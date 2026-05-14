@@ -21,7 +21,7 @@ from pathlib import Path
 
 import numpy as np
 
-from detect_text import (
+from mapsnap.detect_text import (
     DIRECTION_WORDS,
     canonical_street_match,
     deduplicate_detections,

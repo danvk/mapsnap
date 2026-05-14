@@ -1,6 +1,6 @@
 """Unit tests for detect_text.py helpers."""
 
-from detect_text import (
+from mapsnap.detect_text import (
     canonical_street_match,
     matches_any_street,
     normalize_street,

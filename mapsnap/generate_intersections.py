@@ -9,8 +9,9 @@ from collections import Counter, defaultdict
 from typing import Sequence
 
 from haversine import haversine
-from osm import OsmElement, OsmNode
 from tqdm import tqdm
+
+from mapsnap.osm import OsmElement, OsmNode
 
 
 def load_osm_data(osm_json: str) -> list[OsmElement]:
