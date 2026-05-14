@@ -51,6 +51,8 @@ We can use the contemporary streets to filter the OCR results:
 
 ...
 
+Many of these are real streets, but many of them are not.
+
 Next, we extrapolate the streets in both directions, following the direction of the text. If two streets intersect in the image and in the OSM data, we record a candidate intersection:
 
 ...

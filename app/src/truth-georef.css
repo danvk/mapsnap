@@ -11,6 +11,39 @@ textarea {
   flex-shrink: 0;
 }
 
+.image-column {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+.drop-placeholder {
+  width: 200px;
+  height: 200px;
+  border: 4px dashed #aaa;
+  border-radius: 16px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #999;
+  font-family: sans-serif;
+  font-size: 14px;
+  user-select: none;
+  cursor: default;
+}
+
+.drop-placeholder.drag-over {
+  border-color: #555;
+  color: #555;
+}
+
+.image-controls {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
 .image-wrapper {
   position: relative;
   display: inline-block;

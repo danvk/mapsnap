@@ -58,6 +58,9 @@ const showLabelsCheckbox = document.getElementById(
 const showIntersectionsCheckbox = document.getElementById(
   'show-intersections',
 ) as HTMLInputElement;
+const showIntersectionsOnImageCheckbox = document.getElementById(
+  'show-intersections-on-image',
+) as HTMLInputElement;
 
 let streets: Street[] = [];
 let intersections: IntersectionPoint[] = [];
@@ -393,23 +396,25 @@ async function init(): Promise<void> {
   setupFileDrop();
   setupMap();
 
-  const jsonUrl = img.src.replace(/\.[^.]+$/, '.json');
-  try {
-    const resp = await fetch(jsonUrl);
-    if (resp.ok) {
-      const data = (await resp.json()) as GeorefData;
-      streets = (data.streets ?? []).map((s) => ({ ...s }));
-      intersections = (data.intersections ?? []).map((ix) => ({ ...ix }));
-      precomputedCorners = data.corners ?? null;
-      applyJsonDimensions(
-        data.width ?? img.naturalWidth,
-        data.height ?? img.naturalHeight,
-      );
-    } else {
+  if (img.hasAttribute('src')) {
+    const jsonUrl = img.src.replace(/\.[^.]+$/, '.json');
+    try {
+      const resp = await fetch(jsonUrl);
+      if (resp.ok) {
+        const data = (await resp.json()) as GeorefData;
+        streets = (data.streets ?? []).map((s) => ({ ...s }));
+        intersections = (data.intersections ?? []).map((ix) => ({ ...ix }));
+        precomputedCorners = data.corners ?? null;
+        applyJsonDimensions(
+          data.width ?? img.naturalWidth,
+          data.height ?? img.naturalHeight,
+        );
+      } else {
+        applyJsonDimensions(img.naturalWidth, img.naturalHeight);
+      }
+    } catch {
       applyJsonDimensions(img.naturalWidth, img.naturalHeight);
     }
-  } catch {
-    applyJsonDimensions(img.naturalWidth, img.naturalHeight);
   }
 
   syncTextarea();
@@ -444,13 +449,22 @@ function setupOverlay(): void {
 function setupFileDrop(): void {
   let prevObjectUrl: string | null = null;
 
-  // Drop an image file onto the image to replace it (keeps existing data).
-  const wrapper = img.parentElement!;
-  wrapper.addEventListener('dragover', (e) => {
-    if ([...(e as DragEvent).dataTransfer!.types].includes('Files'))
+  // Drop an image file onto the image-column (covers both placeholder and image).
+  const imageColumn = img.parentElement!.parentElement!;
+  const dropPlaceholder = imageColumn.querySelector(
+    '.drop-placeholder',
+  ) as HTMLElement;
+  imageColumn.addEventListener('dragover', (e) => {
+    if ([...(e as DragEvent).dataTransfer!.types].includes('Files')) {
       e.preventDefault();
+      dropPlaceholder.classList.add('drag-over');
+    }
   });
-  wrapper.addEventListener('drop', async (e) => {
+  imageColumn.addEventListener('dragleave', () => {
+    dropPlaceholder.classList.remove('drag-over');
+  });
+  imageColumn.addEventListener('drop', async (e) => {
+    dropPlaceholder.classList.remove('drag-over');
     const de = e as DragEvent;
     const file = [...de.dataTransfer!.files].find((f) =>
       f.type.startsWith('image/'),
@@ -463,6 +477,7 @@ function setupFileDrop(): void {
     await new Promise<void>((resolve) => {
       img.addEventListener('load', () => resolve(), { once: true });
     });
+    dropPlaceholder.style.display = 'none';
     applyJsonDimensions(img.naturalWidth, img.naturalHeight);
     syncTextarea();
   });
@@ -563,6 +578,7 @@ function render(): void {
   // Render in ascending priority so initial seeds appear on top.
   const ixPriority = (ix: IntersectionPoint) =>
     ix.initial ? 2 : ix.inlier ? 1 : 0;
+  if (showIntersectionsOnImageCheckbox.checked) {
   for (const ix of [...intersections].sort(
     (a, b) => ixPriority(a) - ixPriority(b),
   )) {
@@ -608,6 +624,7 @@ function render(): void {
     g.appendChild(label);
 
     svg.appendChild(g);
+  }
   }
 }
 
@@ -660,6 +677,10 @@ showLabelsCheckbox.addEventListener('change', () => {
   ]) {
     if (map.getLayer(id)) map.setLayoutProperty(id, 'visibility', visible);
   }
+});
+
+showIntersectionsOnImageCheckbox.addEventListener('change', () => {
+  render();
 });
 
 showIntersectionsCheckbox.addEventListener('change', () => {

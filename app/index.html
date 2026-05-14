@@ -8,7 +8,14 @@
   <body>
     <div class="container">
       <textarea rows="50" cols="40"></textarea>
-      <img src="brooklyn_ny_1939_vol_2_p19s.otsu.png" />
+      <div class="image-column">
+        <img />
+        <div class="drop-placeholder">Drop image here</div>
+        <div class="image-controls">
+          <input type="checkbox" id="show-intersections-on-image" checked />
+          <label for="show-intersections-on-image">Show intersections on image</label>
+        </div>
+      </div>
       <div class="map-column">
         <div id="map"></div>
         <div class="opacity-control">
