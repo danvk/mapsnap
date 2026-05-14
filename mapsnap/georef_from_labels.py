@@ -23,7 +23,7 @@ import numpy as np
 
 from mapsnap.detect_text import (
     DIRECTION_WORDS,
-    canonical_street_match,
+    canonical_street_matches,
     deduplicate_detections,
     is_number_only,
     normalize_street,
@@ -886,15 +886,15 @@ def process_image(
             and not is_number_only(det["text"])
         ):
             continue
-        canonical = canonical_street_match(
+        for canonical in canonical_street_matches(
             det["text"], normalized_streets, fuzzy_threshold
-        )
-        if canonical is None:
-            continue
-        if canonical != normalize_street(det["text"]):
-            det = dict(det)
-            det["_canonical_text"] = canonical
-        labels_data.append(det)
+        ):
+            if canonical != normalize_street(det["text"]):
+                entry = dict(det)
+                entry["_canonical_text"] = canonical
+            else:
+                entry = det
+            labels_data.append(entry)
 
     print(f"Filtered detections: {len(labels_data)}")
 

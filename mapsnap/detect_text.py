@@ -183,6 +183,65 @@ def canonical_street_match(
     return best_key
 
 
+def canonical_street_matches(
+    text: str,
+    normalized_streets: set[str],
+    fuzzy_threshold: float = 0.0,
+    min_fuzzy_len: int = 5,
+) -> list[str]:
+    """Return all keys from normalized_streets that match text.
+
+    Phase 1 — exact/prefix match: returns every key with at least one
+    prefix-compatible candidate matching normalize_street(text). Unlike
+    canonical_street_match, this collects all matches rather than returning
+    whichever the set iteration yields first, eliminating nondeterminism when
+    a bare label (e.g. "CLINTON") could match multiple full names
+    (e.g. "CLINTON AVENUE" and "CLINTON STREET").
+
+    Phase 2 — fuzzy match: if Phase 1 finds nothing and fuzzy_threshold > 0,
+    returns the single best fuzzy key (OCR errors typically have one target).
+    """
+    normalized = normalize_street(text)
+
+    # Phase 1: collect every key that has at least one matching candidate form.
+    matches: list[str] = []
+    for s in normalized_streets:
+        for candidate in _match_candidates(s):
+            if (
+                normalized == candidate
+                or (
+                    len(candidate.split()) >= 2
+                    and normalized.startswith(candidate + " ")
+                )
+                or candidate.startswith(normalized + " ")
+            ):
+                matches.append(s)
+                break  # count each key at most once
+
+    if matches:
+        return matches
+
+    # Phase 2: single best fuzzy key (ambiguous OCR errors are rare).
+    if fuzzy_threshold <= 0 or len(normalized) < min_fuzzy_len:
+        return []
+    best_key: str | None = None
+    best_norm_dist = fuzzy_threshold
+    for s in normalized_streets:
+        forms = [s]
+        stripped = _strip_street_type(s)
+        if stripped is not None and len(stripped) >= min_fuzzy_len:
+            forms.append(stripped)
+        for form in forms:
+            if len(form) < min_fuzzy_len:
+                continue
+            dist = Levenshtein.distance(normalized, form)
+            norm_dist = dist / max(len(normalized), len(form))
+            if norm_dist < best_norm_dist:
+                best_norm_dist = norm_dist
+                best_key = s
+    return [best_key] if best_key is not None else []
+
+
 def polygon_side_lengths(polygon: list[list[int]]) -> list[float]:
     """Return the four side lengths of a quadrilateral polygon."""
     pts = np.array(polygon, dtype=float)
