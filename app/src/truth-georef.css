@@ -1,0 +1,46 @@
+.container {
+  display: flex;
+  gap: 16px;
+  padding: 16px;
+  align-items: flex-start;
+}
+
+textarea {
+  font-family: monospace;
+  font-size: 12px;
+  flex-shrink: 0;
+}
+
+.image-wrapper {
+  position: relative;
+  display: inline-block;
+  flex-shrink: 0;
+}
+
+.image-wrapper img {
+  display: block;
+  max-height: 90vh;
+  width: auto;
+}
+
+.map-column {
+  flex: 1;
+  min-width: 400px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+#map {
+  height: 90vh;
+}
+
+.opacity-control {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.opacity-control input[type='range'] {
+  flex: 1;
+}

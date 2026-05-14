@@ -1,0 +1,37 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Truth Georef</title>
+  </head>
+  <body>
+    <div class="container">
+      <textarea rows="50" cols="40"></textarea>
+      <img src="brooklyn_ny_1939_vol_2_p19s.otsu.png" />
+      <div class="map-column">
+        <div id="map"></div>
+        <div class="opacity-control">
+          <label for="opacity-slider">Opacity</label>
+          <input
+            type="range"
+            id="opacity-slider"
+            min="0"
+            max="100"
+            value="85"
+          />
+          <span id="opacity-value">85%</span>
+        </div>
+        <div class="opacity-control">
+          <input type="checkbox" id="show-labels" checked />
+          <label for="show-labels">Show street labels on map</label>
+        </div>
+        <div class="opacity-control">
+          <input type="checkbox" id="show-intersections" checked />
+          <label for="show-intersections">Show intersection GCPs on map</label>
+        </div>
+      </div>
+    </div>
+    <script type="module" src="/src/truth-georef.ts"></script>
+  </body>
+</html>
