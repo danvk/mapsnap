@@ -61,7 +61,9 @@ Next, we extrapolate the streets in both directions, following the direction of 
 
 ...
 
-If we have two or more candidate intersections, we have enough data to fit a model. (Sometimes we can get a fit with just one — more on this soon.) For each pair of intersections, we can fit a model and see where it would place the street labels from OCR. If the label gets mapped close to the expected street in OSM, and the street is at the expected angle there, then that's an indicator of a good fit and this street is an "inlier." If not, it's an outlier.
+If we have two or more candidate intersections, we have enough data to fit a model. (Sometimes we can get a fit with just one — more on this in a bit.)
+
+For each pair of intersections, we can fit a model and see where it would place the street labels from OCR. If the label gets mapped close to the expected street in OSM, and the street is at the expected angle there, then that's an indicator of a good fit and this street is an "inlier." If not, it's an outlier.
 
 We try each pair of intersections and find the one that produces the best fit with the most inliers. This is our mapping!
 
@@ -131,48 +133,56 @@ out skel qt;
 
 Run this query and look at the results in the map to make sure they look OK. Then click "Export" and download the raw OSM data. Save this in `streets.osm.json`.
 
-Extract street names and intersections by running:
+Convert the OSM dump to GeoJSON by running:
+
+```
+uv run python mapsnap/osm_to_centerlines.py .../streets.osm.json --output .../centerlines.geojson
+```
+
+Though it's not needed for the pipeline, it can be helpful to dxtract street names and intersections to text files by running:
 
 ```
 jq -r '.elements[].tags.name' streets.osm.json | grep -v '^null$' | sort | uniq > streets.txt
-uv run python sanborn/generate_intersections.py .../streets.osm.json .../intersections.csv
-uv run python osm_to_centerlines.py .../streets.osm.json --output .../centerlines.geojson
+uv run python mapsnap/generate_intersections.py .../streets.osm.json .../intersections.csv
 ```
+
 
 ### Street Label OCR
 
 Run `detect_text.py` over all the scaled-down images to find street labels + angles:
 
 ```
-for x in /Users/danvk/Documents/ohm/new_orleans_la_1951_vol_5/*.2048px.jpg ; do echo $x; uv run python detect_text.py $x --min-long-side 60 --min-short-side 12 --streets /Users/danvk/Documents/ohm/new_orleans_la_1951_vol_5/streets.txt --visualize ${x/.2048px.jpg/.detect.png} > ${x/.2048px.jpg/.streets.json}; done
+uv run python detect_text.py .../*.2048px.jpg
 ```
 
-This is the slowest step if you're running CPU-only, ~1 minute/image.
+This is the slowest step. If you can use a GPU, it's ~15s/image. Iif you're running CPU-only, it's more like ~1 minute/image.
 
 ### Fit georeference model
 
 Given detected street labels and street centerlines, find GCPs and fit a four-parameter model for each map:
 
 ```
-for x in /Users/danvk/Documents/ohm/new_orleans_la_1951_vol_5/*.2048px.jpg ; do echo $x; uv run python georef_from_labels.py --labels ${x/.2048px.jpg/.streets.json} --centerlines /Users/danvk/Documents/ohm/new_orleans_la_1951_vol_5/centerlines.geojson --output ${x/.2048px.jpg/.georef.json} --image $x; done
+uv run mapsnap/georef_from_labels.py .../*.2048px..jpg --centerlines .../centerlines.geojson --min-long-side 60 --min-short-side 12 --fuzzy-match-threshold 0.20 --visualize-ocr
 ```
 
-For maps without enough control points, this will fail to produce an output.
+The main output is `pNNN.georef.json`, which contains the four-parameter model and debug information. Because of the `--visualize-ocr` flag, this also outputs `pNNN.detect.png` to help you debug the OCR.
+
+For maps without enough control points, this will fail to produce an output. It won't delete an existing georef.json file, so make sure to `rm .../*.georef.json` to avoid cross-run contamination!
 
 ### Make an IIIF file
 
 Download the IIIF file for these Sanborn maps from the Library of Congress:
 
 ```
-curl -o ~/Documents/ohm/new_orleans_la_1951_vol_5/loc.iiif.json https://www.loc.gov/item/sanborn03376_029/manifest.json
+curl -o .../loc.iiif.json https://www.loc.gov/item/sanborn03376_029/manifest.json
 ```
 
 Probably, though, you'll need to load https://www.loc.gov/item/sanborn03376_029/manifest.json directly in your browser to avoid getting denied.
 
-Generate an IIIF file using the georeferences:
+Then generate an IIIF file using the georeferences:
 
 ```
-uv run python /Users/danvk/github/ohm/make_iiif_georef.py /Users/danvk/Documents/ohm/new_orleans_la_1951_vol_5/loc.iiif.json '/Users/danvk/Documents/ohm/new_orleans_la_1951_vol_5/*.georef.json' --output /Users/danvk/Documents/ohm/new_orleans_la_1951_vol_5/generated.iiif.json
+uv run python mapsnap/make_iiif_georef.py .../loc.iiif.json '.../*.georef.json' --output .../generated.iiif.json
 ```
 
 You can paste this into viewer.allmaps.org to look at the results.
@@ -182,10 +192,20 @@ You can paste this into viewer.allmaps.org to look at the results.
 Compare the generated IIIF file to the data from OIM:
 
 ```
-python compare_iiif_georef.py \
-  ~/Documents/ohm/new_orleans_la_1951_vol_5/main.iiif.json \
-  ~/Documents/ohm/new_orleans_la_1951_vol_5/generated.iiif.json
+uv run python compare_iiif_georef.py .../main.iiif.json .../generated.iiif.json
 ```
+
+## Debugging output
+
+This repo comes with a small web app to help you debug individual maps:
+
+```
+cd app
+npm i
+npm run dev
+```
+
+Then visit localhost:5173 and drag the image file and its associated georef.json file into the browser window.
 
 ## Notes on the model
 
