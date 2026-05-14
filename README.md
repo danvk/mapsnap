@@ -59,7 +59,7 @@ Many of these are real streets, but many of them are not:
 
 Next, we extrapolate the streets in both directions, following the direction of the text. If two streets intersect in the image and in the OSM data, we record a candidate intersection:
 
-...
+![Intersections](/images/intersections.jpg)
 
 If we have two or more candidate intersections, we have enough data to fit a model. (Sometimes we can get a fit with just one — more on this in a bit.)
 
@@ -67,7 +67,13 @@ For each pair of intersections, we can fit a model and see where it would place 
 
 We try each pair of intersections and find the one that produces the best fit with the most inliers. This is our mapping!
 
-...
+In the image above, the chosen pair of intersections is Pierrepont & Henry and Monroe & Clark. The orange street labels are inliers this this mapping, and the gray ones are outliers. This rejects spurious streets like BROOKLYN, N, E, and CONGRESS. Interestingly, it also rejects FULTON, which continued into this area in 1937 but does not today.
+
+Here's what the resulting mapping looks like:
+
+![Map overlay](/images/map-overlay.jpg)
+
+The fit is excellent. The streets and intersections line up well. If we zoom in, we can even see that some of the individual parcels match between 1937 and today. This is a good indication that our fit is accurate within a few feet.
 
 [p19]: https://oldinsurancemaps.net/document/85714
 [key map]: https://oldinsurancemaps.net/document/85676
