@@ -1,18 +1,39 @@
 # Mapsnap
 
-The goal of this project is to automatically georeference Sanborn Insurance Maps.
+The goal of mapsnap is to automatically georeference Sanborn Insurance Maps.
+
+## Performance
+
+I used [New Orleans 1951 Volume 5][nola5] on OldInsuranceMaps.net for testing:
+
+- Of the 109 images, mapsnap was able to locate 99 of them (91%).
+- On these 99 maps:
+  - The average RMSE vs OIM's hand geocoding was 15ft.
+  - The median RMSE was 11ft.
+  - 76% of maps had an RMSE <= 15ft.
+  - 88% had an RMSE <= 25ft.
+  - 95% had an RMSE <= 50ft.
+  - The worse RMSE was 77ft.
+
+RMSE was measured across 49 equally-spaced points on each image.
+
+TODO: more tests in more places
+
+[nola5]: https://oldinsurancemaps.net/map/sanborn03376_029
 
 ## How it works
 
-Here's an example of a Sanborn Insurance Map:
+Here's an [example][p19] of a Sanborn Insurance Map:
 
-...
+![Brooklyn 1939 Volume 2 Page 19](/images/brooklyn_ny_1939_vol_2_p19.jpg)
 
-Our goal is to overlay this on a contemporary map by determining its location, scale, and rotation.
+This image depicts a small area of Brooklyn, NY in 1939. Our goal is to overlay this on a contemporary map by determining its location, scale, and rotation.
 
 We can run EasyOCR against it to get candidate street labels:
 
-...
+![Same image with boxes drawn around text](/images/brooklyn_ny_1939_vol_2_p19.detect.png)
+
+There's a lot of text in this image! The red boxes show labels that are likely to be streets.
 
 From each bounding rectangle we get three bits of information:
 
@@ -22,9 +43,9 @@ From each bounding rectangle we get three bits of information:
 
 This is the information we'll use to determine the map projection.
 
-We generally know _roughly_ where the map is: the Library of Congress has organized their Sanborn collection by country, state and county. We can get an even better estimate by roughly locating the key map for the volume. This gives a bounding box that's at most a few miles in each dimension.
+We generally know _roughly_ where the map is: the Library of Congress has organized their Sanborn collection by country, state and county. We can get an even better estimate by roughly locating the [key map] for the volume. This gives a bounding box that's at most a few miles in each dimension.
 
-Next, we download contemporary streets in that bounding box from OpenStreetMap (OSM). Our hope is that enough streets have stayed the same that we can line them up between the Sanborn map and OSM.
+Next, we download contemporary streets in that bounding box from [OpenStreetMap] (OSM). Our hope is that enough streets have stayed the same that we can line them up between the Sanborn map and OSM.
 
 We can use the contemporary streets to filter the OCR results:
 
@@ -39,6 +60,10 @@ If we have two or more candidate intersections, we have enough data to fit a mod
 We try each pair of intersections and find the one that produces the best fit with the most inliers. This is our mapping!
 
 ...
+
+[p19]: https://oldinsurancemaps.net/document/85714
+[key map]: https://oldinsurancemaps.net/document/85676
+[OpenStreetMap]: https://www.openstreetmap.org/#map=18/40.683787/-73.978527
 
 ## Development
 
@@ -158,11 +183,7 @@ python compare_iiif_georef.py \
 
 ## Notes on the model
 
-The initial idea was to ask the OpenAI API to find intersections in the Sanborn map. It did an OK job at this, but it was slow (~3 minutes/task), expensive (~$0.10/image) and not always very accurate. It didn't do well on the non-skeleton maps, and its process was opaque, so it was hard to improve on.
-
-I realized I was mostly evaluating its intersections by mentally tracing the street labels, so maybe I should just have OpenAI do that. But detecting street labels is just OCR. So that led me to the local process in this repo.
-
-My initial hope was to _only_ use the street label positions and angles to fit a model, without any reference to intersections. But in practice, since a street only has an angle at a position, this required a rough location to get going. Extrapolated intersections were a good way to get that location. This led me to a two part model: first use extrapolated intersections to fit a rough model, then refine that using street angles. Eventually I realized that the refinement step wasn't helping, and wound up with the current model.
+### Six Parameters vs. Four
 
 OldInsuranceMaps.net (OIM) uses a six parameter affine model. In addition to translation (two parameters), rotation and scale, this adds two new parameters:
 
@@ -171,10 +192,25 @@ OldInsuranceMaps.net (OIM) uses a six parameter affine model. In addition to tra
 
 In practice, the Sanborn maps are all very well-made and well-scanned and don't exhibit much of either of these. Most fits on OIM have scale anisitropy of less than 3% and skew of less than 3°. These are both close enough to zero that it's unclear if they're real or the result of inaccurate georeferencing. Removing these parameters makes it easier to fit a model since you only need two GCPs rather than three. And it eliminates a failure mode of detecting heavily skewed maps due to an inaccurate GCP.
 
-Alternatives considered:
+### How I developed this model
+
+The initial idea was to ask the OpenAI API to find intersections in the Sanborn map. It did an OK job at this, but it was slow (~3 minutes/task), expensive (~$0.10/image) and not always very accurate. It didn't do well on the non-skeleton maps, and its process was opaque, so it was hard to improve on.
+
+I realized I was mostly evaluating its intersections by mentally tracing the street labels, so maybe I should just have OpenAI do that. But detecting street labels is just OCR. So that led me to the local process in this repo.
+
+My initial hope was to _only_ use the street label positions and angles to fit a model, without any reference to intersections. But in practice, since a street only has an angle at a position, this required a rough location to get going. Extrapolated intersections were a good way to get that location. This led me to a two part model: first use extrapolated intersections to fit a rough model, then refine that using street angles. Eventually I realized that the refinement step wasn't helping, and wound up with the current model.
+
+Claude Code and ChatGPT were both instrumental in getting this to work.
+
+### Alternatives considered
 
 - Each map has a compass rose. You could find it and detect its angle to know the direction of north. In practice, compass isn't necessarily _that_ accurate. It's better to use the streets.
 - Each map has a scale bar. You could use this to detect the scale, leaving just location and rotation. I haven't explored this too much, though the one GCP approach relies on the scales all being about the same.
+
+## Questions
+
+- Will this work with other types of maps?
+- How does this relate to OldInsuranceMaps.net (OIM)?
 
 ## Prior Art
 
