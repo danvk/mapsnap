@@ -567,6 +567,10 @@ def ransac_hybrid(
     best_score = -float("inf")
     best_pair: tuple[int, int] | None = None
 
+    print("Candidate intersections:")
+    for a in gcps:
+        print(f"  {a.label_a} x {a.label_b}")
+
     for pair_idx in combinations(range(n), 2):
         pairs = [(gcps[k].pixel, gcps[k].geo) for k in pair_idx]
         try:
@@ -576,15 +580,22 @@ def ransac_hybrid(
         inliers, err = label_inliers(
             features, block_index, A, pos_threshold, dir_threshold
         )
+
         # Each inlier contributes (pos_threshold - pos_err) to the score; an inlier at
         # exactly the threshold boundary contributes 0, so a marginal extra inlier cannot
         # blindly beat a tighter fit with one fewer inlier.
         score = float(len(inliers)) * pos_threshold - err
+        a = gcps[pair_idx[0]]
+        b = gcps[pair_idx[1]]
+
         if score > best_score:
             best_score = score
             best_inliers = inliers
             best_A = A
             best_pair = pair_idx
+            print(
+                f"  {score:.06f} {a.label_a} x {a.label_b} + {b.label_a} x {b.label_b}"
+            )
 
     return best_A, best_inliers, best_pair
 
@@ -860,10 +871,12 @@ def process_image(
     else:
         all_detections = labels_raw
 
+    print(f"All detections: {len(all_detections)}")
     normalized_streets = set(block_index.keys())
     all_detections = deduplicate_detections(
         all_detections, normalized_streets=normalized_streets
     )
+    print(f"Deduped detections: {len(all_detections)}")
     labels_data = []
     for det in all_detections:
         if not (
@@ -882,6 +895,8 @@ def process_image(
             det = dict(det)
             det["_canonical_text"] = canonical
         labels_data.append(det)
+
+    print(f"Filtered detections: {len(labels_data)}")
 
     if visualize_ocr:
         stem = Path(image_path).name.split(".")[0]

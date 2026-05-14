@@ -61,6 +61,18 @@ const showIntersectionsCheckbox = document.getElementById(
 const showIntersectionsOnImageCheckbox = document.getElementById(
   'show-intersections-on-image',
 ) as HTMLInputElement;
+const colorByInlierCheckbox = document.getElementById(
+  'color-by-inlier',
+) as HTMLInputElement;
+
+function streetCircleColor(): maplibregl.ExpressionSpecification | string {
+  return colorByInlierCheckbox.checked
+    ? (['case', ['get', 'inlier'], 'orange', '#888888'] as maplibregl.ExpressionSpecification)
+    : '#ff0000';
+}
+function streetTextColor(): string {
+  return colorByInlierCheckbox.checked ? 'orange' : '#ff0000';
+}
 
 let streets: Street[] = [];
 let intersections: IntersectionPoint[] = [];
@@ -265,7 +277,7 @@ function updateStreets(): void {
       source: 'street-labels',
       paint: {
         'circle-radius': 5,
-        'circle-color': ['case', ['get', 'inlier'], 'orange', '#888888'],
+        'circle-color': streetCircleColor(),
         'circle-stroke-color': '#ffffff',
         'circle-stroke-width': 1.5,
       },
@@ -282,7 +294,7 @@ function updateStreets(): void {
         'text-anchor': 'top',
       },
       paint: {
-        'text-color': 'orange',
+        'text-color': streetTextColor(),
         'text-halo-color': '#ffffff',
         'text-halo-width': 1.5,
       },
@@ -300,9 +312,16 @@ function updateStreets(): void {
       id: 'street-vectors-line',
       type: 'line',
       source: 'street-vectors',
-      paint: { 'line-color': 'orange', 'line-width': 2, 'line-opacity': 0.9 },
+      paint: { 'line-color': streetTextColor(), 'line-width': 2, 'line-opacity': 0.9 },
     });
   }
+
+  if (map.getLayer('street-labels-circle'))
+    map.setPaintProperty('street-labels-circle', 'circle-color', streetCircleColor());
+  if (map.getLayer('street-labels-text'))
+    map.setPaintProperty('street-labels-text', 'text-color', streetTextColor());
+  if (map.getLayer('street-vectors-line'))
+    map.setPaintProperty('street-vectors-line', 'line-color', streetTextColor());
 
   const visible = showLabelsCheckbox.checked ? 'visible' : 'none';
   for (const id of [
@@ -515,7 +534,11 @@ function render(): void {
   );
   for (const st of sortedStreets) {
     const [cx, cy] = toDisplay(st.x, st.y);
-    const color = st.inlier !== false ? 'orange' : '#888888';
+    const color = !colorByInlierCheckbox.checked
+      ? '#ff0000'
+      : st.inlier !== false
+        ? 'orange'
+        : '#888888';
     const g = document.createElementNS('http://www.w3.org/2000/svg', 'g');
 
     const circle = document.createElementNS(
@@ -681,6 +704,11 @@ showLabelsCheckbox.addEventListener('change', () => {
 
 showIntersectionsOnImageCheckbox.addEventListener('change', () => {
   render();
+});
+
+colorByInlierCheckbox.addEventListener('change', () => {
+  render();
+  updateStreets();
 });
 
 showIntersectionsCheckbox.addEventListener('change', () => {

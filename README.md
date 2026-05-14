@@ -49,9 +49,13 @@ Next, we download contemporary streets in that bounding box from [OpenStreetMap]
 
 We can use the contemporary streets to filter the OCR results:
 
-...
+![Detected streets in the image](/images/detected-streets.jpg)
 
-Many of these are real streets, but many of them are not.
+Many of these are real streets, but many of them are not:
+
+- The cut-off street names on the right are CLARK (👍), LIBERTY (👍) and CONGRESS (👎). This last one is matching "Library of Congress" and there is a Congress Street in Brooklyn.
+- Most of the streets in the middle are correct: HENRY, MONROE, PIERREPONT, CLINTON, FULTON, WASHINGTON, JOHNSON, ADAMS, MYRTLE.
+- It misreads "N" and "E" as streets, and it sees BROOKLYN all over the place. These are all bad detections that could potentially throw off alignment.
 
 Next, we extrapolate the streets in both directions, following the direction of the text. If two streets intersect in the image and in the OSM data, we record a candidate intersection:
 
