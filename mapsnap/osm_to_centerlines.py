@@ -23,10 +23,23 @@ EXCLUDE_HIGHWAY = {
     "path",
     "pedestrian",
     "proposed",
-    "service",
     "steps",
     "track",
 }
+
+# highway=service is usually not of interest to us, but there are a
+# few cases where it is. highway=service without service=* is a tagging
+# error, but we let it slide.
+OK_SERVICE = {"alley", None}
+
+
+def should_drop(tags: dict[str, str]):
+    highway = tags.get("highway")
+    if highway in EXCLUDE_HIGHWAY:
+        return True
+    if highway == "service":
+        return tags.get("service") not in OK_SERVICE
+    return False
 
 
 def osm_to_centerlines(osm_json: str) -> dict:
@@ -45,8 +58,8 @@ def osm_to_centerlines(osm_json: str) -> dict:
         name = tags.get("name")
         if not name:
             continue
-        if tags.get("highway") in EXCLUDE_HIGHWAY:
-            # print(f"Dropping w{way['id']} highway={tags.get('highway')} {name}")
+        if should_drop(tags):
+            print(f"Dropping w{way['id']} highway={tags.get('highway')} {name}")
             continue
 
         coords = []
