@@ -268,6 +268,7 @@ Claude Code and ChatGPT were both instrumental in getting this to work.
 
 - Will this work with other types of maps?
 - How does this relate to OldInsuranceMaps.net (OIM)?
+- Does this use AI?
 
 ## Prior Art
 

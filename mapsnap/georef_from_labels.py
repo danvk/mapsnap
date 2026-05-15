@@ -58,6 +58,8 @@ class IntersectionGCP:
     pixel: tuple[float, float]  # pixel line-line crossing of the two label directions
     geo: tuple[float, float]  # shared GeoJSON endpoint (centroid if multiple)
     pixel_dist: float  # distance between label centers
+    feat_a: LabelFeature
+    feat_b: LabelFeature
 
 
 @dataclass
@@ -221,71 +223,6 @@ def solve_similarity_2pts(
         b[2 * k + 1] = lat
     x = np.linalg.solve(M, b)
     alpha, beta, tx, ty = x
-    return np.array([[alpha / cos_phi, beta / cos_phi, tx], [beta, -alpha, ty]])
-
-
-def undirected_angle_diff(a: float, b: float) -> float:
-    """Smallest difference between two undirected angles, in [0, π/2]."""
-    diff = abs(a - b) % np.pi
-    return float(min(diff, np.pi - diff))
-
-
-def estimate_rotation_from_angles(
-    features: list[LabelFeature],
-    block_index: dict[str, list[Block]],
-    n_bins: int = 36,
-    min_peak_ratio: float = 1.5,
-) -> float | None:
-    """Estimate the map rotation R from label-angle vs OSM-tangent histogram cross-correlation.
-
-    The similarity transform with rotation R = atan2(β, α) maps a label at pixel direction
-    dir_pix on a street with OSM tangent φ such that dir_pix + φ ≈ R (mod π). Summing over
-    all (label, OSM-segment) pairs via a circular convolution histogram peaks at R.
-
-    Returns R in radians, or None if the peak/mean ratio is below min_peak_ratio
-    (histogram too flat — too few labels or insufficiently diverse street directions).
-    """
-    H_label = np.zeros(n_bins)
-    for feat in features:
-        if feat.text in block_index:
-            H_label[int(feat.dir_pix / np.pi * n_bins) % n_bins] += 1
-
-    H_osm = np.zeros(n_bins)
-    for blocks in block_index.values():
-        for block in blocks:
-            for k in range(len(block.coords) - 1):
-                seg = block.coords[k + 1] - block.coords[k]
-                if float(np.linalg.norm(seg)) < 1e-10:
-                    continue
-                tangent = float(np.arctan2(seg[1], seg[0])) % np.pi
-                H_osm[int(tangent / np.pi * n_bins) % n_bins] += 1
-
-    if H_label.sum() == 0 or H_osm.sum() == 0:
-        return None
-
-    # Circular convolution: scores[R] = Σ_θ H_label[θ] * H_osm[(R-θ) % n_bins]
-    # peaks at R = true rotation (in bin units), so R_est = peak_idx * π/n_bins.
-    scores = np.real(np.fft.irfft(np.fft.rfft(H_label) * np.fft.rfft(H_osm), n=n_bins))
-    peak_idx = int(np.argmax(scores[:n_bins]))
-    if scores[peak_idx] / (scores.mean() + 1e-10) < min_peak_ratio:
-        return None
-    return float(peak_idx) * np.pi / n_bins
-
-
-def project_to_similarity(A: np.ndarray, cos_phi: float) -> np.ndarray:
-    """Project a general 2×3 affine onto the nearest similarity transform.
-
-    Finds (α, β) minimizing the Frobenius distance to the similarity constraint surface
-    in metric-scaled coordinates, then reconstructs A. Translation columns are unchanged.
-    The similarity model has a = −d/cos_phi and b = c/cos_phi.
-    """
-    a, b = float(A[0, 0]), float(A[0, 1])
-    c, d = float(A[1, 0]), float(A[1, 1])
-    tx, ty = float(A[0, 2]), float(A[1, 2])
-    # Least-squares estimate of (α, β): M^T M = (1/cos_phi² + 1)·I₂
-    k = 1.0 / cos_phi**2 + 1.0
-    alpha = (a / cos_phi - d) / k
-    beta = (b / cos_phi + c) / k
     return np.array([[alpha / cos_phi, beta / cos_phi, tx], [beta, -alpha, ty]])
 
 
@@ -531,6 +468,8 @@ def find_intersection_gcps(
                             pixel=crossing,
                             geo=geo,
                             pixel_dist=pixel_dist,
+                            feat_a=fa,
+                            feat_b=fb,
                         )
                     )
 
@@ -1002,6 +941,29 @@ def process_image(
     return ProcessResult(success=True, scale_deg_per_px=scale)
 
 
+def _rotation_from_gcp_features(
+    gcp: IntersectionGCP,
+    block_index: dict[str, list[Block]],
+) -> float | None:
+    """Estimate map rotation (rad, mod π) from the two streets that form a single GCP.
+
+    For each street, projects the GCP geo coordinate onto the street's polyline to get
+    the OSM tangent angle, then combines it with the label's pixel direction angle via
+    R = (dir_pix + osm_tangent) mod π. Returns the circular mean of the two estimates,
+    or None if either street's polyline projection fails.
+    """
+    Rs: list[float] = []
+    for feat, label in ((gcp.feat_a, gcp.label_a), (gcp.feat_b, gcp.label_b)):
+        blocks = block_index.get(label, [])
+        snap = project_to_polyline(gcp.geo[0], gcp.geo[1], blocks)
+        if snap is None:
+            return None
+        _, _, osm_tangent = snap
+        Rs.append((feat.dir_pix + osm_tangent) % math.pi)
+    z = np.exp(2j * Rs[0]) + np.exp(2j * Rs[1])
+    return float(np.angle(z) / 2) % math.pi
+
+
 def process_deferred_image(
     deferred: dict,
     scale_deg_per_px: float,
@@ -1023,9 +985,9 @@ def process_deferred_image(
     gcps: list[IntersectionGCP] = deferred["gcps"]
     gcp = gcps[0]
 
-    rotation = estimate_rotation_from_angles(features, block_index)
+    rotation = _rotation_from_gcp_features(gcp, block_index)
     if rotation is None:
-        print("Could not estimate rotation from label angles.", file=sys.stderr)
+        print("Could not estimate rotation from GCP street angles.", file=sys.stderr)
         return ProcessResult(success=False)
 
     # Try both directed orientations; histogram gives undirected angle (mod π).
