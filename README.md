@@ -57,6 +57,8 @@ Many of these are real streets, but many of them are not:
 - Most of the streets in the middle are correct: HENRY, MONROE, PIERREPONT, CLINTON, FULTON, WASHINGTON, JOHNSON, ADAMS, MYRTLE.
 - It gets thrown off by "BROOKLYN BRIDGE APPROACH" and sees BROOKLYN in a few other places. These are all bad detections that could potentially throw off alignment.
 
+The street matching here is quite flexible. We only match MONROE, which could be Monroe Place or Monroe Street: both exist in this area of Brooklyn. So we throw in both and hope to sort it out later.
+
 Next, we extrapolate the streets in both directions, following the direction of the text. If two streets intersect in the image and in the OSM data, we record a candidate intersection:
 
 ![Intersections](/images/intersections.png)
@@ -65,7 +67,7 @@ These are known as Ground Control Points (GCPs). If we have two or more GCPs, we
 
 For each pair of GCPs, we can fit a model and see where it would place the street labels from OCR. If the label gets mapped close to the expected street in OSM, and the street is at the expected angle there, then that's an indicator of a good fit and this street is an "inlier." If not, it's an outlier.
 
-We try each pair of GCPs and find the one that produces the best fit with the most inliers. This is our mapping!
+We try each pair of GCPs and find the one that produces the best fit with the most inliers. (This is roughly the [RANSAC algorithm].) This is our mapping!
 
 In the image above, the chosen GCPs are JOHNSON x ADAMS and MONROE x CLARK. The orange street labels are inliers this this mapping, and the gray ones are outliers. This rejects spurious streets like BROOKLYN and CONGRESS. Interestingly, it also rejects FULTON, which continued into this area in 1937 but stops short today.
 
@@ -78,6 +80,7 @@ The fit is excellent. The streets and intersections line up well. If we zoom in,
 [p19]: https://oldinsurancemaps.net/document/85714
 [key map]: https://oldinsurancemaps.net/document/85676
 [OpenStreetMap]: https://www.openstreetmap.org/#map=18/40.683787/-73.978527
+[RANSAC algorithm]: https://www.thinkautonomous.ai/blog/ransac-algorithm/
 
 ## Development
 
