@@ -15,11 +15,12 @@ I used [New Orleans 1951 Volume 5][nola5] on OldInsuranceMaps.net for testing:
   - 95% had an RMSE <= 50ft.
   - The worse RMSE was 77ft.
 
-RMSE was measured across 49 equally-spaced points on each image.
+RMSE was measured across 49 equally-spaced points on each image. You can [view the full fit][nolaiiif] on Allmaps.
 
 TODO: more tests in more places
 
 [nola5]: https://oldinsurancemaps.net/map/sanborn03376_029
+[nolaiiif]: https://viewer.allmaps.org/?url=https%3A%2F%2Fraw.githubusercontent.com%2Fdanvk%2Fmapsnap%2Frefs%2Fheads%2Fmain%2Fgallery%2Fnew_orleans_la_1951_vol_5.iiif.json
 
 ## How it works
 
@@ -77,10 +78,13 @@ Here's what the resulting mapping looks like:
 
 The fit is excellent. The streets and intersections line up well. If we zoom in, we can even see that some of the individual parcels match between 1937 and today. This is a good indication that our fit is accurate within a few feet.
 
+You can view the [full mapping][bkiiif] for this section of Brooklyn on Allmaps.
+
 [p19]: https://oldinsurancemaps.net/document/85714
 [key map]: https://oldinsurancemaps.net/document/85676
 [OpenStreetMap]: https://www.openstreetmap.org/#map=18/40.683787/-73.978527
 [RANSAC algorithm]: https://www.thinkautonomous.ai/blog/ransac-algorithm/
+[bkiiif]: https://viewer.allmaps.org/?url=https%3A%2F%2Fraw.githubusercontent.com%2Fdanvk%2Fmapsnap%2Frefs%2Fheads%2Fmain%2Fgallery%2Fbrooklyn_ny_1939_vol_2.iiif.json
 
 ## Development
 
@@ -249,4 +253,9 @@ Claude Code and ChatGPT were both instrumental in getting this to work.
 
 ## Prior Art
 
-- Shensky (2025): they detect intersections using a custom ML model, then try to read street labels in horizontal or vertical strips from them using Tesseract. That's the reverse of what this repo does. It inherently cannot find diagonal streets, and Tesseract is generally a worse model than EasyOCR.
+- [Shensky et. al. (2025)][shensky]
+  - They detect intersections using a custom ML model, then try to read street labels in horizontal or vertical strips from them using Tesseract. This is essentially the reverse of what this repo does. It inherently cannot find diagonal streets, and Tesseract is generally a worse model than EasyOCR.
+  - They fit six-paramter affine models using _all_ the GCPs they detect. Mapsnap uses a four-parameter model and the [RANSAC algorithm], which is able to throw out large numbers of outliers.
+  - At least for New Orleans 1951, Mapsnap gets within 15ft on 76% of the images it maps, vs. 14% for the Shensky paper. (I'm not sure exactly which maps they're testing on, and they have other criteria, so this may not be a fair comparison.)
+
+[shensky]: https://repositories.lib.utexas.edu/items/3f080054-8ff0-4e4c-8ef7-ea93b0fc36e0
