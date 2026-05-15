@@ -21,7 +21,9 @@ EXCLUDE_HIGHWAY = {
     "motorway",
     "motorway_link",
     "path",
+    "pedestrian",
     "proposed",
+    "service",
     "steps",
     "track",
 }
@@ -44,6 +46,7 @@ def osm_to_centerlines(osm_json: str) -> dict:
         if not name:
             continue
         if tags.get("highway") in EXCLUDE_HIGHWAY:
+            # print(f"Dropping w{way['id']} highway={tags.get('highway')} {name}")
             continue
 
         coords = []
