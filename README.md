@@ -43,7 +43,7 @@ From each bounding rectangle we get three bits of information:
 
 This is the information we'll use to determine the map projection.
 
-We generally know _roughly_ where the map is: the Library of Congress has organized their Sanborn collection by country, state and county. We can get an even better estimate by roughly locating the [key map] for the volume. This gives a bounding box that's at most a few miles in each dimension.
+We generally know _roughly_ where the map is: the Library of Congress has organized their Sanborn collection by country, state and county. We can get an even better estimate by locating the [key map] for the volume. This gives a bounding box that's at most a few miles in each dimension.
 
 Next, we download contemporary streets in that bounding box from [OpenStreetMap] (OSM). Our hope is that enough streets have stayed the same that we can line them up between the Sanborn map and OSM.
 
@@ -62,6 +62,8 @@ Next, we extrapolate the streets in both directions, following the direction of 
 ![Intersections](/images/intersections.jpg)
 
 If we have two or more candidate intersections, we have enough data to fit a model. (Sometimes we can get a fit with just one — more on this in a bit.)
+
+TODO: use the term GCP
 
 For each pair of intersections, we can fit a model and see where it would place the street labels from OCR. If the label gets mapped close to the expected street in OSM, and the street is at the expected angle there, then that's an indicator of a good fit and this street is an "inlier." If not, it's an outlier.
 

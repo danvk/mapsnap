@@ -886,9 +886,17 @@ def process_image(
             and not is_number_only(det["text"])
         ):
             continue
-        for canonical in canonical_street_matches(
+        canonicals = canonical_street_matches(
             det["text"], normalized_streets, fuzzy_threshold
-        ):
+        )
+        # Deduplicate by block-list identity: aliases like "HENRY" and "HENRY STREET"
+        # point to the same blocks, so keep only the most specific (longest) name.
+        seen_block_ids: set[int] = set()
+        for canonical in sorted(canonicals, key=len, reverse=True):
+            bid = id(block_index[canonical])
+            if bid in seen_block_ids:
+                continue
+            seen_block_ids.add(bid)
             if canonical != normalize_street(det["text"]):
                 entry = dict(det)
                 entry["_canonical_text"] = canonical
