@@ -319,13 +319,17 @@ def project_to_polyline(
     lon: float,
     lat: float,
     blocks: list[Block],
+    extrapolate: bool = True,
 ) -> tuple[float, float, float] | None:
     """Project (lon, lat) onto the nearest segment across all blocks of a street.
 
-    At terminal endpoints (block start/end that connects to no other block) the
-    projection is allowed to extrapolate along the segment direction rather than
-    clamping to the endpoint. This handles labels that lie past the end of an OSM
-    segment because the historical street extended further than the current data.
+    When extrapolate=True (default), terminal endpoints (block start/end that connects
+    to no other block) allow the projection to extend beyond the endpoint along the
+    segment direction. This handles labels that lie past the end of an OSM segment
+    because the historical street extended further than current data.
+
+    When extrapolate=False, projection is always clamped to [0, 1] on each segment,
+    so the returned point is guaranteed to lie on a true street segment.
 
     Returns (nearest_lon, nearest_lat, tangent_angle) where tangent_angle is in [0, π)
     (undirected — a street running NE and SW both have the same tangent angle).
@@ -336,7 +340,7 @@ def project_to_polyline(
     best_pt: np.ndarray | None = None
     best_tangent: float = 0.0
 
-    terminal = _terminal_endpoints(blocks)
+    terminal = _terminal_endpoints(blocks) if extrapolate else set()
 
     for block in blocks:
         pts = block.coords  # shape (N, 2), columns [lon, lat]
@@ -371,6 +375,7 @@ def label_inliers(
     affine: np.ndarray,
     pos_threshold: float = 0.001,
     dir_threshold: float = np.pi / 6,
+    extrapolate: bool = True,
 ) -> tuple[list[int], float]:
     """Return indices of features whose label center is consistent with the affine.
 
@@ -378,6 +383,9 @@ def label_inliers(
       - within pos_threshold degrees of its street's polyline, AND
       - whose mapped direction agrees with the polyline tangent at that point within
         dir_threshold radians (undirected comparison).
+
+    extrapolate is passed through to project_to_polyline; set False when scoring
+    candidate orientations to avoid terminal-endpoint extrapolation inflating the fit.
     """
     A_linear = affine[:, :2]
     inliers = []
@@ -387,7 +395,7 @@ def label_inliers(
         if not blocks:
             continue
         lon, lat = apply_affine(affine, *feat.center)
-        snap = project_to_polyline(lon, lat, blocks)
+        snap = project_to_polyline(lon, lat, blocks, extrapolate=extrapolate)
         if snap is None:
             continue
         nearest_lon, nearest_lat, tangent_angle = snap
@@ -990,15 +998,35 @@ def process_deferred_image(
         print("Could not estimate rotation from GCP street angles.", file=sys.stderr)
         return ProcessResult(success=False)
 
-    # Try both directed orientations; histogram gives undirected angle (mod π).
+    # Try both directed orientations; the rotation estimate is undirected (mod π).
+    # Two-level scoring:
+    #   Primary: inlier count with extrapolation at terminal endpoints, so labels near
+    #            true street ends are not unfairly excluded.
+    #   Tiebreaker: negated total error without extrapolation, so when counts are equal
+    #               the orientation that keeps labels on actual street segments wins.
+    pos_threshold = 0.001
     best_A: np.ndarray | None = None
     best_inliers: list[int] = []
+    best_score: tuple[int, float] = (-1, -float("inf"))
     for rot in (rotation, rotation + math.pi):
         A_cand = build_affine_from_scale_rotation_gcp(
             scale_deg_per_px, rot, gcp, cos_phi
         )
-        inliers_cand, _ = label_inliers(features, block_index, A_cand)
-        if len(inliers_cand) > len(best_inliers):
+        inliers_cand, _ = label_inliers(
+            features, block_index, A_cand, pos_threshold, extrapolate=True
+        )
+        # Compute no-extrapolation error for the inliers as the tiebreaker.
+        err_no_ext = 0.0
+        for i in inliers_cand:
+            feat = features[i]
+            blocks = block_index.get(feat.text, [])
+            lon, lat = apply_affine(A_cand, *feat.center)
+            snap = project_to_polyline(lon, lat, blocks, extrapolate=False)
+            if snap is not None:
+                err_no_ext += float(np.linalg.norm([lon - snap[0], lat - snap[1]]))
+        score: tuple[int, float] = (len(inliers_cand), -err_no_ext)
+        if score > best_score:
+            best_score = score
             best_inliers = inliers_cand
             best_A = A_cand
 
