@@ -918,8 +918,10 @@ def process_image(
         visualize_detections(image_path, labels_data, rejected, detect_png)
 
     features = label_features(labels_data)
-    print(f"Labels: {len(features)} ", file=sys.stderr, end="")
-    print(", ".join(f.text for f in features), file=sys.stderr)
+    print(
+        f"Labels ({len(features)}): {', '.join(f.text for f in features)}",
+        file=sys.stderr,
+    )
 
     gcps = find_intersection_gcps(features, block_index)
     print(f"Intersection GCPs: {len(gcps)}", file=sys.stderr)
