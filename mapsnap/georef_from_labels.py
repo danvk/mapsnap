@@ -854,6 +854,7 @@ def process_image(
     min_confidence: float = 0.5,
     min_long_side: float = 250.0,
     min_short_side: float = 60.0,
+    min_aspect_ratio: float = 2.0,
     visualize_ocr: bool = False,
     fuzzy_threshold: float = 0.0,
 ) -> ProcessResult:
@@ -883,6 +884,8 @@ def process_image(
             det["confidence"] >= min_confidence
             and det.get("long_side", float("inf")) >= min_long_side
             and det.get("short_side", float("inf")) >= min_short_side
+            and det.get("long_side", float("inf"))
+            >= min_aspect_ratio * det.get("short_side", 1.0)
             and not is_number_only(det["text"])
         ):
             continue
@@ -1128,6 +1131,13 @@ def main() -> None:
         help="Minimum short side of a text polygon to accept (default: 60)",
     )
     parser.add_argument(
+        "--min-aspect-ratio",
+        type=float,
+        default=2.0,
+        metavar="RATIO",
+        help="Minimum long/short side ratio for a text polygon (default: 2.0)",
+    )
+    parser.add_argument(
         "--visualize-ocr",
         action="store_true",
         help="Save annotated detection image to <stem>.detect.png for each input",
@@ -1191,6 +1201,7 @@ def main() -> None:
             min_confidence=args.min_confidence,
             min_long_side=args.min_long_side,
             min_short_side=args.min_short_side,
+            min_aspect_ratio=args.min_aspect_ratio,
             visualize_ocr=args.visualize_ocr,
             fuzzy_threshold=args.fuzzy_match_threshold,
         )
