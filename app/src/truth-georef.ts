@@ -67,7 +67,12 @@ const colorByInlierCheckbox = document.getElementById(
 
 function streetCircleColor(): maplibregl.ExpressionSpecification | string {
   return colorByInlierCheckbox.checked
-    ? (['case', ['get', 'inlier'], 'orange', '#888888'] as maplibregl.ExpressionSpecification)
+    ? ([
+        'case',
+        ['get', 'inlier'],
+        'orange',
+        '#888888',
+      ] as maplibregl.ExpressionSpecification)
     : '#ff0000';
 }
 function streetTextColor(): string {
@@ -312,16 +317,28 @@ function updateStreets(): void {
       id: 'street-vectors-line',
       type: 'line',
       source: 'street-vectors',
-      paint: { 'line-color': streetTextColor(), 'line-width': 2, 'line-opacity': 0.9 },
+      paint: {
+        'line-color': streetTextColor(),
+        'line-width': 2,
+        'line-opacity': 0.9,
+      },
     });
   }
 
   if (map.getLayer('street-labels-circle'))
-    map.setPaintProperty('street-labels-circle', 'circle-color', streetCircleColor());
+    map.setPaintProperty(
+      'street-labels-circle',
+      'circle-color',
+      streetCircleColor(),
+    );
   if (map.getLayer('street-labels-text'))
     map.setPaintProperty('street-labels-text', 'text-color', streetTextColor());
   if (map.getLayer('street-vectors-line'))
-    map.setPaintProperty('street-vectors-line', 'line-color', streetTextColor());
+    map.setPaintProperty(
+      'street-vectors-line',
+      'line-color',
+      streetTextColor(),
+    );
 
   const visible = showLabelsCheckbox.checked ? 'visible' : 'none';
   for (const id of [
@@ -602,52 +619,52 @@ function render(): void {
   const ixPriority = (ix: IntersectionPoint) =>
     ix.initial ? 2 : ix.inlier ? 1 : 0;
   if (showIntersectionsOnImageCheckbox.checked) {
-  for (const ix of [...intersections].sort(
-    (a, b) => ixPriority(a) - ixPriority(b),
-  )) {
-    const [cx, cy] = toDisplay(ix.x, ix.y);
-    const color = ix.initial ? '#0080ff' : ix.inlier ? '#ff0000' : '#e6b800';
-    const g = document.createElementNS('http://www.w3.org/2000/svg', 'g');
+    for (const ix of [...intersections].sort(
+      (a, b) => ixPriority(a) - ixPriority(b),
+    )) {
+      const [cx, cy] = toDisplay(ix.x, ix.y);
+      const color = ix.initial ? '#0080ff' : ix.inlier ? '#ff0000' : '#e6b800';
+      const g = document.createElementNS('http://www.w3.org/2000/svg', 'g');
 
-    const circle = document.createElementNS(
-      'http://www.w3.org/2000/svg',
-      'circle',
-    );
-    circle.setAttribute('cx', String(cx));
-    circle.setAttribute('cy', String(cy));
-    circle.setAttribute('r', '6');
-    circle.setAttribute('fill', color);
-    circle.setAttribute('fill-opacity', '0.85');
-    circle.setAttribute('stroke', 'white');
-    circle.setAttribute('stroke-width', '2');
-    g.appendChild(circle);
-
-    const label = document.createElementNS(
-      'http://www.w3.org/2000/svg',
-      'text',
-    );
-    label.setAttribute('x', String(cx + 10));
-    label.setAttribute('y', String(cy - 2));
-    label.setAttribute('font-size', '10');
-    label.setAttribute('font-family', 'sans-serif');
-    label.setAttribute('fill', color);
-    label.setAttribute('stroke', 'white');
-    label.setAttribute('stroke-width', '2');
-    label.setAttribute('paint-order', 'stroke');
-    for (const [i, name] of [ix.label_a, ix.label_b].entries()) {
-      const tspan = document.createElementNS(
+      const circle = document.createElementNS(
         'http://www.w3.org/2000/svg',
-        'tspan',
+        'circle',
       );
-      tspan.setAttribute('x', String(cx + 10));
-      tspan.setAttribute('dy', i === 0 ? '0' : '12');
-      tspan.textContent = name;
-      label.appendChild(tspan);
-    }
-    g.appendChild(label);
+      circle.setAttribute('cx', String(cx));
+      circle.setAttribute('cy', String(cy));
+      circle.setAttribute('r', '6');
+      circle.setAttribute('fill', color);
+      circle.setAttribute('fill-opacity', '0.85');
+      circle.setAttribute('stroke', 'white');
+      circle.setAttribute('stroke-width', '2');
+      g.appendChild(circle);
 
-    svg.appendChild(g);
-  }
+      const label = document.createElementNS(
+        'http://www.w3.org/2000/svg',
+        'text',
+      );
+      label.setAttribute('x', String(cx + 10));
+      label.setAttribute('y', String(cy - 2));
+      label.setAttribute('font-size', '10');
+      label.setAttribute('font-family', 'sans-serif');
+      label.setAttribute('fill', color);
+      label.setAttribute('stroke', 'white');
+      label.setAttribute('stroke-width', '2');
+      label.setAttribute('paint-order', 'stroke');
+      for (const [i, name] of [ix.label_a, ix.label_b].entries()) {
+        const tspan = document.createElementNS(
+          'http://www.w3.org/2000/svg',
+          'tspan',
+        );
+        tspan.setAttribute('x', String(cx + 10));
+        tspan.setAttribute('dy', i === 0 ? '0' : '12');
+        tspan.textContent = name;
+        label.appendChild(tspan);
+      }
+      g.appendChild(label);
+
+      svg.appendChild(g);
+    }
   }
 }
 
