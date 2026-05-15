@@ -86,6 +86,20 @@ You can view the [full mapping][bkiiif] for this section of Brooklyn on Allmaps.
 [RANSAC algorithm]: https://www.thinkautonomous.ai/blog/ransac-algorithm/
 [bkiiif]: https://viewer.allmaps.org/?url=https%3A%2F%2Fraw.githubusercontent.com%2Fdanvk%2Fmapsnap%2Frefs%2Fheads%2Fmain%2Fgallery%2Fbrooklyn_ny_1939_vol_2.iiif.json
 
+### One GCP fits
+
+It takes two GCPs to define a four parameter model (translate x, translate y, scale, rotation). But sometimes we can get away with just one.
+
+Consider [page 432] from New Orleans 1951 Volume 5. Here are the detected streets and intersections:
+
+![Image showing three streets and one intersection](/images/1gcp.png)
+
+There are three streets and one intersection (S. Front and Napoleon don't intersect). The one intersection gives us a location, and hence the two translation parameters of the model. The angles of the roads can give us the rotation. But what about the scale?
+
+Assuming this map is from a larger volume, we can assume that all the maps in the volume have roughly the same scale. Specifically, we plug in the median scale across all the maps with more GCPs. When you run the pipeline, these sorts of fits show up as "deferred." These fits aren't quite as robust as they'd be if we had more GCPs. But they're often pretty good, and they're better than nothing!
+
+[page 432]: https://oldinsurancemaps.net/document/46011
+
 ## Development
 
 Quickstart:
@@ -111,19 +125,21 @@ The commands below are for https://oldinsurancemaps.net/map/sanborn03376_029 aka
 Download imagery from OIM and its S3 bucket using the IIIF file:
 
 ```
-mkdir ~/Documents/ohm/new_orleans_la_1951_vol_5
-curl -o ~/Documents/ohm/new_orleans_la_1951_vol_5/main.iiif.json 'https://oldinsurancemaps.net/iiif/mosaic/sanborn03376_029/main-content/?trim=true'
-uv run python download_oim_iiif.py ~/Documents/ohm/new_orleans_la_1951_vol_5/main.iiif.json --oim-url-prefix 'https://s3.us-central-1.wasabisys.com/oldinsurancemaps/uploaded/documents/new_orleans_la_1951_vol_5_'
+mkdir data/new_orleans_la_1951_vol_5
+curl -o data/new_orleans_la_1951_vol_5/main.iiif.json 'https://oldinsurancemaps.net/iiif/mosaic/sanborn03376_029/main-content/?trim=true'
+uv run python mapsnap/download_oim_iiif.py data/new_orleans_la_1951_vol_5/main.iiif.json --oim-url-prefix 'https://s3.us-central-1.wasabisys.com/oldinsurancemaps/uploaded/documents/new_orleans_la_1951_vol_5_'
 ```
 
 This downloads 109 full-resolution JPEG files. It's convenient to pull these from OIM's S3 bucket since the Library of Congress tile server is pretty aggressive about rate-limiting.
 
-The full-resolution images are more than you need for OCR and georeferencing. To speed up the later steps, it's convenient to downscale them and convert to grayscale using ImageMagick:
+The full-resolution images are more than you need for OCR and georeferencing. To speed up the later steps, it's convenient to downscale them and convert to grayscale using [ImageMagick]:
 
 ```
-cd ~/Documents/ohm/new_orleans_la_1951_vol_5
+cd data/new_orleans_la_1951_vol_5
 for x in *.jpg; convert -colorspace gray -resize '2048>' $x ${x/.jpg/.2048px.jpg}
 ```
+
+[ImageMagick]: https://imagemagick.org/command-line-processing/#gsc.tab=0
 
 ### Street and Intersections
 
@@ -149,45 +165,45 @@ Run this query and look at the results in the map to make sure they look OK. The
 Convert the OSM dump to GeoJSON by running:
 
 ```
-uv run python mapsnap/osm_to_centerlines.py .../streets.osm.json --output .../centerlines.geojson
+uv run python mapsnap/osm_to_centerlines.py data/new_orleans_la_1951_vol_5/streets.osm.json --output data/new_orleans_la_1951_vol_5/centerlines.geojson
 ```
 
-Though it's not needed for the pipeline, it can be helpful to dxtract street names and intersections to text files by running:
+Though it's not needed for the pipeline, it can be helpful to extract street names and intersections to text files by running:
 
 ```
 jq -r '.elements[].tags.name' streets.osm.json | grep -v '^null$' | sort | uniq > streets.txt
-uv run python mapsnap/generate_intersections.py .../streets.osm.json .../intersections.csv
+uv run python mapsnap/generate_intersections.py data/new_orleans_la_1951_vol_5/streets.osm.json data/new_orleans_la_1951_vol_5/intersections.csv
 ```
-
 
 ### Street Label OCR
 
 Run `detect_text.py` over all the scaled-down images to find street labels + angles:
 
 ```
-uv run python detect_text.py .../*.2048px.jpg
+uv run python mapsnap/detect_text.py data/new_orleans_la_1951_vol_5/*.2048px.jpg
 ```
 
-This is the slowest step. If you can use a GPU, it's ~15s/image. Iif you're running CPU-only, it's more like ~1 minute/image.
+This is the slowest step. If you can use a GPU, it's ~15s/image. Iif you're running CPU-only, it's more like ~1 minute/image. This writes a `streets.json` file next to each image with candidate street label detections.
 
 ### Fit georeference model
 
-Given detected street labels and street centerlines, find GCPs and fit a four-parameter model for each map:
+This is it! Given detected street labels and street centerlines, find GCPs and fit a four-parameter model for each map:
 
 ```
-uv run mapsnap/georef_from_labels.py .../*.2048px..jpg --centerlines .../centerlines.geojson --min-long-side 60 --min-short-side 12 --fuzzy-match-threshold 0.20 --visualize-ocr
+rm data/new_orleans_la_1951_vol_5/*.georef.json
+uv run mapsnap/georef_from_labels.py data/new_orleans_la_1951_vol_5/*.2048px..jpg --centerlines data/new_orleans_la_1951_vol_5/centerlines.geojson --min-long-side 60 --min-short-side 12 --fuzzy-match-threshold 0.20 --visualize-ocr
 ```
 
 The main output is `pNNN.georef.json`, which contains the four-parameter model and debug information. Because of the `--visualize-ocr` flag, this also outputs `pNNN.detect.png` to help you debug the OCR.
 
-For maps without enough control points, this will fail to produce an output. It won't delete an existing georef.json file, so make sure to `rm .../*.georef.json` to avoid cross-run contamination!
+For maps without enough control points, this will fail to produce an output. It won't delete an existing georef.json file, so make sure to run the `rm` command first to avoid cross-run contamination!
 
 ### Make an IIIF file
 
 Download the IIIF file for these Sanborn maps from the Library of Congress:
 
 ```
-curl -o .../loc.iiif.json https://www.loc.gov/item/sanborn03376_029/manifest.json
+curl -o data/new_orleans_la_1951_vol_5/loc.iiif.json https://www.loc.gov/item/sanborn03376_029/manifest.json
 ```
 
 Probably, though, you'll need to load https://www.loc.gov/item/sanborn03376_029/manifest.json directly in your browser to avoid getting denied.
@@ -195,7 +211,7 @@ Probably, though, you'll need to load https://www.loc.gov/item/sanborn03376_029/
 Then generate an IIIF file using the georeferences:
 
 ```
-uv run python mapsnap/make_iiif_georef.py .../loc.iiif.json '.../*.georef.json' --output .../generated.iiif.json
+uv run python mapsnap/make_iiif_georef.py data/new_orleans_la_1951_vol_5/loc.iiif.json 'data/new_orleans_la_1951_vol_5/*.georef.json' --output data/new_orleans_la_1951_vol_5/generated.iiif.json
 ```
 
 You can paste this into viewer.allmaps.org to look at the results.
@@ -205,8 +221,10 @@ You can paste this into viewer.allmaps.org to look at the results.
 Compare the generated IIIF file to the data from OIM:
 
 ```
-uv run python compare_iiif_georef.py .../main.iiif.json .../generated.iiif.json
+uv run python compare_iiif_georef.py data/new_orleans_la_1951_vol_5/main.iiif.json data/new_orleans_la_1951_vol_5/generated.iiif.json
 ```
+
+This will print out per-image stats and overall summary statistics.
 
 ## Debugging output
 
