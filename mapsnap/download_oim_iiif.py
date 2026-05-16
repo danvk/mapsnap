@@ -98,28 +98,6 @@ def jpeg_dimensions(path: Path) -> tuple[int, int]:
     raise ValueError(f"No SOF marker found in {path}")
 
 
-def scale_gcps(
-    features: list[dict],
-    full_width: int,
-    full_height: int,
-    dl_width: int,
-    dl_height: int,
-) -> list[dict]:
-    """Return a copy of features with resourceCoords scaled to downloaded image space."""
-    scale_x = dl_width / full_width
-    scale_y = dl_height / full_height
-    scaled = []
-    for feat in features:
-        props = dict(feat.get("properties", {}))
-        if "resourceCoords" in props:
-            rx, ry = props["resourceCoords"]
-            props = dict(
-                props, resourceCoords=[round(rx * scale_x, 2), round(ry * scale_y, 2)]
-            )
-        scaled.append(dict(feat, properties=props))
-    return scaled
-
-
 def process_annotation(
     item: dict,
     output_dir: Path,
@@ -181,19 +159,6 @@ def process_annotation(
 
     dl_width, dl_height = jpeg_dimensions(image_path)
     print(f"    Downloaded: {dl_width}×{dl_height}", file=sys.stderr)
-    scaled_features = scale_gcps(features, full_width, full_height, dl_width, dl_height)
-
-    gcp_data = {
-        "label": label,
-        "source_url": actual_url,
-        "full_width": full_width,
-        "full_height": full_height,
-        "image_width": dl_width,
-        "image_height": dl_height,
-        "features": scaled_features,
-    }
-    gcp_path.write_text(json.dumps(gcp_data, indent=2))
-    print(f"    GCPs → {gcp_path.name}", file=sys.stderr)
     return True
 
 
@@ -201,7 +166,7 @@ def main() -> None:
     parser = argparse.ArgumentParser(
         description=(
             "Download OIM images and save GCP files from a local IIIF AnnotationPage. "
-            "Saves one .jpg and one .gcps.json per annotation item alongside the IIIF file."
+            "Saves one .jpg per annotation item alongside the IIIF file."
         )
     )
     parser.add_argument(

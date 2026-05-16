@@ -145,22 +145,13 @@ for x in *.jpg; convert -colorspace gray -resize '2048>' $x ${x/.jpg/.2048px.jpg
 
 Find the southwest and northeast corner of the key map to get a bounding box.
 
-Go to Overpass Turbo and paste the following in:
+Mapsnap needs all the streets from OSM in this bounding box. To get them using the Overpass API, run:
 
 ```
-[out:json][timeout:60];
-(
-  way["highway"]["name"](
-    29.909795,-90.125975,  // southwest
-    29.946841,-90.083828   // northeast
-  );
-);
-out body;
->;
-out skel qt;
+uv run python mapsnap/download_osm.py 29.909795 -90.125975 29.946841 -90.083828 --output data/new_orleans_la_1951_vol_5/streets.osm.json
 ```
 
-Run this query and look at the results in the map to make sure they look OK. Then click "Export" and download the raw OSM data. Save this in `streets.osm.json`.
+The order of the parameters is sw lat, sw lng, ne lat, ne lng.
 
 Convert the OSM dump to GeoJSON by running:
 
