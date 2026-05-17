@@ -411,9 +411,11 @@ def main() -> None:
     parser.add_argument(
         "--allowlist",
         metavar="CHARS",
-        default="ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz ",
+        default="ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz .",
         help=(
-            "Restrict OCR recognition to these characters. Defaults to letters + space."
+            "Restrict OCR recognition to these characters. Defaults to letters, space, "
+            "and period (period separates direction abbreviations like 'E.' from the "
+            "street name so normalize_street can expand them)."
         ),
     )
     parser.add_argument(
