@@ -182,7 +182,7 @@ This is it! Given detected street labels and street centerlines, find GCPs and f
 
 ```
 rm data/new_orleans_la_1951_vol_5/*.georef.json
-uv run mapsnap/georef_from_labels.py data/new_orleans_la_1951_vol_5/*.2048px..jpg --centerlines data/new_orleans_la_1951_vol_5/centerlines.geojson --min-long-side 60 --min-short-side 12 --fuzzy-match-threshold 0.20 --visualize-ocr
+uv run mapsnap/georef_from_labels.py data/new_orleans_la_1951_vol_5/*.2048px.jpg --centerlines data/new_orleans_la_1951_vol_5/centerlines.geojson --min-long-side 60 --min-short-side 12 --fuzzy-match-threshold 0.20 --visualize-ocr
 ```
 
 The main output is `pNNN.georef.json`, which contains the four-parameter model and debug information. Because of the `--visualize-ocr` flag, this also outputs `pNNN.detect.png` to help you debug the OCR.

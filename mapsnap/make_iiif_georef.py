@@ -24,10 +24,10 @@ def canvas_id_to_page_key(canvas_id: str) -> str | None:
     The canvas @id suffix looks like '05791_02_1939-0016s'. We extract the trailing
     numeric-plus-optional-s part and strip leading zeros: '0016s' → 'p16s'.
     """
-    m = re.search(r"-(\d+)(s?)$", canvas_id)
+    m = re.search(r"-(\d+)([sNSEW]?)$", canvas_id)
     if not m:
         return None
-    return f"p{int(m.group(1))}{m.group(2)}"
+    return f"p{int(m.group(1))}{m.group(2)}".lower()
 
 
 def georef_path_to_page_key(path: str) -> str | None:
@@ -37,7 +37,7 @@ def georef_path_to_page_key(path: str) -> str | None:
     '_p16s.gcps.georef.json' (the '.gcps' infix is optional).
     """
     # drop the trailing "__2" in "p428__2" since the LOC images won't have splits.
-    m = re.search(r"(?:\b|_)(p\d+s?(?:__\d)?)(?:\.[^.]+)?\.georef\.json$", path)
+    m = re.search(r"(?:\b|_)(p\d+[snew]?(?:__\d)?)(?:\.[^.]+)?\.georef\.json$", path)
     return m.group(1) if m else None
 
 
