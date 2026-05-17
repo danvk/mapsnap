@@ -301,6 +301,7 @@ def detect_text(
     image_path: str,
     min_size: int = 15,
     allowlist: str | None = None,
+    link_threshold: float = 0.4,
     reader: easyocr.Reader | None = None,
 ) -> list[dict]:
     """Run CRAFT-based text detection at 0°, 90°, and 270° and return all results.
@@ -313,6 +314,10 @@ def detect_text(
     Note: EasyOCR's rotation_info parameter only rotates already-detected crops
     for the recognition stage, so it does not help detect vertical text regions.
     Running the full image at multiple angles is required.
+
+    link_threshold controls how aggressively CRAFT merges adjacent text regions
+    (EasyOCR default 0.4). Lower values (e.g. 0.1) prevent adjacent street labels
+    from being concatenated into a single detection.
 
     Each returned detection is a dict with:
       - polygon: list of 4 [x, y] corners in original image coordinates
@@ -328,7 +333,11 @@ def detect_text(
     orig_width, orig_height = img.size
 
     all_detections: list[dict] = []
-    readtext_kwargs: dict = {"paragraph": False, "min_size": min_size}
+    readtext_kwargs: dict = {
+        "paragraph": False,
+        "min_size": min_size,
+        "link_threshold": link_threshold,
+    }
     if allowlist is not None:
         readtext_kwargs["allowlist"] = allowlist
 
@@ -414,6 +423,17 @@ def main() -> None:
         metavar="PX",
         help="Minimum short side passed to the EasyOCR detector (default: 15)",
     )
+    parser.add_argument(
+        "--link-threshold",
+        type=float,
+        default=0.4,
+        metavar="T",
+        help=(
+            "CRAFT link threshold controlling how aggressively adjacent text regions "
+            "are merged. Lower values (e.g. 0.1) prevent adjacent street labels from "
+            "being concatenated. EasyOCR default is 0.4."
+        ),
+    )
     args = parser.parse_args()
 
     reader = easyocr.Reader(["en"], gpu=True, verbose=False)
@@ -427,6 +447,7 @@ def main() -> None:
             image_path,
             min_size=args.min_short_side,
             allowlist=args.allowlist,
+            link_threshold=args.link_threshold,
             reader=reader,
         )
         with open(output_path, "w") as f:
