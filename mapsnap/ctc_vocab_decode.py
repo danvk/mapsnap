@@ -13,8 +13,10 @@ Usage::
     patch_easyocr_reader(reader, vocab)
     reader.readtext(img, decoder="wordbeamsearch", ...)  # constrained path active
 
-After patching, ``reader.converter.decode_wordbeamsearch`` routes through our decoder
-instead of EasyOCR's default implementation.
+After patching, ``easyocr.recognition.recognizer_predict`` is replaced with a version
+that computes confidence from the constrained CTC path probability rather than greedy
+max probabilities, so false positives get low confidence instead of the confidence of
+the actual (non-street) image content.
 """
 
 from __future__ import annotations
@@ -155,7 +157,7 @@ def prefix_constrained_ctc(
     trie_root: TrieNode,
     char_list: list[str],
     beam_width: int = 20,
-) -> str:
+) -> tuple[str, float]:
     """Prefix-constrained CTC beam search for a single detection.
 
     At each time step only extends beams via characters that are valid next nodes
@@ -170,8 +172,9 @@ def prefix_constrained_ctc(
         beam_width: Maximum number of beams to keep after each time step.
 
     Returns:
-        Decoded string (uppercase). Falls back to the highest-probability partial
-        prefix if no complete vocabulary word is in the final beam.
+        Tuple of (decoded string (uppercase), constrained path probability pb+pnb).
+        Falls back to the highest-probability partial prefix if no complete vocabulary
+        word is in the final beam. Returns ("", 0.0) if beams are empty.
     """
     T = mat.shape[0]
     blank_idx = 0
@@ -258,14 +261,16 @@ def prefix_constrained_ctc(
             beams = new_beams
 
     if not beams:
-        return ""
+        return "", 0.0
 
-    # Prefer beams that end at a complete vocabulary entry.
+    # Only return complete vocabulary entries (is_end=True).
+    # Partial prefix fallbacks would cause non-street fragments to appear
+    # as high-confidence matches because many streets share a common prefix.
     complete = [(pfx, b[2] + b[3]) for pfx, b in beams.items() if b[0].is_end]
-    candidates = (
-        complete if complete else [(pfx, b[2] + b[3]) for pfx, b in beams.items()]
-    )
-    return max(candidates, key=lambda x: x[1])[0]
+    if not complete:
+        return "", 0.0
+    best_pfx, best_prob = max(complete, key=lambda x: x[1])
+    return best_pfx, best_prob
 
 
 # ---------------------------------------------------------------------------
@@ -278,22 +283,85 @@ def patch_easyocr_reader(
     vocab_strings: list[str],
     beam_width: int = 20,
 ) -> TrieNode:
-    """Replace reader.converter.decode_wordbeamsearch with constrained CTC.
+    """Patch easyocr.recognition.recognizer_predict with constrained CTC decoding.
 
-    The patch is per-instance; creating a new ``Reader`` reverts to normal EasyOCR
-    behaviour. After patching, call ``reader.readtext(..., decoder='wordbeamsearch')``
-    to activate the constrained decoder.
+    For ``decoder='wordbeamsearch'`` calls, replaces both the text decoding and the
+    confidence score with values derived from the constrained CTC path probability,
+    so false positives (non-street text forced to a vocabulary word) get low
+    confidence rather than the greedy-decode confidence of the actual image content.
+
+    For other decoders the original function is called unchanged.
+
+    The patch is module-level; creating a new ``Reader`` does NOT revert it. Call
+    ``unpatch_easyocr()`` (or re-import) to restore the original behaviour.
 
     Returns the trie root (for inspection / debugging).
     """
+    import torch
+    import torch.nn.functional as F
+    import easyocr.recognition as _recog
+
     trie_root = build_trie(vocab_strings)
     char_list: list[str] = reader.converter.character
 
-    def _constrained(mat: np.ndarray, beamWidth: int = 5) -> list[str]:
-        return [
-            prefix_constrained_ctc(mat[i], trie_root, char_list, beam_width)
-            for i in range(mat.shape[0])
-        ]
+    original_predict = _recog.recognizer_predict
 
-    reader.converter.decode_wordbeamsearch = _constrained
+    def _patched_recognizer_predict(
+        model,
+        converter,
+        test_loader,
+        batch_max_length,
+        ignore_idx,
+        char_group_idx,
+        decoder: str = "greedy",
+        beamWidth: int = 5,
+        device: str = "cpu",
+    ) -> list[list]:
+        if decoder != "wordbeamsearch":
+            return original_predict(
+                model,
+                converter,
+                test_loader,
+                batch_max_length,
+                ignore_idx,
+                char_group_idx,
+                decoder,
+                beamWidth,
+                device,
+            )
+
+        model.eval()
+        result: list[list] = []
+        with torch.no_grad():
+            for image_tensors in test_loader:
+                batch_size = image_tensors.size(0)
+                image = image_tensors.to(device)
+                text_for_pred = (
+                    torch.LongTensor(batch_size, batch_max_length + 1)
+                    .fill_(0)
+                    .to(device)
+                )
+
+                preds = model(image, text_for_pred)
+                preds_prob = F.softmax(preds, dim=2)
+                preds_prob_np = preds_prob.cpu().detach().numpy()
+
+                # Zero-out ignored characters (same normalisation as original).
+                preds_prob_np[:, :, ignore_idx] = 0.0
+                pred_norm = preds_prob_np.sum(axis=2)
+                preds_prob_np = preds_prob_np / np.expand_dims(pred_norm, axis=-1)
+
+                for i in range(batch_size):
+                    text, path_prob = prefix_constrained_ctc(
+                        preds_prob_np[i], trie_root, char_list, beam_width
+                    )
+                    # Per-character geometric mean of the constrained path probability.
+                    # Analogous to EasyOCR's custom_mean but derived from the actual
+                    # constrained path rather than greedy max probs.
+                    confidence = path_prob ** (1.0 / max(len(text), 1))
+                    result.append([text, float(confidence)])
+
+        return result
+
+    _recog.recognizer_predict = _patched_recognizer_predict
     return trie_root
