@@ -26,6 +26,15 @@ interface IntersectionPoint {
   initial?: boolean;
 }
 
+interface Detection {
+  polygon: [number, number][];
+  text: string;
+  confidence: number;
+  angle: number;
+  long_side: number;
+  short_side: number;
+}
+
 interface GeorefData {
   width?: number;
   height?: number;
@@ -81,6 +90,9 @@ function streetTextColor(): string {
 
 let streets: Street[] = [];
 let intersections: IntersectionPoint[] = [];
+let detections: Detection[] = [];
+let selectedDetectionIndices = new Set<number>();
+let streetsMode = false;
 let svg: SVGSVGElement | null = null;
 let svgW = 0;
 let svgH = 0;
@@ -120,6 +132,23 @@ function solveLinear3(A: number[][], b: number[]): number[] | null {
     x[i] /= m[i][i];
   }
   return x;
+}
+
+/** Ray-casting point-in-polygon test for a convex or concave polygon. */
+function pointInPolygon(
+  x: number,
+  y: number,
+  polygon: [number, number][],
+): boolean {
+  let inside = false;
+  for (let i = 0, j = polygon.length - 1; i < polygon.length; j = i++) {
+    const [xi, yi] = polygon[i];
+    const [xj, yj] = polygon[j];
+    if (yi > y !== yj > y && x < ((xj - xi) * (y - yi)) / (yj - yi) + xi) {
+      inside = !inside;
+    }
+  }
+  return inside;
 }
 
 /**
@@ -166,6 +195,120 @@ function computeCorners(
     transform(width, height),
     transform(0, height),
   ];
+}
+
+/** Switch UI to streets-mode: hide map/controls, show detections panel. */
+function enterStreetsMode(): void {
+  document.getElementById('map')!.style.display = 'none';
+  for (const el of document.querySelectorAll<HTMLElement>('.opacity-control')) {
+    el.style.display = 'none';
+  }
+  document.getElementById('detections-panel')!.style.display = 'block';
+  const wrapper = img.closest<HTMLElement>('.image-wrapper');
+  if (wrapper) wrapper.style.cursor = 'crosshair';
+  renderDetections();
+  updateDetectionsTable();
+}
+
+/** Draw detection polygons on the SVG overlay. Selected ones are highlighted. */
+function renderDetections(): void {
+  if (!svg) return;
+  svg.innerHTML = '';
+  for (const [i, det] of detections.entries()) {
+    const isSelected = selectedDetectionIndices.has(i);
+    const color = isSelected ? '#ff6600' : '#4499ff';
+    const points = det.polygon
+      .map(([x, y]) => toDisplay(x, y))
+      .map(([dx, dy]) => `${dx},${dy}`)
+      .join(' ');
+
+    const polygonEl = document.createElementNS(
+      'http://www.w3.org/2000/svg',
+      'polygon',
+    );
+    polygonEl.setAttribute('points', points);
+    polygonEl.setAttribute('fill', color);
+    polygonEl.setAttribute('fill-opacity', isSelected ? '0.25' : '0.08');
+    polygonEl.setAttribute('stroke', color);
+    polygonEl.setAttribute('stroke-width', isSelected ? '2.5' : '1.2');
+    svg.appendChild(polygonEl);
+
+    if (isSelected) {
+      const [lx, ly] = toDisplay(det.polygon[0][0], det.polygon[0][1]);
+      const label = document.createElementNS(
+        'http://www.w3.org/2000/svg',
+        'text',
+      );
+      label.setAttribute('x', String(lx));
+      label.setAttribute('y', String(ly - 4));
+      label.setAttribute('font-size', '11');
+      label.setAttribute('font-family', 'sans-serif');
+      label.setAttribute('fill', color);
+      label.setAttribute('stroke', 'white');
+      label.setAttribute('stroke-width', '2');
+      label.setAttribute('paint-order', 'stroke');
+      label.textContent = det.text;
+      svg.appendChild(label);
+    }
+  }
+}
+
+/** Rebuild the detections table, showing all rows or only selected ones. */
+function updateDetectionsTable(): void {
+  const tbody = document.querySelector<HTMLTableSectionElement>(
+    '#detections-table tbody',
+  );
+  if (!tbody) return;
+
+  const visible = detections
+    .map((det, i) => ({ det, i }))
+    .filter(
+      ({ i }) =>
+        selectedDetectionIndices.size === 0 || selectedDetectionIndices.has(i),
+    );
+
+  tbody.innerHTML = '';
+  for (const { det, i } of visible) {
+    const tr = document.createElement('tr');
+    if (selectedDetectionIndices.has(i)) tr.classList.add('selected');
+
+    for (const val of [
+      det.angle,
+      det.long_side,
+      det.short_side,
+      det.confidence.toFixed(3),
+      det.text,
+    ]) {
+      const td = document.createElement('td');
+      td.textContent = String(val);
+      tr.appendChild(td);
+    }
+
+    tr.addEventListener('click', () => {
+      selectedDetectionIndices = new Set([i]);
+      renderDetections();
+      updateDetectionsTable();
+    });
+
+    tbody.appendChild(tr);
+  }
+}
+
+/** Handle image clicks in streets-mode: select detections at the click point. */
+function handleImageClick(e: MouseEvent): void {
+  if (!streetsMode) return;
+  const rect = img.getBoundingClientRect();
+  const displayX = e.clientX - rect.left;
+  const displayY = e.clientY - rect.top;
+  const imgX = (displayX * jsonWidth) / svgW;
+  const imgY = (displayY * jsonHeight) / svgH;
+
+  const hit = detections
+    .map((_det, i) => i)
+    .filter((i) => pointInPolygon(imgX, imgY, detections[i].polygon));
+  selectedDetectionIndices = new Set(hit);
+  renderDetections();
+  updateDetectionsTable();
 }
 
 function setupMap(): void {
@@ -480,6 +623,8 @@ function setupOverlay(): void {
 
   new ResizeObserver(updateSize).observe(img);
   updateSize();
+
+  wrapper.addEventListener('click', handleImageClick);
 }
 
 function setupFileDrop(): void {
@@ -530,8 +675,29 @@ function setupFileDrop(): void {
     );
     if (!file) return;
     de.preventDefault();
-    textarea.value = await file.text();
-    textarea.dispatchEvent(new Event('input'));
+    const text = await file.text();
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(text);
+    } catch {
+      return;
+    }
+    if (Array.isArray(parsed)) {
+      // streets.json: array of detection objects from detect_text.py
+      detections = parsed as Detection[];
+      selectedDetectionIndices = new Set();
+      streetsMode = true;
+      textarea.value = text;
+      applyJsonDimensions(
+        img.naturalWidth || jsonWidth || 1,
+        img.naturalHeight || jsonHeight || 1,
+      );
+      enterStreetsMode();
+    } else {
+      streetsMode = false;
+      textarea.value = text;
+      textarea.dispatchEvent(new Event('input'));
+    }
   });
 }
 
@@ -541,6 +707,10 @@ function toDisplay(nx: number, ny: number): [number, number] {
 }
 
 function render(): void {
+  if (streetsMode) {
+    renderDetections();
+    return;
+  }
   if (!svg) return;
   svg.innerHTML = '';
 
@@ -684,6 +854,7 @@ function syncTextarea(): void {
 }
 
 textarea.addEventListener('input', () => {
+  if (streetsMode) return;
   try {
     const data = JSON.parse(textarea.value) as GeorefData;
     streets = (data.streets ?? []).map((s) => ({ ...s }));
