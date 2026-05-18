@@ -91,22 +91,44 @@ def run_paddle(image_path: str) -> list[dict]:
 # ---------------------------------------------------------------------------
 
 
-def run_easyocr(image_path: str) -> list[dict]:
-    """Run EasyOCR at 0°, 90°, 270° (same as detect_text.py defaults)."""
+def run_easyocr(
+    image_path: str,
+    decoder: str = "greedy",
+    beam_width: int = 10,
+    vocab: list[str] | None = None,
+) -> list[dict]:
+    """Run EasyOCR at 0°, 90°, 270° (same as detect_text.py defaults).
+
+    decoder: 'greedy' (default), 'wordbeamsearch' (EasyOCR built-in post-beam filter
+    against en.txt), or 'constrained' (prefix-constrained CTC using the street-name
+    vocabulary supplied via *vocab*).
+    """
     allowlist = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz ."
     reader = easyocr.Reader(["en"], gpu=True, verbose=False)
+
+    if decoder == "constrained":
+        if vocab is None:
+            raise ValueError("vocab must be provided for the constrained decoder")
+        from mapsnap.ctc_vocab_decode import patch_easyocr_reader
+
+        patch_easyocr_reader(reader, vocab, beam_width)
+        # Route through wordbeamsearch so EasyOCR calls our patched method.
+        actual_decoder = "wordbeamsearch"
+    else:
+        actual_decoder = decoder
+
     img = Image.open(image_path).convert("RGB")
     orig_width, orig_height = img.size
 
     all_detections: list[dict] = []
+    readtext_kwargs: dict = {"paragraph": False, "min_size": 15, "allowlist": allowlist}
+    if actual_decoder != "greedy":
+        readtext_kwargs["decoder"] = actual_decoder
+        readtext_kwargs["beamWidth"] = beam_width
+
     for angle in (0, 90, 270):
         rotated = img.rotate(angle, expand=True) if angle != 0 else img
-        results = reader.readtext(
-            np.array(rotated),
-            paragraph=False,
-            min_size=15,
-            allowlist=allowlist,
-        )
+        results = reader.readtext(np.array(rotated), **readtext_kwargs)
         for bbox, text, confidence in results:
             polygon = [[int(x), int(y)] for x, y in bbox]
             if angle == 90:
@@ -249,6 +271,22 @@ def main() -> None:
     parser.add_argument(
         "--no-paddle", action="store_true", help="Skip PaddleOCR (load from cache only)"
     )
+    parser.add_argument(
+        "--easyocr-decoder",
+        default="greedy",
+        choices=["greedy", "wordbeamsearch", "constrained"],
+        help=(
+            "EasyOCR decoder to use (default: greedy). "
+            "'constrained' uses prefix-constrained CTC guided by the centerlines vocabulary."
+        ),
+    )
+    parser.add_argument(
+        "--beam-width",
+        type=int,
+        default=20,
+        metavar="N",
+        help="Beam width for wordbeamsearch / constrained decoder (default: 20)",
+    )
     args = parser.parse_args()
 
     if len(args.pairs) % 2 != 0:
@@ -261,6 +299,9 @@ def main() -> None:
     cache_dir = Path(args.cache_dir) if args.cache_dir else None
     if cache_dir:
         cache_dir.mkdir(parents=True, exist_ok=True)
+
+    # Cache key includes the EasyOCR decoder name so different decoders don't collide.
+    easy_cache_suffix = f"easy.{args.easyocr_decoder}"
 
     def cache_path(image_path: str, engine: str) -> Path | None:
         if cache_dir is None:
@@ -285,18 +326,39 @@ def main() -> None:
     for image_path, centerlines_path in image_centerlines:
         print(f"\nProcessing {Path(image_path).name} ...", file=sys.stderr)
 
-        easy_dets = load_cache(image_path, "easy")
+        easy_dets = load_cache(image_path, easy_cache_suffix)
         easy_time = 0.0
         if easy_dets is None and not args.no_easy:
-            print("  Running EasyOCR ...", file=sys.stderr)
+            # Build vocabulary for constrained decoder (per-image centerlines).
+            vocab: list[str] | None = None
+            if args.easyocr_decoder == "constrained":
+                from mapsnap.ctc_vocab_decode import generate_vocab_strings
+
+                geojson = json.load(open(centerlines_path))
+                block_index = build_block_index(geojson)
+                vocab = generate_vocab_strings(set(block_index.keys()))
+                print(
+                    f"  Constrained vocab: {len(vocab)} forms from {len(block_index)} streets",
+                    file=sys.stderr,
+                )
+
+            print(
+                f"  Running EasyOCR (decoder={args.easyocr_decoder}) ...",
+                file=sys.stderr,
+            )
             t0 = time.time()
-            easy_dets = run_easyocr(image_path)
+            easy_dets = run_easyocr(
+                image_path,
+                decoder=args.easyocr_decoder,
+                beam_width=args.beam_width,
+                vocab=vocab,
+            )
             easy_time = time.time() - t0
             print(
                 f"  EasyOCR done in {easy_time:.0f}s ({len(easy_dets)} detections)",
                 file=sys.stderr,
             )
-            save_cache(image_path, "easy", easy_dets)
+            save_cache(image_path, easy_cache_suffix, easy_dets)
         easy_dets = easy_dets or []
 
         paddle_dets = load_cache(image_path, "paddle")

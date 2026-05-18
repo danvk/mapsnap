@@ -303,6 +303,8 @@ def detect_text(
     allowlist: str | None = None,
     link_threshold: float = 0.4,
     reader: easyocr.Reader | None = None,
+    vocab_strings: list[str] | None = None,
+    beam_width: int = 20,
 ) -> list[dict]:
     """Run CRAFT-based text detection at 0°, 90°, and 270° and return all results.
 
@@ -319,6 +321,11 @@ def detect_text(
     (EasyOCR default 0.4). Lower values (e.g. 0.1) prevent adjacent street labels
     from being concatenated into a single detection.
 
+    vocab_strings, if provided, enables prefix-constrained CTC decoding: the
+    recognizer is restricted to outputting strings that are prefixes of known
+    street-name forms. This substantially improves recall on abbreviated and
+    direction-prefixed labels at the cost of ~25% slower recognition.
+
     Each returned detection is a dict with:
       - polygon: list of 4 [x, y] corners in original image coordinates
       - text: recognized text string
@@ -329,6 +336,12 @@ def detect_text(
     """
     if reader is None:
         reader = easyocr.Reader(["en"], gpu=True, verbose=False)
+
+    if vocab_strings is not None:
+        from mapsnap.ctc_vocab_decode import patch_easyocr_reader
+
+        patch_easyocr_reader(reader, vocab_strings, beam_width)
+
     img = Image.open(image_path).convert("RGB")
     orig_width, orig_height = img.size
 
@@ -340,6 +353,9 @@ def detect_text(
     }
     if allowlist is not None:
         readtext_kwargs["allowlist"] = allowlist
+    if vocab_strings is not None:
+        readtext_kwargs["decoder"] = "wordbeamsearch"
+        readtext_kwargs["beamWidth"] = beam_width
 
     for angle in (0, 90, 270):
         rotated = img.rotate(angle, expand=True) if angle != 0 else img
@@ -436,7 +452,40 @@ def main() -> None:
             "being concatenated. EasyOCR default is 0.4."
         ),
     )
+    parser.add_argument(
+        "--centerlines",
+        metavar="GEOJSON",
+        default=None,
+        help=(
+            "Centerlines GeoJSON file. When provided, enables prefix-constrained CTC "
+            "decoding: the recognizer is guided by a vocabulary of known street-name "
+            "forms derived from the centerlines. Substantially improves recall on "
+            "abbreviated and direction-prefixed labels."
+        ),
+    )
+    parser.add_argument(
+        "--beam-width",
+        type=int,
+        default=20,
+        metavar="N",
+        help="Beam width for constrained CTC decoder (default: 20)",
+    )
     args = parser.parse_args()
+
+    vocab_strings: list[str] | None = None
+    if args.centerlines:
+        import json as _json
+
+        from mapsnap.ctc_vocab_decode import generate_vocab_strings
+        from mapsnap.georef_from_labels import build_block_index
+
+        geojson = _json.load(open(args.centerlines))
+        block_index = build_block_index(geojson)
+        vocab_strings = generate_vocab_strings(set(block_index.keys()))
+        print(
+            f"Constrained vocab: {len(vocab_strings)} forms from {len(block_index)} streets",
+            file=sys.stderr,
+        )
 
     reader = easyocr.Reader(["en"], gpu=True, verbose=False)
 
@@ -451,6 +500,8 @@ def main() -> None:
             allowlist=args.allowlist,
             link_threshold=args.link_threshold,
             reader=reader,
+            vocab_strings=vocab_strings,
+            beam_width=args.beam_width,
         )
         with open(output_path, "w") as f:
             f.write(json.dumps(detections, indent=2))
