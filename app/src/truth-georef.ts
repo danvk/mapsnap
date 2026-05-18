@@ -73,6 +73,15 @@ const showIntersectionsOnImageCheckbox = document.getElementById(
 const colorByInlierCheckbox = document.getElementById(
   'color-by-inlier',
 ) as HTMLInputElement;
+const filterConfidenceSlider = document.getElementById(
+  'filter-confidence',
+) as HTMLInputElement;
+const filterShortSideSlider = document.getElementById(
+  'filter-short-side',
+) as HTMLInputElement;
+const filterLongSideSlider = document.getElementById(
+  'filter-long-side',
+) as HTMLInputElement;
 
 function streetCircleColor(): maplibregl.ExpressionSpecification | string {
   return colorByInlierCheckbox.checked
@@ -203,6 +212,10 @@ function enterStreetsMode(): void {
   for (const el of document.querySelectorAll<HTMLElement>('.opacity-control')) {
     el.style.display = 'none';
   }
+  for (const el of document.querySelectorAll<HTMLElement>('.image-controls')) {
+    el.style.display = 'none';
+  }
+  document.getElementById('detection-filters')!.style.display = 'block';
   document.getElementById('detections-panel')!.style.display = 'block';
   const wrapper = img.closest<HTMLElement>('.image-wrapper');
   if (wrapper) wrapper.style.cursor = 'crosshair';
@@ -210,13 +223,56 @@ function enterStreetsMode(): void {
   updateDetectionsTable();
 }
 
+function onFilterSliderInput(
+  slider: HTMLInputElement,
+  valueSpanId: string,
+  decimals: number,
+): void {
+  document.getElementById(valueSpanId)!.textContent = parseFloat(
+    slider.value,
+  ).toFixed(decimals);
+  renderDetections();
+  updateDetectionsTable();
+}
+
+filterConfidenceSlider.addEventListener('input', () =>
+  onFilterSliderInput(filterConfidenceSlider, 'filter-confidence-value', 3),
+);
+filterShortSideSlider.addEventListener('input', () =>
+  onFilterSliderInput(filterShortSideSlider, 'filter-short-side-value', 0),
+);
+filterLongSideSlider.addEventListener('input', () =>
+  onFilterSliderInput(filterLongSideSlider, 'filter-long-side-value', 0),
+);
+
+/** Map confidence in [0, 1] to a CSS color string (red → yellow → green). */
+function confidenceColor(confidence: number): string {
+  const hue = Math.round(confidence * 120); // 0 = red, 120 = green
+  return `hsl(${hue}, 90%, 45%)`;
+}
+
+/** Return detections passing the current filter sliders, with original indices. */
+function getFilteredDetections(): { det: Detection; i: number }[] {
+  const minConf = parseFloat(filterConfidenceSlider.value);
+  const minShort = parseFloat(filterShortSideSlider.value);
+  const minLong = parseFloat(filterLongSideSlider.value);
+  return detections
+    .map((det, i) => ({ det, i }))
+    .filter(
+      ({ det }) =>
+        det.confidence >= minConf &&
+        det.short_side >= minShort &&
+        det.long_side >= minLong,
+    );
+}
+
 /** Draw detection polygons on the SVG overlay. Selected ones are highlighted. */
 function renderDetections(): void {
   if (!svg) return;
   svg.innerHTML = '';
-  for (const [i, det] of detections.entries()) {
+  for (const { det, i } of getFilteredDetections()) {
     const isSelected = selectedDetectionIndices.has(i);
-    const color = isSelected ? '#ff6600' : '#4499ff';
+    const color = isSelected ? '#ff6600' : confidenceColor(det.confidence);
     const points = det.polygon
       .map(([x, y]) => toDisplay(x, y))
       .map(([dx, dy]) => `${dx},${dy}`)
@@ -260,12 +316,12 @@ function updateDetectionsTable(): void {
   );
   if (!tbody) return;
 
-  const visible = detections
-    .map((det, i) => ({ det, i }))
+  const visible = getFilteredDetections()
     .filter(
       ({ i }) =>
         selectedDetectionIndices.size === 0 || selectedDetectionIndices.has(i),
-    );
+    )
+    .sort((a, b) => b.det.confidence - a.det.confidence);
 
   tbody.innerHTML = '';
   for (const { det, i } of visible) {
@@ -303,9 +359,9 @@ function handleImageClick(e: MouseEvent): void {
   const imgX = (displayX * jsonWidth) / svgW;
   const imgY = (displayY * jsonHeight) / svgH;
 
-  const hit = detections
-    .map((_det, i) => i)
-    .filter((i) => pointInPolygon(imgX, imgY, detections[i].polygon));
+  const hit = getFilteredDetections()
+    .filter(({ det }) => pointInPolygon(imgX, imgY, det.polygon))
+    .map(({ i }) => i);
   selectedDetectionIndices = new Set(hit);
   renderDetections();
   updateDetectionsTable();
@@ -684,7 +740,7 @@ function setupFileDrop(): void {
     }
     if (Array.isArray(parsed)) {
       // streets.json: array of detection objects from detect_text.py
-      detections = parsed as Detection[];
+      detections = (parsed as Detection[]).filter((d) => d.confidence >= 0.001);
       selectedDetectionIndices = new Set();
       streetsMode = true;
       textarea.value = text;
