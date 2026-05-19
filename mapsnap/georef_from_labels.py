@@ -519,6 +519,10 @@ def ransac_hybrid(
         print(f"  {a.label_a} x {a.label_b}")
 
     for pair_idx in combinations(range(n), 2):
+        ga, gb = gcps[pair_idx[0]], gcps[pair_idx[1]]
+        # Skip pairs that map to the same OSM intersection — singular by construction.
+        if abs(ga.geo[0] - gb.geo[0]) < 1e-6 and abs(ga.geo[1] - gb.geo[1]) < 1e-6:
+            continue
         pairs = [(gcps[k].pixel, gcps[k].geo) for k in pair_idx]
         try:
             A = solve_similarity_2pts(pairs, cos_phi)
@@ -804,6 +808,7 @@ def process_image(
     min_aspect_ratio: float = 2.0,
     visualize_ocr: bool = False,
     fuzzy_threshold: float = 0.0,
+    edge_margin: float = 0.02,
 ) -> ProcessResult:
     """Fit a georeference model for one image and write GCPs to output_path.
 
@@ -811,6 +816,11 @@ def process_image(
     Returns success=False with deferred data when exactly 1 intersection GCP is found
     (needs median scale from other maps to complete). Returns success=False otherwise.
     """
+    from PIL import Image as PILImage
+
+    with PILImage.open(image_path) as pil_img:
+        img_w, img_h = pil_img.size
+
     labels_raw = json.load(open(labels_path))
     if isinstance(labels_raw, dict):
         all_detections: list[dict] = labels_raw.get(
@@ -837,6 +847,16 @@ def process_image(
             and normalize_street(det["text"]) not in DIRECTION_WORDS
         ):
             continue
+        if edge_margin > 0:
+            poly = np.array(det["polygon"], dtype=float)
+            cx, cy = float(poly[:, 0].mean()), float(poly[:, 1].mean())
+            if (
+                cx < edge_margin * img_w
+                or cx > (1 - edge_margin) * img_w
+                or cy < edge_margin * img_h
+                or cy > (1 - edge_margin) * img_h
+            ):
+                continue
         canonicals = canonical_street_matches(
             det["text"], normalized_streets, fuzzy_threshold
         )
@@ -1161,6 +1181,27 @@ def main() -> None:
             "If not set, the median scale from successfully georeferenced images is used."
         ),
     )
+    parser.add_argument(
+        "--edge-margin",
+        type=float,
+        default=0.02,
+        metavar="FRAC",
+        help=(
+            "Ignore detections whose center is within this fraction of the image edge "
+            "(default: 0.02 = 2%%). Headers, stamps, and marginal text are filtered out."
+        ),
+    )
+    parser.add_argument(
+        "--scale-outlier-threshold",
+        type=float,
+        default=0.25,
+        metavar="FRAC",
+        help=(
+            "Delete georef output files whose fitted scale deviates from the reference "
+            "scale by more than this fraction (default: 0.25 = 25%%). "
+            "Set to 0 to disable. Reference is --scale if given, else the median."
+        ),
+    )
     args = parser.parse_args()
 
     if args.debug_dir and len(args.images) > 1:
@@ -1177,12 +1218,19 @@ def main() -> None:
 
     n_success = 0
     scales: list[float] = []
+    scale_records: list[
+        tuple[str, float]
+    ] = []  # (image_path, px_per_ft) for outlier check
     deferred_list: list[dict] = []
 
     for image_path in args.images:
         if len(args.images) > 1:
             print(f"\n--- {image_path} ---", file=sys.stderr)
         labels_path, output_path = derive_paths(image_path)
+        # Delete stale georef file before attempting a new fit so a failed run
+        # doesn't leave a previous result in place.
+        if os.path.exists(output_path):
+            os.remove(output_path)
         result = process_image(
             image_path=image_path,
             labels_path=labels_path,
@@ -1197,13 +1245,24 @@ def main() -> None:
             min_aspect_ratio=args.min_aspect_ratio,
             visualize_ocr=args.visualize_ocr,
             fuzzy_threshold=args.fuzzy_match_threshold,
+            edge_margin=args.edge_margin,
         )
         if result.success:
             n_success += 1
             if result.scale_deg_per_px is not None:
-                scales.append(deg_per_px_to_px_per_ft(result.scale_deg_per_px))
+                px_per_ft = deg_per_px_to_px_per_ft(result.scale_deg_per_px)
+                scales.append(px_per_ft)
+                scale_records.append((image_path, px_per_ft))
         elif result.deferred is not None:
             deferred_list.append(result.deferred)
+
+    # Determine reference scale: explicit override takes priority, then median.
+    if args.scale is not None:
+        ref_scale_px_per_ft: float | None = args.scale
+    elif scales:
+        ref_scale_px_per_ft = float(np.median(scales))
+    else:
+        ref_scale_px_per_ft = None
 
     # Print median scale whenever multiple images were processed.
     if scales and len(args.images) > 1:
@@ -1212,23 +1271,16 @@ def main() -> None:
             file=sys.stderr,
         )
 
-    # Process deferred (1-GCP) images using the median scale or --scale override.
+    # Process deferred (1-GCP) images using the reference scale.
     if deferred_list:
-        if args.scale is not None:
-            final_scale_px_per_ft: float | None = args.scale
-        elif scales:
-            final_scale_px_per_ft = float(np.median(scales))
-        else:
-            final_scale_px_per_ft = None
-
-        if final_scale_px_per_ft is None:
+        if ref_scale_px_per_ft is None:
             print(
                 f"\n{len(deferred_list)} deferred image(s) skipped: no scale available. "
                 "Use --scale PX_PER_FT to set manually.",
                 file=sys.stderr,
             )
         else:
-            scale_deg_per_px = px_per_ft_to_deg_per_px(final_scale_px_per_ft)
+            scale_deg_per_px = px_per_ft_to_deg_per_px(ref_scale_px_per_ft)
             for deferred in deferred_list:
                 deferred_image_path: str = deferred["image_path"]
                 if len(args.images) > 1:
@@ -1244,6 +1296,26 @@ def main() -> None:
                 )
                 if deferred_result.success:
                     n_success += 1
+
+    # Drop georef files whose fitted scale is a major outlier vs the reference.
+    if ref_scale_px_per_ft is not None and args.scale_outlier_threshold > 0:
+        n_dropped = 0
+        for img_path, px_per_ft in scale_records:
+            ratio = px_per_ft / ref_scale_px_per_ft
+            if abs(ratio - 1.0) > args.scale_outlier_threshold:
+                _, out_path = derive_paths(img_path)
+                if os.path.exists(out_path):
+                    os.remove(out_path)
+                    n_success -= 1
+                    n_dropped += 1
+                    print(
+                        f"Dropped scale outlier {img_path}: "
+                        f"{px_per_ft:.4f} px/ft vs reference {ref_scale_px_per_ft:.4f} "
+                        f"({ratio:.2f}×)",
+                        file=sys.stderr,
+                    )
+        if n_dropped:
+            print(f"Dropped {n_dropped} scale outlier(s).", file=sys.stderr)
 
     if len(args.images) > 1:
         print(f"\n{n_success}/{len(args.images)} images georeferenced", file=sys.stderr)
