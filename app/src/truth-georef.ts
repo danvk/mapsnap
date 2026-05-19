@@ -347,13 +347,44 @@ function renderDetections(): void {
 
 /**
  * Draw the rotated image patch for a detection into a canvas.
- * The angle (0, 90, 270) is the CCW rotation applied before OCR, so rotating
- * by -angle restores the text to horizontal reading orientation.
+ * Rotation is derived from the direction of the polygon's longest side so that
+ * diagonally-oriented text is also rendered horizontally.
  */
 function drawDetectionCanvas(canvas: HTMLCanvasElement, det: Detection): void {
   if (!img.naturalWidth) return;
   const cx = det.polygon.reduce((s, [x]) => s + x, 0) / 4;
   const cy = det.polygon.reduce((s, [, y]) => s + y, 0) / 4;
+
+  // Find the direction of the longest polygon side to determine text orientation.
+  let maxLen = 0;
+  let longDx = 1,
+    longDy = 0;
+  for (let i = 0; i < 4; i++) {
+    const [x1, y1] = det.polygon[i];
+    const [x2, y2] = det.polygon[(i + 1) % 4];
+    const dx = x2 - x1,
+      dy = y2 - y1;
+    const len = Math.sqrt(dx * dx + dy * dy);
+    if (len > maxLen) {
+      maxLen = len;
+      longDx = dx;
+      longDy = dy;
+    }
+  }
+  // Use det.angle (0/90/270) to disambiguate the 180° ambiguity of the long-side direction.
+  // 90° and 270° both indicate vertical text; folding to the smaller angle gives the same
+  // reference direction (-π/2) for both, so the disambiguation picks the correct half.
+  const rawAngle = Math.atan2(longDy, longDx);
+  const foldedAngle = Math.min(det.angle, 360 - det.angle);
+  const octantAngle = (-foldedAngle * Math.PI) / 180;
+  let textAngle = rawAngle;
+  if (Math.cos(rawAngle - octantAngle) < 0) {
+    // The long side points the wrong way; flip 180°.
+    textAngle = rawAngle + Math.PI;
+  }
+  if (det.angle == 90) {
+    textAngle += Math.PI;
+  }
 
   let scale = 40 / det.short_side;
   let cW = Math.round(det.long_side * scale);
@@ -369,7 +400,7 @@ function drawDetectionCanvas(canvas: HTMLCanvasElement, det: Detection): void {
   const ctx = canvas.getContext('2d')!;
   ctx.save();
   ctx.translate(cW / 2, cH / 2);
-  ctx.rotate((-det.angle * Math.PI) / 180);
+  ctx.rotate(-textAngle);
   ctx.drawImage(
     img,
     -cx * scale,
