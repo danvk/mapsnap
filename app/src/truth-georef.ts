@@ -160,6 +160,24 @@ function pointInPolygon(
   return inside;
 }
 
+/** Haversine distance in miles between two lon/lat points. */
+function distanceMiles(
+  lon1: number,
+  lat1: number,
+  lon2: number,
+  lat2: number,
+): number {
+  const R = 3958.8;
+  const dLat = ((lat2 - lat1) * Math.PI) / 180;
+  const dLon = ((lon2 - lon1) * Math.PI) / 180;
+  const a =
+    Math.sin(dLat / 2) ** 2 +
+    Math.cos((lat1 * Math.PI) / 180) *
+      Math.cos((lat2 * Math.PI) / 180) *
+      Math.sin(dLon / 2) ** 2;
+  return R * 2 * Math.asin(Math.sqrt(a));
+}
+
 /**
  * Fit affine transform lon = a0 + a1*x + a2*y (and lat) from GCPs with lat/lon,
  * then map the 4 image corners to geographic coordinates.
@@ -221,6 +239,24 @@ function enterStreetsMode(): void {
   if (wrapper) wrapper.style.cursor = 'crosshair';
   renderDetections();
   updateDetectionsTable();
+}
+
+/** Switch back to georef mode: restore map, checkboxes, hide detection UI. */
+function exitStreetsMode(): void {
+  streetsMode = false;
+  detections = [];
+  selectedDetectionIndices = new Set();
+  document.getElementById('detections-panel')!.style.display = 'none';
+  document.getElementById('detection-filters')!.style.display = 'none';
+  document.getElementById('map')!.style.display = '';
+  for (const el of document.querySelectorAll<HTMLElement>('.opacity-control')) {
+    el.style.display = '';
+  }
+  for (const el of document.querySelectorAll<HTMLElement>('.image-controls')) {
+    el.style.display = '';
+  }
+  const wrapper = img.closest<HTMLElement>('.image-wrapper');
+  if (wrapper) wrapper.style.cursor = '';
 }
 
 function onFilterSliderInput(
@@ -309,6 +345,41 @@ function renderDetections(): void {
   }
 }
 
+/**
+ * Draw the rotated image patch for a detection into a canvas.
+ * The angle (0, 90, 270) is the CCW rotation applied before OCR, so rotating
+ * by -angle restores the text to horizontal reading orientation.
+ */
+function drawDetectionCanvas(canvas: HTMLCanvasElement, det: Detection): void {
+  if (!img.naturalWidth) return;
+  const cx = det.polygon.reduce((s, [x]) => s + x, 0) / 4;
+  const cy = det.polygon.reduce((s, [, y]) => s + y, 0) / 4;
+
+  let scale = 40 / det.short_side;
+  let cW = Math.round(det.long_side * scale);
+  let cH = 40;
+  if (cW > 200) {
+    scale = 200 / det.long_side;
+    cW = 200;
+    cH = Math.round(det.short_side * scale);
+  }
+  canvas.width = cW;
+  canvas.height = cH;
+
+  const ctx = canvas.getContext('2d')!;
+  ctx.save();
+  ctx.translate(cW / 2, cH / 2);
+  ctx.rotate((-det.angle * Math.PI) / 180);
+  ctx.drawImage(
+    img,
+    -cx * scale,
+    -cy * scale,
+    img.naturalWidth * scale,
+    img.naturalHeight * scale,
+  );
+  ctx.restore();
+}
+
 /** Rebuild the detections table, showing all rows or only selected ones. */
 function updateDetectionsTable(): void {
   const tbody = document.querySelector<HTMLTableSectionElement>(
@@ -324,7 +395,7 @@ function updateDetectionsTable(): void {
     .sort((a, b) => b.det.confidence - a.det.confidence);
 
   tbody.innerHTML = '';
-  for (const { det, i } of visible) {
+  for (const [rowIdx, { det, i }] of visible.entries()) {
     const tr = document.createElement('tr');
     if (selectedDetectionIndices.has(i)) tr.classList.add('selected');
 
@@ -339,6 +410,14 @@ function updateDetectionsTable(): void {
       td.textContent = String(val);
       tr.appendChild(td);
     }
+
+    const imageTd = document.createElement('td');
+    if (rowIdx < 10) {
+      const canvas = document.createElement('canvas');
+      drawDetectionCanvas(canvas, det);
+      imageTd.appendChild(canvas);
+    }
+    tr.appendChild(imageTd);
 
     tr.addEventListener('click', () => {
       selectedDetectionIndices = new Set([i]);
@@ -421,12 +500,25 @@ function updateWarp(): void {
     lastWarpedUrl = url;
     const lons = corners.map((c) => c[0]);
     const lats = corners.map((c) => c[1]);
+    const minLon = Math.min(...lons);
+    const maxLon = Math.max(...lons);
+    const minLat = Math.min(...lats);
+    const maxLat = Math.max(...lats);
+    const newCenterLon = (minLon + maxLon) / 2;
+    const newCenterLat = (minLat + maxLat) / 2;
+    const currentCenter = map.getCenter();
+    const dist = distanceMiles(
+      currentCenter.lng,
+      currentCenter.lat,
+      newCenterLon,
+      newCenterLat,
+    );
     map.fitBounds(
       [
-        [Math.min(...lons), Math.min(...lats)],
-        [Math.max(...lons), Math.max(...lats)],
+        [minLon, minLat],
+        [maxLon, maxLat],
       ],
-      { padding: 40, maxZoom: 17 },
+      { padding: 40, maxZoom: 17, animate: dist <= 10 },
     );
   }
 }
@@ -700,23 +792,55 @@ function setupFileDrop(): void {
   imageColumn.addEventListener('dragleave', () => {
     dropPlaceholder.classList.remove('drag-over');
   });
+  async function processJsonFile(file: File): Promise<void> {
+    const text = await file.text();
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(text);
+    } catch {
+      return;
+    }
+    if (Array.isArray(parsed)) {
+      // streets.json: array of detection objects from detect_text.py
+      detections = (parsed as Detection[]).filter((d) => d.confidence > 0);
+      selectedDetectionIndices = new Set();
+      streetsMode = true;
+      textarea.value = text;
+      applyJsonDimensions(
+        img.naturalWidth || jsonWidth || 1,
+        img.naturalHeight || jsonHeight || 1,
+      );
+      enterStreetsMode();
+    } else {
+      if (streetsMode) exitStreetsMode();
+      textarea.value = text;
+      textarea.dispatchEvent(new Event('input'));
+    }
+  }
+
   imageColumn.addEventListener('drop', async (e) => {
     dropPlaceholder.classList.remove('drag-over');
     const de = e as DragEvent;
-    const file = [...de.dataTransfer!.files].find((f) =>
-      f.type.startsWith('image/'),
-    );
-    if (!file) return;
+    const files = [...de.dataTransfer!.files];
+    const imageFile = files.find((f) => f.type.startsWith('image/'));
+    const jsonFile = files.find((f) => f.name.endsWith('.json'));
+    if (!imageFile && !jsonFile) return;
     de.preventDefault();
-    if (prevObjectUrl) URL.revokeObjectURL(prevObjectUrl);
-    prevObjectUrl = URL.createObjectURL(file);
-    img.src = prevObjectUrl;
-    await new Promise<void>((resolve) => {
-      img.addEventListener('load', () => resolve(), { once: true });
-    });
-    dropPlaceholder.style.display = 'none';
-    applyJsonDimensions(img.naturalWidth, img.naturalHeight);
-    syncTextarea();
+
+    if (imageFile) {
+      if (prevObjectUrl) URL.revokeObjectURL(prevObjectUrl);
+      prevObjectUrl = URL.createObjectURL(imageFile);
+      img.src = prevObjectUrl;
+      await new Promise<void>((resolve) => {
+        img.addEventListener('load', () => resolve(), { once: true });
+      });
+      dropPlaceholder.style.display = 'none';
+      applyJsonDimensions(img.naturalWidth, img.naturalHeight);
+      syncTextarea();
+    }
+    if (jsonFile) {
+      await processJsonFile(jsonFile);
+    }
   });
 
   // Drop a JSON file onto the textarea to replace the georef data.
@@ -731,29 +855,7 @@ function setupFileDrop(): void {
     );
     if (!file) return;
     de.preventDefault();
-    const text = await file.text();
-    let parsed: unknown;
-    try {
-      parsed = JSON.parse(text);
-    } catch {
-      return;
-    }
-    if (Array.isArray(parsed)) {
-      // streets.json: array of detection objects from detect_text.py
-      detections = (parsed as Detection[]).filter((d) => d.confidence >= 0.001);
-      selectedDetectionIndices = new Set();
-      streetsMode = true;
-      textarea.value = text;
-      applyJsonDimensions(
-        img.naturalWidth || jsonWidth || 1,
-        img.naturalHeight || jsonHeight || 1,
-      );
-      enterStreetsMode();
-    } else {
-      streetsMode = false;
-      textarea.value = text;
-      textarea.dispatchEvent(new Event('input'));
-    }
+    await processJsonFile(file);
   });
 }
 
