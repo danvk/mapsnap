@@ -276,6 +276,14 @@ Claude Code and ChatGPT were both instrumental in getting this to work.
 
 The Mapsnap debugger lets you view georeferences and OCR results overlaid on the image. To use it, drag & drop the image and either its associated `georef.json` or `streets.json` file.
 
+Debugging OCR:
+
+![map in New Orleans with recognized street names](/images/mapsnap-debug-ocr.png)
+
+Debugging georefs:
+
+![Sanborn map of New Orleans overlaid on an OSM map](/images/mapsnap-debug-georef.jpg)
+
 To run the debugger locally:
 
 ```
