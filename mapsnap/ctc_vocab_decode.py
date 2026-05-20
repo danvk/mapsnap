@@ -25,7 +25,6 @@ from dataclasses import dataclass, field
 
 import numpy as np
 
-
 # ---------------------------------------------------------------------------
 # Vocabulary generation: canonical names → abbreviated label forms
 # ---------------------------------------------------------------------------
@@ -292,14 +291,13 @@ def patch_easyocr_reader(
 
     For other decoders the original function is called unchanged.
 
-    The patch is module-level; creating a new ``Reader`` does NOT revert it. Call
-    ``unpatch_easyocr()`` (or re-import) to restore the original behaviour.
+    The patch is module-level; creating a new ``Reader`` does NOT revert it.
 
     Returns the trie root (for inspection / debugging).
     """
+    import easyocr.recognition as _recog
     import torch
     import torch.nn.functional as F
-    import easyocr.recognition as _recog
 
     trie_root = build_trie(vocab_strings)
     char_list: list[str] = reader.converter.character

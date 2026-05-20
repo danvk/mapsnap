@@ -15,11 +15,13 @@ import json
 import math
 import os
 import sys
+from collections import defaultdict
 from dataclasses import dataclass
 from itertools import combinations
 from pathlib import Path
 
 import numpy as np
+from PIL import Image
 
 from mapsnap.detect_text import (
     DIRECTION_WORDS,
@@ -136,7 +138,6 @@ def build_block_index(geojson: dict) -> dict[str, list[Block]]:
             "Expressway",
         ]
     )
-    from collections import defaultdict
 
     base_to_full: dict[str, list[str]] = defaultdict(list)
     for key in index:
@@ -689,7 +690,6 @@ def _finalize_georef(
     initial_pair: tuple[int, int] | None = None,
 ) -> float:
     """Print fit stats, write georef JSON, and return scale_deg_per_px."""
-    from PIL import Image as PILImage
 
     if residuals:
         mean_m = float(np.mean(residuals)) * 111_000
@@ -706,7 +706,7 @@ def _finalize_georef(
         file=sys.stderr,
     )
 
-    with PILImage.open(image_path) as img:
+    with Image.open(image_path) as img:
         width, height = img.size
 
     corners = [
@@ -814,9 +814,8 @@ def process_image(
     Returns success=False with deferred data when exactly 1 intersection GCP is found
     (needs median scale from other maps to complete). Returns success=False otherwise.
     """
-    from PIL import Image as PILImage
 
-    with PILImage.open(image_path) as pil_img:
+    with Image.open(image_path) as pil_img:
         img_w, img_h = pil_img.size
 
     labels_raw = json.load(open(labels_path))
