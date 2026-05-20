@@ -15,7 +15,6 @@ import json
 import math
 import os
 import sys
-from collections import defaultdict
 from dataclasses import dataclass
 from itertools import combinations
 from pathlib import Path
@@ -23,21 +22,16 @@ from pathlib import Path
 import numpy as np
 from PIL import Image
 
-from mapsnap.detect_text import (
+from mapsnap.streets import (
+    Block,
     DIRECTION_WORDS,
+    build_block_index,
     canonical_street_matches,
     deduplicate_detections,
     is_number_only,
     normalize_street,
 )
-
-
-@dataclass
-class Block:
-    """One line segment from centerlines.geojson."""
-
-    street_name: str
-    coords: np.ndarray  # shape (N, 2), columns [lon, lat]
+from mapsnap.utils import image_stem
 
 
 @dataclass
@@ -90,78 +84,6 @@ def label_features(labels: list[dict]) -> list[LabelFeature]:
             )
         )
     return features
-
-
-def build_block_index(geojson: dict) -> dict[str, list[Block]]:
-    """Index GeoJSON centerline features by normalized street_name.
-
-    Also adds unambiguous base-name aliases so that bare labels (e.g. "MAGAZINE")
-    match full centerline names (e.g. "MAGAZINE STREET"). An alias is only added
-    when exactly one full name shares that base, to avoid false matches like
-    "MAGAZINE" matching both "Magazine Street" and "Magazine Place".
-    """
-    index: dict[str, list[Block]] = {}
-    for feature in geojson["features"]:
-        raw_name = feature["properties"].get("street_name", "")
-        if not raw_name:
-            continue
-        name = normalize_street(raw_name)
-        geom = feature["geometry"]
-        lines = (
-            geom["coordinates"]
-            if geom["type"] == "MultiLineString"
-            else [geom["coordinates"]]
-        )
-        for line in lines:
-            if len(line) < 2:
-                continue
-            coords = np.array([[c[0], c[1]] for c in line], dtype=float)
-            index.setdefault(name, []).append(Block(street_name=name, coords=coords))
-
-    # Build aliases from bare name → full name for unambiguous cases.
-    # e.g. "MAGAZINE STREET" → also index under "MAGAZINE".
-    street_type_words = set(
-        normalize_street(v)
-        for v in [
-            "Street",
-            "Avenue",
-            "Boulevard",
-            "Place",
-            "Drive",
-            "Road",
-            "Court",
-            "Lane",
-            "Terrace",
-            "Highway",
-            "Parkway",
-            "Circle",
-            "Expressway",
-        ]
-    )
-
-    base_to_full: dict[str, list[str]] = defaultdict(list)
-    for key in index:
-        parts = key.rsplit(" ", 1)
-        if len(parts) == 2 and parts[1] in street_type_words:
-            base_to_full[parts[0]].append(key)
-    for base, full_names in base_to_full.items():
-        if len(full_names) == 1 and base not in index:
-            index[base] = index[full_names[0]]
-
-    # Build aliases with direction prefix stripped for unambiguous cases.
-    # e.g. "SOUTH LIBERTY STREET" → also index under "LIBERTY STREET" and "LIBERTY"
-    # (the latter via the bare-name alias already added above).
-    # Iterating list(index.keys()) captures both original keys and the aliases just added.
-    dir_stripped_to_full: dict[str, list[str]] = defaultdict(list)
-    for key in list(index.keys()):
-        parts = key.split(" ", 1)
-        if len(parts) == 2 and parts[0] in DIRECTION_WORDS and parts[1] not in index:
-            dir_stripped_to_full[parts[1]].append(key)
-    for stripped, full_names in dir_stripped_to_full.items():
-        if len(full_names) == 1:
-            index[stripped] = index[full_names[0]]
-
-    return index
 
 
 def solve_affine_3pts(
@@ -788,7 +710,7 @@ def derive_paths(image_path: str) -> tuple[str, str]:
       p123.2048px.jpg → (p123.streets.json, p123.georef.json)
     """
     p = Path(image_path)
-    stem = p.name.split(".")[0]
+    stem = image_stem(image_path)
     base = p.parent / stem
     return str(base) + ".streets.json", str(base) + ".georef.json"
 
@@ -858,7 +780,8 @@ def process_image(
             det["text"], normalized_streets, fuzzy_threshold
         )
         # Deduplicate by block-list identity: aliases like "HENRY" and "HENRY STREET"
-        # point to the same blocks, so keep only the most specific (longest) name.
+        # map to the *same list object* in block_index (set by build_block_index), so
+        # id() detects them as duplicates and keeps only the longest (most specific) name.
         seen_block_ids: set[int] = set()
         for canonical in sorted(canonicals, key=len, reverse=True):
             bid = id(block_index[canonical])

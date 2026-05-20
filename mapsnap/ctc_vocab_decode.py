@@ -25,38 +25,25 @@ from dataclasses import dataclass, field
 
 import numpy as np
 
+from mapsnap.streets import DIRECTION_ABBREVS, STREET_ABBREVS
+
 # ---------------------------------------------------------------------------
 # Vocabulary generation: canonical names → abbreviated label forms
 # ---------------------------------------------------------------------------
 
-# Inverse of DIRECTION_ABBREVS: full direction → all forms that normalize to it.
-_DIR_TO_ABBREVS: dict[str, list[str]] = {
-    "NORTH": ["NORTH", "N", "N."],
-    "SOUTH": ["SOUTH", "S", "S."],
-    "EAST": ["EAST", "E", "E."],
-    "WEST": ["WEST", "W", "W."],
-    "NORTHEAST": ["NORTHEAST", "NE", "NE."],
-    "NORTHWEST": ["NORTHWEST", "NW", "NW."],
-    "SOUTHEAST": ["SOUTHEAST", "SE", "SE."],
-    "SOUTHWEST": ["SOUTHWEST", "SW", "SW."],
-}
+# Inverse of DIRECTION_ABBREVS: full direction → [full, abbrev, abbrev., ...].
+_DIR_TO_ABBREVS: dict[str, list[str]] = {}
+for _abbrev, _full in DIRECTION_ABBREVS.items():
+    if _full not in _DIR_TO_ABBREVS:
+        _DIR_TO_ABBREVS[_full] = [_full]
+    _DIR_TO_ABBREVS[_full].extend([_abbrev, _abbrev + "."])
 
-# Inverse of STREET_ABBREVS: full type → all abbreviation forms.
-_TYPE_TO_ABBREVS: dict[str, list[str]] = {
-    "STREET": ["STREET", "ST"],
-    "AVENUE": ["AVENUE", "AVE", "AV"],
-    "BOULEVARD": ["BOULEVARD", "BLVD"],
-    "DRIVE": ["DRIVE", "DR"],
-    "PLACE": ["PLACE", "PL"],
-    "COURT": ["COURT", "CT"],
-    "ROAD": ["ROAD", "RD"],
-    "LANE": ["LANE", "LN"],
-    "TERRACE": ["TERRACE", "TER", "TERR"],
-    "HIGHWAY": ["HIGHWAY", "HWY"],
-    "PARKWAY": ["PARKWAY", "PKWY"],
-    "CIRCLE": ["CIRCLE", "CIR"],
-    "EXPRESSWAY": ["EXPRESSWAY", "EXPY"],
-}
+# Inverse of STREET_ABBREVS: full type → [full, abbrev1, abbrev2, ...].
+_TYPE_TO_ABBREVS: dict[str, list[str]] = {}
+for _abbrev, _full in STREET_ABBREVS.items():
+    if _full not in _TYPE_TO_ABBREVS:
+        _TYPE_TO_ABBREVS[_full] = [_full]
+    _TYPE_TO_ABBREVS[_full].append(_abbrev)
 
 
 def generate_vocab_strings(normalized_streets: set[str]) -> list[str]:
@@ -312,7 +299,7 @@ def patch_easyocr_reader(
         ignore_idx,
         char_group_idx,
         decoder: str = "greedy",
-        beamWidth: int = 5,
+        beamWidth: int = 5,  # ignored; the outer beam_width closure is used instead
         device: str = "cpu",
     ) -> list[list]:
         if decoder != "wordbeamsearch":
