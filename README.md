@@ -145,22 +145,13 @@ for x in *.jpg; convert -colorspace gray -resize '2048>' $x ${x/.jpg/.2048px.jpg
 
 Find the southwest and northeast corner of the key map to get a bounding box.
 
-Go to Overpass Turbo and paste the following in:
+Mapsnap needs all the streets from OSM in this bounding box. To get them using the Overpass API, run:
 
 ```
-[out:json][timeout:60];
-(
-  way["highway"]["name"](
-    29.909795,-90.125975,  // southwest
-    29.946841,-90.083828   // northeast
-  );
-);
-out body;
->;
-out skel qt;
+uv run python mapsnap/download_osm.py 29.909795 -90.125975 29.946841 -90.083828 --output data/new_orleans_la_1951_vol_5/streets.osm.json
 ```
 
-Run this query and look at the results in the map to make sure they look OK. Then click "Export" and download the raw OSM data. Save this in `streets.osm.json`.
+The order of the parameters is sw lat, sw lng, ne lat, ne lng.
 
 Convert the OSM dump to GeoJSON by running:
 
@@ -183,7 +174,7 @@ Run `detect_text.py` over all the scaled-down images to find street labels + ang
 uv run python mapsnap/detect_text.py data/new_orleans_la_1951_vol_5/*.2048px.jpg
 ```
 
-This is the slowest step. If you can use a GPU, it's ~15s/image. Iif you're running CPU-only, it's more like ~1 minute/image. This writes a `streets.json` file next to each image with candidate street label detections.
+This is the slowest step. If you can use a GPU, it's ~15s/image. Iif you're running CPU-only, it's more like ~1 minute/image. This writes a `streets.json` file next to each image with candidate street label detections. Use the Mapsnap debugger to view this file.
 
 ### Fit georeference model
 
@@ -191,10 +182,10 @@ This is it! Given detected street labels and street centerlines, find GCPs and f
 
 ```
 rm data/new_orleans_la_1951_vol_5/*.georef.json
-uv run mapsnap/georef_from_labels.py data/new_orleans_la_1951_vol_5/*.2048px..jpg --centerlines data/new_orleans_la_1951_vol_5/centerlines.geojson --min-long-side 60 --min-short-side 12 --fuzzy-match-threshold 0.20 --visualize-ocr
+uv run mapsnap/georef_from_labels.py data/new_orleans_la_1951_vol_5/*.2048px.jpg --centerlines data/new_orleans_la_1951_vol_5/centerlines.geojson --min-long-side 60 --min-short-side 12 --fuzzy-match-threshold 0.20
 ```
 
-The main output is `pNNN.georef.json`, which contains the four-parameter model and debug information. Because of the `--visualize-ocr` flag, this also outputs `pNNN.detect.png` to help you debug the OCR.
+The main output is `pNNN.georef.json`, which contains the four-parameter model and debug information. Use the Mapsnap debugger to view this file.
 
 For maps without enough control points, this will fail to produce an output. It won't delete an existing georef.json file, so make sure to run the `rm` command first to avoid cross-run contamination!
 
@@ -268,6 +259,7 @@ Claude Code and ChatGPT were both instrumental in getting this to work.
 
 - Will this work with other types of maps?
 - How does this relate to OldInsuranceMaps.net (OIM)?
+- Does this use AI?
 
 ## Prior Art
 
@@ -277,3 +269,34 @@ Claude Code and ChatGPT were both instrumental in getting this to work.
   - At least for New Orleans 1951, Mapsnap gets within 15ft on 76% of the images it maps, vs. 14% for the Shensky paper. (I'm not sure exactly which maps they're testing on, and they have other criteria, so this may not be a fair comparison.)
 
 [shensky]: https://repositories.lib.utexas.edu/items/3f080054-8ff0-4e4c-8ef7-ea93b0fc36e0
+
+## Debugger
+
+🌎 [Mapsnap Debugger](https://www.danvk.org/mapsnap/)
+
+The Mapsnap debugger lets you view georeferences and OCR results overlaid on the image. To use it, drag & drop the image and either its associated `georef.json` or `streets.json` file.
+
+Debugging OCR:
+
+![map in New Orleans with recognized street names](/images/mapsnap-debug-ocr.png)
+
+Debugging georefs:
+
+![Sanborn map of New Orleans overlaid on an OSM map](/images/mapsnap-debug-georef.jpg)
+
+To run the debugger locally:
+
+```
+cd app
+npm i
+npm run dev
+```
+
+Then visit localhost:5173/mapsnap/.
+
+To deploy the debugger:
+
+```
+npm run build
+rm -rf ~/github/danvk.github.io/mapsnap && cp -r dist ~/github/danvk.github.io/mapsnap
+```

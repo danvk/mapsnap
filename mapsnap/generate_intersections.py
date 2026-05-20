@@ -9,7 +9,6 @@ from collections import Counter, defaultdict
 from typing import Sequence
 
 from haversine import haversine
-from tqdm import tqdm
 
 from mapsnap.osm import OsmElement, OsmNode
 
@@ -108,7 +107,7 @@ def main():
     with open(output_csv, "w") as f:
         out = csv.writer(f)
         out.writerow(["Street1", "Street2", "Lat", "Lon", "Nodes"])
-        for (str1, str2), intersect_node_ids in tqdm(sorted(way_pairs.items())):
+        for (str1, str2), intersect_node_ids in sorted(way_pairs.items()):
             if all(n in claimed_nodes for n in intersect_node_ids):
                 continue
             try:

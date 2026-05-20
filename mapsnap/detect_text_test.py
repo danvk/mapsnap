@@ -1,6 +1,6 @@
-"""Unit tests for detect_text.py helpers."""
+"""Unit tests for street-name helpers (now in streets.py)."""
 
-from mapsnap.detect_text import (
+from mapsnap.streets import (
     canonical_street_match,
     matches_any_street,
     normalize_street,

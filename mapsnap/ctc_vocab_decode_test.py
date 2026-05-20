@@ -1,0 +1,146 @@
+"""Tests for ctc_vocab_decode helpers."""
+
+import numpy as np
+
+from mapsnap.ctc_vocab_decode import (
+    build_trie,
+    generate_vocab_strings,
+    prefix_constrained_ctc,
+)
+
+# ---------------------------------------------------------------------------
+# generate_vocab_strings
+# ---------------------------------------------------------------------------
+
+SIMPLE_STREETS = {"EAST GRAND AVENUE", "NORTH RAMPART STREET", "MAGAZINE STREET"}
+
+
+def test_generate_includes_full_name():
+    vocab = generate_vocab_strings(SIMPLE_STREETS)
+    assert "EAST GRAND AVENUE" in vocab
+
+
+def test_generate_includes_abbreviated_direction():
+    vocab = generate_vocab_strings(SIMPLE_STREETS)
+    assert "E GRAND" in vocab
+    assert "E. GRAND" in vocab
+    assert "N RAMPART" in vocab
+
+
+def test_generate_includes_abbreviated_type():
+    vocab = generate_vocab_strings(SIMPLE_STREETS)
+    assert "EAST GRAND AVE" in vocab
+    assert "EAST GRAND AV" in vocab
+    assert "NORTH RAMPART ST" in vocab
+
+
+def test_generate_includes_bare_name():
+    # No direction prefix, no type suffix
+    vocab = generate_vocab_strings(SIMPLE_STREETS)
+    assert "GRAND" in vocab
+    assert "RAMPART" in vocab
+    assert "MAGAZINE" in vocab
+
+
+def test_generate_no_direction_bare_name_with_type():
+    # MAGAZINE STREET has no direction prefix; bare + with-type forms
+    vocab = generate_vocab_strings({"MAGAZINE STREET"})
+    assert "MAGAZINE" in vocab
+    assert "MAGAZINE STREET" in vocab
+    assert "MAGAZINE ST" in vocab
+
+
+def test_generate_saint_prefix():
+    vocab = generate_vocab_strings({"SAINT CHARLES AVENUE"})
+    assert "SAINT CHARLES" in vocab
+    assert "ST CHARLES" in vocab
+    assert "CHARLES" in vocab
+
+
+def test_generate_returns_sorted_list():
+    vocab = generate_vocab_strings(SIMPLE_STREETS)
+    assert vocab == sorted(vocab)
+
+
+def test_generate_no_duplicates():
+    vocab = generate_vocab_strings(SIMPLE_STREETS)
+    assert len(vocab) == len(set(vocab))
+
+
+def test_generate_empty_input():
+    assert generate_vocab_strings(set()) == []
+
+
+# ---------------------------------------------------------------------------
+# prefix_constrained_ctc
+# ---------------------------------------------------------------------------
+
+# Minimal character list: blank + A-Z + space.
+_CHARS = ["[blank]"] + list("ABCDEFGHIJKLMNOPQRSTUVWXYZ") + [" "]
+_CHAR_IDX = {c: i for i, c in enumerate(_CHARS)}
+_T = len(_CHARS)  # number of CTC classes
+
+
+def _one_hot_seq(text: str) -> np.ndarray:
+    """Build a (len(text), T) CTC prob matrix that decodes greedily to text."""
+    mat = np.zeros((len(text), _T))
+    for t, ch in enumerate(text.upper()):
+        mat[t, _CHAR_IDX[ch]] = 1.0
+    return mat
+
+
+def _uniform_seq(length: int) -> np.ndarray:
+    """Uniform distribution over all characters for each time step."""
+    mat = np.ones((length, _T)) / _T
+    return mat
+
+
+def test_ctc_exact_match():
+    vocab = ["GRAND"]
+    trie = build_trie(vocab)
+    mat = _one_hot_seq("GRAND")
+    text, prob = prefix_constrained_ctc(mat, trie, _CHARS, beam_width=10)
+    assert text == "GRAND"
+    assert prob > 0.9
+
+
+def test_ctc_selects_vocabulary_word_over_non_vocab():
+    # CTC emissions spell "GRAMD" but "GRAND" is in vocab; beam should prefer "GRAND"
+    # by keeping it alive from partial overlap even if "GRAMD" isn't in the vocab.
+    vocab = ["GRAND"]
+    trie = build_trie(vocab)
+    mat = _one_hot_seq("GRAND")
+    # Slightly corrupt the 4th char (N→M) but keep N nonzero
+    mat[3, _CHAR_IDX["M"]] = 0.6
+    mat[3, _CHAR_IDX["N"]] = 0.4
+    text, prob = prefix_constrained_ctc(mat, trie, _CHARS, beam_width=10)
+    assert text == "GRAND"
+    assert prob > 0
+
+
+def test_ctc_no_match_returns_empty():
+    # Emissions strongly spell "HELLO" which is not in vocab
+    vocab = ["GRAND"]
+    trie = build_trie(vocab)
+    mat = _one_hot_seq("HELLO")
+    text, prob = prefix_constrained_ctc(mat, trie, _CHARS, beam_width=10)
+    assert text == ""
+    assert prob == 0.0
+
+
+def test_ctc_selects_among_multiple_vocab_words():
+    vocab = ["GRAND", "GRANT"]
+    trie = build_trie(vocab)
+    mat = _one_hot_seq("GRAND")
+    text, prob = prefix_constrained_ctc(mat, trie, _CHARS, beam_width=10)
+    assert text == "GRAND"
+    assert prob > 0
+
+
+def test_ctc_empty_sequence_returns_empty():
+    vocab = ["GRAND"]
+    trie = build_trie(vocab)
+    mat = np.zeros((0, _T))
+    text, prob = prefix_constrained_ctc(mat, trie, _CHARS, beam_width=10)
+    assert text == ""
+    assert prob == 0.0

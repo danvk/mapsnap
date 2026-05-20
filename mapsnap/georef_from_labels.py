@@ -20,23 +20,18 @@ from itertools import combinations
 from pathlib import Path
 
 import numpy as np
+from PIL import Image
 
-from mapsnap.detect_text import (
+from mapsnap.streets import (
+    Block,
     DIRECTION_WORDS,
+    build_block_index,
     canonical_street_matches,
     deduplicate_detections,
     is_number_only,
     normalize_street,
-    visualize_detections,
 )
-
-
-@dataclass
-class Block:
-    """One line segment from centerlines.geojson."""
-
-    street_name: str
-    coords: np.ndarray  # shape (N, 2), columns [lon, lat]
+from mapsnap.utils import image_stem
 
 
 @dataclass
@@ -58,6 +53,8 @@ class IntersectionGCP:
     pixel: tuple[float, float]  # pixel line-line crossing of the two label directions
     geo: tuple[float, float]  # shared GeoJSON endpoint (centroid if multiple)
     pixel_dist: float  # distance between label centers
+    feat_a: LabelFeature
+    feat_b: LabelFeature
 
 
 @dataclass
@@ -87,79 +84,6 @@ def label_features(labels: list[dict]) -> list[LabelFeature]:
             )
         )
     return features
-
-
-def build_block_index(geojson: dict) -> dict[str, list[Block]]:
-    """Index GeoJSON centerline features by normalized street_name.
-
-    Also adds unambiguous base-name aliases so that bare labels (e.g. "MAGAZINE")
-    match full centerline names (e.g. "MAGAZINE STREET"). An alias is only added
-    when exactly one full name shares that base, to avoid false matches like
-    "MAGAZINE" matching both "Magazine Street" and "Magazine Place".
-    """
-    index: dict[str, list[Block]] = {}
-    for feature in geojson["features"]:
-        raw_name = feature["properties"].get("street_name", "")
-        if not raw_name:
-            continue
-        name = normalize_street(raw_name)
-        geom = feature["geometry"]
-        lines = (
-            geom["coordinates"]
-            if geom["type"] == "MultiLineString"
-            else [geom["coordinates"]]
-        )
-        for line in lines:
-            if len(line) < 2:
-                continue
-            coords = np.array([[c[0], c[1]] for c in line], dtype=float)
-            index.setdefault(name, []).append(Block(street_name=name, coords=coords))
-
-    # Build aliases from bare name → full name for unambiguous cases.
-    # e.g. "MAGAZINE STREET" → also index under "MAGAZINE".
-    street_type_words = set(
-        normalize_street(v)
-        for v in [
-            "Street",
-            "Avenue",
-            "Boulevard",
-            "Place",
-            "Drive",
-            "Road",
-            "Court",
-            "Lane",
-            "Terrace",
-            "Highway",
-            "Parkway",
-            "Circle",
-            "Expressway",
-        ]
-    )
-    from collections import defaultdict
-
-    base_to_full: dict[str, list[str]] = defaultdict(list)
-    for key in index:
-        parts = key.rsplit(" ", 1)
-        if len(parts) == 2 and parts[1] in street_type_words:
-            base_to_full[parts[0]].append(key)
-    for base, full_names in base_to_full.items():
-        if len(full_names) == 1 and base not in index:
-            index[base] = index[full_names[0]]
-
-    # Build aliases with direction prefix stripped for unambiguous cases.
-    # e.g. "SOUTH LIBERTY STREET" → also index under "LIBERTY STREET" and "LIBERTY"
-    # (the latter via the bare-name alias already added above).
-    # Iterating list(index.keys()) captures both original keys and the aliases just added.
-    dir_stripped_to_full: dict[str, list[str]] = defaultdict(list)
-    for key in list(index.keys()):
-        parts = key.split(" ", 1)
-        if len(parts) == 2 and parts[0] in DIRECTION_WORDS and parts[1] not in index:
-            dir_stripped_to_full[parts[1]].append(key)
-    for stripped, full_names in dir_stripped_to_full.items():
-        if len(full_names) == 1:
-            index[stripped] = index[full_names[0]]
-
-    return index
 
 
 def solve_affine_3pts(
@@ -221,71 +145,6 @@ def solve_similarity_2pts(
         b[2 * k + 1] = lat
     x = np.linalg.solve(M, b)
     alpha, beta, tx, ty = x
-    return np.array([[alpha / cos_phi, beta / cos_phi, tx], [beta, -alpha, ty]])
-
-
-def undirected_angle_diff(a: float, b: float) -> float:
-    """Smallest difference between two undirected angles, in [0, π/2]."""
-    diff = abs(a - b) % np.pi
-    return float(min(diff, np.pi - diff))
-
-
-def estimate_rotation_from_angles(
-    features: list[LabelFeature],
-    block_index: dict[str, list[Block]],
-    n_bins: int = 36,
-    min_peak_ratio: float = 1.5,
-) -> float | None:
-    """Estimate the map rotation R from label-angle vs OSM-tangent histogram cross-correlation.
-
-    The similarity transform with rotation R = atan2(β, α) maps a label at pixel direction
-    dir_pix on a street with OSM tangent φ such that dir_pix + φ ≈ R (mod π). Summing over
-    all (label, OSM-segment) pairs via a circular convolution histogram peaks at R.
-
-    Returns R in radians, or None if the peak/mean ratio is below min_peak_ratio
-    (histogram too flat — too few labels or insufficiently diverse street directions).
-    """
-    H_label = np.zeros(n_bins)
-    for feat in features:
-        if feat.text in block_index:
-            H_label[int(feat.dir_pix / np.pi * n_bins) % n_bins] += 1
-
-    H_osm = np.zeros(n_bins)
-    for blocks in block_index.values():
-        for block in blocks:
-            for k in range(len(block.coords) - 1):
-                seg = block.coords[k + 1] - block.coords[k]
-                if float(np.linalg.norm(seg)) < 1e-10:
-                    continue
-                tangent = float(np.arctan2(seg[1], seg[0])) % np.pi
-                H_osm[int(tangent / np.pi * n_bins) % n_bins] += 1
-
-    if H_label.sum() == 0 or H_osm.sum() == 0:
-        return None
-
-    # Circular convolution: scores[R] = Σ_θ H_label[θ] * H_osm[(R-θ) % n_bins]
-    # peaks at R = true rotation (in bin units), so R_est = peak_idx * π/n_bins.
-    scores = np.real(np.fft.irfft(np.fft.rfft(H_label) * np.fft.rfft(H_osm), n=n_bins))
-    peak_idx = int(np.argmax(scores[:n_bins]))
-    if scores[peak_idx] / (scores.mean() + 1e-10) < min_peak_ratio:
-        return None
-    return float(peak_idx) * np.pi / n_bins
-
-
-def project_to_similarity(A: np.ndarray, cos_phi: float) -> np.ndarray:
-    """Project a general 2×3 affine onto the nearest similarity transform.
-
-    Finds (α, β) minimizing the Frobenius distance to the similarity constraint surface
-    in metric-scaled coordinates, then reconstructs A. Translation columns are unchanged.
-    The similarity model has a = −d/cos_phi and b = c/cos_phi.
-    """
-    a, b = float(A[0, 0]), float(A[0, 1])
-    c, d = float(A[1, 0]), float(A[1, 1])
-    tx, ty = float(A[0, 2]), float(A[1, 2])
-    # Least-squares estimate of (α, β): M^T M = (1/cos_phi² + 1)·I₂
-    k = 1.0 / cos_phi**2 + 1.0
-    alpha = (a / cos_phi - d) / k
-    beta = (b / cos_phi + c) / k
     return np.array([[alpha / cos_phi, beta / cos_phi, tx], [beta, -alpha, ty]])
 
 
@@ -382,13 +241,17 @@ def project_to_polyline(
     lon: float,
     lat: float,
     blocks: list[Block],
+    extrapolate: bool = True,
 ) -> tuple[float, float, float] | None:
     """Project (lon, lat) onto the nearest segment across all blocks of a street.
 
-    At terminal endpoints (block start/end that connects to no other block) the
-    projection is allowed to extrapolate along the segment direction rather than
-    clamping to the endpoint. This handles labels that lie past the end of an OSM
-    segment because the historical street extended further than the current data.
+    When extrapolate=True (default), terminal endpoints (block start/end that connects
+    to no other block) allow the projection to extend beyond the endpoint along the
+    segment direction. This handles labels that lie past the end of an OSM segment
+    because the historical street extended further than current data.
+
+    When extrapolate=False, projection is always clamped to [0, 1] on each segment,
+    so the returned point is guaranteed to lie on a true street segment.
 
     Returns (nearest_lon, nearest_lat, tangent_angle) where tangent_angle is in [0, π)
     (undirected — a street running NE and SW both have the same tangent angle).
@@ -399,7 +262,7 @@ def project_to_polyline(
     best_pt: np.ndarray | None = None
     best_tangent: float = 0.0
 
-    terminal = _terminal_endpoints(blocks)
+    terminal = _terminal_endpoints(blocks) if extrapolate else set()
 
     for block in blocks:
         pts = block.coords  # shape (N, 2), columns [lon, lat]
@@ -434,6 +297,7 @@ def label_inliers(
     affine: np.ndarray,
     pos_threshold: float = 0.001,
     dir_threshold: float = np.pi / 6,
+    extrapolate: bool = True,
 ) -> tuple[list[int], float]:
     """Return indices of features whose label center is consistent with the affine.
 
@@ -441,6 +305,9 @@ def label_inliers(
       - within pos_threshold degrees of its street's polyline, AND
       - whose mapped direction agrees with the polyline tangent at that point within
         dir_threshold radians (undirected comparison).
+
+    extrapolate is passed through to project_to_polyline; set False when scoring
+    candidate orientations to avoid terminal-endpoint extrapolation inflating the fit.
     """
     A_linear = affine[:, :2]
     inliers = []
@@ -450,7 +317,7 @@ def label_inliers(
         if not blocks:
             continue
         lon, lat = apply_affine(affine, *feat.center)
-        snap = project_to_polyline(lon, lat, blocks)
+        snap = project_to_polyline(lon, lat, blocks, extrapolate=extrapolate)
         if snap is None:
             continue
         nearest_lon, nearest_lat, tangent_angle = snap
@@ -531,6 +398,8 @@ def find_intersection_gcps(
                             pixel=crossing,
                             geo=geo,
                             pixel_dist=pixel_dist,
+                            feat_a=fa,
+                            feat_b=fb,
                         )
                     )
 
@@ -572,6 +441,10 @@ def ransac_hybrid(
         print(f"  {a.label_a} x {a.label_b}")
 
     for pair_idx in combinations(range(n), 2):
+        ga, gb = gcps[pair_idx[0]], gcps[pair_idx[1]]
+        # Skip pairs that map to the same OSM intersection — singular by construction.
+        if abs(ga.geo[0] - gb.geo[0]) < 1e-6 and abs(ga.geo[1] - gb.geo[1]) < 1e-6:
+            continue
         pairs = [(gcps[k].pixel, gcps[k].geo) for k in pair_idx]
         try:
             A = solve_similarity_2pts(pairs, cos_phi)
@@ -739,7 +612,6 @@ def _finalize_georef(
     initial_pair: tuple[int, int] | None = None,
 ) -> float:
     """Print fit stats, write georef JSON, and return scale_deg_per_px."""
-    from PIL import Image as PILImage
 
     if residuals:
         mean_m = float(np.mean(residuals)) * 111_000
@@ -756,7 +628,7 @@ def _finalize_georef(
         file=sys.stderr,
     )
 
-    with PILImage.open(image_path) as img:
+    with Image.open(image_path) as img:
         width, height = img.size
 
     corners = [
@@ -838,7 +710,7 @@ def derive_paths(image_path: str) -> tuple[str, str]:
       p123.2048px.jpg → (p123.streets.json, p123.georef.json)
     """
     p = Path(image_path)
-    stem = p.name.split(".")[0]
+    stem = image_stem(image_path)
     base = p.parent / stem
     return str(base) + ".streets.json", str(base) + ".georef.json"
 
@@ -855,8 +727,8 @@ def process_image(
     min_long_side: float = 250.0,
     min_short_side: float = 60.0,
     min_aspect_ratio: float = 2.0,
-    visualize_ocr: bool = False,
     fuzzy_threshold: float = 0.0,
+    edge_margin: float = 0.02,
 ) -> ProcessResult:
     """Fit a georeference model for one image and write GCPs to output_path.
 
@@ -864,6 +736,10 @@ def process_image(
     Returns success=False with deferred data when exactly 1 intersection GCP is found
     (needs median scale from other maps to complete). Returns success=False otherwise.
     """
+
+    with Image.open(image_path) as pil_img:
+        img_w, img_h = pil_img.size
+
     labels_raw = json.load(open(labels_path))
     if isinstance(labels_raw, dict):
         all_detections: list[dict] = labels_raw.get(
@@ -890,11 +766,22 @@ def process_image(
             and normalize_street(det["text"]) not in DIRECTION_WORDS
         ):
             continue
+        if edge_margin > 0:
+            poly = np.array(det["polygon"], dtype=float)
+            cx, cy = float(poly[:, 0].mean()), float(poly[:, 1].mean())
+            if (
+                cx < edge_margin * img_w
+                or cx > (1 - edge_margin) * img_w
+                or cy < edge_margin * img_h
+                or cy > (1 - edge_margin) * img_h
+            ):
+                continue
         canonicals = canonical_street_matches(
             det["text"], normalized_streets, fuzzy_threshold
         )
         # Deduplicate by block-list identity: aliases like "HENRY" and "HENRY STREET"
-        # point to the same blocks, so keep only the most specific (longest) name.
+        # map to the *same list object* in block_index (set by build_block_index), so
+        # id() detects them as duplicates and keeps only the longest (most specific) name.
         seen_block_ids: set[int] = set()
         for canonical in sorted(canonicals, key=len, reverse=True):
             bid = id(block_index[canonical])
@@ -909,13 +796,6 @@ def process_image(
             labels_data.append(entry)
 
     print(f"Filtered detections: {len(labels_data)}")
-
-    if visualize_ocr:
-        stem = Path(image_path).name.split(".")[0]
-        detect_png = str(Path(image_path).parent / (stem + ".detect.png"))
-        accepted_ids = {id(d) for d in labels_data}
-        rejected = [d for d in all_detections if id(d) not in accepted_ids]
-        visualize_detections(image_path, labels_data, rejected, detect_png)
 
     features = label_features(labels_data)
     print(
@@ -1002,6 +882,29 @@ def process_image(
     return ProcessResult(success=True, scale_deg_per_px=scale)
 
 
+def _rotation_from_gcp_features(
+    gcp: IntersectionGCP,
+    block_index: dict[str, list[Block]],
+) -> float | None:
+    """Estimate map rotation (rad, mod π) from the two streets that form a single GCP.
+
+    For each street, projects the GCP geo coordinate onto the street's polyline to get
+    the OSM tangent angle, then combines it with the label's pixel direction angle via
+    R = (dir_pix + osm_tangent) mod π. Returns the circular mean of the two estimates,
+    or None if either street's polyline projection fails.
+    """
+    Rs: list[float] = []
+    for feat, label in ((gcp.feat_a, gcp.label_a), (gcp.feat_b, gcp.label_b)):
+        blocks = block_index.get(label, [])
+        snap = project_to_polyline(gcp.geo[0], gcp.geo[1], blocks)
+        if snap is None:
+            return None
+        _, _, osm_tangent = snap
+        Rs.append((feat.dir_pix + osm_tangent) % math.pi)
+    z = np.exp(2j * Rs[0]) + np.exp(2j * Rs[1])
+    return float(np.angle(z) / 2) % math.pi
+
+
 def process_deferred_image(
     deferred: dict,
     scale_deg_per_px: float,
@@ -1023,20 +926,40 @@ def process_deferred_image(
     gcps: list[IntersectionGCP] = deferred["gcps"]
     gcp = gcps[0]
 
-    rotation = estimate_rotation_from_angles(features, block_index)
+    rotation = _rotation_from_gcp_features(gcp, block_index)
     if rotation is None:
-        print("Could not estimate rotation from label angles.", file=sys.stderr)
+        print("Could not estimate rotation from GCP street angles.", file=sys.stderr)
         return ProcessResult(success=False)
 
-    # Try both directed orientations; histogram gives undirected angle (mod π).
+    # Try both directed orientations; the rotation estimate is undirected (mod π).
+    # Two-level scoring:
+    #   Primary: inlier count with extrapolation at terminal endpoints, so labels near
+    #            true street ends are not unfairly excluded.
+    #   Tiebreaker: negated total error without extrapolation, so when counts are equal
+    #               the orientation that keeps labels on actual street segments wins.
+    pos_threshold = 0.001
     best_A: np.ndarray | None = None
     best_inliers: list[int] = []
+    best_score: tuple[int, float] = (-1, -float("inf"))
     for rot in (rotation, rotation + math.pi):
         A_cand = build_affine_from_scale_rotation_gcp(
             scale_deg_per_px, rot, gcp, cos_phi
         )
-        inliers_cand, _ = label_inliers(features, block_index, A_cand)
-        if len(inliers_cand) > len(best_inliers):
+        inliers_cand, _ = label_inliers(
+            features, block_index, A_cand, pos_threshold, extrapolate=True
+        )
+        # Compute no-extrapolation error for the inliers as the tiebreaker.
+        err_no_ext = 0.0
+        for i in inliers_cand:
+            feat = features[i]
+            blocks = block_index.get(feat.text, [])
+            lon, lat = apply_affine(A_cand, *feat.center)
+            snap = project_to_polyline(lon, lat, blocks, extrapolate=False)
+            if snap is not None:
+                err_no_ext += float(np.linalg.norm([lon - snap[0], lat - snap[1]]))
+        score: tuple[int, float] = (len(inliers_cand), -err_no_ext)
+        if score > best_score:
+            best_score = score
             best_inliers = inliers_cand
             best_A = A_cand
 
@@ -1141,11 +1064,6 @@ def main() -> None:
         help="Minimum long/short side ratio for a text polygon (default: 2.0)",
     )
     parser.add_argument(
-        "--visualize-ocr",
-        action="store_true",
-        help="Save annotated detection image to <stem>.detect.png for each input",
-    )
-    parser.add_argument(
         "--debug-dir",
         metavar="DIR",
         help="Save debug PNGs to this directory (single-image mode only)",
@@ -1171,6 +1089,27 @@ def main() -> None:
             "If not set, the median scale from successfully georeferenced images is used."
         ),
     )
+    parser.add_argument(
+        "--edge-margin",
+        type=float,
+        default=0.02,
+        metavar="FRAC",
+        help=(
+            "Ignore detections whose center is within this fraction of the image edge "
+            "(default: 0.02 = 2%%). Headers, stamps, and marginal text are filtered out."
+        ),
+    )
+    parser.add_argument(
+        "--scale-outlier-threshold",
+        type=float,
+        default=0.25,
+        metavar="FRAC",
+        help=(
+            "Delete georef output files whose fitted scale deviates from the reference "
+            "scale by more than this fraction (default: 0.25 = 25%%). "
+            "Set to 0 to disable. Reference is --scale if given, else the median."
+        ),
+    )
     args = parser.parse_args()
 
     if args.debug_dir and len(args.images) > 1:
@@ -1187,12 +1126,22 @@ def main() -> None:
 
     n_success = 0
     scales: list[float] = []
+    scale_records: list[
+        tuple[str, float]
+    ] = []  # (image_path, px_per_ft) for outlier check
     deferred_list: list[dict] = []
 
     for image_path in args.images:
         if len(args.images) > 1:
             print(f"\n--- {image_path} ---", file=sys.stderr)
         labels_path, output_path = derive_paths(image_path)
+        # Delete stale georef file before attempting a new fit so a failed run
+        # doesn't leave a previous result in place.
+        if os.path.exists(output_path):
+            os.remove(output_path)
+        misscale_path = output_path.replace(".georef.json", ".georef-misscale.json")
+        if os.path.exists(misscale_path):
+            os.remove(misscale_path)
         result = process_image(
             image_path=image_path,
             labels_path=labels_path,
@@ -1205,15 +1154,25 @@ def main() -> None:
             min_long_side=args.min_long_side,
             min_short_side=args.min_short_side,
             min_aspect_ratio=args.min_aspect_ratio,
-            visualize_ocr=args.visualize_ocr,
             fuzzy_threshold=args.fuzzy_match_threshold,
+            edge_margin=args.edge_margin,
         )
         if result.success:
             n_success += 1
             if result.scale_deg_per_px is not None:
-                scales.append(deg_per_px_to_px_per_ft(result.scale_deg_per_px))
+                px_per_ft = deg_per_px_to_px_per_ft(result.scale_deg_per_px)
+                scales.append(px_per_ft)
+                scale_records.append((image_path, px_per_ft))
         elif result.deferred is not None:
             deferred_list.append(result.deferred)
+
+    # Determine reference scale: explicit override takes priority, then median.
+    if args.scale is not None:
+        ref_scale_px_per_ft: float | None = args.scale
+    elif scales:
+        ref_scale_px_per_ft = float(np.median(scales))
+    else:
+        ref_scale_px_per_ft = None
 
     # Print median scale whenever multiple images were processed.
     if scales and len(args.images) > 1:
@@ -1222,23 +1181,16 @@ def main() -> None:
             file=sys.stderr,
         )
 
-    # Process deferred (1-GCP) images using the median scale or --scale override.
+    # Process deferred (1-GCP) images using the reference scale.
     if deferred_list:
-        if args.scale is not None:
-            final_scale_px_per_ft: float | None = args.scale
-        elif scales:
-            final_scale_px_per_ft = float(np.median(scales))
-        else:
-            final_scale_px_per_ft = None
-
-        if final_scale_px_per_ft is None:
+        if ref_scale_px_per_ft is None:
             print(
                 f"\n{len(deferred_list)} deferred image(s) skipped: no scale available. "
                 "Use --scale PX_PER_FT to set manually.",
                 file=sys.stderr,
             )
         else:
-            scale_deg_per_px = px_per_ft_to_deg_per_px(final_scale_px_per_ft)
+            scale_deg_per_px = px_per_ft_to_deg_per_px(ref_scale_px_per_ft)
             for deferred in deferred_list:
                 deferred_image_path: str = deferred["image_path"]
                 if len(args.images) > 1:
@@ -1254,6 +1206,29 @@ def main() -> None:
                 )
                 if deferred_result.success:
                     n_success += 1
+
+    # Drop georef files whose fitted scale is a major outlier vs the reference.
+    if ref_scale_px_per_ft is not None and args.scale_outlier_threshold > 0:
+        n_dropped = 0
+        for img_path, px_per_ft in scale_records:
+            ratio = px_per_ft / ref_scale_px_per_ft
+            if abs(ratio - 1.0) > args.scale_outlier_threshold:
+                _, out_path = derive_paths(img_path)
+                misscale_path = out_path.replace(
+                    ".georef.json", ".georef-misscale.json"
+                )
+                if os.path.exists(out_path):
+                    os.rename(out_path, misscale_path)
+                    n_success -= 1
+                    n_dropped += 1
+                    print(
+                        f"Dropped scale outlier {img_path}: "
+                        f"{px_per_ft:.4f} px/ft vs reference {ref_scale_px_per_ft:.4f} "
+                        f"({ratio:.2f}×) → {misscale_path}",
+                        file=sys.stderr,
+                    )
+        if n_dropped:
+            print(f"Dropped {n_dropped} scale outlier(s).", file=sys.stderr)
 
     if len(args.images) > 1:
         print(f"\n{n_success}/{len(args.images)} images georeferenced", file=sys.stderr)

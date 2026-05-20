@@ -3,7 +3,7 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Truth Georef</title>
+    <title>Mapsnap Debugger</title>
   </head>
   <body>
     <div class="container">
@@ -23,9 +23,67 @@
             >Color inliers/outliers differently</label
           >
         </div>
+        <div id="detection-filters" style="display: none">
+          <div class="filter-row">
+            <label for="filter-confidence"
+              >Min confidence:
+              <span id="filter-confidence-value">0.150</span></label
+            >
+            <input
+              type="range"
+              id="filter-confidence"
+              min="0"
+              max="1"
+              step="0.001"
+              value="0.15"
+            />
+          </div>
+          <div class="filter-row">
+            <label for="filter-short-side"
+              >Min short side:
+              <span id="filter-short-side-value">20</span></label
+            >
+            <input
+              type="range"
+              id="filter-short-side"
+              min="0"
+              max="500"
+              step="1"
+              value="20"
+            />
+          </div>
+          <div class="filter-row">
+            <label for="filter-long-side"
+              >Min long side: <span id="filter-long-side-value">60</span></label
+            >
+            <input
+              type="range"
+              id="filter-long-side"
+              min="0"
+              max="2000"
+              step="1"
+              value="60"
+            />
+          </div>
+        </div>
       </div>
       <div class="map-column">
         <div id="map"></div>
+        <div id="detections-panel" style="display: none">
+          <table id="detections-table">
+            <thead>
+              <tr>
+                <th>Angle</th>
+                <th>Long</th>
+                <th>Short</th>
+                <th>Conf</th>
+                <th>Text</th>
+                <th>Image</th>
+              </tr>
+            </thead>
+            <tbody></tbody>
+          </table>
+        </div>
         <div class="opacity-control">
           <label for="opacity-slider">Opacity</label>
           <input

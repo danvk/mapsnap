@@ -44,6 +44,32 @@ textarea {
   gap: 8px;
 }
 
+#detection-filters {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 6px 0;
+}
+
+.filter-row {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  color: #555;
+}
+
+.filter-row label {
+  white-space: nowrap;
+  width: 10em;
+  flex-shrink: 0;
+}
+
+.filter-row input[type='range'] {
+  flex: 1;
+}
+
 .image-wrapper {
   position: relative;
   display: inline-block;
@@ -76,4 +102,58 @@ textarea {
 
 .opacity-control input[type='range'] {
   flex: 1;
+}
+
+#detections-panel {
+  height: 90vh;
+  overflow-y: auto;
+  font-family: monospace;
+  font-size: 12px;
+  flex: 1;
+}
+
+#detections-table {
+  width: auto;
+  border-collapse: collapse;
+}
+
+#detections-table td:not(:last-child),
+#detections-table th:not(:last-child) {
+  width: 1%;
+}
+
+#detections-table th,
+#detections-table td {
+  padding: 4px 8px;
+  text-align: left;
+  border-bottom: 1px solid #e0e0e0;
+  white-space: nowrap;
+}
+
+#detections-table td:last-child {
+  white-space: normal;
+}
+
+#detections-table th {
+  position: sticky;
+  top: 0;
+  background: white;
+  font-weight: bold;
+  border-bottom: 2px solid #bbb;
+}
+
+#detections-table tbody tr {
+  cursor: pointer;
+}
+
+#detections-table tbody tr:hover {
+  background: #f0f0f0;
+}
+
+#detections-table tr.selected {
+  background: #fff3e0;
+}
+
+#detections-table tr.selected:hover {
+  background: #ffe0b2;
 }

@@ -26,6 +26,15 @@ interface IntersectionPoint {
   initial?: boolean;
 }
 
+interface Detection {
+  polygon: [number, number][];
+  text: string;
+  confidence: number;
+  angle: number;
+  long_side: number;
+  short_side: number;
+}
+
 interface GeorefData {
   width?: number;
   height?: number;
@@ -64,6 +73,15 @@ const showIntersectionsOnImageCheckbox = document.getElementById(
 const colorByInlierCheckbox = document.getElementById(
   'color-by-inlier',
 ) as HTMLInputElement;
+const filterConfidenceSlider = document.getElementById(
+  'filter-confidence',
+) as HTMLInputElement;
+const filterShortSideSlider = document.getElementById(
+  'filter-short-side',
+) as HTMLInputElement;
+const filterLongSideSlider = document.getElementById(
+  'filter-long-side',
+) as HTMLInputElement;
 
 function streetCircleColor(): maplibregl.ExpressionSpecification | string {
   return colorByInlierCheckbox.checked
@@ -81,6 +99,9 @@ function streetTextColor(): string {
 
 let streets: Street[] = [];
 let intersections: IntersectionPoint[] = [];
+let detections: Detection[] = [];
+let selectedDetectionIndices = new Set<number>();
+let streetsMode = false;
 let svg: SVGSVGElement | null = null;
 let svgW = 0;
 let svgH = 0;
@@ -120,6 +141,41 @@ function solveLinear3(A: number[][], b: number[]): number[] | null {
     x[i] /= m[i][i];
   }
   return x;
+}
+
+/** Ray-casting point-in-polygon test for a convex or concave polygon. */
+function pointInPolygon(
+  x: number,
+  y: number,
+  polygon: [number, number][],
+): boolean {
+  let inside = false;
+  for (let i = 0, j = polygon.length - 1; i < polygon.length; j = i++) {
+    const [xi, yi] = polygon[i];
+    const [xj, yj] = polygon[j];
+    if (yi > y !== yj > y && x < ((xj - xi) * (y - yi)) / (yj - yi) + xi) {
+      inside = !inside;
+    }
+  }
+  return inside;
+}
+
+/** Haversine distance in miles between two lon/lat points. */
+function distanceMiles(
+  lon1: number,
+  lat1: number,
+  lon2: number,
+  lat2: number,
+): number {
+  const R = 3958.8;
+  const dLat = ((lat2 - lat1) * Math.PI) / 180;
+  const dLon = ((lon2 - lon1) * Math.PI) / 180;
+  const a =
+    Math.sin(dLat / 2) ** 2 +
+    Math.cos((lat1 * Math.PI) / 180) *
+      Math.cos((lat2 * Math.PI) / 180) *
+      Math.sin(dLon / 2) ** 2;
+  return R * 2 * Math.asin(Math.sqrt(a));
 }
 
 /**
@@ -166,6 +222,259 @@ function computeCorners(
     transform(width, height),
     transform(0, height),
   ];
+}
+
+/** Switch UI to streets-mode: hide map/controls, show detections panel. */
+function enterStreetsMode(): void {
+  document.getElementById('map')!.style.display = 'none';
+  for (const el of document.querySelectorAll<HTMLElement>('.opacity-control')) {
+    el.style.display = 'none';
+  }
+  for (const el of document.querySelectorAll<HTMLElement>('.image-controls')) {
+    el.style.display = 'none';
+  }
+  document.getElementById('detection-filters')!.style.display = 'block';
+  document.getElementById('detections-panel')!.style.display = 'block';
+  const wrapper = img.closest<HTMLElement>('.image-wrapper');
+  if (wrapper) wrapper.style.cursor = 'crosshair';
+  renderDetections();
+  updateDetectionsTable();
+}
+
+/** Switch back to georef mode: restore map, checkboxes, hide detection UI. */
+function exitStreetsMode(): void {
+  streetsMode = false;
+  detections = [];
+  selectedDetectionIndices = new Set();
+  document.getElementById('detections-panel')!.style.display = 'none';
+  document.getElementById('detection-filters')!.style.display = 'none';
+  document.getElementById('map')!.style.display = '';
+  for (const el of document.querySelectorAll<HTMLElement>('.opacity-control')) {
+    el.style.display = '';
+  }
+  for (const el of document.querySelectorAll<HTMLElement>('.image-controls')) {
+    el.style.display = '';
+  }
+  const wrapper = img.closest<HTMLElement>('.image-wrapper');
+  if (wrapper) wrapper.style.cursor = '';
+}
+
+function onFilterSliderInput(
+  slider: HTMLInputElement,
+  valueSpanId: string,
+  decimals: number,
+): void {
+  document.getElementById(valueSpanId)!.textContent = parseFloat(
+    slider.value,
+  ).toFixed(decimals);
+  renderDetections();
+  updateDetectionsTable();
+}
+
+filterConfidenceSlider.addEventListener('input', () =>
+  onFilterSliderInput(filterConfidenceSlider, 'filter-confidence-value', 3),
+);
+filterShortSideSlider.addEventListener('input', () =>
+  onFilterSliderInput(filterShortSideSlider, 'filter-short-side-value', 0),
+);
+filterLongSideSlider.addEventListener('input', () =>
+  onFilterSliderInput(filterLongSideSlider, 'filter-long-side-value', 0),
+);
+
+/** Map confidence in [0, 1] to a CSS color string (red → yellow → green). */
+function confidenceColor(confidence: number): string {
+  const hue = Math.round(confidence * 120); // 0 = red, 120 = green
+  return `hsl(${hue}, 90%, 45%)`;
+}
+
+/** Return detections passing the current filter sliders, with original indices. */
+function getFilteredDetections(): { det: Detection; i: number }[] {
+  const minConf = parseFloat(filterConfidenceSlider.value);
+  const minShort = parseFloat(filterShortSideSlider.value);
+  const minLong = parseFloat(filterLongSideSlider.value);
+  return detections
+    .map((det, i) => ({ det, i }))
+    .filter(
+      ({ det }) =>
+        det.confidence >= minConf &&
+        det.short_side >= minShort &&
+        det.long_side >= minLong,
+    );
+}
+
+/** Draw detection polygons on the SVG overlay. Selected ones are highlighted. */
+function renderDetections(): void {
+  if (!svg) return;
+  svg.innerHTML = '';
+  for (const { det, i } of getFilteredDetections()) {
+    const isSelected = selectedDetectionIndices.has(i);
+    const color = isSelected ? '#ff6600' : confidenceColor(det.confidence);
+    const points = det.polygon
+      .map(([x, y]) => toDisplay(x, y))
+      .map(([dx, dy]) => `${dx},${dy}`)
+      .join(' ');
+
+    const polygonEl = document.createElementNS(
+      'http://www.w3.org/2000/svg',
+      'polygon',
+    );
+    polygonEl.setAttribute('points', points);
+    polygonEl.setAttribute('fill', color);
+    polygonEl.setAttribute('fill-opacity', isSelected ? '0.25' : '0.08');
+    polygonEl.setAttribute('stroke', color);
+    polygonEl.setAttribute('stroke-width', isSelected ? '2.5' : '1.2');
+    svg.appendChild(polygonEl);
+
+    if (isSelected) {
+      const [lx, ly] = toDisplay(det.polygon[0][0], det.polygon[0][1]);
+      const label = document.createElementNS(
+        'http://www.w3.org/2000/svg',
+        'text',
+      );
+      label.setAttribute('x', String(lx));
+      label.setAttribute('y', String(ly - 4));
+      label.setAttribute('font-size', '11');
+      label.setAttribute('font-family', 'sans-serif');
+      label.setAttribute('fill', color);
+      label.setAttribute('stroke', 'white');
+      label.setAttribute('stroke-width', '2');
+      label.setAttribute('paint-order', 'stroke');
+      label.textContent = det.text;
+      svg.appendChild(label);
+    }
+  }
+}
+
+/**
+ * Draw the rotated image patch for a detection into a canvas.
+ * Rotation is derived from the direction of the polygon's longest side so that
+ * diagonally-oriented text is also rendered horizontally.
+ */
+function drawDetectionCanvas(canvas: HTMLCanvasElement, det: Detection): void {
+  if (!img.naturalWidth) return;
+  const cx = det.polygon.reduce((s, [x]) => s + x, 0) / 4;
+  const cy = det.polygon.reduce((s, [, y]) => s + y, 0) / 4;
+
+  // Find the direction of the longest polygon side to determine text orientation.
+  let maxLen = 0;
+  let longDx = 1,
+    longDy = 0;
+  for (let i = 0; i < 4; i++) {
+    const [x1, y1] = det.polygon[i];
+    const [x2, y2] = det.polygon[(i + 1) % 4];
+    const dx = x2 - x1,
+      dy = y2 - y1;
+    const len = Math.sqrt(dx * dx + dy * dy);
+    if (len > maxLen) {
+      maxLen = len;
+      longDx = dx;
+      longDy = dy;
+    }
+  }
+  // Use det.angle (0/90/270) to disambiguate the 180° ambiguity of the long-side direction.
+  // 90° and 270° both indicate vertical text; folding to the smaller angle gives the same
+  // reference direction (-π/2) for both, so the disambiguation picks the correct half.
+  const rawAngle = Math.atan2(longDy, longDx);
+  const foldedAngle = Math.min(det.angle, 360 - det.angle);
+  const octantAngle = (-foldedAngle * Math.PI) / 180;
+  let textAngle = rawAngle;
+  if (Math.cos(rawAngle - octantAngle) < 0) {
+    // The long side points the wrong way; flip 180°.
+    textAngle = rawAngle + Math.PI;
+  }
+  if (det.angle == 90) {
+    textAngle += Math.PI;
+  }
+
+  let scale = 40 / det.short_side;
+  let cW = Math.round(det.long_side * scale);
+  let cH = 40;
+  if (cW > 200) {
+    scale = 200 / det.long_side;
+    cW = 200;
+    cH = Math.round(det.short_side * scale);
+  }
+  canvas.width = cW;
+  canvas.height = cH;
+
+  const ctx = canvas.getContext('2d')!;
+  ctx.save();
+  ctx.translate(cW / 2, cH / 2);
+  ctx.rotate(-textAngle);
+  ctx.drawImage(
+    img,
+    -cx * scale,
+    -cy * scale,
+    img.naturalWidth * scale,
+    img.naturalHeight * scale,
+  );
+  ctx.restore();
+}
+
+/** Rebuild the detections table, showing all rows or only selected ones. */
+function updateDetectionsTable(): void {
+  const tbody = document.querySelector<HTMLTableSectionElement>(
+    '#detections-table tbody',
+  );
+  if (!tbody) return;
+
+  const visible = getFilteredDetections()
+    .filter(
+      ({ i }) =>
+        selectedDetectionIndices.size === 0 || selectedDetectionIndices.has(i),
+    )
+    .sort((a, b) => b.det.confidence - a.det.confidence);
+
+  tbody.innerHTML = '';
+  for (const [rowIdx, { det, i }] of visible.entries()) {
+    const tr = document.createElement('tr');
+    if (selectedDetectionIndices.has(i)) tr.classList.add('selected');
+
+    for (const val of [
+      det.angle,
+      det.long_side,
+      det.short_side,
+      det.confidence.toFixed(3),
+      det.text,
+    ]) {
+      const td = document.createElement('td');
+      td.textContent = String(val);
+      tr.appendChild(td);
+    }
+
+    const imageTd = document.createElement('td');
+    if (rowIdx < 10) {
+      const canvas = document.createElement('canvas');
+      drawDetectionCanvas(canvas, det);
+      imageTd.appendChild(canvas);
+    }
+    tr.appendChild(imageTd);
+
+    tr.addEventListener('click', () => {
+      selectedDetectionIndices = new Set([i]);
+      renderDetections();
+      updateDetectionsTable();
+    });
+
+    tbody.appendChild(tr);
+  }
+}
+
+/** Handle image clicks in streets-mode: select detections at the click point. */
+function handleImageClick(e: MouseEvent): void {
+  if (!streetsMode) return;
+  const rect = img.getBoundingClientRect();
+  const displayX = e.clientX - rect.left;
+  const displayY = e.clientY - rect.top;
+  const imgX = (displayX * jsonWidth) / svgW;
+  const imgY = (displayY * jsonHeight) / svgH;
+
+  const hit = getFilteredDetections()
+    .filter(({ det }) => pointInPolygon(imgX, imgY, det.polygon))
+    .map(({ i }) => i);
+  selectedDetectionIndices = new Set(hit);
+  renderDetections();
+  updateDetectionsTable();
 }
 
 function setupMap(): void {
@@ -222,12 +531,25 @@ function updateWarp(): void {
     lastWarpedUrl = url;
     const lons = corners.map((c) => c[0]);
     const lats = corners.map((c) => c[1]);
+    const minLon = Math.min(...lons);
+    const maxLon = Math.max(...lons);
+    const minLat = Math.min(...lats);
+    const maxLat = Math.max(...lats);
+    const newCenterLon = (minLon + maxLon) / 2;
+    const newCenterLat = (minLat + maxLat) / 2;
+    const currentCenter = map.getCenter();
+    const dist = distanceMiles(
+      currentCenter.lng,
+      currentCenter.lat,
+      newCenterLon,
+      newCenterLat,
+    );
     map.fitBounds(
       [
-        [Math.min(...lons), Math.min(...lats)],
-        [Math.max(...lons), Math.max(...lats)],
+        [minLon, minLat],
+        [maxLon, maxLat],
       ],
-      { padding: 40, maxZoom: 17 },
+      { padding: 40, maxZoom: 17, animate: dist <= 10 },
     );
   }
 }
@@ -480,6 +802,8 @@ function setupOverlay(): void {
 
   new ResizeObserver(updateSize).observe(img);
   updateSize();
+
+  wrapper.addEventListener('click', handleImageClick);
 }
 
 function setupFileDrop(): void {
@@ -499,23 +823,55 @@ function setupFileDrop(): void {
   imageColumn.addEventListener('dragleave', () => {
     dropPlaceholder.classList.remove('drag-over');
   });
+  async function processJsonFile(file: File): Promise<void> {
+    const text = await file.text();
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(text);
+    } catch {
+      return;
+    }
+    if (Array.isArray(parsed)) {
+      // streets.json: array of detection objects from detect_text.py
+      detections = (parsed as Detection[]).filter((d) => d.confidence > 0);
+      selectedDetectionIndices = new Set();
+      streetsMode = true;
+      textarea.value = text;
+      applyJsonDimensions(
+        img.naturalWidth || jsonWidth || 1,
+        img.naturalHeight || jsonHeight || 1,
+      );
+      enterStreetsMode();
+    } else {
+      if (streetsMode) exitStreetsMode();
+      textarea.value = text;
+      textarea.dispatchEvent(new Event('input'));
+    }
+  }
+
   imageColumn.addEventListener('drop', async (e) => {
     dropPlaceholder.classList.remove('drag-over');
     const de = e as DragEvent;
-    const file = [...de.dataTransfer!.files].find((f) =>
-      f.type.startsWith('image/'),
-    );
-    if (!file) return;
+    const files = [...de.dataTransfer!.files];
+    const imageFile = files.find((f) => f.type.startsWith('image/'));
+    const jsonFile = files.find((f) => f.name.endsWith('.json'));
+    if (!imageFile && !jsonFile) return;
     de.preventDefault();
-    if (prevObjectUrl) URL.revokeObjectURL(prevObjectUrl);
-    prevObjectUrl = URL.createObjectURL(file);
-    img.src = prevObjectUrl;
-    await new Promise<void>((resolve) => {
-      img.addEventListener('load', () => resolve(), { once: true });
-    });
-    dropPlaceholder.style.display = 'none';
-    applyJsonDimensions(img.naturalWidth, img.naturalHeight);
-    syncTextarea();
+
+    if (imageFile) {
+      if (prevObjectUrl) URL.revokeObjectURL(prevObjectUrl);
+      prevObjectUrl = URL.createObjectURL(imageFile);
+      img.src = prevObjectUrl;
+      await new Promise<void>((resolve) => {
+        img.addEventListener('load', () => resolve(), { once: true });
+      });
+      dropPlaceholder.style.display = 'none';
+      applyJsonDimensions(img.naturalWidth, img.naturalHeight);
+      syncTextarea();
+    }
+    if (jsonFile) {
+      await processJsonFile(jsonFile);
+    }
   });
 
   // Drop a JSON file onto the textarea to replace the georef data.
@@ -530,8 +886,7 @@ function setupFileDrop(): void {
     );
     if (!file) return;
     de.preventDefault();
-    textarea.value = await file.text();
-    textarea.dispatchEvent(new Event('input'));
+    await processJsonFile(file);
   });
 }
 
@@ -541,6 +896,10 @@ function toDisplay(nx: number, ny: number): [number, number] {
 }
 
 function render(): void {
+  if (streetsMode) {
+    renderDetections();
+    return;
+  }
   if (!svg) return;
   svg.innerHTML = '';
 
@@ -684,6 +1043,7 @@ function syncTextarea(): void {
 }
 
 textarea.addEventListener('input', () => {
+  if (streetsMode) return;
   try {
     const data = JSON.parse(textarea.value) as GeorefData;
     streets = (data.streets ?? []).map((s) => ({ ...s }));
