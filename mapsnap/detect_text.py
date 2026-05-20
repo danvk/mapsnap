@@ -12,7 +12,6 @@ import numpy as np
 from PIL import Image
 
 from mapsnap.ctc_vocab_decode import generate_vocab_strings
-from mapsnap.georef_from_labels import build_block_index
 
 # Map common street-type abbreviations to their full forms for normalization.
 STREET_ABBREVS = {
@@ -447,6 +446,8 @@ def main() -> None:
 
     vocab_strings: list[str] | None = None
     if args.centerlines:
+        from mapsnap.georef_from_labels import build_block_index
+
         geojson = json.load(open(args.centerlines))
         block_index = build_block_index(geojson)
         vocab_strings = generate_vocab_strings(set(block_index.keys()))
