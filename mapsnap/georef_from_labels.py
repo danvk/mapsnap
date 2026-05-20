@@ -1231,6 +1231,9 @@ def main() -> None:
         # doesn't leave a previous result in place.
         if os.path.exists(output_path):
             os.remove(output_path)
+        misscale_path = output_path.replace(".georef.json", ".georef-misscale.json")
+        if os.path.exists(misscale_path):
+            os.remove(misscale_path)
         result = process_image(
             image_path=image_path,
             labels_path=labels_path,
@@ -1304,14 +1307,17 @@ def main() -> None:
             ratio = px_per_ft / ref_scale_px_per_ft
             if abs(ratio - 1.0) > args.scale_outlier_threshold:
                 _, out_path = derive_paths(img_path)
+                misscale_path = out_path.replace(
+                    ".georef.json", ".georef-misscale.json"
+                )
                 if os.path.exists(out_path):
-                    os.remove(out_path)
+                    os.rename(out_path, misscale_path)
                     n_success -= 1
                     n_dropped += 1
                     print(
                         f"Dropped scale outlier {img_path}: "
                         f"{px_per_ft:.4f} px/ft vs reference {ref_scale_px_per_ft:.4f} "
-                        f"({ratio:.2f}×)",
+                        f"({ratio:.2f}×) → {misscale_path}",
                         file=sys.stderr,
                     )
         if n_dropped:
