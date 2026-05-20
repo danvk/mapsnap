@@ -269,3 +269,26 @@ Claude Code and ChatGPT were both instrumental in getting this to work.
   - At least for New Orleans 1951, Mapsnap gets within 15ft on 76% of the images it maps, vs. 14% for the Shensky paper. (I'm not sure exactly which maps they're testing on, and they have other criteria, so this may not be a fair comparison.)
 
 [shensky]: https://repositories.lib.utexas.edu/items/3f080054-8ff0-4e4c-8ef7-ea93b0fc36e0
+
+## Debugger
+
+🌎 [Mapsnap Debugger](https://www.danvk.org/mapsnap/)
+
+The Mapsnap debugger lets you view georeferences and OCR results overlaid on the image. To use it, drag & drop the image and either its associated `georef.json` or `streets.json` file.
+
+To run the debugger locally:
+
+```
+cd app
+npm i
+npm run dev
+```
+
+Then visit localhost:5173/mapsnap/.
+
+To deploy the debugger:
+
+```
+npm run build
+rm -rf ~/github/danvk.github.io/mapsnap && cp -r dist ~/github/danvk.github.io/mapsnap
+```
