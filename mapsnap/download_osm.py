@@ -59,21 +59,11 @@ def main() -> None:
     parser = argparse.ArgumentParser(
         description="Download OSM street data for a bounding box via the Overpass API."
     )
-    parser.add_argument(
-        "sw_lat", type=float, metavar="SW_LAT", help="Southwest latitude"
-    )
-    parser.add_argument(
-        "sw_lon", type=float, metavar="SW_LON", help="Southwest longitude"
-    )
-    parser.add_argument(
-        "ne_lat", type=float, metavar="NE_LAT", help="Northeast latitude"
-    )
-    parser.add_argument(
-        "ne_lon", type=float, metavar="NE_LON", help="Northeast longitude"
-    )
-    parser.add_argument(
-        "--output", metavar="FILE", required=True, help="Output JSON file"
-    )
+    parser.add_argument("sw_lat", type=float, help="Southwest latitude")
+    parser.add_argument("sw_lon", type=float, help="Southwest longitude")
+    parser.add_argument("ne_lat", type=float, help="Northeast latitude")
+    parser.add_argument("ne_lon", type=float, help="Northeast longitude")
+    parser.add_argument("--output", required=True, help="Output JSON file")
     args = parser.parse_args()
 
     print(

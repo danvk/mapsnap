@@ -27,7 +27,6 @@ from mapsnap.detect_text import (
     deduplicate_detections,
     is_number_only,
     normalize_street,
-    visualize_detections,
 )
 
 
@@ -806,7 +805,6 @@ def process_image(
     min_long_side: float = 250.0,
     min_short_side: float = 60.0,
     min_aspect_ratio: float = 2.0,
-    visualize_ocr: bool = False,
     fuzzy_threshold: float = 0.0,
     edge_margin: float = 0.02,
 ) -> ProcessResult:
@@ -876,13 +874,6 @@ def process_image(
             labels_data.append(entry)
 
     print(f"Filtered detections: {len(labels_data)}")
-
-    if visualize_ocr:
-        stem = Path(image_path).name.split(".")[0]
-        detect_png = str(Path(image_path).parent / (stem + ".detect.png"))
-        accepted_ids = {id(d) for d in labels_data}
-        rejected = [d for d in all_detections if id(d) not in accepted_ids]
-        visualize_detections(image_path, labels_data, rejected, detect_png)
 
     features = label_features(labels_data)
     print(
@@ -1151,11 +1142,6 @@ def main() -> None:
         help="Minimum long/short side ratio for a text polygon (default: 2.0)",
     )
     parser.add_argument(
-        "--visualize-ocr",
-        action="store_true",
-        help="Save annotated detection image to <stem>.detect.png for each input",
-    )
-    parser.add_argument(
         "--debug-dir",
         metavar="DIR",
         help="Save debug PNGs to this directory (single-image mode only)",
@@ -1246,7 +1232,6 @@ def main() -> None:
             min_long_side=args.min_long_side,
             min_short_side=args.min_short_side,
             min_aspect_ratio=args.min_aspect_ratio,
-            visualize_ocr=args.visualize_ocr,
             fuzzy_threshold=args.fuzzy_match_threshold,
             edge_margin=args.edge_margin,
         )

@@ -6,10 +6,13 @@ import re
 import sys
 from pathlib import Path
 
-import Levenshtein
 import easyocr
+import Levenshtein
 import numpy as np
-from PIL import Image, ImageDraw, ImageFont
+from PIL import Image
+
+from mapsnap.ctc_vocab_decode import generate_vocab_strings
+from mapsnap.georef_from_labels import build_block_index
 
 # Map common street-type abbreviations to their full forms for normalization.
 STREET_ABBREVS = {
@@ -384,36 +387,6 @@ def detect_text(
     return all_detections
 
 
-def visualize_detections(
-    image_path: str,
-    accepted: list[dict],
-    rejected: list[dict],
-    output_path: str,
-) -> None:
-    """Draw detection polygons on the image: accepted in red, rejected in yellow.
-
-    Rejected detections are those filtered out by the number or street-name filters.
-    Both sets are drawn so the visualization shows where all candidate regions are.
-    """
-    img = Image.open(image_path).convert("RGB")
-    draw = ImageDraw.Draw(img)
-
-    try:
-        font = ImageFont.truetype("/System/Library/Fonts/Helvetica.ttc", size=14)
-    except OSError:
-        font = ImageFont.load_default()
-
-    for color, detections in [((255, 200, 0), rejected), ((255, 0, 0), accepted)]:
-        for det in detections:
-            polygon = [tuple(pt) for pt in det["polygon"]]
-            draw.polygon(polygon, outline=color, width=2)
-            label = f"{det['text']} ({det['confidence']:.2f})"
-            draw.text(polygon[0], label, fill=color, font=font)
-
-    img.save(output_path)
-    print(f"Saved annotated image to {output_path}", file=sys.stderr)
-
-
 def main() -> None:
     parser = argparse.ArgumentParser(
         description="Detect text regions in insurance map images using EasyOCR (CRAFT)."
@@ -474,12 +447,7 @@ def main() -> None:
 
     vocab_strings: list[str] | None = None
     if args.centerlines:
-        import json as _json
-
-        from mapsnap.ctc_vocab_decode import generate_vocab_strings
-        from mapsnap.georef_from_labels import build_block_index
-
-        geojson = _json.load(open(args.centerlines))
+        geojson = json.load(open(args.centerlines))
         block_index = build_block_index(geojson)
         vocab_strings = generate_vocab_strings(set(block_index.keys()))
         print(

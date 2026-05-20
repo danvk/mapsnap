@@ -174,7 +174,7 @@ Run `detect_text.py` over all the scaled-down images to find street labels + ang
 uv run python mapsnap/detect_text.py data/new_orleans_la_1951_vol_5/*.2048px.jpg
 ```
 
-This is the slowest step. If you can use a GPU, it's ~15s/image. Iif you're running CPU-only, it's more like ~1 minute/image. This writes a `streets.json` file next to each image with candidate street label detections.
+This is the slowest step. If you can use a GPU, it's ~15s/image. Iif you're running CPU-only, it's more like ~1 minute/image. This writes a `streets.json` file next to each image with candidate street label detections. Use the Mapsnap debugger to view this file.
 
 ### Fit georeference model
 
@@ -182,10 +182,10 @@ This is it! Given detected street labels and street centerlines, find GCPs and f
 
 ```
 rm data/new_orleans_la_1951_vol_5/*.georef.json
-uv run mapsnap/georef_from_labels.py data/new_orleans_la_1951_vol_5/*.2048px.jpg --centerlines data/new_orleans_la_1951_vol_5/centerlines.geojson --min-long-side 60 --min-short-side 12 --fuzzy-match-threshold 0.20 --visualize-ocr
+uv run mapsnap/georef_from_labels.py data/new_orleans_la_1951_vol_5/*.2048px.jpg --centerlines data/new_orleans_la_1951_vol_5/centerlines.geojson --min-long-side 60 --min-short-side 12 --fuzzy-match-threshold 0.20
 ```
 
-The main output is `pNNN.georef.json`, which contains the four-parameter model and debug information. Because of the `--visualize-ocr` flag, this also outputs `pNNN.detect.png` to help you debug the OCR.
+The main output is `pNNN.georef.json`, which contains the four-parameter model and debug information. Use the Mapsnap debugger to view this file.
 
 For maps without enough control points, this will fail to produce an output. It won't delete an existing georef.json file, so make sure to run the `rm` command first to avoid cross-run contamination!
 
