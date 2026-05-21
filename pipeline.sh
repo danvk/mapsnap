@@ -13,10 +13,14 @@ echo $oim_prefix
 dir=data/$dirname
 mkdir -p $dir
 
+# Download IIIF files from OIM for the main content and the key map.
+# The key map is only needed for getting a bounding box.
+# If you want to georeference a skeleton map or other layer, you'll need to modify this.
 curl -o $dir/main.iiif.json "https://oldinsurancemaps.net/iiif/mosaic/$sanborn_slug/main-content/?trim=true"
 curl -o $dir/key.iiif.json "https://oldinsurancemaps.net/iiif/mosaic/$sanborn_slug/key-map/?trim=true"
 
-echo <<"END"
+# The Library of Congress has a Cloudflare bot protection layer, so this has to be done manually.
+cat <<END
 
 While the pipeline is running, visit:
 
@@ -29,6 +33,8 @@ in your browser and save the results to:
 This will allow the pipeline to generate an IIIF file.
 
 END
+
+sleep 5
 
 uv run python mapsnap/download_oim_iiif.py \
     $dir/main.iiif.json \
@@ -50,7 +56,7 @@ uv run python mapsnap/osm_to_centerlines.py \
 jq -r '.elements[].tags.name' $dir/streets.osm.json | grep -v '^null$' | sort | uniq > $dir/streets.txt
 uv run python mapsnap/generate_intersections.py $dir/streets.osm.json $dir/intersections.csv
 
-uv run python mapsnap/detect_text.py $dir/*.2048px.jpg
+uv run python mapsnap/detect_text.py --centerlines $dir/centerlines.geojson $dir/*.2048px.jpg
 
 uv run mapsnap/georef_from_labels.py $dir/*.2048px.jpg \
     --centerlines $dir/centerlines.geojson \
@@ -62,6 +68,6 @@ uv run python mapsnap/make_iiif_georef.py \
     $dir/loc.iiif.json $dir'/*.georef.json' \
     --output $dir/generated.iiif.json
 
-uv run python compare_iiif_georef.py \
+uv run python mapsnap/compare_iiif_georef.py \
     $dir/main.iiif.json $dir/generated.iiif.json \
     | tee $dir/comparison.txt
