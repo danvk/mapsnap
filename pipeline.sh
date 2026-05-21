@@ -13,8 +13,6 @@ echo $oim_prefix
 dir=data/$dirname
 mkdir -p $dir
 
-if false; then
-
 # Download IIIF files from OIM for the main content and the key map.
 # The key map is only needed for getting a bounding box.
 # If you want to georeference a skeleton map or other layer, you'll need to modify this.
@@ -41,8 +39,6 @@ sleep 5
 uv run python mapsnap/download_oim_iiif.py \
     $dir/main.iiif.json \
     --oim-url-prefix "$oim_prefix"
-
-fi
 
 uv run python mapsnap/scale_images.py $dir/*.raw.jpg
 

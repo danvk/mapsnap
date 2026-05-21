@@ -56,7 +56,7 @@ def main() -> None:
         stem = image_stem(image_path)
         output_path = Path(image_path).parent / (stem + ".scaled.jpg")
         with Image.open(image_path) as img:
-            out = img.convert("L").resize((new_w, new_h), Image.LANCZOS)
+            out = img.convert("L").resize((new_w, new_h), Image.Resampling.LANCZOS)
             out.save(output_path, "JPEG", quality=95)
         print(
             f"{image_path} → {output_path}  ({w}×{h} → {new_w}×{new_h})",

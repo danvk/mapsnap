@@ -25,7 +25,7 @@ def to_row(item: dict) -> dict[str, str]:
         "title": item.get("title", ""),
         "date": item.get("date", ""),
         "description": first(item.get("description")),
-        "num_images": image_count(item),
+        "num_images": str(image_count(item)),
         "location_city": first(item.get("location_city")),
         "location_county": first(item.get("location_county")),
         "location_state": first(item.get("location_state")),
