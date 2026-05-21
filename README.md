@@ -143,12 +143,19 @@ for x in *.jpg; convert -colorspace gray -resize '2048>' $x ${x/.jpg/.2048px.jpg
 
 ### Street and Intersections
 
-Find the southwest and northeast corner of the key map to get a bounding box.
+Find the southwest and northeast corner of the key map to get a bounding box. There's a script to help with this:
+
+```
+$ curl -o data/new_orleans_la_1951_vol_5/key.iiif.json 'https://oldinsurancemaps.net/iiif/mosaic/sanborn03376_029/key-map/?trim=true'
+$ uv run python mapsnap/iiif_bbox.py data/new_orleans_la_1951_vol_5/key.iiif.json
+Bounding box: SW (29.899094, -90.142464)  NE (29.960980, -90.079950)
+29.899093562363152 -90.14246415164352 29.96097999379676 -90.07994986808657
+```
 
 Mapsnap needs all the streets from OSM in this bounding box. To get them using the Overpass API, run:
 
-```
-uv run python mapsnap/download_osm.py 29.909795 -90.125975 29.946841 -90.083828 --output data/new_orleans_la_1951_vol_5/streets.osm.json
+```bash
+uv run python mapsnap/download_osm.py 29.899094 -90.142464 29.960980 -90.079950 --output data/new_orleans_la_1951_vol_5/streets.osm.json
 ```
 
 The order of the parameters is sw lat, sw lng, ne lat, ne lng.
@@ -181,13 +188,10 @@ This is the slowest step. If you can use a GPU, it's ~15s/image. Iif you're runn
 This is it! Given detected street labels and street centerlines, find GCPs and fit a four-parameter model for each map:
 
 ```
-rm data/new_orleans_la_1951_vol_5/*.georef.json
 uv run mapsnap/georef_from_labels.py data/new_orleans_la_1951_vol_5/*.2048px.jpg --centerlines data/new_orleans_la_1951_vol_5/centerlines.geojson --min-long-side 60 --min-short-side 12 --fuzzy-match-threshold 0.20
 ```
 
 The main output is `pNNN.georef.json`, which contains the four-parameter model and debug information. Use the Mapsnap debugger to view this file.
-
-For maps without enough control points, this will fail to produce an output. It won't delete an existing georef.json file, so make sure to run the `rm` command first to avoid cross-run contamination!
 
 ### Make an IIIF file
 
