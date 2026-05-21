@@ -13,6 +13,8 @@ echo $oim_prefix
 dir=data/$dirname
 mkdir -p $dir
 
+if false; then
+
 # Download IIIF files from OIM for the main content and the key map.
 # The key map is only needed for getting a bounding box.
 # If you want to georeference a skeleton map or other layer, you'll need to modify this.
@@ -40,9 +42,9 @@ uv run python mapsnap/download_oim_iiif.py \
     $dir/main.iiif.json \
     --oim-url-prefix "$oim_prefix"
 
-for x in $dir/*.jpg; do
-    magick convert -colorspace gray -resize '2048>' $x ${x/.jpg/.2048px.jpg}
-done
+fi
+
+uv run python mapsnap/scale_images.py $dir/*.raw.jpg
 
 BBOX=$(uv run python mapsnap/iiif_bbox.py $dir/key.iiif.json)
 uv run python mapsnap/download_osm.py \
@@ -56,9 +58,9 @@ uv run python mapsnap/osm_to_centerlines.py \
 jq -r '.elements[].tags.name' $dir/streets.osm.json | grep -v '^null$' | sort | uniq > $dir/streets.txt
 uv run python mapsnap/generate_intersections.py $dir/streets.osm.json $dir/intersections.csv
 
-uv run python mapsnap/detect_text.py --centerlines $dir/centerlines.geojson $dir/*.2048px.jpg
+uv run python mapsnap/detect_text.py --centerlines $dir/centerlines.geojson $dir/*.scaled.jpg
 
-uv run mapsnap/georef_from_labels.py $dir/*.2048px.jpg \
+uv run mapsnap/georef_from_labels.py $dir/*.scaled.jpg \
     --centerlines $dir/centerlines.geojson \
     --min-long-side 50 \
     --min-short-side 20 \

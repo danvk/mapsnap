@@ -124,7 +124,7 @@ def process_annotation(
         return False
 
     image_url = f"{oim_url_prefix}{page_key}.jpg"
-    image_path = output_dir / f"{page_key}.jpg"
+    image_path = output_dir / f"{page_key}.raw.jpg"
     gcp_path = output_dir / f"{page_key}.gcps.json"
 
     if image_path.exists() and gcp_path.exists():
