@@ -42,6 +42,18 @@ def extract_metadata_int(item: dict, label: str) -> int | None:
     return None
 
 
+def extract_metadata_bool(item: dict, label: str) -> bool | None:
+    """Extract a boolean value from a IIIF annotation's metadata list by label."""
+    for entry in item.get("metadata", []):
+        if entry.get("label") == label:
+            v = entry.get("value", "")
+            if v == "true":
+                return True
+            if v == "false":
+                return False
+    return None
+
+
 def extract_gcps(item: dict) -> list[GCP]:
     """Extract (resourceCoords, (lon, lat)) pairs from a IIIF georeferencing annotation."""
     gcps: list[GCP] = []
@@ -202,12 +214,17 @@ def analyze_pair(truth_item: dict, gen_item: dict) -> dict:
     # Distortion of the truth fit (skew and anisotropy the generated model can't capture).
     skew_deg, aniso = truth_distortion(A_truth)
 
+    is_full_canvas = extract_metadata_bool(gen_item, "is_full_canvas")
+
     return {
         "page_key": page_key,
         "n_truth": len(truth_gcps),
         "n_gen": len(gen_gcps),
         "n_streets": extract_metadata_int(gen_item, "streets"),
         "n_intersections": extract_metadata_int(gen_item, "intersections"),
+        "is_full_canvas": is_full_canvas,
+        # Metrics below are only meaningful when is_full_canvas is True.
+        # For sub-images, canvas coords were derived from truth GCPs → circular.
         "rmse_ft": round(rmse_ft, 1),
         "max_ft": round(max_ft, 1),
         "trans_ft": round(trans_ft, 1),
@@ -241,18 +258,24 @@ def print_table(rows: list[dict], missing: list[dict]) -> None:
     rows_sorted = sorted(rows, key=lambda r: r["rmse_ft"], reverse=True)
 
     header = (
-        f"{'Page':<8} {'n_t':>3} {'n_g':>3} {'str':>4} {'int':>4}  "
+        f"{'Page':<9} {'n_t':>3} {'n_g':>3} {'str':>4} {'int':>4}  "
         f"{'rmse_ft':>8}  {'max_ft':>8}  {'trans_ft':>9}  "
         f"{'rot_err':>8}  {'scale_%':>7}  {'skew°':>6}  {'aniso':>6}"
     )
     sep = "-" * len(header)
     print(header)
     print(sep)
+    has_circular = False
     for r in rows_sorted:
         n_str = r["n_streets"] if r["n_streets"] is not None else "—"
         n_int = r["n_intersections"] if r["n_intersections"] is not None else "—"
+        # Sub-images: metrics are circular (canvas coords derived from truth GCPs).
+        circular = r.get("is_full_canvas") is False
+        if circular:
+            has_circular = True
+        suffix = "*" if circular else ""
         print(
-            f"{r['page_key']:<8} {r['n_truth']:>3} {r['n_gen']:>3} {n_str!s:>4} {n_int!s:>4}  "
+            f"{r['page_key'] + suffix:<9} {r['n_truth']:>3} {r['n_gen']:>3} {n_str!s:>4} {n_int!s:>4}  "
             f"{r['rmse_ft']:>8.1f}  {r['max_ft']:>8.1f}  {r['trans_ft']:>9.1f}  "
             f"{r['rot_err']:>+8.2f}  {r['scale_pct']:>+7.2f}  "
             f"{r['skew_deg']:>+6.2f}  {r['aniso']:>6.3f}"
@@ -261,12 +284,16 @@ def print_table(rows: list[dict], missing: list[dict]) -> None:
         missing_sorted = sorted(missing, key=lambda r: r["page_key"])
         for r in missing_sorted:
             print(
-                f"{r['page_key']:<8} {r['n_truth']:>3} {'—':>3} {'—':>4} {'—':>4}  "
+                f"{r['page_key']:<9} {r['n_truth']:>3} {'—':>3} {'—':>4} {'—':>4}  "
                 f"{'—':>8}  {'—':>8}  {'—':>9}  "
                 f"{'—':>8}  {'—':>7}  "
                 f"{r['skew_deg']:>+6.2f}  {r['aniso']:>6.3f}  (no fit)"
             )
     print(sep)
+    if has_circular:
+        print(
+            "* sub-image: metrics are circular (canvas coords derived from truth GCPs)"
+        )
 
     n_paired = len(rows)
     n_missing = len(missing)
@@ -275,12 +302,16 @@ def print_table(rows: list[dict], missing: list[dict]) -> None:
         f"\n{n_paired}/{n_truth_total} pages georeferenced ({n_missing} total losses)"
     )
 
-    if rows:
-        rmsers = np.array([r["rmse_ft"] for r in rows])
-        rot_errs = np.abs([r["rot_err"] for r in rows])
-        trans_fts = np.array([r["trans_ft"] for r in rows])
+    # Summary statistics exclude sub-image rows (circular comparison).
+    valid_rows = [r for r in rows if r.get("is_full_canvas") is not False]
+    n_circular = n_paired - len(valid_rows)
+    if valid_rows:
+        rmsers = np.array([r["rmse_ft"] for r in valid_rows])
+        rot_errs = np.abs([r["rot_err"] for r in valid_rows])
+        trans_fts = np.array([r["trans_ft"] for r in valid_rows])
+        qualifier = f" (excl. {n_circular} circular)" if n_circular else ""
         print(
-            f"RMSE:  mean={float(np.mean(rmsers)):.0f} ft  "
+            f"RMSE{qualifier}:  mean={float(np.mean(rmsers)):.0f} ft  "
             f"median={float(np.median(rmsers)):.0f} ft  "
             f"max={float(np.max(rmsers)):.0f} ft"
         )
@@ -291,10 +322,11 @@ def print_table(rows: list[dict], missing: list[dict]) -> None:
         print(
             f"|rot|: mean={float(np.mean(rot_errs)):.1f}°  median={float(np.median(rot_errs)):.1f}°"
         )
+        n_valid = len(valid_rows)
         for thresh in (15, 25, 50, 100, 500, 1000):
             count = int(np.sum(rmsers <= thresh))
             print(
-                f"  RMSE ≤ {thresh:>4} ft: {count}/{n_paired} ({100 * count / n_paired:.0f}%)"
+                f"  RMSE ≤ {thresh:>4} ft: {count}/{n_valid} ({100 * count / n_valid:.0f}%)"
             )
 
 
@@ -310,6 +342,7 @@ def print_tsv(rows: list[dict], missing: list[dict]) -> None:
         "n_gen",
         "n_streets",
         "n_intersections",
+        "is_full_canvas",
         "rmse_ft",
         "max_ft",
         "trans_ft",

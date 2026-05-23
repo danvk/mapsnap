@@ -55,6 +55,33 @@ def download_with_retry(
                 raise
 
 
+def _download_unsplit_image(
+    base_key: str,
+    output_dir: Path,
+    oim_url_prefix: str,
+    dry_run: bool,
+) -> None:
+    """Download the un-split version of a split page (e.g. p4 for p4__2).
+
+    Saves to <base_key>.unsplit.jpg. Skips if the file already exists.
+    """
+    unsplit_path = output_dir / f"{base_key}.unsplit.jpg"
+    if unsplit_path.exists():
+        print(f"    Unsplit already done: {unsplit_path.name}", file=sys.stderr)
+        return
+
+    unsplit_url = f"{oim_url_prefix}{base_key}.jpg"
+    print(f"    Unsplit URL: {unsplit_url}", file=sys.stderr)
+
+    if dry_run:
+        return
+
+    print(f"    Downloading unsplit → {unsplit_path.name} ...", file=sys.stderr)
+    download_with_retry(unsplit_url, unsplit_path)
+    dl_width, dl_height = jpeg_dimensions(unsplit_path)
+    print(f"    Unsplit downloaded: {dl_width}×{dl_height}", file=sys.stderr)
+
+
 def process_annotation(
     item: dict,
     output_dir: Path,
@@ -64,6 +91,8 @@ def process_annotation(
     """Download the image for one annotation item.
 
     Returns True on success, False if the item was skipped or failed.
+    For split page keys (ending in __N), also downloads the un-split image
+    as <base_key>.unsplit.jpg so it can serve as a reference for sub-image bounds.
     """
     label: str = item.get("label", "unknown")
     page_key = label_to_page_key(label)
@@ -85,30 +114,30 @@ def process_annotation(
 
     if image_path.exists():
         print(f"  Already done: {image_path.name}", file=sys.stderr)
-        return True
+    else:
+        print(f"  {label}", file=sys.stderr)
+        print(f"    Image: {image_url}", file=sys.stderr)
+        print(f"    Source: {full_width}×{full_height}", file=sys.stderr)
 
-    print(f"  {label}", file=sys.stderr)
-    print(f"    Image: {image_url}", file=sys.stderr)
-    print(f"    Source: {full_width}×{full_height}", file=sys.stderr)
+        if not dry_run:
+            print(f"    Downloading → {image_path.name} ...", file=sys.stderr)
+            try:
+                download_with_retry(image_url, image_path)
+            except urllib.error.HTTPError as exc:
+                if exc.code == 404 and "documents" in image_url and "__" in image_url:
+                    actual_url = image_url.replace("/documents/", "/regions/")
+                    print(f"    404; retrying with: {actual_url}", file=sys.stderr)
+                    download_with_retry(actual_url, image_path)
+                else:
+                    raise
+            dl_width, dl_height = jpeg_dimensions(image_path)
+            print(f"    Downloaded: {dl_width}×{dl_height}", file=sys.stderr)
 
-    if dry_run:
-        return True
+    # For split pages, also fetch the un-split original.
+    if "__" in page_key:
+        base_key = page_key.split("__")[0]
+        _download_unsplit_image(base_key, output_dir, oim_url_prefix, dry_run)
 
-    actual_url = image_url
-    if not image_path.exists():
-        print(f"    Downloading → {image_path.name} ...", file=sys.stderr)
-        try:
-            download_with_retry(image_url, image_path)
-        except urllib.error.HTTPError as exc:
-            if exc.code == 404 and "documents" in image_url and "__" in image_url:
-                actual_url = image_url.replace("/documents/", "/regions/")
-                print(f"    404; retrying with: {actual_url}", file=sys.stderr)
-                download_with_retry(actual_url, image_path)
-            else:
-                raise
-
-    dl_width, dl_height = jpeg_dimensions(image_path)
-    print(f"    Downloaded: {dl_width}×{dl_height}", file=sys.stderr)
     return True
 
 

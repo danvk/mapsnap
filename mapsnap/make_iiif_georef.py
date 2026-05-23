@@ -64,8 +64,13 @@ def _canvas_coords_from_oim_gcps(oim_item: dict, georef: dict) -> list[list[floa
     return result
 
 
-def _georef_metadata(georef: dict) -> list[dict]:
-    """Build IIIF metadata entries for streets and intersections found in the image."""
+def _georef_metadata(georef: dict, is_full_canvas: bool) -> list[dict]:
+    """Build IIIF metadata entries for streets, intersections, and canvas type.
+
+    is_full_canvas=False marks true sub-images whose comparison against truth is
+    circular (canvas coords were derived from truth GCPs, so compare_iiif_georef.py
+    will always report near-zero error regardless of actual georef quality).
+    """
     n_streets = len(
         set(s["street"] for s in georef.get("streets", []) if s.get("inlier"))
     )
@@ -73,6 +78,7 @@ def _georef_metadata(georef: dict) -> list[dict]:
     return [
         {"label": "streets", "value": str(n_streets)},
         {"label": "intersections", "value": str(n_intersections)},
+        {"label": "is_full_canvas", "value": "true" if is_full_canvas else "false"},
     ]
 
 
@@ -149,7 +155,7 @@ def make_annotation(
             "http://iiif.io/api/presentation/3/context.json",
         ],
         "label": label,
-        "metadata": _georef_metadata(georef),
+        "metadata": _georef_metadata(georef, is_full_canvas),
         "created": now,
         "modified": now,
         "creator": [creator],
