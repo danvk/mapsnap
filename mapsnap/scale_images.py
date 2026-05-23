@@ -34,6 +34,8 @@ def main() -> None:
     args = parser.parse_args()
 
     # Pass 1: read dimensions and find the maximum short side.
+    # Skip unsplit originals; they exist only as template-matching references.
+    args.images = [p for p in args.images if "unsplit" not in Path(p).name]
     sizes: list[tuple[int, int]] = []
     for image_path in args.images:
         with Image.open(image_path) as img:
