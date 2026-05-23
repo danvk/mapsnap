@@ -140,14 +140,12 @@ def georef_path_to_page_key(path: str) -> str | None:
 
 def _georef_metadata(
     georef: dict,
-    is_full_canvas: bool,
     split_canvas: tuple[float, float, float, float] | None = None,
 ) -> list[dict]:
-    """Build IIIF metadata entries for streets, intersections, and canvas type.
+    """Build IIIF metadata entries for streets, intersections, and split canvas bounds.
 
     split_canvas, when present, gives the sub-image region within the full canvas as
-    (x, y, w, h) in canvas pixel coordinates, derived via template matching rather than
-    truth GCPs. When absent for a sub-image, the comparison is circular.
+    (x, y, w, h) in canvas pixel coordinates, derived via template matching.
     """
     n_streets = len(
         set(s["street"] for s in georef.get("streets", []) if s.get("inlier"))
@@ -156,7 +154,6 @@ def _georef_metadata(
     entries: list[dict] = [
         {"label": "streets", "value": str(n_streets)},
         {"label": "intersections", "value": str(n_intersections)},
-        {"label": "is_full_canvas", "value": "true" if is_full_canvas else "false"},
     ]
     if split_canvas is not None:
         x, y, w, h = split_canvas
@@ -289,7 +286,7 @@ def make_annotation(
             "http://iiif.io/api/presentation/3/context.json",
         ],
         "label": label,
-        "metadata": _georef_metadata(georef, is_full_canvas, split_canvas),
+        "metadata": _georef_metadata(georef, split_canvas),
         "created": now,
         "modified": now,
         "creator": [creator],

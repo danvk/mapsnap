@@ -8,6 +8,7 @@ from pathlib import Path
 import easyocr
 import numpy as np
 from PIL import Image
+from tqdm import tqdm
 
 from mapsnap.ctc_vocab_decode import generate_vocab_strings
 from mapsnap.streets import build_block_index, polygon_side_lengths
@@ -171,9 +172,7 @@ def main() -> None:
 
     reader = easyocr.Reader(["en"], gpu=True, verbose=False)
 
-    for image_path in args.images:
-        if len(args.images) > 1:
-            print(f"\n--- {image_path} ---", file=sys.stderr)
+    for image_path in tqdm(args.images, smoothing=0):
         stem = image_stem(image_path)
         output_path = str(Path(image_path).parent / (stem + ".streets.json"))
         detections = detect_text(
@@ -187,7 +186,6 @@ def main() -> None:
         )
         with open(output_path, "w") as f:
             f.write(json.dumps(detections, indent=2))
-        print(f"Wrote {len(detections)} detections to {output_path}", file=sys.stderr)
 
 
 if __name__ == "__main__":
