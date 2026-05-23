@@ -64,6 +64,18 @@ def _canvas_coords_from_oim_gcps(oim_item: dict, georef: dict) -> list[list[floa
     return result
 
 
+def _georef_metadata(georef: dict) -> list[dict]:
+    """Build IIIF metadata entries for streets and intersections found in the image."""
+    n_streets = len(
+        set(s["street"] for s in georef.get("streets", []) if s.get("inlier"))
+    )
+    n_intersections = sum(1 for i in georef.get("intersections", []) if i.get("inlier"))
+    return [
+        {"label": "streets", "value": str(n_streets)},
+        {"label": "intersections", "value": str(n_intersections)},
+    ]
+
+
 def make_annotation(
     oim_item: dict,
     georef: dict,
@@ -137,6 +149,7 @@ def make_annotation(
             "http://iiif.io/api/presentation/3/context.json",
         ],
         "label": label,
+        "metadata": _georef_metadata(georef),
         "created": now,
         "modified": now,
         "creator": [creator],

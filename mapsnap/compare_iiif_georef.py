@@ -31,6 +31,17 @@ GCP = tuple[tuple[float, float], tuple[float, float]]  # ((px, py), (lon, lat))
 EARTH_RADIUS_FT = 20_925_524.0
 
 
+def extract_metadata_int(item: dict, label: str) -> int | None:
+    """Extract an integer value from a IIIF annotation's metadata list by label."""
+    for entry in item.get("metadata", []):
+        if entry.get("label") == label:
+            try:
+                return int(entry["value"])
+            except (KeyError, ValueError):
+                return None
+    return None
+
+
 def extract_gcps(item: dict) -> list[GCP]:
     """Extract (resourceCoords, (lon, lat)) pairs from a IIIF georeferencing annotation."""
     gcps: list[GCP] = []
@@ -195,6 +206,8 @@ def analyze_pair(truth_item: dict, gen_item: dict) -> dict:
         "page_key": page_key,
         "n_truth": len(truth_gcps),
         "n_gen": len(gen_gcps),
+        "n_streets": extract_metadata_int(gen_item, "streets"),
+        "n_intersections": extract_metadata_int(gen_item, "intersections"),
         "rmse_ft": round(rmse_ft, 1),
         "max_ft": round(max_ft, 1),
         "trans_ft": round(trans_ft, 1),
@@ -228,7 +241,7 @@ def print_table(rows: list[dict], missing: list[dict]) -> None:
     rows_sorted = sorted(rows, key=lambda r: r["rmse_ft"], reverse=True)
 
     header = (
-        f"{'Page':<8} {'n_t':>3} {'n_g':>3}  "
+        f"{'Page':<8} {'n_t':>3} {'n_g':>3} {'str':>4} {'int':>4}  "
         f"{'rmse_ft':>8}  {'max_ft':>8}  {'trans_ft':>9}  "
         f"{'rot_err':>8}  {'scale_%':>7}  {'skew°':>6}  {'aniso':>6}"
     )
@@ -236,8 +249,10 @@ def print_table(rows: list[dict], missing: list[dict]) -> None:
     print(header)
     print(sep)
     for r in rows_sorted:
+        n_str = r["n_streets"] if r["n_streets"] is not None else "—"
+        n_int = r["n_intersections"] if r["n_intersections"] is not None else "—"
         print(
-            f"{r['page_key']:<8} {r['n_truth']:>3} {r['n_gen']:>3}  "
+            f"{r['page_key']:<8} {r['n_truth']:>3} {r['n_gen']:>3} {n_str!s:>4} {n_int!s:>4}  "
             f"{r['rmse_ft']:>8.1f}  {r['max_ft']:>8.1f}  {r['trans_ft']:>9.1f}  "
             f"{r['rot_err']:>+8.2f}  {r['scale_pct']:>+7.2f}  "
             f"{r['skew_deg']:>+6.2f}  {r['aniso']:>6.3f}"
@@ -246,7 +261,7 @@ def print_table(rows: list[dict], missing: list[dict]) -> None:
         missing_sorted = sorted(missing, key=lambda r: r["page_key"])
         for r in missing_sorted:
             print(
-                f"{r['page_key']:<8} {r['n_truth']:>3} {'—':>3}  "
+                f"{r['page_key']:<8} {r['n_truth']:>3} {'—':>3} {'—':>4} {'—':>4}  "
                 f"{'—':>8}  {'—':>8}  {'—':>9}  "
                 f"{'—':>8}  {'—':>7}  "
                 f"{r['skew_deg']:>+6.2f}  {r['aniso']:>6.3f}  (no fit)"
@@ -293,6 +308,8 @@ def print_tsv(rows: list[dict], missing: list[dict]) -> None:
         "page_key",
         "n_truth",
         "n_gen",
+        "n_streets",
+        "n_intersections",
         "rmse_ft",
         "max_ft",
         "trans_ft",
@@ -384,6 +401,8 @@ def main() -> None:
             "page_key",
             "n_truth",
             "n_gen",
+            "n_streets",
+            "n_intersections",
             "rmse_ft",
             "max_ft",
             "trans_ft",
