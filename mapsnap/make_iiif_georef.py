@@ -38,7 +38,7 @@ import cv2
 import numpy as np
 from PIL import Image
 
-from mapsnap.utils import jpeg_dimensions, label_to_page_key
+from mapsnap.utils import jpeg_dimensions
 
 
 def _replace_white(arr: np.ndarray, white_threshold: int = 250) -> np.ndarray:
@@ -146,17 +146,31 @@ def georef_path_to_page_key(path: str) -> str | None:
     return m.group(1) if m else None
 
 
-def _loc_label_to_page_key(label: str) -> str | None:
-    """Extract page key from a LOC canvas label like 'Page 8' → 'p8'."""
-    m = re.match(r"Page\s+(\d+[a-z]?)", label.strip(), re.IGNORECASE)
-    return f"p{m.group(1).lower()}" if m else None
+def _service_url_to_page_key(url: str) -> str | None:
+    """Extract the page key from a LOC IIIF service URL (OIM or LOC manifest format).
+
+    The page key is the trailing segment after the last "-", with leading zeros
+    stripped and any letter suffix lowercased:
+      "...:01790_01N_1950-0006N/info.json" → "p6n"
+      "...:01790_01N_1950-0103W"           → "p103w"
+      "...:05791_02_1939-0027s"            → "p27s"
+
+    Non-sheet URLs (covers, indexes: "...-covr", "...-titl", etc.) start with a
+    letter after the "-" and return None.
+    """
+    url = url.removesuffix("/info.json")
+    m = re.search(r"-0*(\d+)([a-z]*)$", url, re.IGNORECASE)
+    if m is None:
+        return None
+    return f"p{m.group(1)}{m.group(2).lower()}"
 
 
 def _load_oim_index(data: dict) -> dict[str, dict]:
     """Build page_key → item dict from an OIM IIIF AnnotationPage."""
     index: dict[str, dict] = {}
     for item in data.get("items", []):
-        page_key = label_to_page_key(item.get("label", ""))
+        source_id: str = item.get("target", {}).get("source", {}).get("id", "")
+        page_key = _service_url_to_page_key(source_id)
         if page_key:
             index[page_key] = item
     return index
@@ -176,11 +190,11 @@ def _load_loc_index(data: dict, raw_dir: Path) -> dict[str, dict]:
     index: dict[str, dict] = {}
     for canvas in canvases:
         canvas_label: str = canvas.get("label", "")
-        page_key = _loc_label_to_page_key(canvas_label)
-        if page_key is None:
-            continue
         resource: dict = canvas["images"][0]["resource"]
         service_id: str = resource["service"]["@id"]
+        page_key = _service_url_to_page_key(service_id)
+        if page_key is None:
+            continue
 
         raw_path = raw_dir / f"{page_key}.raw.jpg"
         if raw_path.exists():
