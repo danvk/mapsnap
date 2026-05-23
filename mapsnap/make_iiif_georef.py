@@ -33,6 +33,23 @@ from PIL import Image
 from mapsnap.utils import jpeg_dimensions, label_to_page_key
 
 
+def _replace_white(arr: np.ndarray, white_threshold: int = 250) -> np.ndarray:
+    """Replace pure-white pixels with the mean of non-white pixels.
+
+    White pixels (≥ white_threshold) are masked-out regions on Sanborn map splits
+    that share no content with the corresponding area in the unsplit image.
+    Replacing them with the template mean gives zero contribution to TM_CCOEFF_NORMED,
+    preventing them from pulling the match towards the wrong location.
+    """
+    non_white = arr < white_threshold
+    if not non_white.any():
+        return arr
+    mean_val = int(round(float(arr[non_white].mean())))
+    out = arr.copy()
+    out[~non_white] = mean_val
+    return out
+
+
 def locate_split_in_unsplit(
     split_path: Path,
     unsplit_path: Path,
@@ -44,14 +61,18 @@ def locate_split_in_unsplit(
 
     Uses a two-stage search: coarse normalized cross-correlation at downsampled
     resolution to find the rough location, then full-resolution refinement in a
-    small window around that estimate.
+    small window around that estimate. Pure-white pixels in the split (masked-out
+    regions) are replaced with the template mean so they contribute nothing to the
+    correlation score.
 
     Raises ValueError if the refined match score is below min_score (uncertain
     placement) or if the located region overflows the unsplit image bounds.
 
     Returns (offset_x, offset_y) in unsplit image pixel coordinates (top-left corner).
     """
-    split_arr = np.array(Image.open(split_path).convert("L"), dtype=np.uint8)
+    split_arr = _replace_white(
+        np.array(Image.open(split_path).convert("L"), dtype=np.uint8)
+    )
     unsplit_arr = np.array(Image.open(unsplit_path).convert("L"), dtype=np.uint8)
 
     ds = coarse_downsample
