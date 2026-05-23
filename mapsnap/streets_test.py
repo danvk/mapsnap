@@ -1,9 +1,6 @@
 """Tests for mapsnap.streets."""
 
-import pytest
-
-from mapsnap.streets import normalize_street, _ORDINALS, _num_to_ordinal_word
-
+from mapsnap.streets import _ORDINALS, _num_to_ordinal_word, normalize_street
 
 # --- _num_to_ordinal_word ---
 
