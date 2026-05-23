@@ -114,7 +114,7 @@ def main() -> None:
     parser.add_argument(
         "--allowlist",
         metavar="CHARS",
-        default="ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz .",
+        default="ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789 .",
         help=(
             "Restrict OCR recognition to these characters. Defaults to letters, space, "
             "and period (period separates direction abbreviations like 'E.' from the "

@@ -67,6 +67,28 @@ def test_generate_no_duplicates():
     assert len(vocab) == len(set(vocab))
 
 
+def test_generate_numeric_ordinal_forms():
+    # "SOUTH FOURTH STREET" → also generates "4TH" variants so the constrained
+    # CTC decoder can match an image showing "S. 4TH ST".
+    vocab = generate_vocab_strings({"SOUTH FOURTH STREET"})
+    assert "S. 4TH ST" in vocab
+    assert "S 4TH ST" in vocab
+    assert "4TH STREET" in vocab
+    assert "4TH ST" in vocab
+    assert "4TH" in vocab
+    # Word-form variants should still be present.
+    assert "S. FOURTH ST" in vocab
+    assert "SOUTH FOURTH STREET" in vocab
+
+
+def test_generate_numeric_ordinal_compound():
+    # "NORTH TWENTY FIRST AVENUE" → also generates "21ST" variants.
+    vocab = generate_vocab_strings({"NORTH TWENTY FIRST AVENUE"})
+    assert "21ST" in vocab
+    assert "N 21ST AVE" in vocab
+    assert "N. 21ST AV" in vocab
+
+
 def test_generate_empty_input():
     assert generate_vocab_strings(set()) == []
 

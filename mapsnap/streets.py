@@ -62,6 +62,100 @@ STRIPPABLE_PREFIXES: frozenset[str] = DIRECTION_WORDS | {"SAINT"}
 # "JOSEPH STREET" without paying for the full " STREET" edit cost.
 STREET_TYPES: frozenset[str] = frozenset(STREET_ABBREVS.values())
 
+# Irregular ordinal words for 1–19.
+_ORDINAL_ONES = [
+    "",
+    "FIRST",
+    "SECOND",
+    "THIRD",
+    "FOURTH",
+    "FIFTH",
+    "SIXTH",
+    "SEVENTH",
+    "EIGHTH",
+    "NINTH",
+    "TENTH",
+    "ELEVENTH",
+    "TWELFTH",
+    "THIRTEENTH",
+    "FOURTEENTH",
+    "FIFTEENTH",
+    "SIXTEENTH",
+    "SEVENTEENTH",
+    "EIGHTEENTH",
+    "NINETEENTH",
+]
+
+# Ordinal tens words (exact multiples of 10).
+_ORDINAL_TENS = [
+    "",
+    "",
+    "TWENTIETH",
+    "THIRTIETH",
+    "FORTIETH",
+    "FIFTIETH",
+    "SIXTIETH",
+    "SEVENTIETH",
+    "EIGHTIETH",
+    "NINETIETH",
+]
+
+# Cardinal tens words used to form compound ordinals like "TWENTY FIRST".
+_CARDINAL_TENS = [
+    "",
+    "",
+    "TWENTY",
+    "THIRTY",
+    "FORTY",
+    "FIFTY",
+    "SIXTY",
+    "SEVENTY",
+    "EIGHTY",
+    "NINETY",
+]
+
+
+def _num_to_ordinal_word(n: int) -> str:
+    """Convert an integer 1–99 to its ordinal word form (e.g. 4 → "FOURTH", 21 → "TWENTY FIRST")."""
+    if 1 <= n <= 19:
+        return _ORDINAL_ONES[n]
+    tens, ones = divmod(n, 10)
+    if ones == 0:
+        return _ORDINAL_TENS[tens]
+    return f"{_CARDINAL_TENS[tens]} {_ORDINAL_ONES[ones]}"
+
+
+# Map any ordinal token (with any numeric suffix) to its word form.
+# Keys cover all four suffixes (ST/ND/RD/TH) for robustness against OCR suffix errors.
+_ORDINALS: dict[str, str] = {
+    f"{n}{suffix}": _num_to_ordinal_word(n)
+    for n in range(1, 100)
+    for suffix in ("ST", "ND", "RD", "TH")
+}
+
+
+def _canonical_ordinal_suffix(n: int) -> str:
+    """Return the correct ordinal suffix (ST/ND/RD/TH) for integer n."""
+    last_two = n % 100
+    last_one = n % 10
+    if 11 <= last_two <= 13:
+        return "TH"
+    if last_one == 1:
+        return "ST"
+    if last_one == 2:
+        return "ND"
+    if last_one == 3:
+        return "RD"
+    return "TH"
+
+
+# Inverse of _ORDINALS: ordinal word/phrase → canonical numeric string.
+# e.g., "FOURTH" → "4TH", "TWENTY FIRST" → "21ST".
+# Used by generate_vocab_strings to add numeric label variants to the CTC trie.
+ORDINAL_WORD_TO_NUM: dict[str, str] = {
+    _num_to_ordinal_word(n): f"{n}{_canonical_ordinal_suffix(n)}" for n in range(1, 100)
+}
+
 
 def normalize_street(text: str) -> str:
     """Uppercase, strip punctuation, expand direction prefixes and street-type abbreviations.
@@ -69,12 +163,15 @@ def normalize_street(text: str) -> str:
     Direction abbreviations (N, S, E, W, etc.) are expanded only when they are the
     first word, since they appear as prefixes in street names (e.g. "N RAMPART ST"
     → "NORTH RAMPART STREET"). Street-type abbreviations (ST, AVE, …) are expanded
-    wherever they appear.
+    wherever they appear. Numeric ordinals (e.g. "4TH", "21ST") are expanded to word
+    form ("FOURTH", "TWENTY FIRST") so that "S. 4TH ST" matches "South Fourth Street".
     """
     text = re.sub(r"[^\w\s]", " ", text.upper())
     words = text.split()
     if not words:
         return ""
+    # Expand numeric ordinals; may expand one token to two ("21ST" → ["TWENTY", "FIRST"]).
+    words = [w for token in words for w in _ORDINALS.get(token, token).split()]
     words[0] = DIRECTION_ABBREVS.get(words[0], words[0])
     words[0] = PREFIX_ABBREVS.get(words[0], words[0])
     words = [STREET_ABBREVS.get(w, w) for w in words]
