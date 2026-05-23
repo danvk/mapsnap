@@ -1,21 +1,29 @@
-"""Combine OIM IIIF annotations with our georeferences into a new IIIF AnnotationPage.
+"""Combine IIIF annotations with our georeferences into a new IIIF AnnotationPage.
 
-For each georef JSON file whose page key matches an annotation in the OIM IIIF file
-(main.iiif.json), generates one georeferencing annotation with four corner GCPs.
+Accepts two input formats for the source IIIF file:
 
-For images where the raw file covers the full LOC canvas (raw_dims ≈ source_dims),
+  OIM AnnotationPage (type: AnnotationPage)
+    Each item has a label, target.source.{id,width,height}, and body.features (GCPs).
+    Split pages (labels ending in "[N]") are supported: the unsplit original is located
+    via template matching to determine a non-circular canvas placement.
+
+  LOC sc:Manifest (@type: sc:Manifest)
+    Each canvas has a label like "Page 8" and an image service URL. No split pages;
+    the script asserts that all matching georef page keys are unsplit.
+
+For images where the raw file covers the full source canvas (raw_dims ≈ source_dims),
 resource coordinates are computed by simple proportional scaling:
 
     resourceCoords = georef_pixel × source_dim / georef_dim
 
-For true sub-images (raw_dims << source_dims), the unsplit original (e.g. p4.unsplit.jpg)
-is located via template matching to determine the sub-image's pixel offset within the
-full canvas. This gives a non-circular placement: the canvas coords derive from image
-geometry, not from the truth GCPs. If the unsplit image is absent or the match score
-is too low, the script raises an error and skips the page.
+For OIM split sub-images (raw_dims << source_dims), the unsplit original (e.g.
+p4.unsplit.jpg) is located via template matching to determine the sub-image's pixel
+offset within the full canvas. Raises an error and skips the page if the unsplit file
+is absent or the match score is too low.
 
 Usage:
     python make_iiif_georef.py <main.iiif.json> <georef_glob> [--output FILE] [--creator URL]
+    python make_iiif_georef.py <loc.iiif.json>  <georef_glob> [--output FILE] [--creator URL]
 """
 
 import argparse
@@ -138,6 +146,66 @@ def georef_path_to_page_key(path: str) -> str | None:
     return m.group(1) if m else None
 
 
+def _loc_label_to_page_key(label: str) -> str | None:
+    """Extract page key from a LOC canvas label like 'Page 8' → 'p8'."""
+    m = re.match(r"Page\s+(\d+[a-z]?)", label.strip(), re.IGNORECASE)
+    return f"p{m.group(1).lower()}" if m else None
+
+
+def _load_oim_index(data: dict) -> dict[str, dict]:
+    """Build page_key → item dict from an OIM IIIF AnnotationPage."""
+    index: dict[str, dict] = {}
+    for item in data.get("items", []):
+        page_key = label_to_page_key(item.get("label", ""))
+        if page_key:
+            index[page_key] = item
+    return index
+
+
+def _load_loc_index(data: dict, raw_dir: Path) -> dict[str, dict]:
+    """Build page_key → normalized item dict from a LOC sc:Manifest.
+
+    Normalizes each canvas into the same shape make_annotation expects:
+      {"label": str, "target": {"source": {"id": str, "width": int, "height": int}}}
+
+    Full image dimensions come from the raw.jpg on disk when present; otherwise the
+    pct thumbnail scale factor is parsed from the resource URL and applied.
+    """
+    manifest_label: str = data.get("label", "")
+    canvases: list[dict] = data["sequences"][0]["canvases"]
+    index: dict[str, dict] = {}
+    for canvas in canvases:
+        canvas_label: str = canvas.get("label", "")
+        page_key = _loc_label_to_page_key(canvas_label)
+        if page_key is None:
+            continue
+        resource: dict = canvas["images"][0]["resource"]
+        service_id: str = resource["service"]["@id"]
+
+        raw_path = raw_dir / f"{page_key}.raw.jpg"
+        if raw_path.exists():
+            source_width, source_height = jpeg_dimensions(raw_path)
+        else:
+            # Resource URL contains e.g. "/full/pct:25/0/default.jpg"; scale up.
+            pct_m = re.search(r"/pct:(\d+)/", resource.get("@id", ""))
+            scale = 100.0 / int(pct_m.group(1)) if pct_m else 1.0
+            source_width = int(round(resource["width"] * scale))
+            source_height = int(round(resource["height"] * scale))
+
+        index[page_key] = {
+            "label": f"{manifest_label} | {canvas_label}",
+            "target": {
+                "source": {
+                    "id": f"{service_id}/info.json",
+                    "type": "ImageService2",
+                    "width": source_width,
+                    "height": source_height,
+                }
+            },
+        }
+    return index
+
+
 def _georef_metadata(
     georef: dict,
     split_canvas: tuple[float, float, float, float] | None = None,
@@ -167,16 +235,16 @@ def _georef_metadata(
 
 
 def make_annotation(
-    oim_item: dict,
+    item: dict,
     georef: dict,
     raw_path: Path,
     creator_url: str,
     now: str,
 ) -> dict:
-    """Build a IIIF georeferencing annotation in the OIM coordinate space.
+    """Build a IIIF georeferencing annotation for one page.
 
-    Reuses the OIM annotation's source ID and dimensions so the output is directly
-    comparable to main.iiif.json by compare_iiif_georef.py.
+    item must have {"label": str, "target": {"source": {"id", "width", "height"}}};
+    both OIM AnnotationPage items and normalized LOC canvas items satisfy this.
 
     For full-canvas images (raw_dims ≈ source_dims), resource coords are computed
     by simple proportional scaling. For split sub-images, the unsplit original
@@ -184,11 +252,11 @@ def make_annotation(
     canvas placement. Raises ValueError if the unsplit file is missing or the match
     is too uncertain.
     """
-    source = oim_item["target"]["source"]
+    source = item["target"]["source"]
     source_id: str = source["id"]
     source_width: int = source["width"]
     source_height: int = source["height"]
-    label: str = oim_item["label"]
+    label: str = item["label"]
 
     # Derive a unique canvas ID from the source URL; append split number if present.
     canvas_id = source_id.removesuffix("/info.json")
@@ -350,27 +418,34 @@ def main() -> None:
     )
     args = parser.parse_args()
 
-    oim_data: dict = json.load(open(args.oim_iiif))
-    if oim_data.get("type") != "AnnotationPage":
-        print(
-            "Error: expected an OIM IIIF AnnotationPage (type: AnnotationPage).",
-            file=sys.stderr,
-        )
-        sys.exit(1)
-
-    oim_by_key: dict[str, dict] = {}
-    for item in oim_data.get("items", []):
-        page_key = label_to_page_key(item.get("label", ""))
-        if page_key:
-            oim_by_key[page_key] = item
-    print(f"Loaded {len(oim_by_key)} OIM annotations.", file=sys.stderr)
-
-    now = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    source_data: dict = json.load(open(args.oim_iiif))
 
     georef_paths = sorted(glob.glob(args.georef_glob))
     if not georef_paths:
         print(f"Error: no files matched '{args.georef_glob}'.", file=sys.stderr)
         sys.exit(1)
+    raw_dir = Path(georef_paths[0]).parent
+
+    # Detect format and build the page-key → canvas-item index.
+    if source_data.get("type") == "AnnotationPage":
+        items_by_key = _load_oim_index(source_data)
+        result_id = source_data.get("id", "") + "/generated"
+        is_loc = False
+        print(f"Loaded {len(items_by_key)} OIM annotations.", file=sys.stderr)
+    elif source_data.get("@type") == "sc:Manifest":
+        items_by_key = _load_loc_index(source_data, raw_dir)
+        result_id = source_data.get("@id", "") + "/generated"
+        is_loc = True
+        print(f"Loaded {len(items_by_key)} LOC canvases.", file=sys.stderr)
+    else:
+        print(
+            "Error: expected an OIM IIIF AnnotationPage (type: AnnotationPage) "
+            "or a LOC manifest (@type: sc:Manifest).",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+
+    now = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
     annotations: list[dict] = []
     for path in georef_paths:
@@ -378,10 +453,14 @@ def main() -> None:
         if not page_key:
             print(f"Warning: could not parse page key from '{path}'", file=sys.stderr)
             continue
-        oim_item = oim_by_key.get(page_key)
-        if not oim_item:
+        if is_loc:
+            assert "__" not in page_key, (
+                f"LOC manifests have no split pages; found split key '{page_key}' in {path}"
+            )
+        canvas_item = items_by_key.get(page_key)
+        if not canvas_item:
             print(
-                f"Warning: no OIM annotation for page key '{page_key}' ({path})",
+                f"Warning: no canvas for page key '{page_key}' ({path})",
                 file=sys.stderr,
             )
             continue
@@ -389,7 +468,7 @@ def main() -> None:
         raw_path = Path(path).parent / f"{page_key}.raw.jpg"
         try:
             annotations.append(
-                make_annotation(oim_item, georef, raw_path, args.creator, now)
+                make_annotation(canvas_item, georef, raw_path, args.creator, now)
             )
         except ValueError as exc:
             print(f"Warning: skipping {page_key}: {exc}", file=sys.stderr)
@@ -400,10 +479,10 @@ def main() -> None:
     )
 
     result = {
-        "id": oim_data.get("id", "") + "/generated",
+        "id": result_id,
         "type": "AnnotationPage",
         "@context": ["http://www.w3.org/ns/anno.jsonld"],
-        "label": oim_data.get("label", ""),
+        "label": source_data.get("label", ""),
         "items": annotations,
     }
 
