@@ -2,9 +2,7 @@
 
 Reads a local IIIF AnnotationPage JSON file, extracts a page key from each
 annotation label (e.g. "p156" from "New Orleans, La. | 1896 | Vol. 2 p156"),
-constructs an OIM S3 image URL using a caller-supplied prefix, downloads it, and
-saves a companion GCP JSON file with coordinates scaled to the downloaded image
-dimensions.
+constructs an OIM S3 image URL using a caller-supplied prefix, and downloads it.
 
 Usage:
     python download_oim_iiif.py <iiif_file> --oim-url-prefix URL_PREFIX [--dry-run]
@@ -12,13 +10,13 @@ Usage:
 
 import argparse
 import json
-import re
-import struct
 import sys
 import time
 import urllib.error
 import urllib.request
 from pathlib import Path
+
+from mapsnap.utils import jpeg_dimensions, label_to_page_key
 
 
 def download_with_retry(
@@ -57,54 +55,13 @@ def download_with_retry(
                 raise
 
 
-def label_to_page_key(label: str) -> str | None:
-    """Extract the page key from an OIM IIIF annotation label.
-
-    The page key is the last pipe-separated segment's page identifier, normalized
-    to lowercase with bracket variants collapsed to underscores:
-      "New Orleans, La. | 1896 | Vol. 2 p156"    → "p156"
-      "New Orleans, La. | 1896 | Vol. 2 p101 [1]" → "p101_1"
-    Returns None if no page identifier is found.
-    """
-    last_part = label.rsplit("|", 1)[-1].strip()
-    m = re.search(r"\b(p\d+[a-z]?)(?:\s*\[(\d+)\])?$", last_part, re.IGNORECASE)
-    if m is None:
-        return None
-    page = m.group(1).lower()
-    variant = m.group(2)
-    return f"{page}__{variant}" if variant else page
-
-
-def jpeg_dimensions(path: Path) -> tuple[int, int]:
-    """Return (width, height) from a JPEG file by scanning SOF markers."""
-    with path.open("rb") as f:
-        if f.read(2) != b"\xff\xd8":
-            raise ValueError(f"Not a JPEG: {path}")
-        while True:
-            marker = f.read(2)
-            if len(marker) < 2 or marker[0] != 0xFF:
-                break
-            seg_type = marker[1]
-            length_bytes = f.read(2)
-            if len(length_bytes) < 2:
-                break
-            length = struct.unpack(">H", length_bytes)[0]
-            if seg_type in (0xC0, 0xC1, 0xC2, 0xC3):  # SOF0–SOF3
-                data = f.read(length - 2)
-                height = struct.unpack(">H", data[1:3])[0]
-                width = struct.unpack(">H", data[3:5])[0]
-                return width, height
-            f.seek(length - 2, 1)
-    raise ValueError(f"No SOF marker found in {path}")
-
-
 def process_annotation(
     item: dict,
     output_dir: Path,
     oim_url_prefix: str,
     dry_run: bool,
 ) -> bool:
-    """Download the image and GCP file for one annotation item.
+    """Download the image for one annotation item.
 
     Returns True on success, False if the item was skipped or failed.
     """
@@ -125,21 +82,14 @@ def process_annotation(
 
     image_url = f"{oim_url_prefix}{page_key}.jpg"
     image_path = output_dir / f"{page_key}.raw.jpg"
-    gcp_path = output_dir / f"{page_key}.gcps.json"
 
-    if image_path.exists() and gcp_path.exists():
+    if image_path.exists():
         print(f"  Already done: {image_path.name}", file=sys.stderr)
         return True
 
-    body = item.get("body", {})
-    features: list[dict] = body.get("features", [])
-
     print(f"  {label}", file=sys.stderr)
     print(f"    Image: {image_url}", file=sys.stderr)
-    print(
-        f"    Source: {full_width}×{full_height}  GCPs: {len(features)}",
-        file=sys.stderr,
-    )
+    print(f"    Source: {full_width}×{full_height}", file=sys.stderr)
 
     if dry_run:
         return True
@@ -165,8 +115,8 @@ def process_annotation(
 def main() -> None:
     parser = argparse.ArgumentParser(
         description=(
-            "Download OIM images and save GCP files from a local IIIF AnnotationPage. "
-            "Saves one .jpg per annotation item alongside the IIIF file."
+            "Download OIM images from a local IIIF AnnotationPage. "
+            "Saves one .raw.jpg per annotation item alongside the IIIF file."
         )
     )
     parser.add_argument(

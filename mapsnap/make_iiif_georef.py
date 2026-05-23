@@ -1,13 +1,19 @@
-"""Combine a Library of Congress IIIF manifest with georef JSON files into an IIIF AnnotationPage.
+"""Combine OIM IIIF annotations with our georeferences into a new IIIF AnnotationPage.
 
-For each georef JSON file whose page key (e.g. 'p16s') matches a canvas in the LOC manifest,
-generates one georeferencing annotation with four corner GCPs. The LOC manifest uses IIIF Image
-API images served at pct:25 (quarter resolution), so full-resolution pixel coordinates for the
-annotation body are computed as:
-    resourceCoords = georef_pixel × (canvas_dim × 4) / georef_dim
+For each georef JSON file whose page key matches an annotation in the OIM IIIF file
+(main.iiif.json), generates one georeferencing annotation with four corner GCPs.
+
+For images where the raw file covers the full LOC canvas (raw_dims ≈ source_dims),
+resource coordinates are computed by simple proportional scaling:
+
+    resourceCoords = georef_pixel × source_dim / georef_dim
+
+For true sub-images (raw_dims << source_dims), the OIM annotation's GCPs provide a
+geo → canvas-pixel affine that is used to map our georef corner coordinates directly
+into the full canvas pixel space.
 
 Usage:
-    python make_iiif_georef.py <iiif_manifest.json> <georef_glob> [--output FILE] [--creator URL]
+    python make_iiif_georef.py <main.iiif.json> <georef_glob> [--output FILE] [--creator URL]
 """
 
 import argparse
@@ -16,57 +22,76 @@ import json
 import re
 import sys
 from datetime import datetime, timezone
+from pathlib import Path
 
+import numpy as np
 
-def canvas_id_to_page_key(canvas_id: str) -> str | None:
-    """Map a LOC canvas @id to a page key like 'p16s'.
-
-    The canvas @id suffix looks like '05791_02_1939-0016s'. We extract the trailing
-    numeric-plus-optional-s part and strip leading zeros: '0016s' → 'p16s'.
-    """
-    m = re.search(r"-(\d+)([sNSEW]?)$", canvas_id)
-    if not m:
-        return None
-    return f"p{int(m.group(1))}{m.group(2)}".lower()
+from mapsnap.utils import jpeg_dimensions, label_to_page_key
 
 
 def georef_path_to_page_key(path: str) -> str | None:
-    """Extract page key like 'p16s' from a georef filename.
+    """Extract page key like 'p428__2' from a georef filename.
 
     Accepts filenames ending in '_p16s.georef.json', '_p16.georef.json', or
     '_p16s.gcps.georef.json' (the '.gcps' infix is optional).
     """
-    # drop the trailing "__2" in "p428__2" since the LOC images won't have splits.
     m = re.search(r"(?:\b|_)(p\d+[snew]?(?:__\d)?)(?:\.[^.]+)?\.georef\.json$", path)
     return m.group(1) if m else None
 
 
+def _canvas_coords_from_oim_gcps(oim_item: dict, georef: dict) -> list[list[float]]:
+    """Map georef corner geo coords to full canvas pixel coords using OIM GCPs.
+
+    Used for true sub-images where raw_dims differ significantly from source_dims.
+    The OIM GCPs carry both canvas pixel coordinates and geo coordinates; we fit a
+    geo → canvas-pixel affine and apply it to our georef corner geo coordinates.
+    """
+    oim_gcps = oim_item["body"]["features"]
+    if len(oim_gcps) < 3:
+        raise ValueError(f"Need ≥3 OIM GCPs for affine fit, got {len(oim_gcps)}")
+
+    geo_pts = np.array([feat["geometry"]["coordinates"][:2] for feat in oim_gcps])
+    canvas_pts = np.array([feat["properties"]["resourceCoords"] for feat in oim_gcps])
+
+    X = np.column_stack([geo_pts, np.ones(len(geo_pts))])
+    coef, *_ = np.linalg.lstsq(X, canvas_pts, rcond=None)
+
+    result: list[list[float]] = []
+    for lon, lat in georef["corners"]:
+        v = np.array([lon, lat, 1.0])
+        cx, cy = coef.T @ v
+        result.append([round(float(cx), 1), round(float(cy), 1)])
+    return result
+
+
 def make_annotation(
-    canvas: dict,
+    oim_item: dict,
     georef: dict,
+    raw_width: int,
+    raw_height: int,
     creator_url: str,
-    label: str,
     now: str,
 ) -> dict:
-    """Build a single IIIF georeferencing annotation from a canvas and georef data.
+    """Build a IIIF georeferencing annotation in the OIM coordinate space.
 
-    LOC serves images at pct:25, so the canvas dimensions are 1/4 of the full-resolution
-    originals. Scale factors convert from georef pixel space (2048px-wide images) to the
-    full-resolution pixel space used by resourceCoords.
+    Reuses the OIM annotation's source ID and dimensions so the output is directly
+    comparable to main.iiif.json by compare_iiif_georef.py.
     """
-    full_width = canvas["width"] * 4
-    full_height = canvas["height"] * 4
+    source = oim_item["target"]["source"]
+    source_id: str = source["id"]
+    source_width: int = source["width"]
+    source_height: int = source["height"]
+    label: str = oim_item["label"]
+
+    # Derive a unique canvas ID from the source URL; append split number if present.
+    canvas_id = source_id.removesuffix("/info.json")
+    m = re.search(r"\[(\d+)\]$", label)
+    if m:
+        canvas_id += f"__{m.group(1)}"
+
+    creator = {"id": creator_url, "type": "Person"}
     georef_width = georef["width"]
     georef_height = georef["height"]
-    scale_x = full_width / georef_width
-    scale_y = full_height / georef_height
-
-    service_id = canvas["images"][0]["resource"]["service"]["@id"]
-    canvas_id = canvas["@id"]
-    creator = {"id": creator_url, "type": "Person"}
-
-    # corners[i] = [lon, lat] for pixel (px, py) in the georef image.
-    # Order from georef_from_labels.py: (0,0), (w,0), (w,h), (0,h).
     corners = georef["corners"]
     pixel_corners = [
         (0, 0),
@@ -75,11 +100,25 @@ def make_annotation(
         (0, georef_height),
     ]
 
+    # Use simple scaling when the raw image covers the full canvas (within 2px tolerance).
+    is_full_canvas = (
+        abs(raw_width - source_width) <= 2 and abs(raw_height - source_height) <= 2
+    )
+    if is_full_canvas:
+        scale_x = source_width / georef_width
+        scale_y = source_height / georef_height
+        resource_coords_list = [
+            [round(px * scale_x, 1), round(py * scale_y, 1)] for px, py in pixel_corners
+        ]
+    else:
+        # True sub-image: use OIM GCPs to establish geo → canvas affine.
+        resource_coords_list = _canvas_coords_from_oim_gcps(oim_item, georef)
+
     features = [
         {
             "type": "Feature",
             "properties": {
-                "resourceCoords": [round(px * scale_x, 1), round(py * scale_y, 1)],
+                "resourceCoords": rc,
                 "creator": creator,
             },
             "geometry": {
@@ -87,7 +126,7 @@ def make_annotation(
                 "coordinates": corner,
             },
         }
-        for (px, py), corner in zip(pixel_corners, corners)
+        for rc, corner in zip(resource_coords_list, corners)
     ]
 
     return {
@@ -106,16 +145,16 @@ def make_annotation(
             "id": f"{canvas_id}/selector",
             "type": "SpecificResource",
             "source": {
-                "id": f"{service_id}/info.json",
+                "id": source_id,
                 "type": "ImageService2",
-                "height": full_height,
-                "width": full_width,
+                "height": source_height,
+                "width": source_width,
             },
             "selector": {
                 "type": "SvgSelector",
                 "value": (
-                    f'<svg><polygon points="0,{full_height} 0,0 '
-                    f'{full_width},0 {full_width},{full_height} 0,{full_height}" /></svg>'
+                    f'<svg><polygon points="0,{source_height} 0,0 '
+                    f'{source_width},0 {source_width},{source_height} 0,{source_height}" /></svg>'
                 ),
             },
         },
@@ -134,11 +173,15 @@ def make_annotation(
 def main() -> None:
     parser = argparse.ArgumentParser(
         description=(
-            "Combine a Library of Congress IIIF manifest with georef JSON files "
-            "into an IIIF AnnotationPage."
+            "Combine OIM IIIF annotations with our georeferences into an IIIF AnnotationPage. "
+            "Each georef file is matched to the OIM annotation by page key parsed from the label."
         )
     )
-    parser.add_argument("iiif", metavar="MANIFEST", help="LOC IIIF manifest JSON file")
+    parser.add_argument(
+        "oim_iiif",
+        metavar="OIM_IIIF",
+        help="OIM IIIF AnnotationPage JSON file (e.g. main.iiif.json)",
+    )
     parser.add_argument(
         "georef_glob",
         metavar="GEOREF_GLOB",
@@ -157,19 +200,21 @@ def main() -> None:
     )
     args = parser.parse_args()
 
-    manifest: dict = json.load(open(args.iiif))
-    if "sequences" not in manifest:
-        print("Error: expected a IIIF v2 manifest with 'sequences'.", file=sys.stderr)
+    oim_data: dict = json.load(open(args.oim_iiif))
+    if oim_data.get("type") != "AnnotationPage":
+        print(
+            "Error: expected an OIM IIIF AnnotationPage (type: AnnotationPage).",
+            file=sys.stderr,
+        )
         sys.exit(1)
 
-    canvases: list[dict] = manifest["sequences"][0]["canvases"]
-    canvas_by_key: dict[str, dict] = {}
-    for canvas in canvases:
-        key = canvas_id_to_page_key(canvas["@id"])
-        if key:
-            canvas_by_key[key] = canvas
+    oim_by_key: dict[str, dict] = {}
+    for item in oim_data.get("items", []):
+        page_key = label_to_page_key(item.get("label", ""))
+        if page_key:
+            oim_by_key[page_key] = item
+    print(f"Loaded {len(oim_by_key)} OIM annotations.", file=sys.stderr)
 
-    manifest_label: str = manifest.get("label", "")
     now = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
     georef_paths = sorted(glob.glob(args.georef_glob))
@@ -183,23 +228,19 @@ def main() -> None:
         if not page_key:
             print(f"Warning: could not parse page key from '{path}'", file=sys.stderr)
             continue
-        canvas = canvas_by_key.get(page_key)
-        split = None
-        if not canvas and "__" in page_key:
-            page, split = page_key.split("__")
-            canvas = canvas_by_key.get(page)
-        if not canvas:
+        oim_item = oim_by_key.get(page_key)
+        if not oim_item:
             print(
-                f"Warning: no canvas in manifest for page key '{page_key}' ({path})",
+                f"Warning: no OIM annotation for page key '{page_key}' ({path})",
                 file=sys.stderr,
             )
             continue
         georef: dict = json.load(open(path))
-        canvas_label: str = canvas.get("label", page_key)
-        if split:
-            canvas_label += f" [{split}]"
-        label = f"{manifest_label} | {canvas_label}"
-        annotations.append(make_annotation(canvas, georef, args.creator, label, now))
+        raw_path = Path(path).parent / f"{page_key}.raw.jpg"
+        raw_width, raw_height = jpeg_dimensions(raw_path)
+        annotations.append(
+            make_annotation(oim_item, georef, raw_width, raw_height, args.creator, now)
+        )
 
     print(
         f"Generated {len(annotations)} annotations from {len(georef_paths)} georef files.",
@@ -207,10 +248,10 @@ def main() -> None:
     )
 
     result = {
-        "id": f"{manifest.get('@id', manifest.get('id', ''))}/georef/",
+        "id": oim_data.get("id", "") + "/generated",
         "type": "AnnotationPage",
         "@context": ["http://www.w3.org/ns/anno.jsonld"],
-        "label": manifest_label,
+        "label": oim_data.get("label", ""),
         "items": annotations,
     }
 

@@ -19,23 +19,6 @@ mkdir -p $dir
 curl -o $dir/main.iiif.json "https://oldinsurancemaps.net/iiif/mosaic/$sanborn_slug/main-content/?trim=true"
 curl -o $dir/key.iiif.json "https://oldinsurancemaps.net/iiif/mosaic/$sanborn_slug/key-map/?trim=true"
 
-# The Library of Congress has a Cloudflare bot protection layer, so this has to be done manually.
-cat <<END
-
-While the pipeline is running, visit:
-
-    https://www.loc.gov/item/$sanborn_slug/manifest.json
-
-in your browser and save the results to:
-
-    $dir/loc.iiif.json
-
-This will allow the pipeline to generate an IIIF file.
-
-END
-
-sleep 5
-
 uv run python mapsnap/download_oim_iiif.py \
     $dir/main.iiif.json \
     --oim-url-prefix "$oim_prefix"
@@ -63,7 +46,7 @@ uv run mapsnap/georef_from_labels.py $dir/*.scaled.jpg \
     --min-confidence 0.15
 
 uv run python mapsnap/make_iiif_georef.py \
-    $dir/loc.iiif.json $dir'/*.georef.json' \
+    $dir/main.iiif.json $dir'/*.georef.json' \
     --output $dir/generated.iiif.json
 
 uv run python mapsnap/compare_iiif_georef.py \
