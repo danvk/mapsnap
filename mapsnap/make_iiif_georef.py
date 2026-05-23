@@ -347,13 +347,31 @@ def _georef_gcp_points(
         p3_x, p3_y = min(option1, key=lambda c: dist_to_center(*c))
     else:
         # Option 2: any other intersection; inliers preferred, then closest to center.
+        # Only consider candidates offset from the P1-P2 line by ≥ 25% of dist(P1, P2)
+        # to avoid near-collinear third points that degrade the affine fit.
+        dist12 = float(np.linalg.norm(p2 - p1))
+        d_unit = (p2 - p1) / dist12
+
+        def perp_dist(x: float, y: float) -> float:
+            v = np.array([x, y]) - p1
+            return abs(float(v[0] * d_unit[1] - v[1] * d_unit[0]))
+
         others = [
             (float(i["x"]), float(i["y"]), bool(i.get("inlier")))
             for i in all_intersections
             if frozenset({i["label_a"], i["label_b"]}) not in initial_pairs
         ]
-        inliers = [(x, y) for x, y, inlier in others if inlier]
-        non_inliers = [(x, y) for x, y, inlier in others if not inlier]
+        min_offset = 0.25 * dist12
+        inliers = [
+            (x, y)
+            for x, y, inlier in others
+            if inlier and perp_dist(x, y) >= min_offset
+        ]
+        non_inliers = [
+            (x, y)
+            for x, y, inlier in others
+            if not inlier and perp_dist(x, y) >= min_offset
+        ]
         pool = inliers if inliers else non_inliers
 
         if pool:
