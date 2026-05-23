@@ -20,18 +20,30 @@ def download_osm(
     ne_lat: float,
     ne_lon: float,
 ) -> dict:
+    # relation_id = 1836428  # Orleans Parish
+    relation_id = 369518  # Kings County aka Brooklyn
+    area_id = 3600000000 + relation_id
     """Query Overpass for named highway ways in a bounding box and return parsed JSON."""
-    query = f"""[out:json][timeout:60];
+    query = f"""[out:json][timeout:120];
+
+area({area_id})->.searchArea;
+
 (
-  way["highway"]["name"](
-    {sw_lat}, {sw_lon},
-    {ne_lat}, {ne_lon}
-  );
+  way(area.searchArea)["highway"]["name"];
 );
 out body;
 >;
 out skel qt;
 """
+
+    # or:
+    # (
+    #     way["highway"]["name"](
+    #         {sw_lat}, {sw_lon},
+    #         {ne_lat}, {ne_lon}
+    #     );
+    # );
+
     data = urllib.parse.urlencode({"data": query}).encode()
     req = urllib.request.Request(
         OVERPASS_URL,
