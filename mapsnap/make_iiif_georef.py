@@ -8,9 +8,11 @@ resource coordinates are computed by simple proportional scaling:
 
     resourceCoords = georef_pixel × source_dim / georef_dim
 
-For true sub-images (raw_dims << source_dims), the OIM annotation's GCPs provide a
-geo → canvas-pixel affine that is used to map our georef corner coordinates directly
-into the full canvas pixel space.
+For true sub-images (raw_dims << source_dims), the unsplit original (e.g. p4.unsplit.jpg)
+is located via template matching to determine the sub-image's pixel offset within the
+full canvas. This gives a non-circular placement: the canvas coords derive from image
+geometry, not from the truth GCPs. If the unsplit image is absent or the match score
+is too low, the script raises an error and skips the page.
 
 Usage:
     python make_iiif_georef.py <main.iiif.json> <georef_glob> [--output FILE] [--creator URL]
@@ -24,9 +26,85 @@ import sys
 from datetime import datetime, timezone
 from pathlib import Path
 
+import cv2
 import numpy as np
+from PIL import Image
 
 from mapsnap.utils import jpeg_dimensions, label_to_page_key
+
+
+def locate_split_in_unsplit(
+    split_path: Path,
+    unsplit_path: Path,
+    min_score: float = 0.90,
+    coarse_downsample: int = 4,
+    refine_margin: int = 20,
+) -> tuple[int, int]:
+    """Find the pixel offset of a split sub-image within its unsplit original.
+
+    Uses a two-stage search: coarse normalized cross-correlation at downsampled
+    resolution to find the rough location, then full-resolution refinement in a
+    small window around that estimate.
+
+    Raises ValueError if the refined match score is below min_score (uncertain
+    placement) or if the located region overflows the unsplit image bounds.
+
+    Returns (offset_x, offset_y) in unsplit image pixel coordinates (top-left corner).
+    """
+    split_arr = np.array(Image.open(split_path).convert("L"), dtype=np.uint8)
+    unsplit_arr = np.array(Image.open(unsplit_path).convert("L"), dtype=np.uint8)
+
+    ds = coarse_downsample
+    split_small = split_arr[::ds, ::ds]
+    unsplit_small = unsplit_arr[::ds, ::ds]
+
+    if (
+        split_small.shape[0] > unsplit_small.shape[0]
+        or split_small.shape[1] > unsplit_small.shape[1]
+    ):
+        raise ValueError(
+            f"Split ({split_arr.shape[1]}×{split_arr.shape[0]}) is larger than "
+            f"unsplit ({unsplit_arr.shape[1]}×{unsplit_arr.shape[0]}) at coarse resolution"
+        )
+
+    coarse_result = cv2.matchTemplate(unsplit_small, split_small, cv2.TM_CCOEFF_NORMED)
+    _, _, _, coarse_loc = cv2.minMaxLoc(coarse_result)
+    coarse_x = coarse_loc[0] * ds
+    coarse_y = coarse_loc[1] * ds
+
+    # Refine at full resolution within a small window around the coarse estimate.
+    sh, sw = split_arr.shape
+    uh, uw = unsplit_arr.shape
+    x1 = max(0, coarse_x - refine_margin)
+    x2 = min(uw, coarse_x + sw + refine_margin)
+    y1 = max(0, coarse_y - refine_margin)
+    y2 = min(uh, coarse_y + sh + refine_margin)
+
+    if x2 - x1 < sw or y2 - y1 < sh:
+        raise ValueError(
+            f"Refinement window too small ({x2 - x1}×{y2 - y1}) for template ({sw}×{sh})"
+        )
+
+    region = unsplit_arr[y1:y2, x1:x2]
+    result = cv2.matchTemplate(region, split_arr, cv2.TM_CCOEFF_NORMED)
+    _, max_score, _, max_loc = cv2.minMaxLoc(result)
+
+    if max_score < min_score:
+        raise ValueError(
+            f"Template match score {max_score:.3f} < threshold {min_score} "
+            f"({split_path.name} in {unsplit_path.name})"
+        )
+
+    offset_x = x1 + max_loc[0]
+    offset_y = y1 + max_loc[1]
+
+    if offset_x + sw > uw or offset_y + sh > uh:
+        raise ValueError(
+            f"Located position ({offset_x}, {offset_y}) + {sw}×{sh} overflows "
+            f"unsplit bounds {uw}×{uh}"
+        )
+
+    return offset_x, offset_y
 
 
 def georef_path_to_page_key(path: str) -> str | None:
@@ -39,54 +117,41 @@ def georef_path_to_page_key(path: str) -> str | None:
     return m.group(1) if m else None
 
 
-def _canvas_coords_from_oim_gcps(oim_item: dict, georef: dict) -> list[list[float]]:
-    """Map georef corner geo coords to full canvas pixel coords using OIM GCPs.
-
-    Used for true sub-images where raw_dims differ significantly from source_dims.
-    The OIM GCPs carry both canvas pixel coordinates and geo coordinates; we fit a
-    geo → canvas-pixel affine and apply it to our georef corner geo coordinates.
-    """
-    oim_gcps = oim_item["body"]["features"]
-    if len(oim_gcps) < 3:
-        raise ValueError(f"Need ≥3 OIM GCPs for affine fit, got {len(oim_gcps)}")
-
-    geo_pts = np.array([feat["geometry"]["coordinates"][:2] for feat in oim_gcps])
-    canvas_pts = np.array([feat["properties"]["resourceCoords"] for feat in oim_gcps])
-
-    X = np.column_stack([geo_pts, np.ones(len(geo_pts))])
-    coef, *_ = np.linalg.lstsq(X, canvas_pts, rcond=None)
-
-    result: list[list[float]] = []
-    for lon, lat in georef["corners"]:
-        v = np.array([lon, lat, 1.0])
-        cx, cy = coef.T @ v
-        result.append([round(float(cx), 1), round(float(cy), 1)])
-    return result
-
-
-def _georef_metadata(georef: dict, is_full_canvas: bool) -> list[dict]:
+def _georef_metadata(
+    georef: dict,
+    is_full_canvas: bool,
+    split_canvas: tuple[float, float, float, float] | None = None,
+) -> list[dict]:
     """Build IIIF metadata entries for streets, intersections, and canvas type.
 
-    is_full_canvas=False marks true sub-images whose comparison against truth is
-    circular (canvas coords were derived from truth GCPs, so compare_iiif_georef.py
-    will always report near-zero error regardless of actual georef quality).
+    split_canvas, when present, gives the sub-image region within the full canvas as
+    (x, y, w, h) in canvas pixel coordinates, derived via template matching rather than
+    truth GCPs. When absent for a sub-image, the comparison is circular.
     """
     n_streets = len(
         set(s["street"] for s in georef.get("streets", []) if s.get("inlier"))
     )
     n_intersections = sum(1 for i in georef.get("intersections", []) if i.get("inlier"))
-    return [
+    entries: list[dict] = [
         {"label": "streets", "value": str(n_streets)},
         {"label": "intersections", "value": str(n_intersections)},
         {"label": "is_full_canvas", "value": "true" if is_full_canvas else "false"},
     ]
+    if split_canvas is not None:
+        x, y, w, h = split_canvas
+        entries += [
+            {"label": "split_canvas_x", "value": str(x)},
+            {"label": "split_canvas_y", "value": str(y)},
+            {"label": "split_canvas_w", "value": str(w)},
+            {"label": "split_canvas_h", "value": str(h)},
+        ]
+    return entries
 
 
 def make_annotation(
     oim_item: dict,
     georef: dict,
-    raw_width: int,
-    raw_height: int,
+    raw_path: Path,
     creator_url: str,
     now: str,
 ) -> dict:
@@ -94,6 +159,12 @@ def make_annotation(
 
     Reuses the OIM annotation's source ID and dimensions so the output is directly
     comparable to main.iiif.json by compare_iiif_georef.py.
+
+    For full-canvas images (raw_dims ≈ source_dims), resource coords are computed
+    by simple proportional scaling. For split sub-images, the unsplit original
+    (e.g. p4.unsplit.jpg) is located via template matching to determine the non-circular
+    canvas placement. Raises ValueError if the unsplit file is missing or the match
+    is too uncertain.
     """
     source = oim_item["target"]["source"]
     source_id: str = source["id"]
@@ -118,10 +189,14 @@ def make_annotation(
         (0, georef_height),
     ]
 
+    raw_width, raw_height = jpeg_dimensions(raw_path)
+
     # Use simple scaling when the raw image covers the full canvas (within 2px tolerance).
     is_full_canvas = (
         abs(raw_width - source_width) <= 2 and abs(raw_height - source_height) <= 2
     )
+    split_canvas: tuple[float, float, float, float] | None = None
+
     if is_full_canvas:
         scale_x = source_width / georef_width
         scale_y = source_height / georef_height
@@ -129,8 +204,46 @@ def make_annotation(
             [round(px * scale_x, 1), round(py * scale_y, 1)] for px, py in pixel_corners
         ]
     else:
-        # True sub-image: use OIM GCPs to establish geo → canvas affine.
-        resource_coords_list = _canvas_coords_from_oim_gcps(oim_item, georef)
+        # True sub-image: locate via template matching for a non-circular placement.
+        page_key_from_raw = raw_path.name.removesuffix(".raw.jpg")
+        if "__" in page_key_from_raw:
+            base_key = page_key_from_raw.split("__")[0]
+            unsplit_path = raw_path.parent / f"{base_key}.unsplit.jpg"
+        else:
+            unsplit_path = None
+
+        if unsplit_path is None or not unsplit_path.exists():
+            missing = unsplit_path.name if unsplit_path else "unsplit file"
+            raise ValueError(
+                f"{missing} not found; cannot place sub-image non-circularly"
+            )
+
+        # locate_split_in_unsplit raises ValueError if the match is uncertain.
+        offset_x_px, offset_y_px = locate_split_in_unsplit(raw_path, unsplit_path)
+        unsplit_width, unsplit_height = jpeg_dimensions(unsplit_path)
+
+        # Scale from unsplit pixel coordinates to canvas coordinates.
+        scale_x = source_width / unsplit_width
+        scale_y = source_height / unsplit_height
+
+        split_cx = offset_x_px * scale_x
+        split_cy = offset_y_px * scale_y
+        split_cw = raw_width * scale_x
+        split_ch = raw_height * scale_y
+        split_canvas = (
+            round(split_cx, 1),
+            round(split_cy, 1),
+            round(split_cw, 1),
+            round(split_ch, 1),
+        )
+
+        resource_coords_list = [
+            [
+                round(split_cx + px * split_cw / georef_width, 1),
+                round(split_cy + py * split_ch / georef_height, 1),
+            ]
+            for px, py in pixel_corners
+        ]
 
     features = [
         {
@@ -155,7 +268,7 @@ def make_annotation(
             "http://iiif.io/api/presentation/3/context.json",
         ],
         "label": label,
-        "metadata": _georef_metadata(georef, is_full_canvas),
+        "metadata": _georef_metadata(georef, is_full_canvas, split_canvas),
         "created": now,
         "modified": now,
         "creator": [creator],
@@ -256,10 +369,12 @@ def main() -> None:
             continue
         georef: dict = json.load(open(path))
         raw_path = Path(path).parent / f"{page_key}.raw.jpg"
-        raw_width, raw_height = jpeg_dimensions(raw_path)
-        annotations.append(
-            make_annotation(oim_item, georef, raw_width, raw_height, args.creator, now)
-        )
+        try:
+            annotations.append(
+                make_annotation(oim_item, georef, raw_path, args.creator, now)
+            )
+        except ValueError as exc:
+            print(f"Warning: skipping {page_key}: {exc}", file=sys.stderr)
 
     print(
         f"Generated {len(annotations)} annotations from {len(georef_paths)} georef files.",

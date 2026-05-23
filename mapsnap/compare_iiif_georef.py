@@ -54,6 +54,17 @@ def extract_metadata_bool(item: dict, label: str) -> bool | None:
     return None
 
 
+def extract_metadata_float(item: dict, label: str) -> float | None:
+    """Extract a float value from a IIIF annotation's metadata list by label."""
+    for entry in item.get("metadata", []):
+        if entry.get("label") == label:
+            try:
+                return float(entry["value"])
+            except (KeyError, ValueError):
+                return None
+    return None
+
+
 def extract_gcps(item: dict) -> list[GCP]:
     """Extract (resourceCoords, (lon, lat)) pairs from a IIIF georeferencing annotation."""
     gcps: list[GCP] = []
@@ -186,8 +197,28 @@ def analyze_pair(truth_item: dict, gen_item: dict) -> dict:
     width = float(truth_item["target"]["source"]["width"])
     height = float(truth_item["target"]["source"]["height"])
 
+    # For split sub-images with known canvas placement, sample only within the
+    # split region so the error metric covers actual split pixels, not the full canvas.
+    split_cx = extract_metadata_float(gen_item, "split_canvas_x")
+    split_cy = extract_metadata_float(gen_item, "split_canvas_y")
+    split_cw = extract_metadata_float(gen_item, "split_canvas_w")
+    split_ch = extract_metadata_float(gen_item, "split_canvas_h")
+
+    if (
+        split_cx is not None
+        and split_cy is not None
+        and split_cw is not None
+        and split_ch is not None
+    ):
+        grid = [
+            (x + split_cx, y + split_cy) for x, y in sample_grid(split_cw, split_ch)
+        ]
+        has_split_coords = True
+    else:
+        grid = sample_grid(width, height)
+        has_split_coords = False
+
     # Positional errors at grid sample points.
-    grid = sample_grid(width, height)
     errors: list[float] = []
     for px, py in grid:
         v = np.array([px, py, 1.0])
@@ -215,6 +246,9 @@ def analyze_pair(truth_item: dict, gen_item: dict) -> dict:
     skew_deg, aniso = truth_distortion(A_truth)
 
     is_full_canvas = extract_metadata_bool(gen_item, "is_full_canvas")
+    # Circular when it's a sub-image whose canvas coords came from truth GCPs,
+    # i.e. is_full_canvas is False and no template-match-derived split coords.
+    is_circular = (is_full_canvas is False) and not has_split_coords
 
     return {
         "page_key": page_key,
@@ -223,8 +257,7 @@ def analyze_pair(truth_item: dict, gen_item: dict) -> dict:
         "n_streets": extract_metadata_int(gen_item, "streets"),
         "n_intersections": extract_metadata_int(gen_item, "intersections"),
         "is_full_canvas": is_full_canvas,
-        # Metrics below are only meaningful when is_full_canvas is True.
-        # For sub-images, canvas coords were derived from truth GCPs → circular.
+        "is_circular": is_circular,
         "rmse_ft": round(rmse_ft, 1),
         "max_ft": round(max_ft, 1),
         "trans_ft": round(trans_ft, 1),
@@ -269,8 +302,7 @@ def print_table(rows: list[dict], missing: list[dict]) -> None:
     for r in rows_sorted:
         n_str = r["n_streets"] if r["n_streets"] is not None else "—"
         n_int = r["n_intersections"] if r["n_intersections"] is not None else "—"
-        # Sub-images: metrics are circular (canvas coords derived from truth GCPs).
-        circular = r.get("is_full_canvas") is False
+        circular = r.get("is_circular", False)
         if circular:
             has_circular = True
         suffix = "*" if circular else ""
@@ -302,8 +334,8 @@ def print_table(rows: list[dict], missing: list[dict]) -> None:
         f"\n{n_paired}/{n_truth_total} pages georeferenced ({n_missing} total losses)"
     )
 
-    # Summary statistics exclude sub-image rows (circular comparison).
-    valid_rows = [r for r in rows if r.get("is_full_canvas") is not False]
+    # Summary statistics exclude rows where the comparison is circular.
+    valid_rows = [r for r in rows if not r.get("is_circular")]
     n_circular = n_paired - len(valid_rows)
     if valid_rows:
         rmsers = np.array([r["rmse_ft"] for r in valid_rows])
@@ -343,6 +375,7 @@ def print_tsv(rows: list[dict], missing: list[dict]) -> None:
         "n_streets",
         "n_intersections",
         "is_full_canvas",
+        "is_circular",
         "rmse_ft",
         "max_ft",
         "trans_ft",
