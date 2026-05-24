@@ -272,7 +272,7 @@ def _two_gcp_affine(
     return np.array([[alpha / cos_phi, beta / cos_phi, tx], [beta, -alpha, ty]])
 
 
-def _georef_gcp_points(
+def georef_gcp_points(
     georef: dict,
 ) -> list[tuple[tuple[float, float], tuple[float, float]]]:
     """Return (pixel, geo) pairs for the GCPs to embed in the IIIF annotation.
@@ -449,7 +449,7 @@ def make_annotation(
     )
     split_canvas: tuple[float, float, float, float] | None = None
 
-    gcp_pts = _georef_gcp_points(georef)
+    gcp_pts = georef_gcp_points(georef)
 
     if is_full_canvas:
         scale_x = source_width / georef_width
