@@ -4,6 +4,14 @@ The goal of mapsnap is to automatically georeference Sanborn Insurance Maps.
 
 ## Performance
 
+Volume | Pages | Num Fit | Median RMSE | Within 15ft | Within 25ft
+------ | ----- | ------- | ----------- | ----------- | -----------
+[New Orleans 1951 Vol 5][nola5] | 109 | 102 (94%) | 11ft | 71% | 87%
+[New Orleans 1896 Vol 2][nola2] | 91 | 80 (88%) | 24ft | 40% | 52%
+[Detroit 1929 Vol 11][detroit] | 103 | 82 (80%) | 16ft | 43% | 67%
+[Chicago 1950 Vol 1][chicago] | 111 | 102 (92%) | 14ft | 58% | 75%
+[Champaign, Ill. 1915][champaign] | 33 | 29 (88%) | 12ft | 69% | 83%
+
 I used [New Orleans 1951 Volume 5][nola5] on OldInsuranceMaps.net for testing:
 
 - Of the 109 images, mapsnap was able to locate 99 of them (91%).
@@ -17,9 +25,12 @@ I used [New Orleans 1951 Volume 5][nola5] on OldInsuranceMaps.net for testing:
 
 RMSE was measured across 49 equally-spaced points on each image. You can [view the full fit][nolaiiif] on Allmaps.
 
-TODO: more tests in more places
-
 [nola5]: https://oldinsurancemaps.net/map/sanborn03376_029
+[nola2]: https://oldinsurancemaps.net/map/sanborn03376_006
+[detroit]: https://oldinsurancemaps.net/map/sanborn03985_041
+[chicago]: https://oldinsurancemaps.net/map/sanborn01790_085
+[champaign]: https://oldinsurancemaps.net/map/sanborn01778_006
+
 [nolaiiif]: https://viewer.allmaps.org/?url=https%3A%2F%2Fraw.githubusercontent.com%2Fdanvk%2Fmapsnap%2Frefs%2Fheads%2Fmain%2Fgallery%2Fnew_orleans_la_1951_vol_5.iiif.json
 
 ## How it works
