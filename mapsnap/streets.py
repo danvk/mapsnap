@@ -8,7 +8,6 @@ import re
 from collections import defaultdict
 from dataclasses import dataclass, field as dataclass_field
 
-import Levenshtein
 import numpy as np
 
 # Map common street-type abbreviations to their full forms for normalization.
@@ -57,9 +56,7 @@ DIRECTION_WORDS: frozenset[str] = frozenset(DIRECTION_ABBREVS.values())
 # (e.g. the label "CHARLES" should still match "SAINT CHARLES AVENUE").
 STRIPPABLE_PREFIXES: frozenset[str] = DIRECTION_WORDS | {"SAINT"}
 
-# Full street-type words (STREET, AVENUE, …); used to strip trailing type suffixes when
-# building fuzzy-match candidates so a misread name like "JOSEBH" can match
-# "JOSEPH STREET" without paying for the full " STREET" edit cost.
+# Full street-type words (STREET, AVENUE, …); used to identify bare-name aliases in build_block_index.
 STREET_TYPES: frozenset[str] = frozenset(STREET_ABBREVS.values())
 
 # Irregular ordinal words for 1–19.
@@ -183,14 +180,6 @@ def is_number_only(text: str) -> bool:
     return not bool(re.search(r"[a-zA-Z]", text))
 
 
-def _strip_street_type(s: str) -> str | None:
-    """Return s without its trailing street-type word, or None if s has no type suffix."""
-    parts = s.rsplit(" ", 1)
-    if len(parts) == 2 and parts[1] in STREET_TYPES:
-        return parts[0]
-    return None
-
-
 def _match_candidates(s: str) -> list[str]:
     """Return the candidate forms to compare against when prefix-matching street key s.
 
@@ -228,26 +217,15 @@ def matches_any_street(text: str, normalized_streets: set[str]) -> bool:
 def canonical_street_match(
     text: str,
     normalized_streets: set[str],
-    fuzzy_threshold: float = 0.0,
-    min_fuzzy_len: int = 5,
 ) -> str | None:
     """Return the key from normalized_streets that best matches text.
 
-    Phase 1 — exact/prefix match: iterates normalized_streets and returns the first
-    key whose prefix-compatible candidates (including direction- and SAINT-stripped
-    forms) match normalize_street(text). Always returns the actual key so downstream
-    block_index lookups succeed even when the label omits a prefix.
-
-    Phase 2 — fuzzy match: if no exact match and fuzzy_threshold > 0, finds the key
-    whose normalized Levenshtein distance to normalize_street(text) is smallest and
-    below the threshold. Each key is compared against both its full form and a
-    type-suffix-stripped form (e.g. "JOSEPH" from "JOSEPH STREET"), so that a
-    one-letter OCR error like "JOSEBH" can match without paying for " STREET".
-    Both strings must be at least min_fuzzy_len characters. Returns None if no match.
+    Iterates normalized_streets and returns the first key whose prefix-compatible
+    candidates (including direction- and SAINT-stripped forms) match
+    normalize_street(text). Always returns the actual key so downstream block_index
+    lookups succeed even when the label omits a prefix. Returns None if no match.
     """
     normalized = normalize_street(text)
-
-    # Phase 1: exact/prefix match — return the actual key from normalized_streets.
     for s in normalized_streets:
         for candidate in _match_candidates(s):
             if (
@@ -259,49 +237,22 @@ def canonical_street_match(
                 or candidate.startswith(normalized + " ")
             ):
                 return s
-
-    # Phase 2: fuzzy match against full key and type-stripped form.
-    if fuzzy_threshold <= 0 or len(normalized) < min_fuzzy_len:
-        return None
-    best_key: str | None = None
-    best_norm_dist = fuzzy_threshold
-    for s in normalized_streets:
-        forms = [s]
-        stripped = _strip_street_type(s)
-        if stripped is not None and len(stripped) >= min_fuzzy_len:
-            forms.append(stripped)
-        for form in forms:
-            if len(form) < min_fuzzy_len:
-                continue
-            dist = Levenshtein.distance(normalized, form)
-            norm_dist = dist / max(len(normalized), len(form))
-            if norm_dist < best_norm_dist:
-                best_norm_dist = norm_dist
-                best_key = s
-    return best_key
+    return None
 
 
 def canonical_street_matches(
     text: str,
     normalized_streets: set[str],
-    fuzzy_threshold: float = 0.0,
-    min_fuzzy_len: int = 5,
 ) -> list[str]:
     """Return all keys from normalized_streets that match text.
 
-    Phase 1 — exact/prefix match: returns every key with at least one
-    prefix-compatible candidate matching normalize_street(text). Unlike
-    canonical_street_match, this collects all matches rather than returning
-    whichever the set iteration yields first, eliminating nondeterminism when
-    a bare label (e.g. "CLINTON") could match multiple full names
-    (e.g. "CLINTON AVENUE" and "CLINTON STREET").
-
-    Phase 2 — fuzzy match: if Phase 1 finds nothing and fuzzy_threshold > 0,
-    returns the single best fuzzy key (OCR errors typically have one target).
+    Returns every key with at least one prefix-compatible candidate matching
+    normalize_street(text). Collects all matches rather than returning whichever
+    the set iteration yields first, eliminating nondeterminism when a bare label
+    (e.g. "CLINTON") could match multiple full names (e.g. "CLINTON AVENUE" and
+    "CLINTON STREET").
     """
     normalized = normalize_street(text)
-
-    # Phase 1: collect every key that has at least one matching candidate form.
     matches: list[str] = []
     for s in normalized_streets:
         for candidate in _match_candidates(s):
@@ -315,29 +266,7 @@ def canonical_street_matches(
             ):
                 matches.append(s)
                 break  # count each key at most once
-
-    if matches:
-        return matches
-
-    # Phase 2: single best fuzzy key (ambiguous OCR errors are rare).
-    if fuzzy_threshold <= 0 or len(normalized) < min_fuzzy_len:
-        return []
-    best_key: str | None = None
-    best_norm_dist = fuzzy_threshold
-    for s in normalized_streets:
-        forms = [s]
-        stripped = _strip_street_type(s)
-        if stripped is not None and len(stripped) >= min_fuzzy_len:
-            forms.append(stripped)
-        for form in forms:
-            if len(form) < min_fuzzy_len:
-                continue
-            dist = Levenshtein.distance(normalized, form)
-            norm_dist = dist / max(len(normalized), len(form))
-            if norm_dist < best_norm_dist:
-                best_norm_dist = norm_dist
-                best_key = s
-    return [best_key] if best_key is not None else []
+    return matches
 
 
 def polygon_side_lengths(polygon: list[list[int]]) -> list[float]:

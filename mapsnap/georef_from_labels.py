@@ -473,132 +473,6 @@ def ransac_hybrid(
     return best_A, best_inliers, best_pair
 
 
-def save_debug_frame(
-    features: list[LabelFeature],
-    block_index: dict[str, list[Block]],
-    affine: np.ndarray,
-    inlier_feat_indices: list[int],
-    cos_phi: float,
-    frame_n: int,
-    debug_dir: str,
-    note: str = "",
-) -> None:
-    """Save a debug PNG showing label projections, snap positions, and street polylines.
-
-    Green = inlier label, red = outlier. Circles = projected label center, × = snap on
-    polyline, dashed line = position error, colored arrow = mapped label direction,
-    blue arrow = polyline tangent at snap point.
-    """
-    import matplotlib.pyplot as plt  # type: ignore[import-untyped]  # noqa: PLC0415
-
-    inlier_set = set(inlier_feat_indices)
-    A_linear = affine[:, :2]
-
-    projected = [apply_affine(affine, *feat.center) for feat in features]
-    if not projected:
-        return
-
-    lons = [p[0] for p in projected]
-    lats = [p[1] for p in projected]
-    pad_lon = (max(lons) - min(lons)) * 0.15 + 0.003
-    pad_lat = (max(lats) - min(lats)) * 0.15 + 0.003
-    lon_min = min(lons) - pad_lon
-    lon_max = max(lons) + pad_lon
-    lat_min = min(lats) - pad_lat
-    lat_max = max(lats) + pad_lat
-
-    fig, ax = plt.subplots(figsize=(10, 10))
-
-    # Draw street polylines that intersect the bounding box.
-    for blocks in block_index.values():
-        for block in blocks:
-            coords = block.coords
-            if (
-                coords[:, 0].max() < lon_min
-                or coords[:, 0].min() > lon_max
-                or coords[:, 1].max() < lat_min
-                or coords[:, 1].min() > lat_max
-            ):
-                continue
-            ax.plot(
-                coords[:, 0], coords[:, 1], color="lightgray", linewidth=0.8, zorder=1
-            )
-
-    arrow_scale = (lon_max - lon_min) * 0.04
-
-    for i, feat in enumerate(features):
-        lon, lat = projected[i]
-        color = "green" if i in inlier_set else "red"
-        feat_blocks = block_index.get(feat.text)
-        snap = project_to_polyline(lon, lat, feat_blocks) if feat_blocks else None
-
-        if snap is not None:
-            s_lon, s_lat, tangent_angle = snap
-            ax.plot(
-                s_lon,
-                s_lat,
-                "x",
-                color=color,
-                markersize=8,
-                markeredgewidth=1.5,
-                zorder=3,
-            )
-            ax.plot(
-                [lon, s_lon],
-                [lat, s_lat],
-                "--",
-                color=color,
-                linewidth=0.8,
-                alpha=0.6,
-                zorder=2,
-            )
-            # Polyline tangent arrow in blue at the snap point.
-            t_dx = np.cos(tangent_angle) * arrow_scale * 0.5
-            t_dy = np.sin(tangent_angle) * arrow_scale * 0.5
-            ax.annotate(
-                "",
-                xy=(s_lon + t_dx, s_lat + t_dy),
-                xytext=(s_lon - t_dx, s_lat - t_dy),
-                arrowprops={"arrowstyle": "->", "color": "steelblue", "lw": 1.0},
-                zorder=4,
-            )
-
-        ax.plot(lon, lat, "o", color=color, markersize=6, zorder=4)
-        # Mapped direction arrow (label direction transformed into geo space).
-        d_pixel = np.array([np.cos(feat.dir_pix), np.sin(feat.dir_pix)])
-        d_geo = A_linear @ d_pixel
-        d_norm = d_geo / (float(np.linalg.norm(d_geo)) + 1e-10)
-        ax.annotate(
-            "",
-            xy=(lon + d_norm[0] * arrow_scale, lat + d_norm[1] * arrow_scale),
-            xytext=(lon - d_norm[0] * arrow_scale, lat - d_norm[1] * arrow_scale),
-            arrowprops={"arrowstyle": "->", "color": color, "lw": 1.2},
-            zorder=5,
-        )
-        ax.text(lon, lat, f"  {feat.raw_text}", fontsize=6, color=color, zorder=6)
-
-    theta_deg = float(
-        np.degrees(np.arctan2(float(A_linear[1, 0]), float(A_linear[0, 0])))
-    )
-    title = (
-        f"Frame {frame_n:03d}  θ={theta_deg:.1f}°  "
-        f"inliers={len(inlier_feat_indices)}/{len(features)}"
-    )
-    if note:
-        title += f"  [{note}]"
-    ax.set_title(title, fontsize=10)
-    ax.set_xlim(lon_min, lon_max)
-    ax.set_ylim(lat_min, lat_max)
-    # 1° lon ≠ 1° lat in metric space; correct aspect so the map looks undistorted.
-    ax.set_aspect(1.0 / cos_phi)
-    ax.set_xlabel("lon")
-    ax.set_ylabel("lat")
-
-    path = os.path.join(debug_dir, f"frame_{frame_n:04d}.png")
-    fig.savefig(path, dpi=120, bbox_inches="tight")
-    plt.close(fig)
-
-
 def _finalize_georef(
     A: np.ndarray,
     features: list[LabelFeature],
@@ -722,12 +596,10 @@ def process_image(
     block_index: dict[str, list[Block]],
     cos_phi: float,
     centerlines_path: str,
-    debug_dir: str | None,
     min_confidence: float = 0.5,
     min_long_side: float = 250.0,
     min_short_side: float = 60.0,
     min_aspect_ratio: float = 2.0,
-    fuzzy_threshold: float = 0.0,
     edge_margin: float = 0.02,
 ) -> ProcessResult:
     """Fit a georeference model for one image and write GCPs to output_path.
@@ -776,9 +648,7 @@ def process_image(
                 or cy > (1 - edge_margin) * img_h
             ):
                 continue
-        canonicals = canonical_street_matches(
-            det["text"], normalized_streets, fuzzy_threshold
-        )
+        canonicals = canonical_street_matches(det["text"], normalized_streets)
         # Deduplicate by block-list identity: aliases like "HENRY" and "HENRY STREET"
         # map to the *same list object* in block_index (set by build_block_index), so
         # id() detects them as duplicates and keeps only the longest (most specific) name.
@@ -839,19 +709,6 @@ def process_image(
         file=sys.stderr,
     )
 
-    if debug_dir:
-        os.makedirs(debug_dir, exist_ok=True)
-        save_debug_frame(
-            features,
-            block_index,
-            A,
-            inlier_feat_indices,
-            cos_phi,
-            0,
-            debug_dir,
-            note="RANSAC",
-        )
-
     residuals: list[float] = []
     for i in inlier_feat_indices:
         feat = features[i]
@@ -910,7 +767,6 @@ def process_deferred_image(
     scale_deg_per_px: float,
     block_index: dict[str, list[Block]],
     cos_phi: float,
-    debug_dir: str | None,
 ) -> ProcessResult:
     """Georeference an image that was deferred due to having only 1 intersection GCP.
 
@@ -973,19 +829,6 @@ def process_deferred_image(
         f"Deferred: {len(inlier_feat_indices)} / {len(features)} inlier labels",
         file=sys.stderr,
     )
-
-    if debug_dir:
-        os.makedirs(debug_dir, exist_ok=True)
-        save_debug_frame(
-            features,
-            block_index,
-            A,
-            inlier_feat_indices,
-            cos_phi,
-            0,
-            debug_dir,
-            note="deferred-init",
-        )
 
     residuals: list[float] = []
     for i in inlier_feat_indices:
@@ -1064,22 +907,6 @@ def main() -> None:
         help="Minimum long/short side ratio for a text polygon (default: 2.0)",
     )
     parser.add_argument(
-        "--debug-dir",
-        metavar="DIR",
-        help="Save debug PNGs to this directory (single-image mode only)",
-    )
-    parser.add_argument(
-        "--fuzzy-match-threshold",
-        type=float,
-        default=0.0,
-        metavar="T",
-        help=(
-            "Allow fuzzy street-name matching up to this normalized Levenshtein "
-            "distance (0–1). 0 disables fuzzy matching (default). "
-            "0.20 catches typical OCR errors like TCHUUPITOULAS→TCHOUPITOULAS."
-        ),
-    )
-    parser.add_argument(
         "--scale",
         type=float,
         default=None,
@@ -1111,9 +938,6 @@ def main() -> None:
         ),
     )
     args = parser.parse_args()
-
-    if args.debug_dir and len(args.images) > 1:
-        parser.error("--debug-dir can only be used with a single image")
 
     geojson: dict = json.load(open(args.centerlines))
     block_index = build_block_index(geojson)
@@ -1149,12 +973,10 @@ def main() -> None:
             block_index=block_index,
             cos_phi=cos_phi,
             centerlines_path=args.centerlines,
-            debug_dir=args.debug_dir,
             min_confidence=args.min_confidence,
             min_long_side=args.min_long_side,
             min_short_side=args.min_short_side,
             min_aspect_ratio=args.min_aspect_ratio,
-            fuzzy_threshold=args.fuzzy_match_threshold,
             edge_margin=args.edge_margin,
         )
         if result.success:
@@ -1202,7 +1024,6 @@ def main() -> None:
                     scale_deg_per_px=scale_deg_per_px,
                     block_index=block_index,
                     cos_phi=cos_phi,
-                    debug_dir=args.debug_dir,
                 )
                 if deferred_result.success:
                     n_success += 1

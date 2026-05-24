@@ -4,10 +4,12 @@ set -x
 
 sanborn_slug=$1
 dirname=$2
-oim_prefix=$3
+relation=$3
+oim_prefix=$4
 
 echo $sanborn_slug
 echo $dirname
+echo $relation
 echo $oim_prefix
 
 dir=data/$dirname
@@ -24,11 +26,7 @@ uv run python mapsnap/download_oim_iiif.py \
     --oim-url-prefix "$oim_prefix"
 
 uv run python mapsnap/scale_images.py $dir/*.raw.jpg
-
-BBOX=$(uv run python mapsnap/iiif_bbox.py $dir/key.iiif.json)
-uv run python mapsnap/download_osm.py \
-    $BBOX \
-    --output $dir/streets.osm.json
+uv run python mapsnap/download_osm.py $relation --output $dir/streets.osm.json
 
 uv run python mapsnap/osm_to_centerlines.py \
     $dir/streets.osm.json \
