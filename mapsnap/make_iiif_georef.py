@@ -166,13 +166,23 @@ def _service_url_to_page_key(url: str) -> str | None:
 
 
 def _load_oim_index(data: dict) -> dict[str, dict]:
-    """Build page_key → item dict from an OIM IIIF AnnotationPage."""
+    """Build page_key → item dict from an OIM IIIF AnnotationPage.
+
+    Labels ending with "[N]" (e.g. "Page 4 [1]") denote split sub-images; the
+    split number is appended to the page key as "__N" (e.g. "p4__1") to match
+    the naming convention used by georef_path_to_page_key.
+    """
     index: dict[str, dict] = {}
     for item in data.get("items", []):
         source_id: str = item.get("target", {}).get("source", {}).get("id", "")
         page_key = _service_url_to_page_key(source_id)
-        if page_key:
-            index[page_key] = item
+        if page_key is None:
+            continue
+        label: str = item.get("label", "")
+        m = re.search(r"\[(\d+)\]$", label)
+        if m:
+            page_key += f"__{m.group(1)}"
+        index[page_key] = item
     return index
 
 

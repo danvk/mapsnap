@@ -4,6 +4,7 @@ import numpy as np
 import pytest
 
 from mapsnap.make_iiif_georef import (
+    _load_oim_index,
     _service_url_to_page_key,
     _two_gcp_affine,
     georef_gcp_points,
@@ -377,3 +378,44 @@ def test_georef_path_split_page():
 def test_georef_path_no_match():
     assert georef_path_to_page_key("data/vol/streets.json") is None
     assert georef_path_to_page_key("data/vol/p16.streets.json") is None
+
+
+# ---------------------------------------------------------------------------
+# _load_oim_index
+# ---------------------------------------------------------------------------
+
+_BASE_URL = "https://tile.loc.gov/image-services/iiif/service:gmd:g4104cm:g01790195001N:01790_01N_1950-0006N/info.json"
+
+
+def _make_oim_item(url: str, label: str) -> dict:
+    return {
+        "label": label,
+        "target": {"source": {"id": url}},
+    }
+
+
+def test_load_oim_index_simple():
+    data = {"items": [_make_oim_item(_BASE_URL, "Page 6")]}
+    index = _load_oim_index(data)
+    assert list(index.keys()) == ["p6n"]
+
+
+def test_load_oim_index_split_label():
+    # Label " [1]" suffix → page key gets "__1" appended.
+    data = {"items": [_make_oim_item(_BASE_URL, "Page 6 [1]")]}
+    index = _load_oim_index(data)
+    assert list(index.keys()) == ["p6n__1"]
+
+
+def test_load_oim_index_split_label_second_half():
+    data = {"items": [_make_oim_item(_BASE_URL, "Page 6 [2]")]}
+    index = _load_oim_index(data)
+    assert list(index.keys()) == ["p6n__2"]
+
+
+def test_load_oim_index_non_sheet_skipped():
+    cover_url = (
+        "https://tile.loc.gov/image-services/iiif/service:gmd:...-covr/info.json"
+    )
+    data = {"items": [_make_oim_item(cover_url, "Cover")]}
+    assert _load_oim_index(data) == {}
