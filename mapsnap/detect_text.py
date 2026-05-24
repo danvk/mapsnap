@@ -77,6 +77,14 @@ def detect_text(
         rotated = img.rotate(angle, expand=True) if angle != 0 else img
         results = reader.readtext(np.array(rotated), **readtext_kwargs)
         for bbox, text, confidence in results:
+            # Reject boxes that are taller than wide in rotated-image coordinates.
+            # Valid text is always wider than tall in the rotated image; a tall box
+            # means the detection is at the wrong angle (e.g. MONTCLAIR at angle=0
+            # instead of 270, or RIVER at angle=90 instead of 0).
+            xs = [float(p[0]) for p in bbox]
+            ys = [float(p[1]) for p in bbox]
+            if (max(ys) - min(ys)) > (max(xs) - min(xs)):
+                continue
             polygon = [[int(x), int(y)] for x, y in bbox]
             if angle == 90:
                 # PIL rotate(90) is CCW; inverse: (rx, ry) -> (W-1-ry, rx)
