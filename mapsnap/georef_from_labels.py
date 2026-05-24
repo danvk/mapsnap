@@ -242,13 +242,15 @@ def project_to_polyline(
     lat: float,
     blocks: list[Block],
     extrapolate: bool = True,
+    max_extrapolation_ft: float = 500.0,
 ) -> tuple[float, float, float] | None:
     """Project (lon, lat) onto the nearest segment across all blocks of a street.
 
     When extrapolate=True (default), terminal endpoints (block start/end that connects
     to no other block) allow the projection to extend beyond the endpoint along the
-    segment direction. This handles labels that lie past the end of an OSM segment
-    because the historical street extended further than current data.
+    segment direction, up to max_extrapolation_ft feet. This handles labels that lie
+    past the end of an OSM segment because the historical street extended further than
+    current data.
 
     When extrapolate=False, projection is always clamped to [0, 1] on each segment,
     so the returned point is guaranteed to lie on a true street segment.
@@ -276,8 +278,22 @@ def project_to_polyline(
             if seg_len_sq < 1e-20:
                 continue
             t_raw = float(np.dot(q - p1, seg) / seg_len_sq)
-            t_min = -float("inf") if (k == 0 and start_terminal) else 0.0
-            t_max = float("inf") if (k == n_segs - 1 and end_terminal) else 1.0
+            is_start_terminal = k == 0 and start_terminal and extrapolate
+            is_end_terminal = k == n_segs - 1 and end_terminal and extrapolate
+            t_min = 0.0
+            t_max = 1.0
+            if is_start_terminal or is_end_terminal:
+                mid_lat = float((p1[1] + p2[1]) / 2)
+                ft_per_deg_lon = _FT_PER_DEG_LAT * math.cos(math.radians(mid_lat))
+                seg_ft = math.sqrt(
+                    (float(seg[0]) * ft_per_deg_lon) ** 2
+                    + (float(seg[1]) * _FT_PER_DEG_LAT) ** 2
+                )
+                max_t = (max_extrapolation_ft / seg_ft) if seg_ft > 0 else 0.0
+                if is_start_terminal:
+                    t_min = -max_t
+                if is_end_terminal:
+                    t_max = 1.0 + max_t
             t = float(np.clip(t_raw, t_min, t_max))
             nearest = p1 + t * seg
             dist = float(np.linalg.norm(q - nearest))
@@ -311,8 +327,10 @@ def label_inliers(
     candidate orientations to avoid terminal-endpoint extrapolation inflating the fit.
     """
     A_linear = affine[:, :2]
-    inliers = []
-    inlier_err = 0.0
+    # Keyed on feat.center so that one raw detection (expanded to multiple canonical
+    # street names, e.g. JEFFERSON → EAST JEFFERSON + WEST JEFFERSON) counts at most
+    # once as an inlier, using the canonical match with the smallest positional error.
+    best_by_center: dict[tuple[float, float], tuple[int, float]] = {}
     for i, feat in enumerate(features):
         blocks = block_index.get(feat.text)
         if not blocks:
@@ -334,9 +352,16 @@ def label_inliers(
         # Undirected: accept if either direction aligns
         if abs(float(np.dot(d_geo_norm, tangent_vec))) < np.cos(dir_threshold):
             continue
-        inliers.append(i)
-        inlier_err += pos_err
-        print(f"    {i} {pos_err:.06f} {feat.text}")
+        if (
+            feat.center not in best_by_center
+            or pos_err < best_by_center[feat.center][1]
+        ):
+            best_by_center[feat.center] = (i, pos_err)
+    inliers = [idx for idx, _ in best_by_center.values()]
+    inlier_err = sum(err for _, err in best_by_center.values())
+    if debug:
+        for idx, err in best_by_center.values():
+            print(f"    {idx} {err:.06f} {features[idx].text}")
     return inliers, inlier_err
 
 
