@@ -23,8 +23,8 @@ import numpy as np
 from PIL import Image
 
 from mapsnap.streets import (
-    Block,
     DIRECTION_WORDS,
+    Block,
     build_block_index,
     canonical_street_matches,
     deduplicate_detections,
@@ -298,6 +298,7 @@ def label_inliers(
     pos_threshold: float = 0.001,
     dir_threshold: float = np.pi / 6,
     extrapolate: bool = True,
+    debug: bool = False,
 ) -> tuple[list[int], float]:
     """Return indices of features whose label center is consistent with the affine.
 
@@ -335,6 +336,7 @@ def label_inliers(
             continue
         inliers.append(i)
         inlier_err += pos_err
+        print(f"    {i} {pos_err:.06f} {feat.text}")
     return inliers, inlier_err
 
 
@@ -462,6 +464,8 @@ def ransac_hybrid(
     cos_phi: float,
     pos_threshold: float = 0.001,
     dir_threshold: float = np.pi / 6,
+    force_pair: tuple[int, int] | None = None,
+    debug: bool = False,
 ) -> tuple[np.ndarray | None, list[int], tuple[int, int] | None]:
     """Find the best similarity affine using intersection GCPs as seeds, label-based inlier scoring.
 
@@ -475,6 +479,8 @@ def ransac_hybrid(
     geometrically consistent rotations without hard-fixing rotation or changing the solver.
 
     Returns the best affine and a list of inlier indices into `features`.
+    If force_pair is set, all pairs are still evaluated and printed, but that
+    pair is selected regardless of score.
     """
     n = len(gcps)
     if n < 2:
@@ -490,9 +496,10 @@ def ransac_hybrid(
         print(f"  {a.label_a} x {a.label_b}")
 
     for pair_idx in combinations(range(n), 2):
-        ga, gb = gcps[pair_idx[0]], gcps[pair_idx[1]]
+        i1, i2 = pair_idx
+        a, b = gcps[i1], gcps[i2]
         # Skip pairs that map to the same OSM intersection — singular by construction.
-        if abs(ga.geo[0] - gb.geo[0]) < 1e-6 and abs(ga.geo[1] - gb.geo[1]) < 1e-6:
+        if abs(a.geo[0] - b.geo[0]) < 1e-6 and abs(a.geo[1] - b.geo[1]) < 1e-6:
             continue
         pairs = [(gcps[k].pixel, gcps[k].geo) for k in pair_idx]
         try:
@@ -500,23 +507,40 @@ def ransac_hybrid(
         except np.linalg.LinAlgError:
             continue
         inliers, err = label_inliers(
-            features, block_index, A, pos_threshold, dir_threshold
+            features, block_index, A, pos_threshold, dir_threshold, debug=debug
         )
 
         # Each inlier contributes (pos_threshold - pos_err) to the score; an inlier at
         # exactly the threshold boundary contributes 0, so a marginal extra inlier cannot
         # blindly beat a tighter fit with one fewer inlier.
         score = float(len(inliers)) * pos_threshold - err
-        a = gcps[pair_idx[0]]
-        b = gcps[pair_idx[1]]
 
+        should_print = debug
         if score > best_score:
             best_score = score
             best_inliers = inliers
             best_A = A
             best_pair = pair_idx
+            should_print = True
+        if should_print:
             print(
-                f"  {score:.06f} {a.label_a} x {a.label_b} + {b.label_a} x {b.label_b}"
+                f"  {i1} {i2} {score:.06f} ({len(inliers)}) {a.label_a} x {a.label_b} + {b.label_a} x {b.label_b}"
+            )
+
+    if force_pair is not None:
+        i1, i2 = force_pair
+        forced_pairs = [(gcps[i1].pixel, gcps[i1].geo), (gcps[i2].pixel, gcps[i2].geo)]
+        try:
+            forced_A = solve_similarity_2pts(forced_pairs, cos_phi)
+            forced_inliers, _ = label_inliers(
+                features, block_index, forced_A, pos_threshold, dir_threshold
+            )
+            print(f"Forcing pair {force_pair}.", file=sys.stderr)
+            return forced_A, forced_inliers, force_pair
+        except np.linalg.LinAlgError:
+            print(
+                f"Forced pair {force_pair} is degenerate; falling back to best.",
+                file=sys.stderr,
             )
 
     return best_A, best_inliers, best_pair
@@ -650,6 +674,8 @@ def process_image(
     min_short_side: float = 60.0,
     min_aspect_ratio: float = 2.0,
     edge_margin: float = 0.02,
+    force_intersection: tuple[int, int] | None = None,
+    debug: bool = False,
 ) -> ProcessResult:
     """Fit a georeference model for one image and write GCPs to output_path.
 
@@ -745,10 +771,7 @@ def process_image(
         )
 
     A, inlier_feat_indices, seed_pair = ransac_hybrid(
-        gcps,
-        features,
-        block_index,
-        cos_phi,
+        gcps, features, block_index, cos_phi, force_pair=force_intersection, debug=debug
     )
     if A is None:
         print("RANSAC failed: no valid affine found.", file=sys.stderr)
@@ -976,6 +999,15 @@ def main() -> None:
         ),
     )
     parser.add_argument(
+        "--force-intersection",
+        metavar="I,J",
+        default=None,
+        help=(
+            "Force RANSAC to use GCP pair I,J (0-based indices printed during the run) "
+            "regardless of score. Only valid with a single image."
+        ),
+    )
+    parser.add_argument(
         "--scale-outlier-threshold",
         type=float,
         default=0.25,
@@ -986,7 +1018,21 @@ def main() -> None:
             "Set to 0 to disable. Reference is --scale if given, else the median."
         ),
     )
+    parser.add_argument(
+        "--debug", action="store_true", help="Print additional debug information"
+    )
     args = parser.parse_args()
+
+    force_intersection: tuple[int, int] | None = None
+    if args.force_intersection is not None:
+        if len(args.images) != 1:
+            parser.error("--force-intersection requires exactly one image argument")
+        parts = args.force_intersection.split(",")
+        if len(parts) != 2:
+            parser.error(
+                "--force-intersection must be two comma-separated integers, e.g. '2,3'"
+            )
+        force_intersection = (int(parts[0]), int(parts[1]))
 
     geojson: dict = json.load(open(args.centerlines))
     block_index = build_block_index(geojson)
@@ -1027,6 +1073,8 @@ def main() -> None:
             min_short_side=args.min_short_side,
             min_aspect_ratio=args.min_aspect_ratio,
             edge_margin=args.edge_margin,
+            force_intersection=force_intersection,
+            debug=args.debug,
         )
         if result.success:
             n_success += 1
