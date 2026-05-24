@@ -868,8 +868,9 @@ def process_deferred_image(
     """Georeference an image that was deferred due to having only 1 intersection GCP.
 
     Uses the provided scale (deg/px) and estimates rotation from label-angle histogram
-    cross-correlation. Tries both candidate orientations (R and R+π, since the histogram
-    gives an undirected angle) and picks the one that produces more inlier labels.
+    cross-correlation. The rotation estimate is undirected (mod π); the 180° ambiguity
+    is resolved by requiring north to point upward in the image (A[1,1] < 0, equivalently
+    cos(rotation) > 0).
     """
     image_path: str = deferred["image_path"]
     output_path: str = deferred["output_path"]
@@ -884,44 +885,21 @@ def process_deferred_image(
         print("Could not estimate rotation from GCP street angles.", file=sys.stderr)
         return ProcessResult(success=False)
 
-    # Try both directed orientations; the rotation estimate is undirected (mod π).
-    # Two-level scoring:
-    #   Primary: inlier count with extrapolation at terminal endpoints, so labels near
-    #            true street ends are not unfairly excluded.
-    #   Tiebreaker: negated total error without extrapolation, so when counts are equal
-    #               the orientation that keeps labels on actual street segments wins.
-    pos_threshold = 0.001
-    best_A: np.ndarray | None = None
-    best_inliers: list[int] = []
-    best_score: tuple[int, float] = (-1, -float("inf"))
-    for rot in (rotation, rotation + math.pi):
-        A_cand = build_affine_from_scale_rotation_gcp(
-            scale_deg_per_px, rot, gcp, cos_phi
-        )
-        inliers_cand, _ = label_inliers(
-            features, block_index, A_cand, pos_threshold, extrapolate=True
-        )
-        # Compute no-extrapolation error for the inliers as the tiebreaker.
-        err_no_ext = 0.0
-        for i in inliers_cand:
-            feat = features[i]
-            blocks = block_index.get(feat.text, [])
-            lon, lat = apply_affine(A_cand, *feat.center)
-            snap = project_to_polyline(lon, lat, blocks, extrapolate=False)
-            if snap is not None:
-                err_no_ext += float(np.linalg.norm([lon - snap[0], lat - snap[1]]))
-        score: tuple[int, float] = (len(inliers_cand), -err_no_ext)
-        if score > best_score:
-            best_score = score
-            best_inliers = inliers_cand
-            best_A = A_cand
+    # The rotation estimate is mod π; pick the directed angle where north points up.
+    # In the similarity affine, A[1,1] = -scale·cos(rotation); north is up when
+    # A[1,1] < 0, i.e. cos(rotation) > 0.
+    if math.cos(rotation) < 0:
+        rotation += math.pi
 
-    if best_A is None:
+    pos_threshold = 0.001
+    A = build_affine_from_scale_rotation_gcp(scale_deg_per_px, rotation, gcp, cos_phi)
+    inlier_feat_indices, _ = label_inliers(
+        features, block_index, A, pos_threshold, extrapolate=True
+    )
+
+    if not inlier_feat_indices:
         print("No inliers found for deferred image.", file=sys.stderr)
         return ProcessResult(success=False)
-
-    A = best_A
-    inlier_feat_indices = best_inliers
     print(
         f"Deferred: {len(inlier_feat_indices)} / {len(features)} inlier labels",
         file=sys.stderr,
