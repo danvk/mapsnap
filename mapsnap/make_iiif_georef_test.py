@@ -1,9 +1,14 @@
-"""Unit tests for georef_gcp_points."""
+"""Unit tests for make_iiif_georef helpers."""
 
 import numpy as np
 import pytest
 
-from mapsnap.make_iiif_georef import _two_gcp_affine, georef_gcp_points
+from mapsnap.make_iiif_georef import (
+    _service_url_to_page_key,
+    _two_gcp_affine,
+    georef_gcp_points,
+    georef_path_to_page_key,
+)
 
 GCP = tuple[tuple[float, float], tuple[float, float]]
 
@@ -302,3 +307,73 @@ def test_third_gcp_geo_is_projected_not_raw():
     expected = A @ np.array([500.0, 900.0, 1.0])
     assert geo3[0] == pytest.approx(expected[0], abs=1e-7)
     assert geo3[1] == pytest.approx(expected[1], abs=1e-7)
+
+
+# ---------------------------------------------------------------------------
+# _service_url_to_page_key
+# ---------------------------------------------------------------------------
+
+
+def test_service_url_oim_with_info_json():
+    # OIM format: /info.json suffix is stripped before parsing.
+    url = "https://tile.loc.gov/image-services/iiif/service:gmd:g4104cm:g01790195001N:01790_01N_1950-0006N/info.json"
+    assert _service_url_to_page_key(url) == "p6n"
+
+
+def test_service_url_loc_no_info_json():
+    # LOC manifest format: no /info.json suffix.
+    url = "https://tile.loc.gov/image-services/iiif/service:gmd:g4104cm:g01790195001N:01790_01N_1950-0006N"
+    assert _service_url_to_page_key(url) == "p6n"
+
+
+def test_service_url_large_page_number():
+    assert _service_url_to_page_key("...:01790_01N_1950-0103W") == "p103w"
+
+
+def test_service_url_lowercase_suffix():
+    # Brooklyn-style: lowercase sequential letter suffix.
+    assert _service_url_to_page_key("...:05791_02_1939-0027s") == "p27s"
+
+
+def test_service_url_no_suffix_letter():
+    assert _service_url_to_page_key("...:01790_01N_1950-0050") == "p50"
+
+
+def test_service_url_strips_leading_zeros():
+    assert _service_url_to_page_key("...-0001N") == "p1n"
+
+
+def test_service_url_non_sheet_returns_none():
+    # Covers, indexes, title pages start with a letter after "-" — not a page number.
+    assert _service_url_to_page_key("...-covr") is None
+    assert _service_url_to_page_key("...-titl") is None
+
+
+# ---------------------------------------------------------------------------
+# georef_path_to_page_key
+# ---------------------------------------------------------------------------
+
+
+def test_georef_path_simple():
+    assert georef_path_to_page_key("data/vol/p16.georef.json") == "p16"
+
+
+def test_georef_path_with_direction_suffix():
+    assert georef_path_to_page_key("data/vol/p16s.georef.json") == "p16s"
+
+
+def test_georef_path_with_underscore_prefix():
+    assert georef_path_to_page_key("data/vol/chicago_p428.georef.json") == "p428"
+
+
+def test_georef_path_with_gcps_infix():
+    assert georef_path_to_page_key("data/vol/p16s.gcps.georef.json") == "p16s"
+
+
+def test_georef_path_split_page():
+    assert georef_path_to_page_key("data/vol/p20__2.georef.json") == "p20__2"
+
+
+def test_georef_path_no_match():
+    assert georef_path_to_page_key("data/vol/streets.json") is None
+    assert georef_path_to_page_key("data/vol/p16.streets.json") is None
