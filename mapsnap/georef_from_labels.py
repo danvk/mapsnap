@@ -338,6 +338,46 @@ def label_inliers(
     return inliers, inlier_err
 
 
+_CLUSTER_THRESHOLD_FT: float = 60.0
+
+
+def _cluster_geo_coords(
+    coords: list[tuple[float, float]],
+) -> list[list[tuple[float, float]]]:
+    """Group geographic coordinates into clusters by proximity (single-linkage, 60ft threshold).
+
+    Points within 60ft of any point already in a cluster are merged into that cluster.
+    Each returned cluster represents one distinct intersection event; callers should emit
+    one GCP per cluster using the cluster centroid as the geo coordinate.
+
+    A 60ft threshold separates same-intersection nodes (nearby GeoJSON vertices) from
+    distinct intersection events such as jogging streets (Newport St jogs ~115ft along
+    East Jefferson Ave) or divided-highway carriageway crossings.
+    """
+    if not coords:
+        return []
+    mean_lat = sum(p[1] for p in coords) / len(coords)
+    ft_per_deg_lon = _FT_PER_DEG_LAT * math.cos(math.radians(mean_lat))
+    clusters: list[list[tuple[float, float]]] = []
+    for pt in coords:
+        merged = False
+        for cluster in clusters:
+            for c in cluster:
+                dist_ft = math.sqrt(
+                    ((pt[0] - c[0]) * ft_per_deg_lon) ** 2
+                    + ((pt[1] - c[1]) * _FT_PER_DEG_LAT) ** 2
+                )
+                if dist_ft < _CLUSTER_THRESHOLD_FT:
+                    cluster.append(pt)
+                    merged = True
+                    break
+            if merged:
+                break
+        if not merged:
+            clusters.append([pt])
+    return clusters
+
+
 def find_intersection_gcps(
     features: list[LabelFeature],
     block_index: dict[str, list[Block]],
@@ -347,8 +387,13 @@ def find_intersection_gcps(
     A shared coordinate means the streets physically meet at that point. The pixel
     coordinate is the crossing of the two label direction lines (extrapolated from each
     label center). Pairs are skipped if the lines are nearly parallel or if the crossing
-    falls implausibly far from both labels. The geo coordinate is the centroid of all
-    shared endpoint coordinates.
+    falls implausibly far from both labels.
+
+    Shared coordinates are clustered by proximity (60ft threshold). Each cluster becomes
+    a separate GCP candidate with its own centroid geo coordinate. This correctly handles
+    jogging streets (e.g. Newport St crosses East Jefferson Ave at two points 115ft apart)
+    and divided highways (two carriageway crossings) — both yield two candidate GCPs that
+    RANSAC can evaluate independently.
 
     Returns GCPs sorted by pixel_dist ascending (closer labels = better pixel estimate).
     """
@@ -380,28 +425,32 @@ def find_intersection_gcps(
             shared = street_coords[text_a] & street_coords[text_b]
             if not shared:
                 continue
-            geo_pts = np.array(list(shared))
-            geo = (float(geo_pts[:, 0].mean()), float(geo_pts[:, 1].mean()))
-            # Try every combination of detected instances for the two streets.
-            # RANSAC will select the geometrically consistent subset.
-            for fa in feats_by_text[text_a]:
-                for fb in feats_by_text[text_b]:
-                    ca, cb = np.array(fa.center), np.array(fb.center)
-                    pixel_dist = float(np.linalg.norm(ca - cb))
-                    crossing = pixel_line_intersection(ca, fa.dir_pix, cb, fb.dir_pix)
-                    if crossing is None:
-                        continue
-                    gcps.append(
-                        IntersectionGCP(
-                            label_a=text_a,
-                            label_b=text_b,
-                            pixel=crossing,
-                            geo=geo,
-                            pixel_dist=pixel_dist,
-                            feat_a=fa,
-                            feat_b=fb,
+            geo_clusters = _cluster_geo_coords(sorted(shared))
+            for cluster in geo_clusters:
+                cluster_pts = np.array(cluster)
+                geo = (float(cluster_pts[:, 0].mean()), float(cluster_pts[:, 1].mean()))
+                # Try every combination of detected instances for the two streets.
+                # RANSAC will select the geometrically consistent subset.
+                for fa in feats_by_text[text_a]:
+                    for fb in feats_by_text[text_b]:
+                        ca, cb = np.array(fa.center), np.array(fb.center)
+                        pixel_dist = float(np.linalg.norm(ca - cb))
+                        crossing = pixel_line_intersection(
+                            ca, fa.dir_pix, cb, fb.dir_pix
                         )
-                    )
+                        if crossing is None:
+                            continue
+                        gcps.append(
+                            IntersectionGCP(
+                                label_a=text_a,
+                                label_b=text_b,
+                                pixel=crossing,
+                                geo=geo,
+                                pixel_dist=pixel_dist,
+                                feat_a=fa,
+                                feat_b=fb,
+                            )
+                        )
 
     return sorted(gcps, key=lambda g: g.pixel_dist)
 
