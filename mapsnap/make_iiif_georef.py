@@ -334,13 +334,26 @@ def _georef_gcp_points(
     def dist_to_center(x: float, y: float) -> float:
         return float(np.linalg.norm(np.array([x, y]) - image_center))
 
+    # Non-collinearity helpers shared by options 1 and 2.
+    dist12 = float(np.linalg.norm(p2 - p1))
+    d_unit = (p2 - p1) / dist12
+    min_offset = 0.25 * dist12
+
+    def perp_dist(x: float, y: float) -> float:
+        v = np.array([x, y]) - p1
+        return abs(float(v[0] * d_unit[1] - v[1] * d_unit[0]))
+
     # Option 1: intersection formed by streets already in the initial pair set.
+    # Non-collinearity check prevents degenerate cases where an alias pair (e.g.
+    # "KORTE AVENUE x PHILIP STREET" when "KORTE AVENUE" and "KORTE STREET" are the
+    # same physical street) duplicates an existing initial GCP pixel position.
     option1 = [
         (float(i["x"]), float(i["y"]))
         for i in all_intersections
         if frozenset({i["label_a"], i["label_b"]}) not in initial_pairs
         and i["label_a"] in streets_set
         and i["label_b"] in streets_set
+        and perp_dist(float(i["x"]), float(i["y"])) >= min_offset
     ]
 
     if option1:
@@ -349,19 +362,11 @@ def _georef_gcp_points(
         # Option 2: any other intersection; inliers preferred, then closest to center.
         # Only consider candidates offset from the P1-P2 line by ≥ 25% of dist(P1, P2)
         # to avoid near-collinear third points that degrade the affine fit.
-        dist12 = float(np.linalg.norm(p2 - p1))
-        d_unit = (p2 - p1) / dist12
-
-        def perp_dist(x: float, y: float) -> float:
-            v = np.array([x, y]) - p1
-            return abs(float(v[0] * d_unit[1] - v[1] * d_unit[0]))
-
         others = [
             (float(i["x"]), float(i["y"]), bool(i.get("inlier")))
             for i in all_intersections
             if frozenset({i["label_a"], i["label_b"]}) not in initial_pairs
         ]
-        min_offset = 0.25 * dist12
         inliers = [
             (x, y)
             for x, y, inlier in others
