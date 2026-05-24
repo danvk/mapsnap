@@ -333,7 +333,6 @@ def print_table(rows: list[dict], missing: list[dict]) -> None:
         print(
             f"|rot|: mean={float(np.mean(rot_errs)):.1f}°  median={float(np.median(rot_errs)):.1f}°"
         )
-        n_paired = len(rows)
         for thresh in (15, 25, 50, 100, 500, 1000):
             count = int(np.sum(rmsers <= thresh))
             print(

@@ -14,7 +14,7 @@ import sys
 from pathlib import Path
 
 import numpy as np
-from compare_iiif_georef import extract_gcps, fit_affine
+from mapsnap.compare_iiif_georef import extract_gcps, fit_affine
 
 
 def image_corners(width: float, height: float) -> list[tuple[float, float]]:

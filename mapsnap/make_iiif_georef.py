@@ -142,7 +142,7 @@ def georef_path_to_page_key(path: str) -> str | None:
     Accepts filenames ending in '_p16s.georef.json', '_p16.georef.json', or
     '_p16s.gcps.georef.json' (the '.gcps' infix is optional).
     """
-    m = re.search(r"(?:\b|_)(p\d+[snew]?(?:__\d)?)(?:\.[^.]+)?\.georef\.json$", path)
+    m = re.search(r"(?:\b|_)(p\d+[snew]?(?:__\d+)?)(?:\.[^.]+)?\.georef\.json$", path)
     return m.group(1) if m else None
 
 
@@ -451,6 +451,8 @@ def make_annotation(
     georef_width = georef["width"]
     georef_height = georef["height"]
 
+    if not raw_path.exists():
+        raise ValueError(f"raw image not found: {raw_path}")
     raw_width, raw_height = jpeg_dimensions(raw_path)
 
     # Use simple scaling when the raw image covers the full canvas (within 2px tolerance).

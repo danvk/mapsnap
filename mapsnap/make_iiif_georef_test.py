@@ -375,6 +375,10 @@ def test_georef_path_split_page():
     assert georef_path_to_page_key("data/vol/p20__2.georef.json") == "p20__2"
 
 
+def test_georef_path_split_page_multi_digit():
+    assert georef_path_to_page_key("data/vol/p4__10.georef.json") == "p4__10"
+
+
 def test_georef_path_no_match():
     assert georef_path_to_page_key("data/vol/streets.json") is None
     assert georef_path_to_page_key("data/vol/p16.streets.json") is None
