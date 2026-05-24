@@ -79,6 +79,7 @@ textarea {
 .image-wrapper img {
   display: block;
   max-height: 90vh;
+  max-width: 800px;
   width: auto;
 }
 
