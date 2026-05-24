@@ -61,6 +61,9 @@ const opacitySlider = document.getElementById(
   'opacity-slider',
 ) as HTMLInputElement;
 const opacityValue = document.getElementById('opacity-value') as HTMLElement;
+const showStreetsOnImageCheckbox = document.getElementById(
+  'show-streets-on-image',
+) as HTMLInputElement;
 const showLabelsCheckbox = document.getElementById(
   'show-labels',
 ) as HTMLInputElement;
@@ -905,72 +908,74 @@ function render(): void {
 
   // Street label dots with direction arrows. Outliers grey, inliers orange.
   // Render outliers first so inliers appear on top when they overlap.
-  const sortedStreets = [...streets].sort(
-    (a, b) => (a.inlier ? 1 : 0) - (b.inlier ? 1 : 0),
-  );
-  for (const st of sortedStreets) {
-    const [cx, cy] = toDisplay(st.x, st.y);
-    const color = !colorByInlierCheckbox.checked
-      ? '#ff0000'
-      : st.inlier !== false
-        ? 'orange'
-        : '#888888';
-    const g = document.createElementNS('http://www.w3.org/2000/svg', 'g');
-
-    const circle = document.createElementNS(
-      'http://www.w3.org/2000/svg',
-      'circle',
+  if (showStreetsOnImageCheckbox.checked) {
+    const sortedStreets = [...streets].sort(
+      (a, b) => (a.inlier ? 1 : 0) - (b.inlier ? 1 : 0),
     );
-    circle.setAttribute('cx', String(cx));
-    circle.setAttribute('cy', String(cy));
-    circle.setAttribute('r', '8');
-    circle.setAttribute('fill', color);
-    circle.setAttribute('fill-opacity', '0.7');
-    circle.setAttribute('stroke', 'white');
-    circle.setAttribute('stroke-width', '2');
-    g.appendChild(circle);
+    for (const st of sortedStreets) {
+      const [cx, cy] = toDisplay(st.x, st.y);
+      const color = !colorByInlierCheckbox.checked
+        ? '#ff0000'
+        : st.inlier !== false
+          ? 'orange'
+          : '#888888';
+      const g = document.createElementNS('http://www.w3.org/2000/svg', 'g');
 
-    if (st.dir_x !== undefined && st.dir_y !== undefined) {
-      const arrowLen = 40;
-      const dx = (st.dir_x * svgW) / jsonWidth;
-      const dy = (st.dir_y * svgH) / jsonHeight;
-      const len = Math.sqrt(dx * dx + dy * dy);
-      const ndx = (dx / len) * arrowLen;
-      const ndy = (dy / len) * arrowLen;
+      const circle = document.createElementNS(
+        'http://www.w3.org/2000/svg',
+        'circle',
+      );
+      circle.setAttribute('cx', String(cx));
+      circle.setAttribute('cy', String(cy));
+      circle.setAttribute('r', '8');
+      circle.setAttribute('fill', color);
+      circle.setAttribute('fill-opacity', '0.7');
+      circle.setAttribute('stroke', 'white');
+      circle.setAttribute('stroke-width', '2');
+      g.appendChild(circle);
 
-      for (const sign of [1, -1] as const) {
-        const line = document.createElementNS(
-          'http://www.w3.org/2000/svg',
-          'line',
-        );
-        line.setAttribute('x1', String(cx));
-        line.setAttribute('y1', String(cy));
-        line.setAttribute('x2', String(cx + sign * ndx));
-        line.setAttribute('y2', String(cy + sign * ndy));
-        line.setAttribute('stroke', color);
-        line.setAttribute('stroke-width', '2');
-        line.setAttribute('stroke-opacity', '0.9');
-        g.appendChild(line);
+      if (st.dir_x !== undefined && st.dir_y !== undefined) {
+        const arrowLen = 40;
+        const dx = (st.dir_x * svgW) / jsonWidth;
+        const dy = (st.dir_y * svgH) / jsonHeight;
+        const len = Math.sqrt(dx * dx + dy * dy);
+        const ndx = (dx / len) * arrowLen;
+        const ndy = (dy / len) * arrowLen;
+
+        for (const sign of [1, -1] as const) {
+          const line = document.createElementNS(
+            'http://www.w3.org/2000/svg',
+            'line',
+          );
+          line.setAttribute('x1', String(cx));
+          line.setAttribute('y1', String(cy));
+          line.setAttribute('x2', String(cx + sign * ndx));
+          line.setAttribute('y2', String(cy + sign * ndy));
+          line.setAttribute('stroke', color);
+          line.setAttribute('stroke-width', '2');
+          line.setAttribute('stroke-opacity', '0.9');
+          g.appendChild(line);
+        }
       }
+
+      const label = document.createElementNS(
+        'http://www.w3.org/2000/svg',
+        'text',
+      );
+      label.setAttribute('x', String(cx + 12));
+      label.setAttribute('y', String(cy - 4));
+      label.setAttribute('font-size', '13');
+      label.setAttribute('font-family', 'sans-serif');
+      label.setAttribute('font-weight', 'bold');
+      label.setAttribute('fill', color);
+      label.setAttribute('stroke', 'white');
+      label.setAttribute('stroke-width', '3');
+      label.setAttribute('paint-order', 'stroke');
+      label.textContent = st.street;
+      g.appendChild(label);
+
+      svg.appendChild(g);
     }
-
-    const label = document.createElementNS(
-      'http://www.w3.org/2000/svg',
-      'text',
-    );
-    label.setAttribute('x', String(cx + 12));
-    label.setAttribute('y', String(cy - 4));
-    label.setAttribute('font-size', '13');
-    label.setAttribute('font-family', 'sans-serif');
-    label.setAttribute('font-weight', 'bold');
-    label.setAttribute('fill', color);
-    label.setAttribute('stroke', 'white');
-    label.setAttribute('stroke-width', '3');
-    label.setAttribute('paint-order', 'stroke');
-    label.textContent = st.street;
-    g.appendChild(label);
-
-    svg.appendChild(g);
   }
 
   // Intersection GCPs: blue = initial seed, red = inlier, yellow = outlier.
@@ -1079,6 +1084,10 @@ showLabelsCheckbox.addEventListener('change', () => {
   }
 });
 
+showStreetsOnImageCheckbox.addEventListener('change', () => {
+  render();
+});
+
 showIntersectionsOnImageCheckbox.addEventListener('change', () => {
   render();
 });
@@ -1093,6 +1102,19 @@ showIntersectionsCheckbox.addEventListener('change', () => {
   const visible = showIntersectionsCheckbox.checked ? 'visible' : 'none';
   for (const id of ['intersections-circle', 'intersections-text']) {
     if (map.getLayer(id)) map.setLayoutProperty(id, 'visibility', visible);
+  }
+});
+
+document.addEventListener('keydown', (e) => {
+  if (e.key !== 'p' || streetsMode) return;
+  const steps = [0, 50, 100];
+  const current = Number(opacitySlider.value);
+  const nextIdx = (steps.indexOf(current) + 1) % steps.length;
+  const next = steps[nextIdx] ?? steps[0];
+  opacitySlider.value = String(next);
+  opacityValue.textContent = `${next}%`;
+  if (map && mapReady && map.getLayer('warped')) {
+    map.setPaintProperty('warped', 'raster-opacity', next / 100);
   }
 });
 
