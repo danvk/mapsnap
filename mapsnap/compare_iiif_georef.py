@@ -313,8 +313,9 @@ def print_table(rows: list[dict], missing: list[dict]) -> None:
     n_paired = len(rows)
     n_missing = len(missing)
     n_truth_total = n_paired + n_missing
+    pct = 100 * n_paired / n_truth_total
     print(
-        f"\n{n_paired}/{n_truth_total} pages georeferenced ({n_missing} total losses)"
+        f"\n{n_paired}/{n_truth_total} = {pct:.02f}% pages georeferenced ({n_missing} total losses)"
     )
 
     if rows:
