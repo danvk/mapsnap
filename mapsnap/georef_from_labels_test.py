@@ -1,6 +1,5 @@
 """Tests for georef_from_labels helpers."""
 
-
 import numpy as np
 
 from mapsnap.georef_from_labels import (
