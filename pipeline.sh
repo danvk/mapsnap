@@ -1,4 +1,11 @@
 #!/usr/bin/env bash
+# This runs the full pipeline on an OIM map:
+# - downloading images from OIM and streets from OSM
+# - running OCR on the images
+# - georeferencing the images
+# - making an IIIF file
+# - comparing the generated IIIF against OIM's
+
 set -o errexit
 set -x
 
@@ -37,16 +44,4 @@ uv run python mapsnap/generate_intersections.py $dir/streets.osm.json $dir/inter
 
 uv run python mapsnap/detect_text.py --centerlines $dir/centerlines.geojson $dir/*.scaled.jpg
 
-uv run mapsnap/georef_from_labels.py $dir/*.scaled.jpg \
-    --centerlines $dir/centerlines.geojson \
-    --min-long-side 50 \
-    --min-short-side 20 \
-    --min-confidence 0.15
-
-uv run python mapsnap/make_iiif_georef.py \
-    $dir/main.iiif.json $dir'/*.georef.json' \
-    --output $dir/generated.iiif.json
-
-uv run python mapsnap/compare_iiif_georef.py \
-    $dir/main.iiif.json $dir/generated.iiif.json \
-    | tee $dir/comparison.txt
+./fit.sh $dir mapsnap
