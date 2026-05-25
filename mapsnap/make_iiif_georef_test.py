@@ -88,6 +88,25 @@ def test_one_initial_returns_corners_plus_initial():
     assert pts[4][2] == "gcp"
 
 
+def test_deferred_single_gcp_includes_inlier():
+    # Deferred image: one inlier intersection with initial=False (as written by
+    # process_deferred_image). Should appear as "gcp" alongside the four corners.
+    georef = make_georef(
+        2000,
+        2000,
+        [
+            make_intersection(
+                "A", "B", 183, 1953, lon=-82.97, lat=42.37, inlier=True, initial=False
+            )
+        ],
+    )
+    pts = georef_gcp_points(georef)
+    assert len(pts) == 5
+    assert all(p[2] == "corner" for p in pts[:4])
+    assert pts[4][0] == (183.0, 1953.0)
+    assert pts[4][2] == "gcp"
+
+
 def test_coincident_initials_returns_corners():
     # Both initial intersections at the same pixel → degenerate, fall back to corners
     # plus both initial GCPs.
@@ -144,7 +163,7 @@ def test_option1_uses_cross_intersection():
     pts = georef_gcp_points(georef)
     assert len(pts) == 3
     assert pts[2][0] == (500.0, 900.0)
-    assert pts[2][2] == "gcp"
+    assert pts[2][2] == "intersection"
 
 
 def test_option1_picks_candidate_closest_to_center():
