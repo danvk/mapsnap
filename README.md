@@ -4,23 +4,30 @@ The goal of mapsnap is to automatically georeference Sanborn Insurance Maps.
 
 ## Performance
 
-I used [New Orleans 1951 Volume 5][nola5] on OldInsuranceMaps.net for testing:
+Test data comes from hand-geocoding by volunteers on OldInsuranceMaps.net:
 
-- Of the 109 images, mapsnap was able to locate 99 of them (91%).
-- On these 99 maps:
-  - The average RMSE vs OIM's hand geocoding was 15ft.
-  - The median RMSE was 11ft.
-  - 76% of maps had an RMSE <= 15ft.
-  - 88% had an RMSE <= 25ft.
-  - 95% had an RMSE <= 50ft.
-  - The worse RMSE was 77ft.
+Volume | Pages | Num Fit | Median RMSE | Within 15ft | Within 25ft | Allmaps
+------ | ----- | ------- | ----------- | ----------- | ----------- | -------
+[New Orleans 1951 Vol 5][nola5] | 109 | 101 (93%) | 12ft | 67% | 84% | [view][nola5-iiif]
+[New Orleans 1896 Vol 2][nola2] | 91 | 83 (91%) | 25ft | 37% | 49% | [view][nola2-iiif]
+[Detroit 1929 Vol 11][detroit] | 103 | 85 (83%) | 13ft | 58% | 73% | [view][detroit-iiif]
+[Chicago 1950 Vol 1][chicago] | 111 | 100 (90%) | 10ft | 70% | 83% | [view][chicago-iiif]
+[Champaign, Ill. 1915][champaign] | 33 | 28 (85%) | 11ft | 79% | 93% | [view][champaign-iiif]
 
-RMSE was measured across 49 equally-spaced points on each image. You can [view the full fit][nolaiiif] on Allmaps.
-
-TODO: more tests in more places
+RMSE was measured across 49 equally-spaced points on each image. You can view the fits on Allmaps or get the IIIF files from the `gallery` directory. For notes on poor fits, see [test data notes][].
 
 [nola5]: https://oldinsurancemaps.net/map/sanborn03376_029
-[nolaiiif]: https://viewer.allmaps.org/?url=https%3A%2F%2Fraw.githubusercontent.com%2Fdanvk%2Fmapsnap%2Frefs%2Fheads%2Fmain%2Fgallery%2Fnew_orleans_la_1951_vol_5.iiif.json
+[nola2]: https://oldinsurancemaps.net/map/sanborn03376_006
+[detroit]: https://oldinsurancemaps.net/map/sanborn03985_041
+[chicago]: https://oldinsurancemaps.net/map/sanborn01790_085
+[champaign]: https://oldinsurancemaps.net/map/sanborn01778_006
+
+[nola5-iiif]: https://viewer.allmaps.org/?url=https%3A%2F%2Fraw.githubusercontent.com%2Fdanvk%2Fmapsnap%2Frefs%2Fheads%2Fmain%2Fgallery%2Fnew_orleans_la_1951_vol_5.iiif.json
+[nola2-iiif]: https://viewer.allmaps.org/?url=https%3A%2F%2Fraw.githubusercontent.com%2Fdanvk%2Fmapsnap%2Frefs%2Fheads%2Fmain%2Fgallery%2Fnew_orleans_la_1896_vol_2.iiif.json
+[detroit-iiif]: https://viewer.allmaps.org/?url=https%3A%2F%2Fraw.githubusercontent.com%2Fdanvk%2Fmapsnap%2Frefs%2Fheads%2Fmain%2Fgallery%2Fdetroit_mich_1929_vol_11.iiif.json
+[chicago-iiif]: https://viewer.allmaps.org/?url=https%3A%2F%2Fraw.githubusercontent.com%2Fdanvk%2Fmapsnap%2Frefs%2Fheads%2Fmain%2Fgallery%2Fchicago_il_1950_vol_1.iiif.json
+[champaign-iiif]: https://viewer.allmaps.org/?url=https%3A%2F%2Fraw.githubusercontent.com%2Fdanvk%2Fmapsnap%2Frefs%2Fheads%2Fmain%2Fgallery%2Fchampaign_ill_1915.iiif.json
+[test data notes]: https://github.com/danvk/mapsnap/wiki/Test-data-notes
 
 ## How it works
 
@@ -115,107 +122,32 @@ uv run ruff format
 ## Pipeline
 
 - Load a map into OldInsuranceMaps.net by filling out their form or messaging Adam Cox on Slack.
-- Manually georeference the Key Map to get a bounding box for the "volume" of individual maps.
 - "Prepare" all the other maps on OIM.
+- Run the following command:
 
-(assuming you're working with a previously georeferenced map)
-
-The commands below are for https://oldinsurancemaps.net/map/sanborn03376_029 aka https://www.loc.gov/item/sanborn03376_029.
-
-Download imagery from OIM and its S3 bucket using the IIIF file:
-
-```
-mkdir data/new_orleans_la_1951_vol_5
-curl -o data/new_orleans_la_1951_vol_5/main.iiif.json 'https://oldinsurancemaps.net/iiif/mosaic/sanborn03376_029/main-content/?trim=true'
-uv run python mapsnap/download_oim_iiif.py data/new_orleans_la_1951_vol_5/main.iiif.json --oim-url-prefix 'https://s3.us-central-1.wasabisys.com/oldinsurancemaps/uploaded/documents/new_orleans_la_1951_vol_5_'
+```bash
+./pipeline.sh sanborn03376_029 new_orleans_la_1951_vol_5 r1836428 'https://s3.us-central-1.wasabisys.com/oldinsurancemaps/uploaded/documents/new_orleans_la_1951_vol_5_'
 ```
 
-This downloads 109 full-resolution JPEG files. It's convenient to pull these from OIM's S3 bucket since the Library of Congress tile server is pretty aggressive about rate-limiting.
+The four arguments here are:
 
-The full-resolution images are more than you need for OCR and georeferencing. To speed up the later steps, it's convenient to downscale them and convert to grayscale using [ImageMagick]:
+- sanborn03376_029: Library of Congress (LoC) Sanborn Map ID number, also in the OIM URL.
+- new_orleans_la_1951_vol_5: directory slug. Output will go in `data/new_orleans_la_1951_vol_5`.
+- r1836428: Relation containing this map in OSM, usually a county. This is used to download all the streets in the area of the map.
+- 'https://...': OIM S3 bucket prefix for images. You can get this by downloading a JPEG of a page from the OIM web site.
 
-```
-cd data/new_orleans_la_1951_vol_5
-for x in *.jpg; convert -colorspace gray -resize '2048>' $x ${x/.jpg/.2048px.jpg}
-```
+See `pipeline.sh` details about how to run the pipeline. The high-level steps are:
 
-[ImageMagick]: https://imagemagick.org/command-line-processing/#gsc.tab=0
+- `download_oim_iiif.py`: download all the Sanborn images from OIM. This is easier than downloading directly from the Library of Congress and gets you splits.
+- `scale_images.py`: reduces the size of the images by a uniform scale factor so that OCR runs faster.
+- `download_osm.py`: downloads all street data in the area from OpenStreetMap.
+- `osm_to_centerlines.py`: converts raw OSM data to GeoJSON.
+- `detect_text.py`: runs OCR over the downscaled images, saving candidate detections to `streets.json` files.
+- `georef_from_labels.py`: georeferences images based on street detections, writing out `georef.json` files where it can find a good fit.
+- `make_iiif_georef.py`: produces a IIIF JSON file from the georeferences. You can find examples of these in the `gallery` directory.
+- `compare_iiif_georef.py`: compares the generated IIIF file with the human-generated one from OIM, producing a report on the accuracy of the fit.
 
-### Street and Intersections
-
-Find the southwest and northeast corner of the key map to get a bounding box.
-
-Mapsnap needs all the streets from OSM in this bounding box. To get them using the Overpass API, run:
-
-```
-uv run python mapsnap/download_osm.py 29.909795 -90.125975 29.946841 -90.083828 --output data/new_orleans_la_1951_vol_5/streets.osm.json
-```
-
-The order of the parameters is sw lat, sw lng, ne lat, ne lng.
-
-Convert the OSM dump to GeoJSON by running:
-
-```
-uv run python mapsnap/osm_to_centerlines.py data/new_orleans_la_1951_vol_5/streets.osm.json --output data/new_orleans_la_1951_vol_5/centerlines.geojson
-```
-
-Though it's not needed for the pipeline, it can be helpful to extract street names and intersections to text files by running:
-
-```
-jq -r '.elements[].tags.name' streets.osm.json | grep -v '^null$' | sort | uniq > streets.txt
-uv run python mapsnap/generate_intersections.py data/new_orleans_la_1951_vol_5/streets.osm.json data/new_orleans_la_1951_vol_5/intersections.csv
-```
-
-### Street Label OCR
-
-Run `detect_text.py` over all the scaled-down images to find street labels + angles:
-
-```
-uv run python mapsnap/detect_text.py data/new_orleans_la_1951_vol_5/*.2048px.jpg
-```
-
-This is the slowest step. If you can use a GPU, it's ~15s/image. Iif you're running CPU-only, it's more like ~1 minute/image. This writes a `streets.json` file next to each image with candidate street label detections. Use the Mapsnap debugger to view this file.
-
-### Fit georeference model
-
-This is it! Given detected street labels and street centerlines, find GCPs and fit a four-parameter model for each map:
-
-```
-rm data/new_orleans_la_1951_vol_5/*.georef.json
-uv run mapsnap/georef_from_labels.py data/new_orleans_la_1951_vol_5/*.2048px.jpg --centerlines data/new_orleans_la_1951_vol_5/centerlines.geojson --min-long-side 60 --min-short-side 12 --fuzzy-match-threshold 0.20
-```
-
-The main output is `pNNN.georef.json`, which contains the four-parameter model and debug information. Use the Mapsnap debugger to view this file.
-
-For maps without enough control points, this will fail to produce an output. It won't delete an existing georef.json file, so make sure to run the `rm` command first to avoid cross-run contamination!
-
-### Make an IIIF file
-
-Download the IIIF file for these Sanborn maps from the Library of Congress:
-
-```
-curl -o data/new_orleans_la_1951_vol_5/loc.iiif.json https://www.loc.gov/item/sanborn03376_029/manifest.json
-```
-
-Probably, though, you'll need to load https://www.loc.gov/item/sanborn03376_029/manifest.json directly in your browser to avoid getting denied.
-
-Then generate an IIIF file using the georeferences:
-
-```
-uv run python mapsnap/make_iiif_georef.py data/new_orleans_la_1951_vol_5/loc.iiif.json 'data/new_orleans_la_1951_vol_5/*.georef.json' --output data/new_orleans_la_1951_vol_5/generated.iiif.json
-```
-
-You can paste this into viewer.allmaps.org to look at the results.
-
-### Measuring accuracy
-
-Compare the generated IIIF file to the data from OIM:
-
-```
-uv run python compare_iiif_georef.py data/new_orleans_la_1951_vol_5/main.iiif.json data/new_orleans_la_1951_vol_5/generated.iiif.json
-```
-
-This will print out per-image stats and overall summary statistics.
+The pipeline is set up to get imagery from OIM, but it's not dependent on OIM in a deep way. You can absolutely run it on images taken directly from the Library of Congress or another source, you'll just have to run some steps manually. In particular, `make_iiif_georef.py` can use either OIM's IIIF Manifest or the LoC's.
 
 ## Debugging output
 

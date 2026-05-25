@@ -8,6 +8,7 @@ from pathlib import Path
 import easyocr
 import numpy as np
 from PIL import Image
+from tqdm import tqdm
 
 from mapsnap.ctc_vocab_decode import generate_vocab_strings
 from mapsnap.streets import build_block_index, polygon_side_lengths
@@ -16,11 +17,11 @@ from mapsnap.utils import image_stem
 
 def detect_text(
     image_path: str,
+    vocab_strings: list[str],
     min_size: int = 15,
     allowlist: str | None = None,
     link_threshold: float = 0.4,
     reader: easyocr.Reader | None = None,
-    vocab_strings: list[str] | None = None,
     beam_width: int = 20,
 ) -> list[dict]:
     """Run CRAFT-based text detection at 0°, 90°, and 270° and return all results.
@@ -38,10 +39,10 @@ def detect_text(
     (EasyOCR default 0.4). Lower values (e.g. 0.1) prevent adjacent street labels
     from being concatenated into a single detection.
 
-    vocab_strings, if provided, enables prefix-constrained CTC decoding: the
-    recognizer is restricted to outputting strings that are prefixes of known
-    street-name forms. This substantially improves recall on abbreviated and
-    direction-prefixed labels at the cost of ~25% slower recognition.
+    vocab_strings enables prefix-constrained CTC decoding: the recognizer is
+    restricted to outputting strings that are prefixes of known street-name forms.
+    This substantially improves recall on abbreviated and direction-prefixed labels
+    at the cost of ~25% slower recognition.
 
     Each returned detection is a dict with:
       - polygon: list of 4 [x, y] corners in original image coordinates
@@ -54,10 +55,9 @@ def detect_text(
     if reader is None:
         reader = easyocr.Reader(["en"], gpu=True, verbose=False)
 
-    if vocab_strings is not None:
-        from mapsnap.ctc_vocab_decode import patch_easyocr_reader
+    from mapsnap.ctc_vocab_decode import patch_easyocr_reader
 
-        patch_easyocr_reader(reader, vocab_strings, beam_width)
+    patch_easyocr_reader(reader, vocab_strings, beam_width)
 
     img = Image.open(image_path).convert("RGB")
     orig_width, orig_height = img.size
@@ -67,17 +67,24 @@ def detect_text(
         "paragraph": False,
         "min_size": min_size,
         "link_threshold": link_threshold,
+        "decoder": "wordbeamsearch",
+        "beamWidth": beam_width,
     }
     if allowlist is not None:
         readtext_kwargs["allowlist"] = allowlist
-    if vocab_strings is not None:
-        readtext_kwargs["decoder"] = "wordbeamsearch"
-        readtext_kwargs["beamWidth"] = beam_width
 
     for angle in (0, 90, 270):
         rotated = img.rotate(angle, expand=True) if angle != 0 else img
         results = reader.readtext(np.array(rotated), **readtext_kwargs)
         for bbox, text, confidence in results:
+            # Reject boxes that are taller than wide in rotated-image coordinates.
+            # Valid text is always wider than tall in the rotated image; a tall box
+            # means the detection is at the wrong angle (e.g. MONTCLAIR at angle=0
+            # instead of 270, or RIVER at angle=90 instead of 0).
+            xs = [float(p[0]) for p in bbox]
+            ys = [float(p[1]) for p in bbox]
+            if (max(ys) - min(ys)) > (max(xs) - min(xs)):
+                continue
             polygon = [[int(x), int(y)] for x, y in bbox]
             if angle == 90:
                 # PIL rotate(90) is CCW; inverse: (rx, ry) -> (W-1-ry, rx)
@@ -114,7 +121,7 @@ def main() -> None:
     parser.add_argument(
         "--allowlist",
         metavar="CHARS",
-        default="ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz .",
+        default="ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789 .",
         help=(
             "Restrict OCR recognition to these characters. Defaults to letters, space, "
             "and period (period separates direction abbreviations like 'E.' from the "
@@ -142,12 +149,11 @@ def main() -> None:
     parser.add_argument(
         "--centerlines",
         metavar="GEOJSON",
-        default=None,
+        required=True,
         help=(
-            "Centerlines GeoJSON file. When provided, enables prefix-constrained CTC "
-            "decoding: the recognizer is guided by a vocabulary of known street-name "
-            "forms derived from the centerlines. Substantially improves recall on "
-            "abbreviated and direction-prefixed labels."
+            "Centerlines GeoJSON file. Used to build a vocabulary of known street-name "
+            "forms for prefix-constrained CTC decoding, which substantially improves "
+            "recall on abbreviated and direction-prefixed labels."
         ),
     )
     parser.add_argument(
@@ -159,35 +165,30 @@ def main() -> None:
     )
     args = parser.parse_args()
 
-    vocab_strings: list[str] | None = None
-    if args.centerlines:
-        geojson = json.load(open(args.centerlines))
-        block_index = build_block_index(geojson)
-        vocab_strings = generate_vocab_strings(set(block_index.keys()))
-        print(
-            f"Constrained vocab: {len(vocab_strings)} forms from {len(block_index)} streets",
-            file=sys.stderr,
-        )
+    geojson = json.load(open(args.centerlines))
+    block_index = build_block_index(geojson)
+    vocab_strings = generate_vocab_strings(set(block_index.keys()))
+    print(
+        f"Constrained vocab: {len(vocab_strings)} forms from {len(block_index)} streets",
+        file=sys.stderr,
+    )
 
     reader = easyocr.Reader(["en"], gpu=True, verbose=False)
 
-    for image_path in args.images:
-        if len(args.images) > 1:
-            print(f"\n--- {image_path} ---", file=sys.stderr)
+    for image_path in tqdm(args.images, smoothing=0):
         stem = image_stem(image_path)
         output_path = str(Path(image_path).parent / (stem + ".streets.json"))
         detections = detect_text(
             image_path,
+            vocab_strings=vocab_strings,
             min_size=args.min_short_side,
             allowlist=args.allowlist,
             link_threshold=args.link_threshold,
             reader=reader,
-            vocab_strings=vocab_strings,
             beam_width=args.beam_width,
         )
         with open(output_path, "w") as f:
             f.write(json.dumps(detections, indent=2))
-        print(f"Wrote {len(detections)} detections to {output_path}", file=sys.stderr)
 
 
 if __name__ == "__main__":

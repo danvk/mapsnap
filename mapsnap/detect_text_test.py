@@ -152,9 +152,7 @@ def test_multi_word_street_prefix_still_matches():
 # canonical_street_match
 # ---------------------------------------------------------------------------
 
-# Use only the suffixed (full) forms — real block_index keys never have both "X" and
-# "X STREET" as separate entries, and having both makes fuzzy tie-breaking non-deterministic.
-FUZZY_STREETS = {
+CANONICAL_STREETS = {
     "TCHOUPITOULAS STREET",
     "FRONT STREET",
     "CANAL STREET",
@@ -163,28 +161,8 @@ FUZZY_STREETS = {
 
 def test_canonical_exact_returns_key():
     # Exact match via normalize_street — returned value is the actual block_index key.
-    result = canonical_street_match("Tchoupitoulas St", FUZZY_STREETS)
+    result = canonical_street_match("Tchoupitoulas St", CANONICAL_STREETS)
     assert result == "TCHOUPITOULAS STREET"
-
-
-def test_canonical_fuzzy_one_edit():
-    # TCHUUPITOULAS → TCHOUPITOULAS (stripped from key): edit dist 1, norm ~0.077
-    result = canonical_street_match(
-        "TCHUUPITOULAS", FUZZY_STREETS, fuzzy_threshold=0.20
-    )
-    assert result == "TCHOUPITOULAS STREET"
-
-
-def test_canonical_fuzzy_two_edits():
-    # TCHOUATOULAS → TCHOUPITOULAS (stripped): edit dist 2, norm ~0.15
-    result = canonical_street_match("TCHOUATOULAS", FUZZY_STREETS, fuzzy_threshold=0.20)
-    assert result == "TCHOUPITOULAS STREET"
-
-
-def test_canonical_fuzzy_prefix():
-    # SFRONT → FRONT (stripped from FRONT STREET): edit dist 1, norm ~0.17
-    result = canonical_street_match("SFRONT", FUZZY_STREETS, fuzzy_threshold=0.20)
-    assert result == "FRONT STREET"
 
 
 def test_canonical_saint_prefix_returns_key():
@@ -201,33 +179,5 @@ def test_canonical_direction_prefix_returns_key():
     assert result == "NORTH RAMPART STREET"
 
 
-def test_canonical_fuzzy_type_stripped():
-    # JOSEBH → JOSEPH (stripped from JOSEPH STREET): edit dist 1, norm 1/6 ≈ 0.17
-    result = canonical_street_match("JOSEBH", {"JOSEPH STREET"}, fuzzy_threshold=0.20)
-    assert result == "JOSEPH STREET"
-
-
-def test_canonical_fuzzy_disabled_by_default():
-    assert canonical_street_match("TCHUUPITOULAS", FUZZY_STREETS) is None
-
-
-def test_canonical_fuzzy_above_threshold():
-    # Normalized dist ~0.15, but threshold set too low to match
-    assert (
-        canonical_street_match("TCHOUATOULAS", FUZZY_STREETS, fuzzy_threshold=0.10)
-        is None
-    )
-
-
-def test_canonical_below_min_length():
-    # "OAK" (3 chars) is below min_fuzzy_len=5 — no fuzzy match
-    assert (
-        canonical_street_match("OAX", {"OAK STREET", "OAK"}, fuzzy_threshold=0.20)
-        is None
-    )
-
-
 def test_canonical_no_match():
-    assert (
-        canonical_street_match("ZZZZZZZZZ", FUZZY_STREETS, fuzzy_threshold=0.20) is None
-    )
+    assert canonical_street_match("ZZZZZZZZZ", CANONICAL_STREETS) is None

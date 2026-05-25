@@ -25,7 +25,7 @@ from dataclasses import dataclass, field
 
 import numpy as np
 
-from mapsnap.streets import DIRECTION_ABBREVS, STREET_ABBREVS
+from mapsnap.streets import DIRECTION_ABBREVS, ORDINAL_WORD_TO_NUM, STREET_ABBREVS
 
 # ---------------------------------------------------------------------------
 # Vocabulary generation: canonical names → abbreviated label forms
@@ -95,16 +95,24 @@ def generate_vocab_strings(normalized_streets: set[str]) -> list[str]:
 
         base_name = " ".join(name_words)
 
-        # Cross-product of (direction prefix) × (type suffix)
+        # Also generate the numeric ordinal form so the CTC trie contains "S. 4TH ST"
+        # alongside "S. FOURTH ST" — without this, the constrained decoder cannot
+        # produce the abbreviated numeric label that appears on the map image.
+        base_names = [base_name]
+        if base_name in ORDINAL_WORD_TO_NUM:
+            base_names.append(ORDINAL_WORD_TO_NUM[base_name])
+
+        # Cross-product of (direction prefix) × (base name) × (type suffix)
         for dir_form in dir_forms:
-            for type_form in type_forms:
-                parts: list[str] = []
-                if dir_form is not None:
-                    parts.append(dir_form)
-                parts.append(base_name)
-                if type_form is not None:
-                    parts.append(type_form)
-                result.add(" ".join(parts))
+            for bn in base_names:
+                for type_form in type_forms:
+                    parts: list[str] = []
+                    if dir_form is not None:
+                        parts.append(dir_form)
+                    parts.append(bn)
+                    if type_form is not None:
+                        parts.append(type_form)
+                    result.add(" ".join(parts))
 
     return sorted(result)
 

@@ -2,9 +2,7 @@
 
 Reads a local IIIF AnnotationPage JSON file, extracts a page key from each
 annotation label (e.g. "p156" from "New Orleans, La. | 1896 | Vol. 2 p156"),
-constructs an OIM S3 image URL using a caller-supplied prefix, downloads it, and
-saves a companion GCP JSON file with coordinates scaled to the downloaded image
-dimensions.
+constructs an OIM S3 image URL using a caller-supplied prefix, and downloads it.
 
 Usage:
     python download_oim_iiif.py <iiif_file> --oim-url-prefix URL_PREFIX [--dry-run]
@@ -12,13 +10,13 @@ Usage:
 
 import argparse
 import json
-import re
-import struct
 import sys
 import time
 import urllib.error
 import urllib.request
 from pathlib import Path
+
+from mapsnap.utils import jpeg_dimensions, label_to_page_key
 
 
 def download_with_retry(
@@ -57,45 +55,31 @@ def download_with_retry(
                 raise
 
 
-def label_to_page_key(label: str) -> str | None:
-    """Extract the page key from an OIM IIIF annotation label.
+def _download_unsplit_image(
+    base_key: str,
+    output_dir: Path,
+    oim_url_prefix: str,
+    dry_run: bool,
+) -> None:
+    """Download the un-split version of a split page (e.g. p4 for p4__2).
 
-    The page key is the last pipe-separated segment's page identifier, normalized
-    to lowercase with bracket variants collapsed to underscores:
-      "New Orleans, La. | 1896 | Vol. 2 p156"    → "p156"
-      "New Orleans, La. | 1896 | Vol. 2 p101 [1]" → "p101_1"
-    Returns None if no page identifier is found.
+    Saves to <base_key>.unsplit.jpg. Skips if the file already exists.
     """
-    last_part = label.rsplit("|", 1)[-1].strip()
-    m = re.search(r"\b(p\d+[a-z]?)(?:\s*\[(\d+)\])?$", last_part, re.IGNORECASE)
-    if m is None:
-        return None
-    page = m.group(1).lower()
-    variant = m.group(2)
-    return f"{page}__{variant}" if variant else page
+    unsplit_path = output_dir / f"{base_key}.unsplit.jpg"
+    if unsplit_path.exists():
+        print(f"    Unsplit already done: {unsplit_path.name}", file=sys.stderr)
+        return
 
+    unsplit_url = f"{oim_url_prefix}{base_key}.jpg"
+    print(f"    Unsplit URL: {unsplit_url}", file=sys.stderr)
 
-def jpeg_dimensions(path: Path) -> tuple[int, int]:
-    """Return (width, height) from a JPEG file by scanning SOF markers."""
-    with path.open("rb") as f:
-        if f.read(2) != b"\xff\xd8":
-            raise ValueError(f"Not a JPEG: {path}")
-        while True:
-            marker = f.read(2)
-            if len(marker) < 2 or marker[0] != 0xFF:
-                break
-            seg_type = marker[1]
-            length_bytes = f.read(2)
-            if len(length_bytes) < 2:
-                break
-            length = struct.unpack(">H", length_bytes)[0]
-            if seg_type in (0xC0, 0xC1, 0xC2, 0xC3):  # SOF0–SOF3
-                data = f.read(length - 2)
-                height = struct.unpack(">H", data[1:3])[0]
-                width = struct.unpack(">H", data[3:5])[0]
-                return width, height
-            f.seek(length - 2, 1)
-    raise ValueError(f"No SOF marker found in {path}")
+    if dry_run:
+        return
+
+    print(f"    Downloading unsplit → {unsplit_path.name} ...", file=sys.stderr)
+    download_with_retry(unsplit_url, unsplit_path)
+    dl_width, dl_height = jpeg_dimensions(unsplit_path)
+    print(f"    Unsplit downloaded: {dl_width}×{dl_height}", file=sys.stderr)
 
 
 def process_annotation(
@@ -104,9 +88,11 @@ def process_annotation(
     oim_url_prefix: str,
     dry_run: bool,
 ) -> bool:
-    """Download the image and GCP file for one annotation item.
+    """Download the image for one annotation item.
 
     Returns True on success, False if the item was skipped or failed.
+    For split page keys (ending in __N), also downloads the un-split image
+    as <base_key>.unsplit.jpg so it can serve as a reference for sub-image bounds.
     """
     label: str = item.get("label", "unknown")
     page_key = label_to_page_key(label)
@@ -124,49 +110,42 @@ def process_annotation(
         return False
 
     image_url = f"{oim_url_prefix}{page_key}.jpg"
-    image_path = output_dir / f"{page_key}.jpg"
-    gcp_path = output_dir / f"{page_key}.gcps.json"
+    image_path = output_dir / f"{page_key}.raw.jpg"
 
-    if image_path.exists() and gcp_path.exists():
+    if image_path.exists():
         print(f"  Already done: {image_path.name}", file=sys.stderr)
-        return True
+    else:
+        print(f"  {label}", file=sys.stderr)
+        print(f"    Image: {image_url}", file=sys.stderr)
+        print(f"    Source: {full_width}×{full_height}", file=sys.stderr)
 
-    body = item.get("body", {})
-    features: list[dict] = body.get("features", [])
+        if not dry_run:
+            print(f"    Downloading → {image_path.name} ...", file=sys.stderr)
+            try:
+                download_with_retry(image_url, image_path)
+            except urllib.error.HTTPError as exc:
+                if exc.code == 404 and "documents" in image_url and "__" in image_url:
+                    actual_url = image_url.replace("/documents/", "/regions/")
+                    print(f"    404; retrying with: {actual_url}", file=sys.stderr)
+                    download_with_retry(actual_url, image_path)
+                else:
+                    raise
+            dl_width, dl_height = jpeg_dimensions(image_path)
+            print(f"    Downloaded: {dl_width}×{dl_height}", file=sys.stderr)
 
-    print(f"  {label}", file=sys.stderr)
-    print(f"    Image: {image_url}", file=sys.stderr)
-    print(
-        f"    Source: {full_width}×{full_height}  GCPs: {len(features)}",
-        file=sys.stderr,
-    )
+    # For split pages, also fetch the un-split original.
+    if "__" in page_key:
+        base_key = page_key.split("__")[0]
+        _download_unsplit_image(base_key, output_dir, oim_url_prefix, dry_run)
 
-    if dry_run:
-        return True
-
-    actual_url = image_url
-    if not image_path.exists():
-        print(f"    Downloading → {image_path.name} ...", file=sys.stderr)
-        try:
-            download_with_retry(image_url, image_path)
-        except urllib.error.HTTPError as exc:
-            if exc.code == 404 and "documents" in image_url and "__" in image_url:
-                actual_url = image_url.replace("/documents/", "/regions/")
-                print(f"    404; retrying with: {actual_url}", file=sys.stderr)
-                download_with_retry(actual_url, image_path)
-            else:
-                raise
-
-    dl_width, dl_height = jpeg_dimensions(image_path)
-    print(f"    Downloaded: {dl_width}×{dl_height}", file=sys.stderr)
     return True
 
 
 def main() -> None:
     parser = argparse.ArgumentParser(
         description=(
-            "Download OIM images and save GCP files from a local IIIF AnnotationPage. "
-            "Saves one .jpg per annotation item alongside the IIIF file."
+            "Download OIM images from a local IIIF AnnotationPage. "
+            "Saves one .raw.jpg per annotation item alongside the IIIF file."
         )
     )
     parser.add_argument(

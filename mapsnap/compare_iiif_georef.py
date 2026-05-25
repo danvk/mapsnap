@@ -31,6 +31,28 @@ GCP = tuple[tuple[float, float], tuple[float, float]]  # ((px, py), (lon, lat))
 EARTH_RADIUS_FT = 20_925_524.0
 
 
+def extract_metadata_int(item: dict, label: str) -> int | None:
+    """Extract an integer value from a IIIF annotation's metadata list by label."""
+    for entry in item.get("metadata", []):
+        if entry.get("label") == label:
+            try:
+                return int(entry["value"])
+            except (KeyError, ValueError):
+                return None
+    return None
+
+
+def extract_metadata_float(item: dict, label: str) -> float | None:
+    """Extract a float value from a IIIF annotation's metadata list by label."""
+    for entry in item.get("metadata", []):
+        if entry.get("label") == label:
+            try:
+                return float(entry["value"])
+            except (KeyError, ValueError):
+                return None
+    return None
+
+
 def extract_gcps(item: dict) -> list[GCP]:
     """Extract (resourceCoords, (lon, lat)) pairs from a IIIF georeferencing annotation."""
     gcps: list[GCP] = []
@@ -64,6 +86,14 @@ def north_angle(A: np.ndarray) -> float:
 def scale_deg_per_px(A: np.ndarray) -> float:
     """Return the (latitude) scale in degrees/pixel from a 2×3 affine matrix."""
     return math.sqrt(A[1, 0] ** 2 + A[1, 1] ** 2)
+
+
+_FT_PER_DEG_LAT = EARTH_RADIUS_FT * math.pi / 180.0
+
+
+def px_per_ft(A: np.ndarray) -> float:
+    """Pixels per foot of ground distance, from a 2×3 pixel→geo affine matrix."""
+    return 1.0 / (scale_deg_per_px(A) * _FT_PER_DEG_LAT)
 
 
 def haversine_ft(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
@@ -163,8 +193,26 @@ def analyze_pair(truth_item: dict, gen_item: dict) -> dict:
     width = float(truth_item["target"]["source"]["width"])
     height = float(truth_item["target"]["source"]["height"])
 
+    # For split sub-images with known canvas placement, sample only within the
+    # split region so the error metric covers actual split pixels, not the full canvas.
+    split_cx = extract_metadata_float(gen_item, "split_canvas_x")
+    split_cy = extract_metadata_float(gen_item, "split_canvas_y")
+    split_cw = extract_metadata_float(gen_item, "split_canvas_w")
+    split_ch = extract_metadata_float(gen_item, "split_canvas_h")
+
+    if (
+        split_cx is not None
+        and split_cy is not None
+        and split_cw is not None
+        and split_ch is not None
+    ):
+        grid = [
+            (x + split_cx, y + split_cy) for x, y in sample_grid(split_cw, split_ch)
+        ]
+    else:
+        grid = sample_grid(width, height)
+
     # Positional errors at grid sample points.
-    grid = sample_grid(width, height)
     errors: list[float] = []
     for px, py in grid:
         v = np.array([px, py, 1.0])
@@ -195,6 +243,10 @@ def analyze_pair(truth_item: dict, gen_item: dict) -> dict:
         "page_key": page_key,
         "n_truth": len(truth_gcps),
         "n_gen": len(gen_gcps),
+        "n_streets": extract_metadata_int(gen_item, "streets"),
+        "n_intersections": extract_metadata_int(gen_item, "intersections"),
+        "truth_px_per_ft": round(px_per_ft(A_truth), 2),
+        "gen_px_per_ft": round(px_per_ft(A_gen), 2),
         "rmse_ft": round(rmse_ft, 1),
         "max_ft": round(max_ft, 1),
         "trans_ft": round(trans_ft, 1),
@@ -228,7 +280,8 @@ def print_table(rows: list[dict], missing: list[dict]) -> None:
     rows_sorted = sorted(rows, key=lambda r: r["rmse_ft"], reverse=True)
 
     header = (
-        f"{'Page':<8} {'n_t':>3} {'n_g':>3}  "
+        f"{'Page':<9} {'n_t':>3} {'n_g':>3} {'str':>4} {'int':>4}  "
+        f"{'t.px/ft':>7}  {'g.px/ft':>7}  "
         f"{'rmse_ft':>8}  {'max_ft':>8}  {'trans_ft':>9}  "
         f"{'rot_err':>8}  {'scale_%':>7}  {'skew°':>6}  {'aniso':>6}"
     )
@@ -236,8 +289,11 @@ def print_table(rows: list[dict], missing: list[dict]) -> None:
     print(header)
     print(sep)
     for r in rows_sorted:
+        n_str = r["n_streets"] if r["n_streets"] is not None else "—"
+        n_int = r["n_intersections"] if r["n_intersections"] is not None else "—"
         print(
-            f"{r['page_key']:<8} {r['n_truth']:>3} {r['n_gen']:>3}  "
+            f"{r['page_key']:<9} {r['n_truth']:>3} {r['n_gen']:>3} {n_str!s:>4} {n_int!s:>4}  "
+            f"{r['truth_px_per_ft']:>7.2f}  {r['gen_px_per_ft']:>7.2f}  "
             f"{r['rmse_ft']:>8.1f}  {r['max_ft']:>8.1f}  {r['trans_ft']:>9.1f}  "
             f"{r['rot_err']:>+8.2f}  {r['scale_pct']:>+7.2f}  "
             f"{r['skew_deg']:>+6.2f}  {r['aniso']:>6.3f}"
@@ -246,7 +302,8 @@ def print_table(rows: list[dict], missing: list[dict]) -> None:
         missing_sorted = sorted(missing, key=lambda r: r["page_key"])
         for r in missing_sorted:
             print(
-                f"{r['page_key']:<8} {r['n_truth']:>3} {'—':>3}  "
+                f"{r['page_key']:<9} {r['n_truth']:>3} {'—':>3} {'—':>4} {'—':>4}  "
+                f"{'—':>7}  {'—':>7}  "
                 f"{'—':>8}  {'—':>8}  {'—':>9}  "
                 f"{'—':>8}  {'—':>7}  "
                 f"{r['skew_deg']:>+6.2f}  {r['aniso']:>6.3f}  (no fit)"
@@ -256,8 +313,9 @@ def print_table(rows: list[dict], missing: list[dict]) -> None:
     n_paired = len(rows)
     n_missing = len(missing)
     n_truth_total = n_paired + n_missing
+    pct = 100 * n_paired / n_truth_total
     print(
-        f"\n{n_paired}/{n_truth_total} pages georeferenced ({n_missing} total losses)"
+        f"\n{n_paired}/{n_truth_total} = {pct:.02f}% pages georeferenced ({n_missing} total losses)"
     )
 
     if rows:
@@ -293,6 +351,10 @@ def print_tsv(rows: list[dict], missing: list[dict]) -> None:
         "page_key",
         "n_truth",
         "n_gen",
+        "n_streets",
+        "n_intersections",
+        "truth_px_per_ft",
+        "gen_px_per_ft",
         "rmse_ft",
         "max_ft",
         "trans_ft",
@@ -384,6 +446,10 @@ def main() -> None:
             "page_key",
             "n_truth",
             "n_gen",
+            "n_streets",
+            "n_intersections",
+            "truth_px_per_ft",
+            "gen_px_per_ft",
             "rmse_ft",
             "max_ft",
             "trans_ft",

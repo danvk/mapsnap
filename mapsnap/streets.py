@@ -8,7 +8,6 @@ import re
 from collections import defaultdict
 from dataclasses import dataclass, field as dataclass_field
 
-import Levenshtein
 import numpy as np
 
 # Map common street-type abbreviations to their full forms for normalization.
@@ -57,10 +56,102 @@ DIRECTION_WORDS: frozenset[str] = frozenset(DIRECTION_ABBREVS.values())
 # (e.g. the label "CHARLES" should still match "SAINT CHARLES AVENUE").
 STRIPPABLE_PREFIXES: frozenset[str] = DIRECTION_WORDS | {"SAINT"}
 
-# Full street-type words (STREET, AVENUE, …); used to strip trailing type suffixes when
-# building fuzzy-match candidates so a misread name like "JOSEBH" can match
-# "JOSEPH STREET" without paying for the full " STREET" edit cost.
+# Full street-type words (STREET, AVENUE, …); used to identify bare-name aliases in build_block_index.
 STREET_TYPES: frozenset[str] = frozenset(STREET_ABBREVS.values())
+
+# Irregular ordinal words for 1–19.
+_ORDINAL_ONES = [
+    "",
+    "FIRST",
+    "SECOND",
+    "THIRD",
+    "FOURTH",
+    "FIFTH",
+    "SIXTH",
+    "SEVENTH",
+    "EIGHTH",
+    "NINTH",
+    "TENTH",
+    "ELEVENTH",
+    "TWELFTH",
+    "THIRTEENTH",
+    "FOURTEENTH",
+    "FIFTEENTH",
+    "SIXTEENTH",
+    "SEVENTEENTH",
+    "EIGHTEENTH",
+    "NINETEENTH",
+]
+
+# Ordinal tens words (exact multiples of 10).
+_ORDINAL_TENS = [
+    "",
+    "",
+    "TWENTIETH",
+    "THIRTIETH",
+    "FORTIETH",
+    "FIFTIETH",
+    "SIXTIETH",
+    "SEVENTIETH",
+    "EIGHTIETH",
+    "NINETIETH",
+]
+
+# Cardinal tens words used to form compound ordinals like "TWENTY FIRST".
+_CARDINAL_TENS = [
+    "",
+    "",
+    "TWENTY",
+    "THIRTY",
+    "FORTY",
+    "FIFTY",
+    "SIXTY",
+    "SEVENTY",
+    "EIGHTY",
+    "NINETY",
+]
+
+
+def _num_to_ordinal_word(n: int) -> str:
+    """Convert an integer 1–99 to its ordinal word form (e.g. 4 → "FOURTH", 21 → "TWENTY FIRST")."""
+    if 1 <= n <= 19:
+        return _ORDINAL_ONES[n]
+    tens, ones = divmod(n, 10)
+    if ones == 0:
+        return _ORDINAL_TENS[tens]
+    return f"{_CARDINAL_TENS[tens]} {_ORDINAL_ONES[ones]}"
+
+
+# Map any ordinal token (with any numeric suffix) to its word form.
+# Keys cover all four suffixes (ST/ND/RD/TH) for robustness against OCR suffix errors.
+_ORDINALS: dict[str, str] = {
+    f"{n}{suffix}": _num_to_ordinal_word(n)
+    for n in range(1, 100)
+    for suffix in ("ST", "ND", "RD", "TH")
+}
+
+
+def _canonical_ordinal_suffix(n: int) -> str:
+    """Return the correct ordinal suffix (ST/ND/RD/TH) for integer n."""
+    last_two = n % 100
+    last_one = n % 10
+    if 11 <= last_two <= 13:
+        return "TH"
+    if last_one == 1:
+        return "ST"
+    if last_one == 2:
+        return "ND"
+    if last_one == 3:
+        return "RD"
+    return "TH"
+
+
+# Inverse of _ORDINALS: ordinal word/phrase → canonical numeric string.
+# e.g., "FOURTH" → "4TH", "TWENTY FIRST" → "21ST".
+# Used by generate_vocab_strings to add numeric label variants to the CTC trie.
+ORDINAL_WORD_TO_NUM: dict[str, str] = {
+    _num_to_ordinal_word(n): f"{n}{_canonical_ordinal_suffix(n)}" for n in range(1, 100)
+}
 
 
 def normalize_street(text: str) -> str:
@@ -69,12 +160,15 @@ def normalize_street(text: str) -> str:
     Direction abbreviations (N, S, E, W, etc.) are expanded only when they are the
     first word, since they appear as prefixes in street names (e.g. "N RAMPART ST"
     → "NORTH RAMPART STREET"). Street-type abbreviations (ST, AVE, …) are expanded
-    wherever they appear.
+    wherever they appear. Numeric ordinals (e.g. "4TH", "21ST") are expanded to word
+    form ("FOURTH", "TWENTY FIRST") so that "S. 4TH ST" matches "South Fourth Street".
     """
     text = re.sub(r"[^\w\s]", " ", text.upper())
     words = text.split()
     if not words:
         return ""
+    # Expand numeric ordinals; may expand one token to two ("21ST" → ["TWENTY", "FIRST"]).
+    words = [w for token in words for w in _ORDINALS.get(token, token).split()]
     words[0] = DIRECTION_ABBREVS.get(words[0], words[0])
     words[0] = PREFIX_ABBREVS.get(words[0], words[0])
     words = [STREET_ABBREVS.get(w, w) for w in words]
@@ -84,14 +178,6 @@ def normalize_street(text: str) -> str:
 def is_number_only(text: str) -> bool:
     """Return True if text contains no alphabetic characters (e.g. block numbers)."""
     return not bool(re.search(r"[a-zA-Z]", text))
-
-
-def _strip_street_type(s: str) -> str | None:
-    """Return s without its trailing street-type word, or None if s has no type suffix."""
-    parts = s.rsplit(" ", 1)
-    if len(parts) == 2 and parts[1] in STREET_TYPES:
-        return parts[0]
-    return None
 
 
 def _match_candidates(s: str) -> list[str]:
@@ -131,26 +217,15 @@ def matches_any_street(text: str, normalized_streets: set[str]) -> bool:
 def canonical_street_match(
     text: str,
     normalized_streets: set[str],
-    fuzzy_threshold: float = 0.0,
-    min_fuzzy_len: int = 5,
 ) -> str | None:
     """Return the key from normalized_streets that best matches text.
 
-    Phase 1 — exact/prefix match: iterates normalized_streets and returns the first
-    key whose prefix-compatible candidates (including direction- and SAINT-stripped
-    forms) match normalize_street(text). Always returns the actual key so downstream
-    block_index lookups succeed even when the label omits a prefix.
-
-    Phase 2 — fuzzy match: if no exact match and fuzzy_threshold > 0, finds the key
-    whose normalized Levenshtein distance to normalize_street(text) is smallest and
-    below the threshold. Each key is compared against both its full form and a
-    type-suffix-stripped form (e.g. "JOSEPH" from "JOSEPH STREET"), so that a
-    one-letter OCR error like "JOSEBH" can match without paying for " STREET".
-    Both strings must be at least min_fuzzy_len characters. Returns None if no match.
+    Iterates normalized_streets and returns the first key whose prefix-compatible
+    candidates (including direction- and SAINT-stripped forms) match
+    normalize_street(text). Always returns the actual key so downstream block_index
+    lookups succeed even when the label omits a prefix. Returns None if no match.
     """
     normalized = normalize_street(text)
-
-    # Phase 1: exact/prefix match — return the actual key from normalized_streets.
     for s in normalized_streets:
         for candidate in _match_candidates(s):
             if (
@@ -162,49 +237,22 @@ def canonical_street_match(
                 or candidate.startswith(normalized + " ")
             ):
                 return s
-
-    # Phase 2: fuzzy match against full key and type-stripped form.
-    if fuzzy_threshold <= 0 or len(normalized) < min_fuzzy_len:
-        return None
-    best_key: str | None = None
-    best_norm_dist = fuzzy_threshold
-    for s in normalized_streets:
-        forms = [s]
-        stripped = _strip_street_type(s)
-        if stripped is not None and len(stripped) >= min_fuzzy_len:
-            forms.append(stripped)
-        for form in forms:
-            if len(form) < min_fuzzy_len:
-                continue
-            dist = Levenshtein.distance(normalized, form)
-            norm_dist = dist / max(len(normalized), len(form))
-            if norm_dist < best_norm_dist:
-                best_norm_dist = norm_dist
-                best_key = s
-    return best_key
+    return None
 
 
 def canonical_street_matches(
     text: str,
     normalized_streets: set[str],
-    fuzzy_threshold: float = 0.0,
-    min_fuzzy_len: int = 5,
 ) -> list[str]:
     """Return all keys from normalized_streets that match text.
 
-    Phase 1 — exact/prefix match: returns every key with at least one
-    prefix-compatible candidate matching normalize_street(text). Unlike
-    canonical_street_match, this collects all matches rather than returning
-    whichever the set iteration yields first, eliminating nondeterminism when
-    a bare label (e.g. "CLINTON") could match multiple full names
-    (e.g. "CLINTON AVENUE" and "CLINTON STREET").
-
-    Phase 2 — fuzzy match: if Phase 1 finds nothing and fuzzy_threshold > 0,
-    returns the single best fuzzy key (OCR errors typically have one target).
+    Returns every key with at least one prefix-compatible candidate matching
+    normalize_street(text). Collects all matches rather than returning whichever
+    the set iteration yields first, eliminating nondeterminism when a bare label
+    (e.g. "CLINTON") could match multiple full names (e.g. "CLINTON AVENUE" and
+    "CLINTON STREET").
     """
     normalized = normalize_street(text)
-
-    # Phase 1: collect every key that has at least one matching candidate form.
     matches: list[str] = []
     for s in normalized_streets:
         for candidate in _match_candidates(s):
@@ -218,29 +266,7 @@ def canonical_street_matches(
             ):
                 matches.append(s)
                 break  # count each key at most once
-
-    if matches:
-        return matches
-
-    # Phase 2: single best fuzzy key (ambiguous OCR errors are rare).
-    if fuzzy_threshold <= 0 or len(normalized) < min_fuzzy_len:
-        return []
-    best_key: str | None = None
-    best_norm_dist = fuzzy_threshold
-    for s in normalized_streets:
-        forms = [s]
-        stripped = _strip_street_type(s)
-        if stripped is not None and len(stripped) >= min_fuzzy_len:
-            forms.append(stripped)
-        for form in forms:
-            if len(form) < min_fuzzy_len:
-                continue
-            dist = Levenshtein.distance(normalized, form)
-            norm_dist = dist / max(len(normalized), len(form))
-            if norm_dist < best_norm_dist:
-                best_norm_dist = norm_dist
-                best_key = s
-    return [best_key] if best_key is not None else []
+    return matches
 
 
 def polygon_side_lengths(polygon: list[list[int]]) -> list[float]:
