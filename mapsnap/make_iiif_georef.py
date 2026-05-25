@@ -289,9 +289,9 @@ def _corner_fallback(
     corners: list,
     width: int,
     height: int,
-    initials: list[dict],
+    intersections: list[dict],
 ) -> list[GcpPoint]:
-    """Return 4 image-corner GCPs plus any initial intersection GCPs.
+    """Return 4 image-corner GCPs plus any detected intersection GCPs.
 
     Used as a fallback when there are fewer than 2 non-coincident initial
     intersections and a full affine fit is not possible.
@@ -303,11 +303,11 @@ def _corner_fallback(
         ((w, h), (float(corners[2][0]), float(corners[2][1])), "corner"),
         ((0.0, h), (float(corners[3][0]), float(corners[3][1])), "corner"),
     ]
-    initial_pts: list[GcpPoint] = [
+    intersection_pts: list[GcpPoint] = [
         ((float(i["x"]), float(i["y"])), (float(i["lon"]), float(i["lat"])), "gcp")
-        for i in initials
+        for i in intersections
     ]
-    return corner_pts + initial_pts
+    return corner_pts + intersection_pts
 
 
 def georef_gcp_points(
@@ -327,10 +327,11 @@ def georef_gcp_points(
     through the similarity affine defined by the two initial GCPs alone, so it
     carries no independent information and cannot shift the fitted transform.
 
-    Type values: "gcp" for detected intersections, "projected" for the synthetic
-    perpendicular third point (option 3), "corner" for image-corner fallback points.
+    Type values: "gcp" for the two initial seed intersections that determine the fit,
+    "intersection" for the third detected intersection (options 1 & 2), "projected" for
+    the synthetic perpendicular third point (option 3), "corner" for image-corner fallback.
 
-    Falls back to 4 image corners (type "corner") plus any initial intersections
+    Falls back to 4 image corners (type "corner") plus any inlier intersections
     (type "gcp") when fewer than 2 non-coincident initial intersections exist
     (e.g. georefs produced by deferred single-GCP processing).
     """
@@ -339,9 +340,11 @@ def georef_gcp_points(
     corners: list = georef["corners"]
     image_center = np.array([width / 2.0, height / 2.0])
 
-    initials = [i for i in georef.get("intersections", []) if i.get("initial")]
+    all_intersections: list[dict] = georef.get("intersections", [])
+    inlier_intersections = [i for i in all_intersections if i.get("inlier")]
+    initials = [i for i in all_intersections if i.get("initial")]
     if len(initials) < 2:
-        return _corner_fallback(corners, width, height, initials)
+        return _corner_fallback(corners, width, height, inlier_intersections)
 
     int1, int2 = initials[0], initials[1]
     p1_pixel = (float(int1["x"]), float(int1["y"]))
@@ -352,14 +355,13 @@ def georef_gcp_points(
     p1 = np.array(p1_pixel)
     p2 = np.array(p2_pixel)
     if float(np.linalg.norm(p2 - p1)) < 1.0:
-        return _corner_fallback(corners, width, height, initials)
+        return _corner_fallback(corners, width, height, inlier_intersections)
 
     streets_set = {int1["label_a"], int1["label_b"], int2["label_a"], int2["label_b"]}
     initial_pairs = {
         frozenset({int1["label_a"], int1["label_b"]}),
         frozenset({int2["label_a"], int2["label_b"]}),
     }
-    all_intersections: list[dict] = georef.get("intersections", [])
 
     def dist_to_center(x: float, y: float) -> float:
         return float(np.linalg.norm(np.array([x, y]) - image_center))
@@ -389,7 +391,7 @@ def georef_gcp_points(
     p3_type: str
     if option1:
         p3_x, p3_y = min(option1, key=lambda c: dist_to_center(*c))
-        p3_type = "gcp"
+        p3_type = "intersection"
     else:
         # Option 2: any other intersection; inliers preferred, then closest to center.
         # Only consider candidates offset from the P1-P2 line by ≥ 25% of dist(P1, P2)
@@ -413,7 +415,7 @@ def georef_gcp_points(
 
         if pool:
             p3_x, p3_y = min(pool, key=lambda c: dist_to_center(*c))
-            p3_type = "gcp"
+            p3_type = "intersection"
         else:
             # Option 3: perpendicular offset from midpoint.
             diff = p2 - p1
