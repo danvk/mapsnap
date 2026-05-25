@@ -282,10 +282,38 @@ def _two_gcp_affine(
     return np.array([[alpha / cos_phi, beta / cos_phi, tx], [beta, -alpha, ty]])
 
 
+GcpPoint = tuple[tuple[float, float], tuple[float, float], str]
+
+
+def _corner_fallback(
+    corners: list,
+    width: int,
+    height: int,
+    initials: list[dict],
+) -> list[GcpPoint]:
+    """Return 4 image-corner GCPs plus any initial intersection GCPs.
+
+    Used as a fallback when there are fewer than 2 non-coincident initial
+    intersections and a full affine fit is not possible.
+    """
+    w, h = float(width), float(height)
+    corner_pts: list[GcpPoint] = [
+        ((0.0, 0.0), (float(corners[0][0]), float(corners[0][1])), "corner"),
+        ((w, 0.0), (float(corners[1][0]), float(corners[1][1])), "corner"),
+        ((w, h), (float(corners[2][0]), float(corners[2][1])), "corner"),
+        ((0.0, h), (float(corners[3][0]), float(corners[3][1])), "corner"),
+    ]
+    initial_pts: list[GcpPoint] = [
+        ((float(i["x"]), float(i["y"])), (float(i["lon"]), float(i["lat"])), "gcp")
+        for i in initials
+    ]
+    return corner_pts + initial_pts
+
+
 def georef_gcp_points(
     georef: dict,
-) -> list[tuple[tuple[float, float], tuple[float, float]]]:
-    """Return (pixel, geo) pairs for the GCPs to embed in the IIIF annotation.
+) -> list[GcpPoint]:
+    """Return (pixel, geo, type) triples for the GCPs to embed in the IIIF annotation.
 
     Uses the two "initial" intersections from the RANSAC fit plus a third point
     selected in priority order:
@@ -299,7 +327,11 @@ def georef_gcp_points(
     through the similarity affine defined by the two initial GCPs alone, so it
     carries no independent information and cannot shift the fitted transform.
 
-    Falls back to the 4 image corners when fewer than 2 initial intersections exist
+    Type values: "gcp" for detected intersections, "projected" for the synthetic
+    perpendicular third point (option 3), "corner" for image-corner fallback points.
+
+    Falls back to 4 image corners (type "corner") plus any initial intersections
+    (type "gcp") when fewer than 2 non-coincident initial intersections exist
     (e.g. georefs produced by deferred single-GCP processing).
     """
     width: int = georef["width"]
@@ -309,13 +341,7 @@ def georef_gcp_points(
 
     initials = [i for i in georef.get("intersections", []) if i.get("initial")]
     if len(initials) < 2:
-        w, h = float(width), float(height)
-        return [
-            ((0.0, 0.0), (float(corners[0][0]), float(corners[0][1]))),
-            ((w, 0.0), (float(corners[1][0]), float(corners[1][1]))),
-            ((w, h), (float(corners[2][0]), float(corners[2][1]))),
-            ((0.0, h), (float(corners[3][0]), float(corners[3][1]))),
-        ]
+        return _corner_fallback(corners, width, height, initials)
 
     int1, int2 = initials[0], initials[1]
     p1_pixel = (float(int1["x"]), float(int1["y"]))
@@ -326,13 +352,7 @@ def georef_gcp_points(
     p1 = np.array(p1_pixel)
     p2 = np.array(p2_pixel)
     if float(np.linalg.norm(p2 - p1)) < 1.0:
-        w, h = float(width), float(height)
-        return [
-            ((0.0, 0.0), (float(corners[0][0]), float(corners[0][1]))),
-            ((w, 0.0), (float(corners[1][0]), float(corners[1][1]))),
-            ((w, h), (float(corners[2][0]), float(corners[2][1]))),
-            ((0.0, h), (float(corners[3][0]), float(corners[3][1]))),
-        ]
+        return _corner_fallback(corners, width, height, initials)
 
     streets_set = {int1["label_a"], int1["label_b"], int2["label_a"], int2["label_b"]}
     initial_pairs = {
@@ -366,8 +386,10 @@ def georef_gcp_points(
         and perp_dist(float(i["x"]), float(i["y"])) >= min_offset
     ]
 
+    p3_type: str
     if option1:
         p3_x, p3_y = min(option1, key=lambda c: dist_to_center(*c))
+        p3_type = "gcp"
     else:
         # Option 2: any other intersection; inliers preferred, then closest to center.
         # Only consider candidates offset from the P1-P2 line by ≥ 25% of dist(P1, P2)
@@ -391,6 +413,7 @@ def georef_gcp_points(
 
         if pool:
             p3_x, p3_y = min(pool, key=lambda c: dist_to_center(*c))
+            p3_type = "gcp"
         else:
             # Option 3: perpendicular offset from midpoint.
             diff = p2 - p1
@@ -405,15 +428,16 @@ def georef_gcp_points(
             )
             p3_x = float(np.clip(p3[0], 0.0, float(width)))
             p3_y = float(np.clip(p3[1], 0.0, float(height)))
+            p3_type = "projected"
 
     # Project P3 through the 2-GCP similarity to get its geo coords.
     A = _two_gcp_affine(p1_pixel, p1_geo, p2_pixel, p2_geo)
     p3_geo = A @ np.array([p3_x, p3_y, 1.0])
 
     return [
-        (p1_pixel, p1_geo),
-        (p2_pixel, p2_geo),
-        ((p3_x, p3_y), (float(p3_geo[0]), float(p3_geo[1]))),
+        (p1_pixel, p1_geo, "gcp"),
+        (p2_pixel, p2_geo, "gcp"),
+        ((p3_x, p3_y), (float(p3_geo[0]), float(p3_geo[1])), p3_type),
     ]
 
 
@@ -467,7 +491,8 @@ def make_annotation(
         scale_x = source_width / georef_width
         scale_y = source_height / georef_height
         resource_coords_list = [
-            [round(px * scale_x, 1), round(py * scale_y, 1)] for (px, py), _ in gcp_pts
+            [round(px * scale_x, 1), round(py * scale_y, 1)]
+            for (px, py), _, _ in gcp_pts
         ]
     else:
         # True sub-image: locate via template matching for a non-circular placement.
@@ -508,7 +533,7 @@ def make_annotation(
                 round(split_cx + px * split_cw / georef_width, 1),
                 round(split_cy + py * split_ch / georef_height, 1),
             ]
-            for (px, py), _ in gcp_pts
+            for (px, py), _, _ in gcp_pts
         ]
 
     features = [
@@ -517,13 +542,14 @@ def make_annotation(
             "properties": {
                 "resourceCoords": rc,
                 "creator": creator,
+                "type": gcp_type,
             },
             "geometry": {
                 "type": "Point",
                 "coordinates": list(geo),
             },
         }
-        for rc, (_, geo) in zip(resource_coords_list, gcp_pts)
+        for rc, (_, geo, gcp_type) in zip(resource_coords_list, gcp_pts)
     ]
 
     return {

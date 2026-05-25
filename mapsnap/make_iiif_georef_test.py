@@ -4,14 +4,13 @@ import numpy as np
 import pytest
 
 from mapsnap.make_iiif_georef import (
+    GcpPoint,
     _load_oim_index,
     _service_url_to_page_key,
     _two_gcp_affine,
     georef_gcp_points,
     georef_path_to_page_key,
 )
-
-GCP = tuple[tuple[float, float], tuple[float, float]]
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -57,7 +56,7 @@ def make_intersection(
     }
 
 
-def pixels(pts: list[GCP]) -> list[tuple[float, float]]:
+def pixels(pts: list[GcpPoint]) -> list[tuple[float, float]]:
     return [pt[0] for pt in pts]
 
 
@@ -74,17 +73,24 @@ def test_no_initials_returns_corners():
     assert pts[1][0] == (2000.0, 0.0)
     assert pts[2][0] == (2000.0, 2000.0)
     assert pts[3][0] == (0.0, 2000.0)
+    assert all(p[2] == "corner" for p in pts)
 
 
-def test_one_initial_returns_corners():
+def test_one_initial_returns_corners_plus_initial():
+    # One initial: 4 corners + 1 initial GCP.
     georef = make_georef(
         2000, 2000, [make_intersection("A", "B", 100, 500, initial=True)]
     )
-    assert len(georef_gcp_points(georef)) == 4
+    pts = georef_gcp_points(georef)
+    assert len(pts) == 5
+    assert all(p[2] == "corner" for p in pts[:4])
+    assert pts[4][0] == (100.0, 500.0)
+    assert pts[4][2] == "gcp"
 
 
 def test_coincident_initials_returns_corners():
-    # Both initial intersections at the same pixel → degenerate, fall back to corners.
+    # Both initial intersections at the same pixel → degenerate, fall back to corners
+    # plus both initial GCPs.
     georef = make_georef(
         2000,
         2000,
@@ -93,7 +99,10 @@ def test_coincident_initials_returns_corners():
             make_intersection("C", "D", 500, 500, initial=True),
         ],
     )
-    assert len(georef_gcp_points(georef)) == 4
+    pts = georef_gcp_points(georef)
+    assert len(pts) == 6
+    assert all(p[2] == "corner" for p in pts[:4])
+    assert all(p[2] == "gcp" for p in pts[4:])
 
 
 # ---------------------------------------------------------------------------
@@ -111,8 +120,8 @@ def test_first_two_gcps_are_initials():
         ],
     )
     pts = georef_gcp_points(georef)
-    assert pts[0] == ((100.0, 500.0), (-90.0, 30.1))
-    assert pts[1] == ((900.0, 500.0), (-89.9, 30.1))
+    assert pts[0] == ((100.0, 500.0), (-90.0, 30.1), "gcp")
+    assert pts[1] == ((900.0, 500.0), (-89.9, 30.1), "gcp")
 
 
 # ---------------------------------------------------------------------------
@@ -135,6 +144,7 @@ def test_option1_uses_cross_intersection():
     pts = georef_gcp_points(georef)
     assert len(pts) == 3
     assert pts[2][0] == (500.0, 900.0)
+    assert pts[2][2] == "gcp"
 
 
 def test_option1_picks_candidate_closest_to_center():
@@ -265,6 +275,7 @@ def test_option3_used_when_all_candidates_collinear():
     # Midpoint is (500, 500); perpendicular offset gives x≈500, y≠500.
     assert abs(p3x - 500.0) < 1.0
     assert p3y != pytest.approx(500.0)
+    assert pts[2][2] == "projected"
 
 
 def test_option3_picks_side_closer_to_image_center():
@@ -301,7 +312,7 @@ def test_third_gcp_geo_is_projected_not_raw():
         ],
     )
     pts = georef_gcp_points(georef)
-    _, geo3 = pts[2]
+    _, geo3, _ = pts[2]
     assert geo3 != (-99.0, 99.0)
     # Geo should be consistent with the 2-GCP affine applied to (500, 900).
     A = _two_gcp_affine((100.0, 500.0), (-90.0, 30.1), (900.0, 500.0), (-89.9, 30.1))
