@@ -14,7 +14,7 @@ Volume | Pages | Num Fit | Median RMSE | Within 15ft | Within 25ft | Allmaps
 [Chicago 1950 Vol 1][chicago] | 111 | 100 (90%) | 10ft | 70% | 83% | [view][chicago-iiif]
 [Champaign, Ill. 1915][champaign] | 33 | 28 (85%) | 11ft | 79% | 93% | [view][champaign-iiif]
 
-RMSE was measured across 49 equally-spaced points on each image. You can view the fits on Allmaps or get the IIIF files from the `gallery` directory.
+RMSE was measured across 49 equally-spaced points on each image. You can view the fits on Allmaps or get the IIIF files from the `gallery` directory. For notes on poor fits, see [test data notes][].
 
 [nola5]: https://oldinsurancemaps.net/map/sanborn03376_029
 [nola2]: https://oldinsurancemaps.net/map/sanborn03376_006
@@ -27,6 +27,7 @@ RMSE was measured across 49 equally-spaced points on each image. You can view th
 [detroit-iiif]: https://viewer.allmaps.org/?url=https%3A%2F%2Fraw.githubusercontent.com%2Fdanvk%2Fmapsnap%2Frefs%2Fheads%2Fmain%2Fgallery%2Fdetroit_mich_1929_vol_11.iiif.json
 [chicago-iiif]: https://viewer.allmaps.org/?url=https%3A%2F%2Fraw.githubusercontent.com%2Fdanvk%2Fmapsnap%2Frefs%2Fheads%2Fmain%2Fgallery%2Fchicago_il_1950_vol_1.iiif.json
 [champaign-iiif]: https://viewer.allmaps.org/?url=https%3A%2F%2Fraw.githubusercontent.com%2Fdanvk%2Fmapsnap%2Frefs%2Fheads%2Fmain%2Fgallery%2Fchampaign_ill_1915.iiif.json
+[test data notes]: https://github.com/danvk/mapsnap/wiki/Test-data-notes
 
 ## How it works
 
