@@ -8,9 +8,12 @@ non-overlapping clipping masks.
 
 import math
 import sys
+from dataclasses import dataclass
+from pathlib import Path
 from typing import cast
 
 import numpy as np
+from PIL import Image, ImageDraw
 from shapely.geometry import LineString, MultiPolygon, Polygon
 from shapely.geometry import mapping as geom_mapping
 from shapely.geometry import shape as geom_shape
@@ -19,6 +22,25 @@ from shapely.ops import polygonize, unary_union
 
 # ~0.5 miles in degrees latitude (constant regardless of location).
 _BUFFER_LAT_DEG = 0.5 * 1609.344 / 111_320.0
+
+
+@dataclass
+class PageColorData:
+    """Color-score array and affine for one page's raw image.
+
+    color_score holds max(0, spread-20) per pixel where spread = max(R,G,B)-min(R,G,B).
+    Background paper tint has spread ≈ 20, so this zeroes it out; real colored ink
+    has spread > 20.
+
+    A_fwd/A_inv operate in georef pixel space. scale_x/scale_y map from georef pixels
+    to work-image pixels.
+    """
+
+    color_score: np.ndarray  # (H, W) int16
+    A_fwd: np.ndarray  # (2, 3) pixel→geo at georef pixel scale
+    A_inv: np.ndarray  # (2, 2) geo→pixel (inverse of A_fwd[:, :2])
+    scale_x: float  # work_w / georef_w
+    scale_y: float  # work_h / georef_h
 
 
 def _fit_affine(georef: dict) -> tuple[np.ndarray, np.ndarray]:
@@ -56,6 +78,67 @@ def _geo_to_pixel(
     geo_vec = np.array([lon, lat]) - A_fwd[:, 2]
     px, py = A_inv @ geo_vec
     return float(px), float(py)
+
+
+def _load_page_color_data(
+    raw_path: Path,
+    georef: dict,
+    work_long_side: int = 512,
+) -> PageColorData | None:
+    """Load a raw JPEG and build a color-score array for block assignment scoring.
+
+    Decodes the JPEG at reduced resolution using PIL's draft() hint (JPEG 1/8 DCT),
+    then resizes to work_long_side on the long side. Computes per-pixel spread =
+    max(R,G,B) - min(R,G,B), subtracts 20 (approximate background paper tint), and
+    clamps to zero. Returns None if the file is missing or unreadable.
+
+    Assumes georef["width"] / georef["height"] match the original raw image dimensions
+    (true for full-canvas Sanborn pages).
+    """
+    if not raw_path.exists():
+        return None
+    try:
+        img = Image.open(raw_path)
+        img.draft("RGB", (work_long_side, work_long_side))
+        img = img.convert("RGB")
+        raw_w, raw_h = img.size
+        scale = work_long_side / max(raw_w, raw_h)
+        work_w = max(1, round(raw_w * scale))
+        work_h = max(1, round(raw_h * scale))
+        img = img.resize((work_w, work_h), Image.Resampling.LANCZOS)
+        arr = np.array(img, dtype=np.int16)  # (H, W, 3)
+        spread = arr.max(axis=2) - arr.min(axis=2)
+        color_score = np.maximum(0, spread - 20).astype(np.int16)
+        A_fwd, A_inv = _fit_affine(georef)
+        georef_w = float(georef["width"])
+        georef_h = float(georef["height"])
+        return PageColorData(
+            color_score=color_score,
+            A_fwd=A_fwd,
+            A_inv=A_inv,
+            scale_x=work_w / georef_w,
+            scale_y=work_h / georef_h,
+        )
+    except Exception:
+        return None
+
+
+def _score_block_on_page(block: Polygon, pcd: PageColorData) -> float:
+    """Sum color-score values within the block polygon projected onto the page image.
+
+    Projects the block exterior from geo coords to work-pixel coords using the page's
+    affine, rasterizes with PIL.ImageDraw, then sums the color_score within the mask.
+    """
+    H, W = pcd.color_score.shape
+    coords_px = []
+    for lon, lat in block.exterior.coords:
+        px, py = _geo_to_pixel(lon, lat, pcd.A_fwd, pcd.A_inv)
+        coords_px.append((px * pcd.scale_x, py * pcd.scale_y))
+    mask_img = Image.new("L", (W, H), 0)
+    draw = ImageDraw.Draw(mask_img)
+    draw.polygon(coords_px, fill=1)
+    mask = np.array(mask_img, dtype=bool)
+    return float(pcd.color_score[mask].sum())
 
 
 def _polygonize_streets(
@@ -99,17 +182,17 @@ def _polygonize_streets(
 def _assign_blocks_to_pages(
     blocks: list[Polygon],
     page_polys: list[Polygon],
+    page_color_data: list[PageColorData | None] | None = None,
 ) -> dict[int, list[int]]:
-    """Assign each block to the page whose centroid is nearest (Voronoi assignment).
+    """Assign each block to the page with the highest color score (or nearest centroid).
 
-    Each block is assigned to the page with the minimum centroid-to-centroid
-    distance. Only pages with non-zero intersection with the block are eligible.
-    Tie-break: maximum intersection area.
+    When page_color_data is provided, each eligible (block, page) pair is scored by
+    summing color-spread values within the block on that page's work image. The page
+    with the highest score wins; centroid distance breaks ties, then intersection area.
+    Pages without color data receive a score of 0.
 
-    Distance-based (Voronoi) assignment naturally partitions the overlap zone
-    along perpendicular bisectors between page centers, producing connected
-    page territories. The earlier area-based approach let overlapping pages
-    steal blocks from deep inside a page's interior, creating disconnected masks.
+    When page_color_data is None, falls back to centroid-distance assignment (Voronoi):
+    the nearest page centroid wins with intersection area as tiebreak.
 
     Returns a dict mapping page_index → list of block indices.
     Blocks with zero intersection with every page are dropped.
@@ -120,6 +203,7 @@ def _assign_blocks_to_pages(
     for block_idx, block in enumerate(blocks):
         block_centroid = block.centroid
         best_page = -1
+        best_score = -1.0
         best_dist = float("inf")
         best_area = 0.0
 
@@ -128,11 +212,26 @@ def _assign_blocks_to_pages(
             area = inter.area
             if area <= 0:
                 continue
+
             dist = block_centroid.distance(page_centroids[page_idx])
-            if dist < best_dist or (dist == best_dist and area > best_area):
-                best_dist = dist
-                best_page = page_idx
-                best_area = area
+
+            if page_color_data is not None:
+                pcd = page_color_data[page_idx]
+                score = _score_block_on_page(block, pcd) if pcd is not None else 0.0
+                if (
+                    score > best_score
+                    or (score == best_score and dist < best_dist)
+                    or (score == best_score and dist == best_dist and area > best_area)
+                ):
+                    best_score = score
+                    best_page = page_idx
+                    best_dist = dist
+                    best_area = area
+            else:
+                if dist < best_dist or (dist == best_dist and area > best_area):
+                    best_dist = dist
+                    best_page = page_idx
+                    best_area = area
 
         if best_page >= 0:
             assignment[best_page].append(block_idx)
@@ -204,6 +303,7 @@ def _remove_spike_vertices(polygon: Polygon, min_turn_deg: float = 170.0) -> Pol
 def _assign_blocks_to_pages_with_splits(
     blocks: list[Polygon],
     page_polys: list[Polygon],
+    page_color_data: list[PageColorData | None] | None = None,
 ) -> dict[int, list[Polygon]]:
     """Assign blocks to pages, splitting blocks that straddle page boundaries.
 
@@ -222,7 +322,7 @@ def _assign_blocks_to_pages_with_splits(
     remaining: list[Polygon] = list(blocks)
 
     while remaining:
-        assignment = _assign_blocks_to_pages(remaining, page_polys)
+        assignment = _assign_blocks_to_pages(remaining, page_polys, page_color_data)
         if not any(assignment.values()):
             break  # all remaining subblocks are outside every page
 
@@ -248,6 +348,7 @@ def compute_all_clip_masks(
     centerlines_geojson: dict,
     simplify_tolerance: float = 0.00005,
     debug_blocks_out: list[dict] | None = None,
+    raw_paths: list[Path] | None = None,
 ) -> list[Polygon | None]:
     """Compute block-based clipping masks for all georeferenced pages.
 
@@ -265,6 +366,8 @@ def compute_all_clip_masks(
         simplify_tolerance: Douglas-Peucker tolerance in degrees (~0.00005 ≈ 5 m).
         debug_blocks_out: if provided, GeoJSON Feature dicts for each block are
             appended here (properties include 'page_idx': int | null).
+        raw_paths: if provided, raw JPEG paths parallel to georefs; used to load
+            color-score data for block assignment scoring.
     """
     if not georefs:
         return []
@@ -295,7 +398,21 @@ def compute_all_clip_masks(
     if not blocks:
         return [None] * len(georefs)
 
-    page_pieces = _assign_blocks_to_pages_with_splits(blocks, page_polys)
+    page_color_data: list[PageColorData | None] | None = None
+    if raw_paths is not None:
+        page_color_data = [
+            _load_page_color_data(path, georef)
+            for path, georef in zip(raw_paths, georefs)
+        ]
+        n_loaded = sum(pcd is not None for pcd in page_color_data)
+        print(
+            f"Loaded color data for {n_loaded}/{len(georefs)} pages.",
+            file=sys.stderr,
+        )
+
+    page_pieces = _assign_blocks_to_pages_with_splits(
+        blocks, page_polys, page_color_data
+    )
 
     if debug_blocks_out is not None:
         for page_idx, pieces in page_pieces.items():

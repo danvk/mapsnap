@@ -707,7 +707,10 @@ def main() -> None:
         print("Computing block-based clipping masks...", file=sys.stderr)
         debug_blocks: list[dict] | None = [] if args.debug_blocks else None
         geo_masks = compute_all_clip_masks(
-            all_georefs, centerlines_geojson, debug_blocks_out=debug_blocks
+            all_georefs,
+            centerlines_geojson,
+            debug_blocks_out=debug_blocks,
+            raw_paths=[raw_path for _, _, _, raw_path in valid_items],
         )
         n_masked = sum(m is not None for m in geo_masks)
         print(

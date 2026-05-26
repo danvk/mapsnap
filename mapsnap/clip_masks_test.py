@@ -1,18 +1,22 @@
 """Tests for clip_masks.py."""
 
 import math
+from pathlib import Path
 
 import numpy as np
 import pytest
 from shapely.geometry import MultiPolygon, Polygon
 
 from mapsnap.clip_masks import (
+    PageColorData,
     _assign_blocks_to_pages,
     _assign_blocks_to_pages_with_splits,
     _fit_affine,
     _is_substantial,
+    _load_page_color_data,
     _polygonize_streets,
     _remove_spike_vertices,
+    _score_block_on_page,
     compute_all_clip_masks,
     geo_polygon_to_svg,
 )
@@ -437,3 +441,73 @@ def test_svg_buffer_is_0_5_miles():
     miles_per_degree_lat = 111_320.0 / 1609.344  # ≈ 69.1 miles
     expected = 0.5 / miles_per_degree_lat
     assert math.isclose(_BUFFER_LAT_DEG, expected, rel_tol=1e-6)
+
+
+# ---------------------------------------------------------------------------
+# _load_page_color_data / _score_block_on_page
+# ---------------------------------------------------------------------------
+
+
+def _make_page_color_data(georef: dict, score_array: np.ndarray) -> PageColorData:
+    """Build a PageColorData directly from a georef and a pre-made score array."""
+    A_fwd, A_inv = _fit_affine(georef)
+    H, W = score_array.shape
+    return PageColorData(
+        color_score=score_array,
+        A_fwd=A_fwd,
+        A_inv=A_inv,
+        scale_x=W / float(georef["width"]),
+        scale_y=H / float(georef["height"]),
+    )
+
+
+def test_load_color_data_missing_file():
+    """Returns None when the raw image file does not exist."""
+    georef = _axis_aligned_georef(0.0, 0.0, 1.0, 1.0, w=100, h=100)
+    result = _load_page_color_data(Path("/nonexistent/file.jpg"), georef)
+    assert result is None
+
+
+def test_score_block_zero_image():
+    """A block over an all-zero color image returns score 0."""
+    georef = _axis_aligned_georef(0.0, 0.0, 1.0, 1.0, w=10, h=10)
+    pcd = _make_page_color_data(georef, np.zeros((10, 10), dtype=np.int16))
+    block = Polygon([(0.2, 0.2), (0.8, 0.2), (0.8, 0.8), (0.2, 0.8)])
+    assert _score_block_on_page(block, pcd) == 0.0
+
+
+def test_score_block_bright_region():
+    """A block over colored pixels returns a positive score."""
+    georef = _axis_aligned_georef(0.0, 0.0, 1.0, 1.0, w=10, h=10)
+    # For this axis-aligned georef:
+    #   lon=0.2 → px=2, lat=0.8 → py=(1-0.8)*10=2
+    #   lon=0.8 → px=8, lat=0.2 → py=(1-0.2)*10=8
+    # So the block maps to pixel rows 2-8, cols 2-8.
+    arr = np.zeros((10, 10), dtype=np.int16)
+    arr[2:8, 2:8] = 50
+    pcd = _make_page_color_data(georef, arr)
+    block = Polygon([(0.2, 0.2), (0.8, 0.2), (0.8, 0.8), (0.2, 0.8)])
+    assert _score_block_on_page(block, pcd) > 0.0
+
+
+def test_assign_uses_color_score_over_centroid():
+    """Block is assigned to the page with higher color score, even if more distant."""
+    # Two adjacent pages; block straddles the boundary near page0.
+    # Without color: page0 centroid is closer → block goes to page0.
+    # With color: page1 has rich content in the block area → block goes to page1.
+    georef0 = _axis_aligned_georef(0.0, 0.0, 1.0, 1.0, w=10, h=10)
+    georef1 = _axis_aligned_georef(0.9, 0.0, 2.0, 1.0, w=10, h=10)
+    page0 = Polygon(georef0["corners"])
+    page1 = Polygon(georef1["corners"])
+    # Block centroid at (0.75, 0.5): closer to page0 centroid (0.5, 0.5) than
+    # page1 centroid (1.45, 0.5), so centroid-distance would assign to page0.
+    block = Polygon([(0.6, 0.2), (0.95, 0.2), (0.95, 0.8), (0.6, 0.8)])
+
+    result_no_color = _assign_blocks_to_pages([block], [page0, page1])
+    assert result_no_color[0] == [0], "without color, block should go to closer page0"
+
+    # page0: zero color score; page1: rich color score everywhere
+    pcd0 = _make_page_color_data(georef0, np.zeros((10, 10), dtype=np.int16))
+    pcd1 = _make_page_color_data(georef1, np.full((10, 10), 100, dtype=np.int16))
+    result_with_color = _assign_blocks_to_pages([block], [page0, page1], [pcd0, pcd1])
+    assert result_with_color[1] == [0], "with color scoring, block should go to page1"
