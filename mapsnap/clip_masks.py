@@ -99,10 +99,16 @@ def _assign_blocks_to_pages(
     blocks: list[Polygon],
     page_polys: list[Polygon],
 ) -> dict[int, list[int]]:
-    """Assign each block to the page with the greatest intersection area.
+    """Assign each block to the page whose centroid is nearest (Voronoi assignment).
 
-    Tie-break (equal area): assign to the page whose centroid is closest
-    to the block centroid.
+    Each block is assigned to the page with the minimum centroid-to-centroid
+    distance. Only pages with non-zero intersection with the block are eligible.
+    Tie-break: maximum intersection area.
+
+    Distance-based (Voronoi) assignment naturally partitions the overlap zone
+    along perpendicular bisectors between page centers, producing connected
+    page territories. The earlier area-based approach let overlapping pages
+    steal blocks from deep inside a page's interior, creating disconnected masks.
 
     Returns a dict mapping page_index → list of block indices.
     Blocks with zero intersection with every page are dropped.
@@ -111,20 +117,21 @@ def _assign_blocks_to_pages(
     assignment: dict[int, list[int]] = {i: [] for i in range(len(page_polys))}
 
     for block_idx, block in enumerate(blocks):
+        block_centroid = block.centroid
         best_page = -1
-        best_area = 0.0
         best_dist = float("inf")
+        best_area = 0.0
 
         for page_idx, page_poly in enumerate(page_polys):
             inter = block.intersection(page_poly)
             area = inter.area
             if area <= 0:
                 continue
-            dist = block.centroid.distance(page_centroids[page_idx])
-            if area > best_area or (area == best_area and dist < best_dist):
-                best_area = area
-                best_page = page_idx
+            dist = block_centroid.distance(page_centroids[page_idx])
+            if dist < best_dist or (dist == best_dist and area > best_area):
                 best_dist = dist
+                best_page = page_idx
+                best_area = area
 
         if best_page >= 0:
             assignment[best_page].append(block_idx)
@@ -214,12 +221,29 @@ def compute_all_clip_masks(
                 )
                 mask_geo = substantial[0]
             else:
-                raise ValueError(
-                    f"Page {page_idx} (corners starting at {georef['corners'][0]}) "
-                    f"produced a MultiPolygon clipping mask with {len(substantial)} "
-                    f"substantial parts (each ≥5% of largest). This is unexpected — "
-                    f"investigate the street network or block assignment for this page."
-                )
+                # Multiple substantial parts — likely due to a rotated page whose diagonal
+                # boundary clips the axis-aligned block grid into disconnected pieces.
+                # Try the convex hull of the parts clipped to the page; since both the
+                # convex hull and the page polygon (a convex quadrilateral) are convex,
+                # their intersection is always a connected Polygon.
+                hull_mask = mask_geo.convex_hull.intersection(page_polys[page_idx])
+                if isinstance(hull_mask, Polygon) and not hull_mask.is_empty:
+                    hull_pct = hull_mask.area / page_polys[page_idx].area * 100
+                    print(
+                        f"Warning: page {page_idx} mask had {len(substantial)} disconnected "
+                        f"substantial parts; using convex hull "
+                        f"({hull_pct:.1f}% of page). Corners: {georef['corners'][0]}",
+                        file=sys.stderr,
+                    )
+                    mask_geo = hull_mask
+                else:
+                    raise ValueError(
+                        f"Page {page_idx} (corners starting at {georef['corners'][0]}) "
+                        f"produced a MultiPolygon clipping mask with {len(substantial)} "
+                        f"substantial parts (each ≥5% of largest), and the convex hull "
+                        f"fallback also failed. Investigate the street network or block "
+                        f"assignment for this page."
+                    )
 
         # Warn if interior holes are present (unexpected with city block geometry).
         if len(mask_geo.interiors) > 0:
