@@ -12,6 +12,7 @@ from mapsnap.clip_masks import (
     _fit_affine,
     _is_substantial,
     _polygonize_streets,
+    _remove_spike_vertices,
     compute_all_clip_masks,
     geo_polygon_to_svg,
 )
@@ -279,6 +280,35 @@ def test_is_substantial_small_area_rejected():
     reference = Polygon([(0, 0), (10, 0), (10, 10), (0, 10)])
     small = Polygon([(0, 0), (1, 0), (1, 0.9), (0, 0.9)])  # 0.9% of area
     assert not _is_substantial(small, reference)
+
+
+# ---------------------------------------------------------------------------
+# _remove_spike_vertices
+# ---------------------------------------------------------------------------
+
+
+def test_remove_spike_removes_backtrack_vertex():
+    """A vertex where the polygon reverses direction (≥150° turn) is removed."""
+    # Square with a spike: goes to (1, 0.5), which requires a ≥150° turn to reach
+    # from (2, 0.9) and another to leave toward (2, 1.1).
+    spike_poly = Polygon([(0, 0), (2, 0), (2, 0.9), (1, 0.5), (2, 1.1), (2, 2), (0, 2)])
+    cleaned = _remove_spike_vertices(spike_poly, min_turn_deg=150.0)
+    assert len(list(cleaned.exterior.coords)) < len(list(spike_poly.exterior.coords))
+
+
+def test_remove_spike_preserves_clean_polygon():
+    """A polygon with no spike vertices is returned unchanged."""
+    square = Polygon([(0, 0), (1, 0), (1, 1), (0, 1)])
+    cleaned = _remove_spike_vertices(square)
+    assert list(cleaned.exterior.coords) == list(square.exterior.coords)
+
+
+def test_remove_spike_collinear_not_removed():
+    """A collinear vertex (0° turn, same direction) is NOT treated as a spike."""
+    # (1,1) lies exactly on the top edge between (2,1) and (0,1) — 0° turn, not 180°.
+    poly = Polygon([(0, 0), (2, 0), (2, 1), (1, 1), (0, 1)])
+    cleaned = _remove_spike_vertices(poly)
+    assert len(list(cleaned.exterior.coords)) == len(list(poly.exterior.coords))
 
 
 # ---------------------------------------------------------------------------

@@ -170,6 +170,37 @@ def _is_substantial(
     return True
 
 
+def _remove_spike_vertices(polygon: Polygon, min_turn_deg: float = 170.0) -> Polygon:
+    """Remove backtrack vertices from a polygon's exterior ring.
+
+    A backtrack vertex is one where the signed turn angle is ≥ min_turn_deg,
+    meaning the polygon boundary reverses direction and creates a spike or
+    antenna. These vertices cause triangulation failures in viewers like Allmaps.
+
+    Iterates until no more backtrack vertices remain (multi-vertex spikes may
+    require more than one pass).
+    """
+    coords = list(polygon.exterior.coords[:-1])  # drop closing duplicate
+    while True:
+        n = len(coords)
+        keep = []
+        for i in range(n):
+            prev = coords[(i - 1) % n]
+            cur = coords[i]
+            nxt = coords[(i + 1) % n]
+            v1 = (cur[0] - prev[0], cur[1] - prev[1])
+            v2 = (nxt[0] - cur[0], nxt[1] - cur[1])
+            cross = v1[0] * v2[1] - v1[1] * v2[0]
+            dot = v1[0] * v2[0] + v1[1] * v2[1]
+            turn = math.degrees(math.atan2(cross, dot))
+            if abs(turn) < min_turn_deg:
+                keep.append(cur)
+        if len(keep) == n or len(keep) < 3:
+            break
+        coords = keep
+    return Polygon(coords)
+
+
 def _assign_blocks_to_pages_with_splits(
     blocks: list[Polygon],
     page_polys: list[Polygon],
@@ -291,6 +322,9 @@ def compute_all_clip_masks(
             continue
 
         mask_geo = mask_geo.simplify(simplify_tolerance, preserve_topology=True)
+
+        if isinstance(mask_geo, Polygon):
+            mask_geo = _remove_spike_vertices(mask_geo)
 
         if isinstance(mask_geo, MultiPolygon):
             # Filter out disconnected slivers (< 5% of the largest component).
