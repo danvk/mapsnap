@@ -149,6 +149,27 @@ def _collect_polygons(geom: object) -> list[Polygon]:
     return []
 
 
+def _is_substantial(
+    piece: Polygon, reference: Polygon, min_fraction: float = 0.10
+) -> bool:
+    """Return True if piece is substantial relative to reference.
+
+    Requires the piece's area to be >= min_fraction of reference area AND
+    its bounding-box extent in both dimensions to be >= min_fraction of
+    reference extent. Rejects slivers that are narrow in any direction.
+    """
+    if piece.area < reference.area * min_fraction:
+        return False
+    rx_min, ry_min, rx_max, ry_max = reference.bounds
+    px_min, py_min, px_max, py_max = piece.bounds
+    ref_w, ref_h = rx_max - rx_min, ry_max - ry_min
+    if ref_w > 0 and (px_max - px_min) < ref_w * min_fraction:
+        return False
+    if ref_h > 0 and (py_max - py_min) < ref_h * min_fraction:
+        return False
+    return True
+
+
 def _assign_blocks_to_pages_with_splits(
     blocks: list[Polygon],
     page_polys: list[Polygon],
@@ -157,9 +178,9 @@ def _assign_blocks_to_pages_with_splits(
 
     Iteratively assigns the current pool of subblocks. For each subblock assigned
     to a page, the intersection with that page is added to that page's territory;
-    the remainder (outside the page) is queued for the next round. Because the
-    remainder has zero intersection with the page that already claimed the inside,
-    it will be assigned to a different page (or dropped if it overlaps none).
+    the remainder (outside the page) is queued for the next round only if it is
+    substantial relative to the subblock (≥10% of area and ≥10% of extent in both
+    dimensions). Thin slivers are discarded to avoid invalid geometry.
 
     Convergence is guaranteed: each outside part is strictly smaller than the
     subblock it came from, and the set of eligible pages shrinks each round.
@@ -183,7 +204,7 @@ def _assign_blocks_to_pages_with_splits(
                 outside = subblock.difference(page_poly)
                 page_territory[page_idx].extend(_collect_polygons(inside))
                 for piece in _collect_polygons(outside):
-                    if piece.area > 1e-14:
+                    if _is_substantial(piece, subblock):
                         next_remaining.append(piece)
 
         remaining = next_remaining

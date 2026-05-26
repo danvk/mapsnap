@@ -10,6 +10,7 @@ from mapsnap.clip_masks import (
     _assign_blocks_to_pages,
     _assign_blocks_to_pages_with_splits,
     _fit_affine,
+    _is_substantial,
     _polygonize_streets,
     compute_all_clip_masks,
     geo_polygon_to_svg,
@@ -243,6 +244,41 @@ def test_split_outside_block_dropped():
     block = Polygon([(5, 5), (6, 5), (6, 6), (5, 6)])
     pieces = _assign_blocks_to_pages_with_splits([block], [page])
     assert all(len(ps) == 0 for ps in pieces.values())
+
+
+def test_split_sliver_remainder_dropped():
+    """A thin outside remainder (<10% of block width) is not passed on."""
+    page0 = Polygon([(0, 0), (1, 0), (1, 1), (0, 1)])
+    page1 = Polygon([(1, 0), (2, 0), (2, 1), (1, 1)])
+    # Block x in [0, 1.05]: outside piece is only ~5% of block width → sliver.
+    block = Polygon([(0.0, 0.2), (1.05, 0.2), (1.05, 0.8), (0.0, 0.8)])
+    pieces = _assign_blocks_to_pages_with_splits([block], [page0, page1])
+    assert sum(p.area for p in pieces[1]) == 0, "sliver remainder should be dropped"
+
+
+# ---------------------------------------------------------------------------
+# _is_substantial
+# ---------------------------------------------------------------------------
+
+
+def test_is_substantial_full_overlap():
+    """A piece identical to the reference is substantial."""
+    poly = Polygon([(0, 0), (1, 0), (1, 1), (0, 1)])
+    assert _is_substantial(poly, poly)
+
+
+def test_is_substantial_thin_strip_rejected():
+    """A strip that is <10% of reference height is not substantial."""
+    reference = Polygon([(0, 0), (1, 0), (1, 1), (0, 1)])
+    thin = Polygon([(0, 0), (1, 0), (1, 0.05), (0, 0.05)])  # 5% of height
+    assert not _is_substantial(thin, reference)
+
+
+def test_is_substantial_small_area_rejected():
+    """A piece with <10% of reference area is not substantial."""
+    reference = Polygon([(0, 0), (10, 0), (10, 10), (0, 10)])
+    small = Polygon([(0, 0), (1, 0), (1, 0.9), (0, 0.9)])  # 0.9% of area
+    assert not _is_substantial(small, reference)
 
 
 # ---------------------------------------------------------------------------
