@@ -1,0 +1,337 @@
+"""Tests for clip_masks.py."""
+
+import math
+
+import numpy as np
+import pytest
+from shapely.geometry import MultiPolygon, Polygon
+
+from mapsnap.clip_masks import (
+    _assign_blocks_to_pages,
+    _fit_affine,
+    _polygonize_streets,
+    compute_all_clip_masks,
+    geo_polygon_to_svg,
+)
+
+
+def _make_georef(
+    width: int,
+    height: int,
+    corners: list[list[float]],
+) -> dict:
+    """Build a minimal georef dict for testing."""
+    return {"width": width, "height": height, "corners": corners}
+
+
+def _axis_aligned_georef(
+    lon0: float, lat0: float, lon1: float, lat1: float, w: int = 1000, h: int = 1000
+) -> dict:
+    """Return a georef whose corners form an axis-aligned lon/lat rectangle.
+
+    corners: TL=(lon0,lat1), TR=(lon1,lat1), BR=(lon1,lat0), BL=(lon0,lat0)
+    (image y increases downward, lat increases upward).
+    """
+    return _make_georef(
+        w,
+        h,
+        [
+            [lon0, lat1],  # TL: pixel (0,0)
+            [lon1, lat1],  # TR: pixel (w,0)
+            [lon1, lat0],  # BR: pixel (w,h)
+            [lon0, lat0],  # BL: pixel (0,h)
+        ],
+    )
+
+
+# ---------------------------------------------------------------------------
+# _fit_affine
+# ---------------------------------------------------------------------------
+
+
+def test_fit_affine_round_trips_corners():
+    """Forward affine maps pixel corners to the correct geo coords."""
+    georef = _axis_aligned_georef(-90.0, 30.0, -89.9, 30.1)
+    A_fwd, _ = _fit_affine(georef)
+    w, h = float(georef["width"]), float(georef["height"])
+    pixel_pts = np.array([[0, 0], [w, 0], [w, h], [0, h]])
+    for (px, py), expected in zip(pixel_pts, georef["corners"]):
+        result = A_fwd @ np.array([px, py, 1.0])
+        np.testing.assert_allclose(result, expected, atol=1e-9)
+
+
+def test_fit_affine_inverse_round_trips():
+    """Inverse affine maps geo corners back to pixel coords."""
+    georef = _axis_aligned_georef(-90.0, 30.0, -89.9, 30.1)
+    A_fwd, A_inv = _fit_affine(georef)
+    w, h = float(georef["width"]), float(georef["height"])
+    expected_pixels = [(0, 0), (w, 0), (w, h), (0, h)]
+    for (lon, lat), (ex, ey) in zip(georef["corners"], expected_pixels):
+        geo_vec = np.array([lon, lat]) - A_fwd[:, 2]
+        px, py = A_inv @ geo_vec
+        assert abs(px - ex) < 1e-5
+        assert abs(py - ey) < 1e-5
+
+
+def test_fit_affine_handles_rotated_map():
+    """Affine fit works when the map is ~45° rotated in geo space."""
+    # Rotate a square 45°: TL→top, TR→right, BR→bottom, BL→left.
+    d = 0.1
+    corners = [
+        [0.0, d],  # TL: pixel (0,0) → north tip
+        [d, 0.0],  # TR: pixel (w,0) → east tip
+        [0.0, -d],  # BR: pixel (w,h) → south tip
+        [-d, 0.0],  # BL: pixel (0,h) → west tip
+    ]
+    georef = _make_georef(1000, 1000, corners)
+    A_fwd, A_inv = _fit_affine(georef)
+    w, h = 1000.0, 1000.0
+    for (px, py), expected in zip([(0, 0), (w, 0), (w, h), (0, h)], corners):
+        result = A_fwd @ np.array([px, py, 1.0])
+        np.testing.assert_allclose(result, expected, atol=1e-9)
+        geo_vec = np.array(expected) - A_fwd[:, 2]
+        rx, ry = A_inv @ geo_vec
+        assert abs(rx - px) < 1e-6
+        assert abs(ry - py) < 1e-6
+
+
+# ---------------------------------------------------------------------------
+# _polygonize_streets
+# ---------------------------------------------------------------------------
+
+
+def _line_feature(coords: list[list[float]]) -> dict:
+    return {
+        "type": "Feature",
+        "properties": {},
+        "geometry": {"type": "LineString", "coordinates": coords},
+    }
+
+
+def _geojson(*features: dict) -> dict:
+    return {"type": "FeatureCollection", "features": list(features)}
+
+
+def test_polygonize_simple_grid():
+    """A 2×2 street grid inside a bounding box produces ≥4 blocks."""
+    # Coverage: unit square [0,1]×[0,1]
+    coverage = Polygon([(0, 0), (1, 0), (1, 1), (0, 1)])
+    gj = _geojson(
+        _line_feature([[0.5, 0.0], [0.5, 1.0]]),  # vertical line x=0.5
+        _line_feature([[0.0, 0.5], [1.0, 0.5]]),  # horizontal line y=0.5
+    )
+    blocks = _polygonize_streets(gj, coverage)
+    # With the boundary ring added: 4 cells from the grid + boundary edges
+    assert len(blocks) >= 4
+
+
+def test_polygonize_boundary_closes_open_ends():
+    """A single horizontal line + coverage boundary creates ≥2 blocks."""
+    coverage = Polygon([(0, 0), (2, 0), (2, 1), (0, 1)])
+    gj = _geojson(
+        _line_feature([[0.0, 0.5], [2.0, 0.5]]),  # divides rectangle in half
+    )
+    blocks = _polygonize_streets(gj, coverage)
+    assert len(blocks) >= 2
+
+
+def test_polygonize_empty_centerlines():
+    """No features → no blocks (just the boundary, which doesn't polygonize alone)."""
+    coverage = Polygon([(0, 0), (1, 0), (1, 1), (0, 1)])
+    gj = _geojson()
+    blocks = _polygonize_streets(gj, coverage)
+    # A single closed ring with no interior lines produces 0 blocks from polygonize.
+    assert isinstance(blocks, list)
+
+
+def test_polygonize_clips_outside_coverage():
+    """Lines entirely outside the coverage polygon are excluded."""
+    coverage = Polygon([(0, 0), (1, 0), (1, 1), (0, 1)])
+    gj = _geojson(
+        _line_feature([[2.0, 0.5], [3.0, 0.5]]),  # entirely outside
+        _line_feature([[0.5, 0.0], [0.5, 1.0]]),  # inside — splits coverage
+    )
+    blocks = _polygonize_streets(gj, coverage)
+    # Only the inside line contributes; should produce ≥2 blocks.
+    assert len(blocks) >= 2
+
+
+# ---------------------------------------------------------------------------
+# _assign_blocks_to_pages
+# ---------------------------------------------------------------------------
+
+
+def test_assign_primary_by_area():
+    """Block mostly inside page 0 is assigned to page 0."""
+    page0 = Polygon([(0, 0), (10, 0), (10, 10), (0, 10)])  # x in [0,10]
+    page1 = Polygon([(8, 0), (20, 0), (20, 10), (8, 10)])  # x in [8,20]
+    # Block x in [0,9]: 90% in page0, 10% in page1.
+    block = Polygon([(0, 0), (9, 0), (9, 10), (0, 10)])
+    result = _assign_blocks_to_pages([block], [page0, page1])
+    assert 0 in result[0]
+    assert result[1] == []
+
+
+def test_assign_tiebreak_by_distance():
+    """When overlap areas are equal, the closer page centroid wins."""
+    # Two adjacent unit squares; block is exactly on the border.
+    page0 = Polygon([(0, 0), (1, 0), (1, 1), (0, 1)])  # centroid (0.5, 0.5)
+    page1 = Polygon([(1, 0), (2, 0), (2, 1), (1, 1)])  # centroid (1.5, 0.5)
+    # Block spans both pages equally (0.5 units each side of x=1).
+    block = Polygon([(0.5, 0.25), (1.5, 0.25), (1.5, 0.75), (0.5, 0.75)])
+    result = _assign_blocks_to_pages([block], [page0, page1])
+    # Block centroid is at (1.0, 0.5); both pages equally distant at 0.5 units.
+    # Either assignment is valid; just verify it went somewhere.
+    assert result[0] == [0] or result[1] == [0]
+
+
+def test_assign_no_overlap_block_dropped():
+    """Block with no overlap with any page is not assigned."""
+    page = Polygon([(0, 0), (1, 0), (1, 1), (0, 1)])
+    block = Polygon([(5, 5), (6, 5), (6, 6), (5, 6)])  # far away
+    result = _assign_blocks_to_pages([block], [page])
+    assert result[0] == []
+
+
+def test_assign_no_double_assignment():
+    """No block is assigned to more than one page."""
+    page0 = Polygon([(0, 0), (5, 0), (5, 5), (0, 5)])
+    page1 = Polygon([(4, 0), (10, 0), (10, 5), (4, 5)])
+    blocks = [
+        Polygon([(0, 0), (4, 0), (4, 5), (0, 5)]),
+        Polygon([(4, 0), (5, 0), (5, 5), (4, 5)]),
+        Polygon([(5, 0), (10, 0), (10, 5), (5, 5)]),
+    ]
+    result = _assign_blocks_to_pages(blocks, [page0, page1])
+    all_assigned = result[0] + result[1]
+    assert len(all_assigned) == len(set(all_assigned)), (
+        "Block assigned to multiple pages"
+    )
+
+
+# ---------------------------------------------------------------------------
+# compute_all_clip_masks
+# ---------------------------------------------------------------------------
+
+
+def _simple_georef_row() -> tuple[list[dict], dict]:
+    """Three adjacent pages with a simple 3-column street grid.
+
+    Pages are 1°×1° boxes at lon 0-1, 1-2, 2-3; all at lat 0-1.
+    Centerlines are the vertical lines at lon=0.5, 1.5, 2.5 (one per page interior).
+    """
+    georefs = [
+        _axis_aligned_georef(0.0, 0.0, 1.0, 1.0),
+        _axis_aligned_georef(1.0, 0.0, 2.0, 1.0),
+        _axis_aligned_georef(2.0, 0.0, 3.0, 1.0),
+    ]
+    gj = _geojson(
+        _line_feature([[0.5, 0.0], [0.5, 1.0]]),
+        _line_feature([[1.5, 0.0], [1.5, 1.0]]),
+        _line_feature([[2.5, 0.0], [2.5, 1.0]]),
+    )
+    return georefs, gj
+
+
+def test_compute_masks_returns_one_per_georef():
+    georefs, gj = _simple_georef_row()
+    masks = compute_all_clip_masks(georefs, gj)
+    assert len(masks) == 3
+
+
+def test_compute_masks_within_page_bounds():
+    georefs, gj = _simple_georef_row()
+    masks = compute_all_clip_masks(georefs, gj)
+    for georef, mask in zip(georefs, masks):
+        if mask is None:
+            continue
+        page_poly = Polygon(georef["corners"])
+        # mask should be (approximately) contained in the page polygon.
+        assert mask.difference(page_poly.buffer(1e-8)).area < 1e-8
+
+
+def test_compute_masks_empty_georefs():
+    assert (
+        compute_all_clip_masks([], {"type": "FeatureCollection", "features": []}) == []
+    )
+
+
+def test_compute_masks_empty_centerlines():
+    georefs, _ = _simple_georef_row()
+    masks = compute_all_clip_masks(
+        georefs, {"type": "FeatureCollection", "features": []}
+    )
+    # With no centerlines the boundary ring creates at most 1 block; most pages get None.
+    assert len(masks) == len(georefs)
+    assert sum(m is None for m in masks) >= len(georefs) - 1
+
+
+# ---------------------------------------------------------------------------
+# geo_polygon_to_svg
+# ---------------------------------------------------------------------------
+
+
+def test_svg_none_returns_full_page_rect():
+    georef = _axis_aligned_georef(-90.0, 30.0, -89.9, 30.1, w=2000, h=3000)
+    svg = geo_polygon_to_svg(None, georef, 2000, 3000)
+    assert "2000" in svg
+    assert "3000" in svg
+    assert svg.count("<polygon") == 1
+
+
+def test_svg_full_page_polygon_gives_corner_coords():
+    """A polygon equal to the page corners should give approximately full-page coords."""
+    georef = _axis_aligned_georef(-90.0, 30.0, -89.9, 30.1, w=1000, h=1000)
+    page_poly = Polygon(georef["corners"])
+    svg = geo_polygon_to_svg(page_poly, georef, 1000, 1000)
+    assert "<polygon" in svg
+    assert "<svg>" in svg
+
+
+def test_svg_known_coords():
+    """For an axis-aligned page, corners map to exact pixel coords."""
+    georef = _axis_aligned_georef(0.0, 0.0, 1.0, 1.0, w=100, h=100)
+    # A polygon exactly matching the page corners (but using just 4 points).
+    poly = Polygon([(0.0, 1.0), (1.0, 1.0), (1.0, 0.0), (0.0, 0.0)])
+    svg = geo_polygon_to_svg(poly, georef, 100, 100)
+    # Should include corner pixel coords (0,0), (100,0), (100,100), (0,100).
+    assert "0.0,0.0" in svg or "0,0" in svg
+
+
+def test_svg_split_canvas_offset():
+    """Split-canvas coordinates include the (cx, cy) offset."""
+    georef = _axis_aligned_georef(0.0, 0.0, 1.0, 1.0, w=100, h=100)
+    poly = Polygon([(0.0, 1.0), (1.0, 1.0), (1.0, 0.0), (0.0, 0.0)])
+    split = (500.0, 200.0, 100.0, 100.0)  # offset (500, 200)
+    svg = geo_polygon_to_svg(poly, georef, 1000, 1000, split_canvas=split)
+    # The top-left corner pixel (0,0) → canvas (500, 200).
+    assert "500.0,200.0" in svg
+
+
+def test_svg_multipolygon_raises():
+    georef = _axis_aligned_georef(0.0, 0.0, 1.0, 1.0)
+    mp = MultiPolygon(
+        [
+            Polygon([(0, 0), (0.4, 0), (0.4, 1), (0, 1)]),
+            Polygon([(0.6, 0), (1, 0), (1, 1), (0.6, 1)]),
+        ]
+    )
+    with pytest.raises(ValueError, match="MultiPolygon"):
+        geo_polygon_to_svg(mp, georef, 1000, 1000)
+
+
+def test_svg_empty_polygon_returns_full_page_rect():
+    georef = _axis_aligned_georef(-90.0, 30.0, -89.9, 30.1, w=2000, h=3000)
+    empty = Polygon()
+    svg = geo_polygon_to_svg(empty, georef, 2000, 3000)
+    assert "2000" in svg
+    assert "3000" in svg
+
+
+def test_svg_buffer_is_0_5_miles():
+    """Verify the buffer constant is approximately 0.5 miles in degrees lat."""
+    from mapsnap.clip_masks import _BUFFER_LAT_DEG
+
+    miles_per_degree_lat = 111_320.0 / 1609.344  # ≈ 69.1 miles
+    expected = 0.5 / miles_per_degree_lat
+    assert math.isclose(_BUFFER_LAT_DEG, expected, rel_tol=1e-6)

@@ -37,7 +37,10 @@ from pathlib import Path
 import cv2
 import numpy as np
 from PIL import Image
+from shapely.geometry import Polygon as ShapelyPolygon
 
+from mapsnap.clip_masks import compute_all_clip_masks
+from mapsnap.clip_masks import geo_polygon_to_svg
 from mapsnap.utils import jpeg_dimensions
 
 
@@ -449,6 +452,7 @@ def make_annotation(
     raw_path: Path,
     creator_url: str,
     now: str,
+    geo_mask: ShapelyPolygon | None = None,
 ) -> dict:
     """Build a IIIF georeferencing annotation for one page.
 
@@ -460,6 +464,9 @@ def make_annotation(
     (e.g. p4.unsplit.jpg) is located via template matching to determine the non-circular
     canvas placement. Raises ValueError if the unsplit file is missing or the match
     is too uncertain.
+
+    geo_mask, when provided, is a Shapely Polygon in geographic (lon/lat) space used
+    as the SvgSelector clipping polygon. Falls back to the full-page rectangle if None.
     """
     source = item["target"]["source"]
     source_id: str = source["id"]
@@ -578,9 +585,8 @@ def make_annotation(
             },
             "selector": {
                 "type": "SvgSelector",
-                "value": (
-                    f'<svg><polygon points="0,{source_height} 0,0 '
-                    f'{source_width},0 {source_width},{source_height} 0,{source_height}" /></svg>'
+                "value": geo_polygon_to_svg(
+                    geo_mask, georef, source_width, source_height, split_canvas
                 ),
             },
         },
@@ -624,6 +630,11 @@ def main() -> None:
         default="https://oldinsurancemaps.net/profile/danvk",
         help="Creator profile URL (default: %(default)s)",
     )
+    parser.add_argument(
+        "--centerlines",
+        metavar="FILE",
+        help="GeoJSON centerlines file for block-based clipping masks",
+    )
     args = parser.parse_args()
 
     source_data: dict = json.load(open(args.oim_iiif))
@@ -655,7 +666,8 @@ def main() -> None:
 
     now = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
-    annotations: list[dict] = []
+    # Pass 1: collect all valid (page_key, canvas_item, georef, raw_path) tuples.
+    valid_items: list[tuple[str, dict, dict, Path]] = []
     for path in georef_paths:
         page_key = georef_path_to_page_key(path)
         if not page_key:
@@ -672,11 +684,32 @@ def main() -> None:
                 file=sys.stderr,
             )
             continue
-        georef: dict = json.load(open(path))
+        georef = json.load(open(path))
         raw_path = Path(path).parent / f"{page_key}.raw.jpg"
+        valid_items.append((page_key, canvas_item, georef, raw_path))
+
+    # Compute block-based clipping masks when a centerlines file is provided.
+    geo_masks: list[ShapelyPolygon | None] = [None] * len(valid_items)
+    if args.centerlines:
+        centerlines_geojson: dict = json.load(open(args.centerlines))
+        all_georefs = [georef for _, _, georef, _ in valid_items]
+        print("Computing block-based clipping masks...", file=sys.stderr)
+        geo_masks = compute_all_clip_masks(all_georefs, centerlines_geojson)
+        n_masked = sum(m is not None for m in geo_masks)
+        print(
+            f"Computed masks for {n_masked}/{len(valid_items)} pages.", file=sys.stderr
+        )
+
+    # Pass 2: build annotations with the per-page geo mask.
+    annotations: list[dict] = []
+    for (page_key, canvas_item, georef, raw_path), geo_mask in zip(
+        valid_items, geo_masks
+    ):
         try:
             annotations.append(
-                make_annotation(canvas_item, georef, raw_path, args.creator, now)
+                make_annotation(
+                    canvas_item, georef, raw_path, args.creator, now, geo_mask
+                )
             )
         except ValueError as exc:
             print(f"Warning: skipping {page_key}: {exc}", file=sys.stderr)
