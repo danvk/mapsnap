@@ -140,6 +140,57 @@ def _assign_blocks_to_pages(
     return assignment
 
 
+def _collect_polygons(geom: object) -> list[Polygon]:
+    """Extract all non-empty Polygon parts from any Shapely geometry."""
+    if isinstance(geom, Polygon):
+        return [] if geom.is_empty else [geom]
+    if isinstance(geom, BaseMultipartGeometry):
+        return [p for p in geom.geoms if isinstance(p, Polygon) and not p.is_empty]
+    return []
+
+
+def _assign_blocks_to_pages_with_splits(
+    blocks: list[Polygon],
+    page_polys: list[Polygon],
+) -> dict[int, list[Polygon]]:
+    """Assign blocks to pages, splitting blocks that straddle page boundaries.
+
+    Iteratively assigns the current pool of subblocks. For each subblock assigned
+    to a page, the intersection with that page is added to that page's territory;
+    the remainder (outside the page) is queued for the next round. Because the
+    remainder has zero intersection with the page that already claimed the inside,
+    it will be assigned to a different page (or dropped if it overlaps none).
+
+    Convergence is guaranteed: each outside part is strictly smaller than the
+    subblock it came from, and the set of eligible pages shrinks each round.
+
+    Returns page_idx → list of Polygon pieces already clipped to the page boundary.
+    """
+    page_territory: dict[int, list[Polygon]] = {i: [] for i in range(len(page_polys))}
+    remaining: list[Polygon] = list(blocks)
+
+    while remaining:
+        assignment = _assign_blocks_to_pages(remaining, page_polys)
+        if not any(assignment.values()):
+            break  # all remaining subblocks are outside every page
+
+        next_remaining: list[Polygon] = []
+        for page_idx, block_indices in assignment.items():
+            page_poly = page_polys[page_idx]
+            for block_idx in block_indices:
+                subblock = remaining[block_idx]
+                inside = subblock.intersection(page_poly)
+                outside = subblock.difference(page_poly)
+                page_territory[page_idx].extend(_collect_polygons(inside))
+                for piece in _collect_polygons(outside):
+                    if piece.area > 1e-14:
+                        next_remaining.append(piece)
+
+        remaining = next_remaining
+
+    return page_territory
+
+
 def compute_all_clip_masks(
     georefs: list[dict],
     centerlines_geojson: dict,
@@ -192,32 +243,27 @@ def compute_all_clip_masks(
     if not blocks:
         return [None] * len(georefs)
 
-    assignment = _assign_blocks_to_pages(blocks, page_polys)
+    page_pieces = _assign_blocks_to_pages_with_splits(blocks, page_polys)
 
     if debug_blocks_out is not None:
-        block_to_page = {
-            block_idx: page_idx
-            for page_idx, block_indices in assignment.items()
-            for block_idx in block_indices
-        }
-        for block_idx, block in enumerate(blocks):
-            debug_blocks_out.append(
-                {
-                    "type": "Feature",
-                    "properties": {"page_idx": block_to_page.get(block_idx)},
-                    "geometry": geom_mapping(block),
-                }
-            )
+        for page_idx, pieces in page_pieces.items():
+            for piece in pieces:
+                debug_blocks_out.append(
+                    {
+                        "type": "Feature",
+                        "properties": {"page_idx": page_idx},
+                        "geometry": geom_mapping(piece),
+                    }
+                )
 
     masks: list[Polygon | None] = []
     for page_idx, georef in enumerate(georefs):
-        block_indices = assignment.get(page_idx, [])
-        if not block_indices:
+        pieces = page_pieces.get(page_idx, [])
+        if not pieces:
             masks.append(None)
             continue
 
-        assigned = [blocks[i] for i in block_indices]
-        mask_geo = unary_union(assigned).intersection(page_polys[page_idx])
+        mask_geo = unary_union(pieces)
 
         if mask_geo.is_empty:
             masks.append(None)

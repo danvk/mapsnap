@@ -8,6 +8,7 @@ from shapely.geometry import MultiPolygon, Polygon
 
 from mapsnap.clip_masks import (
     _assign_blocks_to_pages,
+    _assign_blocks_to_pages_with_splits,
     _fit_affine,
     _polygonize_streets,
     compute_all_clip_masks,
@@ -210,6 +211,41 @@ def test_assign_no_double_assignment():
 
 
 # ---------------------------------------------------------------------------
+# _assign_blocks_to_pages_with_splits
+# ---------------------------------------------------------------------------
+
+
+def test_split_border_block_covers_both_pages():
+    """A block straddling two pages is split, giving each page its half."""
+    page0 = Polygon([(0, 0), (1, 0), (1, 1), (0, 1)])
+    page1 = Polygon([(1, 0), (2, 0), (2, 1), (1, 1)])
+    # Block x in [0.5, 1.5]: equal halves in each page.
+    block = Polygon([(0.5, 0.2), (1.5, 0.2), (1.5, 0.8), (0.5, 0.8)])
+    pieces = _assign_blocks_to_pages_with_splits([block], [page0, page1])
+    assert len(pieces[0]) > 0, "page0 should receive a piece"
+    assert len(pieces[1]) > 0, "page1 should receive a piece"
+    total_area = sum(p.area for ps in pieces.values() for p in ps)
+    assert abs(total_area - block.area) < 1e-10, "pieces should cover the full block"
+
+
+def test_split_fully_inside_block_stays_whole():
+    """A block entirely inside a page is not split."""
+    page = Polygon([(0, 0), (10, 0), (10, 10), (0, 10)])
+    block = Polygon([(2, 2), (5, 2), (5, 5), (2, 5)])
+    pieces = _assign_blocks_to_pages_with_splits([block], [page])
+    assert len(pieces[0]) == 1
+    assert abs(pieces[0][0].area - block.area) < 1e-10
+
+
+def test_split_outside_block_dropped():
+    """A block with no overlap with any page produces no pieces."""
+    page = Polygon([(0, 0), (1, 0), (1, 1), (0, 1)])
+    block = Polygon([(5, 5), (6, 5), (6, 6), (5, 6)])
+    pieces = _assign_blocks_to_pages_with_splits([block], [page])
+    assert all(len(ps) == 0 for ps in pieces.values())
+
+
+# ---------------------------------------------------------------------------
 # compute_all_clip_masks
 # ---------------------------------------------------------------------------
 
@@ -261,9 +297,9 @@ def test_compute_masks_empty_centerlines():
     masks = compute_all_clip_masks(
         georefs, {"type": "FeatureCollection", "features": []}
     )
-    # With no centerlines the boundary ring creates at most 1 block; most pages get None.
+    # With no centerlines the boundary ring creates a single large block that is
+    # split among all overlapping pages, so all pages may get a non-None mask.
     assert len(masks) == len(georefs)
-    assert sum(m is None for m in masks) >= len(georefs) - 1
 
 
 # ---------------------------------------------------------------------------
