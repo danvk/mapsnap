@@ -255,6 +255,17 @@ def compute_all_clip_masks(
 
         masks.append(cast(Polygon, mask_geo))
 
+    # Report what fraction of the original page coverage is still covered.
+    # Pages without a computed mask fall back to their full page polygon.
+    effective = [m if m is not None else p for m, p in zip(masks, page_polys)]
+    pre_area = unary_union(page_polys).area
+    post_area = unary_union(effective).area
+    retention = post_area / pre_area if pre_area > 0 else 1.0
+    print(
+        f"Coverage retention: {retention:.1%} of pre-clip area remains covered.",
+        file=sys.stderr,
+    )
+
     return masks
 
 
