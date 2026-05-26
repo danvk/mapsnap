@@ -1,0 +1,1013 @@
+{
+  "type": "FeatureCollection",
+  "features": [
+    {
+      "type": "Feature",
+      "properties": {
+        "street_name": "East Illinois Street"
+      },
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [
+            -87.6141958,
+            41.8911276
+          ],
+          [
+            -87.6139692,
+            41.8911245
+          ]
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "street_name": "East Ontario Street"
+      },
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [
+            -87.6148753,
+            41.8934964
+          ],
+          [
+            -87.6149738,
+            41.8934942
+          ],
+          [
+            -87.6152636,
+            41.8934906
+          ],
+          [
+            -87.6153285,
+            41.8934897
+          ],
+          [
+            -87.6155861,
+            41.8934859
+          ],
+          [
+            -87.6167287,
+            41.8934688
+          ],
+          [
+            -87.6176558,
+            41.8934552
+          ],
+          [
+            -87.6177462,
+            41.8934537
+          ]
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "street_name": "North Peshtigo Court"
+      },
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [
+            -87.6151976,
+            41.8918751
+          ],
+          [
+            -87.6151956,
+            41.8918028
+          ],
+          [
+            -87.6151783,
+            41.8911966
+          ],
+          [
+            -87.6151792,
+            41.8911123
+          ]
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "street_name": "North Lake Shore Drive"
+      },
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [
+            -87.6153782,
+            41.894289
+          ],
+          [
+            -87.6150508,
+            41.8937734
+          ],
+          [
+            -87.6149312,
+            41.893585
+          ],
+          [
+            -87.6148753,
+            41.8934964
+          ]
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "street_name": "North Lake Shore Drive"
+      },
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [
+            -87.6145965,
+            41.8926846
+          ],
+          [
+            -87.6145711,
+            41.8927021
+          ],
+          [
+            -87.6145536,
+            41.8927244
+          ],
+          [
+            -87.6145422,
+            41.8927666
+          ],
+          [
+            -87.6145474,
+            41.8928537
+          ],
+          [
+            -87.6145709,
+            41.8929989
+          ],
+          [
+            -87.6146299,
+            41.8931347
+          ],
+          [
+            -87.6147182,
+            41.8932678
+          ]
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "street_name": "East Illinois Street"
+      },
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [
+            -87.6176647,
+            41.8910671
+          ],
+          [
+            -87.6175318,
+            41.8910697
+          ],
+          [
+            -87.6167122,
+            41.8910848
+          ],
+          [
+            -87.6155176,
+            41.8911058
+          ],
+          [
+            -87.6153882,
+            41.8911078
+          ],
+          [
+            -87.6153298,
+            41.8911094
+          ],
+          [
+            -87.6151792,
+            41.8911123
+          ]
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "street_name": "East Grand Avenue"
+      },
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [
+            -87.6133599,
+            41.8919277
+          ],
+          [
+            -87.613732,
+            41.8919192
+          ],
+          [
+            -87.6138817,
+            41.891913
+          ]
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "street_name": "East Ohio Street"
+      },
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [
+            -87.6177145,
+            41.8926319
+          ],
+          [
+            -87.6176201,
+            41.8926325
+          ],
+          [
+            -87.6158359,
+            41.8926545
+          ],
+          [
+            -87.6153075,
+            41.8926609
+          ],
+          [
+            -87.6150576,
+            41.8926639
+          ],
+          [
+            -87.6146353,
+            41.8926734
+          ],
+          [
+            -87.6145965,
+            41.8926846
+          ]
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "street_name": "North McClurg Court"
+      },
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [
+            -87.6176875,
+            41.8918326
+          ],
+          [
+            -87.6176909,
+            41.8919426
+          ],
+          [
+            -87.6177119,
+            41.8925526
+          ],
+          [
+            -87.6177145,
+            41.8926319
+          ]
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "street_name": "North McClurg Court"
+      },
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [
+            -87.6177145,
+            41.8926319
+          ],
+          [
+            -87.6177177,
+            41.8927337
+          ],
+          [
+            -87.6177405,
+            41.8933056
+          ],
+          [
+            -87.6177424,
+            41.8933625
+          ],
+          [
+            -87.6177462,
+            41.8934537
+          ]
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "street_name": "North McClurg Court"
+      },
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [
+            -87.6177462,
+            41.8934537
+          ],
+          [
+            -87.6177494,
+            41.8935422
+          ],
+          [
+            -87.6177509,
+            41.8935844
+          ],
+          [
+            -87.6177709,
+            41.8941407
+          ],
+          [
+            -87.6177717,
+            41.8941633
+          ],
+          [
+            -87.617775,
+            41.8942551
+          ],
+          [
+            -87.617778,
+            41.894337
+          ],
+          [
+            -87.6177786,
+            41.8943559
+          ],
+          [
+            -87.617793,
+            41.8947556
+          ]
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "street_name": "North Lake Shore Drive"
+      },
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [
+            -87.6164066,
+            41.8958729
+          ],
+          [
+            -87.6158998,
+            41.895086
+          ],
+          [
+            -87.6153782,
+            41.894289
+          ]
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "street_name": "North McClurg Court"
+      },
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [
+            -87.6176299,
+            41.8895105
+          ],
+          [
+            -87.6176284,
+            41.8896185
+          ],
+          [
+            -87.6176418,
+            41.8901386
+          ],
+          [
+            -87.6176634,
+            41.8909691
+          ],
+          [
+            -87.6176647,
+            41.8910671
+          ]
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "street_name": "East Illinois Street"
+      },
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [
+            -87.619304,
+            41.8910394
+          ],
+          [
+            -87.6186096,
+            41.8910511
+          ],
+          [
+            -87.6180681,
+            41.8910603
+          ]
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "street_name": "East Grand Avenue"
+      },
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [
+            -87.6181064,
+            41.8918283
+          ],
+          [
+            -87.6186741,
+            41.8918213
+          ],
+          [
+            -87.619225,
+            41.8918175
+          ]
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "street_name": "East Ontario Street"
+      },
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [
+            -87.6177462,
+            41.8934537
+          ],
+          [
+            -87.6178384,
+            41.8934527
+          ],
+          [
+            -87.6184073,
+            41.8934457
+          ],
+          [
+            -87.6184506,
+            41.8934452
+          ],
+          [
+            -87.6190241,
+            41.8934382
+          ],
+          [
+            -87.6194333,
+            41.8934332
+          ],
+          [
+            -87.6196312,
+            41.8934308
+          ]
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "street_name": "East Grand Avenue"
+      },
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [
+            -87.6138817,
+            41.891913
+          ],
+          [
+            -87.6139973,
+            41.8919098
+          ]
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "street_name": "East Erie Street"
+      },
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [
+            -87.6199175,
+            41.8942208
+          ],
+          [
+            -87.6198248,
+            41.8942222
+          ],
+          [
+            -87.6194319,
+            41.8942283
+          ],
+          [
+            -87.6192434,
+            41.8942313
+          ],
+          [
+            -87.6190558,
+            41.8942343
+          ],
+          [
+            -87.6189331,
+            41.8942362
+          ],
+          [
+            -87.6188393,
+            41.8942376
+          ],
+          [
+            -87.61875,
+            41.8942391
+          ],
+          [
+            -87.6179865,
+            41.894251
+          ],
+          [
+            -87.6179131,
+            41.8942521
+          ],
+          [
+            -87.6178761,
+            41.8942527
+          ],
+          [
+            -87.617775,
+            41.8942551
+          ],
+          [
+            -87.6176923,
+            41.8942557
+          ],
+          [
+            -87.6167575,
+            41.8942644
+          ],
+          [
+            -87.6157167,
+            41.8942818
+          ]
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "street_name": "East Grand Avenue"
+      },
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [
+            -87.617102,
+            41.8918426
+          ],
+          [
+            -87.6175566,
+            41.8918354
+          ],
+          [
+            -87.6176875,
+            41.8918326
+          ]
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "street_name": "East Grand Avenue"
+      },
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [
+            -87.6163764,
+            41.891855
+          ],
+          [
+            -87.617102,
+            41.8918426
+          ]
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "street_name": "East Grand Avenue"
+      },
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [
+            -87.6151976,
+            41.8918751
+          ],
+          [
+            -87.6153656,
+            41.8918715
+          ],
+          [
+            -87.6155524,
+            41.8918693
+          ],
+          [
+            -87.6158086,
+            41.8918647
+          ],
+          [
+            -87.6158863,
+            41.8918633
+          ]
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "street_name": "East Grand Avenue"
+      },
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [
+            -87.6143349,
+            41.8918999
+          ],
+          [
+            -87.6144535,
+            41.8918959
+          ],
+          [
+            -87.6146635,
+            41.8918896
+          ]
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "street_name": "East Grand Avenue"
+      },
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [
+            -87.6139973,
+            41.8919098
+          ],
+          [
+            -87.6143349,
+            41.8918999
+          ]
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "street_name": "East Grand Avenue"
+      },
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [
+            -87.6176875,
+            41.8918326
+          ],
+          [
+            -87.6178468,
+            41.8918311
+          ],
+          [
+            -87.6181064,
+            41.8918283
+          ]
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "street_name": "East Grand Avenue"
+      },
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [
+            -87.6146635,
+            41.8918896
+          ],
+          [
+            -87.6150927,
+            41.8918769
+          ],
+          [
+            -87.6151976,
+            41.8918751
+          ]
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "street_name": "East Illinois Street"
+      },
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [
+            -87.6138164,
+            41.8911235
+          ],
+          [
+            -87.6136482,
+            41.8911255
+          ],
+          [
+            -87.6133952,
+            41.8911284
+          ]
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "street_name": "East Illinois Street"
+      },
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [
+            -87.6151792,
+            41.8911123
+          ],
+          [
+            -87.6143684,
+            41.8911277
+          ]
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "street_name": "East Erie Street"
+      },
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [
+            -87.6157167,
+            41.8942818
+          ],
+          [
+            -87.6154868,
+            41.8942884
+          ],
+          [
+            -87.6153782,
+            41.894289
+          ]
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "street_name": "North Lake Shore Drive"
+      },
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [
+            -87.6147182,
+            41.8932678
+          ],
+          [
+            -87.6147399,
+            41.8933004
+          ],
+          [
+            -87.6148105,
+            41.8934026
+          ],
+          [
+            -87.6148753,
+            41.8934964
+          ]
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "street_name": "East Ohio Street"
+      },
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [
+            -87.6186178,
+            41.8926165
+          ],
+          [
+            -87.6178419,
+            41.8926297
+          ],
+          [
+            -87.6177145,
+            41.8926319
+          ]
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "street_name": "East Grand Avenue"
+      },
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [
+            -87.6158863,
+            41.8918633
+          ],
+          [
+            -87.6163764,
+            41.891855
+          ]
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "street_name": "East Illinois Street"
+      },
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [
+            -87.6180681,
+            41.8910603
+          ],
+          [
+            -87.6179186,
+            41.8910628
+          ],
+          [
+            -87.6178288,
+            41.8910642
+          ],
+          [
+            -87.6176647,
+            41.8910671
+          ]
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "street_name": "North McClurg Court"
+      },
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [
+            -87.6176647,
+            41.8910671
+          ],
+          [
+            -87.6176674,
+            41.8911529
+          ],
+          [
+            -87.6176833,
+            41.8916714
+          ],
+          [
+            -87.6176858,
+            41.8917471
+          ],
+          [
+            -87.6176875,
+            41.8918326
+          ]
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "street_name": "North McClurg Court"
+      },
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [
+            -87.617793,
+            41.8947556
+          ],
+          [
+            -87.6177978,
+            41.8949037
+          ]
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "street_name": "East Illinois Street"
+      },
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [
+            -87.6143684,
+            41.8911277
+          ],
+          [
+            -87.6143462,
+            41.8911285
+          ],
+          [
+            -87.6141958,
+            41.8911276
+          ]
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "street_name": "East Illinois Street"
+      },
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [
+            -87.6139692,
+            41.8911245
+          ],
+          [
+            -87.6138164,
+            41.8911235
+          ]
+        ]
+      }
+    }
+  ]
+}

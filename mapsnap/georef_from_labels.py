@@ -456,8 +456,10 @@ def find_intersection_gcps(
             for cluster in geo_clusters:
                 cluster_pts = np.array(cluster)
                 geo = (float(cluster_pts[:, 0].mean()), float(cluster_pts[:, 1].mean()))
-                # Try every combination of detected instances for the two streets.
-                # RANSAC will select the geometrically consistent subset.
+                # For each (text_a, text_b, cluster), keep only the best (fa, fb) pair
+                # by pixel_dist. All pairs share the same geo centroid, so extra pairs
+                # only add RANSAC iterations without adding independent intersection anchors.
+                best: IntersectionGCP | None = None
                 for fa in feats_by_text[text_a]:
                     for fb in feats_by_text[text_b]:
                         ca, cb = np.array(fa.center), np.array(fb.center)
@@ -467,8 +469,8 @@ def find_intersection_gcps(
                         )
                         if crossing is None:
                             continue
-                        gcps.append(
-                            IntersectionGCP(
+                        if best is None or pixel_dist < best.pixel_dist:
+                            best = IntersectionGCP(
                                 label_a=text_a,
                                 label_b=text_b,
                                 pixel=crossing,
@@ -477,7 +479,8 @@ def find_intersection_gcps(
                                 feat_a=fa,
                                 feat_b=fb,
                             )
-                        )
+                if best is not None:
+                    gcps.append(best)
 
     return sorted(gcps, key=lambda g: g.pixel_dist)
 

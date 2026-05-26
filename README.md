@@ -172,6 +172,10 @@ OldInsuranceMaps.net (OIM) uses a six parameter affine model. In addition to tra
 
 In practice, the Sanborn maps are all very well-made and well-scanned and don't exhibit much of either of these. Most fits on OIM have scale anisitropy of less than 3% and skew of less than 3°. These are both close enough to zero that it's unclear if they're real or the result of inaccurate georeferencing. Removing these parameters makes it easier to fit a model since you only need two GCPs rather than three. And it eliminates a failure mode of detecting heavily skewed maps due to an inaccurate GCP.
 
+In the GIS world, the four parameter model is known as a [Helmert transformation].
+
+[Helmert transformation]: https://en.wikipedia.org/wiki/Helmert_transformation#Variations
+
 ### How I developed this model
 
 The initial idea was to ask the OpenAI API to find intersections in the Sanborn map. It did an OK job at this, but it was slow (~3 minutes/task), expensive (~$0.10/image) and not always very accurate. It didn't do well on the non-skeleton maps, and its process was opaque, so it was hard to improve on.
