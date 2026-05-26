@@ -38,6 +38,7 @@ import cv2
 import numpy as np
 from PIL import Image
 from shapely.geometry import Polygon as ShapelyPolygon
+from shapely.geometry import mapping as geom_mapping
 
 from mapsnap.clip_masks import compute_all_clip_masks
 from mapsnap.clip_masks import geo_polygon_to_svg
@@ -640,6 +641,11 @@ def main() -> None:
         metavar="FILE",
         help="Write a GeoJSON file with one Polygon feature per block (requires --centerlines)",
     )
+    parser.add_argument(
+        "--debug-clip",
+        metavar="FILE",
+        help="Write a GeoJSON file with one Polygon feature per clipping mask (requires --centerlines)",
+    )
     args = parser.parse_args()
 
     source_data: dict = json.load(open(args.oim_iiif))
@@ -713,6 +719,22 @@ def main() -> None:
                 json.dump(blocks_geojson, f)
             print(
                 f"Wrote {len(debug_blocks)} block features to {args.debug_blocks}",
+                file=sys.stderr,
+            )
+        if args.debug_clip:
+            clip_features = [
+                {
+                    "type": "Feature",
+                    "properties": {"page_key": page_key},
+                    "geometry": geom_mapping(mask),
+                }
+                for (page_key, _, _, _), mask in zip(valid_items, geo_masks)
+                if mask is not None
+            ]
+            with open(args.debug_clip, "w") as f:
+                json.dump({"type": "FeatureCollection", "features": clip_features}, f)
+            print(
+                f"Wrote {len(clip_features)} clip features to {args.debug_clip}",
                 file=sys.stderr,
             )
 
