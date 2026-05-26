@@ -440,9 +440,6 @@ def compute_all_clip_masks(
 
         mask_geo = mask_geo.simplify(simplify_tolerance, preserve_topology=True)
 
-        if isinstance(mask_geo, Polygon):
-            mask_geo = _remove_spike_vertices(mask_geo)
-
         if isinstance(mask_geo, MultiPolygon):
             # Filter out disconnected slivers (< 5% of the largest component).
             parts = sorted(mask_geo.geoms, key=lambda p: p.area, reverse=True)
@@ -481,6 +478,12 @@ def compute_all_clip_masks(
                         f"fallback also failed. Investigate the street network or block "
                         f"assignment for this page."
                     )
+
+        # Remove backtrack vertices from any path (direct Polygon or resolved
+        # MultiPolygon). Simplification can introduce spikes when it removes
+        # intermediate vertices from narrow arms.
+        if isinstance(mask_geo, Polygon):
+            mask_geo = _remove_spike_vertices(mask_geo)
 
         # Warn if interior holes are present (unexpected with city block geometry).
         if len(mask_geo.interiors) > 0:
