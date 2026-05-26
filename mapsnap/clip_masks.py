@@ -12,6 +12,7 @@ from typing import cast
 
 import numpy as np
 from shapely.geometry import LineString, MultiPolygon, Polygon
+from shapely.geometry import mapping as geom_mapping
 from shapely.geometry import shape as geom_shape
 from shapely.geometry.base import BaseMultipartGeometry
 from shapely.ops import polygonize, unary_union
@@ -143,6 +144,7 @@ def compute_all_clip_masks(
     georefs: list[dict],
     centerlines_geojson: dict,
     simplify_tolerance: float = 0.00005,
+    debug_blocks_out: list[dict] | None = None,
 ) -> list[Polygon | None]:
     """Compute block-based clipping masks for all georeferenced pages.
 
@@ -158,6 +160,8 @@ def compute_all_clip_masks(
         georefs: list of parsed georef.json dicts with 'corners', 'width', 'height'.
         centerlines_geojson: parsed GeoJSON FeatureCollection of LineStrings.
         simplify_tolerance: Douglas-Peucker tolerance in degrees (~0.00005 ≈ 5 m).
+        debug_blocks_out: if provided, GeoJSON Feature dicts for each block are
+            appended here (properties include 'page_idx': int | null).
     """
     if not georefs:
         return []
@@ -189,6 +193,21 @@ def compute_all_clip_masks(
         return [None] * len(georefs)
 
     assignment = _assign_blocks_to_pages(blocks, page_polys)
+
+    if debug_blocks_out is not None:
+        block_to_page = {
+            block_idx: page_idx
+            for page_idx, block_indices in assignment.items()
+            for block_idx in block_indices
+        }
+        for block_idx, block in enumerate(blocks):
+            debug_blocks_out.append(
+                {
+                    "type": "Feature",
+                    "properties": {"page_idx": block_to_page.get(block_idx)},
+                    "geometry": geom_mapping(block),
+                }
+            )
 
     masks: list[Polygon | None] = []
     for page_idx, georef in enumerate(georefs):

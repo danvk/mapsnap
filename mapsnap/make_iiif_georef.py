@@ -635,6 +635,11 @@ def main() -> None:
         metavar="FILE",
         help="GeoJSON centerlines file for block-based clipping masks",
     )
+    parser.add_argument(
+        "--debug-blocks",
+        metavar="FILE",
+        help="Write a GeoJSON file with one Polygon feature per block (requires --centerlines)",
+    )
     args = parser.parse_args()
 
     source_data: dict = json.load(open(args.oim_iiif))
@@ -694,11 +699,22 @@ def main() -> None:
         centerlines_geojson: dict = json.load(open(args.centerlines))
         all_georefs = [georef for _, _, georef, _ in valid_items]
         print("Computing block-based clipping masks...", file=sys.stderr)
-        geo_masks = compute_all_clip_masks(all_georefs, centerlines_geojson)
+        debug_blocks: list[dict] | None = [] if args.debug_blocks else None
+        geo_masks = compute_all_clip_masks(
+            all_georefs, centerlines_geojson, debug_blocks_out=debug_blocks
+        )
         n_masked = sum(m is not None for m in geo_masks)
         print(
             f"Computed masks for {n_masked}/{len(valid_items)} pages.", file=sys.stderr
         )
+        if debug_blocks is not None:
+            blocks_geojson = {"type": "FeatureCollection", "features": debug_blocks}
+            with open(args.debug_blocks, "w") as f:
+                json.dump(blocks_geojson, f)
+            print(
+                f"Wrote {len(debug_blocks)} block features to {args.debug_blocks}",
+                file=sys.stderr,
+            )
 
     # Pass 2: build annotations with the per-page geo mask.
     annotations: list[dict] = []
