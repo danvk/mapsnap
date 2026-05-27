@@ -10,6 +10,8 @@
 
 ### Python
 
+This project uses `uv` for package management and running scripts. The `uv` binary can be found in `~/.local/bin/uv`.
+
 Write type hints for all function parameters, and local variables where pyright cannot infer a type. Write return types for functions, unless they're very complicated and can be inferred.
 
 Provide generic type parameters where types take them: don't use plain `dict`, use `dict[str, str]` if that's what the type is.
