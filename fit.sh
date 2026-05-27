@@ -15,6 +15,7 @@ uv run mapsnap/georef_from_labels.py $dir/*.scaled.jpg \
 
 uv run python mapsnap/make_iiif_georef.py \
     $dir/main.iiif.json $dir'/*.georef.json' \
+    --centerlines $dir/centerlines.geojson \
     --output $dir/$tag.iiif.json
 
 uv run python mapsnap/compare_iiif_georef.py \

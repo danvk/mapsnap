@@ -1,9 +1,22 @@
 """Compute block-based clipping polygons for Sanborn map pages.
 
 Street network polygonization divides the mapped region into city blocks.
-Each block is assigned to exactly one page (the one with the greatest
-intersection area; tie-break: closest page centroid), producing gapless,
+Each block is assigned to exactly one page, which hopefully produces gapless,
 non-overlapping clipping masks.
+
+Blocks are assigned based on:
+
+- Which page has the most color pixels in this block
+- Centroid-distance assignment (Voronoi)
+
+This can leave gaps where a block isn't fully covered by any page.
+These can be patched by adding the uncovered part of the block back to the queue.
+Since geometry subtraction can create artifacts, there are some heuristics to remove
+"spikes" from clipping polygons, which look bad and can trip up Allmaps.
+
+This also makes an effort to fill in concave "dents" in clipping polygons by
+borrowing that part from the adjacent page, so long as it doesn't drop a meaningful
+number of color pixels and improves convexity.
 """
 
 import math
