@@ -803,7 +803,7 @@ def compute_all_clip_masks(
 
 
 def geo_polygon_to_svg(
-    geo_polygon: Polygon | None,
+    geo_polygon: Polygon | MultiPolygon | None,
     georef: dict,
     source_width: int,
     source_height: int,
