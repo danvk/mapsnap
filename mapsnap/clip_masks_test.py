@@ -13,6 +13,7 @@ from mapsnap.clip_masks import (
     _assign_blocks_to_pages_with_splits,
     _convexity_ratio,
     _fill_concave_dents,
+    _fill_coverage_gaps,
     _fit_affine,
     _is_substantial,
     _load_page_color_data,
@@ -599,3 +600,68 @@ def test_assign_uses_color_score_over_centroid():
     pcd1 = _make_page_color_data(georef1, np.full((10, 10), 100, dtype=np.int16))
     result_with_color = _assign_blocks_to_pages([block], [page0, page1], [pcd0, pcd1])
     assert result_with_color[1] == [0], "with color scoring, block should go to page1"
+
+
+# ---------------------------------------------------------------------------
+# _fill_coverage_gaps
+# ---------------------------------------------------------------------------
+
+
+def test_fill_coverage_gaps_notch_within_single_page():
+    """A triangular notch in a page's mask is filled when it lies within the page extent."""
+    page_poly = Polygon([(0, 0), (4, 0), (4, 4), (0, 4)])
+    # mask has a triangular notch cut from the top-right corner
+    mask = Polygon([(0, 0), (4, 0), (4, 2), (2, 4), (0, 4)])
+    # gap = triangle [(2,4)-(4,4)-(4,2)], entirely within page_poly
+
+    result = _fill_coverage_gaps([mask], [page_poly])
+
+    assert result[0] is not None
+    assert abs(result[0].area - page_poly.area) < 1e-6, (
+        "gap should be absorbed, covering full page"
+    )
+
+
+def test_fill_coverage_gaps_split_across_pages():
+    """A gap spanning two adjacent page extents is split and each page gets its portion."""
+    page_poly_0 = Polygon([(0, 0), (4, 0), (4, 4), (0, 4)])
+    page_poly_1 = Polygon([(4, 0), (8, 0), (8, 4), (4, 4)])
+    mask_0 = Polygon([(0, 0), (3, 0), (3, 4), (0, 4)])  # leaves x=[3,4] uncovered
+    mask_1 = Polygon([(5, 0), (8, 0), (8, 4), (5, 4)])  # leaves x=[4,5] uncovered
+
+    result = _fill_coverage_gaps([mask_0, mask_1], [page_poly_0, page_poly_1])
+
+    assert result[0] is not None
+    assert result[0].area > mask_0.area, "page0 should gain x=[3,4] strip"
+    assert result[1] is not None
+    assert result[1].area > mask_1.area, "page1 should gain x=[4,5] strip"
+    # No region should be double-covered (shared edge at x=4 has zero area)
+    assert result[0].intersection(result[1]).area < 1e-8
+
+
+def test_fill_coverage_gaps_clipped_to_page_extent():
+    """Gap extending outside a page's extent is clipped before being added."""
+    page_poly = Polygon([(0, 0), (4, 0), (4, 4), (0, 4)])
+    mask = Polygon([(0, 0), (4, 0), (4, 2), (2, 4), (0, 4)])
+    # Simulate another page whose mask doesn't cover the top-right region
+    # The gap is partially outside page_poly (e.g., extends to y=6).
+    # Only the part within page_poly should be added to mask.
+    extra_page_poly = Polygon([(2, 4), (6, 4), (6, 8), (2, 8)])
+    extra_mask = Polygon([(4, 4), (6, 4), (6, 8), (2, 8)])  # leaves triangle at left
+
+    result = _fill_coverage_gaps([mask, extra_mask], [page_poly, extra_page_poly])
+
+    # page0 mask should grow (absorb the top-right triangle within page_poly)
+    assert result[0] is not None
+    assert result[0].area > mask.area
+    # page0 mask must stay within its page extent
+    assert result[0].difference(page_poly.buffer(1e-9)).area < 1e-8
+
+
+def test_fill_coverage_gaps_no_gaps():
+    """When masks already cover all page extents, nothing changes."""
+    page_poly = Polygon([(0, 0), (4, 0), (4, 4), (0, 4)])
+    mask = page_poly  # exact coverage
+
+    result = _fill_coverage_gaps([mask], [page_poly])
+    assert result[0] is mask  # same object returned (no modification)

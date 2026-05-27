@@ -533,6 +533,98 @@ def _fill_concave_dents(
     return new_masks
 
 
+def _fill_coverage_gaps(
+    masks: list[Polygon | None],
+    page_polys: list[Polygon],
+    simplify_tolerance: float = 0.00005,
+    min_gap_fraction: float = 0.001,
+) -> list[Polygon | None]:
+    """Fill uncovered regions within page extents by adding them to adjacent masks.
+
+    Computes union(page_polys) − union(masks) to find all gap areas, then for each
+    gap piece tries to assign it to a page whose mask it connects to (mask.union(piece)
+    is a Polygon). When the gap spans multiple page extents, the overlapping portion is
+    split and each page gets the part within its own extent.
+
+    Unlike dent-filling, no color check is applied — gap areas have no existing owner.
+    Convexity improvement is used only to break ties when multiple pages could absorb
+    the same overlapping gap area.
+    """
+    page_union = unary_union(page_polys)
+    mask_union = unary_union([m for m in masks if m is not None])
+    total_gaps = page_union.difference(mask_union)
+    if total_gaps.is_empty:
+        return masks
+
+    gap_pieces = _collect_polygons(total_gaps)
+    if not gap_pieces:
+        return masks
+
+    new_masks: list[Polygon | None] = list(masks)
+    fill_count = 0
+    modified: set[int] = set()
+
+    for gap_piece in gap_pieces:
+        claimed = Polygon()  # portion of this gap already assigned to some page
+
+        # For each page, compute the clipped sub-piece and check connectivity.
+        assignments: list[tuple[float, int, Polygon]] = []
+        for j, (mask_j, page_poly_j) in enumerate(zip(masks, page_polys)):
+            if mask_j is None:
+                continue
+            sub = gap_piece.intersection(page_poly_j)
+            if sub.is_empty:
+                continue
+            for piece in _collect_polygons(sub):
+                if piece.area < mask_j.area * min_gap_fraction:
+                    continue  # ignore tiny fragments
+                candidate = mask_j.union(piece)
+                if not isinstance(candidate, Polygon):
+                    continue  # piece doesn't connect to mask; skip
+                improvement = _convexity_ratio(candidate) - _convexity_ratio(mask_j)
+                assignments.append((improvement, j, piece))
+
+        # Process in descending convexity-improvement order; track claimed area to
+        # prevent the same gap region from being assigned to two overlapping pages.
+        assignments.sort(key=lambda t: (-t[0], t[1]))
+
+        for _, j, piece in assignments:
+            unclaimed = piece.difference(claimed)
+            if unclaimed.is_empty:
+                continue
+            for sub in _collect_polygons(unclaimed):
+                cur = new_masks[j]
+                if cur is None:
+                    continue
+                candidate = cur.union(sub)
+                if not isinstance(candidate, Polygon):
+                    continue
+                new_masks[j] = candidate
+                claimed = claimed.union(sub)
+                modified.add(j)
+                fill_count += 1
+
+    if fill_count:
+        print(
+            f"Gap-filling: {fill_count} piece(s) added across {len(modified)} page(s).",
+            file=sys.stderr,
+        )
+
+    # Re-apply simplification and spike removal to modified masks.
+    for j in modified:
+        mask = new_masks[j]
+        if mask is None:
+            continue
+        simplified = mask.simplify(simplify_tolerance, preserve_topology=True)
+        if isinstance(simplified, Polygon):
+            new_masks[j] = _remove_spike_vertices(simplified)
+        elif isinstance(simplified, MultiPolygon):
+            parts = sorted(simplified.geoms, key=lambda p: p.area, reverse=True)
+            new_masks[j] = _remove_spike_vertices(parts[0])
+
+    return new_masks
+
+
 def compute_all_clip_masks(
     georefs: list[dict],
     centerlines_geojson: dict,
@@ -688,6 +780,10 @@ def compute_all_clip_masks(
     # Fill concave dents: transfer pieces from neighboring pages when there's no
     # strong color reason to keep them there.
     masks = _fill_concave_dents(masks, page_color_data, page_polys, simplify_tolerance)
+
+    # Fill coverage gaps: add uncovered regions (within the page extent union but
+    # absent from every mask) to adjacent pages based on connectivity.
+    masks = _fill_coverage_gaps(masks, page_polys, simplify_tolerance)
 
     # Report what fraction of the original page coverage is still covered.
     # Pages without a computed mask fall back to their full page polygon.
