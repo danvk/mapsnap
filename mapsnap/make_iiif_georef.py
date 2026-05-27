@@ -702,7 +702,8 @@ def main() -> None:
     # Compute block-based clipping masks when a centerlines file is provided.
     geo_masks: list[ShapelyPolygon | None] = [None] * len(valid_items)
     if args.centerlines:
-        centerlines_geojson: dict = json.load(open(args.centerlines))
+        with open(args.centerlines) as f:
+            centerlines_geojson: dict = json.load(f)
         all_georefs = [georef for _, _, georef, _ in valid_items]
         print("Computing block-based clipping masks...", file=sys.stderr)
         debug_blocks: list[dict] | None = [] if args.debug_blocks else None

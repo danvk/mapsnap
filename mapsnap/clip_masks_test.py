@@ -319,6 +319,23 @@ def test_remove_spike_collinear_not_removed():
 
 
 # ---------------------------------------------------------------------------
+# _convexity_ratio
+# ---------------------------------------------------------------------------
+
+
+def test_convexity_ratio_square():
+    """A square is perfectly convex: ratio = 1.0."""
+    square = Polygon([(0, 0), (1, 0), (1, 1), (0, 1)])
+    assert abs(_convexity_ratio(square) - 1.0) < 1e-9
+
+
+def test_convexity_ratio_l_shape():
+    """An L-shape has ratio < 1.0 (area=3, convex hull is a pentagon with area=3.5 → 6/7)."""
+    l_shape = Polygon([(0, 0), (2, 0), (2, 1), (1, 1), (1, 2), (0, 2)])
+    assert abs(_convexity_ratio(l_shape) - 6 / 7) < 1e-9
+
+
+# ---------------------------------------------------------------------------
 # compute_all_clip_masks
 # ---------------------------------------------------------------------------
 
@@ -373,6 +390,31 @@ def test_compute_masks_empty_centerlines():
     # With no centerlines the boundary ring creates a single large block that is
     # split among all overlapping pages, so all pages may get a non-None mask.
     assert len(masks) == len(georefs)
+
+
+def test_compute_masks_overlapping_pages_no_overlap():
+    """Masks for geographically overlapping pages do not overlap each other.
+
+    Pages cover lon=[0,2] and lon=[1,3] (overlap at lon=[1,2]). Each block is
+    assigned to exactly one page via the split-assignment loop, so the resulting
+    masks must be disjoint.
+    """
+    georefs = [
+        _axis_aligned_georef(0.0, 0.0, 2.0, 1.0),  # lon 0-2
+        _axis_aligned_georef(1.0, 0.0, 3.0, 1.0),  # lon 1-3, overlaps with page 0
+    ]
+    gj = _geojson(
+        _line_feature([[0.5, 0.0], [0.5, 1.0]]),
+        _line_feature([[1.5, 0.0], [1.5, 1.0]]),
+        _line_feature([[2.5, 0.0], [2.5, 1.0]]),
+    )
+    masks = compute_all_clip_masks(georefs, gj)
+    assert len(masks) == 2
+    m0, m1 = masks
+    assert m0 is not None and m1 is not None
+    assert m0.intersection(m1).area < 1e-8, (
+        "masks for overlapping pages must not overlap"
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -579,6 +621,59 @@ def test_fill_concave_dents_arm_via_page_poly():
     assert _convexity_ratio(result_poly[1]) > _convexity_ratio(mask_p24)
 
 
+def test_fill_concave_dents_page_poly_with_color_transfers():
+    """With both page_polys and color_data, arm is transferred when color is similar."""
+    # Same arm geometry as test_fill_concave_dents_arm_via_page_poly.
+    page_poly_p32 = Polygon([(0, 0), (4, 0), (4, 6), (0, 6)])
+    mask_p32 = Polygon([(0, 0), (4, 0), (4, 3), (0, 3)])
+    page_poly_p24 = Polygon([(0, 5), (4, 5), (4, 9), (0, 9)])
+    arm = Polygon([(1, 3), (2, 3), (2, 5.5), (1, 5.5)])
+    mask_p24 = Polygon([(0, 5), (4, 5), (4, 9), (0, 9)]).union(arm)
+    assert isinstance(mask_p24, Polygon)
+
+    # Both pages have zero color — no dominance, transfer should proceed.
+    georef_p32 = _axis_aligned_georef(0.0, 0.0, 4.0, 6.0, w=40, h=60)
+    georef_p24 = _axis_aligned_georef(0.0, 5.0, 4.0, 9.0, w=40, h=40)
+    pcd_p32 = _make_page_color_data(georef_p32, np.zeros((60, 40), dtype=np.int16))
+    pcd_p24 = _make_page_color_data(georef_p24, np.zeros((40, 40), dtype=np.int16))
+
+    result = _fill_concave_dents(
+        [mask_p32, mask_p24],
+        page_color_data=[pcd_p32, pcd_p24],
+        page_polys=[page_poly_p32, page_poly_p24],
+    )
+    assert result[0] is not None
+    assert result[0].area > mask_p32.area, "p32 should gain the arm"
+    assert result[1] is not None
+    assert result[1].area < mask_p24.area, "p24 should lose the arm"
+
+
+def test_fill_concave_dents_page_poly_color_blocks_transfer():
+    """With both page_polys and color_data, arm is NOT transferred when j dominates."""
+    page_poly_p32 = Polygon([(0, 0), (4, 0), (4, 6), (0, 6)])
+    mask_p32 = Polygon([(0, 0), (4, 0), (4, 3), (0, 3)])
+    page_poly_p24 = Polygon([(0, 5), (4, 5), (4, 9), (0, 9)])
+    arm = Polygon([(1, 3), (2, 3), (2, 5.5), (1, 5.5)])
+    mask_p24 = Polygon([(0, 5), (4, 5), (4, 9), (0, 9)]).union(arm)
+    assert isinstance(mask_p24, Polygon)
+
+    # p24 has high color everywhere; p32 has none → color dominance blocks transfer.
+    georef_p32 = _axis_aligned_georef(0.0, 0.0, 4.0, 6.0, w=40, h=60)
+    georef_p24 = _axis_aligned_georef(0.0, 5.0, 4.0, 9.0, w=40, h=40)
+    pcd_p32 = _make_page_color_data(georef_p32, np.zeros((60, 40), dtype=np.int16))
+    pcd_p24 = _make_page_color_data(georef_p24, np.full((40, 40), 200, dtype=np.int16))
+
+    result = _fill_concave_dents(
+        [mask_p32, mask_p24],
+        page_color_data=[pcd_p32, pcd_p24],
+        page_polys=[page_poly_p32, page_poly_p24],
+    )
+    assert result[0] is not None
+    assert abs(result[0].area - mask_p32.area) < 1e-6, "p32 should NOT gain the arm"
+    assert result[1] is not None
+    assert abs(result[1].area - mask_p24.area) < 1e-6, "p24 should keep the arm"
+
+
 def test_assign_uses_color_score_over_centroid():
     """Block is assigned to the page with higher color score, even if more distant."""
     # Two adjacent pages; block straddles the boundary near page0.
@@ -656,6 +751,38 @@ def test_fill_coverage_gaps_clipped_to_page_extent():
     assert result[0].area > mask.area
     # page0 mask must stay within its page extent
     assert result[0].difference(page_poly.buffer(1e-9)).area < 1e-8
+
+
+def test_fill_coverage_gaps_disconnected_from_mask():
+    """Gap piece that doesn't touch a page's mask is not added to that page.
+
+    page_0's mask is a small corner square; the gap piece (a floating island)
+    is disjoint from it, so mask_0.union(island) is a MultiPolygon and the
+    connectivity check at line 584 rejects it for page 0.
+
+    page_1's mask has the island as an interior hole, so mask_1.union(island)
+    fills the hole and gives a solid Polygon — page 1 absorbs the gap.
+    """
+    big_square = Polygon([(0, 0), (10, 0), (10, 10), (0, 10)])
+    island = Polygon([(4, 4), (6, 4), (6, 6), (4, 6)])
+
+    # page_0: small bottom-left corner, nowhere near the island
+    mask_0 = Polygon([(0, 0), (2, 0), (2, 2), (0, 2)])
+    # page_1: big square with the island punched out as an interior hole
+    mask_1 = big_square.difference(island)
+    assert isinstance(mask_1, Polygon) and len(list(mask_1.interiors)) == 1
+
+    # The only gap is the island itself (page_union = big_square; mask_union = mask_0 ∪ mask_1
+    # = big_square - island + tiny corner, so gap ≈ island).
+    result = _fill_coverage_gaps([mask_0, mask_1], [big_square, big_square])
+
+    # page_1 fills its hole (island connects to mask_1's boundary)
+    assert result[1] is not None
+    assert abs(result[1].area - big_square.area) < 1e-6
+
+    # page_0 does NOT absorb the island (disconnected from its mask)
+    assert result[0] is not None
+    assert abs(result[0].area - mask_0.area) < 1e-6
 
 
 def test_fill_coverage_gaps_no_gaps():

@@ -563,7 +563,7 @@ def _fill_coverage_gaps(
         return masks
 
     new_masks: list[Polygon | None] = list(masks)
-    fill_count = 0
+    transfer_count = 0
     modified: set[int] = set()
 
     for gap_piece in gap_pieces:
@@ -594,6 +594,7 @@ def _fill_coverage_gaps(
             unclaimed = piece.difference(claimed)
             if unclaimed.is_empty:
                 continue
+            added = False
             for sub in _collect_polygons(unclaimed):
                 cur = new_masks[j]
                 if cur is None:
@@ -604,11 +605,13 @@ def _fill_coverage_gaps(
                 new_masks[j] = candidate
                 claimed = claimed.union(sub)
                 modified.add(j)
-                fill_count += 1
+                added = True
+            if added:
+                transfer_count += 1
 
-    if fill_count:
+    if transfer_count:
         print(
-            f"Gap-filling: {fill_count} piece(s) added across {len(modified)} page(s).",
+            f"Gap-filling: {transfer_count} transfer(s) across {len(modified)} page(s).",
             file=sys.stderr,
         )
 
