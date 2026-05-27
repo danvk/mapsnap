@@ -159,7 +159,7 @@ def _polygonize_streets(
             continue
         # intersection of a LineString with a Polygon can be a Point, LineString,
         # MultiLineString, or GeometryCollection; collect only linear parts.
-        if hasattr(clipped, "geoms"):
+        if isinstance(clipped, BaseMultipartGeometry):
             for part in clipped.geoms:
                 if isinstance(part, LineString) and not part.is_empty:
                     lines.append(part)
@@ -479,14 +479,16 @@ def _fill_concave_dents(
 
     # Apply transfers using incrementally updated masks.
     for i, piece, j in candidates:
-        if new_masks[i] is None or new_masks[j] is None:
+        cur_i = new_masks[i]
+        cur_j = new_masks[j]
+        if cur_i is None or cur_j is None:
             continue
         # Verify j still owns the piece; an earlier transfer may have claimed it.
-        if new_masks[j].intersection(piece).area <= piece.area * 0.5:
+        if cur_j.intersection(piece).area <= piece.area * 0.5:
             continue
 
-        candidate_i = new_masks[i].union(piece)
-        candidate_j = new_masks[j].difference(piece)
+        candidate_i = cur_i.union(piece)
+        candidate_j = cur_j.difference(piece)
         if not isinstance(candidate_i, Polygon):
             continue
 
@@ -674,7 +676,7 @@ def compute_all_clip_masks(
             [(lon / cos_lat, lat) for lon, lat in scaled_buf.exterior.coords]
         )
         buffered.append(unbuf)
-    coverage_buffered: Polygon | MultiPolygon = unary_union(buffered)
+    coverage_buffered = cast(Polygon | MultiPolygon, unary_union(buffered))
 
     blocks = _polygonize_streets(centerlines_geojson, coverage_buffered)
     if not blocks:
@@ -764,8 +766,9 @@ def compute_all_clip_masks(
         # Remove backtrack vertices from any path (direct Polygon or resolved
         # MultiPolygon). Simplification can introduce spikes when it removes
         # intermediate vertices from narrow arms.
-        if isinstance(mask_geo, Polygon):
-            mask_geo = _remove_spike_vertices(mask_geo)
+        if not isinstance(mask_geo, Polygon):
+            continue
+        mask_geo = _remove_spike_vertices(mask_geo)
 
         # Warn if interior holes are present (unexpected with city block geometry).
         if len(mask_geo.interiors) > 0:
@@ -775,7 +778,7 @@ def compute_all_clip_masks(
                 file=sys.stderr,
             )
 
-        masks.append(cast(Polygon, mask_geo))
+        masks.append(mask_geo)
 
     # Fill concave dents: transfer pieces from neighboring pages when there's no
     # strong color reason to keep them there.
