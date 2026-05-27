@@ -713,6 +713,7 @@ def compute_all_clip_masks(
                 )
 
     masks: list[Polygon | None] = []
+    convex_hull_count = 0
     for page_idx, georef in enumerate(georefs):
         pieces = page_pieces.get(page_idx, [])
         if not pieces:
@@ -757,6 +758,7 @@ def compute_all_clip_masks(
                         file=sys.stderr,
                     )
                     mask_geo = hull_mask
+                    convex_hull_count += 1
                 else:
                     raise ValueError(
                         f"Page {page_idx} (corners starting at {georef['corners'][0]}) "
@@ -801,6 +803,41 @@ def compute_all_clip_masks(
         f"Coverage retention: {retention:.1%} of pre-clip area remains covered.",
         file=sys.stderr,
     )
+
+    # Pages not fully block-clipped: None mask (full-page rect) or convex hull fallback.
+    none_count = sum(1 for m in masks if m is None)
+    fallback_total = none_count + convex_hull_count
+    print(
+        f"Unclipped: {fallback_total} page(s) without full block mask "
+        f"({none_count} no blocks, {convex_hull_count} convex hull).",
+        file=sys.stderr,
+    )
+
+    # Double-coverage: excess area from overlapping effective masks.
+    individual_area = sum(m.area for m in effective)
+    double_coverage = (
+        (individual_area - post_area) / post_area if post_area > 0 else 0.0
+    )
+    print(f"Double-coverage: {double_coverage:.1%} of covered area.", file=sys.stderr)
+
+    # Color retention: fraction of each page's colored pixels that fall within its mask.
+    if page_color_data is not None:
+        total_color = 0.0
+        retained_color = 0.0
+        for mask, pcd in zip(masks, page_color_data):
+            if pcd is None:
+                continue
+            page_total = float(pcd.color_score.sum())
+            total_color += page_total
+            if mask is None:
+                retained_color += page_total  # full-page rect retains all color
+            else:
+                retained_color += _score_block_on_page(mask, pcd)
+        if total_color > 0:
+            print(
+                f"Color retention: {retained_color / total_color:.1%} of color pixels within mask.",
+                file=sys.stderr,
+            )
 
     return masks
 
