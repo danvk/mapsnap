@@ -343,6 +343,196 @@ def _assign_blocks_to_pages_with_splits(
     return page_territory
 
 
+def _convexity_ratio(poly: Polygon) -> float:
+    """Return area/convex_hull.area (1.0 = convex, lower = more concave)."""
+    hull = poly.convex_hull
+    return poly.area / hull.area if hull.area > 0 else 1.0
+
+
+def _fill_concave_dents(
+    masks: list[Polygon | None],
+    page_color_data: list[PageColorData | None] | None,
+    page_polys: list[Polygon] | None = None,
+    simplify_tolerance: float = 0.00005,
+    color_dominance_threshold: float = 3.0,
+    color_min_score: float = 500.0,
+) -> list[Polygon | None]:
+    """Fill concave dents in page masks when the neighboring page has no color advantage.
+
+    When page_polys is provided, uses page_poly_i − mask_i to find candidate regions
+    (areas within the page's geographic extent that aren't in its mask). This catches
+    arms and protrusions at territory edges that don't fall within the convex hull.
+    Without page_polys, falls back to hull(mask_i) − mask_i.
+
+    For each candidate piece owned by exactly one other page j, the piece is transferred
+    from j to i unless: j's color score substantially exceeds i's (color_dominance_threshold),
+    or (when using page_polys) removing the piece from j would not improve j's convexity
+    ratio (meaning it isn't a protrusion in j).
+
+    After all transfers, re-applies simplification and spike removal to modified masks.
+    """
+    new_masks: list[Polygon | None] = list(masks)
+    modified: set[int] = set()
+    transfer_count = 0
+
+    # Pre-compute all transfer candidates using the ORIGINAL masks so that dent
+    # computations for all pages use a consistent baseline.  Applying transfers
+    # incrementally would shrink a page's mask before later pages are inspected,
+    # causing the dent region to change and hiding dents that should have been found.
+    candidates: list[tuple[int, Polygon, int]] = []
+
+    if page_polys is not None:
+        # Page-poly-based detection: for each (i, j) pair, directly compute the
+        # part of j's mask that lies within i's geographic extent but not in i's
+        # mask.  This avoids the owner-check problem (the arm is guaranteed to
+        # come from j) and catches arms at territory edges that hull(mask_i) misses.
+        for i, mask_i in enumerate(masks):
+            if mask_i is None:
+                continue
+            for j, mask_j in enumerate(masks):
+                if j == i or mask_j is None:
+                    continue
+                arm_geo = mask_j.intersection(page_polys[i]).difference(mask_i)
+                if arm_geo.is_empty:
+                    continue
+                for piece in _collect_polygons(arm_geo):
+                    if piece.area < mask_i.area * 0.001:
+                        continue  # ignore tiny fragments
+
+                    # Compute color scores for both pages in this piece's region.
+                    score_i, score_j = 0.0, 0.0
+                    if page_color_data is not None:
+                        pcd_i = page_color_data[i]
+                        pcd_j = page_color_data[j]
+                        if pcd_i is not None:
+                            score_i = _score_block_on_page(piece, pcd_i)
+                        if pcd_j is not None:
+                            score_j = _score_block_on_page(piece, pcd_j)
+
+                    # Skip if j has a clear, substantial color advantage.
+                    if (
+                        score_j
+                        > max(score_i, color_min_score) * color_dominance_threshold
+                    ):
+                        continue
+
+                    # Verify removing piece from j improves j's convexity ratio
+                    # (confirms it's a protrusion in j, not a legitimate block
+                    # assignment that happens to lie within i's page extent).
+                    test_j = mask_j.difference(piece)
+                    if not test_j.is_empty:
+                        test_j_poly: Polygon | None = None
+                        if isinstance(test_j, Polygon):
+                            test_j_poly = test_j
+                        elif isinstance(test_j, MultiPolygon):
+                            parts = sorted(
+                                test_j.geoms, key=lambda p: p.area, reverse=True
+                            )
+                            if parts[0].area >= test_j.area * 0.9:
+                                test_j_poly = parts[0]
+                        if test_j_poly is None:
+                            continue  # too fragmented after removal; skip
+                        if _convexity_ratio(test_j_poly) <= _convexity_ratio(mask_j):
+                            continue  # removing piece doesn't improve j's convexity; skip
+
+                    candidates.append((i, piece, j))
+    else:
+        # Hull-based detection: find pieces in hull(mask_i) − mask_i that are
+        # fully owned by exactly one other page j.
+        for i, mask_i in enumerate(masks):
+            if mask_i is None:
+                continue
+            dent_i = mask_i.convex_hull.difference(mask_i)
+            if dent_i.is_empty:
+                continue
+            for piece in _collect_polygons(dent_i):
+                if piece.area < mask_i.area * 0.001:
+                    continue  # ignore tiny fragments
+
+                # Find the single page that fully owns this piece.
+                owners = [
+                    j
+                    for j, mask_j in enumerate(masks)
+                    if j != i
+                    and mask_j is not None
+                    and piece.intersection(mask_j).area > piece.area * 0.9
+                ]
+                if len(owners) != 1:
+                    continue
+                j = owners[0]
+
+                # Compute color scores for both pages in this piece's region.
+                score_i, score_j = 0.0, 0.0
+                if page_color_data is not None:
+                    pcd_i = page_color_data[i]
+                    pcd_j = page_color_data[j]
+                    if pcd_i is not None:
+                        score_i = _score_block_on_page(piece, pcd_i)
+                    if pcd_j is not None:
+                        score_j = _score_block_on_page(piece, pcd_j)
+
+                # Skip if j has a clear, substantial color advantage.
+                if score_j > max(score_i, color_min_score) * color_dominance_threshold:
+                    continue
+
+                candidates.append((i, piece, j))
+
+    # Apply transfers using incrementally updated masks.
+    for i, piece, j in candidates:
+        if new_masks[i] is None or new_masks[j] is None:
+            continue
+        # Verify j still owns the piece; an earlier transfer may have claimed it.
+        if new_masks[j].intersection(piece).area <= piece.area * 0.5:
+            continue
+
+        candidate_i = new_masks[i].union(piece)
+        candidate_j = new_masks[j].difference(piece)
+        if not isinstance(candidate_i, Polygon):
+            continue
+
+        # For the source, allow a MultiPolygon if one component dominates (≥90%).
+        # This handles the case where the arm bridges two parts of j's territory —
+        # removing it leaves a main body plus a small disconnected remnant.
+        new_j: Polygon | None
+        if candidate_j.is_empty:
+            new_j = None
+        elif isinstance(candidate_j, Polygon):
+            new_j = candidate_j
+        elif isinstance(candidate_j, MultiPolygon):
+            parts = sorted(candidate_j.geoms, key=lambda p: p.area, reverse=True)
+            if parts[0].area >= candidate_j.area * 0.9:
+                new_j = parts[0]
+            else:
+                continue  # too fragmented; skip
+        else:
+            continue
+
+        new_masks[i] = candidate_i
+        new_masks[j] = new_j
+        modified.update([i, j])
+        transfer_count += 1
+
+    if transfer_count:
+        print(
+            f"Dent-filling: {transfer_count} transfer(s) across {len(modified)} page(s).",
+            file=sys.stderr,
+        )
+
+    # Re-apply simplification and spike removal to modified masks.
+    for i in modified:
+        mask = new_masks[i]
+        if mask is None:
+            continue
+        simplified = mask.simplify(simplify_tolerance, preserve_topology=True)
+        if isinstance(simplified, Polygon):
+            new_masks[i] = _remove_spike_vertices(simplified)
+        elif isinstance(simplified, MultiPolygon):
+            parts = sorted(simplified.geoms, key=lambda p: p.area, reverse=True)
+            new_masks[i] = _remove_spike_vertices(parts[0])
+
+    return new_masks
+
+
 def compute_all_clip_masks(
     georefs: list[dict],
     centerlines_geojson: dict,
@@ -494,6 +684,10 @@ def compute_all_clip_masks(
             )
 
         masks.append(cast(Polygon, mask_geo))
+
+    # Fill concave dents: transfer pieces from neighboring pages when there's no
+    # strong color reason to keep them there.
+    masks = _fill_concave_dents(masks, page_color_data, page_polys, simplify_tolerance)
 
     # Report what fraction of the original page coverage is still covered.
     # Pages without a computed mask fall back to their full page polygon.

@@ -11,6 +11,8 @@ from mapsnap.clip_masks import (
     PageColorData,
     _assign_blocks_to_pages,
     _assign_blocks_to_pages_with_splits,
+    _convexity_ratio,
+    _fill_concave_dents,
     _fit_affine,
     _is_substantial,
     _load_page_color_data,
@@ -488,6 +490,92 @@ def test_score_block_bright_region():
     pcd = _make_page_color_data(georef, arr)
     block = Polygon([(0.2, 0.2), (0.8, 0.2), (0.8, 0.8), (0.2, 0.8)])
     assert _score_block_on_page(block, pcd) > 0.0
+
+
+# ---------------------------------------------------------------------------
+# _fill_concave_dents
+# ---------------------------------------------------------------------------
+
+
+def test_fill_concave_dents_transfers_notch():
+    """Dent region owned by page j is transferred to page i when color is equal."""
+    # mask_i: L-shape (area=3). convex_hull is a pentagon (area=3.5); the
+    # dent is the triangle [(2,1),(1,1),(1,2)] with area=0.5.
+    # mask_j: unit square [(1,1)×(2,2)] that owns the dent triangle.
+    mask_i = Polygon([(0, 0), (2, 0), (2, 1), (1, 1), (1, 2), (0, 2)])
+    mask_j = Polygon([(1, 1), (2, 1), (2, 2), (1, 2)])
+
+    result = _fill_concave_dents([mask_i, mask_j], page_color_data=None)
+
+    # mask_i should absorb the dent triangle and equal its convex hull (area=3.5).
+    assert result[0] is not None
+    assert abs(result[0].area - mask_i.convex_hull.area) < 1e-6
+    # mask_j lost the dent triangle → area shrank from 1.0 to 0.5.
+    assert result[1] is not None
+    assert result[1].area < mask_j.area
+
+
+def test_fill_concave_dents_no_transfer_when_color_dominates():
+    """Notch is NOT transferred when the owning page has substantially more color."""
+    mask_i = Polygon([(0, 0), (2, 0), (2, 1), (1, 1), (1, 2), (0, 2)])
+    mask_j = Polygon([(1, 1), (2, 1), (2, 2), (1, 2)])
+
+    # page j has high color everywhere; page i has none.
+    georef_i = _axis_aligned_georef(0.0, 0.0, 2.0, 2.0, w=20, h=20)
+    georef_j = _axis_aligned_georef(1.0, 1.0, 2.0, 2.0, w=10, h=10)
+    pcd_i = _make_page_color_data(georef_i, np.zeros((20, 20), dtype=np.int16))
+    pcd_j = _make_page_color_data(georef_j, np.full((10, 10), 200, dtype=np.int16))
+
+    result = _fill_concave_dents([mask_i, mask_j], page_color_data=[pcd_i, pcd_j])
+
+    # Transfer should be blocked — mask_j still owns the notch.
+    assert result[1] is not None
+    assert abs(result[1].area - mask_j.area) < 1e-6
+
+
+def test_fill_concave_dents_arm_via_page_poly():
+    """Arm in j's territory inside i's page extent is transferred using page_poly detection.
+
+    Hull-based detection would miss this arm because it isn't inside hull(mask_i).
+    Page_poly-based detection finds it via page_poly_i − mask_i.
+
+    Geometry:
+      page_poly_p32: [(0,0)-(4,6)]  p32's full geographic extent
+      mask_p32:      [(0,0)-(4,3)]  only south half of p32
+      page_poly_p24: [(0,5)-(4,9)]  p24's extent (north of p32)
+      arm:     [(1,3)-(2,5.5)]      thin strip in p32's upper area, protrudes down from p24
+      mask_p24: rect[(0,5)-(4,9)] ∪ arm  — arm hangs below p24's main territory into p32's extent
+    """
+    page_poly_p32 = Polygon([(0, 0), (4, 0), (4, 6), (0, 6)])
+    mask_p32 = Polygon([(0, 0), (4, 0), (4, 3), (0, 3)])
+    page_poly_p24 = Polygon([(0, 5), (4, 5), (4, 9), (0, 9)])
+    arm = Polygon([(1, 3), (2, 3), (2, 5.5), (1, 5.5)])
+    mask_p24 = Polygon([(0, 5), (4, 5), (4, 9), (0, 9)]).union(arm)
+    assert isinstance(mask_p24, Polygon), "test setup: mask_p24 must be a Polygon"
+
+    # Without page_polys (hull-based), the arm should NOT be detected:
+    # hull(mask_p32) only extends to y=3, so the arm at y=[3,5.5] is outside it.
+    result_hull = _fill_concave_dents(
+        [mask_p32, mask_p24], page_color_data=None, page_polys=None
+    )
+    assert result_hull[1] is not None
+    assert abs(result_hull[1].area - mask_p24.area) < 1e-6, (
+        "hull-based: arm should NOT be transferred (it's outside hull(mask_p32))"
+    )
+
+    # With page_polys (page-poly-based), the arm IS in page_poly_p32.difference(mask_p32),
+    # and removing it improves p24's convexity ratio.
+    result_poly = _fill_concave_dents(
+        [mask_p32, mask_p24],
+        page_color_data=None,
+        page_polys=[page_poly_p32, page_poly_p24],
+    )
+    assert result_poly[0] is not None
+    assert result_poly[0].area > mask_p32.area, "p32 should gain the arm"
+    assert result_poly[1] is not None
+    assert result_poly[1].area < mask_p24.area, "p24 should lose the arm"
+    # Convexity of p24 should improve after losing the arm.
+    assert _convexity_ratio(result_poly[1]) > _convexity_ratio(mask_p24)
 
 
 def test_assign_uses_color_score_over_centroid():
