@@ -14,6 +14,8 @@ from mapsnap.split_pages import find_thick_bands, partition_image, split_image
 DATA_DIR = Path(__file__).parent.parent / "data"
 
 CHAMPAIGN_UNSPLIT = DATA_DIR / "champaign_ill_1915" / "p4.unsplit.jpg"
+CHAMPAIGN_P2 = DATA_DIR / "champaign_ill_1915" / "p2.unsplit.jpg"
+CHAMPAIGN_P20 = DATA_DIR / "champaign_ill_1915" / "p20.unsplit.jpg"
 DETROIT_NO_SPLIT = DATA_DIR / "detroit_mich_1929_vol_11" / "p11.raw.jpg"
 NEW_ORLEANS_DIAGONAL = DATA_DIR / "new_orleans_la_1896_vol_2" / "p101.unsplit.jpg"
 
@@ -92,7 +94,8 @@ def test_partition_no_split():
     # Uniform white image → single section covering the whole image.
     img = np.full((100, 100), 200, dtype=np.uint8)
     sections = partition_image(img, min_run_fraction=0.3, min_thickness=3)
-    assert sections == [(0, 0, 100, 100)]
+    assert len(sections) == 1
+    assert sections[0].bounds == (0.0, 0.0, 100.0, 100.0)
 
 
 def test_partition_vertical_split():
@@ -100,12 +103,10 @@ def test_partition_vertical_split():
     img = _make_dark_stripe_v(height=100, width=100, band_x=45, band_w=10)
     sections = partition_image(img, min_run_fraction=0.3, min_thickness=3)
     assert len(sections) == 2
-    # Left section covers x=0..49, right covers x=50..100 (approximate center).
     left, right = sections
-    assert left[0] == 0  # x0
-    assert right[2] == 100  # x1
-    # Sections should not overlap significantly.
-    assert left[2] <= right[0] + 2
+    assert left.bounds[0] == 0  # x0
+    assert right.bounds[2] == 100  # x1
+    assert left.bounds[2] <= right.bounds[0] + 2
 
 
 def test_partition_horizontal_split():
@@ -114,15 +115,13 @@ def test_partition_horizontal_split():
     sections = partition_image(img, min_run_fraction=0.3, min_thickness=3)
     assert len(sections) == 2
     top, bottom = sections
-    assert top[1] == 0  # y0
-    assert bottom[3] == 100  # y1
-    assert top[3] <= bottom[1] + 2
+    assert top.bounds[1] == 0  # y0
+    assert bottom.bounds[3] == 100  # y1
+    assert top.bounds[3] <= bottom.bounds[1] + 2
 
 
 def test_partition_t_shape():
     # T-shaped layout: one vertical band + two horizontal bands only in the right column.
-    # Image 200×100: vertical stripe at x=90..99, horizontal stripes at y=30..39 and y=60..69
-    # (but only for x >= 90, so they won't be detected as full-width horizontal bands initially).
     height, width = 100, 200
     img = np.full((height, width), 200, dtype=np.uint8)
 
@@ -139,15 +138,15 @@ def test_partition_t_shape():
 
     # First section is the full-height left column.
     left = sections[0]
-    assert left[0] == 0
-    assert left[1] == 0
-    assert left[3] == height
+    assert left.bounds[0] == 0  # x0
+    assert left.bounds[1] == 0  # y0
+    assert left.bounds[3] == height  # y1
 
     # Remaining 3 sections are stacked in the right column.
     right_sections = sections[1:]
-    assert all(s[0] > 80 for s in right_sections)  # all start after the vertical split
-    assert right_sections[0][1] == 0
-    assert right_sections[-1][3] == height
+    assert all(s.bounds[0] > 80 for s in right_sections)
+    assert right_sections[0].bounds[1] == 0
+    assert right_sections[-1].bounds[3] == height
 
 
 # ---------------------------------------------------------------------------
@@ -165,6 +164,30 @@ def test_split_image_champaign(tmp_path):
     assert len(paths) == 4
     names = {p.name for p in paths}
     assert names == {"p4__1.raw.jpg", "p4__2.raw.jpg", "p4__3.raw.jpg", "p4__4.raw.jpg"}
+
+
+@pytest.mark.skipif(not CHAMPAIGN_P2.exists(), reason="test data not present")
+def test_split_image_champaign_p2(tmp_path):
+    # p2.unsplit.jpg has a corner inset (top-left): expect 2 sections.
+    import shutil
+
+    src = shutil.copy(CHAMPAIGN_P2, tmp_path / "p2.unsplit.jpg")
+    paths = split_image(Path(src))
+    assert len(paths) == 2
+    names = {p.name for p in paths}
+    assert names == {"p2__1.raw.jpg", "p2__2.raw.jpg"}
+
+
+@pytest.mark.skipif(not CHAMPAIGN_P20.exists(), reason="test data not present")
+def test_split_image_champaign_p20(tmp_path):
+    # p20.unsplit.jpg has a corner inset (bottom-right): expect 2 sections.
+    import shutil
+
+    src = shutil.copy(CHAMPAIGN_P20, tmp_path / "p20.unsplit.jpg")
+    paths = split_image(Path(src))
+    assert len(paths) == 2
+    names = {p.name for p in paths}
+    assert names == {"p20__1.raw.jpg", "p20__2.raw.jpg"}
 
 
 @pytest.mark.skipif(not DETROIT_NO_SPLIT.exists(), reason="test data not present")
