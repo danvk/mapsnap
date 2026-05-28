@@ -13,49 +13,11 @@ import json
 import re
 import sys
 import time
-import urllib.error
-import urllib.request
 from pathlib import Path
 
 from mapsnap.compare_iiif_georef import source_id_to_page_key
+from mapsnap.download_oim_iiif import download_with_retry
 from mapsnap.utils import jpeg_dimensions
-
-
-def download_with_retry(
-    url: str,
-    dest: Path,
-    max_attempts: int = 5,
-    initial_delay: float = 15.0,
-) -> None:
-    """Download a URL to dest, retrying on transient errors with exponential backoff."""
-    delay = initial_delay
-    for attempt in range(1, max_attempts + 1):
-        try:
-            req = urllib.request.Request(url, headers={"User-Agent": "mapsnap/0.1"})
-            with urllib.request.urlopen(req) as resp:
-                dest.write_bytes(resp.read())
-            return
-        except urllib.error.HTTPError as exc:
-            if exc.code in (429, 503) and attempt < max_attempts:
-                print(
-                    f"  HTTP {exc.code}; retrying in {delay:.0f}s "
-                    f"(attempt {attempt}/{max_attempts})",
-                    file=sys.stderr,
-                )
-                time.sleep(delay)
-                delay = min(delay * 2, 60.0)
-            else:
-                raise
-        except Exception:
-            if attempt < max_attempts:
-                print(
-                    f"  Error on attempt {attempt}; retrying in {delay:.0f}s",
-                    file=sys.stderr,
-                )
-                time.sleep(delay)
-                delay = min(delay * 2, 60.0)
-            else:
-                raise
 
 
 def canvas_to_page_key(canvas_id: str, label: str) -> str:
@@ -98,7 +60,9 @@ def process_canvas(
         return True
 
     print(f"    Downloading → {image_path.name} ...", file=sys.stderr)
-    download_with_retry(image_url, image_path)
+    download_with_retry(image_url, image_path, initial_delay=15.0)
+    # unconditional delay to avoid making too many requests if they all succeed.
+    time.sleep(15.0)
     dl_width, dl_height = jpeg_dimensions(image_path)
     print(f"    Downloaded: {dl_width}×{dl_height}", file=sys.stderr)
 
