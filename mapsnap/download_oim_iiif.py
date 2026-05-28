@@ -29,7 +29,8 @@ def download_with_retry(
     delay = initial_delay
     for attempt in range(1, max_attempts + 1):
         try:
-            with urllib.request.urlopen(url) as resp:
+            req = urllib.request.Request(url, headers={"User-Agent": "mapsnap/0.1"})
+            with urllib.request.urlopen(req) as resp:
                 dest.write_bytes(resp.read())
             return
         except urllib.error.HTTPError as exc:
