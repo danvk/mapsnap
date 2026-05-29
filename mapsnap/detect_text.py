@@ -18,7 +18,7 @@ from mapsnap.utils import image_stem
 # excluded from georeferencing. Pipe labels use the size without the inch mark
 # (the " character is outside the OCR allowlist and is dropped).
 NON_STREET_TEXT: frozenset[str] = frozenset(
-    {f"{size} W. PIPE" for size in ("2", "4", "6", "8", "10", "12", "16", "20")}
+    {f'{size}" W. PIPE' for size in ("2", "4", "6", "8", "10", "12", "16", "20")}
 )
 
 
@@ -134,7 +134,7 @@ def main() -> None:
     parser.add_argument(
         "--allowlist",
         metavar="CHARS",
-        default="ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789 .",
+        default='ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789 ."',
         help=(
             "Restrict OCR recognition to these characters. Defaults to letters, space, "
             "and period (period separates direction abbreviations like 'E.' from the "
