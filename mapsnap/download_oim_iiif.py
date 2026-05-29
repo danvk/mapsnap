@@ -34,7 +34,7 @@ def download_with_retry(
                 dest.write_bytes(resp.read())
             return
         except urllib.error.HTTPError as exc:
-            if exc.code in (429, 503, 520) and attempt < max_attempts:
+            if (exc.code == 429 or (500 <= exc.code < 600)) and attempt < max_attempts:
                 print(
                     f"  HTTP {exc.code}; retrying in {delay:.0f}s "
                     f"(attempt {attempt}/{max_attempts})",
