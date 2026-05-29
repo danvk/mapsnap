@@ -724,6 +724,7 @@ def process_image(
         all_detections = labels_raw
 
     print(f"All detections: {len(all_detections)}")
+    all_detections = [d for d in all_detections if not d.get("ignore")]
     normalized_streets = set(block_index.keys())
     all_detections = deduplicate_detections(
         all_detections, normalized_streets=normalized_streets

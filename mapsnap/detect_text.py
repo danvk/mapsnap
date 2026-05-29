@@ -14,6 +14,13 @@ from mapsnap.ctc_vocab_decode import generate_vocab_strings
 from mapsnap.streets import build_block_index, polygon_side_lengths
 from mapsnap.utils import image_stem
 
+# Non-street text that appears on Sanborn maps and should be recognized but
+# excluded from georeferencing. Pipe labels use the size without the inch mark
+# (the " character is outside the OCR allowlist and is dropped).
+NON_STREET_TEXT: frozenset[str] = frozenset(
+    {f"{size} W. PIPE" for size in ("2", "4", "6", "8", "10", "12", "16", "20")}
+)
+
 
 def detect_text(
     image_path: str,
@@ -51,13 +58,17 @@ def detect_text(
       - angle: rotation pass (0, 90, or 270) that produced this detection
       - long_side: length of the longer pair of polygon sides (pixels)
       - short_side: length of the shorter pair of polygon sides (pixels)
+      - ignore: True if the text matches a NON_STREET_TEXT pattern (absent otherwise)
     """
     if reader is None:
         reader = easyocr.Reader(["en"], gpu=True, verbose=False)
 
     from mapsnap.ctc_vocab_decode import patch_easyocr_reader
 
-    patch_easyocr_reader(reader, vocab_strings, beam_width)
+    # Include non-street labels in the trie so they decode correctly rather
+    # than being forced to a random street name.
+    all_vocab = sorted(set(vocab_strings) | NON_STREET_TEXT)
+    patch_easyocr_reader(reader, all_vocab, beam_width)
 
     img = Image.open(image_path).convert("RGB")
     orig_width, orig_height = img.size
@@ -105,6 +116,8 @@ def detect_text(
         sides = polygon_side_lengths(det["polygon"])
         det["long_side"] = round(max(sides), 1)
         det["short_side"] = round(min(sides), 1)
+        if det["text"].upper() in NON_STREET_TEXT:
+            det["ignore"] = True
     return all_detections
 
 

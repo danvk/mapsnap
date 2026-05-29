@@ -1,5 +1,6 @@
 """Unit tests for street-name helpers (now in streets.py)."""
 
+from mapsnap.detect_text import NON_STREET_TEXT
 from mapsnap.streets import (
     canonical_street_match,
     matches_any_street,
@@ -181,3 +182,19 @@ def test_canonical_direction_prefix_returns_key():
 
 def test_canonical_no_match():
     assert canonical_street_match("ZZZZZZZZZ", CANONICAL_STREETS) is None
+
+
+# ---------------------------------------------------------------------------
+# NON_STREET_TEXT
+# ---------------------------------------------------------------------------
+
+
+def test_non_street_text_contains_pipe_sizes():
+    # Common Sanborn pipe labels — inch mark is not in the OCR allowlist so it
+    # is dropped, leaving e.g. "6 W. PIPE".
+    assert "6 W. PIPE" in NON_STREET_TEXT
+    assert "12 W. PIPE" in NON_STREET_TEXT
+
+
+def test_non_street_text_all_uppercase():
+    assert all(s == s.upper() for s in NON_STREET_TEXT)
