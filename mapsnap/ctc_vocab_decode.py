@@ -21,11 +21,15 @@ the actual (non-street) image content.
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass, field
 
 import numpy as np
 
 from mapsnap.streets import DIRECTION_ABBREVS, ORDINAL_WORD_TO_NUM, STREET_ABBREVS
+
+# Matches numeric ordinal suffixes: "5TH", "12ND", "3RD", "21ST", etc.
+_ORDINAL_RE = re.compile(r"^(\d+)(ST|ND|RD|TH)$")
 
 # ---------------------------------------------------------------------------
 # Vocabulary generation: canonical names → abbreviated label forms
@@ -101,6 +105,18 @@ def generate_vocab_strings(normalized_streets: set[str]) -> list[str]:
         base_names = [base_name]
         if base_name in ORDINAL_WORD_TO_NUM:
             base_names.append(ORDINAL_WORD_TO_NUM[base_name])
+
+        # Sanborn maps print ordinals with a typographic gap between the digit
+        # and the suffix (e.g. "5 TH", not "5TH"). The CTC model sees that gap
+        # as a space character, so "5TH" in the trie gets a near-zero path
+        # probability (blank must pass through frames dominated by space).
+        # Adding "5 TH" gives the decoder a matching path at ~1.0 probability.
+        spaced = [
+            f"{m.group(1)} {m.group(2)}"
+            for bn in base_names
+            if (m := _ORDINAL_RE.match(bn))
+        ]
+        base_names = base_names + [s for s in spaced if s not in base_names]
 
         # Cross-product of (direction prefix) × (base name) × (type suffix)
         for dir_form in dir_forms:
