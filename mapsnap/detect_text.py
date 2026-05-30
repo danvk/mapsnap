@@ -15,10 +15,39 @@ from mapsnap.streets import build_block_index, polygon_side_lengths
 from mapsnap.utils import image_stem
 
 # Non-street text that appears on Sanborn maps and should be recognized but
-# excluded from georeferencing. Pipe labels use the size without the inch mark
-# (the " character is outside the OCR allowlist and is dropped).
+# excluded from georeferencing.
+#
+# Water pipe labels like '6" W. PIPE' are tricky: the Sanborn font renders '6"'
+# as a tight glyph that the OCR model commonly misreads. The constrained CTC
+# decoder then maps to "EMPIRE" (a real Queens street) instead.
+#
+# Two independent sources of variation compound each other:
+#
+# (1) How '6"' is read:  'E' (tight glyph, horizontal text),
+#                        'S' (compressed, vertical text),
+#                        '5' / 'G' (other instances)
+#
+# (2) How 'W' is read:   depends on the exact crop height fed to the recognition
+#     model. EasyOCR upscales crops to a fixed 32px height, so a 25px-tall
+#     bounding box is upscaled 1.28×, a 29px box 1.10×, etc. At different
+#     scales the same 'W' glyph reads as W / X / Y / M / K — the dominant
+#     letter can shift by a single pixel of crop height. All must be covered.
+#
+# The double-dashed underline is also captured inside the CRAFT bounding box,
+# making the box ~40% taller than the text alone; this is why vertical-text
+# instances read '6' as 'S' rather than 'E' (the glyph is compressed).
 NON_STREET_TEXT: frozenset[str] = frozenset(
+    # Exact forms with inch mark (legible in higher-quality scans)
     {f'{size}" W. PIPE' for size in ("2", "4", "6", "8", "10", "12", "16", "20")}
+    # '6"' → 'E'; cover W → W / X / Y / M (scale-dependent)
+    | {"EWPIPE", "EXPIPE", "EYPIPE", "EMPIPE"}
+    | {"EW PIPE", "EX PIPE", "EY PIPE", "EM PIPE"}
+    | {"EW. PIPE", "EX. PIPE", "EY. PIPE", "EM. PIPE"}
+    # vertical text: '6' → 'S', '"' visible; W → W / X / Y / M
+    | {'S"WPIPE', 'S"XPIPE', 'S"YPIPE', 'S"MPIPE'}
+    | {'S" W. PIPE', 'S" W PIPE'}
+    # vertical text: '6' → 'S', '"' dropped; W → W / M
+    | {"SM PIPE", "S W PIPE", "S W. PIPE"}
 )
 
 

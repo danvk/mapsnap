@@ -190,10 +190,20 @@ def test_canonical_no_match():
 
 
 def test_non_street_text_contains_pipe_sizes():
-    # Common Sanborn pipe labels — inch mark is not in the OCR allowlist so it
-    # is dropped, leaving e.g. "6 W. PIPE".
-    assert "6 W. PIPE" in NON_STREET_TEXT
-    assert "12 W. PIPE" in NON_STREET_TEXT
+    # Exact forms with inch mark for higher-quality scans.
+    assert '6" W. PIPE' in NON_STREET_TEXT
+    assert '12" W. PIPE' in NON_STREET_TEXT
+
+
+def test_non_street_text_contains_confusable_forms():
+    # Horizontal: "6"" → "E"; W reads as W, X, Y, or M depending on crop scale.
+    assert "EWPIPE" in NON_STREET_TEXT
+    assert "EXPIPE" in NON_STREET_TEXT
+    assert "EYPIPE" in NON_STREET_TEXT
+    # Vertical text: '6' → 'S', '"' visible
+    assert 'S"WPIPE' in NON_STREET_TEXT
+    # Vertical text: '6' → 'S', '"' dropped, 'W' → 'M'
+    assert "SM PIPE" in NON_STREET_TEXT
 
 
 def test_non_street_text_all_uppercase():
