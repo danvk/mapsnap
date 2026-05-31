@@ -51,6 +51,41 @@ NON_STREET_TEXT: frozenset[str] = frozenset(
 )
 
 
+def _trim_underlines(
+    img_array: np.ndarray,
+    boxes: list,
+    dark_coverage: float = 0.25,
+    scan_fraction: float = 0.25,
+) -> list:
+    """Trim rows containing dashed underlines from the bottom of CRAFT bounding boxes.
+
+    Sanborn maps often print dashed underlines below street labels. CRAFT captures
+    these in the bounding box, inflating crop height and causing near-baseline
+    characters (e.g. 'D') to be misread (e.g. as 'P').
+
+    Scans the bottom scan_fraction of each ``[x_min, x_max, y_min, y_max]`` box.
+    If a row in that region has >= dark_coverage fraction of dark pixels
+    (grayscale < 128), the box is trimmed to exclude that row and everything below.
+    """
+    gray = img_array.mean(axis=2)  # (H, W) grayscale
+    H, W = gray.shape
+    result = []
+    for x_min, x_max, y_min, y_max in boxes:
+        x_min, x_max, y_min, y_max = int(x_min), int(x_max), int(y_min), int(y_max)
+        crop_h = y_max - y_min
+        scan_start = y_max - max(1, int(crop_h * scan_fraction))
+        new_y_max = y_max
+        for row in range(scan_start, y_max):
+            if row >= H:
+                break
+            row_pixels = gray[row, max(0, x_min) : min(W, x_max)]
+            if len(row_pixels) and (row_pixels < 128).mean() >= dark_coverage:
+                new_y_max = row
+                break
+        result.append([x_min, x_max, y_min, max(new_y_max, y_min + 4)])
+    return result
+
+
 def detect_text(
     image_path: str,
     vocab_strings: list[str],
@@ -103,19 +138,25 @@ def detect_text(
     orig_width, orig_height = img.size
 
     all_detections: list[dict] = []
-    readtext_kwargs: dict = {
+    recognize_kwargs: dict = {
         "paragraph": False,
-        "min_size": min_size,
-        "link_threshold": link_threshold,
         "decoder": "wordbeamsearch",
         "beamWidth": beam_width,
     }
     if allowlist is not None:
-        readtext_kwargs["allowlist"] = allowlist
+        recognize_kwargs["allowlist"] = allowlist
 
     for angle in (0, 90, 270):
         rotated = img.rotate(angle, expand=True) if angle != 0 else img
-        results = reader.readtext(np.array(rotated), **readtext_kwargs)
+        rotated_array = np.array(rotated)
+        horizontal_list_agg, free_list_agg = reader.detect(
+            rotated_array, min_size=min_size, link_threshold=link_threshold
+        )
+        horizontal_list = _trim_underlines(rotated_array, horizontal_list_agg[0])
+        free_list = free_list_agg[0]
+        results = reader.recognize(
+            rotated_array, horizontal_list, free_list, **recognize_kwargs
+        )
         for bbox, text, confidence in results:
             # Reject boxes that are taller than wide in rotated-image coordinates.
             # Valid text is always wider than tall in the rotated image; a tall box

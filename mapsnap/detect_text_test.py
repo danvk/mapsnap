@@ -1,6 +1,8 @@
 """Unit tests for street-name helpers (now in streets.py)."""
 
-from mapsnap.detect_text import NON_STREET_TEXT
+import numpy as np
+
+from mapsnap.detect_text import NON_STREET_TEXT, _trim_underlines
 from mapsnap.streets import (
     canonical_street_match,
     matches_any_street,
@@ -208,3 +210,45 @@ def test_non_street_text_contains_confusable_forms():
 
 def test_non_street_text_all_uppercase():
     assert all(s == s.upper() for s in NON_STREET_TEXT)
+
+
+# ---------------------------------------------------------------------------
+# _trim_underlines
+# ---------------------------------------------------------------------------
+
+
+def _make_img(height: int, width: int, dark_rows: list[int]) -> np.ndarray:
+    """White (H, W, 3) image with fully dark (0) rows at the given indices."""
+    img = np.full((height, width, 3), 255, dtype=np.uint8)
+    for row in dark_rows:
+        img[row, :, :] = 0
+    return img
+
+
+def test_trim_underlines_trims_dark_bottom_row():
+    # Box spanning rows 0-19; dark row at 17 (within bottom 25%).
+    img = _make_img(50, 100, dark_rows=[17])
+    result = _trim_underlines(img, [[0, 100, 0, 20]])
+    assert result == [[0, 100, 0, 17]]
+
+
+def test_trim_underlines_no_underline_unchanged():
+    # No dark rows — box should come back untouched.
+    img = _make_img(50, 100, dark_rows=[])
+    result = _trim_underlines(img, [[0, 100, 0, 20]])
+    assert result == [[0, 100, 0, 20]]
+
+
+def test_trim_underlines_dark_row_outside_scan_window_unchanged():
+    # Dark row at row 2 is outside the bottom 25% of a 0-20 box (scan starts at 15).
+    img = _make_img(50, 100, dark_rows=[2])
+    result = _trim_underlines(img, [[0, 100, 0, 20]])
+    assert result == [[0, 100, 0, 20]]
+
+
+def test_trim_underlines_enforces_minimum_height():
+    # If trimming would produce a box shorter than 4px, clamp to y_min+4.
+    img = _make_img(50, 100, dark_rows=[1])
+    result = _trim_underlines(img, [[0, 100, 0, 4]])
+    # scan_start = 4 - max(1, int(4*0.25)) = 3; row 1 is outside → no trim
+    assert result[0][3] >= result[0][2] + 4
