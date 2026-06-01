@@ -22,6 +22,14 @@ else
     ref_iiif=$dir/loc.iiif.json
 fi
 
+# --edge-margin 0
+
+if [ -e $dir/main.iiif.json ]; then
+    ref_iiif=$dir/main.iiif.json
+else
+    ref_iiif=$dir/loc.iiif.json
+fi
+
 uv run python mapsnap/make_iiif_georef.py \
     $ref_iiif $dir'/*.georef.json' \
     --centerlines $dir/centerlines.geojson \
