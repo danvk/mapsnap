@@ -329,19 +329,26 @@ def patch_easyocr_reader(
     vocab_strings: list[str],
     beam_width: int = 20,
 ) -> TrieNode:
-    """Patch easyocr.recognition.recognizer_predict with constrained CTC decoding.
+    """Patch EasyOCR for vocabulary-constrained CTC decoding and batched GPU→CPU transfers.
 
-    For ``decoder='wordbeamsearch'`` calls, replaces both the text decoding and the
-    confidence score with values derived from the constrained CTC path probability,
-    so false positives (non-street text forced to a vocabulary word) get low
-    confidence rather than the greedy-decode confidence of the actual image content.
+    Two patches are applied:
 
-    For other decoders the original function is called unchanged.
+    1. ``easyocr.recognition.recognizer_predict`` — replaces text decoding with
+       prefix-constrained CTC beam search (vocabulary trie) and derives confidence
+       from the constrained path probability. For other decoders the original is called.
 
-    The patch is module-level; creating a new ``Reader`` does NOT revert it.
+    2. ``easyocr.Reader.recognize`` — replaces the ``batch_size=1`` one-per-bbox loop
+       with a group-by-T loop: bboxes with the same natural sequence length (max_width)
+       are batched together, so each distinct T value produces one LSTM forward pass and
+       one GPU→CPU transfer instead of one per bbox. This reduces ~1886 CUDA syncs to
+       ~10–20 for a typical Sanborn map page (one per distinct crop aspect ratio).
+
+    Both patches are module-/class-level; creating a new ``Reader`` does NOT revert them.
 
     Returns the trie root (for inspection / debugging).
     """
+    import easyocr
+    import easyocr.easyocr as _easyocr_mod
     import easyocr.recognition as _recog
     import torch
     import torch.nn.functional as F
@@ -376,7 +383,11 @@ def patch_easyocr_reader(
             )
 
         model.eval()
-        result: list[list] = []
+
+        # Phase 1: all GPU forward passes — keep preds_prob on GPU.
+        # Ignore-idx zeroing and renormalization happen on GPU to avoid the
+        # extra GPU→CPU→GPU roundtrip that the original EasyOCR code does.
+        all_preds: list[torch.Tensor] = []
         with torch.no_grad():
             for image_tensors in test_loader:
                 batch_size = image_tensors.size(0)
@@ -386,27 +397,208 @@ def patch_easyocr_reader(
                     .fill_(0)
                     .to(device)
                 )
-
                 preds = model(image, text_for_pred)
                 preds_prob = F.softmax(preds, dim=2)
-                preds_prob_np = preds_prob.cpu().detach().numpy()
+                if ignore_idx:
+                    preds_prob[:, :, ignore_idx] = 0.0
+                pred_norm = preds_prob.sum(dim=2, keepdim=True).clamp(min=1e-9)
+                all_preds.append(preds_prob / pred_norm)
 
-                # Zero-out ignored characters (same normalisation as original).
-                preds_prob_np[:, :, ignore_idx] = 0.0
-                pred_norm = preds_prob_np.sum(axis=2)
-                preds_prob_np = preds_prob_np / np.expand_dims(pred_norm, axis=-1)
+        if not all_preds:
+            return []
 
-                for i in range(batch_size):
-                    text, path_prob = prefix_constrained_ctc(
-                        preds_prob_np[i], trie_root, char_list, beam_width
-                    )
-                    # Per-character geometric mean of the constrained path probability.
-                    # Analogous to EasyOCR's custom_mean but derived from the actual
-                    # constrained path rather than greedy max probs.
-                    confidence = path_prob ** (1.0 / max(len(text), 1))
-                    result.append([text, float(confidence)])
+        # Phase 2: one GPU→CPU transfer for all batches combined.
+        # (N_total, T_global, C) where T_global = batch_max_length + 1.
+        all_probs: np.ndarray = torch.cat(all_preds, dim=0).cpu().numpy()
+
+        # Phase 3: CTC beam search with per-crop T trimming.
+        # When called with batch_size > 1, EasyOCR pads all crops to the
+        # widest crop's T_global. Padding frames have near-100% blank
+        # probability (black-pixel padding → near-zero CNN features → LSTM
+        # outputs dominated by blank). Trimming those frames restores the
+        # per-crop effective T, keeping CTC beam search as fast as it was
+        # in the batch_size=1 path.
+        T_global = all_probs.shape[1]
+        result: list[list] = []
+        for i in range(len(all_probs)):
+            crop = all_probs[i]  # (T_global, C)
+            # Scan backwards to find the last non-padding frame.
+            effective_T = T_global
+            for t in range(T_global - 1, 0, -1):
+                if crop[t, 0] >= 0.9999:
+                    effective_T = t
+                else:
+                    break
+            text, path_prob = prefix_constrained_ctc(
+                crop[:effective_T], trie_root, char_list, beam_width
+            )
+            # Per-character geometric mean of the constrained path probability.
+            # Analogous to EasyOCR's custom_mean but derived from the actual
+            # constrained path rather than greedy max probs.
+            confidence = path_prob ** (1.0 / max(len(text), 1))
+            result.append([text, float(confidence)])
 
         return result
 
     _recog.recognizer_predict = _patched_recognizer_predict
+
+    # --- Patch 2: Reader.recognize --- group bboxes by T to reduce CUDA syncs ---
+
+    from collections import defaultdict
+
+    import easyocr.utils as _eu
+    from easyocr.recognition import get_text as _get_text
+
+    original_recognize = easyocr.Reader.recognize
+
+    def _patched_recognize(
+        self,
+        img_cv_grey,
+        horizontal_list=None,
+        free_list=None,
+        decoder="greedy",
+        beamWidth=5,
+        batch_size=1,
+        workers=0,
+        allowlist=None,
+        blocklist=None,
+        detail=1,
+        rotation_info=None,
+        paragraph=False,
+        contrast_ths=0.1,
+        adjust_contrast=0.5,
+        filter_ths=0.003,
+        y_ths=0.5,
+        x_ths=1.0,
+        reformat=True,
+        output_format="standard",
+    ):
+        # Only optimize the GPU wordbeamsearch path without rotation.
+        # Fall back to original for CPU (where CUDA sync overhead doesn't exist),
+        # non-wordbeamsearch decoders, and rotation_info paths.
+        if decoder != "wordbeamsearch" or rotation_info or self.device == "cpu":
+            return original_recognize(
+                self,
+                img_cv_grey,
+                horizontal_list,
+                free_list,
+                decoder,
+                beamWidth,
+                batch_size,
+                workers,
+                allowlist,
+                blocklist,
+                detail,
+                rotation_info,
+                paragraph,
+                contrast_ths,
+                adjust_contrast,
+                filter_ths,
+                y_ths,
+                x_ths,
+                reformat,
+                output_format,
+            )
+
+        # Replicate recognize()'s standard preprocessing.
+        if reformat:
+            _, img_cv_grey = _eu.reformat_input(img_cv_grey)
+
+        if allowlist:
+            ignore_char = "".join(set(self.character) - set(allowlist))
+        elif blocklist:
+            ignore_char = "".join(set(blocklist))
+        else:
+            ignore_char = "".join(set(self.character) - set(self.lang_char))
+
+        if horizontal_list is None and free_list is None:
+            y_max, x_max = img_cv_grey.shape
+            horizontal_list = [[0, x_max, 0, y_max]]
+            free_list = []
+
+        img_h: int = _easyocr_mod.imgH
+
+        # Group bboxes by max_width (= each crop's natural sequence length T×10).
+        # Crops with the same max_width share a T value so they can go through
+        # the LSTM together without any padding overhead. Each group produces one
+        # LSTM forward pass and one GPU→CPU transfer instead of one per bbox.
+        groups: dict[int, list] = defaultdict(list)
+        for bbox in horizontal_list or []:
+            image_list, max_width = _eu.get_image_list(
+                [bbox], [], img_cv_grey, model_height=img_h
+            )
+            if image_list:
+                groups[int(max_width)].extend(image_list)
+        for bbox in free_list or []:
+            image_list, max_width = _eu.get_image_list(
+                [], [bbox], img_cv_grey, model_height=img_h
+            )
+            if image_list:
+                groups[int(max_width)].extend(image_list)
+
+        result = []
+        for max_width, image_list in groups.items():
+            group_result = _get_text(
+                self.character,
+                img_h,
+                max_width,
+                self.recognizer,
+                self.converter,
+                image_list,
+                ignore_char,
+                decoder,
+                beamWidth,
+                len(image_list),  # one LSTM call for the whole T group
+                contrast_ths,
+                adjust_contrast,
+                filter_ths,
+                workers,
+                self.device,
+            )
+            result.extend(group_result)
+
+        if paragraph:
+            result = _eu.get_paragraph(result, x_ths=x_ths, y_ths=y_ths, mode="ltr")
+
+        if detail == 0:
+            return [item[1] for item in result]
+        elif output_format == "dict":
+            if paragraph:
+                return [{"boxes": item[0], "text": item[1]} for item in result]
+            return [
+                {"boxes": item[0], "text": item[1], "confident": item[2]}
+                for item in result
+            ]
+        elif output_format == "json":
+            import json as _json
+
+            if paragraph:
+                return [
+                    _json.dumps(
+                        {
+                            "boxes": [list(map(int, lst)) for lst in item[0]],
+                            "text": item[1],
+                        },
+                        ensure_ascii=False,
+                    )
+                    for item in result
+                ]
+            return [
+                _json.dumps(
+                    {
+                        "boxes": [list(map(int, lst)) for lst in item[0]],
+                        "text": item[1],
+                        "confident": item[2],
+                    },
+                    ensure_ascii=False,
+                )
+                for item in result
+            ]
+        elif output_format == "free_merge":
+            return _eu.merge_to_free(result, free_list)
+        else:
+            return result
+
+    easyocr.Reader.recognize = _patched_recognize
+
     return trie_root
