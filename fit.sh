@@ -9,9 +9,10 @@ tag=$2
 
 uv run mapsnap/georef_from_labels.py $dir/*.scaled.jpg \
     --centerlines $dir/centerlines.geojson \
-    --min-long-side 50 \
+    --min-long-side 45 \
     --min-short-side 20 \
-    --min-confidence 0.15
+    --min-confidence 0.15 \
+    --min-aspect-ratio 1.75
 
 # --edge-margin 0
 
