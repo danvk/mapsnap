@@ -152,6 +152,14 @@ def _craft_detect_all_angles(
     return result
 
 
+def filter_args(argv: list[str], image: str) -> list[str]:
+    """If this script is run with *.jpg, then argv can be very long. This compacts it.
+
+    Specifically, it removes images from the command line other than the one of interest.
+    """
+    return [arg for arg in argv if not arg.endswith(".jpg") or arg == image]
+
+
 def detect_text(
     image_path: str,
     vocab_strings: list[str],
@@ -239,7 +247,7 @@ def detect_text(
             "width": orig_width,
             "height": orig_height,
             "timestamp": datetime.now(timezone.utc).isoformat(),
-            "command": sys.argv[:],
+            "command": filter_args(sys.argv[:], image_path),
             "boxes": angle_boxes,
         }
         with open(_boxes_path(image_path), "w") as f:
@@ -315,7 +323,7 @@ def detect_text(
         "width": orig_width,
         "height": orig_height,
         "timestamp": datetime.now(timezone.utc).isoformat(),
-        "command": sys.argv[:],
+        "command": filter_args(sys.argv[:], image_path),
         "streets": all_detections,
     }
     with open(_streets_path(image_path), "w") as f:
