@@ -26,6 +26,8 @@ Don't include explicit type annotations where they would exactly match what pyri
 + tags = {"key1": "value1", "key2": val2}
 ```
 
+Assume all functions are importable. There's no need to `_`-prefix functions.
+
 ### TypeScript
 
 Use the following format for JSDoc comments:

@@ -41,14 +41,15 @@ def process_canvas(
 ) -> Path:
     """Download the full-resolution image for one canvas.
 
-    Returns True on success, False if the canvas was skipped or failed.
+    Returns a Path to the output file, or raises on failure.
     """
     canvas_id: str = canvas.get("@id", "")
     label: str = canvas.get("label", "unknown")
 
     page_key = canvas_to_page_key(canvas_id, label)
     assert page_key != "iiif", f"Could not extract valid page key from {canvas_id}"
-    size = "pct:25"
+    # size = "pct:25"
+    size = "full"
     image_url = f"{canvas_id}/full/{size}/0/default.jpg"
     image_path = output_dir / f"{page_key}.raw.jpg"
 
@@ -118,7 +119,8 @@ def main() -> None:
     if len(out_paths) < num_total:
         print(f"Unique paths: {len(out_paths)}; there are collisions.", file=sys.stderr)
         print(
-            [*((path, count) for path, count in out_paths.most_common() if count > 1)]
+            [*((path, count) for path, count in out_paths.most_common() if count > 1)],
+            file=sys.stderr,
         )
 
 
