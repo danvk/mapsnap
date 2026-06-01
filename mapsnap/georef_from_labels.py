@@ -783,8 +783,9 @@ def process_image(
         print("No intersection GCPs found.", file=sys.stderr)
         return ProcessResult(success=False)
     if len(gcps) == 1:
+        ix = f"{gcps[0].feat_a.raw_text} x {gcps[0].feat_b.raw_text}"
         print(
-            "Only 1 intersection GCP; deferring for median-scale processing.",
+            f"Only 1 intersection GCP: {ix}; deferring for median-scale processing.",
             file=sys.stderr,
         )
         return ProcessResult(
