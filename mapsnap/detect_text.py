@@ -6,6 +6,7 @@ import multiprocessing
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import Any
 
 import easyocr
 import numpy as np
@@ -333,7 +334,7 @@ def detect_text(
 
 
 # Module-level state populated by _worker_init in each worker process.
-_worker_state: dict = {}
+_worker_state: dict[str, Any] = {}
 
 
 def _worker_init(

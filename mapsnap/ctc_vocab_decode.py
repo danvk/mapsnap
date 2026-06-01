@@ -323,6 +323,13 @@ def prefix_constrained_ctc(
 # Monkey-patch
 # ---------------------------------------------------------------------------
 
+# Blank probability threshold above which a CTC frame is treated as padding.
+# After batching, EasyOCR pads shorter crops to the longest crop's T.
+# Padding frames have near-100% blank probability (black pixels → near-zero
+# CNN activations → LSTM output dominated by blank). Frames at or above this
+# threshold are trimmed before beam search to restore per-crop effective T.
+_PADDING_BLANK_THRESHOLD = 0.9999
+
 
 def patch_easyocr_reader(
     reader,
@@ -425,7 +432,7 @@ def patch_easyocr_reader(
             # Scan backwards to find the last non-padding frame.
             effective_T = T_global
             for t in range(T_global - 1, 0, -1):
-                if crop[t, 0] >= 0.9999:
+                if crop[t, 0] >= _PADDING_BLANK_THRESHOLD:
                     effective_T = t
                 else:
                     break
@@ -476,6 +483,8 @@ def patch_easyocr_reader(
         # Only optimize the GPU wordbeamsearch path without rotation.
         # Fall back to original for CPU (where CUDA sync overhead doesn't exist),
         # non-wordbeamsearch decoders, and rotation_info paths.
+        # Note: batch_size is intentionally ignored — all crops sharing the same T
+        # are batched together regardless of the caller's batch_size value.
         if decoder != "wordbeamsearch" or rotation_info or self.device == "cpu":
             return original_recognize(
                 self,
@@ -561,6 +570,7 @@ def patch_easyocr_reader(
         if paragraph:
             result = _eu.get_paragraph(result, x_ths=x_ths, y_ths=y_ths, mode="ltr")  # type: ignore[reportArgumentType]
 
+        assert detail != 2, "detail=2 is not supported by the batched recognize patch"
         if detail == 0:
             return [item[1] for item in result]
         elif output_format == "dict":

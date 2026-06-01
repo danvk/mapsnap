@@ -2,7 +2,7 @@
 
 import numpy as np
 
-from mapsnap.detect_text import NON_STREET_TEXT, _erase_underlines
+from mapsnap.detect_text import NON_STREET_TEXT, _erase_underlines, filter_args
 from mapsnap.streets import (
     canonical_street_match,
     matches_any_street,
@@ -260,3 +260,38 @@ def test_erase_underlines_preserves_row_above_underline():
     result = _erase_underlines(img, [[0, 100, 0, 20]])
     assert result[17, :, :].min() == 255  # underline erased
     assert result[14, :, :].max() == 0  # text row above scan window intact
+
+
+# ---------------------------------------------------------------------------
+# filter_args
+# ---------------------------------------------------------------------------
+
+
+def test_filter_args_keeps_non_jpg():
+    argv = ["detect_text.py", "--centerlines", "streets.geojson", "a.jpg"]
+    assert filter_args(argv, "a.jpg") == argv
+
+
+def test_filter_args_removes_other_jpgs():
+    argv = ["detect_text.py", "a.jpg", "b.jpg", "c.jpg"]
+    assert filter_args(argv, "b.jpg") == ["detect_text.py", "b.jpg"]
+
+
+def test_filter_args_keeps_flags_and_target():
+    argv = ["detect_text.py", "--min-long-side", "45", "p1.jpg", "p2.jpg", "p3.jpg"]
+    assert filter_args(argv, "p2.jpg") == [
+        "detect_text.py",
+        "--min-long-side",
+        "45",
+        "p2.jpg",
+    ]
+
+
+def test_filter_args_single_image():
+    argv = ["detect_text.py", "only.jpg"]
+    assert filter_args(argv, "only.jpg") == argv
+
+
+def test_filter_args_no_jpgs():
+    argv = ["detect_text.py", "--help"]
+    assert filter_args(argv, "x.jpg") == argv
