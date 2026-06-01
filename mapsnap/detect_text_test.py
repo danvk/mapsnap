@@ -2,7 +2,7 @@
 
 import numpy as np
 
-from mapsnap.detect_text import NON_STREET_TEXT, _trim_underlines
+from mapsnap.detect_text import NON_STREET_TEXT, _erase_underlines
 from mapsnap.streets import (
     canonical_street_match,
     matches_any_street,
@@ -225,30 +225,38 @@ def _make_img(height: int, width: int, dark_rows: list[int]) -> np.ndarray:
     return img
 
 
-def test_trim_underlines_trims_dark_bottom_row():
-    # Box spanning rows 0-19; dark row at 17 (within bottom 25%).
+def test_erase_underlines_paints_dark_bottom_row_white():
+    # Box spanning rows 0-19; dark row at 17 (within bottom 25%) should become white.
     img = _make_img(50, 100, dark_rows=[17])
-    result = _trim_underlines(img, [[0, 100, 0, 20]])
-    assert result == [[0, 100, 0, 17]]
+    result = _erase_underlines(img, [[0, 100, 0, 20]])
+    assert result[17, :, :].min() == 255  # row 17 is now white
+    assert result[16, :, :].max() == 255  # row above (light) untouched
 
 
-def test_trim_underlines_no_underline_unchanged():
-    # No dark rows — box should come back untouched.
+def test_erase_underlines_no_underline_unchanged():
+    # No dark rows — returned image should equal the input.
     img = _make_img(50, 100, dark_rows=[])
-    result = _trim_underlines(img, [[0, 100, 0, 20]])
-    assert result == [[0, 100, 0, 20]]
+    result = _erase_underlines(img, [[0, 100, 0, 20]])
+    assert np.array_equal(result, img)
 
 
-def test_trim_underlines_dark_row_outside_scan_window_unchanged():
-    # Dark row at row 2 is outside the bottom 25% of a 0-20 box (scan starts at 15).
+def test_erase_underlines_does_not_mutate_input():
+    img = _make_img(50, 100, dark_rows=[17])
+    original = img.copy()
+    _erase_underlines(img, [[0, 100, 0, 20]])
+    assert np.array_equal(img, original)
+
+
+def test_erase_underlines_dark_row_outside_scan_window_unchanged():
+    # Dark row at 2 is outside the bottom 25% of a 0-20 box (scan starts at 15).
     img = _make_img(50, 100, dark_rows=[2])
-    result = _trim_underlines(img, [[0, 100, 0, 20]])
-    assert result == [[0, 100, 0, 20]]
+    result = _erase_underlines(img, [[0, 100, 0, 20]])
+    assert result[2, :, :].min() == 0  # row 2 still dark
 
 
-def test_trim_underlines_enforces_minimum_height():
-    # If trimming would produce a box shorter than 4px, clamp to y_min+4.
-    img = _make_img(50, 100, dark_rows=[1])
-    result = _trim_underlines(img, [[0, 100, 0, 4]])
-    # scan_start = 4 - max(1, int(4*0.25)) = 3; row 1 is outside → no trim
-    assert result[0][3] >= result[0][2] + 4
+def test_erase_underlines_preserves_row_above_underline():
+    # Row 14 (text) and row 17 (underline) both dark; only row 17 is in scan window.
+    img = _make_img(50, 100, dark_rows=[14, 17])
+    result = _erase_underlines(img, [[0, 100, 0, 20]])
+    assert result[17, :, :].min() == 255  # underline erased
+    assert result[14, :, :].max() == 0  # text row above scan window intact

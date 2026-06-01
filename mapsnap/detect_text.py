@@ -51,39 +51,38 @@ NON_STREET_TEXT: frozenset[str] = frozenset(
 )
 
 
-def _trim_underlines(
+def _erase_underlines(
     img_array: np.ndarray,
     boxes: list,
     dark_coverage: float = 0.25,
     scan_fraction: float = 0.25,
-) -> list:
-    """Trim rows containing dashed underlines from the bottom of CRAFT bounding boxes.
+) -> np.ndarray:
+    """Return a copy of img_array with dashed underlines painted white.
 
     Sanborn maps often print dashed underlines below street labels. CRAFT captures
-    these in the bounding box, inflating crop height and causing near-baseline
-    characters (e.g. 'D') to be misread (e.g. as 'P').
+    these in the bounding box, causing near-baseline characters (e.g. 'D') to be
+    misread (e.g. as 'P'). Painting them out preserves the full bounding-box height
+    (avoiding character clipping) while removing the noise from the recognizer.
 
     Scans the bottom scan_fraction of each ``[x_min, x_max, y_min, y_max]`` box.
-    If a row in that region has >= dark_coverage fraction of dark pixels
-    (grayscale < 128), the box is trimmed to exclude that row and everything below.
+    Rows in that region with >= dark_coverage fraction of dark pixels
+    (grayscale < 128) are overwritten with white (255) within the box column range.
     """
+    img_out = img_array.copy()
     gray = img_array.mean(axis=2)  # (H, W) grayscale
     H, W = gray.shape
-    result = []
     for x_min, x_max, y_min, y_max in boxes:
         x_min, x_max, y_min, y_max = int(x_min), int(x_max), int(y_min), int(y_max)
         crop_h = y_max - y_min
         scan_start = y_max - max(1, int(crop_h * scan_fraction))
-        new_y_max = y_max
+        col_start, col_end = max(0, x_min), min(W, x_max)
         for row in range(scan_start, y_max):
             if row >= H:
                 break
-            row_pixels = gray[row, max(0, x_min) : min(W, x_max)]
+            row_pixels = gray[row, col_start:col_end]
             if len(row_pixels) and (row_pixels < 128).mean() >= dark_coverage:
-                new_y_max = row
-                break
-        result.append([x_min, x_max, y_min, max(new_y_max, y_min + 4)])
-    return result
+                img_out[row, col_start:col_end] = 255
+    return img_out
 
 
 def detect_text(
@@ -152,10 +151,11 @@ def detect_text(
         horizontal_list_agg, free_list_agg = reader.detect(
             rotated_array, min_size=min_size, link_threshold=link_threshold
         )
-        horizontal_list = _trim_underlines(rotated_array, horizontal_list_agg[0])
+        horizontal_list = horizontal_list_agg[0]
         free_list = free_list_agg[0]
+        rotated_clean = _erase_underlines(rotated_array, horizontal_list)
         results = reader.recognize(
-            rotated_array, horizontal_list, free_list, **recognize_kwargs
+            rotated_clean, horizontal_list, free_list, **recognize_kwargs
         )
         for bbox, text, confidence in results:
             # Reject boxes that are taller than wide in rotated-image coordinates.
