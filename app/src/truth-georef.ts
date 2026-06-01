@@ -33,6 +33,7 @@ interface Detection {
   angle: number;
   long_side: number;
   short_side: number;
+  ignore?: boolean;
 }
 
 interface GeorefData {
@@ -93,6 +94,9 @@ const filterShortSideSlider = document.getElementById(
 ) as HTMLInputElement;
 const filterLongSideSlider = document.getElementById(
   'filter-long-side',
+) as HTMLInputElement;
+const showIgnoredCheckbox = document.getElementById(
+  'show-ignored',
 ) as HTMLInputElement;
 
 function streetCircleColor(): maplibregl.ExpressionSpecification | string {
@@ -292,6 +296,10 @@ filterShortSideSlider.addEventListener('input', () =>
 filterLongSideSlider.addEventListener('input', () =>
   onFilterSliderInput(filterLongSideSlider, 'filter-long-side-value', 0),
 );
+showIgnoredCheckbox.addEventListener('change', () => {
+  renderDetections();
+  updateDetectionsTable();
+});
 
 /** Map confidence in [0, 1] to a CSS color string (red → yellow → green). */
 function confidenceColor(confidence: number): string {
@@ -304,13 +312,15 @@ function getFilteredDetections(): { det: Detection; i: number }[] {
   const minConf = parseFloat(filterConfidenceSlider.value);
   const minShort = parseFloat(filterShortSideSlider.value);
   const minLong = parseFloat(filterLongSideSlider.value);
+  const showIgnored = showIgnoredCheckbox.checked;
   return detections
     .map((det, i) => ({ det, i }))
     .filter(
       ({ det }) =>
         det.confidence >= minConf &&
         det.short_side >= minShort &&
-        det.long_side >= minLong,
+        det.long_side >= minLong &&
+        (!det.ignore || showIgnored),
     );
 }
 
@@ -320,7 +330,12 @@ function renderDetections(): void {
   svg.innerHTML = '';
   for (const { det, i } of getFilteredDetections()) {
     const isSelected = selectedDetectionIndices.has(i);
-    const color = isSelected ? '#ff6600' : confidenceColor(det.confidence);
+    const isIgnored = det.ignore === true;
+    const color = isSelected
+      ? '#ff6600'
+      : isIgnored
+        ? '#999'
+        : confidenceColor(det.confidence);
     const points = det.polygon
       .map(([x, y]) => toDisplay(x, y))
       .map(([dx, dy]) => `${dx},${dy}`)
@@ -332,9 +347,10 @@ function renderDetections(): void {
     );
     polygonEl.setAttribute('points', points);
     polygonEl.setAttribute('fill', color);
-    polygonEl.setAttribute('fill-opacity', isSelected ? '0.25' : '0.08');
+    polygonEl.setAttribute('fill-opacity', isSelected ? '0.25' : '0.05');
     polygonEl.setAttribute('stroke', color);
     polygonEl.setAttribute('stroke-width', isSelected ? '2.5' : '1.2');
+    if (isIgnored) polygonEl.setAttribute('stroke-dasharray', '4 3');
     svg.appendChild(polygonEl);
 
     if (isSelected) {
@@ -441,6 +457,7 @@ function updateDetectionsTable(): void {
   for (const [rowIdx, { det, i }] of visible.entries()) {
     const tr = document.createElement('tr');
     if (selectedDetectionIndices.has(i)) tr.classList.add('selected');
+    if (det.ignore) tr.classList.add('ignored');
 
     for (const val of [
       det.angle,
