@@ -93,6 +93,12 @@ def _boxes_path(image_path: str) -> str:
     return str(Path(image_path).parent / (stem + ".boxes.json"))
 
 
+def _streets_path(image_path: str) -> str:
+    """Return the path for the OCR results file (<stem>.streets.json)."""
+    stem = image_stem(image_path)
+    return str(Path(image_path).parent / (stem + ".streets.json"))
+
+
 def _craft_detect_all_angles(
     img: Image.Image,
     reader: easyocr.Reader,
@@ -302,6 +308,17 @@ def detect_text(
         det["short_side"] = round(min(sides), 1)
         if det["text"].upper() in NON_STREET_TEXT:
             det["ignore"] = True
+
+    streets_doc = {
+        "width": orig_width,
+        "height": orig_height,
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "command": sys.argv[:],
+        "streets": all_detections,
+    }
+    with open(_streets_path(image_path), "w") as f:
+        json.dump(streets_doc, f, indent=2)
+
     return all_detections
 
 
@@ -334,9 +351,7 @@ def _worker_init(
 
 def _process_image(image_path: str) -> str:
     """Process one image in a worker process, writing output to <stem>.streets.json."""
-    stem = image_stem(image_path)
-    output_path = str(Path(image_path).parent / (stem + ".streets.json"))
-    detections = detect_text(
+    detect_text(
         image_path,
         vocab_strings=_worker_state["vocab_strings"],
         min_size=_worker_state["min_size"],
@@ -348,8 +363,6 @@ def _process_image(image_path: str) -> str:
         craft_scale=_worker_state["craft_scale"],
         reuse_boxes=_worker_state["reuse_boxes"],
     )
-    with open(output_path, "w") as f:
-        f.write(json.dumps(detections, indent=2))
     return image_path
 
 
@@ -522,9 +535,7 @@ def main() -> None:
     else:
         reader = easyocr.Reader(["en"], gpu=gpu, verbose=False)
         for image_path in tqdm(images, smoothing=0):
-            stem = image_stem(image_path)
-            output_path = str(Path(image_path).parent / (stem + ".streets.json"))
-            detections = detect_text(
+            detect_text(
                 image_path,
                 vocab_strings=vocab_strings,
                 min_size=args.min_short_side,
@@ -536,8 +547,6 @@ def main() -> None:
                 craft_scale=args.craft_scale,
                 reuse_boxes=args.reuse_boxes,
             )
-            with open(output_path, "w") as f:
-                f.write(json.dumps(detections, indent=2))
 
 
 if __name__ == "__main__":

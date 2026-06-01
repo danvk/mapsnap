@@ -48,6 +48,15 @@ interface GeorefData {
   intersections?: IntersectionPoint[];
 }
 
+/** New-format streets.json: detection list wrapped with image metadata. */
+interface StreetsJsonData {
+  width: number;
+  height: number;
+  timestamp: string;
+  command: string[];
+  streets: Detection[];
+}
+
 type Corners = [
   [number, number],
   [number, number],
@@ -834,16 +843,31 @@ function setupFileDrop(): void {
     } catch {
       return;
     }
-    if (Array.isArray(parsed)) {
-      // streets.json: array of detection objects from detect_text.py
-      detections = (parsed as Detection[]).filter((d) => d.confidence > 0);
+    const isOldStreetsFormat = Array.isArray(parsed);
+    const isNewStreetsFormat =
+      !isOldStreetsFormat &&
+      typeof parsed === 'object' &&
+      parsed !== null &&
+      'streets' in parsed &&
+      Array.isArray((parsed as StreetsJsonData).streets) &&
+      ((parsed as StreetsJsonData).streets[0] as Partial<Detection> | undefined)
+        ?.confidence !== undefined;
+    if (isOldStreetsFormat || isNewStreetsFormat) {
+      // streets.json: detection objects from detect_text.py (array or wrapped object)
+      const rawDetections: Detection[] = isOldStreetsFormat
+        ? (parsed as Detection[])
+        : (parsed as StreetsJsonData).streets;
+      detections = rawDetections.filter((d) => d.confidence > 0);
       selectedDetectionIndices = new Set();
       streetsMode = true;
       textarea.value = text;
-      applyJsonDimensions(
-        img.naturalWidth || jsonWidth || 1,
-        img.naturalHeight || jsonHeight || 1,
-      );
+      const w = isNewStreetsFormat
+        ? (parsed as StreetsJsonData).width
+        : img.naturalWidth || jsonWidth || 1;
+      const h = isNewStreetsFormat
+        ? (parsed as StreetsJsonData).height
+        : img.naturalHeight || jsonHeight || 1;
+      applyJsonDimensions(w, h);
       enterStreetsMode();
     } else {
       if (streetsMode) exitStreetsMode();
