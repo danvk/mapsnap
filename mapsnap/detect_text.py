@@ -90,10 +90,12 @@ def detect_text(
     image_path: str,
     vocab_strings: list[str],
     min_size: int = 15,
+    min_long_side: int = 0,
     allowlist: str | None = None,
     link_threshold: float = 0.4,
     reader: easyocr.Reader | None = None,
     beam_width: int = 20,
+    craft_scale: float = 1.0,
 ) -> list[dict]:
     """Run CRAFT-based text detection at 0°, 90°, and 270° and return all results.
 
@@ -114,6 +116,19 @@ def detect_text(
     restricted to outputting strings that are prefixes of known street-name forms.
     This substantially improves recall on abbreviated and direction-prefixed labels
     at the cost of ~25% slower recognition.
+
+    min_long_side skips recognition for boxes whose long side (max of width and
+    height in rotated-image coordinates) is below this threshold. Boxes are still
+    detected by CRAFT but never passed to the recognizer, so they do not appear in
+    the output. Set this to match the --min-long-side used by georef_from_labels.py
+    to avoid spending time recognizing text that will be filtered downstream.
+
+    craft_scale downsizes the image before CRAFT detection (e.g. 0.5 = half
+    resolution). CRAFT CNN cost scales quadratically with image area, so 0.5
+    gives ~4× faster detection. Detected bounding boxes are scaled back up to
+    original coordinates before recognition, which always runs at full resolution.
+    min_size is also scaled proportionally so the same physical text size threshold
+    applies.
 
     Each returned detection is a dict with:
       - polygon: list of 4 [x, y] corners in original image coordinates
@@ -146,14 +161,47 @@ def detect_text(
     if allowlist is not None:
         recognize_kwargs["allowlist"] = allowlist
 
+    craft_min_size = max(1, int(min_size * craft_scale))
+
     for angle in (0, 90, 270):
         rotated = img.rotate(angle, expand=True) if angle != 0 else img
         rotated_array = np.array(rotated)
+        if craft_scale != 1.0:
+            rot_h, rot_w = rotated_array.shape[:2]
+            small_w = max(1, int(rot_w * craft_scale))
+            small_h = max(1, int(rot_h * craft_scale))
+            detect_array = np.array(
+                Image.fromarray(rotated_array).resize((small_w, small_h), Image.LANCZOS)
+            )
+        else:
+            detect_array = rotated_array
         horizontal_list_agg, free_list_agg = reader.detect(
-            rotated_array, min_size=min_size, link_threshold=link_threshold
+            detect_array, min_size=craft_min_size, link_threshold=link_threshold
         )
         horizontal_list = horizontal_list_agg[0]
         free_list = free_list_agg[0]
+        if craft_scale != 1.0:
+            inv = 1.0 / craft_scale
+            horizontal_list = [
+                [int(b[0] * inv), int(b[1] * inv), int(b[2] * inv), int(b[3] * inv)]
+                for b in horizontal_list
+            ]
+            free_list = [
+                [[int(c[0] * inv), int(c[1] * inv)] for c in box] for box in free_list
+            ]
+        if min_long_side > 0:
+            horizontal_list = [
+                b for b in horizontal_list if (b[1] - b[0]) > min_long_side
+            ]
+            free_list = [
+                b
+                for b in free_list
+                if max(
+                    max(c[0] for c in b) - min(c[0] for c in b),
+                    max(c[1] for c in b) - min(c[1] for c in b),
+                )
+                > min_long_side
+            ]
         rotated_clean = _erase_underlines(rotated_array, horizontal_list)
         results = reader.recognize(
             rotated_clean, horizontal_list, free_list, **recognize_kwargs
@@ -199,18 +247,22 @@ _worker_state: dict = {}
 def _worker_init(
     vocab_strings: list[str],
     min_size: int,
+    min_long_side: int,
     allowlist: str | None,
     link_threshold: float,
     beam_width: int,
+    craft_scale: float,
     gpu: bool,
 ) -> None:
     """Initialize per-worker state once per process: create the EasyOCR reader."""
     _worker_state["reader"] = easyocr.Reader(["en"], gpu=gpu, verbose=False)
     _worker_state["vocab_strings"] = vocab_strings
     _worker_state["min_size"] = min_size
+    _worker_state["min_long_side"] = min_long_side
     _worker_state["allowlist"] = allowlist
     _worker_state["link_threshold"] = link_threshold
     _worker_state["beam_width"] = beam_width
+    _worker_state["craft_scale"] = craft_scale
 
 
 def _process_image(image_path: str) -> str:
@@ -221,10 +273,12 @@ def _process_image(image_path: str) -> str:
         image_path,
         vocab_strings=_worker_state["vocab_strings"],
         min_size=_worker_state["min_size"],
+        min_long_side=_worker_state["min_long_side"],
         allowlist=_worker_state["allowlist"],
         link_threshold=_worker_state["link_threshold"],
         reader=_worker_state["reader"],
         beam_width=_worker_state["beam_width"],
+        craft_scale=_worker_state["craft_scale"],
     )
     with open(output_path, "w") as f:
         f.write(json.dumps(detections, indent=2))
@@ -307,6 +361,30 @@ def main() -> None:
         action="store_true",
         help="Disable GPU acceleration (recommended with --num-workers > 1).",
     )
+    parser.add_argument(
+        "--min-long-side",
+        type=int,
+        default=0,
+        metavar="PX",
+        help=(
+            "Skip recognition for CRAFT detections whose long side is below this "
+            "threshold (default: 0, no filtering). Set to match the --min-long-side "
+            "used by georef_from_labels.py to avoid recognizing boxes that will be "
+            "filtered downstream."
+        ),
+    )
+    parser.add_argument(
+        "--craft-scale",
+        type=float,
+        default=1.0,
+        metavar="S",
+        help=(
+            "Scale factor applied to images before CRAFT detection (default: 1.0). "
+            "0.5 halves each dimension, reducing CRAFT CNN cost ~4×. Detected boxes "
+            "are scaled back to original coordinates; recognition always runs at full "
+            "resolution."
+        ),
+    )
     args = parser.parse_args()
 
     geojson = json.load(open(args.centerlines))
@@ -335,9 +413,11 @@ def main() -> None:
         initargs = (
             vocab_strings,
             args.min_short_side,
+            args.min_long_side,
             args.allowlist,
             args.link_threshold,
             args.beam_width,
+            args.craft_scale,
             gpu,
         )
         with multiprocessing.Pool(
@@ -360,10 +440,12 @@ def main() -> None:
                 image_path,
                 vocab_strings=vocab_strings,
                 min_size=args.min_short_side,
+                min_long_side=args.min_long_side,
                 allowlist=args.allowlist,
                 link_threshold=args.link_threshold,
                 reader=reader,
                 beam_width=args.beam_width,
+                craft_scale=args.craft_scale,
             )
             with open(output_path, "w") as f:
                 f.write(json.dumps(detections, indent=2))
