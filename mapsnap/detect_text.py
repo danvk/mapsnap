@@ -2,6 +2,7 @@
 
 import argparse
 import json
+import multiprocessing
 import sys
 from pathlib import Path
 
@@ -191,6 +192,45 @@ def detect_text(
     return all_detections
 
 
+# Module-level state populated by _worker_init in each worker process.
+_worker_state: dict = {}
+
+
+def _worker_init(
+    vocab_strings: list[str],
+    min_size: int,
+    allowlist: str | None,
+    link_threshold: float,
+    beam_width: int,
+    gpu: bool,
+) -> None:
+    """Initialize per-worker state once per process: create the EasyOCR reader."""
+    _worker_state["reader"] = easyocr.Reader(["en"], gpu=gpu, verbose=False)
+    _worker_state["vocab_strings"] = vocab_strings
+    _worker_state["min_size"] = min_size
+    _worker_state["allowlist"] = allowlist
+    _worker_state["link_threshold"] = link_threshold
+    _worker_state["beam_width"] = beam_width
+
+
+def _process_image(image_path: str) -> str:
+    """Process one image in a worker process, writing output to <stem>.streets.json."""
+    stem = image_stem(image_path)
+    output_path = str(Path(image_path).parent / (stem + ".streets.json"))
+    detections = detect_text(
+        image_path,
+        vocab_strings=_worker_state["vocab_strings"],
+        min_size=_worker_state["min_size"],
+        allowlist=_worker_state["allowlist"],
+        link_threshold=_worker_state["link_threshold"],
+        reader=_worker_state["reader"],
+        beam_width=_worker_state["beam_width"],
+    )
+    with open(output_path, "w") as f:
+        f.write(json.dumps(detections, indent=2))
+    return image_path
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(
         description="Detect text regions in insurance map images using EasyOCR (CRAFT)."
@@ -251,6 +291,22 @@ def main() -> None:
         action="store_true",
         help="Skip images that already have a .streets.json output file.",
     )
+    parser.add_argument(
+        "--num-workers",
+        type=int,
+        default=1,
+        metavar="N",
+        help=(
+            "Number of parallel worker processes (default: 1). Each worker loads its "
+            "own EasyOCR reader. With GPU enabled, workers share the GPU via CUDA "
+            "context switching; each worker requires ~500 MB of VRAM for model weights."
+        ),
+    )
+    parser.add_argument(
+        "--no-gpu",
+        action="store_true",
+        help="Disable GPU acceleration (recommended with --num-workers > 1).",
+    )
     args = parser.parse_args()
 
     geojson = json.load(open(args.centerlines))
@@ -273,22 +329,44 @@ def main() -> None:
             file=sys.stderr,
         )
 
-    reader = easyocr.Reader(["en"], gpu=True, verbose=False)
+    gpu = not args.no_gpu
 
-    for image_path in tqdm(images, smoothing=0):
-        stem = image_stem(image_path)
-        output_path = str(Path(image_path).parent / (stem + ".streets.json"))
-        detections = detect_text(
-            image_path,
-            vocab_strings=vocab_strings,
-            min_size=args.min_short_side,
-            allowlist=args.allowlist,
-            link_threshold=args.link_threshold,
-            reader=reader,
-            beam_width=args.beam_width,
+    if args.num_workers > 1:
+        initargs = (
+            vocab_strings,
+            args.min_short_side,
+            args.allowlist,
+            args.link_threshold,
+            args.beam_width,
+            gpu,
         )
-        with open(output_path, "w") as f:
-            f.write(json.dumps(detections, indent=2))
+        with multiprocessing.Pool(
+            args.num_workers,
+            initializer=_worker_init,
+            initargs=initargs,
+        ) as pool:
+            for _ in tqdm(
+                pool.imap_unordered(_process_image, images),
+                total=len(images),
+                smoothing=0,
+            ):
+                pass
+    else:
+        reader = easyocr.Reader(["en"], gpu=gpu, verbose=False)
+        for image_path in tqdm(images, smoothing=0):
+            stem = image_stem(image_path)
+            output_path = str(Path(image_path).parent / (stem + ".streets.json"))
+            detections = detect_text(
+                image_path,
+                vocab_strings=vocab_strings,
+                min_size=args.min_short_side,
+                allowlist=args.allowlist,
+                link_threshold=args.link_threshold,
+                reader=reader,
+                beam_width=args.beam_width,
+            )
+            with open(output_path, "w") as f:
+                f.write(json.dumps(detections, indent=2))
 
 
 if __name__ == "__main__":
