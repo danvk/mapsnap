@@ -425,6 +425,10 @@ function drawDetectionCanvas(canvas: HTMLCanvasElement, det: Detection): void {
   canvas.width = cW;
   canvas.height = cH;
 
+  // When the loaded image is larger than the json coordinate space (e.g. full-res
+  // image with streets.json from a downscaled version), render the image at
+  // jsonWidth*scale × jsonHeight*scale so one json-pixel equals one canvas pixel at
+  // the given scale, keeping the crop center at the polygon centroid.
   const ctx = canvas.getContext('2d')!;
   ctx.save();
   ctx.translate(cW / 2, cH / 2);
@@ -433,8 +437,8 @@ function drawDetectionCanvas(canvas: HTMLCanvasElement, det: Detection): void {
     img,
     -cx * scale,
     -cy * scale,
-    img.naturalWidth * scale,
-    img.naturalHeight * scale,
+    jsonWidth * scale,
+    jsonHeight * scale,
   );
   ctx.restore();
 }
