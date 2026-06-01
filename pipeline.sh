@@ -39,6 +39,10 @@ uv run python mapsnap/osm_to_centerlines.py \
     $dir/streets.osm.json \
     --output $dir/centerlines.geojson
 
-uv run python mapsnap/detect_text.py --centerlines $dir/centerlines.geojson $dir/*.scaled.jpg
+uv run python mapsnap/detect_text.py \
+    --min-long-side 45 \
+    --centerlines $dir/centerlines.geojson \
+    --num-workers 2 \
+    $dir/*.scaled.jpg
 
 ./fit.sh $dir mapsnap

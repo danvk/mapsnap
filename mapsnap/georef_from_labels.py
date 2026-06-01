@@ -718,7 +718,7 @@ def process_image(
     labels_raw = json.load(open(labels_path))
     if isinstance(labels_raw, dict):
         all_detections: list[dict] = labels_raw.get(
-            "detections", labels_raw.get("accepted", [])
+            "streets", labels_raw.get("detections", labels_raw.get("accepted", []))
         )
     else:
         all_detections = labels_raw

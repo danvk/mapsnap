@@ -33,6 +33,7 @@ interface Detection {
   angle: number;
   long_side: number;
   short_side: number;
+  ignore?: boolean;
 }
 
 interface GeorefData {
@@ -46,6 +47,15 @@ interface GeorefData {
   ];
   streets?: Street[];
   intersections?: IntersectionPoint[];
+}
+
+/** New-format streets.json: detection list wrapped with image metadata. */
+interface StreetsJsonData {
+  width: number;
+  height: number;
+  timestamp: string;
+  command: string[];
+  streets: Detection[];
 }
 
 type Corners = [
@@ -84,6 +94,9 @@ const filterShortSideSlider = document.getElementById(
 ) as HTMLInputElement;
 const filterLongSideSlider = document.getElementById(
   'filter-long-side',
+) as HTMLInputElement;
+const showIgnoredCheckbox = document.getElementById(
+  'show-ignored',
 ) as HTMLInputElement;
 
 function streetCircleColor(): maplibregl.ExpressionSpecification | string {
@@ -283,6 +296,10 @@ filterShortSideSlider.addEventListener('input', () =>
 filterLongSideSlider.addEventListener('input', () =>
   onFilterSliderInput(filterLongSideSlider, 'filter-long-side-value', 0),
 );
+showIgnoredCheckbox.addEventListener('change', () => {
+  renderDetections();
+  updateDetectionsTable();
+});
 
 /** Map confidence in [0, 1] to a CSS color string (red → yellow → green). */
 function confidenceColor(confidence: number): string {
@@ -295,13 +312,15 @@ function getFilteredDetections(): { det: Detection; i: number }[] {
   const minConf = parseFloat(filterConfidenceSlider.value);
   const minShort = parseFloat(filterShortSideSlider.value);
   const minLong = parseFloat(filterLongSideSlider.value);
+  const showIgnored = showIgnoredCheckbox.checked;
   return detections
     .map((det, i) => ({ det, i }))
     .filter(
       ({ det }) =>
         det.confidence >= minConf &&
         det.short_side >= minShort &&
-        det.long_side >= minLong,
+        det.long_side >= minLong &&
+        (!det.ignore || showIgnored),
     );
 }
 
@@ -311,7 +330,12 @@ function renderDetections(): void {
   svg.innerHTML = '';
   for (const { det, i } of getFilteredDetections()) {
     const isSelected = selectedDetectionIndices.has(i);
-    const color = isSelected ? '#ff6600' : confidenceColor(det.confidence);
+    const isIgnored = det.ignore === true;
+    const color = isSelected
+      ? '#ff6600'
+      : isIgnored
+        ? '#999'
+        : confidenceColor(det.confidence);
     const points = det.polygon
       .map(([x, y]) => toDisplay(x, y))
       .map(([dx, dy]) => `${dx},${dy}`)
@@ -323,9 +347,10 @@ function renderDetections(): void {
     );
     polygonEl.setAttribute('points', points);
     polygonEl.setAttribute('fill', color);
-    polygonEl.setAttribute('fill-opacity', isSelected ? '0.25' : '0.08');
+    polygonEl.setAttribute('fill-opacity', isSelected ? '0.25' : '0.05');
     polygonEl.setAttribute('stroke', color);
     polygonEl.setAttribute('stroke-width', isSelected ? '2.5' : '1.2');
+    if (isIgnored) polygonEl.setAttribute('stroke-dasharray', '4 3');
     svg.appendChild(polygonEl);
 
     if (isSelected) {
@@ -400,6 +425,10 @@ function drawDetectionCanvas(canvas: HTMLCanvasElement, det: Detection): void {
   canvas.width = cW;
   canvas.height = cH;
 
+  // When the loaded image is larger than the json coordinate space (e.g. full-res
+  // image with streets.json from a downscaled version), render the image at
+  // jsonWidth*scale × jsonHeight*scale so one json-pixel equals one canvas pixel at
+  // the given scale, keeping the crop center at the polygon centroid.
   const ctx = canvas.getContext('2d')!;
   ctx.save();
   ctx.translate(cW / 2, cH / 2);
@@ -408,8 +437,8 @@ function drawDetectionCanvas(canvas: HTMLCanvasElement, det: Detection): void {
     img,
     -cx * scale,
     -cy * scale,
-    img.naturalWidth * scale,
-    img.naturalHeight * scale,
+    jsonWidth * scale,
+    jsonHeight * scale,
   );
   ctx.restore();
 }
@@ -432,6 +461,7 @@ function updateDetectionsTable(): void {
   for (const [rowIdx, { det, i }] of visible.entries()) {
     const tr = document.createElement('tr');
     if (selectedDetectionIndices.has(i)) tr.classList.add('selected');
+    if (det.ignore) tr.classList.add('ignored');
 
     for (const val of [
       det.angle,
@@ -834,16 +864,31 @@ function setupFileDrop(): void {
     } catch {
       return;
     }
-    if (Array.isArray(parsed)) {
-      // streets.json: array of detection objects from detect_text.py
-      detections = (parsed as Detection[]).filter((d) => d.confidence > 0);
+    const isOldStreetsFormat = Array.isArray(parsed);
+    const isNewStreetsFormat =
+      !isOldStreetsFormat &&
+      typeof parsed === 'object' &&
+      parsed !== null &&
+      'streets' in parsed &&
+      Array.isArray((parsed as StreetsJsonData).streets) &&
+      ((parsed as StreetsJsonData).streets[0] as Partial<Detection> | undefined)
+        ?.confidence !== undefined;
+    if (isOldStreetsFormat || isNewStreetsFormat) {
+      // streets.json: detection objects from detect_text.py (array or wrapped object)
+      const rawDetections: Detection[] = isOldStreetsFormat
+        ? (parsed as Detection[])
+        : (parsed as StreetsJsonData).streets;
+      detections = rawDetections.filter((d) => d.confidence > 0);
       selectedDetectionIndices = new Set();
       streetsMode = true;
       textarea.value = text;
-      applyJsonDimensions(
-        img.naturalWidth || jsonWidth || 1,
-        img.naturalHeight || jsonHeight || 1,
-      );
+      const w = isNewStreetsFormat
+        ? (parsed as StreetsJsonData).width
+        : img.naturalWidth || jsonWidth || 1;
+      const h = isNewStreetsFormat
+        ? (parsed as StreetsJsonData).height
+        : img.naturalHeight || jsonHeight || 1;
+      applyJsonDimensions(w, h);
       enterStreetsMode();
     } else {
       if (streetsMode) exitStreetsMode();

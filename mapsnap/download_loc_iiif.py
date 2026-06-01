@@ -13,6 +13,7 @@ import json
 import re
 import sys
 import time
+from collections import Counter
 from pathlib import Path
 
 from mapsnap.compare_iiif_georef import source_id_to_page_key
@@ -37,27 +38,29 @@ def process_canvas(
     canvas: dict,
     output_dir: Path,
     dry_run: bool,
-) -> bool:
+) -> Path:
     """Download the full-resolution image for one canvas.
 
-    Returns True on success, False if the canvas was skipped or failed.
+    Returns a Path to the output file, or raises on failure.
     """
     canvas_id: str = canvas.get("@id", "")
     label: str = canvas.get("label", "unknown")
 
     page_key = canvas_to_page_key(canvas_id, label)
-    image_url = f"{canvas_id}/full/full/0/default.jpg"
+    assert page_key != "iiif", f"Could not extract valid page key from {canvas_id}"
+    # size = "pct:25"
+    size = "full"
+    image_url = f"{canvas_id}/full/{size}/0/default.jpg"
     image_path = output_dir / f"{page_key}.raw.jpg"
 
     if image_path.exists():
         print(f"  Already done: {image_path.name}", file=sys.stderr)
-        return True
+        return image_path
 
-    print(f"  {label} ({page_key})", file=sys.stderr)
-    print(f"    URL: {image_url}", file=sys.stderr)
+    print(f"  {label} ({page_key}) {image_path} {image_url}", file=sys.stderr)
 
     if dry_run:
-        return True
+        return image_path
 
     print(f"    Downloading → {image_path.name} ...", file=sys.stderr)
     download_with_retry(image_url, image_path, initial_delay=15.0)
@@ -66,7 +69,7 @@ def process_canvas(
     dl_width, dl_height = jpeg_dimensions(image_path)
     print(f"    Downloaded: {dl_width}×{dl_height}", file=sys.stderr)
 
-    return True
+    return image_path
 
 
 def main() -> None:
@@ -77,9 +80,10 @@ def main() -> None:
         )
     )
     parser.add_argument(
-        "iiif_file",
+        "iiif_files",
+        nargs="+",
         metavar="FILE",
-        help="Local LOC IIIF Presentation manifest JSON file",
+        help="Local LOC IIIF Presentation manifest JSON file(s)",
     )
     parser.add_argument(
         "--dry-run",
@@ -88,28 +92,36 @@ def main() -> None:
     )
     args = parser.parse_args()
 
-    iiif_path = Path(args.iiif_file)
-    output_dir = iiif_path.parent
-    data: dict = json.load(iiif_path.open())
+    num_total = 0
+    out_paths = Counter[Path]()
+    for iiif_file in args.iiif_files:
+        iiif_path = Path(iiif_file)
+        output_dir = iiif_path.parent
+        data: dict = json.load(iiif_path.open())
 
-    sequences: list[dict] = data.get("sequences", [])
-    if not sequences:
-        print("No sequences found in manifest.", file=sys.stderr)
-        sys.exit(1)
-    canvases: list[dict] = sequences[0].get("canvases", [])
-    print(f"Found {len(canvases)} canvases in {iiif_path.name}.", file=sys.stderr)
+        sequences: list[dict] = data.get("sequences", [])
+        if not sequences:
+            print("No sequences found in manifest.", file=sys.stderr)
+            sys.exit(1)
+        canvases: list[dict] = sequences[0].get("canvases", [])
+        print(f"Found {len(canvases)} canvases in {iiif_path.name}.", file=sys.stderr)
 
-    success = 0
-    for i, canvas in enumerate(canvases, 1):
-        print(f"[{i}/{len(canvases)}]", file=sys.stderr)
-        ok = process_canvas(canvas, output_dir, args.dry_run)
-        if ok:
-            success += 1
+        for i, canvas in enumerate(canvases, 1):
+            print(f"[{i}/{len(canvases)}] ", file=sys.stderr, end="")
+            out_path = process_canvas(canvas, output_dir, args.dry_run)
+            out_paths[out_path] += 1
+            num_total += 1
 
     print(
-        f"\nDone: {success}/{len(canvases)} canvases {'would be ' if args.dry_run else ''}processed.",
+        f"\nDone: {num_total} canvases {'would be ' if args.dry_run else ''}processed.",
         file=sys.stderr,
     )
+    if len(out_paths) < num_total:
+        print(f"Unique paths: {len(out_paths)}; there are collisions.", file=sys.stderr)
+        print(
+            [*((path, count) for path, count in out_paths.most_common() if count > 1)],
+            file=sys.stderr,
+        )
 
 
 if __name__ == "__main__":

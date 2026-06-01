@@ -166,7 +166,7 @@ def source_id_to_page_key(source_id: str, label: str) -> str:
         assert m
         split = m.group(1)
         split_suffix = f"__{split}"
-    m = re.search(r"-(\d+)([sNESW]?)(?:/info\.json)?$", source_id)
+    m = re.search(r"-(\d+)([a-zA-Z]?)(?:/info\.json)?$", source_id)
     if m:
         page_key = f"p{int(m.group(1))}{m.group(2)}"
     else:

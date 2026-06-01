@@ -2,8 +2,11 @@
 
 import argparse
 import json
+import multiprocessing
 import sys
+from datetime import datetime, timezone
 from pathlib import Path
+from typing import Any
 
 import easyocr
 import numpy as np
@@ -85,14 +88,90 @@ def _erase_underlines(
     return img_out
 
 
+def _boxes_path(image_path: str) -> str:
+    """Return the path for the CRAFT boxes cache file (<stem>.boxes.json)."""
+    stem = image_stem(image_path)
+    return str(Path(image_path).parent / (stem + ".boxes.json"))
+
+
+def _streets_path(image_path: str) -> str:
+    """Return the path for the OCR results file (<stem>.streets.json)."""
+    stem = image_stem(image_path)
+    return str(Path(image_path).parent / (stem + ".streets.json"))
+
+
+def _craft_detect_all_angles(
+    img: Image.Image,
+    reader: easyocr.Reader,
+    min_size: int,
+    link_threshold: float,
+    craft_scale: float,
+) -> list[dict]:
+    """Run CRAFT detection at 0°, 90°, and 270° and return per-angle box data.
+
+    Each element of the returned list is a dict with:
+      - angle: rotation in degrees (0, 90, or 270)
+      - horizontal_list: list of [x_min, x_max, y_min, y_max] in rotated-image coords
+      - free_list: list of [[x, y], ...] polygon lists in rotated-image coords
+    """
+    craft_min_size = max(1, int(min_size * craft_scale))
+    result = []
+    for angle in (0, 90, 270):
+        rotated = img.rotate(angle, expand=True) if angle != 0 else img
+        rotated_array = np.array(rotated)
+        if craft_scale != 1.0:
+            rot_h, rot_w = rotated_array.shape[:2]
+            small_w = max(1, int(rot_w * craft_scale))
+            small_h = max(1, int(rot_h * craft_scale))
+            detect_array = np.array(
+                Image.fromarray(rotated_array).resize(
+                    (small_w, small_h), Image.Resampling.LANCZOS
+                )
+            )
+        else:
+            detect_array = rotated_array
+        horizontal_list_agg, free_list_agg = reader.detect(
+            detect_array, min_size=craft_min_size, link_threshold=link_threshold
+        )
+        horizontal_list = horizontal_list_agg[0]
+        free_list = free_list_agg[0]
+        inv = 1.0 / craft_scale
+        horizontal_list = [
+            [int(b[0] * inv), int(b[1] * inv), int(b[2] * inv), int(b[3] * inv)]
+            for b in horizontal_list
+        ]
+        free_list = [
+            [[int(c[0] * inv), int(c[1] * inv)] for c in box] for box in free_list
+        ]
+        result.append(
+            {
+                "angle": angle,
+                "horizontal_list": horizontal_list,
+                "free_list": free_list,
+            }
+        )
+    return result
+
+
+def filter_args(argv: list[str], image: str) -> list[str]:
+    """If this script is run with *.jpg, then argv can be very long. This compacts it.
+
+    Specifically, it removes images from the command line other than the one of interest.
+    """
+    return [arg for arg in argv if not arg.endswith(".jpg") or arg == image]
+
+
 def detect_text(
     image_path: str,
     vocab_strings: list[str],
     min_size: int = 15,
+    min_long_side: int = 0,
     allowlist: str | None = None,
     link_threshold: float = 0.4,
     reader: easyocr.Reader | None = None,
     beam_width: int = 20,
+    craft_scale: float = 1.0,
+    reuse_boxes: bool = False,
 ) -> list[dict]:
     """Run CRAFT-based text detection at 0°, 90°, and 270° and return all results.
 
@@ -113,6 +192,28 @@ def detect_text(
     restricted to outputting strings that are prefixes of known street-name forms.
     This substantially improves recall on abbreviated and direction-prefixed labels
     at the cost of ~25% slower recognition.
+
+    min_long_side skips recognition for boxes whose long side (max of width and
+    height in rotated-image coordinates) is below this threshold. Boxes are still
+    detected by CRAFT but never passed to the recognizer, so they do not appear in
+    the output. Set this to match the --min-long-side used by georef_from_labels.py
+    to avoid spending time recognizing text that will be filtered downstream.
+
+    craft_scale downsizes the image before CRAFT detection (e.g. 0.5 = half
+    resolution). CRAFT CNN cost scales quadratically with image area, so 0.5
+    gives ~4× faster detection. Detected bounding boxes are scaled back up to
+    original coordinates before recognition, which always runs at full resolution.
+    min_size is also scaled proportionally so the same physical text size threshold
+    applies. Ignored when reuse_boxes=True.
+
+    reuse_boxes loads CRAFT bounding boxes from the existing <stem>.boxes.json
+    file instead of re-running CRAFT. Useful for iterating on recognition
+    parameters without redoing the (slower) detection step. The caller is
+    responsible for ensuring the file exists before calling with reuse_boxes=True.
+
+    Writes <stem>.boxes.json alongside the image whenever CRAFT is run (i.e.
+    when reuse_boxes=False). The file records the image dimensions, a timestamp,
+    the command line, and the per-angle box data.
 
     Each returned detection is a dict with:
       - polygon: list of 4 [x, y] corners in original image coordinates
@@ -136,6 +237,23 @@ def detect_text(
     img = Image.open(image_path).convert("RGB")
     orig_width, orig_height = img.size
 
+    if reuse_boxes:
+        with open(_boxes_path(image_path)) as f:
+            angle_boxes: list[dict] = json.load(f)["boxes"]
+    else:
+        angle_boxes = _craft_detect_all_angles(
+            img, reader, min_size, link_threshold, craft_scale
+        )
+        boxes_doc = {
+            "width": orig_width,
+            "height": orig_height,
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "command": filter_args(sys.argv[:], image_path),
+            "boxes": angle_boxes,
+        }
+        with open(_boxes_path(image_path), "w") as f:
+            json.dump(boxes_doc, f, indent=2)
+
     all_detections: list[dict] = []
     recognize_kwargs: dict = {
         "paragraph": False,
@@ -145,14 +263,27 @@ def detect_text(
     if allowlist is not None:
         recognize_kwargs["allowlist"] = allowlist
 
-    for angle in (0, 90, 270):
+    for angle_data in angle_boxes:
+        angle = angle_data["angle"]
+        horizontal_list = list(angle_data["horizontal_list"])
+        free_list = list(angle_data["free_list"])
+
         rotated = img.rotate(angle, expand=True) if angle != 0 else img
         rotated_array = np.array(rotated)
-        horizontal_list_agg, free_list_agg = reader.detect(
-            rotated_array, min_size=min_size, link_threshold=link_threshold
-        )
-        horizontal_list = horizontal_list_agg[0]
-        free_list = free_list_agg[0]
+
+        if min_long_side > 0:
+            horizontal_list = [
+                b for b in horizontal_list if (b[1] - b[0]) > min_long_side
+            ]
+            free_list = [
+                b
+                for b in free_list
+                if max(
+                    max(c[0] for c in b) - min(c[0] for c in b),
+                    max(c[1] for c in b) - min(c[1] for c in b),
+                )
+                > min_long_side
+            ]
         rotated_clean = _erase_underlines(rotated_array, horizontal_list)
         results = reader.recognize(
             rotated_clean, horizontal_list, free_list, **recognize_kwargs
@@ -188,7 +319,62 @@ def detect_text(
         det["short_side"] = round(min(sides), 1)
         if det["text"].upper() in NON_STREET_TEXT:
             det["ignore"] = True
+
+    streets_doc = {
+        "width": orig_width,
+        "height": orig_height,
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "command": filter_args(sys.argv[:], image_path),
+        "streets": all_detections,
+    }
+    with open(_streets_path(image_path), "w") as f:
+        json.dump(streets_doc, f, indent=2)
+
     return all_detections
+
+
+# Module-level state populated by _worker_init in each worker process.
+_worker_state: dict[str, Any] = {}
+
+
+def _worker_init(
+    vocab_strings: list[str],
+    min_size: int,
+    min_long_side: int,
+    allowlist: str | None,
+    link_threshold: float,
+    beam_width: int,
+    craft_scale: float,
+    reuse_boxes: bool,
+    gpu: bool,
+) -> None:
+    """Initialize per-worker state once per process: create the EasyOCR reader."""
+    _worker_state["reader"] = easyocr.Reader(["en"], gpu=gpu, verbose=False)
+    _worker_state["vocab_strings"] = vocab_strings
+    _worker_state["min_size"] = min_size
+    _worker_state["min_long_side"] = min_long_side
+    _worker_state["allowlist"] = allowlist
+    _worker_state["link_threshold"] = link_threshold
+    _worker_state["beam_width"] = beam_width
+    _worker_state["craft_scale"] = craft_scale
+    _worker_state["reuse_boxes"] = reuse_boxes
+
+
+def _process_image(image_path: str) -> str:
+    """Process one image in a worker process, writing output to <stem>.streets.json."""
+    detect_text(
+        image_path,
+        vocab_strings=_worker_state["vocab_strings"],
+        min_size=_worker_state["min_size"],
+        min_long_side=_worker_state["min_long_side"],
+        allowlist=_worker_state["allowlist"],
+        link_threshold=_worker_state["link_threshold"],
+        reader=_worker_state["reader"],
+        beam_width=_worker_state["beam_width"],
+        craft_scale=_worker_state["craft_scale"],
+        reuse_boxes=_worker_state["reuse_boxes"],
+    )
+    return image_path
 
 
 def main() -> None:
@@ -251,6 +437,56 @@ def main() -> None:
         action="store_true",
         help="Skip images that already have a .streets.json output file.",
     )
+    parser.add_argument(
+        "--num-workers",
+        type=int,
+        default=1,
+        metavar="N",
+        help=(
+            "Number of parallel worker processes (default: 1). Each worker loads its "
+            "own EasyOCR reader. With GPU enabled, workers share the GPU via CUDA "
+            "context switching; each worker requires ~500 MB of VRAM for model weights."
+        ),
+    )
+    parser.add_argument(
+        "--no-gpu",
+        action="store_true",
+        help="Disable GPU acceleration (recommended with --num-workers > 1).",
+    )
+    parser.add_argument(
+        "--min-long-side",
+        type=int,
+        default=0,
+        metavar="PX",
+        help=(
+            "Skip recognition for CRAFT detections whose long side is below this "
+            "threshold (default: 0, no filtering). Set to match the --min-long-side "
+            "used by georef_from_labels.py to avoid recognizing boxes that will be "
+            "filtered downstream."
+        ),
+    )
+    parser.add_argument(
+        "--craft-scale",
+        type=float,
+        default=1.0,
+        metavar="S",
+        help=(
+            "Scale factor applied to images before CRAFT detection (default: 1.0). "
+            "0.5 halves each dimension, reducing CRAFT CNN cost ~4×. Detected boxes "
+            "are scaled back to original coordinates; recognition always runs at full "
+            "resolution."
+        ),
+    )
+    parser.add_argument(
+        "--reuse-boxes",
+        action="store_true",
+        help=(
+            "Reuse CRAFT bounding boxes from existing <stem>.boxes.json files instead "
+            "of re-running CRAFT detection. Useful for iterating on recognition "
+            "parameters without redoing detection. All images must already have a "
+            ".boxes.json file; this flag aborts with an error if any are missing."
+        ),
+    )
     args = parser.parse_args()
 
     geojson = json.load(open(args.centerlines))
@@ -273,22 +509,55 @@ def main() -> None:
             file=sys.stderr,
         )
 
-    reader = easyocr.Reader(["en"], gpu=True, verbose=False)
+    if args.reuse_boxes:
+        missing = [p for p in images if not Path(_boxes_path(p)).exists()]
+        if missing:
+            for p in missing:
+                print(f"Missing boxes file: {_boxes_path(p)}", file=sys.stderr)
+            sys.exit(
+                f"--reuse-boxes: {len(missing)} image(s) have no .boxes.json file."
+            )
 
-    for image_path in tqdm(images, smoothing=0):
-        stem = image_stem(image_path)
-        output_path = str(Path(image_path).parent / (stem + ".streets.json"))
-        detections = detect_text(
-            image_path,
-            vocab_strings=vocab_strings,
-            min_size=args.min_short_side,
-            allowlist=args.allowlist,
-            link_threshold=args.link_threshold,
-            reader=reader,
-            beam_width=args.beam_width,
+    gpu = not args.no_gpu
+
+    if args.num_workers > 1:
+        initargs = (
+            vocab_strings,
+            args.min_short_side,
+            args.min_long_side,
+            args.allowlist,
+            args.link_threshold,
+            args.beam_width,
+            args.craft_scale,
+            args.reuse_boxes,
+            gpu,
         )
-        with open(output_path, "w") as f:
-            f.write(json.dumps(detections, indent=2))
+        with multiprocessing.Pool(
+            args.num_workers,
+            initializer=_worker_init,
+            initargs=initargs,
+        ) as pool:
+            for _ in tqdm(
+                pool.imap_unordered(_process_image, images),
+                total=len(images),
+                smoothing=0,
+            ):
+                pass
+    else:
+        reader = easyocr.Reader(["en"], gpu=gpu, verbose=False)
+        for image_path in tqdm(images, smoothing=0):
+            detect_text(
+                image_path,
+                vocab_strings=vocab_strings,
+                min_size=args.min_short_side,
+                min_long_side=args.min_long_side,
+                allowlist=args.allowlist,
+                link_threshold=args.link_threshold,
+                reader=reader,
+                beam_width=args.beam_width,
+                craft_scale=args.craft_scale,
+                reuse_boxes=args.reuse_boxes,
+            )
 
 
 if __name__ == "__main__":
