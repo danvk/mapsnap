@@ -13,6 +13,7 @@ import json
 import re
 import sys
 import time
+from collections import Counter
 from pathlib import Path
 
 from mapsnap.compare_iiif_georef import source_id_to_page_key
@@ -46,7 +47,9 @@ def process_canvas(
     label: str = canvas.get("label", "unknown")
 
     page_key = canvas_to_page_key(canvas_id, label)
-    image_url = f"{canvas_id}/full/full/0/default.jpg"
+    assert page_key != "iiif", f"Could not extract valid page key from {canvas_id}"
+    size = "pct:25"
+    image_url = f"{canvas_id}/full/{size}/0/default.jpg"
     image_path = output_dir / f"{page_key}.raw.jpg"
 
     if image_path.exists():
@@ -89,7 +92,7 @@ def main() -> None:
     args = parser.parse_args()
 
     num_total = 0
-    out_paths = set[Path]()
+    out_paths = Counter[Path]()
     for iiif_file in args.iiif_files:
         iiif_path = Path(iiif_file)
         output_dir = iiif_path.parent
@@ -105,7 +108,7 @@ def main() -> None:
         for i, canvas in enumerate(canvases, 1):
             print(f"[{i}/{len(canvases)}] ", file=sys.stderr, end="")
             out_path = process_canvas(canvas, output_dir, args.dry_run)
-            out_paths.add(out_path)
+            out_paths[out_path] += 1
             num_total += 1
 
     print(
@@ -114,6 +117,9 @@ def main() -> None:
     )
     if len(out_paths) < num_total:
         print(f"Unique paths: {len(out_paths)}; there are collisions.", file=sys.stderr)
+        print(
+            [*((path, count) for path, count in out_paths.most_common() if count > 1)]
+        )
 
 
 if __name__ == "__main__":
