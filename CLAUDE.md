@@ -7,6 +7,7 @@
 - Don't sweat access control. There's no need for `private` declarations or `_`-prefixed variables. Use `varname`, not `_varname`.
 - Factor out helper functions where reasonable. Write at least a one-line documentation comment (`//` in TypeScript, `#` in Python) for internal-only functions, and full jsdoc/docstrings for exported functions.
 - Write unit tests for all public functions.
+- Functions should never take more than four positional arguments. To avoid this factor out dataclasses/interfaces, use keyword-only arguments or an options object, or group x/y parameters into  `(x, y)` tuples (or lat/lng, width/height, etc.).
 
 ### Python
 

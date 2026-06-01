@@ -163,6 +163,11 @@ def main() -> None:
         metavar="N",
         help="Beam width for constrained CTC decoder (default: 20)",
     )
+    parser.add_argument(
+        "--resume",
+        action="store_true",
+        help="Skip images that already have a .streets.json output file.",
+    )
     args = parser.parse_args()
 
     geojson = json.load(open(args.centerlines))
@@ -173,9 +178,21 @@ def main() -> None:
         file=sys.stderr,
     )
 
+    images = args.images
+    if args.resume:
+        images = [
+            p
+            for p in images
+            if not (Path(p).parent / (image_stem(p) + ".streets.json")).exists()
+        ]
+        print(
+            f"Resuming: {len(images)}/{len(args.images)} remaining images to process.",
+            file=sys.stderr,
+        )
+
     reader = easyocr.Reader(["en"], gpu=True, verbose=False)
 
-    for image_path in tqdm(args.images, smoothing=0):
+    for image_path in tqdm(images, smoothing=0):
         stem = image_stem(image_path)
         output_path = str(Path(image_path).parent / (stem + ".streets.json"))
         detections = detect_text(
