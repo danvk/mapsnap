@@ -409,7 +409,7 @@ def patch_easyocr_reader(
 
         # Phase 2: one GPU→CPU transfer for all batches combined.
         # (N_total, T_global, C) where T_global = batch_max_length + 1.
-        all_probs: np.ndarray = torch.cat(all_preds, dim=0).cpu().numpy()
+        all_probs: np.ndarray = torch.cat(all_preds, dim=0).cpu().numpy()  # type: ignore[reportPrivateImportUsage]
 
         # Phase 3: CTC beam search with per-crop T trimming.
         # When called with batch_size > 1, EasyOCR pads all crops to the
@@ -503,6 +503,7 @@ def patch_easyocr_reader(
         # Replicate recognize()'s standard preprocessing.
         if reformat:
             _, img_cv_grey = _eu.reformat_input(img_cv_grey)
+            assert img_cv_grey is not None
 
         if allowlist:
             ignore_char = "".join(set(self.character) - set(allowlist))
@@ -558,7 +559,7 @@ def patch_easyocr_reader(
             result.extend(group_result)
 
         if paragraph:
-            result = _eu.get_paragraph(result, x_ths=x_ths, y_ths=y_ths, mode="ltr")
+            result = _eu.get_paragraph(result, x_ths=x_ths, y_ths=y_ths, mode="ltr")  # type: ignore[reportArgumentType]
 
         if detail == 0:
             return [item[1] for item in result]

@@ -123,7 +123,9 @@ def _craft_detect_all_angles(
             small_w = max(1, int(rot_w * craft_scale))
             small_h = max(1, int(rot_h * craft_scale))
             detect_array = np.array(
-                Image.fromarray(rotated_array).resize((small_w, small_h), Image.LANCZOS)
+                Image.fromarray(rotated_array).resize(
+                    (small_w, small_h), Image.Resampling.LANCZOS
+                )
             )
         else:
             detect_array = rotated_array
