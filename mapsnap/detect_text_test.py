@@ -1,5 +1,8 @@
 """Unit tests for street-name helpers (now in streets.py)."""
 
+import numpy as np
+
+from mapsnap.detect_text import NON_STREET_TEXT, _erase_underlines
 from mapsnap.streets import (
     canonical_street_match,
     matches_any_street,
@@ -181,3 +184,79 @@ def test_canonical_direction_prefix_returns_key():
 
 def test_canonical_no_match():
     assert canonical_street_match("ZZZZZZZZZ", CANONICAL_STREETS) is None
+
+
+# ---------------------------------------------------------------------------
+# NON_STREET_TEXT
+# ---------------------------------------------------------------------------
+
+
+def test_non_street_text_contains_pipe_sizes():
+    # Exact forms with inch mark for higher-quality scans.
+    assert '6" W. PIPE' in NON_STREET_TEXT
+    assert '12" W. PIPE' in NON_STREET_TEXT
+
+
+def test_non_street_text_contains_confusable_forms():
+    # Horizontal: "6"" → "E"; W reads as W, X, Y, or M depending on crop scale.
+    assert "EWPIPE" in NON_STREET_TEXT
+    assert "EXPIPE" in NON_STREET_TEXT
+    assert "EYPIPE" in NON_STREET_TEXT
+    # Vertical text: '6' → 'S', '"' visible
+    assert 'S"WPIPE' in NON_STREET_TEXT
+    # Vertical text: '6' → 'S', '"' dropped, 'W' → 'M'
+    assert "SM PIPE" in NON_STREET_TEXT
+
+
+def test_non_street_text_all_uppercase():
+    assert all(s == s.upper() for s in NON_STREET_TEXT)
+
+
+# ---------------------------------------------------------------------------
+# _trim_underlines
+# ---------------------------------------------------------------------------
+
+
+def _make_img(height: int, width: int, dark_rows: list[int]) -> np.ndarray:
+    """White (H, W, 3) image with fully dark (0) rows at the given indices."""
+    img = np.full((height, width, 3), 255, dtype=np.uint8)
+    for row in dark_rows:
+        img[row, :, :] = 0
+    return img
+
+
+def test_erase_underlines_paints_dark_bottom_row_white():
+    # Box spanning rows 0-19; dark row at 17 (within bottom 25%) should become white.
+    img = _make_img(50, 100, dark_rows=[17])
+    result = _erase_underlines(img, [[0, 100, 0, 20]])
+    assert result[17, :, :].min() == 255  # row 17 is now white
+    assert result[16, :, :].max() == 255  # row above (light) untouched
+
+
+def test_erase_underlines_no_underline_unchanged():
+    # No dark rows — returned image should equal the input.
+    img = _make_img(50, 100, dark_rows=[])
+    result = _erase_underlines(img, [[0, 100, 0, 20]])
+    assert np.array_equal(result, img)
+
+
+def test_erase_underlines_does_not_mutate_input():
+    img = _make_img(50, 100, dark_rows=[17])
+    original = img.copy()
+    _erase_underlines(img, [[0, 100, 0, 20]])
+    assert np.array_equal(img, original)
+
+
+def test_erase_underlines_dark_row_outside_scan_window_unchanged():
+    # Dark row at 2 is outside the bottom 25% of a 0-20 box (scan starts at 15).
+    img = _make_img(50, 100, dark_rows=[2])
+    result = _erase_underlines(img, [[0, 100, 0, 20]])
+    assert result[2, :, :].min() == 0  # row 2 still dark
+
+
+def test_erase_underlines_preserves_row_above_underline():
+    # Row 14 (text) and row 17 (underline) both dark; only row 17 is in scan window.
+    img = _make_img(50, 100, dark_rows=[14, 17])
+    result = _erase_underlines(img, [[0, 100, 0, 20]])
+    assert result[17, :, :].min() == 255  # underline erased
+    assert result[14, :, :].max() == 0  # text row above scan window intact

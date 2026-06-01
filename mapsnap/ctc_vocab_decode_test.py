@@ -89,6 +89,17 @@ def test_generate_numeric_ordinal_compound():
     assert "N. 21ST AV" in vocab
 
 
+def test_generate_spaced_ordinal_forms():
+    # Sanborn maps print "5 TH" (space between digit and suffix). The CTC model
+    # sees the typographic gap as a space, so "5TH" has near-zero path probability.
+    # Both the compact form ("5TH") and the spaced form ("5 TH") must be in vocab.
+    vocab = generate_vocab_strings({"SOUTH FIFTH STREET"})
+    assert "5TH" in vocab
+    assert "5 TH" in vocab
+    assert "S. 5 TH ST" in vocab
+    assert "S. 5TH ST" in vocab
+
+
 def test_generate_empty_input():
     assert generate_vocab_strings(set()) == []
 
