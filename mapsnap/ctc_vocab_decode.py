@@ -23,6 +23,7 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass, field
+from functools import lru_cache
 
 import numpy as np
 
@@ -162,6 +163,33 @@ def build_trie(strings: list[str]) -> TrieNode:
 # ---------------------------------------------------------------------------
 
 
+@lru_cache(maxsize=2)
+def _build_char_projection(
+    char_list_tuple: tuple[str, ...],
+) -> tuple[dict[str, int], np.ndarray]:
+    """Build a compact uppercase-char index and CTC→uppercase projection matrix.
+
+    Cached so the O(C²) construction runs once per unique char_list rather than once
+    per crop (1880+ times per image). The projection matrix ``ctc_to_uc`` has shape
+    ``(C, n_uc)`` with a 1 in column k for every CTC index i whose character
+    upper-cases to ``uc_chars[k]``.  A single ``mat @ ctc_to_uc`` replaces all the
+    ``sum(p[i] for i in idxs)`` calls in the hot beam-search loop.
+    """
+    uc_chars: list[str] = []
+    uc_char_to_idx: dict[str, int] = {}
+    for ch in char_list_tuple[1:]:  # index 0 is the blank sentinel
+        uc = ch.upper()
+        if uc not in uc_char_to_idx:
+            uc_char_to_idx[uc] = len(uc_chars)
+            uc_chars.append(uc)
+    n_uc = len(uc_chars)
+    ctc_to_uc = np.zeros((len(char_list_tuple), n_uc), dtype=np.float64)
+    for i, ch in enumerate(char_list_tuple):
+        if i != 0:
+            ctc_to_uc[i, uc_char_to_idx[ch.upper()]] = 1.0
+    return uc_char_to_idx, ctc_to_uc
+
+
 def prefix_constrained_ctc(
     mat: np.ndarray,
     trie_root: TrieNode,
@@ -189,14 +217,15 @@ def prefix_constrained_ctc(
     T = mat.shape[0]
     blank_idx = 0
 
-    # Map uppercase character → list of CTC class indices.
-    # Both 'A' (index i) and 'a' (index j) map to key 'A'.
-    uc_to_idxs: dict[str, list[int]] = {}
-    for idx, ch in enumerate(char_list):
-        if idx == 0:
-            continue  # skip blank sentinel
-        uc = ch.upper()
-        uc_to_idxs.setdefault(uc, []).append(idx)
+    # Precompute compact uppercase-char probabilities for every time step.
+    #
+    # Both 'A' (CTC index i) and 'a' (CTC index j) map to the same uppercase key 'A'.
+    # _build_char_projection is @lru_cache'd so the projection matrix is built only
+    # once per unique char_list across all crops. The single matmul replaces the
+    # per-crop Python loop + tens of millions of sum(p[i] for i in idxs) calls.
+    uc_char_to_idx, ctc_to_uc = _build_char_projection(tuple(char_list))
+    compact_char_probs: np.ndarray = mat @ ctc_to_uc  # (T, n_uc)
+    blank_probs = mat[:, blank_idx]
 
     # Beam entries: prefix_str → (trie_node, last_uc, pb, pnb)
     #   last_uc: uppercase version of the last emitted character (for repeat-char rule)
@@ -207,14 +236,15 @@ def prefix_constrained_ctc(
     }
 
     for t in range(T):
-        p = mat[t]
+        t_probs = compact_char_probs[t]  # (n_uc,) view; O(1) slice, no copy
+        blank_p = float(blank_probs[t])
         new_beams: dict[str, tuple[TrieNode, str, float, float]] = {}
 
         for prefix, (node, last_uc, pb, pnb) in beams.items():
             pr_total = pb + pnb
 
             # Emit blank — prefix and trie node unchanged.
-            blank_prob = p[blank_idx] * pr_total
+            blank_prob = blank_p * pr_total
             prev = new_beams.get(prefix)
             if prev is None:
                 new_beams[prefix] = (node, last_uc, blank_prob, 0.0)
@@ -224,18 +254,24 @@ def prefix_constrained_ctc(
             # Repeat last char — decoded prefix unchanged (CTC merge rule).
             # Probability comes only from non-blank-ending paths.
             if last_uc:
-                idxs = uc_to_idxs.get(last_uc, [])
-                repeat_p = pnb * sum(p[i] for i in idxs)
-                if repeat_p > 0:
-                    prev = new_beams[prefix]
-                    new_beams[prefix] = (prev[0], prev[1], prev[2], prev[3] + repeat_p)
+                last_ci = uc_char_to_idx.get(last_uc)
+                if last_ci is not None:
+                    repeat_p = pnb * float(t_probs[last_ci])
+                    if repeat_p > 0:
+                        prev = new_beams[prefix]
+                        new_beams[prefix] = (
+                            prev[0],
+                            prev[1],
+                            prev[2],
+                            prev[3] + repeat_p,
+                        )
 
             # Extend with each trie-valid character.
             for uc, child_node in node.children.items():
-                idxs = uc_to_idxs.get(uc, [])
-                if not idxs:
+                ci = uc_char_to_idx.get(uc)
+                if ci is None:
                     continue  # char not in EasyOCR alphabet
-                char_p = sum(p[i] for i in idxs)
+                char_p = float(t_probs[ci])
                 if char_p == 0:
                     continue
 
