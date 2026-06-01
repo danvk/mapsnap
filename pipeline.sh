@@ -39,9 +39,6 @@ uv run python mapsnap/osm_to_centerlines.py \
     $dir/streets.osm.json \
     --output $dir/centerlines.geojson
 
-jq -r '.elements[].tags.name' $dir/streets.osm.json | grep -v '^null$' | sort | uniq > $dir/streets.txt
-uv run python mapsnap/generate_intersections.py $dir/streets.osm.json $dir/intersections.csv
-
 uv run python mapsnap/detect_text.py --centerlines $dir/centerlines.geojson $dir/*.scaled.jpg
 
 ./fit.sh $dir mapsnap
