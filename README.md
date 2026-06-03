@@ -190,8 +190,13 @@ Averaging a mix of correct and incorrect GCPs is unlikely to produce a good mode
 
 ### When does this fail?
 
-- When the street names have changed.
-- When the streets themselves have changed.
+Mapsnap makes an assumption that the streets today are at least somewhat like the streets when the map was produced. This is usually the case. The streets don't have to be _exactly_ the same. If a highway was put through a map, it can still be georeferenced so long as some of the streets adjacent to the highway remain the same. These sorts of maps are harder to georeference, though.
+
+There are cases where this breaks down, though. If the streets in a large area have been reworked, then there's nothing for Mapsnap to "snap" to.
+
+If the streets have all been renamed, this can also throw off georeferencing. For example, the borough of Queens in New York City systematically renamed all its streets in 1911. Mapsnap does well on 1945 Queens maps, but it does terribly on the [1898 maps][queens1898].
+
+[queens1898]: https://www.loc.gov/item/sanborn06198_001
 
 ### How I developed this model
 
