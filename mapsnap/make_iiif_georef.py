@@ -709,6 +709,21 @@ def main() -> None:
         raw_path = Path(path).parent / f"{page_key}.raw.jpg"
         valid_items.append((page_key, canvas_item, georef, raw_path))
 
+    # Drop skeleton pages (key ends in 's') when a full-color counterpart exists.
+    non_skeleton_keys = {pk for pk, _, _, _ in valid_items if not pk.endswith("s")}
+    skipped = [
+        pk
+        for pk, _, _, _ in valid_items
+        if pk.endswith("s") and pk[:-1] in non_skeleton_keys
+    ]
+    if skipped:
+        print(
+            f"Dropping {len(skipped)} skeleton page(s) with full-color counterparts: "
+            + ", ".join(skipped),
+            file=sys.stderr,
+        )
+        valid_items = [item for item in valid_items if item[0] not in set(skipped)]
+
     # Compute block-based clipping masks when a centerlines file is provided.
     geo_masks: list[ShapelyPolygon | None] = [None] * len(valid_items)
     if args.centerlines:
