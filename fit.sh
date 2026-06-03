@@ -7,7 +7,10 @@ set -x
 dir=$1
 tag=$2
 
-centerlines=$dir/../centerlines.geojson
+centerlines=$dir/centerlines.geojson
+if [ ! -e $centerlines ]; then
+    centerlines=$dir/../centerlines.geojson
+fi
 
 uv run mapsnap/georef_from_labels.py $dir/p*.raw.jpg \
     --centerlines $centerlines \
