@@ -63,6 +63,7 @@ class ProcessResult:
 
     success: bool
     scale_deg_per_px: float | None = None  # set on success
+    center: tuple[float, float] | None = None  # (lon, lat) page center, set on success
     deferred: dict | None = None  # set when deferred (exactly 1 GCP, needs scale)
 
 
@@ -149,6 +150,14 @@ def solve_similarity_2pts(
 
 
 _FT_PER_DEG_LAT: float = math.pi * 20_925_524.0 / 180.0  # feet per degree latitude
+
+
+def _dist_km(a: tuple[float, float], b: tuple[float, float]) -> float:
+    """Approximate great-circle distance in km between two (lon, lat) points."""
+    cos_lat = math.cos(math.radians((a[1] + b[1]) / 2))
+    dlat_km = (b[1] - a[1]) * 111.0
+    dlon_km = (b[0] - a[0]) * 111.0 * cos_lat
+    return math.sqrt(dlat_km**2 + dlon_km**2)
 
 
 def affine_scale_deg_per_px(A: np.ndarray) -> float:
@@ -585,8 +594,8 @@ def _finalize_georef(
     labels_path: str,
     centerlines_path: str,
     initial_pair: tuple[int, int] | None = None,
-) -> float:
-    """Print fit stats, write georef JSON, and return scale_deg_per_px."""
+) -> tuple[float, tuple[float, float]]:
+    """Print fit stats, write georef JSON, and return (scale_deg_per_px, page_center)."""
 
     if residuals:
         mean_m = float(np.mean(residuals)) * 111_000
@@ -675,7 +684,11 @@ def _finalize_georef(
         f" to {output_path}",
         file=sys.stderr,
     )
-    return affine_scale_deg_per_px(A)
+    center = (
+        sum(c[0] for c in corners) / 4,
+        sum(c[1] for c in corners) / 4,
+    )
+    return affine_scale_deg_per_px(A), center
 
 
 def derive_paths(image_path: str) -> tuple[str, str]:
@@ -826,7 +839,7 @@ def process_image(
             float(np.linalg.norm(np.array([lon - nearest_lon, lat - nearest_lat])))
         )
 
-    scale = _finalize_georef(
+    scale, center = _finalize_georef(
         A,
         features,
         gcps,
@@ -838,7 +851,7 @@ def process_image(
         centerlines_path,
         initial_pair=seed_pair,
     )
-    return ProcessResult(success=True, scale_deg_per_px=scale)
+    return ProcessResult(success=True, scale_deg_per_px=scale, center=center)
 
 
 def _rotation_from_gcp_features(
@@ -925,7 +938,7 @@ def process_deferred_image(
             float(np.linalg.norm(np.array([lon - nearest_lon, lat - nearest_lat])))
         )
 
-    scale = _finalize_georef(
+    scale, center = _finalize_georef(
         A,
         features,
         gcps,
@@ -936,7 +949,7 @@ def process_deferred_image(
         labels_path,
         centerlines_path,
     )
-    return ProcessResult(success=True, scale_deg_per_px=scale)
+    return ProcessResult(success=True, scale_deg_per_px=scale, center=center)
 
 
 def main() -> None:
@@ -1027,6 +1040,16 @@ def main() -> None:
         ),
     )
     parser.add_argument(
+        "--min-distance-for-outlier-km",
+        type=float,
+        default=1.5,
+        metavar="KM",
+        help=(
+            "Rename georefs whose center is more than this many km from every other "
+            "georeferenced page to .georef-outlier.json (default: 1.0). Set to 0 to disable."
+        ),
+    )
+    parser.add_argument(
         "--debug", action="store_true", help="Print additional debug information"
     )
     args = parser.parse_args()
@@ -1056,6 +1079,7 @@ def main() -> None:
     scale_records: list[
         tuple[str, float]
     ] = []  # (image_path, px_per_ft) for outlier check
+    location_records: list[tuple[str, tuple[float, float]]] = []  # (image_path, center)
     deferred_list: list[dict] = []
 
     for image_path in args.images:
@@ -1066,9 +1090,10 @@ def main() -> None:
         # doesn't leave a previous result in place.
         if os.path.exists(output_path):
             os.remove(output_path)
-        misscale_path = output_path.replace(".georef.json", ".georef-misscale.json")
-        if os.path.exists(misscale_path):
-            os.remove(misscale_path)
+        for stale_suffix in (".georef-misscale.json", ".georef-outlier.json"):
+            stale_path = output_path.replace(".georef.json", stale_suffix)
+            if os.path.exists(stale_path):
+                os.remove(stale_path)
         result = process_image(
             image_path=image_path,
             labels_path=labels_path,
@@ -1090,6 +1115,8 @@ def main() -> None:
                 px_per_ft = deg_per_px_to_px_per_ft(result.scale_deg_per_px)
                 scales.append(px_per_ft)
                 scale_records.append((image_path, px_per_ft))
+            if result.center is not None:
+                location_records.append((image_path, result.center))
         elif result.deferred is not None:
             deferred_list.append(result.deferred)
 
@@ -1132,6 +1159,10 @@ def main() -> None:
                 )
                 if deferred_result.success:
                     n_success += 1
+                    if deferred_result.center is not None:
+                        location_records.append(
+                            (deferred_image_path, deferred_result.center)
+                        )
 
     # Drop georef files whose fitted scale is a major outlier vs the reference.
     if ref_scale_px_per_ft is not None and args.scale_outlier_threshold > 0:
@@ -1155,6 +1186,30 @@ def main() -> None:
                     )
         if n_dropped:
             print(f"Dropped {n_dropped} scale outlier(s).", file=sys.stderr)
+
+    # Drop georef files whose center is far from every other georeferenced page.
+    if args.min_distance_for_outlier_km > 0 and len(location_records) >= 2:
+        # Only pages whose .georef.json still exists (not already renamed by scale check).
+        active = [
+            (p, c) for p, c in location_records if os.path.exists(derive_paths(p)[1])
+        ]
+        n_dropped = 0
+        for img_path, center in active:
+            other_centers = [c for p, c in active if p != img_path]
+            min_dist_km = min(_dist_km(center, other) for other in other_centers)
+            if min_dist_km > args.min_distance_for_outlier_km:
+                _, out_path = derive_paths(img_path)
+                outlier_path = out_path.replace(".georef.json", ".georef-outlier.json")
+                os.rename(out_path, outlier_path)
+                n_success -= 1
+                n_dropped += 1
+                print(
+                    f"Dropped location outlier {img_path}: "
+                    f"{min_dist_km:.1f} km from closest map → {outlier_path}",
+                    file=sys.stderr,
+                )
+        if n_dropped:
+            print(f"Dropped {n_dropped} location outlier(s).", file=sys.stderr)
 
     if len(args.images) > 1:
         print(f"\n{n_success}/{len(args.images)} images georeferenced", file=sys.stderr)
