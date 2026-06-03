@@ -211,12 +211,15 @@ def _load_loc_index(data: dict, raw_dir: Path) -> dict[str, dict]:
             continue
 
         raw_path = raw_dir / f"{page_key}.raw.jpg"
+        pct_m = re.search(r"/pct:(\d+)/", resource.get("@id", ""))
+        scale = 100.0 / int(pct_m.group(1)) if pct_m else 1.0
         if raw_path.exists():
-            source_width, source_height = jpeg_dimensions(raw_path)
+            # Use raw file dims as the base; apply pct scale to get true canvas size.
+            raw_w, raw_h = jpeg_dimensions(raw_path)
+            source_width = int(round(raw_w * scale))
+            source_height = int(round(raw_h * scale))
         else:
             # Resource URL contains e.g. "/full/pct:25/0/default.jpg"; scale up.
-            pct_m = re.search(r"/pct:(\d+)/", resource.get("@id", ""))
-            scale = 100.0 / int(pct_m.group(1)) if pct_m else 1.0
             source_width = int(round(resource["width"] * scale))
             source_height = int(round(resource["height"] * scale))
 
@@ -489,9 +492,16 @@ def make_annotation(
         raise ValueError(f"raw image not found: {raw_path}")
     raw_width, raw_height = jpeg_dimensions(raw_path)
 
-    # Use simple scaling when the raw image covers the full canvas (within 2px tolerance).
+    # Full canvas: raw covers the complete canvas extent, possibly at lower resolution
+    # (e.g. a pct:25 download). Split sub-images (OIM only) have "__" in the filename
+    # and are routed to template matching regardless of size ratios.
+    is_split_raw = "__" in raw_path.name
     is_full_canvas = (
         abs(raw_width - source_width) <= 2 and abs(raw_height - source_height) <= 2
+    ) or (
+        not is_split_raw
+        and source_width > 0
+        and abs(raw_width / source_width - raw_height / source_height) <= 0.01
     )
     split_canvas: tuple[float, float, float, float] | None = None
 
