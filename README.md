@@ -176,6 +176,23 @@ In the GIS world, the four parameter model is known as a [Helmert transformation
 
 [Helmert transformation]: https://en.wikipedia.org/wiki/Helmert_transformation#Variations
 
+### Why RANSAC?
+
+When you find GCPs on OldInsuranceMaps or Allmaps, they use all of them to fit a model. If you provide more GCPs than needed, they use a technique like [least squares] to find a best fit. Every GCP you provide influences the model.
+
+That is _not_ how mapsnap works. To georeference an image, it uses each pair of GCPs to fit a candidate model. It then looks at how well this model can explain the street labels. The best pair of GCPs are chosen, and the rest are discarded. They have no direct influence on the fit.
+
+On some level this feels wasteful. Why throw out a GCP? The key difference is that we have much less confidence Mapsnap's GCPs than we would in a human's. It's quite likely that some large fraction of our GCPs are wrong. This might be because of an OCR mistake or misinterpretation (the "POST" in "POST OFFICE" is not Post Street), because a street turns before reaching an intersection (so that extrapolation is invalid), or because the street label was misinterpreted ("17TH" meant 17th Street, not 17th Ave).
+
+Averaging a mix of correct and incorrect GCPs is unlikely to produce a good model. But by using [RANSAC], which is extremely robust to outliers, we can find even a little bit of signal through the noise.
+
+[least squares]: https://en.wikipedia.org/wiki/Least_squares
+
+### When does this fail?
+
+- When the street names have changed.
+- When the streets themselves have changed.
+
 ### How I developed this model
 
 The initial idea was to ask the OpenAI API to find intersections in the Sanborn map. It did an OK job at this, but it was slow (~3 minutes/task), expensive (~$0.10/image) and not always very accurate. It didn't do well on the non-skeleton maps, and its process was opaque, so it was hard to improve on.
