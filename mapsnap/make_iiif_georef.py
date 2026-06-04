@@ -613,6 +613,89 @@ def make_annotation(
     }
 
 
+def _load_volume_items(
+    iiif_path: str,
+    georef_glob_pattern: str,
+) -> tuple[list[tuple[str, dict, dict, Path]], str, str]:
+    """Load one volume's valid items after per-volume skeleton deduplication.
+
+    Accepts an OIM AnnotationPage or LOC sc:Manifest as the source IIIF, plus a
+    glob pattern for georef JSON files. Loads each georef, matches it to a canvas
+    item in the manifest, and drops skeleton pages (keys ending in 's') that have
+    a full-color counterpart within this volume.
+
+    Returns (valid_items, result_id, label) where valid_items is a list of
+    (page_key, canvas_item, georef, raw_path) tuples ready for annotation building.
+    """
+    source_data: dict = json.load(open(iiif_path))
+
+    georef_paths = sorted(glob.glob(georef_glob_pattern))
+    if not georef_paths:
+        print(f"Error: no files matched '{georef_glob_pattern}'.", file=sys.stderr)
+        sys.exit(1)
+    raw_dir = Path(georef_paths[0]).parent
+
+    if source_data.get("type") == "AnnotationPage":
+        items_by_key = _load_oim_index(source_data)
+        result_id = source_data.get("id", "") + "/generated"
+        is_loc = False
+        print(f"Loaded {len(items_by_key)} OIM annotations.", file=sys.stderr)
+    elif source_data.get("@type") == "sc:Manifest":
+        items_by_key = _load_loc_index(source_data, raw_dir)
+        result_id = source_data.get("@id", "") + "/generated"
+        is_loc = True
+        print(f"Loaded {len(items_by_key)} LOC canvases.", file=sys.stderr)
+    else:
+        print(
+            "Error: expected an OIM IIIF AnnotationPage (type: AnnotationPage) "
+            "or a LOC manifest (@type: sc:Manifest).",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+
+    label: str = source_data.get("label", "")
+
+    valid_items: list[tuple[str, dict, dict, Path]] = []
+    for path in georef_paths:
+        page_key = georef_path_to_page_key(path)
+        if not page_key:
+            print(f"Warning: could not parse page key from '{path}'", file=sys.stderr)
+            continue
+        if is_loc:
+            assert "__" not in page_key, (
+                f"LOC manifests have no split pages; found split key '{page_key}' in {path}"
+            )
+        canvas_item = items_by_key.get(page_key)
+        if not canvas_item:
+            print(
+                f"Warning: no canvas for page key '{page_key}' ({path})",
+                file=sys.stderr,
+            )
+            continue
+        georef = json.load(open(path))
+        raw_path = Path(path).parent / f"{page_key}.raw.jpg"
+        valid_items.append((page_key, canvas_item, georef, raw_path))
+
+    # Drop skeleton pages (key ends in 's') when a full-color counterpart exists
+    # within this volume. Scoped per-volume so skeletons in one volume are never
+    # dropped because another volume has a matching full-color page.
+    non_skeleton_keys = {pk for pk, _, _, _ in valid_items if not pk.endswith("s")}
+    skipped = [
+        pk
+        for pk, _, _, _ in valid_items
+        if pk.endswith("s") and pk[:-1] in non_skeleton_keys
+    ]
+    if skipped:
+        print(
+            f"Dropping {len(skipped)} skeleton page(s) with full-color counterparts: "
+            + ", ".join(skipped),
+            file=sys.stderr,
+        )
+        valid_items = [item for item in valid_items if item[0] not in set(skipped)]
+
+    return valid_items, result_id, label
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(
         description=(
@@ -622,13 +705,26 @@ def main() -> None:
     )
     parser.add_argument(
         "oim_iiif",
+        nargs="?",
         metavar="OIM_IIIF",
         help="OIM IIIF AnnotationPage JSON file (e.g. main.iiif.json)",
     )
     parser.add_argument(
         "georef_glob",
+        nargs="?",
         metavar="GEOREF_GLOB",
         help="Glob pattern matching georef JSON files (e.g. 'path/to/*.georef.json')",
+    )
+    parser.add_argument(
+        "--volume",
+        action="append",
+        nargs=2,
+        metavar=("IIIF", "GLOB"),
+        help=(
+            "Add a volume as an IIIF manifest file and a georef glob pattern. "
+            "Repeatable for multi-volume output. When used, positional OIM_IIIF "
+            "and GEOREF_GLOB are ignored."
+        ),
     )
     parser.add_argument(
         "--output",
@@ -658,89 +754,57 @@ def main() -> None:
     )
     args = parser.parse_args()
 
-    source_data: dict = json.load(open(args.oim_iiif))
-
-    georef_paths = sorted(glob.glob(args.georef_glob))
-    if not georef_paths:
-        print(f"Error: no files matched '{args.georef_glob}'.", file=sys.stderr)
-        sys.exit(1)
-    raw_dir = Path(georef_paths[0]).parent
-
-    # Detect format and build the page-key → canvas-item index.
-    if source_data.get("type") == "AnnotationPage":
-        items_by_key = _load_oim_index(source_data)
-        result_id = source_data.get("id", "") + "/generated"
-        is_loc = False
-        print(f"Loaded {len(items_by_key)} OIM annotations.", file=sys.stderr)
-    elif source_data.get("@type") == "sc:Manifest":
-        items_by_key = _load_loc_index(source_data, raw_dir)
-        result_id = source_data.get("@id", "") + "/generated"
-        is_loc = True
-        print(f"Loaded {len(items_by_key)} LOC canvases.", file=sys.stderr)
+    # Resolve volume specs: --volume flags take precedence over positional args.
+    if args.volume:
+        if args.oim_iiif or args.georef_glob:
+            print(
+                "Warning: positional OIM_IIIF/GEOREF_GLOB are ignored when --volume is used.",
+                file=sys.stderr,
+            )
+        volume_specs: list[list[str]] = args.volume
+    elif args.oim_iiif and args.georef_glob:
+        volume_specs = [[args.oim_iiif, args.georef_glob]]
     else:
-        print(
-            "Error: expected an OIM IIIF AnnotationPage (type: AnnotationPage) "
-            "or a LOC manifest (@type: sc:Manifest).",
-            file=sys.stderr,
+        parser.error(
+            "Provide positional OIM_IIIF GEOREF_GLOB for a single volume, "
+            "or use --volume IIIF GLOB (repeatable) for multiple volumes."
         )
-        sys.exit(1)
 
     now = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
-    # Pass 1: collect all valid (page_key, canvas_item, georef, raw_path) tuples.
-    valid_items: list[tuple[str, dict, dict, Path]] = []
-    for path in georef_paths:
-        page_key = georef_path_to_page_key(path)
-        if not page_key:
-            print(f"Warning: could not parse page key from '{path}'", file=sys.stderr)
-            continue
-        if is_loc:
-            assert "__" not in page_key, (
-                f"LOC manifests have no split pages; found split key '{page_key}' in {path}"
-            )
-        canvas_item = items_by_key.get(page_key)
-        if not canvas_item:
-            print(
-                f"Warning: no canvas for page key '{page_key}' ({path})",
-                file=sys.stderr,
-            )
-            continue
-        georef = json.load(open(path))
-        raw_path = Path(path).parent / f"{page_key}.raw.jpg"
-        valid_items.append((page_key, canvas_item, georef, raw_path))
-
-    # Drop skeleton pages (key ends in 's') when a full-color counterpart exists.
-    non_skeleton_keys = {pk for pk, _, _, _ in valid_items if not pk.endswith("s")}
-    skipped = [
-        pk
-        for pk, _, _, _ in valid_items
-        if pk.endswith("s") and pk[:-1] in non_skeleton_keys
-    ]
-    if skipped:
-        print(
-            f"Dropping {len(skipped)} skeleton page(s) with full-color counterparts: "
-            + ", ".join(skipped),
-            file=sys.stderr,
-        )
-        valid_items = [item for item in valid_items if item[0] not in set(skipped)]
+    # Load all volumes; skeleton deduplication is per-volume inside _load_volume_items.
+    all_valid_items: list[tuple[str, dict, dict, Path]] = []
+    result_id = ""
+    label = ""
+    n_georef_files = 0
+    for iiif_path, georef_glob in volume_specs:
+        vol_items, vol_result_id, vol_label = _load_volume_items(iiif_path, georef_glob)
+        all_valid_items.extend(vol_items)
+        n_georef_files += len(sorted(glob.glob(georef_glob)))
+        if not result_id:
+            result_id = vol_result_id
+            label = vol_label
 
     # Compute block-based clipping masks when a centerlines file is provided.
-    geo_masks: list[ShapelyPolygon | None] = [None] * len(valid_items)
+    # All volumes' pages are passed together so blocks at volume boundaries are
+    # assigned correctly using color and geometry from all neighboring pages.
+    geo_masks: list[ShapelyPolygon | None] = [None] * len(all_valid_items)
     if args.centerlines:
         with open(args.centerlines) as f:
             centerlines_geojson: dict = json.load(f)
-        all_georefs = [georef for _, _, georef, _ in valid_items]
+        all_georefs = [georef for _, _, georef, _ in all_valid_items]
         print("Computing block-based clipping masks...", file=sys.stderr)
         debug_blocks: list[dict] | None = [] if args.debug_blocks else None
         geo_masks = compute_all_clip_masks(
             all_georefs,
             centerlines_geojson,
             debug_blocks_out=debug_blocks,
-            raw_paths=[raw_path for _, _, _, raw_path in valid_items],
+            raw_paths=[raw_path for _, _, _, raw_path in all_valid_items],
         )
         n_masked = sum(m is not None for m in geo_masks)
         print(
-            f"Computed masks for {n_masked}/{len(valid_items)} pages.", file=sys.stderr
+            f"Computed masks for {n_masked}/{len(all_valid_items)} pages.",
+            file=sys.stderr,
         )
         if debug_blocks is not None:
             blocks_geojson = {"type": "FeatureCollection", "features": debug_blocks}
@@ -757,7 +821,7 @@ def main() -> None:
                     "properties": {"page_key": page_key},
                     "geometry": geom_mapping(mask),
                 }
-                for (page_key, _, _, _), mask in zip(valid_items, geo_masks)
+                for (page_key, _, _, _), mask in zip(all_valid_items, geo_masks)
                 if mask is not None
             ]
             with open(args.debug_clip, "w") as f:
@@ -770,7 +834,7 @@ def main() -> None:
     # Pass 2: build annotations with the per-page geo mask.
     annotations: list[dict] = []
     for (page_key, canvas_item, georef, raw_path), geo_mask in zip(
-        valid_items, geo_masks
+        all_valid_items, geo_masks
     ):
         try:
             annotations.append(
@@ -782,7 +846,7 @@ def main() -> None:
             print(f"Warning: skipping {page_key}: {exc}", file=sys.stderr)
 
     print(
-        f"Generated {len(annotations)} annotations from {len(georef_paths)} georef files.",
+        f"Generated {len(annotations)} annotations from {n_georef_files} georef files.",
         file=sys.stderr,
     )
 
@@ -790,7 +854,7 @@ def main() -> None:
         "id": result_id,
         "type": "AnnotationPage",
         "@context": ["http://www.w3.org/ns/anno.jsonld"],
-        "label": source_data.get("label", ""),
+        "label": label,
         "items": annotations,
     }
 
