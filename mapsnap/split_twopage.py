@@ -24,17 +24,15 @@ from pathlib import Path
 import numpy as np
 from PIL import Image
 
-# Skeleton detection: fraction of pixels with max(R,G,B)-min(R,G,B) > SPREAD_THRESHOLD
-# that must be exceeded for a half to be considered a color (non-skeleton) page.
+# RGB spread threshold for color detection: max(R,G,B) - min(R,G,B) > this value.
 _COLOR_SPREAD = 50
-_SKELETON_THRESHOLD = 0.10
 
 
-def is_skeleton(img: Image.Image) -> bool:
-    """Return True if the image has too few colored pixels to be a color map."""
+def color_fraction(img: Image.Image) -> float:
+    """Return the fraction of pixels with RGB spread > _COLOR_SPREAD."""
     arr = np.array(img.convert("RGB"), dtype=np.int16)
     spread = arr.max(axis=2) - arr.min(axis=2)
-    return float((spread > _COLOR_SPREAD).mean()) < _SKELETON_THRESHOLD
+    return float((spread > _COLOR_SPREAD).mean())
 
 
 def parse_page_number(filename: str) -> int | None:
@@ -63,13 +61,13 @@ def page_filename(page_num: int, skeleton: bool) -> str:
 def save_half(
     half: Image.Image,
     page_num: int,
+    skeleton: bool,
     out_dir: Path,
     source_name: str,
     side: str,
     dry_run: bool,
 ) -> bool:
     """Write a half-page (or single-page) image. Returns True on success."""
-    skeleton = is_skeleton(half)
     name = page_filename(page_num, skeleton)
     kind = "skeleton" if skeleton else "color"
     out_path = out_dir / name
@@ -141,11 +139,11 @@ def main() -> None:
             w, h = img.size
 
         if w <= h:
-            # Single-page image — copy directly.
+            # Single-page image — cannot determine skeleton status in isolation.
             with Image.open(img_path) as img:
                 full = img.copy()
             ok = save_half(
-                full, page_num, out_dir, img_path.name, "single", args.dry_run
+                full, page_num, False, out_dir, img_path.name, "single", args.dry_run
             )
             n_success += ok
             n_fail += not ok
@@ -161,21 +159,27 @@ def main() -> None:
 
         if diff == 1:
             # Color/skeleton pair: both halves share page_num.
-            # is_skeleton() assigns the 's' suffix to whichever half has less color.
-            for half, side in [(left_half, "left"), (right_half, "right")]:
+            # Whichever half has less color is the skeleton.
+            left_is_skel = color_fraction(left_half) < color_fraction(right_half)
+            for half, side, skel in [
+                (left_half, "left", left_is_skel),
+                (right_half, "right", not left_is_skel),
+            ]:
                 ok = save_half(
-                    half, page_num, out_dir, img_path.name, side, args.dry_run
+                    half, page_num, skel, out_dir, img_path.name, side, args.dry_run
                 )
                 n_success += ok
                 n_fail += not ok
 
         elif diff == 2:
-            # Two separate sheets: left=page_num, right=page_num+1.
+            # Two separate sheets: neither is a skeleton.
             for half, side, pnum in [
                 (left_half, "left", page_num),
                 (right_half, "right", page_num + 1),
             ]:
-                ok = save_half(half, pnum, out_dir, img_path.name, side, args.dry_run)
+                ok = save_half(
+                    half, pnum, False, out_dir, img_path.name, side, args.dry_run
+                )
                 n_success += ok
                 n_fail += not ok
 
