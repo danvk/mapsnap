@@ -652,7 +652,7 @@ def _load_s3_items(
             "label": page_key,
             "target": {
                 "source": {
-                    "id": f"{base_url}/{page_key}.raw",
+                    "id": f"{base_url}/{page_key}.raw.jpg",
                     "type": source_type,
                     "width": raw_w,
                     "height": raw_h,
