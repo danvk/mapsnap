@@ -617,14 +617,18 @@ def make_annotation(
 def _load_s3_items(
     georef_glob_pattern: str,
     image_base_url: str,
+    source_type: str = "ImageService3",
 ) -> tuple[list[tuple[str, dict, dict, Path]], str, str]:
-    """Load volume items for plain-image hosting (no IIIF manifest needed).
+    """Load volume items for self-hosted images (no IIIF manifest needed).
 
     Constructs canvas items directly from raw.jpg dimensions on disk and a
-    base URL, so no LOC or OIM manifest file is required. The source type is
-    'Image' (not 'ImageService2'), meaning viewers fetch the full JPEG rather
-    than requesting tiles. Resource coordinates are in the raw.jpg pixel
-    space (scale factor 1.0 — no rescaling needed).
+    base URL, so no LOC or OIM manifest file is required. Resource coordinates
+    are in the raw.jpg pixel space (scale factor 1.0 — no rescaling needed).
+
+    source_type should match the image server in use:
+      'ImageService3' — IIIF Image API v3 (e.g. serverless-iiif v3 on Lambda)
+      'ImageService2' — IIIF Image API v2
+      'Image'         — plain static JPEG (no tile server; limited viewer support)
 
     The image URL for each page is: {image_base_url}/{page_key}.raw.jpg
     """
@@ -650,7 +654,7 @@ def _load_s3_items(
             "target": {
                 "source": {
                     "id": f"{base_url}/{page_key}.raw.jpg",
-                    "type": "Image",
+                    "type": source_type,
                     "width": raw_w,
                     "height": raw_h,
                 }
@@ -807,6 +811,16 @@ def main() -> None:
         help="Creator profile URL (default: %(default)s)",
     )
     parser.add_argument(
+        "--image-source-type",
+        metavar="TYPE",
+        default="ImageService3",
+        help=(
+            "IIIF source type used with --image-base-url "
+            "(default: ImageService3). Use ImageService2 for a v2 endpoint, "
+            "or Image for a plain static JPEG with no tile server."
+        ),
+    )
+    parser.add_argument(
         "--image-base-url",
         metavar="URL",
         help=(
@@ -854,7 +868,9 @@ def main() -> None:
             base = args.image_base_url.rstrip("/")
             for s3_glob, vol_suffix in args.volume:
                 vol_base_url = base + "/" + vol_suffix.lstrip("/")
-                vol_items, vol_result_id, _ = _load_s3_items(s3_glob, vol_base_url)
+                vol_items, vol_result_id, _ = _load_s3_items(
+                    s3_glob, vol_base_url, args.image_source_type
+                )
                 all_valid_items.extend(vol_items)
                 n_georef_files += len(sorted(glob.glob(s3_glob)))
                 if not result_id:
@@ -869,7 +885,9 @@ def main() -> None:
                     "Provide a georef glob pattern as a positional argument "
                     "when using --image-base-url."
                 )
-            vol_items, result_id, label = _load_s3_items(s3_glob, args.image_base_url)
+            vol_items, result_id, label = _load_s3_items(
+                s3_glob, args.image_base_url, args.image_source_type
+            )
             all_valid_items.extend(vol_items)
             n_georef_files = len(sorted(glob.glob(s3_glob)))
     else:
