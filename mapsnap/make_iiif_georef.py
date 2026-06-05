@@ -787,11 +787,12 @@ def main() -> None:
         "--volume",
         action="append",
         nargs=2,
-        metavar=("IIIF", "GLOB"),
+        metavar=("ARG1", "ARG2"),
         help=(
-            "Add a volume as an IIIF manifest file and a georef glob pattern. "
-            "Repeatable for multi-volume output. When used, positional OIM_IIIF "
-            "and GEOREF_GLOB are ignored."
+            "Add a volume. Without --image-base-url: ARG1=IIIF manifest, ARG2=georef glob. "
+            "With --image-base-url: ARG1=georef glob, ARG2=path suffix appended to the base URL "
+            "(e.g. 'vol1' gives {base_url}/vol1/{page}.raw.jpg). "
+            "Repeatable for multi-volume output."
         ),
     )
     parser.add_argument(
@@ -842,19 +843,35 @@ def main() -> None:
 
     if args.image_base_url:
         # Plain-image (S3) mode: no manifest needed.
-        # Accept the georef glob from either positional; oim_iiif is first so it
-        # gets the value when only one positional argument is supplied.
         if args.volume:
-            parser.error("--volume cannot be combined with --image-base-url.")
-        s3_glob = args.georef_glob or args.oim_iiif
-        if not s3_glob:
-            parser.error(
-                "Provide a georef glob pattern as a positional argument "
-                "when using --image-base-url."
-            )
-        vol_items, result_id, label = _load_s3_items(s3_glob, args.image_base_url)
-        all_valid_items.extend(vol_items)
-        n_georef_files = len(sorted(glob.glob(s3_glob)))
+            # Multi-volume S3: each --volume takes GLOB SUFFIX where SUFFIX is
+            # appended to --image-base-url to form the per-volume image base URL.
+            if args.oim_iiif or args.georef_glob:
+                print(
+                    "Warning: positional args are ignored when --volume is used.",
+                    file=sys.stderr,
+                )
+            base = args.image_base_url.rstrip("/")
+            for s3_glob, vol_suffix in args.volume:
+                vol_base_url = base + "/" + vol_suffix.lstrip("/")
+                vol_items, vol_result_id, _ = _load_s3_items(s3_glob, vol_base_url)
+                all_valid_items.extend(vol_items)
+                n_georef_files += len(sorted(glob.glob(s3_glob)))
+                if not result_id:
+                    result_id = vol_result_id
+        else:
+            # Single-volume S3: georef glob from positional arg.
+            # oim_iiif is first positional so it receives the value when only one
+            # positional argument is supplied.
+            s3_glob = args.georef_glob or args.oim_iiif
+            if not s3_glob:
+                parser.error(
+                    "Provide a georef glob pattern as a positional argument "
+                    "when using --image-base-url."
+                )
+            vol_items, result_id, label = _load_s3_items(s3_glob, args.image_base_url)
+            all_valid_items.extend(vol_items)
+            n_georef_files = len(sorted(glob.glob(s3_glob)))
     else:
         # Manifest-based mode: resolve volume specs from --volume or positionals.
         if args.volume:
