@@ -474,6 +474,7 @@ def make_annotation(
     """
     source = item["target"]["source"]
     source_id: str = source["id"]
+    source_type: str = source.get("type", "ImageService2")
     source_width: int = source["width"]
     source_height: int = source["height"]
     label: str = item["label"]
@@ -590,7 +591,7 @@ def make_annotation(
             "type": "SpecificResource",
             "source": {
                 "id": source_id,
-                "type": "ImageService2",
+                "type": source_type,
                 "height": source_height,
                 "width": source_width,
             },
@@ -611,6 +612,73 @@ def make_annotation(
             "features": features,
         },
     }
+
+
+def _load_s3_items(
+    georef_glob_pattern: str,
+    image_base_url: str,
+) -> tuple[list[tuple[str, dict, dict, Path]], str, str]:
+    """Load volume items for plain-image hosting (no IIIF manifest needed).
+
+    Constructs canvas items directly from raw.jpg dimensions on disk and a
+    base URL, so no LOC or OIM manifest file is required. The source type is
+    'Image' (not 'ImageService2'), meaning viewers fetch the full JPEG rather
+    than requesting tiles. Resource coordinates are in the raw.jpg pixel
+    space (scale factor 1.0 — no rescaling needed).
+
+    The image URL for each page is: {image_base_url}/{page_key}.raw.jpg
+    """
+    georef_paths = sorted(glob.glob(georef_glob_pattern))
+    if not georef_paths:
+        print(f"Error: no files matched '{georef_glob_pattern}'.", file=sys.stderr)
+        sys.exit(1)
+
+    base_url = image_base_url.rstrip("/")
+    valid_items: list[tuple[str, dict, dict, Path]] = []
+    for path in georef_paths:
+        page_key = georef_path_to_page_key(path)
+        if not page_key:
+            print(f"Warning: could not parse page key from '{path}'", file=sys.stderr)
+            continue
+        raw_path = Path(path).parent / f"{page_key}.raw.jpg"
+        if not raw_path.exists():
+            print(f"Warning: raw image not found: {raw_path}", file=sys.stderr)
+            continue
+        raw_w, raw_h = jpeg_dimensions(raw_path)
+        canvas_item = {
+            "label": page_key,
+            "target": {
+                "source": {
+                    "id": f"{base_url}/{page_key}.raw.jpg",
+                    "type": "Image",
+                    "width": raw_w,
+                    "height": raw_h,
+                }
+            },
+        }
+        georef = json.load(open(path))
+        valid_items.append((page_key, canvas_item, georef, raw_path))
+
+    # Drop skeleton pages within this volume.
+    non_skeleton_keys = {pk for pk, _, _, _ in valid_items if not pk.endswith("s")}
+    skipped = [
+        pk
+        for pk, _, _, _ in valid_items
+        if pk.endswith("s") and pk[:-1] in non_skeleton_keys
+    ]
+    if skipped:
+        print(
+            f"Dropping {len(skipped)} skeleton page(s) with full-color counterparts: "
+            + ", ".join(skipped),
+            file=sys.stderr,
+        )
+        valid_items = [item for item in valid_items if item[0] not in set(skipped)]
+
+    print(
+        f"Loaded {len(valid_items)} pages from {len(georef_paths)} georef files.",
+        file=sys.stderr,
+    )
+    return valid_items, base_url, ""
 
 
 def _load_volume_items(
@@ -738,6 +806,17 @@ def main() -> None:
         help="Creator profile URL (default: %(default)s)",
     )
     parser.add_argument(
+        "--image-base-url",
+        metavar="URL",
+        help=(
+            "Base URL for plain-image hosting (e.g. an S3 bucket). "
+            "When set, no IIIF manifest is needed: canvas items are built directly "
+            "from the raw.jpg files on disk. The URL for each page is "
+            "{URL}/{page_key}.raw.jpg. Provide the georef glob as the sole "
+            "positional argument."
+        ),
+    )
+    parser.add_argument(
         "--centerlines",
         metavar="FILE",
         help="GeoJSON centerlines file for block-based clipping masks",
@@ -754,36 +833,55 @@ def main() -> None:
     )
     args = parser.parse_args()
 
-    # Resolve volume specs: --volume flags take precedence over positional args.
-    if args.volume:
-        if args.oim_iiif or args.georef_glob:
-            print(
-                "Warning: positional OIM_IIIF/GEOREF_GLOB are ignored when --volume is used.",
-                file=sys.stderr,
-            )
-        volume_specs: list[list[str]] = args.volume
-    elif args.oim_iiif and args.georef_glob:
-        volume_specs = [[args.oim_iiif, args.georef_glob]]
-    else:
-        parser.error(
-            "Provide positional OIM_IIIF GEOREF_GLOB for a single volume, "
-            "or use --volume IIIF GLOB (repeatable) for multiple volumes."
-        )
-
     now = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
-    # Load all volumes; skeleton deduplication is per-volume inside _load_volume_items.
     all_valid_items: list[tuple[str, dict, dict, Path]] = []
     result_id = ""
     label = ""
     n_georef_files = 0
-    for iiif_path, georef_glob in volume_specs:
-        vol_items, vol_result_id, vol_label = _load_volume_items(iiif_path, georef_glob)
+
+    if args.image_base_url:
+        # Plain-image (S3) mode: no manifest needed.
+        # Accept the georef glob from either positional; oim_iiif is first so it
+        # gets the value when only one positional argument is supplied.
+        if args.volume:
+            parser.error("--volume cannot be combined with --image-base-url.")
+        s3_glob = args.georef_glob or args.oim_iiif
+        if not s3_glob:
+            parser.error(
+                "Provide a georef glob pattern as a positional argument "
+                "when using --image-base-url."
+            )
+        vol_items, result_id, label = _load_s3_items(s3_glob, args.image_base_url)
         all_valid_items.extend(vol_items)
-        n_georef_files += len(sorted(glob.glob(georef_glob)))
-        if not result_id:
-            result_id = vol_result_id
-            label = vol_label
+        n_georef_files = len(sorted(glob.glob(s3_glob)))
+    else:
+        # Manifest-based mode: resolve volume specs from --volume or positionals.
+        if args.volume:
+            if args.oim_iiif or args.georef_glob:
+                print(
+                    "Warning: positional OIM_IIIF/GEOREF_GLOB are ignored when --volume is used.",
+                    file=sys.stderr,
+                )
+            volume_specs: list[list[str]] = args.volume
+        elif args.oim_iiif and args.georef_glob:
+            volume_specs = [[args.oim_iiif, args.georef_glob]]
+        else:
+            parser.error(
+                "Provide positional OIM_IIIF GEOREF_GLOB for a single volume, "
+                "or use --volume IIIF GLOB (repeatable) for multiple volumes, "
+                "or use --image-base-url URL for plain-image hosting."
+            )
+
+        for iiif_path, georef_glob in volume_specs:
+            vol_items, vol_result_id, vol_label = _load_volume_items(
+                iiif_path, georef_glob
+            )
+            all_valid_items.extend(vol_items)
+            n_georef_files += len(sorted(glob.glob(georef_glob)))
+            if not result_id:
+                result_id = vol_result_id
+                label = vol_label
 
     # Compute block-based clipping masks when a centerlines file is provided.
     # All volumes' pages are passed together so blocks at volume boundaries are
