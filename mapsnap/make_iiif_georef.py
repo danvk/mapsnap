@@ -40,8 +40,7 @@ from PIL import Image
 from shapely.geometry import Polygon as ShapelyPolygon
 from shapely.geometry import mapping as geom_mapping
 
-from mapsnap.clip_masks import compute_all_clip_masks
-from mapsnap.clip_masks import geo_polygon_to_svg
+from mapsnap.clip_masks import compute_all_clip_masks, geo_polygon_to_svg
 from mapsnap.utils import jpeg_dimensions
 
 
@@ -653,7 +652,7 @@ def _load_s3_items(
             "label": page_key,
             "target": {
                 "source": {
-                    "id": f"{base_url}/{page_key}.raw.jpg",
+                    "id": f"{base_url}/{page_key}.raw",
                     "type": source_type,
                     "width": raw_w,
                     "height": raw_h,
