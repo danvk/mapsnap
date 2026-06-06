@@ -38,5 +38,7 @@ app.use('/iiif', iiif({ imageDir }));
 app.listen(port, () => {
   console.error(`IIIF server running at http://localhost:${port}/iiif`);
   console.error(`Serving images from: ${imageDir}`);
-  console.error(`Example: http://localhost:${port}/iiif/vol1/p1.raw.jpg/info.json`);
+  console.error(
+    `Example: http://localhost:${port}/iiif/vol1/p1.raw.jpg/info.json`,
+  );
 });
