@@ -161,6 +161,119 @@ def filter_args(argv: list[str], image: str) -> list[str]:
     return [arg for arg in argv if not arg.endswith(".jpg") or arg == image]
 
 
+def _box_center_in_original(
+    box: list[int], angle: int, orig_width: int, orig_height: int
+) -> tuple[float, float]:
+    """Convert a horizontal_list box [x_min, x_max, y_min, y_max] in rotated image
+    coordinates to its center in original (unrotated) image coordinates."""
+    rx = (box[0] + box[1]) / 2.0
+    ry = (box[2] + box[3]) / 2.0
+    if angle == 0:
+        return rx, ry
+    elif angle == 90:
+        # PIL rotate(90) CCW; inverse: (rx, ry) → original (W-1-ry, rx)
+        return orig_width - 1 - ry, rx
+    else:  # 270
+        # PIL rotate(270) CW; inverse: (rx, ry) → original (ry, H-1-rx)
+        return ry, orig_height - 1 - rx
+
+
+def _recognize_near_hints(
+    hint_detections: list[dict],
+    skipped_by_angle: dict[int, list[list[int]]],
+    img: Image.Image,
+    reader: easyocr.Reader,
+    recognize_kwargs: dict,
+    orig_width: int,
+    orig_height: int,
+    max_gap_px: float = 80.0,
+    perp_tolerance_px: float = 20.0,
+) -> list[dict]:
+    """Run recognition on small boxes (skipped by min_long_side) adjacent to hints.
+
+    For each hint detection, finds horizontal_list boxes that were below the
+    min_long_side threshold and lie within max_gap_px along the hint's direction
+    and perp_tolerance_px perpendicular to it. Runs recognition only on those
+    candidates, avoiding a full re-scan of all skipped boxes.
+
+    Returns new detections (already post-processed with long_side, dir_pix, hint flag)
+    that should be appended to all_detections before saving streets.json.
+    """
+    new_detections: list[dict] = []
+
+    for angle in (0, 90, 270):
+        skipped_h = skipped_by_angle.get(angle, [])
+        angle_hints = [d for d in hint_detections if d.get("angle") == angle]
+        if not skipped_h or not angle_hints:
+            continue
+
+        box_orig_centers = [
+            _box_center_in_original(box, angle, orig_width, orig_height)
+            for box in skipped_h
+        ]
+
+        # Find boxes adjacent to any hint in this angle pass.
+        candidate_indices: set[int] = set()
+        for hint in angle_hints:
+            hint_cx = sum(p[0] for p in hint["polygon"]) / 4.0
+            hint_cy = sum(p[1] for p in hint["polygon"]) / 4.0
+            dir_pix = hint.get("dir_pix", 0.0)
+            cos_d = float(np.cos(dir_pix))
+            sin_d = float(np.sin(dir_pix))
+
+            for i, (box_cx, box_cy) in enumerate(box_orig_centers):
+                dx = box_cx - hint_cx
+                dy = box_cy - hint_cy
+                parallel = abs(dx * cos_d + dy * sin_d)
+                perp = abs(-dx * sin_d + dy * cos_d)
+                if parallel <= max_gap_px and perp <= perp_tolerance_px:
+                    candidate_indices.add(i)
+
+        if not candidate_indices:
+            continue
+
+        candidate_h = [skipped_h[i] for i in sorted(candidate_indices)]
+        rotated = img.rotate(angle, expand=True) if angle != 0 else img
+        rotated_array = np.array(rotated)
+        rotated_clean = _erase_underlines(rotated_array, candidate_h)
+
+        results = reader.recognize(rotated_clean, candidate_h, [], **recognize_kwargs)
+        for bbox, text, confidence in results:
+            xs = [float(p[0]) for p in bbox]
+            ys = [float(p[1]) for p in bbox]
+            if (max(ys) - min(ys)) > (max(xs) - min(xs)):
+                continue
+            polygon = [[int(x), int(y)] for x, y in bbox]
+            if angle == 90:
+                polygon = [[orig_width - 1 - y, x] for x, y in polygon]
+            elif angle == 270:
+                polygon = [[y, orig_height - 1 - x] for x, y in polygon]
+
+            pts = np.array(polygon, dtype=float)
+            sides = polygon_side_lengths(polygon)
+            edge_vecs = [pts[(i + 1) % 4] - pts[i] for i in range(4)]
+            long_vec = max(edge_vecs, key=np.linalg.norm)
+            det: dict = {
+                "polygon": polygon,
+                "text": text,
+                "confidence": round(float(confidence), 4),
+                "angle": angle,
+                "long_side": round(max(sides), 1),
+                "short_side": round(min(sides), 1),
+                "dir_pix": round(
+                    float(np.arctan2(long_vec[1], long_vec[0])) % np.pi, 4
+                ),
+                "second_pass": True,
+            }
+            if text.upper() in NON_STREET_TEXT:
+                det["ignore"] = True
+            elif text.upper() in _HINT_STRINGS:
+                det["hint"] = True
+            new_detections.append(det)
+
+    return new_detections
+
+
 def detect_text(
     image_path: str,
     vocab_strings: list[str],
@@ -255,6 +368,7 @@ def detect_text(
             json.dump(boxes_doc, f, indent=2)
 
     all_detections: list[dict] = []
+    skipped_by_angle: dict[int, list[list[int]]] = {}
     recognize_kwargs: dict = {
         "paragraph": False,
         "decoder": "wordbeamsearch",
@@ -272,6 +386,9 @@ def detect_text(
         rotated_array = np.array(rotated)
 
         if min_long_side > 0:
+            skipped_by_angle[angle] = [
+                b for b in horizontal_list if (b[1] - b[0]) <= min_long_side
+            ]
             horizontal_list = [
                 b for b in horizontal_list if (b[1] - b[0]) > min_long_side
             ]
@@ -325,6 +442,20 @@ def detect_text(
             det["ignore"] = True
         elif det["text"].upper() in _HINT_STRINGS:
             det["hint"] = True
+
+    # Second pass: recognize small boxes adjacent to hint detections.
+    hint_dets = [d for d in all_detections if d.get("hint")]
+    if hint_dets and min_long_side > 0:
+        second_pass = _recognize_near_hints(
+            hint_dets,
+            skipped_by_angle,
+            img,
+            reader,
+            recognize_kwargs,
+            orig_width,
+            orig_height,
+        )
+        all_detections.extend(second_pass)
 
     streets_doc = {
         "width": orig_width,
