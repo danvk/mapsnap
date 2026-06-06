@@ -40,8 +40,7 @@ from PIL import Image
 from shapely.geometry import Polygon as ShapelyPolygon
 from shapely.geometry import mapping as geom_mapping
 
-from mapsnap.clip_masks import compute_all_clip_masks
-from mapsnap.clip_masks import geo_polygon_to_svg
+from mapsnap.clip_masks import compute_all_clip_masks, geo_polygon_to_svg
 from mapsnap.utils import jpeg_dimensions
 
 
@@ -211,12 +210,15 @@ def _load_loc_index(data: dict, raw_dir: Path) -> dict[str, dict]:
             continue
 
         raw_path = raw_dir / f"{page_key}.raw.jpg"
+        pct_m = re.search(r"/pct:(\d+)/", resource.get("@id", ""))
+        scale = 100.0 / int(pct_m.group(1)) if pct_m else 1.0
         if raw_path.exists():
-            source_width, source_height = jpeg_dimensions(raw_path)
+            # Use raw file dims as the base; apply pct scale to get true canvas size.
+            raw_w, raw_h = jpeg_dimensions(raw_path)
+            source_width = int(round(raw_w * scale))
+            source_height = int(round(raw_h * scale))
         else:
             # Resource URL contains e.g. "/full/pct:25/0/default.jpg"; scale up.
-            pct_m = re.search(r"/pct:(\d+)/", resource.get("@id", ""))
-            scale = 100.0 / int(pct_m.group(1)) if pct_m else 1.0
             source_width = int(round(resource["width"] * scale))
             source_height = int(round(resource["height"] * scale))
 
@@ -471,6 +473,7 @@ def make_annotation(
     """
     source = item["target"]["source"]
     source_id: str = source["id"]
+    source_type: str = source.get("type", "ImageService2")
     source_width: int = source["width"]
     source_height: int = source["height"]
     label: str = item["label"]
@@ -489,9 +492,16 @@ def make_annotation(
         raise ValueError(f"raw image not found: {raw_path}")
     raw_width, raw_height = jpeg_dimensions(raw_path)
 
-    # Use simple scaling when the raw image covers the full canvas (within 2px tolerance).
+    # Full canvas: raw covers the complete canvas extent, possibly at lower resolution
+    # (e.g. a pct:25 download). Split sub-images (OIM only) have "__" in the filename
+    # and are routed to template matching regardless of size ratios.
+    is_split_raw = "__" in raw_path.name
     is_full_canvas = (
         abs(raw_width - source_width) <= 2 and abs(raw_height - source_height) <= 2
+    ) or (
+        not is_split_raw
+        and source_width > 0
+        and abs(raw_width / source_width - raw_height / source_height) <= 0.01
     )
     split_canvas: tuple[float, float, float, float] | None = None
 
@@ -580,7 +590,7 @@ def make_annotation(
             "type": "SpecificResource",
             "source": {
                 "id": source_id,
-                "type": "ImageService2",
+                "type": source_type,
                 "height": source_height,
                 "width": source_width,
             },
@@ -603,60 +613,99 @@ def make_annotation(
     }
 
 
-def main() -> None:
-    parser = argparse.ArgumentParser(
-        description=(
-            "Combine OIM IIIF annotations with our georeferences into an IIIF AnnotationPage. "
-            "Each georef file is matched to the OIM annotation by page key parsed from the label."
-        )
-    )
-    parser.add_argument(
-        "oim_iiif",
-        metavar="OIM_IIIF",
-        help="OIM IIIF AnnotationPage JSON file (e.g. main.iiif.json)",
-    )
-    parser.add_argument(
-        "georef_glob",
-        metavar="GEOREF_GLOB",
-        help="Glob pattern matching georef JSON files (e.g. 'path/to/*.georef.json')",
-    )
-    parser.add_argument(
-        "--output",
-        metavar="FILE",
-        help="Write output to this file (default: stdout)",
-    )
-    parser.add_argument(
-        "--creator",
-        metavar="URL",
-        default="https://oldinsurancemaps.net/profile/danvk",
-        help="Creator profile URL (default: %(default)s)",
-    )
-    parser.add_argument(
-        "--centerlines",
-        metavar="FILE",
-        help="GeoJSON centerlines file for block-based clipping masks",
-    )
-    parser.add_argument(
-        "--debug-blocks",
-        metavar="FILE",
-        help="Write a GeoJSON file with one Polygon feature per block (requires --centerlines)",
-    )
-    parser.add_argument(
-        "--debug-clip",
-        metavar="FILE",
-        help="Write a GeoJSON file with one Polygon feature per clipping mask (requires --centerlines)",
-    )
-    args = parser.parse_args()
+def _load_s3_items(
+    georef_glob_pattern: str,
+    image_base_url: str,
+    source_type: str = "ImageService3",
+) -> tuple[list[tuple[str, dict, dict, Path]], str, str]:
+    """Load volume items for self-hosted images (no IIIF manifest needed).
 
-    source_data: dict = json.load(open(args.oim_iiif))
+    Constructs canvas items directly from raw.jpg dimensions on disk and a
+    base URL, so no LOC or OIM manifest file is required. Resource coordinates
+    are in the raw.jpg pixel space (scale factor 1.0 — no rescaling needed).
 
-    georef_paths = sorted(glob.glob(args.georef_glob))
+    source_type should match the image server in use:
+      'ImageService3' — IIIF Image API v3 (e.g. serverless-iiif v3 on Lambda)
+      'ImageService2' — IIIF Image API v2
+      'Image'         — plain static JPEG (no tile server; limited viewer support)
+
+    The image URL for each page is: {image_base_url}/{page_key}.raw.jpg
+    """
+    georef_paths = sorted(glob.glob(georef_glob_pattern))
     if not georef_paths:
-        print(f"Error: no files matched '{args.georef_glob}'.", file=sys.stderr)
+        print(f"Error: no files matched '{georef_glob_pattern}'.", file=sys.stderr)
+        sys.exit(1)
+
+    base_url = image_base_url.rstrip("/")
+    valid_items: list[tuple[str, dict, dict, Path]] = []
+    for path in georef_paths:
+        page_key = georef_path_to_page_key(path)
+        if not page_key:
+            print(f"Warning: could not parse page key from '{path}'", file=sys.stderr)
+            continue
+        raw_path = Path(path).parent / f"{page_key}.raw.jpg"
+        if not raw_path.exists():
+            print(f"Warning: raw image not found: {raw_path}", file=sys.stderr)
+            continue
+        raw_w, raw_h = jpeg_dimensions(raw_path)
+        canvas_item = {
+            "label": page_key,
+            "target": {
+                "source": {
+                    "id": f"{base_url}/{page_key}.raw.jpg",
+                    "type": source_type,
+                    "width": raw_w,
+                    "height": raw_h,
+                }
+            },
+        }
+        georef = json.load(open(path))
+        valid_items.append((page_key, canvas_item, georef, raw_path))
+
+    # Drop skeleton pages within this volume.
+    non_skeleton_keys = {pk for pk, _, _, _ in valid_items if not pk.endswith("s")}
+    skipped = [
+        pk
+        for pk, _, _, _ in valid_items
+        if pk.endswith("s") and pk[:-1] in non_skeleton_keys
+    ]
+    if skipped:
+        print(
+            f"Dropping {len(skipped)} skeleton page(s) with full-color counterparts: "
+            + ", ".join(skipped),
+            file=sys.stderr,
+        )
+        valid_items = [item for item in valid_items if item[0] not in set(skipped)]
+
+    print(
+        f"Loaded {len(valid_items)} pages from {len(georef_paths)} georef files.",
+        file=sys.stderr,
+    )
+    return valid_items, base_url, ""
+
+
+def _load_volume_items(
+    iiif_path: str,
+    georef_glob_pattern: str,
+) -> tuple[list[tuple[str, dict, dict, Path]], str, str]:
+    """Load one volume's valid items after per-volume skeleton deduplication.
+
+    Accepts an OIM AnnotationPage or LOC sc:Manifest as the source IIIF, plus a
+    glob pattern for georef JSON files. Loads each georef, matches it to a canvas
+    item in the manifest, and drops skeleton pages (keys ending in 's') that have
+    a full-color counterpart within this volume.
+
+    Returns (valid_items, result_id, label) where valid_items is a list of
+    (page_key, canvas_item, georef, raw_path) tuples ready for annotation building.
+    """
+    source_data: dict = json.load(open(iiif_path))
+
+    georef_paths = sorted(glob.glob(georef_glob_pattern))
+    if not georef_paths:
+        print(f"Error: no files matched '{georef_glob_pattern}'.", file=sys.stderr)
         sys.exit(1)
     raw_dir = Path(georef_paths[0]).parent
 
-    # Detect format and build the page-key → canvas-item index.
     if source_data.get("type") == "AnnotationPage":
         items_by_key = _load_oim_index(source_data)
         result_id = source_data.get("id", "") + "/generated"
@@ -675,9 +724,8 @@ def main() -> None:
         )
         sys.exit(1)
 
-    now = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    label: str = source_data.get("label", "")
 
-    # Pass 1: collect all valid (page_key, canvas_item, georef, raw_path) tuples.
     valid_items: list[tuple[str, dict, dict, Path]] = []
     for path in georef_paths:
         page_key = georef_path_to_page_key(path)
@@ -699,23 +747,196 @@ def main() -> None:
         raw_path = Path(path).parent / f"{page_key}.raw.jpg"
         valid_items.append((page_key, canvas_item, georef, raw_path))
 
+    # Drop skeleton pages (key ends in 's') when a full-color counterpart exists
+    # within this volume. Scoped per-volume so skeletons in one volume are never
+    # dropped because another volume has a matching full-color page.
+    non_skeleton_keys = {pk for pk, _, _, _ in valid_items if not pk.endswith("s")}
+    skipped = [
+        pk
+        for pk, _, _, _ in valid_items
+        if pk.endswith("s") and pk[:-1] in non_skeleton_keys
+    ]
+    if skipped:
+        print(
+            f"Dropping {len(skipped)} skeleton page(s) with full-color counterparts: "
+            + ", ".join(skipped),
+            file=sys.stderr,
+        )
+        valid_items = [item for item in valid_items if item[0] not in set(skipped)]
+
+    return valid_items, result_id, label
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser(
+        description=(
+            "Combine OIM IIIF annotations with our georeferences into an IIIF AnnotationPage. "
+            "Each georef file is matched to the OIM annotation by page key parsed from the label."
+        )
+    )
+    parser.add_argument(
+        "oim_iiif",
+        nargs="?",
+        metavar="OIM_IIIF",
+        help="OIM IIIF AnnotationPage JSON file (e.g. main.iiif.json)",
+    )
+    parser.add_argument(
+        "georef_glob",
+        nargs="?",
+        metavar="GEOREF_GLOB",
+        help="Glob pattern matching georef JSON files (e.g. 'path/to/*.georef.json')",
+    )
+    parser.add_argument(
+        "--volume",
+        action="append",
+        nargs=2,
+        metavar=("ARG1", "ARG2"),
+        help=(
+            "Add a volume. Without --image-base-url: ARG1=IIIF manifest, ARG2=georef glob. "
+            "With --image-base-url: ARG1=georef glob, ARG2=path suffix appended to the base URL "
+            "(e.g. 'vol1' gives {base_url}/vol1/{page}.raw.jpg). "
+            "Repeatable for multi-volume output."
+        ),
+    )
+    parser.add_argument(
+        "--output",
+        metavar="FILE",
+        help="Write output to this file (default: stdout)",
+    )
+    parser.add_argument(
+        "--creator",
+        metavar="URL",
+        default="https://oldinsurancemaps.net/profile/danvk",
+        help="Creator profile URL (default: %(default)s)",
+    )
+    parser.add_argument(
+        "--image-source-type",
+        metavar="TYPE",
+        default="ImageService3",
+        help=(
+            "IIIF source type used with --image-base-url "
+            "(default: ImageService3). Use ImageService2 for a v2 endpoint, "
+            "or Image for a plain static JPEG with no tile server."
+        ),
+    )
+    parser.add_argument(
+        "--image-base-url",
+        metavar="URL",
+        help=(
+            "Base URL for plain-image hosting (e.g. an S3 bucket). "
+            "When set, no IIIF manifest is needed: canvas items are built directly "
+            "from the raw.jpg files on disk. The URL for each page is "
+            "{URL}/{page_key}.raw.jpg. Provide the georef glob as the sole "
+            "positional argument."
+        ),
+    )
+    parser.add_argument(
+        "--centerlines",
+        metavar="FILE",
+        help="GeoJSON centerlines file for block-based clipping masks",
+    )
+    parser.add_argument(
+        "--debug-blocks",
+        metavar="FILE",
+        help="Write a GeoJSON file with one Polygon feature per block (requires --centerlines)",
+    )
+    parser.add_argument(
+        "--debug-clip",
+        metavar="FILE",
+        help="Write a GeoJSON file with one Polygon feature per clipping mask (requires --centerlines)",
+    )
+    args = parser.parse_args()
+
+    now = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+    all_valid_items: list[tuple[str, dict, dict, Path]] = []
+    result_id = ""
+    label = ""
+    n_georef_files = 0
+
+    if args.image_base_url:
+        # Plain-image (S3) mode: no manifest needed.
+        if args.volume:
+            # Multi-volume S3: each --volume takes GLOB SUFFIX where SUFFIX is
+            # appended to --image-base-url to form the per-volume image base URL.
+            if args.oim_iiif or args.georef_glob:
+                print(
+                    "Warning: positional args are ignored when --volume is used.",
+                    file=sys.stderr,
+                )
+            base = args.image_base_url.rstrip("/")
+            for s3_glob, vol_suffix in args.volume:
+                vol_base_url = base + "/" + vol_suffix.lstrip("/")
+                vol_items, vol_result_id, _ = _load_s3_items(
+                    s3_glob, vol_base_url, args.image_source_type
+                )
+                all_valid_items.extend(vol_items)
+                n_georef_files += len(sorted(glob.glob(s3_glob)))
+                if not result_id:
+                    result_id = vol_result_id
+        else:
+            # Single-volume S3: georef glob from positional arg.
+            # oim_iiif is first positional so it receives the value when only one
+            # positional argument is supplied.
+            s3_glob = args.georef_glob or args.oim_iiif
+            if not s3_glob:
+                parser.error(
+                    "Provide a georef glob pattern as a positional argument "
+                    "when using --image-base-url."
+                )
+            vol_items, result_id, label = _load_s3_items(
+                s3_glob, args.image_base_url, args.image_source_type
+            )
+            all_valid_items.extend(vol_items)
+            n_georef_files = len(sorted(glob.glob(s3_glob)))
+    else:
+        # Manifest-based mode: resolve volume specs from --volume or positionals.
+        if args.volume:
+            if args.oim_iiif or args.georef_glob:
+                print(
+                    "Warning: positional OIM_IIIF/GEOREF_GLOB are ignored when --volume is used.",
+                    file=sys.stderr,
+                )
+            volume_specs: list[list[str]] = args.volume
+        elif args.oim_iiif and args.georef_glob:
+            volume_specs = [[args.oim_iiif, args.georef_glob]]
+        else:
+            parser.error(
+                "Provide positional OIM_IIIF GEOREF_GLOB for a single volume, "
+                "or use --volume IIIF GLOB (repeatable) for multiple volumes, "
+                "or use --image-base-url URL for plain-image hosting."
+            )
+
+        for iiif_path, georef_glob in volume_specs:
+            vol_items, vol_result_id, vol_label = _load_volume_items(
+                iiif_path, georef_glob
+            )
+            all_valid_items.extend(vol_items)
+            n_georef_files += len(sorted(glob.glob(georef_glob)))
+            if not result_id:
+                result_id = vol_result_id
+                label = vol_label
+
     # Compute block-based clipping masks when a centerlines file is provided.
-    geo_masks: list[ShapelyPolygon | None] = [None] * len(valid_items)
+    # All volumes' pages are passed together so blocks at volume boundaries are
+    # assigned correctly using color and geometry from all neighboring pages.
+    geo_masks: list[ShapelyPolygon | None] = [None] * len(all_valid_items)
     if args.centerlines:
         with open(args.centerlines) as f:
             centerlines_geojson: dict = json.load(f)
-        all_georefs = [georef for _, _, georef, _ in valid_items]
+        all_georefs = [georef for _, _, georef, _ in all_valid_items]
         print("Computing block-based clipping masks...", file=sys.stderr)
         debug_blocks: list[dict] | None = [] if args.debug_blocks else None
         geo_masks = compute_all_clip_masks(
             all_georefs,
             centerlines_geojson,
             debug_blocks_out=debug_blocks,
-            raw_paths=[raw_path for _, _, _, raw_path in valid_items],
+            raw_paths=[raw_path for _, _, _, raw_path in all_valid_items],
         )
         n_masked = sum(m is not None for m in geo_masks)
         print(
-            f"Computed masks for {n_masked}/{len(valid_items)} pages.", file=sys.stderr
+            f"Computed masks for {n_masked}/{len(all_valid_items)} pages.",
+            file=sys.stderr,
         )
         if debug_blocks is not None:
             blocks_geojson = {"type": "FeatureCollection", "features": debug_blocks}
@@ -732,7 +953,7 @@ def main() -> None:
                     "properties": {"page_key": page_key},
                     "geometry": geom_mapping(mask),
                 }
-                for (page_key, _, _, _), mask in zip(valid_items, geo_masks)
+                for (page_key, _, _, _), mask in zip(all_valid_items, geo_masks)
                 if mask is not None
             ]
             with open(args.debug_clip, "w") as f:
@@ -745,7 +966,7 @@ def main() -> None:
     # Pass 2: build annotations with the per-page geo mask.
     annotations: list[dict] = []
     for (page_key, canvas_item, georef, raw_path), geo_mask in zip(
-        valid_items, geo_masks
+        all_valid_items, geo_masks
     ):
         try:
             annotations.append(
@@ -757,7 +978,7 @@ def main() -> None:
             print(f"Warning: skipping {page_key}: {exc}", file=sys.stderr)
 
     print(
-        f"Generated {len(annotations)} annotations from {len(georef_paths)} georef files.",
+        f"Generated {len(annotations)} annotations from {n_georef_files} georef files.",
         file=sys.stderr,
     )
 
@@ -765,7 +986,7 @@ def main() -> None:
         "id": result_id,
         "type": "AnnotationPage",
         "@context": ["http://www.w3.org/ns/anno.jsonld"],
-        "label": source_data.get("label", ""),
+        "label": label,
         "items": annotations,
     }
 

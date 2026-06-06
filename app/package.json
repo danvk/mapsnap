@@ -6,13 +6,16 @@
     "build": "vite build",
     "preview": "vite preview",
     "type-check": "tsc --noEmit",
-    "format": "prettier --write ."
+    "format": "prettier --write .",
+    "iiif": "node iiif-server.mjs"
   },
   "type": "module",
   "dependencies": {
     "maplibre-gl": "^5.19.0"
   },
   "devDependencies": {
+    "express": "^4.22.2",
+    "express-iiif": "^1.7.0",
     "prettier": "^3.8.1",
     "typescript": "^5.9.3",
     "vite": "^7.3.1"

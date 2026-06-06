@@ -324,10 +324,10 @@ def _assign_blocks_to_pages_with_splits(
     to a page, the intersection with that page is added to that page's territory;
     the remainder (outside the page) is queued for the next round only if it is
     substantial relative to the subblock (≥10% of area and ≥10% of extent in both
-    dimensions). Thin slivers are discarded to avoid invalid geometry.
-
-    Convergence is guaranteed: each outside part is strictly smaller than the
-    subblock it came from, and the set of eligible pages shrinks each round.
+    dimensions) AND the page claimed at least 5% of the subblock. The second
+    condition prevents infinite loops when a large block barely clips many pages
+    (e.g. a coverage-boundary polygon): in that case the outside is always ~100%
+    of the subblock and re-queuing never converges.
 
     Returns page_idx → list of Polygon pieces already clipped to the page boundary.
     """
@@ -346,10 +346,17 @@ def _assign_blocks_to_pages_with_splits(
                 subblock = remaining[block_idx]
                 inside = subblock.intersection(page_poly)
                 outside = subblock.difference(page_poly)
-                page_territory[page_idx].extend(_collect_polygons(inside))
-                for piece in _collect_polygons(outside):
-                    if _is_substantial(piece, subblock):
-                        next_remaining.append(piece)
+                inside_pieces = _collect_polygons(inside)
+                page_territory[page_idx].extend(inside_pieces)
+                inside_fraction = (
+                    sum(p.area for p in inside_pieces) / subblock.area
+                    if subblock.area > 0
+                    else 1.0
+                )
+                if inside_fraction >= 0.05:
+                    for piece in _collect_polygons(outside):
+                        if _is_substantial(piece, subblock):
+                            next_remaining.append(piece)
 
         remaining = next_remaining
 

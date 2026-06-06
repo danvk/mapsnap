@@ -37,6 +37,7 @@ def canvas_to_page_key(canvas_id: str, label: str) -> str:
 def process_canvas(
     canvas: dict,
     output_dir: Path,
+    scale: str,
     dry_run: bool,
 ) -> Path:
     """Download the full-resolution image for one canvas.
@@ -48,9 +49,7 @@ def process_canvas(
 
     page_key = canvas_to_page_key(canvas_id, label)
     assert page_key != "iiif", f"Could not extract valid page key from {canvas_id}"
-    # size = "pct:25"
-    size = "full"
-    image_url = f"{canvas_id}/full/{size}/0/default.jpg"
+    image_url = f"{canvas_id}/full/{scale}/0/default.jpg"
     image_path = output_dir / f"{page_key}.raw.jpg"
 
     if image_path.exists():
@@ -86,6 +85,13 @@ def main() -> None:
         help="Local LOC IIIF Presentation manifest JSON file(s)",
     )
     parser.add_argument(
+        "--scale",
+        type=str,
+        default="full",
+        help='Scale at which to download imagery. Default is "full", but can also be '
+        'set to "pct:25", "pct:50", etc.',
+    )
+    parser.add_argument(
         "--dry-run",
         action="store_true",
         help="Print what would be downloaded without actually downloading",
@@ -108,7 +114,9 @@ def main() -> None:
 
         for i, canvas in enumerate(canvases, 1):
             print(f"[{i}/{len(canvases)}] ", file=sys.stderr, end="")
-            out_path = process_canvas(canvas, output_dir, args.dry_run)
+            out_path = process_canvas(
+                canvas, output_dir, scale=args.scale, dry_run=args.dry_run
+            )
             out_paths[out_path] += 1
             num_total += 1
 
