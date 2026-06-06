@@ -752,7 +752,10 @@ def process_image(
             and det.get("long_side", float("inf"))
             >= min_aspect_ratio * det.get("short_side", 1.0)
             and not is_number_only(det["text"])
-            and normalize_street(det["text"]) not in DIRECTION_WORDS
+            and (
+                normalize_street(det["text"]) not in DIRECTION_WORDS
+                or det["text"].upper().strip() in DIRECTION_WORDS
+            )
         ):
             continue
         if edge_margin > 0:

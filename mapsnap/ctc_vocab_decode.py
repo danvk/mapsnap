@@ -96,6 +96,16 @@ def generate_vocab_strings(normalized_streets: set[str]) -> list[str]:
             name_words = body
 
         if not name_words:
+            if first not in _DIR_TO_ABBREVS:
+                continue
+            # e.g. "WEST STREET": the direction word is the street name, not a prefix.
+            # Generate all abbreviated name forms × type forms (no separate direction prefix).
+            for name_form in _DIR_TO_ABBREVS[first]:
+                for type_form in type_forms:
+                    parts = [name_form]
+                    if type_form is not None:
+                        parts.append(type_form)
+                    result.add(" ".join(parts))
             continue
 
         base_name = " ".join(name_words)
