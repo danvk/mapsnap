@@ -691,6 +691,135 @@ def _finalize_georef(
     return affine_scale_deg_per_px(A), center
 
 
+def assemble_hint_groups(
+    detections: list[dict],
+    hint_detections: list[dict],
+    normalized_streets: set[str],
+    max_gap_px: float = 30.0,
+    perp_tolerance_px: float = 15.0,
+) -> list[dict]:
+    """Assemble collinear hint+name token sequences into unambiguous street detections.
+
+    When CRAFT splits one physical label (e.g. "EAST SEVENTH ST") into separate boxes,
+    this groups spatially adjacent detections and checks whether their assembled text
+    resolves to a single known street name. Returns one synthetic detection per
+    unambiguous group.
+
+    Tokens are bucketed by dir_pix (15° buckets), sorted by their projection onto the
+    bucket direction, then sweep-merged into runs. Two consecutive tokens (in parallel
+    order) join the same run when the edge-to-edge gap along the parallel axis is ≤
+    max_gap_px and the perpendicular center difference is ≤ perp_tolerance_px.
+    Edge-to-edge gap = center_gap − (long_side_a + long_side_b) / 2. Each run with at
+    least one hint and one non-hint token is tried for assembly.
+    """
+    all_candidates = detections + hint_detections
+    if not all_candidates or not hint_detections:
+        return []
+
+    bucket_size = math.pi / 12.0  # 15° per bucket; 12 buckets cover [0, π)
+    buckets: dict[int, list[dict]] = {}
+    for det in all_candidates:
+        dir_pix = det.get("dir_pix", 0.0)
+        bucket_key = int(round(dir_pix / bucket_size)) % 12
+        buckets.setdefault(bucket_key, []).append(det)
+
+    assembled: list[dict] = []
+
+    for group in buckets.values():
+        if not any(d.get("hint") for d in group):
+            continue
+
+        mean_dir = sum(d.get("dir_pix", 0.0) for d in group) / len(group)
+        cos_d = math.cos(mean_dir)
+        sin_d = math.sin(mean_dir)
+
+        # Project each detection center onto (parallel, perpendicular) axes.
+        annotated: list[tuple[float, float, dict]] = []
+        for det in group:
+            poly = det["polygon"]
+            cx = sum(p[0] for p in poly) / 4.0
+            cy = sum(p[1] for p in poly) / 4.0
+            par = cx * cos_d + cy * sin_d
+            perp = -cx * sin_d + cy * cos_d
+            annotated.append((par, perp, det))
+        annotated.sort(key=lambda t: t[0])
+
+        # Sweep-merge: consecutive items within gap thresholds join the same run.
+        # Gap is edge-to-edge: center_gap − (long_side_a + long_side_b) / 2.
+        runs: list[list[tuple[float, float, dict]]] = []
+        current_run = [annotated[0]]
+        for i in range(1, len(annotated)):
+            prev_par, prev_perp, prev_det = annotated[i - 1]
+            curr_par, curr_perp, curr_det = annotated[i]
+            center_gap = curr_par - prev_par
+            half_extents = (
+                prev_det.get("long_side", 0.0) + curr_det.get("long_side", 0.0)
+            ) / 2.0
+            edge_gap = center_gap - half_extents
+            perp_diff = abs(curr_perp - prev_perp)
+            if edge_gap <= max_gap_px and perp_diff <= perp_tolerance_px:
+                current_run.append(annotated[i])
+            else:
+                runs.append(current_run)
+                current_run = [annotated[i]]
+        runs.append(current_run)
+
+        for run in runs:
+            has_hint = any(d.get("hint") for _, _, d in run)
+            has_non_hint = any(not d.get("hint") for _, _, d in run)
+            if not has_hint or not has_non_hint:
+                continue
+
+            tokens = [d for _, _, d in run]
+            # Normalize the joined string, not each token independently.
+            # normalize_street("ST.") alone gives "SAINT" (PREFIX_ABBREVS applies to
+            # first word), but normalize_street("SEVENTH ST.") correctly gives
+            # "SEVENTH STREET" (STREET_ABBREVS applies to non-first words).
+            assembled_text = normalize_street(" ".join(d["text"] for d in tokens))
+            matches = canonical_street_matches(assembled_text, normalized_streets)
+            if len(matches) != 1:
+                continue
+
+            canonical = matches[0]
+            min_confidence = min(d["confidence"] for d in tokens if not d.get("hint"))
+
+            # Build bounding polygon aligned to dir_pix from all constituent corners.
+            all_pars: list[float] = []
+            all_perps: list[float] = []
+            for d in tokens:
+                for px, py in d["polygon"]:
+                    all_pars.append(px * cos_d + py * sin_d)
+                    all_perps.append(-px * sin_d + py * cos_d)
+            par_min, par_max = min(all_pars), max(all_pars)
+            perp_min, perp_max = min(all_perps), max(all_perps)
+
+            # Convert (par, perp) corners back to (x, y) pixel coordinates.
+            polygon = [
+                [int(p * cos_d - q * sin_d), int(p * sin_d + q * cos_d)]
+                for p, q in [
+                    (par_min, perp_min),
+                    (par_max, perp_min),
+                    (par_max, perp_max),
+                    (par_min, perp_max),
+                ]
+            ]
+
+            assembled.append(
+                {
+                    "polygon": polygon,
+                    "text": canonical,
+                    "confidence": round(min_confidence, 4),
+                    "angle": tokens[0].get("angle", 0),
+                    "long_side": round(par_max - par_min, 1),
+                    "short_side": round(perp_max - perp_min, 1),
+                    "dir_pix": round(mean_dir % math.pi, 4),
+                    "assembled": True,
+                }
+            )
+
+    return assembled
+
+
 def derive_paths(image_path: str) -> tuple[str, str]:
     """Derive labels and output paths from an image path.
 
@@ -749,6 +878,16 @@ def process_image(
             file=sys.stderr,
         )
     normalized_streets = set(block_index.keys())
+    assembled = assemble_hint_groups(
+        all_detections, hint_detections, normalized_streets
+    )
+    if assembled:
+        print(
+            f"Assembled detections ({len(assembled)}): "
+            + ", ".join(d["text"] for d in assembled),
+            file=sys.stderr,
+        )
+        all_detections = assembled + all_detections
     all_detections = deduplicate_detections(
         all_detections, normalized_streets=normalized_streets
     )

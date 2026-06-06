@@ -5,9 +5,120 @@ import numpy as np
 from mapsnap.georef_from_labels import (
     _FT_PER_DEG_LAT,
     _cluster_geo_coords,
+    assemble_hint_groups,
     project_to_polyline,
 )
 from mapsnap.streets import Block
+
+
+# ---------------------------------------------------------------------------
+# assemble_hint_groups
+# ---------------------------------------------------------------------------
+
+
+def _make_det(
+    text: str,
+    cx: float,
+    cy: float,
+    long_side: float = 60.0,
+    short_side: float = 18.0,
+    confidence: float = 0.9,
+    dir_pix: float = 0.0,
+    angle: int = 0,
+    hint: bool = False,
+) -> dict:
+    """Build a mock detection dict with a horizontal bounding polygon."""
+    half_long = long_side / 2.0
+    half_short = short_side / 2.0
+    return {
+        "polygon": [
+            [int(cx - half_long), int(cy - half_short)],
+            [int(cx + half_long), int(cy - half_short)],
+            [int(cx + half_long), int(cy + half_short)],
+            [int(cx - half_long), int(cy + half_short)],
+        ],
+        "text": text,
+        "confidence": confidence,
+        "angle": angle,
+        "long_side": long_side,
+        "short_side": short_side,
+        "dir_pix": dir_pix,
+        **({"hint": True} if hint else {}),
+    }
+
+
+def test_assemble_three_token_label():
+    # "EAST SEVENTH ST" split into three adjacent boxes; should assemble.
+    # Positions: EAST (long=40, cx=20), SEVENTH (long=80, cx=80), ST. (long=30, cx=135)
+    # Edge gaps: 20+20=40 right of EAST; 80-40=40 left of SEVENTH → edge gap = 0px ✓
+    #            80+40=120 right of SEVENTH; 135-15=120 left of ST. → edge gap = 0px ✓
+    streets = {"EAST SEVENTH STREET"}
+    dets = [_make_det("SEVENTH", cx=80, cy=100, long_side=80)]
+    hints = [
+        _make_det("EAST", cx=20, cy=100, long_side=40, hint=True),
+        _make_det("ST.", cx=135, cy=100, long_side=30, hint=True),
+    ]
+    result = assemble_hint_groups(dets, hints, streets)
+    assert len(result) == 1
+    assert result[0]["text"] == "EAST SEVENTH STREET"
+    assert result[0]["assembled"] is True
+    assert result[0]["confidence"] == 0.9  # min of non-hint confidences
+    # Assembled polygon spans from EAST left edge (0) to ST. right edge (150)
+    xs = [p[0] for p in result[0]["polygon"]]
+    assert min(xs) <= 0 and max(xs) >= 150
+
+
+def test_assemble_non_adjacent_groups_not_merged():
+    # "EAST" (long_side=60) and "SEVENTH" (long_side=60) with a 200px edge gap.
+    # EAST center=50 (edges 20-80), SEVENTH center=350 (edges 320-380).
+    # Edge gap = 350-50 - (60+60)/2 = 300-60 = 240 > max_gap_px.
+    streets = {"EAST SEVENTH STREET"}
+    dets = [_make_det("SEVENTH", cx=350, cy=100)]
+    hints = [_make_det("EAST", cx=50, cy=100, hint=True)]
+    result = assemble_hint_groups(dets, hints, streets)
+    assert result == []
+
+
+def test_assemble_no_hints_returns_empty():
+    streets = {"SEVENTH STREET"}
+    dets = [_make_det("SEVENTH", cx=100, cy=100)]
+    result = assemble_hint_groups(dets, [], streets)
+    assert result == []
+
+
+def test_assemble_ambiguous_match_skipped():
+    # "SEVENTH ST" could match SEVENTH STREET but also an unrelated match —
+    # here we use a streets set where "SEVENTH" alone matches two streets.
+    streets = {"EAST SEVENTH STREET", "WEST SEVENTH STREET"}
+    dets = [_make_det("SEVENTH", cx=100, cy=100)]
+    hints = [_make_det("ST.", cx=200, cy=100, hint=True)]
+    # "SEVENTH STREET" normalized → matches both EAST and WEST variants?
+    # canonical_street_matches("SEVENTH STREET", ...) returns keys that
+    # prefix-match "SEVENTH STREET"; both "EAST SEVENTH STREET" and
+    # "WEST SEVENTH STREET" have "SEVENTH STREET" as a suffix-match candidate,
+    # so two matches → ambiguous → no assembly.
+    result = assemble_hint_groups(dets, hints, streets)
+    assert result == []
+
+
+def test_assemble_hint_only_run_skipped():
+    # A run with only hints (no non-hint name) should not produce a detection.
+    streets = {"EAST STREET"}
+    hints = [
+        _make_det("EAST", cx=50, cy=100, hint=True),
+        _make_det("ST.", cx=120, cy=100, hint=True),
+    ]
+    result = assemble_hint_groups([], hints, streets)
+    assert result == []
+
+
+def test_assemble_perpendicular_gap_too_large():
+    # "EAST" and "SEVENTH" are at same parallel position but far apart perpendicularly.
+    streets = {"EAST SEVENTH STREET"}
+    dets = [_make_det("SEVENTH", cx=150, cy=200)]  # cy differs by 100
+    hints = [_make_det("EAST", cx=50, cy=100, hint=True)]
+    result = assemble_hint_groups(dets, hints, streets, perp_tolerance_px=15.0)
+    assert result == []
 
 
 # ---------------------------------------------------------------------------
