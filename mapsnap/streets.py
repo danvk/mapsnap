@@ -234,6 +234,20 @@ def canonical_street_match(
     raw = text.upper().strip()
     if raw != normalized and raw in normalized_streets:
         return raw
+    if normalized in DIRECTION_WORDS:
+        # Bare direction word (e.g. "EAST", "WEST"): only match exact key aliases
+        # or two-word "DIRECTION TYPE" keys (e.g. "EAST STREET", "WEST AVENUE").
+        # Prevents "EAST" from prefix-matching all "EAST 103RD STREET",
+        # "EAST FOURTH STREET", etc. via candidate.startswith("EAST ").
+        for s in normalized_streets:
+            if s == normalized:
+                return s
+            if (
+                s.startswith(normalized + " ")
+                and s[len(normalized) + 1 :] in STREET_TYPES
+            ):
+                return s
+        return None
     for s in normalized_streets:
         for candidate in _match_candidates(s):
             if (
@@ -263,11 +277,26 @@ def canonical_street_matches(
     When normalization expands a direction abbreviation (e.g. "W"→"WEST") and the
     raw text is itself a known alias (e.g. "W" for "AVENUE W"), only that alias is
     returned — preventing "W" from matching all 70+ "WEST X" streets.
+
+    Bare direction words (e.g. "EAST", "WEST") only match exact key aliases or
+    two-word "DIRECTION TYPE" keys (e.g. "EAST STREET") — not direction-prefixed
+    named/numbered streets like "EAST 103RD STREET".
     """
     normalized = normalize_street(text)
     raw = text.upper().strip()
     if raw != normalized and raw in normalized_streets:
         return [raw]
+    if normalized in DIRECTION_WORDS:
+        matches = []
+        for s in normalized_streets:
+            if s == normalized:
+                matches.append(s)
+            elif (
+                s.startswith(normalized + " ")
+                and s[len(normalized) + 1 :] in STREET_TYPES
+            ):
+                matches.append(s)
+        return matches
     matches: list[str] = []
     for s in normalized_streets:
         for candidate in _match_candidates(s):
