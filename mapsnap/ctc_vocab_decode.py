@@ -27,7 +27,13 @@ from functools import lru_cache
 
 import numpy as np
 
-from mapsnap.streets import DIRECTION_ABBREVS, ORDINAL_WORD_TO_NUM, STREET_ABBREVS
+from mapsnap.streets import (
+    DIRECTION_ABBREVS,
+    DIRECTION_WORDS,
+    ORDINAL_WORD_TO_NUM,
+    STREET_ABBREVS,
+    STREET_TYPES,
+)
 
 # Matches numeric ordinal suffixes: "5TH", "12ND", "3RD", "21ST", etc.
 _ORDINAL_RE = re.compile(r"^(\d+)(ST|ND|RD|TH)$")
@@ -49,6 +55,20 @@ for _abbrev, _full in STREET_ABBREVS.items():
     if _full not in _TYPE_TO_ABBREVS:
         _TYPE_TO_ABBREVS[_full] = [_full]
     _TYPE_TO_ABBREVS[_full].append(_abbrev)
+
+# Standalone hint strings: type words, direction words, and their abbreviations.
+# These allow the CTC decoder to correctly recognise CRAFT boxes that contain only
+# one component of a multi-word label (e.g. "ST." split off from "EAST 7TH ST.").
+# They are marked "hint" in streets.json and are not used as standalone GCPs.
+_HINT_STRINGS: frozenset[str] = frozenset(
+    STREET_TYPES  # STREET, AVENUE, BOULEVARD, …
+    | set(STREET_ABBREVS)  # ST, AVE, AV, BLVD, …
+    | {a + "." for a in STREET_ABBREVS}  # ST., AVE., …
+    | DIRECTION_WORDS  # NORTH, SOUTH, EAST, WEST, …
+    | set(DIRECTION_ABBREVS)  # N, S, E, W, NE, …
+    | {a + "." for a in DIRECTION_ABBREVS}  # N., S., E., W., …
+    | {"SAINT"}
+)
 
 
 def generate_vocab_strings(normalized_streets: set[str]) -> list[str]:
@@ -164,6 +184,10 @@ def generate_vocab_strings(normalized_streets: set[str]) -> list[str]:
                     if type_form is not None:
                         parts.append(type_form)
                     result.add(" ".join(parts))
+
+    # Add standalone hint strings unconditionally so the CTC decoder can output
+    # bare type/direction words when CRAFT splits a label into separate boxes.
+    result.update(_HINT_STRINGS)
 
     return sorted(result)
 

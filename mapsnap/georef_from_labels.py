@@ -738,6 +738,16 @@ def process_image(
 
     print(f"All detections: {len(all_detections)}")
     all_detections = [d for d in all_detections if not d.get("ignore")]
+    # Hints (bare type/direction words) are separated before GCP matching.
+    # They don't form standalone GCPs but will be used by future assembly logic.
+    hint_detections = [d for d in all_detections if d.get("hint")]
+    all_detections = [d for d in all_detections if not d.get("hint")]
+    if hint_detections:
+        print(
+            f"Hint detections ({len(hint_detections)}): "
+            + ", ".join(d["text"] for d in hint_detections),
+            file=sys.stderr,
+        )
     normalized_streets = set(block_index.keys())
     all_detections = deduplicate_detections(
         all_detections, normalized_streets=normalized_streets

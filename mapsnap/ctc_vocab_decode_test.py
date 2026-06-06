@@ -3,6 +3,7 @@
 import numpy as np
 
 from mapsnap.ctc_vocab_decode import (
+    _HINT_STRINGS,
     build_trie,
     generate_vocab_strings,
     prefix_constrained_ctc,
@@ -101,7 +102,11 @@ def test_generate_spaced_ordinal_forms():
 
 
 def test_generate_empty_input():
-    assert generate_vocab_strings(set()) == []
+    # Hint strings are always included even with no streets.
+    vocab = set(generate_vocab_strings(set()))
+    assert "STREET" in vocab
+    assert "AVE" in vocab
+    assert "NORTH" in vocab
 
 
 def test_generate_leading_type_street():
@@ -120,6 +125,25 @@ def test_generate_west_street():
     assert "W" in vocab
     assert "WEST ST" in vocab
     assert "W ST" in vocab
+
+
+def test_generate_includes_hint_strings():
+    # Hint strings must appear in every vocab regardless of which streets are present.
+    vocab = set(generate_vocab_strings({"MAGAZINE STREET"}))
+    for word in ("STREET", "AVE", "ST.", "NORTH", "N.", "EAST", "W", "SAINT"):
+        assert word in vocab, f"hint word {word!r} missing from vocab"
+
+
+def test_hint_strings_constant():
+    # Spot-check that _HINT_STRINGS contains the expected categories.
+    assert "STREET" in _HINT_STRINGS
+    assert "AVE" in _HINT_STRINGS
+    assert "ST." in _HINT_STRINGS
+    assert "NORTH" in _HINT_STRINGS
+    assert "N." in _HINT_STRINGS
+    assert "SAINT" in _HINT_STRINGS
+    # Should NOT contain multi-word forms.
+    assert "EAST GRAND" not in _HINT_STRINGS
 
 
 # ---------------------------------------------------------------------------
