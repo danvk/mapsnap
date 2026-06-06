@@ -755,6 +755,7 @@ def process_image(
             and (
                 normalize_street(det["text"]) not in DIRECTION_WORDS
                 or det["text"].upper().strip() in DIRECTION_WORDS
+                or det["text"].upper().strip() in normalized_streets
             )
         ):
             continue

@@ -224,8 +224,16 @@ def canonical_street_match(
     candidates (including direction- and SAINT-stripped forms) match
     normalize_street(text). Always returns the actual key so downstream block_index
     lookups succeed even when the label omits a prefix. Returns None if no match.
+
+    When normalization expands a direction abbreviation (e.g. "W"→"WEST") and the
+    raw text is itself a known alias (e.g. "W" for "AVENUE W"), the alias is returned
+    directly and the expansion path is skipped — preventing "W" from matching all
+    "WEST X" streets when it should match only "AVENUE W".
     """
     normalized = normalize_street(text)
+    raw = text.upper().strip()
+    if raw != normalized and raw in normalized_streets:
+        return raw
     for s in normalized_streets:
         for candidate in _match_candidates(s):
             if (
@@ -251,8 +259,15 @@ def canonical_street_matches(
     the set iteration yields first, eliminating nondeterminism when a bare label
     (e.g. "CLINTON") could match multiple full names (e.g. "CLINTON AVENUE" and
     "CLINTON STREET").
+
+    When normalization expands a direction abbreviation (e.g. "W"→"WEST") and the
+    raw text is itself a known alias (e.g. "W" for "AVENUE W"), only that alias is
+    returned — preventing "W" from matching all 70+ "WEST X" streets.
     """
     normalized = normalize_street(text)
+    raw = text.upper().strip()
+    if raw != normalized and raw in normalized_streets:
+        return [raw]
     matches: list[str] = []
     for s in normalized_streets:
         for candidate in _match_candidates(s):
@@ -341,9 +356,10 @@ def build_block_index(geojson: dict) -> dict[str, list[Block]]:
     """Index GeoJSON centerline features by normalized street_name.
 
     Also adds unambiguous base-name aliases so that bare labels (e.g. "MAGAZINE")
-    match full centerline names (e.g. "MAGAZINE STREET"). An alias is only added
-    when exactly one full name shares that base, to avoid false matches like
-    "MAGAZINE" matching both "Magazine Street" and "Magazine Place".
+    match full centerline names (e.g. "MAGAZINE STREET"), direction-stripped aliases
+    (e.g. "LIBERTY" for "SOUTH LIBERTY STREET"), and leading-type-stripped aliases
+    (e.g. "X" for "AVENUE X"). Each alias is only added when unambiguous (exactly
+    one full name maps to that stripped form).
     """
     index: dict[str, list[Block]] = {}
     for feature in geojson["features"]:
@@ -388,6 +404,18 @@ def build_block_index(geojson: dict) -> dict[str, list[Block]]:
     for stripped, full_names in dir_stripped_to_full.items():
         if len(full_names) == 1:
             # Same list object as the full-name entry; see comment above.
+            index[stripped] = index[full_names[0]]
+
+    # Build aliases with leading type word stripped for unambiguous cases.
+    # e.g. "AVENUE X" → also index under "X".
+    # Iterating list(index.keys()) captures all aliases added so far.
+    leading_type_stripped: dict[str, list[str]] = defaultdict(list)
+    for key in list(index.keys()):
+        parts = key.split(" ", 1)
+        if len(parts) == 2 and parts[0] in STREET_TYPES and parts[1] not in index:
+            leading_type_stripped[parts[1]].append(key)
+    for stripped, full_names in leading_type_stripped.items():
+        if len(full_names) == 1:
             index[stripped] = index[full_names[0]]
 
     return index

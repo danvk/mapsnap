@@ -104,6 +104,24 @@ def test_generate_empty_input():
     assert generate_vocab_strings(set()) == []
 
 
+def test_generate_leading_type_street():
+    # "AVENUE X": type word is a prefix, not a suffix.
+    vocab = generate_vocab_strings({"AVENUE X"})
+    assert "AVENUE X" in vocab
+    assert "AV X" in vocab
+    assert "AVE X" in vocab
+    assert "X" in vocab  # bare base name
+
+
+def test_generate_west_street():
+    # "WEST STREET": direction word is the street name, not a prefix (regression test).
+    vocab = generate_vocab_strings({"WEST STREET"})
+    assert "WEST" in vocab
+    assert "W" in vocab
+    assert "WEST ST" in vocab
+    assert "W ST" in vocab
+
+
 # ---------------------------------------------------------------------------
 # prefix_constrained_ctc
 # ---------------------------------------------------------------------------

@@ -108,6 +108,30 @@ def generate_vocab_strings(normalized_streets: set[str]) -> list[str]:
                     result.add(" ".join(parts))
             continue
 
+        # e.g. "AVENUE X": type word is a leading qualifier, not a suffix.
+        # Triggered when no trailing type was stripped (type_forms == [None]) but the
+        # first word is itself a type. Generate all abbreviation variants of that type
+        # × the remaining base name, with no separate trailing type.
+        if (
+            type_forms == [None]
+            and len(name_words) > 1
+            and name_words[0] in _TYPE_TO_ABBREVS
+        ):
+            leading_type_forms: list[str | None] = [None] + _TYPE_TO_ABBREVS[
+                name_words[0]
+            ]
+            rest_name = " ".join(name_words[1:])
+            for dir_form in dir_forms:
+                for lt_form in leading_type_forms:
+                    parts: list[str] = []
+                    if dir_form is not None:
+                        parts.append(dir_form)
+                    if lt_form is not None:
+                        parts.append(lt_form)
+                    parts.append(rest_name)
+                    result.add(" ".join(parts))
+            continue
+
         base_name = " ".join(name_words)
 
         # Also generate the numeric ordinal form so the CTC trie contains "S. 4TH ST"
