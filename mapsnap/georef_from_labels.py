@@ -24,6 +24,7 @@ from PIL import Image
 
 from mapsnap.streets import (
     DIRECTION_WORDS,
+    STREET_TYPES,
     Block,
     build_block_index,
     canonical_street_matches,
@@ -42,6 +43,8 @@ class LabelFeature:
     text: str  # normalize_street(raw_text)
     center: tuple[float, float]  # (px, py), mean of polygon corners
     dir_pix: float  # atan2 of long-axis edge mod π, in [0, π)
+    long_side: float  # length of the longest polygon edge in pixels
+    short_side: float  # length of the shortest polygon edge in pixels
 
 
 @dataclass
@@ -74,14 +77,25 @@ def label_features(labels: list[dict]) -> list[LabelFeature]:
         pts = np.array(label["polygon"], dtype=float)
         center = (float(pts[:, 0].mean()), float(pts[:, 1].mean()))
         sides = [pts[(i + 1) % 4] - pts[i] for i in range(4)]
+        side_lengths = [float(np.linalg.norm(s)) for s in sides]
+        long_side = max(side_lengths)
+        short_side = min(side_lengths)
         long_vec = max(sides, key=np.linalg.norm)
-        dir_pix = float(np.arctan2(long_vec[1], long_vec[0])) % np.pi
+        dir_pix_geom = float(np.arctan2(long_vec[1], long_vec[0])) % np.pi
+        # For square polygons the geometry gives an unreliable direction; prefer the
+        # stored dir_pix from detect_text.py (which uses the original CRAFT polygon).
+        if "dir_pix" in label and short_side > 0 and long_side / short_side < 2.0:
+            dir_pix = label["dir_pix"]
+        else:
+            dir_pix = dir_pix_geom
         features.append(
             LabelFeature(
                 raw_text=label["text"],
                 text=label.get("_canonical_text") or normalize_street(label["text"]),
                 center=center,
                 dir_pix=dir_pix,
+                long_side=long_side,
+                short_side=short_side,
             )
         )
     return features
@@ -820,6 +834,132 @@ def assemble_hint_groups(
     return assembled
 
 
+def promote_avenue_letters(
+    hint_detections: list[dict],
+    all_detections: list[dict],
+    normalized_streets: set[str],
+    perp_tolerance_px: float = 20.0,
+) -> list[dict]:
+    """Promote small single-char detections that sit in the same column as a type-word hint.
+
+    When a type-word hint ('AVENUE', 'STREET') shares a direction column with a single-char
+    detection ('X', 'J') that unambiguously matches a lettered avenue/street via bare alias,
+    the detection is returned with `promoted=True` so the quality filter bypasses its size
+    checks, and its dir_pix is corrected from the hint.
+
+    A 'column' means the same dir_pix bucket and a perpendicular offset ≤ perp_tolerance_px.
+    The parallel (along-street) gap is unconstrained — the single-char label and the type-word
+    label can be anywhere along the same avenue.
+    """
+    type_hints = [
+        h for h in hint_detections if h.get("text", "").upper().strip() in STREET_TYPES
+    ]
+    if not type_hints or not all_detections:
+        return []
+
+    bucket_size = math.pi / 12.0
+    promoted: list[dict] = []
+    promoted_poly_keys: set[tuple] = set()
+
+    for hint in type_hints:
+        hint_dir = hint.get("dir_pix", 0.0)
+        hint_bucket = int(round(hint_dir / bucket_size)) % 12
+        cos_d = math.cos(hint_dir)
+        sin_d = math.sin(hint_dir)
+
+        hint_poly = hint["polygon"]
+        hint_cx = sum(p[0] for p in hint_poly) / 4.0
+        hint_cy = sum(p[1] for p in hint_poly) / 4.0
+        hint_perp = -hint_cx * sin_d + hint_cy * cos_d
+
+        for det in all_detections:
+            text = det.get("text", "").strip()
+            if len(text) != 1:
+                continue
+            if det.get("promoted") or det.get("assembled"):
+                continue
+
+            det_dir = det.get("dir_pix", 0.0)
+            det_bucket = int(round(det_dir / bucket_size)) % 12
+            if det_bucket != hint_bucket:
+                continue
+
+            det_poly = det["polygon"]
+            poly_key = tuple(tuple(p) for p in det_poly)
+            if poly_key in promoted_poly_keys:
+                continue
+
+            det_cx = sum(p[0] for p in det_poly) / 4.0
+            det_cy = sum(p[1] for p in det_poly) / 4.0
+            det_perp = -det_cx * sin_d + det_cy * cos_d
+
+            if abs(det_perp - hint_perp) > perp_tolerance_px:
+                continue
+
+            matches = canonical_street_matches(text, normalized_streets)
+            if len(matches) != 1:
+                continue
+
+            promoted_poly_keys.add(poly_key)
+            promoted.append(
+                {
+                    **det,
+                    "dir_pix": round(hint_dir % math.pi, 4),
+                    "promoted": True,
+                }
+            )
+
+    return promoted
+
+
+def correct_square_feature_dirs(
+    features: list[LabelFeature],
+    hint_detections: list[dict],
+    search_radius_px: float = 200.0,
+    square_threshold: float = 2.0,
+) -> None:
+    """Correct dir_pix for square-ish features using nearby type-word hints.
+
+    Modifies features in-place. For each feature whose long_side/short_side ratio is below
+    square_threshold, the polygon long-axis direction is unreliable (a square has no
+    dominant axis). The nearest type-word hint (AVENUE, STREET …) within search_radius_px
+    is used to assign the direction. No bucket filtering is applied — for square features
+    dir_pix is unreliable and cannot be used to pre-select hints.
+    """
+    type_hints = [
+        h for h in hint_detections if h.get("text", "").upper().strip() in STREET_TYPES
+    ]
+    if not type_hints:
+        return
+
+    hint_info: list[tuple[float, float, float]] = []
+    for hint in type_hints:
+        poly = hint["polygon"]
+        hcx = sum(p[0] for p in poly) / 4.0
+        hcy = sum(p[1] for p in poly) / 4.0
+        hdir = hint.get("dir_pix", 0.0)
+        hint_info.append((hcx, hcy, hdir))
+
+    for feat in features:
+        if feat.short_side <= 0:
+            continue
+        if feat.long_side / feat.short_side >= square_threshold:
+            continue
+
+        feat_cx, feat_cy = feat.center
+
+        best_dist = float("inf")
+        best_dir: float | None = None
+        for hcx, hcy, hdir in hint_info:
+            dist = math.hypot(feat_cx - hcx, feat_cy - hcy)
+            if dist < best_dist and dist <= search_radius_px:
+                best_dist = dist
+                best_dir = hdir
+
+        if best_dir is not None:
+            feat.dir_pix = round(best_dir % math.pi, 4)
+
+
 def derive_paths(image_path: str) -> tuple[str, str]:
     """Derive labels and output paths from an image path.
 
@@ -888,13 +1028,28 @@ def process_image(
             file=sys.stderr,
         )
         all_detections = assembled + all_detections
+    promoted = promote_avenue_letters(
+        hint_detections, all_detections, normalized_streets
+    )
+    if promoted:
+        print(
+            f"Promoted detections ({len(promoted)}): "
+            + ", ".join(d["text"] for d in promoted),
+            file=sys.stderr,
+        )
+        all_detections = promoted + all_detections
     all_detections = deduplicate_detections(
         all_detections, normalized_streets=normalized_streets
     )
     print(f"Deduped detections: {len(all_detections)}")
     labels_data = []
     for det in all_detections:
-        if not (
+        is_promoted = det.get("promoted")
+        if is_promoted:
+            # Promoted single-char avenue letters bypass size/aspect checks; confidence only.
+            if det["confidence"] < min_confidence or is_number_only(det["text"]):
+                continue
+        elif not (
             det["confidence"] >= min_confidence
             and det.get("long_side", float("inf")) >= min_long_side
             and det.get("short_side", float("inf")) >= min_short_side
@@ -938,6 +1093,7 @@ def process_image(
     print(f"Filtered detections: {len(labels_data)}")
 
     features = label_features(labels_data)
+    correct_square_feature_dirs(features, hint_detections)
     print(
         f"Labels ({len(features)}): {', '.join(f.text for f in features)}",
         file=sys.stderr,

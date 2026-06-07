@@ -1,11 +1,16 @@
 """Tests for georef_from_labels helpers."""
 
+import math
+
 import numpy as np
 
 from mapsnap.georef_from_labels import (
     _FT_PER_DEG_LAT,
     _cluster_geo_coords,
     assemble_hint_groups,
+    correct_square_feature_dirs,
+    label_features,
+    promote_avenue_letters,
     project_to_polyline,
 )
 from mapsnap.streets import Block
@@ -119,6 +124,149 @@ def test_assemble_perpendicular_gap_too_large():
     hints = [_make_det("EAST", cx=50, cy=100, hint=True)]
     result = assemble_hint_groups(dets, hints, streets, perp_tolerance_px=15.0)
     assert result == []
+
+
+# ---------------------------------------------------------------------------
+# promote_avenue_letters
+# ---------------------------------------------------------------------------
+
+
+def test_promote_single_char_near_avenue_hint():
+    # "X" in the same vertical column as an "AVENUE" hint → promoted with corrected dir_pix.
+    # Both share dir_pix=π/2 (vertical), as in the real p88 data where detect_text.py
+    # already computes dir_pix correctly from the CRAFT polygon even for square boxes.
+    streets = {"AVENUE X", "X"}
+    hints = [
+        _make_det(
+            "AVENUE", cx=193, cy=1544, long_side=120, hint=True, dir_pix=math.pi / 2
+        )
+    ]
+    dets = [
+        _make_det("X", cx=192, cy=274, long_side=24, short_side=24, dir_pix=math.pi / 2)
+    ]
+    result = promote_avenue_letters(hints, dets, streets)
+    assert len(result) == 1
+    assert result[0]["text"] == "X"
+    assert result[0]["promoted"] is True
+    assert abs(result[0]["dir_pix"] - math.pi / 2) < 0.01
+
+
+def test_promote_wrong_dir_bucket_not_promoted():
+    # "X" has dir_pix=0.0 (wrong bucket, different from AVENUE hint's π/2) → no promotion.
+    # promote_avenue_letters requires detection and hint in the same direction bucket.
+    streets = {"AVENUE X", "X"}
+    hints = [
+        _make_det(
+            "AVENUE", cx=193, cy=1544, long_side=120, hint=True, dir_pix=math.pi / 2
+        )
+    ]
+    dets = [_make_det("X", cx=192, cy=274, long_side=24, short_side=24, dir_pix=0.0)]
+    result = promote_avenue_letters(hints, dets, streets)
+    assert result == []
+
+
+def test_promote_no_matching_street():
+    # "Q" is not in the streets set → canonical_street_matches returns [] → no promotion.
+    streets = {"AVENUE X", "X"}
+    hints = [
+        _make_det(
+            "AVENUE", cx=193, cy=1544, long_side=120, hint=True, dir_pix=math.pi / 2
+        )
+    ]
+    dets = [
+        _make_det("Q", cx=192, cy=274, long_side=24, short_side=24, dir_pix=math.pi / 2)
+    ]
+    result = promote_avenue_letters(hints, dets, streets)
+    assert result == []
+
+
+def test_promote_different_column_not_promoted():
+    # "X" and "AVENUE" hint are in different columns (|perp diff| >> tolerance).
+    streets = {"AVENUE X", "X"}
+    hints = [
+        _make_det(
+            "AVENUE", cx=500, cy=1544, long_side=120, hint=True, dir_pix=math.pi / 2
+        )
+    ]
+    dets = [
+        _make_det("X", cx=192, cy=274, long_side=24, short_side=24, dir_pix=math.pi / 2)
+    ]
+    result = promote_avenue_letters(hints, dets, streets, perp_tolerance_px=20.0)
+    assert result == []
+
+
+def test_promote_multi_char_not_promoted():
+    # Multi-character detection is not eligible for promotion.
+    streets = {"AVENUE XX", "XX"}
+    hints = [
+        _make_det(
+            "AVENUE", cx=193, cy=1544, long_side=120, hint=True, dir_pix=math.pi / 2
+        )
+    ]
+    dets = [
+        _make_det(
+            "XX", cx=192, cy=274, long_side=40, short_side=20, dir_pix=math.pi / 2
+        )
+    ]
+    result = promote_avenue_letters(hints, dets, streets)
+    assert result == []
+
+
+def test_promote_direction_hint_not_used():
+    # Direction hints (EAST, NORTH) are not type-word hints → no promotion.
+    streets = {"AVENUE X", "X"}
+    hints = [_make_det("EAST", cx=193, cy=300, long_side=80, hint=True, dir_pix=0.0)]
+    dets = [_make_det("X", cx=192, cy=274, long_side=24, short_side=24, dir_pix=0.0)]
+    result = promote_avenue_letters(hints, dets, streets)
+    assert result == []
+
+
+# ---------------------------------------------------------------------------
+# correct_square_feature_dirs
+# ---------------------------------------------------------------------------
+
+
+def test_correct_square_feature_dir():
+    # A square-ish feature near an AVENUE hint gets dir_pix corrected to the hint's direction.
+    # Hint at cx=270 (same cy), feature at cx=192 — distance 78px < default 200px.
+    hints = [
+        _make_det(
+            "AVENUE", cx=270, cy=300, long_side=120, hint=True, dir_pix=math.pi / 2
+        )
+    ]
+    det = _make_det("X", cx=192, cy=300, long_side=24, short_side=24, dir_pix=0.0)
+    features = label_features([det])
+    assert features[0].long_side / features[0].short_side < 2.0  # confirms square-ish
+    correct_square_feature_dirs(features, hints)
+    assert abs(features[0].dir_pix - math.pi / 2) < 0.01
+
+
+def test_correct_square_feature_too_far_unchanged():
+    # Hint is within search_radius_px but on a different avenue — hint is > 200px away.
+    hints = [
+        _make_det(
+            "AVENUE", cx=193, cy=1544, long_side=120, hint=True, dir_pix=math.pi / 2
+        )
+    ]
+    det = _make_det("X", cx=192, cy=300, long_side=24, short_side=24, dir_pix=0.0)
+    features = label_features([det])
+    original_dir = features[0].dir_pix
+    correct_square_feature_dirs(features, hints, search_radius_px=50.0)
+    assert features[0].dir_pix == original_dir
+
+
+def test_correct_non_square_feature_unchanged():
+    # Long, narrow feature (aspect ≫ 2) is not corrected even with a nearby hint.
+    hints = [
+        _make_det(
+            "AVENUE", cx=193, cy=300, long_side=120, hint=True, dir_pix=math.pi / 2
+        )
+    ]
+    det = _make_det("SEVENTH", cx=192, cy=300, long_side=80, short_side=18, dir_pix=0.0)
+    features = label_features([det])
+    original_dir = features[0].dir_pix
+    correct_square_feature_dirs(features, hints)
+    assert features[0].dir_pix == original_dir
 
 
 # ---------------------------------------------------------------------------

@@ -42,7 +42,14 @@ def _make_geojson(*name_and_lines: tuple[str, list[list[float]]]) -> dict:
 
 def _feat(text: str, cx: float, cy: float, dir_pix: float) -> LabelFeature:
     """Build a LabelFeature with canonical text, pixel center, and label direction."""
-    return LabelFeature(raw_text=text, text=text, center=(cx, cy), dir_pix=dir_pix)
+    return LabelFeature(
+        raw_text=text,
+        text=text,
+        center=(cx, cy),
+        dir_pix=dir_pix,
+        long_side=200.0,
+        short_side=20.0,
+    )
 
 
 EW = 0.0  # dir_pix for an east-west label (horizontal)
