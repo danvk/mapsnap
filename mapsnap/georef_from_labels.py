@@ -839,6 +839,7 @@ def promote_avenue_letters(
     all_detections: list[dict],
     normalized_streets: set[str],
     perp_tolerance_px: float = 20.0,
+    center_dedup_px: float = 10.0,
 ) -> list[dict]:
     """Promote small single-char detections that sit in the same column as a type-word hint.
 
@@ -847,19 +848,38 @@ def promote_avenue_letters(
     the detection is returned with `promoted=True` so the quality filter bypasses its size
     checks, and its dir_pix is corrected from the hint.
 
+    Single-char direction-abbreviation hints ('W', 'N', 'E', 'S') in hint_detections are
+    also eligible candidates. They are processed before non-hint detections so that e.g. 'W'
+    (correctly read as Avenue W) takes priority over a same-position non-hint misread like 'M'.
+    Once a detection is promoted at some center position, any other candidate within
+    center_dedup_px is suppressed — this prevents both 'W' and 'M' from being promoted when
+    they are different OCR readings of the same physical box.
+
     A 'column' means the same dir_pix bucket and a perpendicular offset ≤ perp_tolerance_px.
-    The parallel (along-street) gap is unconstrained — the single-char label and the type-word
-    label can be anywhere along the same avenue.
+    The parallel (along-street) gap is unconstrained.
     """
     type_hints = [
         h for h in hint_detections if h.get("text", "").upper().strip() in STREET_TYPES
     ]
-    if not type_hints or not all_detections:
+    if not type_hints:
+        return []
+
+    # Single-char direction-abbrev hints (e.g. "W" for Avenue W) are candidates too.
+    # Prepend them so they win the center-based dedup over same-position non-hint misreads.
+    single_char_dir_hints = [
+        h
+        for h in hint_detections
+        if len(h.get("text", "").strip()) == 1
+        and h.get("text", "").upper().strip() not in STREET_TYPES
+    ]
+    candidates = single_char_dir_hints + list(all_detections)
+
+    if not candidates:
         return []
 
     bucket_size = math.pi / 12.0
     promoted: list[dict] = []
-    promoted_poly_keys: set[tuple] = set()
+    promoted_centers: list[tuple[float, float]] = []
 
     for hint in type_hints:
         hint_dir = hint.get("dir_pix", 0.0)
@@ -872,7 +892,7 @@ def promote_avenue_letters(
         hint_cy = sum(p[1] for p in hint_poly) / 4.0
         hint_perp = -hint_cx * sin_d + hint_cy * cos_d
 
-        for det in all_detections:
+        for det in candidates:
             text = det.get("text", "").strip()
             if len(text) != 1:
                 continue
@@ -885,14 +905,17 @@ def promote_avenue_letters(
                 continue
 
             det_poly = det["polygon"]
-            poly_key = tuple(tuple(p) for p in det_poly)
-            if poly_key in promoted_poly_keys:
-                continue
-
             det_cx = sum(p[0] for p in det_poly) / 4.0
             det_cy = sum(p[1] for p in det_poly) / 4.0
-            det_perp = -det_cx * sin_d + det_cy * cos_d
 
+            # Suppress candidates too close to an already-promoted detection.
+            if any(
+                math.hypot(det_cx - pc[0], det_cy - pc[1]) < center_dedup_px
+                for pc in promoted_centers
+            ):
+                continue
+
+            det_perp = -det_cx * sin_d + det_cy * cos_d
             if abs(det_perp - hint_perp) > perp_tolerance_px:
                 continue
 
@@ -900,14 +923,13 @@ def promote_avenue_letters(
             if len(matches) != 1:
                 continue
 
-            promoted_poly_keys.add(poly_key)
-            promoted.append(
-                {
-                    **det,
-                    "dir_pix": round(hint_dir % math.pi, 4),
-                    "promoted": True,
-                }
-            )
+            promoted_centers.append((det_cx, det_cy))
+            # Strip "hint" so the promoted detection is treated as a regular detection
+            # downstream (deduplicate_detections and the quality filter both skip hints).
+            promoted_det = {k: v for k, v in det.items() if k != "hint"}
+            promoted_det["dir_pix"] = round(hint_dir % math.pi, 4)
+            promoted_det["promoted"] = True
+            promoted.append(promoted_det)
 
     return promoted
 

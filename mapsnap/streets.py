@@ -349,13 +349,18 @@ def deduplicate_detections(
     street name are ranked before non-matches regardless of EasyOCR confidence.
     Within each group, higher confidence wins. This prevents a high-confidence
     misread from suppressing a lower-confidence but correctly spelled street label.
+
+    Assembled (Phase 3) and promoted (Phase 4) detections always rank above plain
+    detections so that synthetic or rescued detections are not suppressed by a
+    higher-confidence misread at the same position.
     """
 
-    def sort_key(d: dict) -> tuple[bool, float]:
+    def sort_key(d: dict) -> tuple[bool, bool, float]:
         street_match = normalized_streets is not None and matches_any_street(
             d["text"], normalized_streets
         )
-        return (street_match, d["confidence"])
+        is_priority = bool(d.get("assembled") or d.get("promoted"))
+        return (street_match, is_priority, d["confidence"])
 
     sorted_dets = sorted(detections, key=sort_key, reverse=True)
     kept: list[dict] = []
