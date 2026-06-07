@@ -343,7 +343,7 @@ def deduplicate_detections(
     iou_threshold: float = 0.3,
     normalized_streets: set[str] | None = None,
 ) -> list[dict]:
-    """Remove duplicate detections with greedy NMS.
+    """Remove duplicate detections with greedy non-maximum suppression (NMS).
 
     When normalized_streets is provided, detections whose text matches a known
     street name are ranked before non-matches regardless of EasyOCR confidence.
