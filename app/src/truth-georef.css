@@ -162,3 +162,11 @@ textarea {
 #detections-table tr.ignored td {
   color: #999;
 }
+
+#detections-table tr.hint td {
+  color: #7c3aed;
+}
+
+#detections-table tr.second-pass td {
+  color: #0284c7;
+}

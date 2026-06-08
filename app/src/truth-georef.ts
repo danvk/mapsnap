@@ -34,6 +34,8 @@ interface Detection {
   long_side: number;
   short_side: number;
   ignore?: boolean;
+  hint?: boolean;
+  second_pass?: boolean;
 }
 
 interface GeorefData {
@@ -331,11 +333,17 @@ function renderDetections(): void {
   for (const { det, i } of getFilteredDetections()) {
     const isSelected = selectedDetectionIndices.has(i);
     const isIgnored = det.ignore === true;
+    const isHint = det.hint === true;
+    const isSecondPass = det.second_pass === true;
     const color = isSelected
       ? '#ff6600'
       : isIgnored
         ? '#999'
-        : confidenceColor(det.confidence);
+        : isHint
+          ? '#7c3aed'
+          : isSecondPass
+            ? '#0284c7'
+            : confidenceColor(det.confidence);
     const points = det.polygon
       .map(([x, y]) => toDisplay(x, y))
       .map(([dx, dy]) => `${dx},${dy}`)
@@ -351,6 +359,9 @@ function renderDetections(): void {
     polygonEl.setAttribute('stroke', color);
     polygonEl.setAttribute('stroke-width', isSelected ? '2.5' : '1.2');
     if (isIgnored) polygonEl.setAttribute('stroke-dasharray', '4 3');
+    else if (isHint) polygonEl.setAttribute('stroke-dasharray', '3 2');
+    else if (isSecondPass)
+      polygonEl.setAttribute('stroke-dasharray', '6 2 2 2');
     svg.appendChild(polygonEl);
 
     if (isSelected) {
@@ -462,6 +473,8 @@ function updateDetectionsTable(): void {
     const tr = document.createElement('tr');
     if (selectedDetectionIndices.has(i)) tr.classList.add('selected');
     if (det.ignore) tr.classList.add('ignored');
+    if (det.hint) tr.classList.add('hint');
+    if (det.second_pass) tr.classList.add('second-pass');
 
     for (const val of [
       det.angle,
