@@ -709,6 +709,8 @@ def assemble_hint_groups(
     detections: list[dict],
     hint_detections: list[dict],
     normalized_streets: set[str],
+    block_index: dict[str, list[Block]] | None = None,
+    min_confidence: float = 0.5,
     max_gap_px: float = 30.0,
     perp_tolerance_px: float = 15.0,
 ) -> list[dict]:
@@ -719,13 +721,21 @@ def assemble_hint_groups(
     resolves to a single known street name. Returns one synthetic detection per
     unambiguous group.
 
-    Tokens are bucketed by dir_pix (15° buckets), sorted by their projection onto the
-    bucket direction, then sweep-merged into runs. Two consecutive tokens (in parallel
-    order) join the same run when the edge-to-edge gap along the parallel axis is ≤
-    max_gap_px and the perpendicular center difference is ≤ perp_tolerance_px.
-    Edge-to-edge gap = center_gap − (long_side_a + long_side_b) / 2. Each run with at
-    least one hint and one non-hint token is tried for assembly.
+    Only detections meeting min_confidence are considered. This filters low-quality
+    noise detections (e.g. a misread street that overlaps a real one) that would
+    otherwise contaminate runs with spurious non-hint tokens.
+
+    Tokens are bucketed by dir_pix (15° buckets). Within each bucket, items are
+    clustered into perp lanes by single-linkage on their perpendicular coordinate,
+    then sweep-merged by par within each lane. Each run with exactly one non-hint
+    token and at least one hint is tried for assembly. Both forward and reversed
+    token orderings are tried so that direction prefixes (e.g. "N") that appear
+    after the street name in par order (labels reading bottom-to-top) still match.
     """
+    detections = [d for d in detections if d.get("confidence", 0.0) >= min_confidence]
+    hint_detections = [
+        d for d in hint_detections if d.get("confidence", 0.0) >= min_confidence
+    ]
     all_candidates = detections + hint_detections
     if not all_candidates or not hint_detections:
         return []
@@ -756,46 +766,80 @@ def assemble_hint_groups(
             par = cx * cos_d + cy * sin_d
             perp = -cx * sin_d + cy * cos_d
             annotated.append((par, perp, det))
-        annotated.sort(key=lambda t: t[0])
 
-        # Sweep-merge: consecutive items within gap thresholds join the same run.
+        # Cluster into perp lanes using single-linkage on perp values (sorted first
+        # so grouping is stable regardless of par order). Items from different text
+        # rows are separated; the par sweep then runs within each lane only.
+        annotated_by_perp = sorted(annotated, key=lambda t: t[1])
+        perp_lanes: list[list[tuple[float, float, dict]]] = [[annotated_by_perp[0]]]
+        for item in annotated_by_perp[1:]:
+            if abs(item[1] - perp_lanes[-1][-1][1]) <= perp_tolerance_px:
+                perp_lanes[-1].append(item)
+            else:
+                perp_lanes.append([item])
+
+        # Sweep-merge within each perp lane: consecutive items (by par) join the
+        # same run when edge-to-edge gap ≤ max_gap_px.
         # Gap is edge-to-edge: center_gap − (long_side_a + long_side_b) / 2.
         runs: list[list[tuple[float, float, dict]]] = []
-        current_run = [annotated[0]]
-        for i in range(1, len(annotated)):
-            prev_par, prev_perp, prev_det = annotated[i - 1]
-            curr_par, curr_perp, curr_det = annotated[i]
-            center_gap = curr_par - prev_par
-            half_extents = (
-                prev_det.get("long_side", 0.0) + curr_det.get("long_side", 0.0)
-            ) / 2.0
-            edge_gap = center_gap - half_extents
-            perp_diff = abs(curr_perp - prev_perp)
-            if edge_gap <= max_gap_px and perp_diff <= perp_tolerance_px:
-                current_run.append(annotated[i])
-            else:
-                runs.append(current_run)
-                current_run = [annotated[i]]
-        runs.append(current_run)
+        for lane in perp_lanes:
+            lane.sort(key=lambda t: t[0])
+            current_run = [lane[0]]
+            for i in range(1, len(lane)):
+                prev_par, _, prev_det = lane[i - 1]
+                curr_par, _, curr_det = lane[i]
+                center_gap = curr_par - prev_par
+                half_extents = (
+                    prev_det.get("long_side", 0.0) + curr_det.get("long_side", 0.0)
+                ) / 2.0
+                edge_gap = center_gap - half_extents
+                if edge_gap <= max_gap_px:
+                    current_run.append(lane[i])
+                else:
+                    runs.append(current_run)
+                    current_run = [lane[i]]
+            runs.append(current_run)
 
         for run in runs:
-            has_hint = any(d.get("hint") for _, _, d in run)
-            has_non_hint = any(not d.get("hint") for _, _, d in run)
-            if not has_hint or not has_non_hint:
+            hint_tokens = [d for _, _, d in run if d.get("hint")]
+            non_hint_tokens = [d for _, _, d in run if not d.get("hint")]
+            if not hint_tokens or len(non_hint_tokens) != 1:
                 continue
 
+            # Preserve par order for natural left-to-right / top-to-bottom assembly.
             tokens = [d for _, _, d in run]
             # Normalize the joined string, not each token independently.
             # normalize_street("ST.") alone gives "SAINT" (PREFIX_ABBREVS applies to
             # first word), but normalize_street("SEVENTH ST.") correctly gives
             # "SEVENTH STREET" (STREET_ABBREVS applies to non-first words).
-            assembled_text = normalize_street(" ".join(d["text"] for d in tokens))
-            matches = canonical_street_matches(assembled_text, normalized_streets)
-            if len(matches) != 1:
+            # Try both forward and reversed order: for vertical labels a direction
+            # prefix (e.g. "N") may fall below the street name in par order
+            # (labels reading bottom-to-top), so "STATE N" reversed gives "N STATE".
+            canonical: str | None = None
+            for ordering in [tokens, list(reversed(tokens))]:
+                text = normalize_street(" ".join(d["text"] for d in ordering))
+                raw_matches = canonical_street_matches(text, normalized_streets)
+                # Deduplicate by block-list identity: "WEST COLUMBIA" and
+                # "WEST COLUMBIA AVENUE" point to the same list object, so they
+                # count as one street here just as they do in process_image.
+                # When block_index is None (e.g. in tests), skip dedup.
+                if block_index is not None:
+                    seen_ids: set[int] = set()
+                    deduped: list[str] = []
+                    for m in raw_matches:
+                        bid = id(block_index[m])
+                        if bid not in seen_ids:
+                            seen_ids.add(bid)
+                            deduped.append(m)
+                else:
+                    deduped = list(raw_matches)
+                if len(deduped) == 1:
+                    canonical = deduped[0]
+                    break
+            if canonical is None:
                 continue
 
-            canonical = matches[0]
-            min_confidence = min(d["confidence"] for d in tokens if not d.get("hint"))
+            run_conf = min(d["confidence"] for d in non_hint_tokens)
 
             # Build bounding polygon aligned to dir_pix from all constituent corners.
             all_pars: list[float] = []
@@ -822,8 +866,8 @@ def assemble_hint_groups(
                 {
                     "polygon": polygon,
                     "text": canonical,
-                    "confidence": round(min_confidence, 4),
-                    "angle": tokens[0].get("angle", 0),
+                    "confidence": round(run_conf, 4),
+                    "angle": non_hint_tokens[0].get("angle", 0),
                     "long_side": round(par_max - par_min, 1),
                     "short_side": round(perp_max - perp_min, 1),
                     "dir_pix": round(mean_dir % math.pi, 4),
@@ -1042,7 +1086,7 @@ def process_image(
         )
     normalized_streets = set(block_index.keys())
     assembled = assemble_hint_groups(
-        all_detections, hint_detections, normalized_streets
+        all_detections, hint_detections, normalized_streets, block_index, min_confidence
     )
     if assembled:
         print(
