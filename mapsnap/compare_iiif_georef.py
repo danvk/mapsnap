@@ -96,16 +96,23 @@ def fit_similarity(gcps: list[GCP]) -> np.ndarray:
     return np.array([[alpha / cos_phi, beta / cos_phi, tx], [beta, -alpha, ty]])
 
 
-def fit_transform(gcps: list[GCP]) -> np.ndarray:
-    """Fit the appropriate transform for the given GCPs.
+def fit_transform(gcps: list[GCP], transform_type: str) -> np.ndarray:
+    """Fit the transform indicated by transform_type.
 
-    Uses a 4-parameter similarity (Helmert) fit for exactly 2 GCPs, and a full
-    6-parameter affine least-squares fit for 3 or more. Two GCPs correspond to the
-    Helmert annotations output by make_iiif_georef.py; fewer than 2 is an error.
+    'helmert' uses a 4-parameter similarity fit; any other value (e.g. 'polynomial')
+    uses a full 6-parameter affine least-squares fit.
     """
-    if len(gcps) == 2:
+    if transform_type == "helmert":
         return fit_similarity(gcps)
     return fit_affine(gcps)
+
+
+def annotation_transform_type(item: dict) -> str:
+    """Return the transformation.type string from a IIIF georef annotation body.
+
+    Defaults to 'polynomial' when the field is absent (older annotations).
+    """
+    return item.get("body", {}).get("transformation", {}).get("type", "polynomial")
 
 
 def north_angle(A: np.ndarray) -> float:
@@ -221,8 +228,8 @@ def analyze_pair(truth_item: dict, gen_item: dict) -> dict:
     truth_gcps = extract_gcps(truth_item)
     gen_gcps = extract_gcps(gen_item)
 
-    A_truth = fit_transform(truth_gcps)
-    A_gen = fit_transform(gen_gcps)
+    A_truth = fit_transform(truth_gcps, annotation_transform_type(truth_item))
+    A_gen = fit_transform(gen_gcps, annotation_transform_type(gen_item))
 
     width = float(truth_item["target"]["source"]["width"])
     height = float(truth_item["target"]["source"]["height"])
@@ -299,7 +306,7 @@ def analyze_truth_only(truth_item: dict) -> dict:
     source_id: str = truth_item["target"]["source"]["id"]
     page_key = source_id_to_page_key(source_id, truth_item["label"])
     truth_gcps = extract_gcps(truth_item)
-    A_truth = fit_transform(truth_gcps)
+    A_truth = fit_transform(truth_gcps, annotation_transform_type(truth_item))
     skew_deg, aniso = truth_distortion(A_truth)
     return {
         "page_key": page_key,
