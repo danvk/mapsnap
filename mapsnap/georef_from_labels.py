@@ -1007,6 +1007,7 @@ def process_image(
     min_aspect_ratio: float = 2.0,
     edge_margin: float = 0.02,
     force_intersection: tuple[int, int] | None = None,
+    one_gcp_fits: bool = False,
     debug: bool = False,
 ) -> ProcessResult:
     """Fit a georeference model for one image and write GCPs to output_path.
@@ -1128,6 +1129,12 @@ def process_image(
         return ProcessResult(success=False)
     if len(gcps) == 1:
         ix = f"{gcps[0].feat_a.raw_text} x {gcps[0].feat_b.raw_text}"
+        if not one_gcp_fits:
+            print(
+                f"Only 1 intersection GCP: {ix}; skipping (use --one-gcp-fits to enable).",
+                file=sys.stderr,
+            )
+            return ProcessResult(success=False)
         print(
             f"Only 1 intersection GCP: {ix}; deferring for median-scale processing.",
             file=sys.stderr,
@@ -1381,6 +1388,15 @@ def main() -> None:
         ),
     )
     parser.add_argument(
+        "--one-gcp-fits",
+        action="store_true",
+        default=False,
+        help=(
+            "Attempt to georeference pages with only 1 intersection GCP using the "
+            "median scale from other pages (less reliable; disabled by default)."
+        ),
+    )
+    parser.add_argument(
         "--debug", action="store_true", help="Print additional debug information"
     )
     args = parser.parse_args()
@@ -1438,6 +1454,7 @@ def main() -> None:
             min_aspect_ratio=args.min_aspect_ratio,
             edge_margin=args.edge_margin,
             force_intersection=force_intersection,
+            one_gcp_fits=args.one_gcp_fits,
             debug=args.debug,
         )
         if result.success:
