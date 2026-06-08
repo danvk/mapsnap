@@ -18,8 +18,9 @@ uv run mapsnap/georef_from_labels.py $dir/p*.scaled.jpg \
     --min-short-side 20 \
     --edge-margin 0 \
     --min-confidence 0.15 \
-    --min-aspect-ratio 1.75 \
-    --scale-outlier-threshold 0
+    --min-aspect-ratio 1.75
+
+#    --scale-outlier-threshold 0
 
 if [ -e $dir/main.iiif.json ]; then
     ref_iiif=$dir/main.iiif.json
