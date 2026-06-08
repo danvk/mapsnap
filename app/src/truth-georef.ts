@@ -481,12 +481,25 @@ function updateDetectionsTable(): void {
       det.long_side,
       det.short_side,
       det.confidence.toFixed(3),
-      det.text,
     ]) {
       const td = document.createElement('td');
       td.textContent = String(val);
       tr.appendChild(td);
     }
+
+    const typeTd = document.createElement('td');
+    typeTd.textContent = det.ignore
+      ? 'ignore'
+      : det.hint
+        ? 'hint'
+        : det.second_pass
+          ? '2nd pass'
+          : 'street';
+    tr.appendChild(typeTd);
+
+    const textTd = document.createElement('td');
+    textTd.textContent = det.text;
+    tr.appendChild(textTd);
 
     const imageTd = document.createElement('td');
     if (rowIdx < 10) {
