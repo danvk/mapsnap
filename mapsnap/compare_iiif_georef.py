@@ -66,53 +66,12 @@ def extract_gcps(item: dict) -> list[GCP]:
 def fit_affine(gcps: list[GCP]) -> np.ndarray:
     """Fit a 2×3 affine transform: [lon, lat] = A @ [px, py, 1].
 
-    Returns A (2×3 ndarray). Requires at least 3 GCPs; underdetermined otherwise.
+    Returns A (2×3 ndarray).
     """
     X = np.array([[px, py, 1.0] for (px, py), _ in gcps])
     Y = np.array([[lon, lat] for _, (lon, lat) in gcps])
     result, *_ = np.linalg.lstsq(X, Y, rcond=None)
     return result.T  # 2×3
-
-
-def fit_similarity(gcps: list[GCP]) -> np.ndarray:
-    """Fit a 4-parameter similarity (Helmert) transform from 2+ GCPs.
-
-    Enforces equal metric scale in x/y and no shear. cos(lat) is estimated from
-    the mean latitude of the GCPs to handle the lon/lat aspect ratio.
-
-    Returns A (2×3 ndarray) where [lon, lat]^T = A @ [px, py, 1]^T.
-    """
-    mean_lat = sum(lat for _, (_, lat) in gcps) / len(gcps)
-    cos_phi = math.cos(math.radians(mean_lat))
-    M = []
-    b: list[float] = []
-    for (px, py), (lon, lat) in gcps:
-        M.append([px / cos_phi, py / cos_phi, 1.0, 0.0])
-        b.append(lon)
-        M.append([-py, px, 0.0, 1.0])
-        b.append(lat)
-    result, *_ = np.linalg.lstsq(np.array(M), np.array(b), rcond=None)
-    alpha, beta, tx, ty = result
-    return np.array([[alpha / cos_phi, beta / cos_phi, tx], [beta, -alpha, ty]])
-
-
-def fit_transform(gcps: list[GCP], transform_type: str) -> np.ndarray:
-    """Fit the transform indicated by transform_type.
-
-    'helmert' uses a 4-parameter similarity fit; any other value (e.g. 'polynomial')
-    uses a full 6-parameter affine least-squares fit.
-    """
-    if transform_type == "helmert":
-        return fit_similarity(gcps)
-    return fit_affine(gcps)
-
-
-def annotation_transform_type(item: dict) -> str:
-    """Return the transformation.type string from a IIIF georef annotation body.
-
-    Defaults to 'polynomial' when the field is absent (older annotations).
-    """
-    return item.get("body", {}).get("transformation", {}).get("type", "polynomial")
 
 
 def north_angle(A: np.ndarray) -> float:
@@ -228,8 +187,8 @@ def analyze_pair(truth_item: dict, gen_item: dict) -> dict:
     truth_gcps = extract_gcps(truth_item)
     gen_gcps = extract_gcps(gen_item)
 
-    A_truth = fit_transform(truth_gcps, annotation_transform_type(truth_item))
-    A_gen = fit_transform(gen_gcps, annotation_transform_type(gen_item))
+    A_truth = fit_affine(truth_gcps)
+    A_gen = fit_affine(gen_gcps)
 
     width = float(truth_item["target"]["source"]["width"])
     height = float(truth_item["target"]["source"]["height"])
@@ -306,7 +265,7 @@ def analyze_truth_only(truth_item: dict) -> dict:
     source_id: str = truth_item["target"]["source"]["id"]
     page_key = source_id_to_page_key(source_id, truth_item["label"])
     truth_gcps = extract_gcps(truth_item)
-    A_truth = fit_transform(truth_gcps, annotation_transform_type(truth_item))
+    A_truth = fit_affine(truth_gcps)
     skew_deg, aniso = truth_distortion(A_truth)
     return {
         "page_key": page_key,

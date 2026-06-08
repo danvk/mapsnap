@@ -264,6 +264,30 @@ def _georef_metadata(
     return entries
 
 
+def _two_gcp_affine(
+    p1_pixel: tuple[float, float],
+    p1_geo: tuple[float, float],
+    p2_pixel: tuple[float, float],
+    p2_geo: tuple[float, float],
+) -> np.ndarray:
+    """Compute a 2×3 similarity affine from exactly 2 (pixel, geo) point pairs.
+
+    Enforces equal metric scale in x/y (no shear). cos(lat) is estimated from
+    the mean latitude of the two points. Returns A where [lon, lat]^T = A @ [px, py, 1]^T.
+    """
+    cos_phi = float(np.cos(np.radians((p1_geo[1] + p2_geo[1]) / 2.0)))
+    dx = p2_pixel[0] - p1_pixel[0]
+    dy = p2_pixel[1] - p1_pixel[1]
+    dlon = p2_geo[0] - p1_geo[0]
+    dlat = p2_geo[1] - p1_geo[1]
+    det = dx * dx + dy * dy
+    alpha = (dx * dlon * cos_phi - dy * dlat) / det
+    beta = (dy * dlon * cos_phi + dx * dlat) / det
+    tx = p1_geo[0] - (alpha * p1_pixel[0] + beta * p1_pixel[1]) / cos_phi
+    ty = p1_geo[1] - beta * p1_pixel[0] + alpha * p1_pixel[1]
+    return np.array([[alpha / cos_phi, beta / cos_phi, tx], [beta, -alpha, ty]])
+
+
 GcpPoint = tuple[tuple[float, float], tuple[float, float], str]
 
 
@@ -292,21 +316,35 @@ def _corner_fallback(
     return corner_pts + intersection_pts
 
 
-def georef_gcp_points(georef: dict) -> list[GcpPoint]:
+def georef_gcp_points(
+    georef: dict,
+) -> list[GcpPoint]:
     """Return (pixel, geo, type) triples for the GCPs to embed in the IIIF annotation.
 
-    For georefs with two non-coincident initial (RANSAC seed) intersections, returns
-    exactly those two points with type "gcp". The caller uses a Helmert transformation,
-    which only requires two points.
+    Uses the two "initial" intersections from the RANSAC fit plus a third point
+    selected in priority order:
+      1. Another intersection formed by streets already in the initial pair set.
+      2. Any other intersection in the georef, preferring inliers.
+      3. A perpendicular offset from the midpoint of the two initial intersections.
+    Among multiple candidates in each tier, the one closest to the image center
+    is chosen.
+
+    The third point's geo coords are computed by projecting its pixel position
+    through the similarity affine defined by the two initial GCPs alone, so it
+    carries no independent information and cannot shift the fitted transform.
+
+    Type values: "gcp" for the two initial seed intersections that determine the fit,
+    "intersection" for the third detected intersection (options 1 & 2), "projected" for
+    the synthetic perpendicular third point (option 3), "corner" for image-corner fallback.
 
     Falls back to 4 image corners (type "corner") plus any inlier intersections
     (type "gcp") when fewer than 2 non-coincident initial intersections exist
-    (e.g. georefs produced by deferred single-GCP processing). The caller uses a
-    polynomial transformation for these.
+    (e.g. georefs produced by deferred single-GCP processing).
     """
-    corners: list = georef["corners"]
     width: int = georef["width"]
     height: int = georef["height"]
+    corners: list = georef["corners"]
+    image_center = np.array([width / 2.0, height / 2.0])
 
     all_intersections: list[dict] = georef.get("intersections", [])
     inlier_intersections = [i for i in all_intersections if i.get("inlier")]
@@ -320,12 +358,94 @@ def georef_gcp_points(georef: dict) -> list[GcpPoint]:
     p1_geo = (float(int1["lon"]), float(int1["lat"]))
     p2_geo = (float(int2["lon"]), float(int2["lat"]))
 
-    if float(np.linalg.norm(np.array(p2_pixel) - np.array(p1_pixel))) < 1.0:
+    p1 = np.array(p1_pixel)
+    p2 = np.array(p2_pixel)
+    if float(np.linalg.norm(p2 - p1)) < 1.0:
         return _corner_fallback(corners, width, height, inlier_intersections)
+
+    streets_set = {int1["label_a"], int1["label_b"], int2["label_a"], int2["label_b"]}
+    initial_pairs = {
+        frozenset({int1["label_a"], int1["label_b"]}),
+        frozenset({int2["label_a"], int2["label_b"]}),
+    }
+
+    def dist_to_center(x: float, y: float) -> float:
+        return float(np.linalg.norm(np.array([x, y]) - image_center))
+
+    # Non-collinearity helpers shared by options 1 and 2.
+    dist12 = float(np.linalg.norm(p2 - p1))
+    d_unit = (p2 - p1) / dist12
+    min_offset = 0.25 * dist12
+
+    def perp_dist(x: float, y: float) -> float:
+        v = np.array([x, y]) - p1
+        return abs(float(v[0] * d_unit[1] - v[1] * d_unit[0]))
+
+    # Option 1: intersection formed by streets already in the initial pair set.
+    # Non-collinearity check prevents degenerate cases where an alias pair (e.g.
+    # "KORTE AVENUE x PHILIP STREET" when "KORTE AVENUE" and "KORTE STREET" are the
+    # same physical street) duplicates an existing initial GCP pixel position.
+    option1 = [
+        (float(i["x"]), float(i["y"]))
+        for i in all_intersections
+        if frozenset({i["label_a"], i["label_b"]}) not in initial_pairs
+        and i["label_a"] in streets_set
+        and i["label_b"] in streets_set
+        and perp_dist(float(i["x"]), float(i["y"])) >= min_offset
+    ]
+
+    p3_type: str
+    if option1:
+        p3_x, p3_y = min(option1, key=lambda c: dist_to_center(*c))
+        p3_type = "intersection"
+    else:
+        # Option 2: any other intersection; inliers preferred, then closest to center.
+        # Only consider candidates offset from the P1-P2 line by ≥ 25% of dist(P1, P2)
+        # to avoid near-collinear third points that degrade the affine fit.
+        others = [
+            (float(i["x"]), float(i["y"]), bool(i.get("inlier")))
+            for i in all_intersections
+            if frozenset({i["label_a"], i["label_b"]}) not in initial_pairs
+        ]
+        inliers = [
+            (x, y)
+            for x, y, inlier in others
+            if inlier and perp_dist(x, y) >= min_offset
+        ]
+        non_inliers = [
+            (x, y)
+            for x, y, inlier in others
+            if not inlier and perp_dist(x, y) >= min_offset
+        ]
+        pool = inliers if inliers else non_inliers
+
+        if pool:
+            p3_x, p3_y = min(pool, key=lambda c: dist_to_center(*c))
+            p3_type = "intersection"
+        else:
+            # Option 3: perpendicular offset from midpoint.
+            diff = p2 - p1
+            perp = np.array([-diff[1], diff[0]])
+            mid = (p1 + p2) / 2.0
+            p3_a, p3_b = mid + perp, mid - perp
+            p3 = (
+                p3_a
+                if float(np.linalg.norm(p3_a - image_center))
+                <= float(np.linalg.norm(p3_b - image_center))
+                else p3_b
+            )
+            p3_x = float(np.clip(p3[0], 0.0, float(width)))
+            p3_y = float(np.clip(p3[1], 0.0, float(height)))
+            p3_type = "projected"
+
+    # Project P3 through the 2-GCP similarity to get its geo coords.
+    A = _two_gcp_affine(p1_pixel, p1_geo, p2_pixel, p2_geo)
+    p3_geo = A @ np.array([p3_x, p3_y, 1.0])
 
     return [
         (p1_pixel, p1_geo, "gcp"),
         (p2_pixel, p2_geo, "gcp"),
+        ((p3_x, p3_y), (float(p3_geo[0]), float(p3_geo[1])), p3_type),
     ]
 
 
@@ -484,11 +604,10 @@ def make_annotation(
         "body": {
             "id": f"{canvas_id}/gcps",
             "type": "FeatureCollection",
-            "transformation": (
-                {"type": "helmert"}
-                if len(gcp_pts) == 2
-                else {"type": "polynomial", "options": {"order": 1}}
-            ),
+            "transformation": {
+                "type": "polynomial",
+                "options": {"order": 1},
+            },
             "features": features,
         },
     }
