@@ -12,13 +12,23 @@ if [ ! -e $centerlines ]; then
     centerlines=$dir/../centerlines.geojson
 fi
 
-uv run mapsnap/georef_from_labels.py $dir/p*.scaled.jpg \
+if compgen -G "$dir/p*.scaled.jpg" > /dev/null; then
+    input_images=$dir/p*.scaled.jpg
+elif compgen -G "$dir/p*.raw.jpg" > /dev/null; then
+    input_images=$dir/p*.raw.jpg
+else
+    echo "Error: no p*.scaled.jpg or p*.raw.jpg found in $dir" >&2
+    exit 1
+fi
+
+uv run mapsnap/georef_from_labels.py $input_images \
     --centerlines $centerlines \
     --min-long-side 45 \
     --min-short-side 20 \
     --edge-margin 0 \
     --min-confidence 0.15 \
-    --min-aspect-ratio 1.75
+    --min-aspect-ratio 1.75 \
+    --one-gcp-fits
 
 if [ -e $dir/main.iiif.json ]; then
     ref_iiif=$dir/main.iiif.json
