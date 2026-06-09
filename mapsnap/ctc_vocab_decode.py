@@ -64,7 +64,7 @@ for _abbrev, _full in STREET_ABBREVS.items():
 _LETTERED_TYPE_ABBREVS: frozenset[str] = frozenset(
     k for k, v in STREET_ABBREVS.items() if v in ("AVENUE", "STREET")
 )
-_HINT_STRINGS: frozenset[str] = frozenset(
+HINT_STRINGS: frozenset[str] = frozenset(
     {"AVENUE", "STREET"}
     | _LETTERED_TYPE_ABBREVS  # AVE, AV, ST
     | {a + "." for a in _LETTERED_TYPE_ABBREVS}  # AVE., AV., ST.
@@ -189,7 +189,7 @@ def generate_vocab_strings(normalized_streets: set[str]) -> list[str]:
 
     # Add standalone hint strings unconditionally so the CTC decoder can output
     # bare type/direction words when CRAFT splits a label into separate boxes.
-    result.update(_HINT_STRINGS)
+    result.update(HINT_STRINGS)
 
     return sorted(result)
 

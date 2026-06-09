@@ -13,7 +13,7 @@ import numpy as np
 from PIL import Image
 from tqdm import tqdm
 
-from mapsnap.ctc_vocab_decode import _HINT_STRINGS, generate_vocab_strings
+from mapsnap.ctc_vocab_decode import HINT_STRINGS, generate_vocab_strings
 from mapsnap.streets import build_block_index, polygon_side_lengths
 from mapsnap.utils import image_stem
 
@@ -267,7 +267,7 @@ def _recognize_near_hints(
             }
             if text.upper() in NON_STREET_TEXT:
                 det["ignore"] = True
-            elif text.upper() in _HINT_STRINGS:
+            elif text.upper() in HINT_STRINGS:
                 det["hint"] = True
             new_detections.append(det)
 
@@ -440,7 +440,7 @@ def detect_text(
         det["dir_pix"] = round(float(np.arctan2(long_vec[1], long_vec[0])) % np.pi, 4)
         if det["text"].upper() in NON_STREET_TEXT:
             det["ignore"] = True
-        elif det["text"].upper() in _HINT_STRINGS:
+        elif det["text"].upper() in HINT_STRINGS:
             det["hint"] = True
 
     # Second pass: recognize small boxes adjacent to hint detections.

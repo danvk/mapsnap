@@ -3,7 +3,7 @@
 import numpy as np
 
 from mapsnap.ctc_vocab_decode import (
-    _HINT_STRINGS,
+    HINT_STRINGS,
     build_trie,
     generate_vocab_strings,
     prefix_constrained_ctc,
@@ -140,23 +140,23 @@ def test_generate_includes_hint_strings():
 
 
 def test_hint_strings_constant():
-    # _HINT_STRINGS contains AVENUE and STREET families only.
-    assert "AVENUE" in _HINT_STRINGS
-    assert "AVE" in _HINT_STRINGS
-    assert "AV" in _HINT_STRINGS
-    assert "AV." in _HINT_STRINGS
-    assert "A V" in _HINT_STRINGS
-    assert "STREET" in _HINT_STRINGS
-    assert "ST" in _HINT_STRINGS
-    assert "ST." in _HINT_STRINGS
-    assert "S T" in _HINT_STRINGS
+    # HINT_STRINGS contains AVENUE and STREET families only.
+    assert "AVENUE" in HINT_STRINGS
+    assert "AVE" in HINT_STRINGS
+    assert "AV" in HINT_STRINGS
+    assert "AV." in HINT_STRINGS
+    assert "A V" in HINT_STRINGS
+    assert "STREET" in HINT_STRINGS
+    assert "ST" in HINT_STRINGS
+    assert "ST." in HINT_STRINGS
+    assert "S T" in HINT_STRINGS
     # Other type words and direction words are no longer hints.
-    assert "COURT" not in _HINT_STRINGS
-    assert "NORTH" not in _HINT_STRINGS
-    assert "N." not in _HINT_STRINGS
-    assert "SAINT" not in _HINT_STRINGS
+    assert "COURT" not in HINT_STRINGS
+    assert "NORTH" not in HINT_STRINGS
+    assert "N." not in HINT_STRINGS
+    assert "SAINT" not in HINT_STRINGS
     # Should NOT contain multi-word forms.
-    assert "EAST GRAND" not in _HINT_STRINGS
+    assert "EAST GRAND" not in HINT_STRINGS
 
 
 # ---------------------------------------------------------------------------
