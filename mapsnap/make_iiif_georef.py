@@ -213,10 +213,14 @@ def _load_loc_index(data: dict, raw_dir: Path) -> dict[str, dict]:
         pct_m = re.search(r"/pct:(\d+)/", resource.get("@id", ""))
         scale = 100.0 / int(pct_m.group(1)) if pct_m else 1.0
         if raw_path.exists():
-            # Use raw file dims as the base; apply pct scale to get true canvas size.
             raw_w, raw_h = jpeg_dimensions(raw_path)
-            source_width = int(round(raw_w * scale))
-            source_height = int(round(raw_h * scale))
+            # raw.jpg may be the pct thumbnail (raw_w ≈ resource["width"]) or the
+            # full-resolution image (raw_w ≈ resource["width"] * scale). Only apply
+            # scale if the raw image is at thumbnail resolution.
+            res_w = resource.get("width", 0)
+            effective_scale = 1.0 if (res_w > 0 and raw_w > res_w * 1.5) else scale
+            source_width = int(round(raw_w * effective_scale))
+            source_height = int(round(raw_h * effective_scale))
         else:
             # Resource URL contains e.g. "/full/pct:25/0/default.jpg"; scale up.
             source_width = int(round(resource["width"] * scale))
