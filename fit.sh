@@ -12,15 +12,13 @@ if [ ! -e $centerlines ]; then
     centerlines=$dir/../centerlines.geojson
 fi
 
-uv run mapsnap/georef_from_labels.py $dir/p*.scaled.jpg \
+uv run mapsnap/georef_from_labels.py $dir/p*.raw.jpg \
     --centerlines $centerlines \
     --min-long-side 45 \
     --min-short-side 20 \
     --edge-margin 0 \
     --min-confidence 0.15 \
     --min-aspect-ratio 1.75
-
-#    --scale-outlier-threshold 0
 
 if [ -e $dir/main.iiif.json ]; then
     ref_iiif=$dir/main.iiif.json

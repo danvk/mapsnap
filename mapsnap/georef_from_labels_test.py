@@ -146,56 +146,44 @@ def test_promote_direction_hint_not_used():
     assert result == []
 
 
-def test_promote_direction_hint_letter_wins_over_non_hint_misread():
-    # "W" (hint, direction abbrev) and "M" (non-hint misread) at essentially the same
-    # position near an AVENUE hint.  "W" is processed first and wins; "M" is suppressed
-    # by center-based dedup (both centers are within 10px of each other).
+def test_promote_correct_letter_wins_over_misread():
+    # "W" and "M" (competing OCR readings of the same physical box) at essentially the
+    # same position near an AVENUE hint. "W" is first in all_detections so it is
+    # promoted first; "M" is then suppressed by center-based dedup (within 10px).
     streets = {"AVENUE W", "W", "AVENUE M", "M"}
     hints = [
         _make_det(
             "AVENUE", cx=1164, cy=1566, long_side=120, hint=True, dir_pix=math.pi / 2
         ),
-        _make_det(
-            "W",
-            cx=1163,
-            cy=268,
-            long_side=28,
-            short_side=26,
-            hint=True,
-            dir_pix=math.pi / 2,
-        ),
     ]
     dets = [
         _make_det(
+            "W", cx=1163, cy=268, long_side=28, short_side=26, dir_pix=math.pi / 2
+        ),
+        _make_det(
             "M", cx=1162, cy=270, long_side=28, short_side=26, dir_pix=math.pi / 2
-        )
+        ),
     ]
     result = promote_avenue_letters(hints, dets, streets)
     assert len(result) == 1
     assert result[0]["text"] == "W"
     assert result[0]["promoted"] is True
-    # The hint flag must be stripped — downstream deduplication and filters skip hints.
-    assert "hint" not in result[0]
 
 
-def test_promote_direction_hint_letter_eligible_without_non_hint():
-    # "W" (hint) in column with AVENUE hint, no competing non-hint → promoted.
+def test_promote_letter_in_column_with_avenue():
+    # "W" as a regular detection in column with AVENUE hint → promoted.
     streets = {"AVENUE W", "W"}
     hints = [
         _make_det(
             "AVENUE", cx=193, cy=1544, long_side=120, hint=True, dir_pix=math.pi / 2
         ),
+    ]
+    dets = [
         _make_det(
-            "W",
-            cx=192,
-            cy=274,
-            long_side=18,
-            short_side=12,
-            hint=True,
-            dir_pix=math.pi / 2,
+            "W", cx=192, cy=274, long_side=18, short_side=12, dir_pix=math.pi / 2
         ),
     ]
-    result = promote_avenue_letters(hints, [], streets)
+    result = promote_avenue_letters(hints, dets, streets)
     assert len(result) == 1
     assert result[0]["text"] == "W"
     assert result[0]["promoted"] is True

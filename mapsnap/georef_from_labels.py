@@ -45,6 +45,7 @@ class LabelFeature:
     dir_pix: float  # atan2 of long-axis edge mod π, in [0, π)
     long_side: float  # length of the longest polygon edge in pixels
     short_side: float  # length of the shortest polygon edge in pixels
+    promoted: bool = False  # True for detections rescued by promote_avenue_letters
 
 
 @dataclass
@@ -82,9 +83,11 @@ def label_features(labels: list[dict]) -> list[LabelFeature]:
         short_side = min(side_lengths)
         long_vec = max(sides, key=np.linalg.norm)
         dir_pix_geom = float(np.arctan2(long_vec[1], long_vec[0])) % np.pi
-        # For square polygons the geometry gives an unreliable direction; prefer the
-        # stored dir_pix from detect_text.py (which uses the original CRAFT polygon).
-        if "dir_pix" in label and short_side > 0 and long_side / short_side < 2.0:
+        # For nearly-square polygons the geometry gives an unreliable direction; prefer
+        # the stored dir_pix from detect_text.py (which uses the original CRAFT polygon).
+        # Threshold 1.5 targets genuinely square single-character labels; more elongated
+        # boxes have a reliable geometric axis and should not be overridden.
+        if "dir_pix" in label and short_side > 0 and long_side / short_side < 1.5:
             dir_pix = label["dir_pix"]
         else:
             dir_pix = dir_pix_geom
@@ -96,6 +99,7 @@ def label_features(labels: list[dict]) -> list[LabelFeature]:
                 dir_pix=dir_pix,
                 long_side=long_side,
                 short_side=short_side,
+                promoted=bool(label.get("promoted")),
             )
         )
     return features
@@ -719,9 +723,6 @@ def promote_avenue_letters(
     the detection is returned with `promoted=True` so the quality filter bypasses its size
     checks, and its dir_pix is corrected from the hint.
 
-    Single-char direction-abbreviation hints ('W', 'N', 'E', 'S') in hint_detections are
-    also eligible candidates. They are processed before non-hint detections so that e.g. 'W'
-    (correctly read as Avenue W) takes priority over a same-position non-hint misread like 'M'.
     Once a detection is promoted at some center position, any other candidate within
     center_dedup_px is suppressed — this prevents both 'W' and 'M' from being promoted when
     they are different OCR readings of the same physical box.
@@ -735,15 +736,7 @@ def promote_avenue_letters(
     if not type_hints:
         return []
 
-    # Single-char direction-abbrev hints (e.g. "W" for Avenue W) are candidates too.
-    # Prepend them so they win the center-based dedup over same-position non-hint misreads.
-    single_char_dir_hints = [
-        h
-        for h in hint_detections
-        if len(h.get("text", "").strip()) == 1
-        and h.get("text", "").upper().strip() not in STREET_TYPES
-    ]
-    candidates = single_char_dir_hints + list(all_detections)
+    candidates = list(all_detections)
 
     if not candidates:
         return []
@@ -781,7 +774,7 @@ def promote_avenue_letters(
 
             # Suppress candidates too close to an already-promoted detection.
             if any(
-                math.hypot(det_cx - pc[0], det_cy - pc[1]) < center_dedup_px
+                math.hypot(det_cx - pc[0], det_cy - pc[1]) <= center_dedup_px
                 for pc in promoted_centers
             ):
                 continue
@@ -809,15 +802,18 @@ def correct_square_feature_dirs(
     features: list[LabelFeature],
     hint_detections: list[dict],
     search_radius_px: float = 200.0,
-    square_threshold: float = 2.0,
+    square_threshold: float = 1.5,
 ) -> None:
     """Correct dir_pix for square-ish features using nearby type-word hints.
 
-    Modifies features in-place. For each feature whose long_side/short_side ratio is below
-    square_threshold, the polygon long-axis direction is unreliable (a square has no
-    dominant axis). The nearest type-word hint (AVENUE, STREET …) within search_radius_px
-    is used to assign the direction. No bucket filtering is applied — for square features
-    dir_pix is unreliable and cannot be used to pre-select hints.
+    Modifies features in-place. For each non-promoted feature whose long_side/short_side
+    ratio is below square_threshold, the polygon long-axis direction is unreliable (a square
+    has no dominant axis). The nearest type-word hint (AVENUE, STREET …) within
+    search_radius_px is used to assign the direction. No bucket filtering is applied — for
+    square features dir_pix is unreliable and cannot be used to pre-select hints.
+
+    Promoted features are skipped: their dir_pix was already set explicitly from the correct
+    column hint during promotion and must not be overwritten by a different nearby hint.
     """
     type_hints = [
         h for h in hint_detections if h.get("text", "").upper().strip() in STREET_TYPES
@@ -834,6 +830,8 @@ def correct_square_feature_dirs(
         hint_info.append((hcx, hcy, hdir))
 
     for feat in features:
+        if feat.promoted:
+            continue
         if feat.short_side <= 0:
             continue
         if feat.long_side / feat.short_side >= square_threshold:
@@ -884,8 +882,10 @@ def process_image(
     """Fit a georeference model for one image and write GCPs to output_path.
 
     Returns a ProcessResult with success=True and scale_deg_per_px set on success.
-    Returns success=False with deferred data when exactly 1 intersection GCP is found
-    (needs median scale from other maps to complete). Returns success=False otherwise.
+    Returns success=False otherwise. When one_gcp_fits=True and exactly 1 intersection
+    GCP is found, returns success=False with deferred data set (for later median-scale
+    processing). With the default one_gcp_fits=False, 1-GCP pages return success=False
+    with no deferred data and are skipped entirely.
     """
 
     with Image.open(image_path) as pil_img:
@@ -940,12 +940,11 @@ def process_image(
             and not is_number_only(det["text"])
             and (
                 normalize_street(det["text"]) not in DIRECTION_WORDS
-                or det["text"].upper().strip() in DIRECTION_WORDS
                 or det["text"].upper().strip() in normalized_streets
             )
         ):
             continue
-        if edge_margin > 0:
+        if edge_margin > 0 and not is_promoted:
             poly = np.array(det["polygon"], dtype=float)
             cx, cy = float(poly[:, 0].mean()), float(poly[:, 1].mean())
             if (

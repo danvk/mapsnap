@@ -54,7 +54,6 @@ for _abbrev, _full in STREET_ABBREVS.items():
         _TYPE_TO_ABBREVS[_full] = [_full]
     _TYPE_TO_ABBREVS[_full].append(_abbrev)
 
-# Standalone hint strings: type words, direction words, and their abbreviations.
 # Hint strings are marked "hint" in streets.json and are not used as standalone GCPs.
 # They serve as anchors for promote_avenue_letters (recovering single-letter avenue
 # names like "X" or "W" from "AVENUE X" labels that CRAFT splits into two boxes).

@@ -282,7 +282,7 @@ def detect_text(
                     max(c[0] for c in b) - min(c[0] for c in b),
                     max(c[1] for c in b) - min(c[1] for c in b),
                 )
-                > min_long_side
+                >= min_long_side
             ]
         rotated_clean = _erase_underlines(rotated_array, horizontal_list)
         results = reader.recognize(
