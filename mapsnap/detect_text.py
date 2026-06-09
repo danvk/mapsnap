@@ -273,7 +273,7 @@ def detect_text(
 
         if min_long_side > 0:
             horizontal_list = [
-                b for b in horizontal_list if (b[1] - b[0]) > min_long_side
+                b for b in horizontal_list if (b[1] - b[0]) >= min_long_side
             ]
             free_list = [
                 b
