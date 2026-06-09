@@ -1,13 +1,240 @@
 """Tests for georef_from_labels helpers."""
 
+import math
+
 import numpy as np
 
 from mapsnap.georef_from_labels import (
     _FT_PER_DEG_LAT,
     _cluster_geo_coords,
+    correct_square_feature_dirs,
+    label_features,
+    promote_avenue_letters,
     project_to_polyline,
 )
 from mapsnap.streets import Block
+
+
+# ---------------------------------------------------------------------------
+# promote_avenue_letters
+# ---------------------------------------------------------------------------
+
+
+def _make_det(
+    text: str,
+    cx: float,
+    cy: float,
+    long_side: float = 60.0,
+    short_side: float = 18.0,
+    confidence: float = 0.9,
+    dir_pix: float = 0.0,
+    angle: int = 0,
+    hint: bool = False,
+) -> dict:
+    """Build a mock detection dict with a horizontal bounding polygon."""
+    half_long = long_side / 2.0
+    half_short = short_side / 2.0
+    return {
+        "polygon": [
+            [int(cx - half_long), int(cy - half_short)],
+            [int(cx + half_long), int(cy - half_short)],
+            [int(cx + half_long), int(cy + half_short)],
+            [int(cx - half_long), int(cy + half_short)],
+        ],
+        "text": text,
+        "confidence": confidence,
+        "angle": angle,
+        "long_side": long_side,
+        "short_side": short_side,
+        "dir_pix": dir_pix,
+        **({"hint": True} if hint else {}),
+    }
+
+
+# ---------------------------------------------------------------------------
+# promote_avenue_letters
+# ---------------------------------------------------------------------------
+
+
+def test_promote_single_char_near_avenue_hint():
+    # "X" in the same vertical column as an "AVENUE" hint → promoted with corrected dir_pix.
+    # Both share dir_pix=π/2 (vertical), as in the real p88 data where detect_text.py
+    # already computes dir_pix correctly from the CRAFT polygon even for square boxes.
+    streets = {"AVENUE X", "X"}
+    hints = [
+        _make_det(
+            "AVENUE", cx=193, cy=1544, long_side=120, hint=True, dir_pix=math.pi / 2
+        )
+    ]
+    dets = [
+        _make_det("X", cx=192, cy=274, long_side=24, short_side=24, dir_pix=math.pi / 2)
+    ]
+    result = promote_avenue_letters(hints, dets, streets)
+    assert len(result) == 1
+    assert result[0]["text"] == "X"
+    assert result[0]["promoted"] is True
+    assert abs(result[0]["dir_pix"] - math.pi / 2) < 0.01
+
+
+def test_promote_wrong_dir_bucket_not_promoted():
+    # "X" has dir_pix=0.0 (wrong bucket, different from AVENUE hint's π/2) → no promotion.
+    # promote_avenue_letters requires detection and hint in the same direction bucket.
+    streets = {"AVENUE X", "X"}
+    hints = [
+        _make_det(
+            "AVENUE", cx=193, cy=1544, long_side=120, hint=True, dir_pix=math.pi / 2
+        )
+    ]
+    dets = [_make_det("X", cx=192, cy=274, long_side=24, short_side=24, dir_pix=0.0)]
+    result = promote_avenue_letters(hints, dets, streets)
+    assert result == []
+
+
+def test_promote_no_matching_street():
+    # "Q" is not in the streets set → canonical_street_matches returns [] → no promotion.
+    streets = {"AVENUE X", "X"}
+    hints = [
+        _make_det(
+            "AVENUE", cx=193, cy=1544, long_side=120, hint=True, dir_pix=math.pi / 2
+        )
+    ]
+    dets = [
+        _make_det("Q", cx=192, cy=274, long_side=24, short_side=24, dir_pix=math.pi / 2)
+    ]
+    result = promote_avenue_letters(hints, dets, streets)
+    assert result == []
+
+
+def test_promote_different_column_not_promoted():
+    # "X" and "AVENUE" hint are in different columns (|perp diff| >> tolerance).
+    streets = {"AVENUE X", "X"}
+    hints = [
+        _make_det(
+            "AVENUE", cx=500, cy=1544, long_side=120, hint=True, dir_pix=math.pi / 2
+        )
+    ]
+    dets = [
+        _make_det("X", cx=192, cy=274, long_side=24, short_side=24, dir_pix=math.pi / 2)
+    ]
+    result = promote_avenue_letters(hints, dets, streets, perp_tolerance_px=20.0)
+    assert result == []
+
+
+def test_promote_multi_char_not_promoted():
+    # Multi-character detection is not eligible for promotion.
+    streets = {"AVENUE XX", "XX"}
+    hints = [
+        _make_det(
+            "AVENUE", cx=193, cy=1544, long_side=120, hint=True, dir_pix=math.pi / 2
+        )
+    ]
+    dets = [
+        _make_det(
+            "XX", cx=192, cy=274, long_side=40, short_side=20, dir_pix=math.pi / 2
+        )
+    ]
+    result = promote_avenue_letters(hints, dets, streets)
+    assert result == []
+
+
+def test_promote_direction_hint_not_used():
+    # Direction hints (EAST, NORTH) are not type-word hints → no promotion.
+    streets = {"AVENUE X", "X"}
+    hints = [_make_det("EAST", cx=193, cy=300, long_side=80, hint=True, dir_pix=0.0)]
+    dets = [_make_det("X", cx=192, cy=274, long_side=24, short_side=24, dir_pix=0.0)]
+    result = promote_avenue_letters(hints, dets, streets)
+    assert result == []
+
+
+def test_promote_correct_letter_wins_over_misread():
+    # "W" and "M" (competing OCR readings of the same physical box) at essentially the
+    # same position near an AVENUE hint. "W" is first in all_detections so it is
+    # promoted first; "M" is then suppressed by center-based dedup (within 10px).
+    streets = {"AVENUE W", "W", "AVENUE M", "M"}
+    hints = [
+        _make_det(
+            "AVENUE", cx=1164, cy=1566, long_side=120, hint=True, dir_pix=math.pi / 2
+        ),
+    ]
+    dets = [
+        _make_det(
+            "W", cx=1163, cy=268, long_side=28, short_side=26, dir_pix=math.pi / 2
+        ),
+        _make_det(
+            "M", cx=1162, cy=270, long_side=28, short_side=26, dir_pix=math.pi / 2
+        ),
+    ]
+    result = promote_avenue_letters(hints, dets, streets)
+    assert len(result) == 1
+    assert result[0]["text"] == "W"
+    assert result[0]["promoted"] is True
+
+
+def test_promote_letter_in_column_with_avenue():
+    # "W" as a regular detection in column with AVENUE hint → promoted.
+    streets = {"AVENUE W", "W"}
+    hints = [
+        _make_det(
+            "AVENUE", cx=193, cy=1544, long_side=120, hint=True, dir_pix=math.pi / 2
+        ),
+    ]
+    dets = [
+        _make_det(
+            "W", cx=192, cy=274, long_side=18, short_side=12, dir_pix=math.pi / 2
+        ),
+    ]
+    result = promote_avenue_letters(hints, dets, streets)
+    assert len(result) == 1
+    assert result[0]["text"] == "W"
+    assert result[0]["promoted"] is True
+
+
+# ---------------------------------------------------------------------------
+# correct_square_feature_dirs
+# ---------------------------------------------------------------------------
+
+
+def test_correct_square_feature_dir():
+    # A square-ish feature near an AVENUE hint gets dir_pix corrected to the hint's direction.
+    # Hint at cx=270 (same cy), feature at cx=192 — distance 78px < default 200px.
+    hints = [
+        _make_det(
+            "AVENUE", cx=270, cy=300, long_side=120, hint=True, dir_pix=math.pi / 2
+        )
+    ]
+    det = _make_det("X", cx=192, cy=300, long_side=24, short_side=24, dir_pix=0.0)
+    features = label_features([det])
+    assert features[0].long_side / features[0].short_side < 2.0  # confirms square-ish
+    correct_square_feature_dirs(features, hints)
+    assert abs(features[0].dir_pix - math.pi / 2) < 0.01
+
+
+def test_correct_square_feature_too_far_unchanged():
+    # Hint is within search_radius_px but on a different avenue — hint is > 200px away.
+    hints = [
+        _make_det(
+            "AVENUE", cx=193, cy=1544, long_side=120, hint=True, dir_pix=math.pi / 2
+        )
+    ]
+    det = _make_det("X", cx=192, cy=300, long_side=24, short_side=24, dir_pix=0.0)
+    features = label_features([det])
+    original_dir = features[0].dir_pix
+    correct_square_feature_dirs(features, hints, search_radius_px=50.0)
+    assert features[0].dir_pix == original_dir
+
+
+def test_correct_non_square_feature_unchanged():
+    # Long, narrow feature (aspect ≫ 2) is not corrected even with a nearby hint.
+    hints = [
+        _make_det(
+            "AVENUE", cx=193, cy=300, long_side=120, hint=True, dir_pix=math.pi / 2
+        )
+    ]
+    det = _make_det("SEVENTH", cx=192, cy=300, long_side=80, short_side=18, dir_pix=0.0)
+    features = label_features([det])
+    original_dir = features[0].dir_pix
+    correct_square_feature_dirs(features, hints)
+    assert features[0].dir_pix == original_dir
 
 
 # ---------------------------------------------------------------------------

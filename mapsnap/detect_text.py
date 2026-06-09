@@ -13,7 +13,7 @@ import numpy as np
 from PIL import Image
 from tqdm import tqdm
 
-from mapsnap.ctc_vocab_decode import generate_vocab_strings
+from mapsnap.ctc_vocab_decode import HINT_STRINGS, generate_vocab_strings
 from mapsnap.streets import build_block_index, polygon_side_lengths
 from mapsnap.utils import image_stem
 
@@ -273,7 +273,7 @@ def detect_text(
 
         if min_long_side > 0:
             horizontal_list = [
-                b for b in horizontal_list if (b[1] - b[0]) > min_long_side
+                b for b in horizontal_list if (b[1] - b[0]) >= min_long_side
             ]
             free_list = [
                 b
@@ -282,7 +282,7 @@ def detect_text(
                     max(c[0] for c in b) - min(c[0] for c in b),
                     max(c[1] for c in b) - min(c[1] for c in b),
                 )
-                > min_long_side
+                >= min_long_side
             ]
         rotated_clean = _erase_underlines(rotated_array, horizontal_list)
         results = reader.recognize(
@@ -314,11 +314,17 @@ def detect_text(
             )
 
     for det in all_detections:
+        pts = np.array(det["polygon"], dtype=float)
         sides = polygon_side_lengths(det["polygon"])
         det["long_side"] = round(max(sides), 1)
         det["short_side"] = round(min(sides), 1)
+        edge_vecs = [pts[(i + 1) % 4] - pts[i] for i in range(4)]
+        long_vec = max(edge_vecs, key=np.linalg.norm)
+        det["dir_pix"] = round(float(np.arctan2(long_vec[1], long_vec[0])) % np.pi, 4)
         if det["text"].upper() in NON_STREET_TEXT:
             det["ignore"] = True
+        elif det["text"].upper() in HINT_STRINGS:
+            det["hint"] = True
 
     streets_doc = {
         "width": orig_width,

@@ -3,6 +3,7 @@
 import numpy as np
 
 from mapsnap.ctc_vocab_decode import (
+    HINT_STRINGS,
     build_trie,
     generate_vocab_strings,
     prefix_constrained_ctc,
@@ -101,7 +102,61 @@ def test_generate_spaced_ordinal_forms():
 
 
 def test_generate_empty_input():
-    assert generate_vocab_strings(set()) == []
+    # AVENUE- and STREET-family hint strings are always included even with no streets.
+    vocab = set(generate_vocab_strings(set()))
+    assert "AVENUE" in vocab
+    assert "AVE" in vocab
+    assert "AV" in vocab
+    assert "STREET" in vocab
+    assert "ST" in vocab
+    # Other type words and direction words are no longer hints.
+    assert "COURT" not in vocab
+    assert "NORTH" not in vocab
+
+
+def test_generate_leading_type_street():
+    # "AVENUE X": type word is a prefix, not a suffix.
+    vocab = generate_vocab_strings({"AVENUE X"})
+    assert "AVENUE X" in vocab
+    assert "AV X" in vocab
+    assert "AVE X" in vocab
+    assert "X" in vocab  # bare base name
+
+
+def test_generate_west_street():
+    # "WEST STREET": direction word is the street name, not a prefix (regression test).
+    vocab = generate_vocab_strings({"WEST STREET"})
+    assert "WEST" in vocab
+    assert "W" in vocab
+    assert "WEST ST" in vocab
+    assert "W ST" in vocab
+
+
+def test_generate_includes_hint_strings():
+    # AVENUE- and STREET-family hints appear in every vocab regardless of streets present.
+    vocab = set(generate_vocab_strings({"MAGAZINE STREET"}))
+    for word in ("AVENUE", "AVE", "AV", "AV.", "A V", "STREET", "ST", "ST.", "S T"):
+        assert word in vocab, f"hint word {word!r} missing from vocab"
+
+
+def test_hint_strings_constant():
+    # HINT_STRINGS contains AVENUE and STREET families only.
+    assert "AVENUE" in HINT_STRINGS
+    assert "AVE" in HINT_STRINGS
+    assert "AV" in HINT_STRINGS
+    assert "AV." in HINT_STRINGS
+    assert "A V" in HINT_STRINGS
+    assert "STREET" in HINT_STRINGS
+    assert "ST" in HINT_STRINGS
+    assert "ST." in HINT_STRINGS
+    assert "S T" in HINT_STRINGS
+    # Other type words and direction words are no longer hints.
+    assert "COURT" not in HINT_STRINGS
+    assert "NORTH" not in HINT_STRINGS
+    assert "N." not in HINT_STRINGS
+    assert "SAINT" not in HINT_STRINGS
+    # Should NOT contain multi-word forms.
+    assert "EAST GRAND" not in HINT_STRINGS
 
 
 # ---------------------------------------------------------------------------

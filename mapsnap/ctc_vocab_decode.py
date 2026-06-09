@@ -27,7 +27,11 @@ from functools import lru_cache
 
 import numpy as np
 
-from mapsnap.streets import DIRECTION_ABBREVS, ORDINAL_WORD_TO_NUM, STREET_ABBREVS
+from mapsnap.streets import (
+    DIRECTION_ABBREVS,
+    ORDINAL_WORD_TO_NUM,
+    STREET_ABBREVS,
+)
 
 # Matches numeric ordinal suffixes: "5TH", "12ND", "3RD", "21ST", etc.
 _ORDINAL_RE = re.compile(r"^(\d+)(ST|ND|RD|TH)$")
@@ -49,6 +53,23 @@ for _abbrev, _full in STREET_ABBREVS.items():
     if _full not in _TYPE_TO_ABBREVS:
         _TYPE_TO_ABBREVS[_full] = [_full]
     _TYPE_TO_ABBREVS[_full].append(_abbrev)
+
+# Hint strings are marked "hint" in streets.json and are not used as standalone GCPs.
+# They serve as anchors for promote_avenue_letters (recovering single-letter avenue
+# names like "X" or "W" from "AVENUE X" labels that CRAFT splits into two boxes).
+# AVENUE and STREET (and their abbreviations) are hints; "K STREET" in Washington DC
+# is the same pattern. All other type words (COURT, BOULEVARD, …) and direction
+# words remain regular detections.
+_LETTERED_TYPE_ABBREVS: frozenset[str] = frozenset(
+    k for k, v in STREET_ABBREVS.items() if v in ("AVENUE", "STREET")
+)
+HINT_STRINGS: frozenset[str] = frozenset(
+    {"AVENUE", "STREET"}
+    | _LETTERED_TYPE_ABBREVS  # AVE, AV, ST
+    | {a + "." for a in _LETTERED_TYPE_ABBREVS}  # AVE., AV., ST.
+    # Spaced forms: Sanborn typography sometimes gaps characters (e.g. "A V", "S T").
+    | {" ".join(a) for a in _LETTERED_TYPE_ABBREVS if len(a) > 1}  # A V, A V E, S T
+)
 
 
 def generate_vocab_strings(normalized_streets: set[str]) -> list[str]:
@@ -96,6 +117,40 @@ def generate_vocab_strings(normalized_streets: set[str]) -> list[str]:
             name_words = body
 
         if not name_words:
+            if first not in _DIR_TO_ABBREVS:
+                continue
+            # e.g. "WEST STREET": the direction word is the street name, not a prefix.
+            # Generate all abbreviated name forms × type forms (no separate direction prefix).
+            for name_form in _DIR_TO_ABBREVS[first]:
+                for type_form in type_forms:
+                    parts = [name_form]
+                    if type_form is not None:
+                        parts.append(type_form)
+                    result.add(" ".join(parts))
+            continue
+
+        # e.g. "AVENUE X": type word is a leading qualifier, not a suffix.
+        # Triggered when no trailing type was stripped (type_forms == [None]) but the
+        # first word is itself a type. Generate all abbreviation variants of that type
+        # × the remaining base name, with no separate trailing type.
+        if (
+            type_forms == [None]
+            and len(name_words) > 1
+            and name_words[0] in _TYPE_TO_ABBREVS
+        ):
+            leading_type_forms: list[str | None] = [None] + _TYPE_TO_ABBREVS[
+                name_words[0]
+            ]
+            rest_name = " ".join(name_words[1:])
+            for dir_form in dir_forms:
+                for lt_form in leading_type_forms:
+                    parts: list[str] = []
+                    if dir_form is not None:
+                        parts.append(dir_form)
+                    if lt_form is not None:
+                        parts.append(lt_form)
+                    parts.append(rest_name)
+                    result.add(" ".join(parts))
             continue
 
         base_name = " ".join(name_words)
@@ -130,6 +185,10 @@ def generate_vocab_strings(normalized_streets: set[str]) -> list[str]:
                     if type_form is not None:
                         parts.append(type_form)
                     result.add(" ".join(parts))
+
+    # Add standalone hint strings unconditionally so the CTC decoder can output
+    # bare type/direction words when CRAFT splits a label into separate boxes.
+    result.update(HINT_STRINGS)
 
     return sorted(result)
 

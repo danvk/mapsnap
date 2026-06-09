@@ -34,6 +34,7 @@ interface Detection {
   long_side: number;
   short_side: number;
   ignore?: boolean;
+  hint?: boolean;
 }
 
 interface GeorefData {
@@ -331,11 +332,14 @@ function renderDetections(): void {
   for (const { det, i } of getFilteredDetections()) {
     const isSelected = selectedDetectionIndices.has(i);
     const isIgnored = det.ignore === true;
+    const isHint = det.hint === true;
     const color = isSelected
       ? '#ff6600'
       : isIgnored
         ? '#999'
-        : confidenceColor(det.confidence);
+        : isHint
+          ? '#7c3aed'
+          : confidenceColor(det.confidence);
     const points = det.polygon
       .map(([x, y]) => toDisplay(x, y))
       .map(([dx, dy]) => `${dx},${dy}`)
@@ -351,6 +355,7 @@ function renderDetections(): void {
     polygonEl.setAttribute('stroke', color);
     polygonEl.setAttribute('stroke-width', isSelected ? '2.5' : '1.2');
     if (isIgnored) polygonEl.setAttribute('stroke-dasharray', '4 3');
+    else if (isHint) polygonEl.setAttribute('stroke-dasharray', '3 2');
     svg.appendChild(polygonEl);
 
     if (isSelected) {
@@ -462,18 +467,26 @@ function updateDetectionsTable(): void {
     const tr = document.createElement('tr');
     if (selectedDetectionIndices.has(i)) tr.classList.add('selected');
     if (det.ignore) tr.classList.add('ignored');
+    if (det.hint) tr.classList.add('hint');
 
     for (const val of [
       det.angle,
       det.long_side,
       det.short_side,
       det.confidence.toFixed(3),
-      det.text,
     ]) {
       const td = document.createElement('td');
       td.textContent = String(val);
       tr.appendChild(td);
     }
+
+    const typeTd = document.createElement('td');
+    typeTd.textContent = det.ignore ? 'ignore' : det.hint ? 'hint' : 'street';
+    tr.appendChild(typeTd);
+
+    const textTd = document.createElement('td');
+    textTd.textContent = det.text;
+    tr.appendChild(textTd);
 
     const imageTd = document.createElement('td');
     if (rowIdx < 10) {

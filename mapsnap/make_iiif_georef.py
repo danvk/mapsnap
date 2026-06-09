@@ -617,7 +617,7 @@ def _load_s3_items(
     georef_glob_pattern: str,
     image_base_url: str,
     source_type: str = "ImageService3",
-) -> tuple[list[tuple[str, dict, dict, Path]], str, str]:
+) -> tuple[list[tuple[str, dict, dict, Path, Path]], str, str]:
     """Load volume items for self-hosted images (no IIIF manifest needed).
 
     Constructs canvas items directly from raw.jpg dimensions on disk and a
@@ -637,7 +637,7 @@ def _load_s3_items(
         sys.exit(1)
 
     base_url = image_base_url.rstrip("/")
-    valid_items: list[tuple[str, dict, dict, Path]] = []
+    valid_items: list[tuple[str, dict, dict, Path, Path]] = []
     for path in georef_paths:
         page_key = georef_path_to_page_key(path)
         if not page_key:
@@ -660,13 +660,13 @@ def _load_s3_items(
             },
         }
         georef = json.load(open(path))
-        valid_items.append((page_key, canvas_item, georef, raw_path))
+        valid_items.append((page_key, canvas_item, georef, raw_path, Path(path)))
 
     # Drop skeleton pages within this volume.
-    non_skeleton_keys = {pk for pk, _, _, _ in valid_items if not pk.endswith("s")}
+    non_skeleton_keys = {pk for pk, _, _, _, _ in valid_items if not pk.endswith("s")}
     skipped = [
         pk
-        for pk, _, _, _ in valid_items
+        for pk, _, _, _, _ in valid_items
         if pk.endswith("s") and pk[:-1] in non_skeleton_keys
     ]
     if skipped:
@@ -687,7 +687,7 @@ def _load_s3_items(
 def _load_volume_items(
     iiif_path: str,
     georef_glob_pattern: str,
-) -> tuple[list[tuple[str, dict, dict, Path]], str, str]:
+) -> tuple[list[tuple[str, dict, dict, Path, Path]], str, str]:
     """Load one volume's valid items after per-volume skeleton deduplication.
 
     Accepts an OIM AnnotationPage or LOC sc:Manifest as the source IIIF, plus a
@@ -696,7 +696,7 @@ def _load_volume_items(
     a full-color counterpart within this volume.
 
     Returns (valid_items, result_id, label) where valid_items is a list of
-    (page_key, canvas_item, georef, raw_path) tuples ready for annotation building.
+    (page_key, canvas_item, georef, raw_path, georef_path) tuples ready for annotation building.
     """
     source_data: dict = json.load(open(iiif_path))
 
@@ -726,7 +726,7 @@ def _load_volume_items(
 
     label: str = source_data.get("label", "")
 
-    valid_items: list[tuple[str, dict, dict, Path]] = []
+    valid_items: list[tuple[str, dict, dict, Path, Path]] = []
     for path in georef_paths:
         page_key = georef_path_to_page_key(path)
         if not page_key:
@@ -745,15 +745,15 @@ def _load_volume_items(
             continue
         georef = json.load(open(path))
         raw_path = Path(path).parent / f"{page_key}.raw.jpg"
-        valid_items.append((page_key, canvas_item, georef, raw_path))
+        valid_items.append((page_key, canvas_item, georef, raw_path, Path(path)))
 
     # Drop skeleton pages (key ends in 's') when a full-color counterpart exists
     # within this volume. Scoped per-volume so skeletons in one volume are never
     # dropped because another volume has a matching full-color page.
-    non_skeleton_keys = {pk for pk, _, _, _ in valid_items if not pk.endswith("s")}
+    non_skeleton_keys = {pk for pk, _, _, _, _ in valid_items if not pk.endswith("s")}
     skipped = [
         pk
-        for pk, _, _, _ in valid_items
+        for pk, _, _, _, _ in valid_items
         if pk.endswith("s") and pk[:-1] in non_skeleton_keys
     ]
     if skipped:
@@ -849,7 +849,7 @@ def main() -> None:
 
     now = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
-    all_valid_items: list[tuple[str, dict, dict, Path]] = []
+    all_valid_items: list[tuple[str, dict, dict, Path, Path]] = []
     result_id = ""
     label = ""
     n_georef_files = 0
@@ -924,14 +924,14 @@ def main() -> None:
     if args.centerlines:
         with open(args.centerlines) as f:
             centerlines_geojson: dict = json.load(f)
-        all_georefs = [georef for _, _, georef, _ in all_valid_items]
+        all_georefs = [georef for _, _, georef, _, _ in all_valid_items]
         print("Computing block-based clipping masks...", file=sys.stderr)
         debug_blocks: list[dict] | None = [] if args.debug_blocks else None
         geo_masks = compute_all_clip_masks(
             all_georefs,
             centerlines_geojson,
             debug_blocks_out=debug_blocks,
-            raw_paths=[raw_path for _, _, _, raw_path in all_valid_items],
+            raw_paths=[raw_path for _, _, _, raw_path, _ in all_valid_items],
         )
         n_masked = sum(m is not None for m in geo_masks)
         print(
@@ -953,7 +953,7 @@ def main() -> None:
                     "properties": {"page_key": page_key},
                     "geometry": geom_mapping(mask),
                 }
-                for (page_key, _, _, _), mask in zip(all_valid_items, geo_masks)
+                for (page_key, _, _, _, _), mask in zip(all_valid_items, geo_masks)
                 if mask is not None
             ]
             with open(args.debug_clip, "w") as f:
@@ -965,7 +965,8 @@ def main() -> None:
 
     # Pass 2: build annotations with the per-page geo mask.
     annotations: list[dict] = []
-    for (page_key, canvas_item, georef, raw_path), geo_mask in zip(
+    annotation_georef_paths: list[Path] = []
+    for (page_key, canvas_item, georef, raw_path, georef_path), geo_mask in zip(
         all_valid_items, geo_masks
     ):
         try:
@@ -974,13 +975,28 @@ def main() -> None:
                     canvas_item, georef, raw_path, args.creator, now, geo_mask
                 )
             )
+            annotation_georef_paths.append(georef_path)
         except ValueError as exc:
             print(f"Warning: skipping {page_key}: {exc}", file=sys.stderr)
 
+    n_total = len(annotations)
+    one_gcp_paths = [
+        str(georef_path)
+        for ann, georef_path in zip(annotations, annotation_georef_paths)
+        if sum(1 for f in ann["body"]["features"] if f["properties"]["type"] == "gcp")
+        == 1
+    ]
     print(
-        f"Generated {len(annotations)} annotations from {n_georef_files} georef files.",
+        f"Generated {n_total} annotations from {n_georef_files} georef files.",
         file=sys.stderr,
     )
+    if one_gcp_paths:
+        pct = 100.0 * len(one_gcp_paths) / n_total if n_total else 0.0
+        print(
+            f"One-GCP fits: {len(one_gcp_paths)}/{n_total} ({pct:.1f}%): "
+            + ", ".join(one_gcp_paths),
+            file=sys.stderr,
+        )
 
     result = {
         "id": result_id,

@@ -24,6 +24,7 @@ from PIL import Image
 
 from mapsnap.streets import (
     DIRECTION_WORDS,
+    STREET_TYPES,
     Block,
     build_block_index,
     canonical_street_matches,
@@ -42,6 +43,9 @@ class LabelFeature:
     text: str  # normalize_street(raw_text)
     center: tuple[float, float]  # (px, py), mean of polygon corners
     dir_pix: float  # atan2 of long-axis edge mod π, in [0, π)
+    long_side: float  # length of the longest polygon edge in pixels
+    short_side: float  # length of the shortest polygon edge in pixels
+    promoted: bool = False  # True for detections rescued by promote_avenue_letters
 
 
 @dataclass
@@ -74,14 +78,28 @@ def label_features(labels: list[dict]) -> list[LabelFeature]:
         pts = np.array(label["polygon"], dtype=float)
         center = (float(pts[:, 0].mean()), float(pts[:, 1].mean()))
         sides = [pts[(i + 1) % 4] - pts[i] for i in range(4)]
+        side_lengths = [float(np.linalg.norm(s)) for s in sides]
+        long_side = max(side_lengths)
+        short_side = min(side_lengths)
         long_vec = max(sides, key=np.linalg.norm)
-        dir_pix = float(np.arctan2(long_vec[1], long_vec[0])) % np.pi
+        dir_pix_geom = float(np.arctan2(long_vec[1], long_vec[0])) % np.pi
+        # For nearly-square polygons the geometry gives an unreliable direction; prefer
+        # the stored dir_pix from detect_text.py (which uses the original CRAFT polygon).
+        # Threshold 1.5 targets genuinely square single-character labels; more elongated
+        # boxes have a reliable geometric axis and should not be overridden.
+        if "dir_pix" in label and short_side > 0 and long_side / short_side < 1.5:
+            dir_pix = label["dir_pix"]
+        else:
+            dir_pix = dir_pix_geom
         features.append(
             LabelFeature(
                 raw_text=label["text"],
                 text=label.get("_canonical_text") or normalize_street(label["text"]),
                 center=center,
                 dir_pix=dir_pix,
+                long_side=long_side,
+                short_side=short_side,
+                promoted=bool(label.get("promoted")),
             )
         )
     return features
@@ -691,6 +709,148 @@ def _finalize_georef(
     return affine_scale_deg_per_px(A), center
 
 
+def promote_avenue_letters(
+    hint_detections: list[dict],
+    all_detections: list[dict],
+    normalized_streets: set[str],
+    perp_tolerance_px: float = 20.0,
+    center_dedup_px: float = 10.0,
+) -> list[dict]:
+    """Promote small single-char detections that sit in the same column as a type-word hint.
+
+    When a type-word hint ('AVENUE', 'STREET') shares a direction column with a single-char
+    detection ('X', 'J') that unambiguously matches a lettered avenue/street via bare alias,
+    the detection is returned with `promoted=True` so the quality filter bypasses its size
+    checks, and its dir_pix is corrected from the hint.
+
+    Once a detection is promoted at some center position, any other candidate within
+    center_dedup_px is suppressed — this prevents both 'W' and 'M' from being promoted when
+    they are different OCR readings of the same physical box.
+
+    A 'column' means the same dir_pix bucket and a perpendicular offset ≤ perp_tolerance_px.
+    The parallel (along-street) gap is unconstrained.
+    """
+    type_hints = [
+        h for h in hint_detections if h.get("text", "").upper().strip() in STREET_TYPES
+    ]
+    if not type_hints:
+        return []
+
+    candidates = list(all_detections)
+
+    if not candidates:
+        return []
+
+    bucket_size = math.pi / 12.0
+    promoted: list[dict] = []
+    promoted_centers: list[tuple[float, float]] = []
+
+    for hint in type_hints:
+        hint_dir = hint.get("dir_pix", 0.0)
+        hint_bucket = int(round(hint_dir / bucket_size)) % 12
+        cos_d = math.cos(hint_dir)
+        sin_d = math.sin(hint_dir)
+
+        hint_poly = hint["polygon"]
+        hint_cx = sum(p[0] for p in hint_poly) / 4.0
+        hint_cy = sum(p[1] for p in hint_poly) / 4.0
+        hint_perp = -hint_cx * sin_d + hint_cy * cos_d
+
+        for det in candidates:
+            text = det.get("text", "").strip()
+            if len(text) != 1:
+                continue
+            if det.get("promoted") or det.get("assembled"):
+                continue
+
+            det_dir = det.get("dir_pix", 0.0)
+            det_bucket = int(round(det_dir / bucket_size)) % 12
+            if det_bucket != hint_bucket:
+                continue
+
+            det_poly = det["polygon"]
+            det_cx = sum(p[0] for p in det_poly) / 4.0
+            det_cy = sum(p[1] for p in det_poly) / 4.0
+
+            # Suppress candidates too close to an already-promoted detection.
+            if any(
+                math.hypot(det_cx - pc[0], det_cy - pc[1]) <= center_dedup_px
+                for pc in promoted_centers
+            ):
+                continue
+
+            det_perp = -det_cx * sin_d + det_cy * cos_d
+            if abs(det_perp - hint_perp) > perp_tolerance_px:
+                continue
+
+            matches = canonical_street_matches(text, normalized_streets)
+            if len(matches) != 1:
+                continue
+
+            promoted_centers.append((det_cx, det_cy))
+            # Strip "hint" so the promoted detection is treated as a regular detection
+            # downstream (deduplicate_detections and the quality filter both skip hints).
+            promoted_det = {k: v for k, v in det.items() if k != "hint"}
+            promoted_det["dir_pix"] = round(hint_dir % math.pi, 4)
+            promoted_det["promoted"] = True
+            promoted.append(promoted_det)
+
+    return promoted
+
+
+def correct_square_feature_dirs(
+    features: list[LabelFeature],
+    hint_detections: list[dict],
+    search_radius_px: float = 200.0,
+    square_threshold: float = 1.5,
+) -> None:
+    """Correct dir_pix for square-ish features using nearby type-word hints.
+
+    Modifies features in-place. For each non-promoted feature whose long_side/short_side
+    ratio is below square_threshold, the polygon long-axis direction is unreliable (a square
+    has no dominant axis). The nearest type-word hint (AVENUE, STREET …) within
+    search_radius_px is used to assign the direction. No bucket filtering is applied — for
+    square features dir_pix is unreliable and cannot be used to pre-select hints.
+
+    Promoted features are skipped: their dir_pix was already set explicitly from the correct
+    column hint during promotion and must not be overwritten by a different nearby hint.
+    """
+    type_hints = [
+        h for h in hint_detections if h.get("text", "").upper().strip() in STREET_TYPES
+    ]
+    if not type_hints:
+        return
+
+    hint_info: list[tuple[float, float, float]] = []
+    for hint in type_hints:
+        poly = hint["polygon"]
+        hcx = sum(p[0] for p in poly) / 4.0
+        hcy = sum(p[1] for p in poly) / 4.0
+        hdir = hint.get("dir_pix", 0.0)
+        hint_info.append((hcx, hcy, hdir))
+
+    for feat in features:
+        if feat.promoted:
+            continue
+        if feat.short_side <= 0:
+            continue
+        if feat.long_side / feat.short_side >= square_threshold:
+            continue
+
+        feat_cx, feat_cy = feat.center
+
+        best_dist = float("inf")
+        best_dir: float | None = None
+        for hcx, hcy, hdir in hint_info:
+            dist = math.hypot(feat_cx - hcx, feat_cy - hcy)
+            if dist < best_dist and dist <= search_radius_px:
+                best_dist = dist
+                best_dir = hdir
+
+        if best_dir is not None:
+            feat.dir_pix = round(best_dir % math.pi, 4)
+
+
 def derive_paths(image_path: str) -> tuple[str, str]:
     """Derive labels and output paths from an image path.
 
@@ -716,13 +876,16 @@ def process_image(
     min_aspect_ratio: float = 2.0,
     edge_margin: float = 0.02,
     force_intersection: tuple[int, int] | None = None,
+    one_gcp_fits: bool = False,
     debug: bool = False,
 ) -> ProcessResult:
     """Fit a georeference model for one image and write GCPs to output_path.
 
     Returns a ProcessResult with success=True and scale_deg_per_px set on success.
-    Returns success=False with deferred data when exactly 1 intersection GCP is found
-    (needs median scale from other maps to complete). Returns success=False otherwise.
+    Returns success=False otherwise. When one_gcp_fits=True and exactly 1 intersection
+    GCP is found, returns success=False with deferred data set (for later median-scale
+    processing). With the default one_gcp_fits=False, 1-GCP pages return success=False
+    with no deferred data and are skipped entirely.
     """
 
     with Image.open(image_path) as pil_img:
@@ -738,24 +901,50 @@ def process_image(
 
     print(f"All detections: {len(all_detections)}")
     all_detections = [d for d in all_detections if not d.get("ignore")]
+    hint_detections = [d for d in all_detections if d.get("hint")]
+    all_detections = [d for d in all_detections if not d.get("hint")]
+    if hint_detections:
+        print(
+            f"Hint detections ({len(hint_detections)}): "
+            + ", ".join(d["text"] for d in hint_detections),
+            file=sys.stderr,
+        )
     normalized_streets = set(block_index.keys())
+    promoted = promote_avenue_letters(
+        hint_detections, all_detections, normalized_streets
+    )
+    if promoted:
+        print(
+            f"Promoted detections ({len(promoted)}): "
+            + ", ".join(d["text"] for d in promoted),
+            file=sys.stderr,
+        )
+        all_detections = promoted + all_detections
     all_detections = deduplicate_detections(
         all_detections, normalized_streets=normalized_streets
     )
     print(f"Deduped detections: {len(all_detections)}")
     labels_data = []
     for det in all_detections:
-        if not (
+        is_promoted = det.get("promoted")
+        if is_promoted:
+            # Promoted single-char avenue letters bypass size/aspect checks; confidence only.
+            if det["confidence"] < min_confidence or is_number_only(det["text"]):
+                continue
+        elif not (
             det["confidence"] >= min_confidence
             and det.get("long_side", float("inf")) >= min_long_side
             and det.get("short_side", float("inf")) >= min_short_side
             and det.get("long_side", float("inf"))
             >= min_aspect_ratio * det.get("short_side", 1.0)
             and not is_number_only(det["text"])
-            and normalize_street(det["text"]) not in DIRECTION_WORDS
+            and (
+                normalize_street(det["text"]) not in DIRECTION_WORDS
+                or det["text"].upper().strip() in normalized_streets
+            )
         ):
             continue
-        if edge_margin > 0:
+        if edge_margin > 0 and not is_promoted:
             poly = np.array(det["polygon"], dtype=float)
             cx, cy = float(poly[:, 0].mean()), float(poly[:, 1].mean())
             if (
@@ -785,6 +974,7 @@ def process_image(
     print(f"Filtered detections: {len(labels_data)}")
 
     features = label_features(labels_data)
+    correct_square_feature_dirs(features, hint_detections)
     print(
         f"Labels ({len(features)}): {', '.join(f.text for f in features)}",
         file=sys.stderr,
@@ -797,6 +987,12 @@ def process_image(
         return ProcessResult(success=False)
     if len(gcps) == 1:
         ix = f"{gcps[0].feat_a.raw_text} x {gcps[0].feat_b.raw_text}"
+        if not one_gcp_fits:
+            print(
+                f"Only 1 intersection GCP: {ix}; skipping (use --one-gcp-fits to enable).",
+                file=sys.stderr,
+            )
+            return ProcessResult(success=False)
         print(
             f"Only 1 intersection GCP: {ix}; deferring for median-scale processing.",
             file=sys.stderr,
@@ -1050,6 +1246,15 @@ def main() -> None:
         ),
     )
     parser.add_argument(
+        "--one-gcp-fits",
+        action="store_true",
+        default=False,
+        help=(
+            "Attempt to georeference pages with only 1 intersection GCP using the "
+            "median scale from other pages (less reliable; disabled by default)."
+        ),
+    )
+    parser.add_argument(
         "--debug", action="store_true", help="Print additional debug information"
     )
     args = parser.parse_args()
@@ -1107,6 +1312,7 @@ def main() -> None:
             min_aspect_ratio=args.min_aspect_ratio,
             edge_margin=args.edge_margin,
             force_intersection=force_intersection,
+            one_gcp_fits=args.one_gcp_fits,
             debug=args.debug,
         )
         if result.success:

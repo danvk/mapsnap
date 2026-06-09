@@ -224,8 +224,30 @@ def canonical_street_match(
     candidates (including direction- and SAINT-stripped forms) match
     normalize_street(text). Always returns the actual key so downstream block_index
     lookups succeed even when the label omits a prefix. Returns None if no match.
+
+    When normalization expands a direction abbreviation (e.g. "W"→"WEST") and the
+    raw text is itself a known alias (e.g. "W" for "AVENUE W"), the alias is returned
+    directly and the expansion path is skipped — preventing "W" from matching all
+    "WEST X" streets when it should match only "AVENUE W".
     """
     normalized = normalize_street(text)
+    raw = text.upper().strip()
+    if raw != normalized and raw in normalized_streets:
+        return raw
+    if normalized in DIRECTION_WORDS:
+        # Bare direction word (e.g. "EAST", "WEST"): only match exact key aliases
+        # or two-word "DIRECTION TYPE" keys (e.g. "EAST STREET", "WEST AVENUE").
+        # Prevents "EAST" from prefix-matching all "EAST 103RD STREET",
+        # "EAST FOURTH STREET", etc. via candidate.startswith("EAST ").
+        for s in normalized_streets:
+            if s == normalized:
+                return s
+            if (
+                s.startswith(normalized + " ")
+                and s[len(normalized) + 1 :] in STREET_TYPES
+            ):
+                return s
+        return None
     for s in normalized_streets:
         for candidate in _match_candidates(s):
             if (
@@ -251,8 +273,30 @@ def canonical_street_matches(
     the set iteration yields first, eliminating nondeterminism when a bare label
     (e.g. "CLINTON") could match multiple full names (e.g. "CLINTON AVENUE" and
     "CLINTON STREET").
+
+    When normalization expands a direction abbreviation (e.g. "W"→"WEST") and the
+    raw text is itself a known alias (e.g. "W" for "AVENUE W"), only that alias is
+    returned — preventing "W" from matching all 70+ "WEST X" streets.
+
+    Bare direction words (e.g. "EAST", "WEST") only match exact key aliases or
+    two-word "DIRECTION TYPE" keys (e.g. "EAST STREET") — not direction-prefixed
+    named/numbered streets like "EAST 103RD STREET".
     """
     normalized = normalize_street(text)
+    raw = text.upper().strip()
+    if raw != normalized and raw in normalized_streets:
+        return [raw]
+    if normalized in DIRECTION_WORDS:
+        matches = []
+        for s in normalized_streets:
+            if s == normalized:
+                matches.append(s)
+            elif (
+                s.startswith(normalized + " ")
+                and s[len(normalized) + 1 :] in STREET_TYPES
+            ):
+                matches.append(s)
+        return matches
     matches: list[str] = []
     for s in normalized_streets:
         for candidate in _match_candidates(s):
@@ -299,19 +343,24 @@ def deduplicate_detections(
     iou_threshold: float = 0.3,
     normalized_streets: set[str] | None = None,
 ) -> list[dict]:
-    """Remove duplicate detections with greedy NMS.
+    """Remove duplicate detections with greedy non-maximum suppression (NMS).
 
     When normalized_streets is provided, detections whose text matches a known
     street name are ranked before non-matches regardless of EasyOCR confidence.
     Within each group, higher confidence wins. This prevents a high-confidence
     misread from suppressing a lower-confidence but correctly spelled street label.
+
+    Assembled (Phase 3) and promoted (Phase 4) detections always rank above plain
+    detections so that synthetic or rescued detections are not suppressed by a
+    higher-confidence misread at the same position.
     """
 
-    def sort_key(d: dict) -> tuple[bool, float]:
+    def sort_key(d: dict) -> tuple[bool, bool, float]:
         street_match = normalized_streets is not None and matches_any_street(
             d["text"], normalized_streets
         )
-        return (street_match, d["confidence"])
+        is_priority = bool(d.get("assembled") or d.get("promoted"))
+        return (street_match, is_priority, d["confidence"])
 
     sorted_dets = sorted(detections, key=sort_key, reverse=True)
     kept: list[dict] = []
@@ -341,9 +390,10 @@ def build_block_index(geojson: dict) -> dict[str, list[Block]]:
     """Index GeoJSON centerline features by normalized street_name.
 
     Also adds unambiguous base-name aliases so that bare labels (e.g. "MAGAZINE")
-    match full centerline names (e.g. "MAGAZINE STREET"). An alias is only added
-    when exactly one full name shares that base, to avoid false matches like
-    "MAGAZINE" matching both "Magazine Street" and "Magazine Place".
+    match full centerline names (e.g. "MAGAZINE STREET"), direction-stripped aliases
+    (e.g. "LIBERTY" for "SOUTH LIBERTY STREET"), and leading-type-stripped aliases
+    (e.g. "X" for "AVENUE X"). Each alias is only added when unambiguous (exactly
+    one full name maps to that stripped form).
     """
     index: dict[str, list[Block]] = {}
     for feature in geojson["features"]:
@@ -388,6 +438,18 @@ def build_block_index(geojson: dict) -> dict[str, list[Block]]:
     for stripped, full_names in dir_stripped_to_full.items():
         if len(full_names) == 1:
             # Same list object as the full-name entry; see comment above.
+            index[stripped] = index[full_names[0]]
+
+    # Build aliases with leading type word stripped for unambiguous cases.
+    # e.g. "AVENUE X" → also index under "X".
+    # Iterating list(index.keys()) captures all aliases added so far.
+    leading_type_stripped: dict[str, list[str]] = defaultdict(list)
+    for key in list(index.keys()):
+        parts = key.split(" ", 1)
+        if len(parts) == 2 and parts[0] in STREET_TYPES and parts[1] not in index:
+            leading_type_stripped[parts[1]].append(key)
+    for stripped, full_names in leading_type_stripped.items():
+        if len(full_names) == 1:
             index[stripped] = index[full_names[0]]
 
     return index
