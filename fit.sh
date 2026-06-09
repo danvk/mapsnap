@@ -12,7 +12,7 @@ if [ ! -e $centerlines ]; then
     centerlines=$dir/../centerlines.geojson
 fi
 
-uv run mapsnap/georef_from_labels.py $dir/p*.raw.jpg \
+uv run mapsnap/georef_from_labels.py $dir/p*.scaled.jpg \
     --centerlines $centerlines \
     --min-long-side 45 \
     --min-short-side 20 \
