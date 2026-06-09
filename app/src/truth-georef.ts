@@ -35,7 +35,6 @@ interface Detection {
   short_side: number;
   ignore?: boolean;
   hint?: boolean;
-  second_pass?: boolean;
 }
 
 interface GeorefData {
@@ -334,16 +333,13 @@ function renderDetections(): void {
     const isSelected = selectedDetectionIndices.has(i);
     const isIgnored = det.ignore === true;
     const isHint = det.hint === true;
-    const isSecondPass = det.second_pass === true;
     const color = isSelected
       ? '#ff6600'
       : isIgnored
         ? '#999'
         : isHint
           ? '#7c3aed'
-          : isSecondPass
-            ? '#0284c7'
-            : confidenceColor(det.confidence);
+          : confidenceColor(det.confidence);
     const points = det.polygon
       .map(([x, y]) => toDisplay(x, y))
       .map(([dx, dy]) => `${dx},${dy}`)
@@ -360,8 +356,6 @@ function renderDetections(): void {
     polygonEl.setAttribute('stroke-width', isSelected ? '2.5' : '1.2');
     if (isIgnored) polygonEl.setAttribute('stroke-dasharray', '4 3');
     else if (isHint) polygonEl.setAttribute('stroke-dasharray', '3 2');
-    else if (isSecondPass)
-      polygonEl.setAttribute('stroke-dasharray', '6 2 2 2');
     svg.appendChild(polygonEl);
 
     if (isSelected) {
@@ -474,7 +468,6 @@ function updateDetectionsTable(): void {
     if (selectedDetectionIndices.has(i)) tr.classList.add('selected');
     if (det.ignore) tr.classList.add('ignored');
     if (det.hint) tr.classList.add('hint');
-    if (det.second_pass) tr.classList.add('second-pass');
 
     for (const val of [
       det.angle,
@@ -488,13 +481,7 @@ function updateDetectionsTable(): void {
     }
 
     const typeTd = document.createElement('td');
-    typeTd.textContent = det.ignore
-      ? 'ignore'
-      : det.hint
-        ? 'hint'
-        : det.second_pass
-          ? '2nd pass'
-          : 'street';
+    typeTd.textContent = det.ignore ? 'ignore' : det.hint ? 'hint' : 'street';
     tr.appendChild(typeTd);
 
     const textTd = document.createElement('td');
