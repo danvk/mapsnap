@@ -68,6 +68,7 @@ class ProcessResult:
     success: bool
     scale_deg_per_px: float | None = None  # set on success
     center: tuple[float, float] | None = None  # (lon, lat) page center, set on success
+    rotation: float | None = None  # directed rotation in radians, set on success
     deferred: dict | None = None  # set when deferred (exactly 1 GCP, needs scale)
 
 
@@ -1006,6 +1007,8 @@ def process_image(
                 "centerlines_path": centerlines_path,
                 "features": features,
                 "gcps": gcps,
+                "img_w": img_w,
+                "img_h": img_h,
             },
         )
 
@@ -1047,7 +1050,69 @@ def process_image(
         centerlines_path,
         initial_pair=seed_pair,
     )
-    return ProcessResult(success=True, scale_deg_per_px=scale, center=center)
+    rotation = math.atan2(float(A[1, 0]), float(-A[1, 1]))
+    return ProcessResult(
+        success=True, scale_deg_per_px=scale, center=center, rotation=rotation
+    )
+
+
+def _angle_diff_abs(a: float, b: float) -> float:
+    """Smallest angular separation between two angles (radians), result in [0, π]."""
+    d = (a - b) % (2 * math.pi)
+    return min(d, 2 * math.pi - d)
+
+
+def _rotation_from_neighbors(
+    candidate: float,
+    approx_center: tuple[float, float],
+    page_dim_deg: tuple[float, float],
+    neighbor_rotations: list[tuple[tuple[float, float], float]],
+    angle_threshold_rad: float = 10 * math.pi / 180,
+) -> float | None:
+    """Validate and direct an undirected rotation using adjacent pages' rotation angles.
+
+    candidate is undirected (in [0, π)); the two directed candidates are candidate and
+    candidate + π. Neighbours within 1.5× page dimensions in both lon and lat are
+    considered adjacent. If 2+ adjacent neighbours agree with one of the two directed
+    candidates (within angle_threshold_rad), returns that directed rotation.
+    Returns None if no candidate has sufficient adjacent support.
+    """
+    approx_lon, approx_lat = approx_center
+    page_dim_lon, page_dim_lat = page_dim_deg
+    thresh_lon = 1.5 * page_dim_lon
+    thresh_lat = 1.5 * page_dim_lat
+
+    adjacent = [
+        rotation
+        for (n_lon, n_lat), rotation in neighbor_rotations
+        if abs(n_lon - approx_lon) <= thresh_lon
+        and abs(n_lat - approx_lat) <= thresh_lat
+    ]
+
+    print(
+        f"  Rotation validation: {len(adjacent)} adjacent georeferenced page(s) found.",
+        file=sys.stderr,
+    )
+
+    for directed in (candidate, candidate + math.pi):
+        n_agree = sum(
+            1 for r in adjacent if _angle_diff_abs(r, directed) <= angle_threshold_rad
+        )
+        if n_agree >= 2:
+            print(
+                f"  Rotation {math.degrees(directed):.1f}° confirmed by {n_agree} neighbours.",
+                file=sys.stderr,
+            )
+            return directed
+
+    candidates_deg = (
+        f"{math.degrees(candidate):.1f}° / {math.degrees(candidate + math.pi):.1f}°"
+    )
+    print(
+        f"  Neither rotation candidate ({candidates_deg}) supported by ≥2 adjacent pages; skipping.",
+        file=sys.stderr,
+    )
+    return None
 
 
 def _rotation_from_gcp_features(
@@ -1078,13 +1143,15 @@ def process_deferred_image(
     scale_deg_per_px: float,
     block_index: dict[str, list[Block]],
     cos_phi: float,
+    neighbor_rotations: list[tuple[tuple[float, float], float]],
 ) -> ProcessResult:
     """Georeference an image that was deferred due to having only 1 intersection GCP.
 
-    Uses the provided scale (deg/px) and estimates rotation from label-angle histogram
-    cross-correlation. The rotation estimate is undirected (mod π); the 180° ambiguity
-    is resolved by requiring north to point upward in the image (A[1,1] < 0, equivalently
-    cos(rotation) > 0).
+    Uses the provided scale (deg/px) and estimates rotation from the two streets at the
+    single GCP. The undirected rotation is then validated against adjacent pages (already
+    successfully georeferenced): if ≥2 neighbours within 1.5× page dimensions agree with
+    one of the two directed candidates (±180°), that direction is used. If fewer than 2
+    neighbours agree, the image is skipped.
     """
     image_path: str = deferred["image_path"]
     output_path: str = deferred["output_path"]
@@ -1092,6 +1159,8 @@ def process_deferred_image(
     centerlines_path: str = deferred["centerlines_path"]
     features: list[LabelFeature] = deferred["features"]
     gcps: list[IntersectionGCP] = deferred["gcps"]
+    img_w: int = deferred["img_w"]
+    img_h: int = deferred["img_h"]
     gcp = gcps[0]
 
     rotation = _rotation_from_gcp_features(gcp, block_index)
@@ -1099,11 +1168,17 @@ def process_deferred_image(
         print("Could not estimate rotation from GCP street angles.", file=sys.stderr)
         return ProcessResult(success=False)
 
-    # The rotation estimate is mod π; pick the directed angle where north points up.
-    # In the similarity affine, A[1,1] = -scale·cos(rotation); north is up when
-    # A[1,1] < 0, i.e. cos(rotation) > 0.
-    if math.cos(rotation) < 0:
-        rotation += math.pi
+    page_dim_lat = scale_deg_per_px * img_h
+    page_dim_lon = scale_deg_per_px * img_w / cos_phi
+    directed_rotation = _rotation_from_neighbors(
+        candidate=rotation,
+        approx_center=gcp.geo,
+        page_dim_deg=(page_dim_lon, page_dim_lat),
+        neighbor_rotations=neighbor_rotations,
+    )
+    if directed_rotation is None:
+        return ProcessResult(success=False)
+    rotation = directed_rotation
 
     pos_threshold = 0.001
     A = build_affine_from_scale_rotation_gcp(scale_deg_per_px, rotation, gcp, cos_phi)
@@ -1285,6 +1360,9 @@ def main() -> None:
         tuple[str, float]
     ] = []  # (image_path, px_per_ft) for outlier check
     location_records: list[tuple[str, tuple[float, float]]] = []  # (image_path, center)
+    neighbor_rotations: list[
+        tuple[tuple[float, float], float]
+    ] = []  # (center, rotation)
     deferred_list: list[dict] = []
 
     for image_path in args.images:
@@ -1323,6 +1401,8 @@ def main() -> None:
                 scale_records.append((image_path, px_per_ft))
             if result.center is not None:
                 location_records.append((image_path, result.center))
+                if result.rotation is not None:
+                    neighbor_rotations.append((result.center, result.rotation))
         elif result.deferred is not None:
             deferred_list.append(result.deferred)
 
@@ -1362,6 +1442,7 @@ def main() -> None:
                     scale_deg_per_px=scale_deg_per_px,
                     block_index=block_index,
                     cos_phi=cos_phi,
+                    neighbor_rotations=neighbor_rotations,
                 )
                 if deferred_result.success:
                     n_success += 1
