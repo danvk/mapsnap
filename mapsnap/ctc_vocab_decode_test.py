@@ -102,11 +102,16 @@ def test_generate_spaced_ordinal_forms():
 
 
 def test_generate_empty_input():
-    # Hint strings are always included even with no streets.
+    # AVENUE- and STREET-family hint strings are always included even with no streets.
     vocab = set(generate_vocab_strings(set()))
-    assert "STREET" in vocab
+    assert "AVENUE" in vocab
     assert "AVE" in vocab
-    assert "NORTH" in vocab
+    assert "AV" in vocab
+    assert "STREET" in vocab
+    assert "ST" in vocab
+    # Other type words and direction words are no longer hints.
+    assert "COURT" not in vocab
+    assert "NORTH" not in vocab
 
 
 def test_generate_leading_type_street():
@@ -128,20 +133,28 @@ def test_generate_west_street():
 
 
 def test_generate_includes_hint_strings():
-    # Hint strings must appear in every vocab regardless of which streets are present.
+    # AVENUE- and STREET-family hints appear in every vocab regardless of streets present.
     vocab = set(generate_vocab_strings({"MAGAZINE STREET"}))
-    for word in ("STREET", "AVE", "ST.", "NORTH", "N.", "EAST", "W", "SAINT"):
+    for word in ("AVENUE", "AVE", "AV", "AV.", "A V", "STREET", "ST", "ST.", "S T"):
         assert word in vocab, f"hint word {word!r} missing from vocab"
 
 
 def test_hint_strings_constant():
-    # Spot-check that _HINT_STRINGS contains the expected categories.
-    assert "STREET" in _HINT_STRINGS
+    # _HINT_STRINGS contains AVENUE and STREET families only.
+    assert "AVENUE" in _HINT_STRINGS
     assert "AVE" in _HINT_STRINGS
+    assert "AV" in _HINT_STRINGS
+    assert "AV." in _HINT_STRINGS
+    assert "A V" in _HINT_STRINGS
+    assert "STREET" in _HINT_STRINGS
+    assert "ST" in _HINT_STRINGS
     assert "ST." in _HINT_STRINGS
-    assert "NORTH" in _HINT_STRINGS
-    assert "N." in _HINT_STRINGS
-    assert "SAINT" in _HINT_STRINGS
+    assert "S T" in _HINT_STRINGS
+    # Other type words and direction words are no longer hints.
+    assert "COURT" not in _HINT_STRINGS
+    assert "NORTH" not in _HINT_STRINGS
+    assert "N." not in _HINT_STRINGS
+    assert "SAINT" not in _HINT_STRINGS
     # Should NOT contain multi-word forms.
     assert "EAST GRAND" not in _HINT_STRINGS
 

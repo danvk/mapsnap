@@ -1074,8 +1074,6 @@ def process_image(
 
     print(f"All detections: {len(all_detections)}")
     all_detections = [d for d in all_detections if not d.get("ignore")]
-    # Hints (bare type/direction words) are separated before GCP matching.
-    # They don't form standalone GCPs but will be used by future assembly logic.
     hint_detections = [d for d in all_detections if d.get("hint")]
     all_detections = [d for d in all_detections if not d.get("hint")]
     if hint_detections:
@@ -1085,16 +1083,6 @@ def process_image(
             file=sys.stderr,
         )
     normalized_streets = set(block_index.keys())
-    assembled = assemble_hint_groups(
-        all_detections, hint_detections, normalized_streets, block_index, min_confidence
-    )
-    if assembled:
-        print(
-            f"Assembled detections ({len(assembled)}): "
-            + ", ".join(d["text"] for d in assembled),
-            file=sys.stderr,
-        )
-        all_detections = assembled + all_detections
     promoted = promote_avenue_letters(
         hint_detections, all_detections, normalized_streets
     )

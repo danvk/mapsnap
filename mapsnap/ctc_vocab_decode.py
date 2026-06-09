@@ -29,10 +29,8 @@ import numpy as np
 
 from mapsnap.streets import (
     DIRECTION_ABBREVS,
-    DIRECTION_WORDS,
     ORDINAL_WORD_TO_NUM,
     STREET_ABBREVS,
-    STREET_TYPES,
 )
 
 # Matches numeric ordinal suffixes: "5TH", "12ND", "3RD", "21ST", etc.
@@ -57,21 +55,21 @@ for _abbrev, _full in STREET_ABBREVS.items():
     _TYPE_TO_ABBREVS[_full].append(_abbrev)
 
 # Standalone hint strings: type words, direction words, and their abbreviations.
-# These allow the CTC decoder to correctly recognise CRAFT boxes that contain only
-# one component of a multi-word label (e.g. "ST." split off from "EAST 7TH ST.").
-# They are marked "hint" in streets.json and are not used as standalone GCPs.
+# Hint strings are marked "hint" in streets.json and are not used as standalone GCPs.
+# They serve as anchors for promote_avenue_letters (recovering single-letter avenue
+# names like "X" or "W" from "AVENUE X" labels that CRAFT splits into two boxes).
+# AVENUE and STREET (and their abbreviations) are hints; "K STREET" in Washington DC
+# is the same pattern. All other type words (COURT, BOULEVARD, …) and direction
+# words remain regular detections.
+_LETTERED_TYPE_ABBREVS: frozenset[str] = frozenset(
+    k for k, v in STREET_ABBREVS.items() if v in ("AVENUE", "STREET")
+)
 _HINT_STRINGS: frozenset[str] = frozenset(
-    STREET_TYPES  # STREET, AVENUE, BOULEVARD, …
-    | set(STREET_ABBREVS)  # ST, AVE, AV, BLVD, …
-    | {a + "." for a in STREET_ABBREVS}  # ST., AVE., …
-    # Spaced forms: Sanborn typography sometimes gaps characters so the CTC model
-    # sees a space between them (e.g. "S T" instead of "ST", same as "5 TH").
-    | {" ".join(a) for a in STREET_ABBREVS if len(a) > 1}  # S T, A V, …
-    | DIRECTION_WORDS  # NORTH, SOUTH, EAST, WEST, …
-    | set(DIRECTION_ABBREVS)  # N, S, E, W, NE, …
-    | {a + "." for a in DIRECTION_ABBREVS}  # N., S., E., W., …
-    | {" ".join(a) for a in DIRECTION_ABBREVS if len(a) > 1}  # N E, N W, S W, …
-    | {"SAINT"}
+    {"AVENUE", "STREET"}
+    | _LETTERED_TYPE_ABBREVS  # AVE, AV, ST
+    | {a + "." for a in _LETTERED_TYPE_ABBREVS}  # AVE., AV., ST.
+    # Spaced forms: Sanborn typography sometimes gaps characters (e.g. "A V", "S T").
+    | {" ".join(a) for a in _LETTERED_TYPE_ABBREVS if len(a) > 1}  # A V, A V E, S T
 )
 
 
