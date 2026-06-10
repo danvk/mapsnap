@@ -40,7 +40,7 @@ uv run python mapsnap/osm_to_centerlines.py \
     --output $dir/centerlines.geojson
 
 uv run python mapsnap/detect_text.py \
-    --min-long-side 45 \
+    --min-long-side 20 \
     --centerlines $dir/centerlines.geojson \
     --num-workers 2 \
     $dir/*.scaled.jpg

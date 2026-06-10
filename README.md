@@ -1,6 +1,8 @@
 # Mapsnap
 
-The goal of mapsnap is to automatically georeference Sanborn Insurance Maps.
+The goal of Mapsnap is to automatically georeference Sanborn Insurance Maps.
+
+If you'd like to georeference a map using Mapsnap, read about [How it Works](#how-it-works) then head down to the [Pipeline](#pipeline) section.
 
 ## Performance
 
@@ -29,7 +31,7 @@ RMSE was measured across 49 equally-spaced points on each image. You can view th
 [champaign-iiif]: https://viewer.allmaps.org/?url=https%3A%2F%2Fraw.githubusercontent.com%2Fdanvk%2Fmapsnap%2Frefs%2Fheads%2Fmain%2Fgallery%2Fchampaign_ill_1915.iiif.json
 [test data notes]: https://github.com/danvk/mapsnap/wiki/Test-data-notes
 
-## How it works
+## How it Works
 
 Here's an [example][p19] of a Sanborn Insurance Map:
 
@@ -39,9 +41,13 @@ This image depicts a small area of Brooklyn, NY in 1939. Our goal is to overlay 
 
 We can run EasyOCR against it to get candidate street labels:
 
-![Same image with boxes drawn around text](/images/brooklyn_ny_1939_vol_2_p19.detect.png)
+![Same image with boxes drawn around text](/images/brooklyn_ny_1939_vol_2_p19.detect.jpg)
 
-There's a lot of text in this image! The red boxes show labels that are likely to be streets.
+There's a lot of text in this image! The green boxes show labels that Mapsnap believes are likely to be streets. These are all rectangles that:
+
+1. EasyOCR's CRAFT text recognizer thinks contain text.
+2. Match a street name somewhere in Brooklyn.
+3. Are larger than a minimum size.
 
 From each bounding rectangle we get three bits of information:
 
@@ -51,33 +57,30 @@ From each bounding rectangle we get three bits of information:
 
 This is the information we'll use to determine the map projection.
 
-We generally know _roughly_ where the map is: the Library of Congress has organized their Sanborn collection by country, state and county. We can get an even better estimate by locating the [key map] for the volume. This gives a bounding box that's at most a few miles in each dimension.
+We generally know _roughly_ where the map is: the Library of Congress has organized their Sanborn collection by country, state and county. So to get street names, we can download all of OSM's features for that county. Our hope is that enough streets have stayed the same that we can line them up between the Sanborn map and OSM.
 
-Next, we download contemporary streets in that bounding box from [OpenStreetMap] (OSM). Our hope is that enough streets have stayed the same that we can line them up between the Sanborn map and OSM.
+(You can get much tighter by locating the [key map] for the volume. This gives a bounding box that's at most a few miles in each dimension, but it comes at the cost of an additional, manual step. A county is usually precise enough for Mapsnap.)
 
-We can use the contemporary streets to filter the OCR results:
+Most of the detected streets are real, but some of them are not.
 
-![Detected streets in the image](/images/detected-streets.png)
+- The streets in the middle are correct: HENRY, MONROE, PIERREPONT, CLINTON, FULTON, WASHINGTON, JOHNSON, ADAMS, MYRTLE.
+- It gets thrown off by "BROOKLYN BRIDGE APPROACH" and sees BROOKLYN in a few other places. There's a "Brooklyn Avenue" and a "Bridge Street" in Brooklyn, but this doesn't refer to either of them. These are bad detections that could potentially throw off alignment.
+- It matches the "POST" in "POST OFFICE" because "POST COURT" is a street in Brooklyn. Again, this could create trouble.
+- There are a few more lower-confidence street detections in red boxes.
 
-Many of these are real streets, but many of them are not:
+The street matching here is quite flexible. We only match MONROE, which could be Monroe Place or Monroe Street: both exist in Brooklyn. So we throw in both and hope to sort it out later.
 
-- The cut-off street names on the right are CLARK (👍), LIBERTY (👍) and CONGRESS (👎). This last one is matching the "Library of Congress" stamp, because there _is_ a Congress Street in Brooklyn.
-- Most of the streets in the middle are correct: HENRY, MONROE, PIERREPONT, CLINTON, FULTON, WASHINGTON, JOHNSON, ADAMS, MYRTLE.
-- It gets thrown off by "BROOKLYN BRIDGE APPROACH" and sees BROOKLYN in a few other places. These are all bad detections that could potentially throw off alignment.
-
-The street matching here is quite flexible. We only match MONROE, which could be Monroe Place or Monroe Street: both exist in this area of Brooklyn. So we throw in both and hope to sort it out later.
-
-Next, we extrapolate the streets in both directions, following the direction of the text. If two streets intersect in the image and in the OSM data, we record a candidate intersection:
+Next, we extrapolate the streets in both directions, following the direction of the text. If two streets intersect near the image _and_ in the OSM data, we record a candidate intersection:
 
 ![Intersections](/images/intersections.png)
 
-These are known as Ground Control Points (GCPs). If we have two or more GCPs, we have enough data to fit a model. (Sometimes we can get a fit with just one — more on this in a bit.)
+These are known as Ground Control Points (GCPs). If we have two or more GCPs, we have enough data to fit a model. (If you thought you needed three, see [Notes on the Model](#six-parameters-vs-four), below. Sometimes we can get a fit with just one — more on this [in a bit](#one-gcp-fits).)
 
 For each pair of GCPs, we can fit a model and see where it would place the street labels from OCR. If the label gets mapped close to the expected street in OSM, and the street is at the expected angle there, then that's an indicator of a good fit and this street is an "inlier." If not, it's an outlier.
 
 We try each pair of GCPs and find the one that produces the best fit with the most inliers. (This is roughly the [RANSAC algorithm].) This is our mapping!
 
-In the image above, the chosen GCPs are JOHNSON x ADAMS and MONROE x CLARK. The orange street labels are inliers this this mapping, and the gray ones are outliers. This rejects spurious streets like BROOKLYN and CONGRESS. Interestingly, it also rejects FULTON, which continued into this area in 1937 but stops short today.
+In the image above, the chosen GCPs are PIERREPONT STREET x HENRY STREET and PIERREPONT STREET x CLINTON STREET. The orange street labels are inliers this this mapping, and the gray ones are outliers. This rejects spurious streets like BROOKLYN and POST. Interestingly, it also rejects FULTON, which continued into this area in 1937 but stops short today.
 
 Here's what the resulting mapping looks like:
 
@@ -89,7 +92,6 @@ You can view the [full mapping][bkiiif] for this section of Brooklyn on Allmaps.
 
 [p19]: https://oldinsurancemaps.net/document/85714
 [key map]: https://oldinsurancemaps.net/document/85676
-[OpenStreetMap]: https://www.openstreetmap.org/#map=18/40.683787/-73.978527
 [RANSAC algorithm]: https://www.thinkautonomous.ai/blog/ransac-algorithm/
 [bkiiif]: https://viewer.allmaps.org/?url=https%3A%2F%2Fraw.githubusercontent.com%2Fdanvk%2Fmapsnap%2Frefs%2Fheads%2Fmain%2Fgallery%2Fbrooklyn_ny_1939_vol_2.iiif.json
 
@@ -97,36 +99,46 @@ You can view the [full mapping][bkiiif] for this section of Brooklyn on Allmaps.
 
 It takes two GCPs to define a four parameter model (translate x, translate y, scale, rotation). But sometimes we can get away with just one.
 
-Consider [page 432] from New Orleans 1951 Volume 5. Here are the detected streets and intersections:
+Consider [page 431] from New Orleans 1951 Volume 5. Here are the detected streets and intersections:
 
-![Image showing three streets and one intersection](/images/1gcp.png)
+![Image showing three streets and one intersection](/images/1gcp.jpg)
 
-There are three streets and one intersection (S. Front and Napoleon don't intersect). The one intersection gives us a location, and hence the two translation parameters of the model. The angles of the roads can give us the rotation. But what about the scale?
+There are three streets and one intersection (CADIZ and FRONT don't intersect). The one intersection gives us a location, and hence the two translation parameters of the model. The angles of the roads can give us the rotation. But what about the scale?
 
-Assuming this map is from a larger volume, we can assume that all the maps in the volume have roughly the same scale. Specifically, we plug in the median scale across all the maps with more GCPs. When you run the pipeline, these sorts of fits show up as "deferred." These fits aren't quite as robust as they'd be if we had more GCPs. But they're often pretty good, and they're better than nothing!
+Assuming this map is from a larger volume, we can assume that all the maps in the volume have roughly the same scale. Specifically, we plug in the median scale across all the maps with more GCPs. When you run the pipeline, these sorts of fits show up as "deferred."
 
-[page 432]: https://oldinsurancemaps.net/document/46011
+These fits aren't quite as robust as they'd be if we had more GCPs, so we require a little bit more evidence before accepting them. Specifically, we look at all the adjacent pages in the volume. If two or more of them match the rotation angle of the 1-gcp fit, then we keep it. Otherwise we toss it.
 
-## Development
+Sometimes these fits aren't the best, but they're often pretty good and they significantly increase Mapsnap's coverage for some volumes, e.g. [Detroit 1929 Vol 11][detroit].
 
-Quickstart:
+[page 431]: https://oldinsurancemaps.net/document/46009
 
-```
-uv sync
-uv run pytest
-uv run pyright
-uv run ruff check
-uv run ruff format
-```
+### Automatic Masks
+
+Sanborn pages typically include colorful, detailed information in the center and are more sparse towards the edges. The detail for those areas is contained on other pages. If you make a georeferenced map with the full pages, there will be significant overlap. The detailed parts of one map might be hidden behind the margins of another.
+
+The solution to this is a **mask**. Each image in the IIIF file has a clipping polygon that removes margins and areas that are better covered by other pages. (OldInsuranceMaps calls this a [multimask].)
+
+![Page 22 of Brooklyn, NY map with a clipping polygon](/images/p22-mask.jpg)
+
+Mapsnap automatically generates clipping polygons for each image using the underlying street grid. The idea is that each "block" should only be represented by one page from the Sanborn volume. We choose the page that has the most color for that block. This sometimes generates more complex polygons than a human would, but it tends to work well in practice, at least in areas where the street grid hasn't changed much since the map was made. See [PR #31] for details.
+
+[multimask]: https://docs.oldinsurancemaps.net/guides/trimming/
+[PR #31]: https://github.com/danvk/mapsnap/pull/31
 
 ## Pipeline
 
-- Load a map into OldInsuranceMaps.net by filling out their form or messaging Adam Cox on Slack.
-- "Prepare" all the other maps on OIM.
-- Run the following command:
+Mapsnap can, in principle, run on any type of map. But it's only been tested on Sanborn maps. This repo contains tools for downloading and georeferencing Sanborn maps from two sources:
+
+1. **OldInsuranceMaps** (OIM). OIM hosts a subset of volumes (~1,000) that have already been manually split and georeferenced. You can download images from it reliably. Mapsnap uses it for truth data.
+2. **Library of Congress** (loc.gov). The LoC hosts most of the Sanborn volumes that are in the public domain (~30,000). These have not been georeferenced, and downloads are somewhat unreliable.
+
+Depending on where you get your Sanborn maps, the next steps will be different.
+
+### OldInsuranceMaps
 
 ```bash
-./pipeline.sh sanborn03376_029 new_orleans_la_1951_vol_5 r1836428 'https://s3.us-central-1.wasabisys.com/oldinsurancemaps/uploaded/documents/new_orleans_la_1951_vol_5_'
+./pipeline-oim.sh sanborn03376_029 new_orleans_la_1951_vol_5 r1836428 'https://s3.us-central-1.wasabisys.com/oldinsurancemaps/uploaded/documents/new_orleans_la_1951_vol_5_'
 ```
 
 The four arguments here are:
@@ -136,7 +148,7 @@ The four arguments here are:
 - r1836428: Relation containing this map in OSM, usually a county. This is used to download all the streets in the area of the map.
 - 'https://...': OIM S3 bucket prefix for images. You can get this by downloading a JPEG of a page from the OIM web site.
 
-See `pipeline.sh` details about how to run the pipeline. The high-level steps are:
+See `pipeline-oim.sh` details about how to run the pipeline. The high-level steps are:
 
 - `download_oim_iiif.py`: download all the Sanborn images from OIM. This is easier than downloading directly from the Library of Congress and gets you splits.
 - `scale_images.py`: reduces the size of the images by a uniform scale factor so that OCR runs faster.
@@ -144,22 +156,55 @@ See `pipeline.sh` details about how to run the pipeline. The high-level steps ar
 - `osm_to_centerlines.py`: converts raw OSM data to GeoJSON.
 - `detect_text.py`: runs OCR over the downscaled images, saving candidate detections to `streets.json` files.
 - `georef_from_labels.py`: georeferences images based on street detections, writing out `georef.json` files where it can find a good fit.
-- `make_iiif_georef.py`: produces a IIIF JSON file from the georeferences. You can find examples of these in the `gallery` directory.
+- `make_iiif_georef.py`: produces a IIIF Georeference Extension. You can find examples of these in the `gallery` directory. View them on Allmaps.
 - `compare_iiif_georef.py`: compares the generated IIIF file with the human-generated one from OIM, producing a report on the accuracy of the fit.
 
-The pipeline is set up to get imagery from OIM, but it's not dependent on OIM in a deep way. You can absolutely run it on images taken directly from the Library of Congress or another source, you'll just have to run some steps manually. In particular, `make_iiif_georef.py` can use either OIM's IIIF Manifest or the LoC's.
+The last three steps run relatively quickly. You can experiment with options and iterate on them using `fit.sh`.
+
+### Library of Congress
+
+Again, using New Orleans 1951 Vol 5 as an example:
+
+- Go to https://www.loc.gov/item/sanborn03376_029.
+- Download the IIIF Presentation Manifest ("Manifest (JSON/LD)"). You have to do this by hand in your browser due to the LoC's Cloudflare DoS protections.
+- Make a directory and put this file in `data/new_orleans_la_1951_vol_5/loc.manifest.json`.
+
+Next, download all the images at 25% resolution by running:
+
+```bash
+uv run mapsnap/download_loc_iiif.py --scale pct:25 data/new_orleans_la_1951_vol_5/loc.manifest.json
+```
+
+This will go slowly. It might fail and you might have to wait a few hours to restart it and try again. But it will eventually get all the images.
+
+From here, the process is similar to OldInsuranceMaps:
+
+```bash
+./pipeline-loc.sh sanborn03376_029 new_orleans_la_1951_vol_5 r1836428
+```
+
+See above for an explanation of these three parameters. This script downloads OSM data, runs OCR over the images, and then runs `fit.sh`.
+
+The end result is a IIIF Georeference Extension that you can view with Allmaps. Since there's no truth data, you won't get a comparison at the end.
+
+### Multivolume Runs
+
+Mapsnap can produce multi-volume IIIFs, calculating a unified set of clipping masks across all the images. This can be used to create maps of larger areas, for example all of Brooklyn in 1908, which Sanborn mapped across sixteen volumes.
+
+To produce a multivolume map, run the pipeline for each volume independently, as above. Then run `make_iiif_georef.py` with multiple `--volume` flags, one for each volume. See [PR #39] for details and a command line.
+
+There's an example Brooklyn multivolume IIIF in the `gallery` directory, which you can [view on Allmaps][brooklyn-multi].
+
+[PR #39]: https://github.com/danvk/mapsnap/pull/39
+[brooklyn-multi]: https://viewer.allmaps.org/?url=https%3A%2F%2Fraw.githubusercontent.com%2Fdanvk%2Fmapsnap%2Frefs%2Fheads%2Fmain%2Fgallery%2Fbrooklyn-1904-1908.iiif.json
 
 ## Debugging output
 
-This repo comes with a small web app to help you debug individual maps:
+This repo comes with a small web app to help you debug individual maps. You can access it at:
 
-```
-cd app
-npm i
-npm run dev
-```
+🌎 [Mapsnap Debugger](https://www.danvk.org/mapsnap/)
 
-Then visit localhost:5173 and drag the image file and its associated georef.json file into the browser window.
+Drag & drop an image and either a `streets.json` or `georef.json` file to use it. All of the screenshots above were taken using the debugger.
 
 ## Notes on the model
 
@@ -228,7 +273,19 @@ Claude Code and ChatGPT were both instrumental in getting this to work.
 
 [shensky]: https://repositories.lib.utexas.edu/items/3f080054-8ff0-4e4c-8ef7-ea93b0fc36e0
 
-## Debugger
+## Development
+
+Quickstart:
+
+```
+uv sync
+uv run pytest
+uv run pyright
+uv run ruff check
+uv run ruff format
+```
+
+### Debugger
 
 🌎 [Mapsnap Debugger](https://www.danvk.org/mapsnap/)
 
