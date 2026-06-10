@@ -187,6 +187,17 @@ See above for an explanation of these three parameters. This script downloads OS
 
 The end result is a IIIF Georeference Extension that you can view with Allmaps. Since there's no truth data, you won't get a comparison at the end.
 
+### Multivolume Runs
+
+Mapsnap can produce multi-volume IIIFs, calculating a unified set of clipping masks across all the images. This can be used to create maps of larger areas, for example all of Brooklyn in 1908, which Sanborn mapped across sixteen volumes.
+
+To produce a multivolume map, run the pipeline for each volume independently, as above. Then run `make_iiif_georef.py` with multiple `--volume` flags, one for each volume. See [PR #39] for details and a command line.
+
+There's an example Brooklyn multivolume IIIF in the `gallery` directory, which you can [view on Allmaps][brooklyn-multi].
+
+[PR #39]: https://github.com/danvk/mapsnap/pull/39
+[brooklyn-multi]: https://viewer.allmaps.org/?url=https%3A%2F%2Fraw.githubusercontent.com%2Fdanvk%2Fmapsnap%2Frefs%2Fheads%2Fmain%2Fgallery%2Fbrooklyn-1904-1908.iiif.json
+
 ## Debugging output
 
 This repo comes with a small web app to help you debug individual maps. You can access it at:
