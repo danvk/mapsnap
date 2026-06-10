@@ -35,7 +35,7 @@ if [ -e $dir/main.iiif.json ]; then
 elif [ -e $dir/loc.iiif.json ]; then
     ref_iiif=$dir/loc.iiif.json
 else
-    ref_iiif=$dir/*.manifest.json
+    ref_iiif=$dir/*manifest.json
 fi
 
 uv run python mapsnap/make_iiif_georef.py \
