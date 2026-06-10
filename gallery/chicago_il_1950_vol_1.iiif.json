@@ -24,8 +24,8 @@
           "value": "3"
         }
       ],
-      "created": "2026-05-25T13:23:24Z",
-      "modified": "2026-05-25T13:23:24Z",
+      "created": "2026-06-10T19:14:36Z",
+      "modified": "2026-06-10T19:14:36Z",
       "creator": [
         {
           "id": "https://oldinsurancemaps.net/profile/danvk",
@@ -44,17 +44,14 @@
         },
         "selector": {
           "type": "SvgSelector",
-          "value": "<svg><polygon points=\"0,7323 0,0 5882,0 5882,7323 0,7323\" /></svg>"
+          "value": "<svg><polygon points=\"5882.0,7323.0 -0.0,7323.0 -0.0,1000.2 5882.0,1010.3 5882.0,7323.0\" /></svg>"
         }
       },
       "body": {
         "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd410m:g4104m:g4104cm:g01790195001N:01790_01N_1950-0100W/gcps",
         "type": "FeatureCollection",
         "transformation": {
-          "type": "polynomial",
-          "options": {
-            "order": 1
-          }
+          "type": "helmert"
         },
         "features": [
           {
@@ -98,27 +95,6 @@
                 41.8712518
               ]
             }
-          },
-          {
-            "type": "Feature",
-            "properties": {
-              "resourceCoords": [
-                1285.3,
-                6329.1
-              ],
-              "creator": {
-                "id": "https://oldinsurancemaps.net/profile/danvk",
-                "type": "Person"
-              },
-              "type": "gcp"
-            },
-            "geometry": {
-              "type": "Point",
-              "coordinates": [
-                -87.64688627362594,
-                41.87191046637535
-              ]
-            }
           }
         ]
       }
@@ -141,8 +117,8 @@
           "value": "4"
         }
       ],
-      "created": "2026-05-25T13:23:24Z",
-      "modified": "2026-05-25T13:23:24Z",
+      "created": "2026-06-10T19:14:36Z",
+      "modified": "2026-06-10T19:14:36Z",
       "creator": [
         {
           "id": "https://oldinsurancemaps.net/profile/danvk",
@@ -161,17 +137,14 @@
         },
         "selector": {
           "type": "SvgSelector",
-          "value": "<svg><polygon points=\"0,7323 0,0 5844,0 5844,7323 0,7323\" /></svg>"
+          "value": "<svg><polygon points=\"4201.5,6234.1 1791.2,6243.3 1731.4,37.8 4127.1,0.0 4201.5,6234.1\" /></svg>"
         }
       },
       "body": {
         "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd410m:g4104m:g4104cm:g01790195001N:01790_01N_1950-0101W/gcps",
         "type": "FeatureCollection",
         "transformation": {
-          "type": "polynomial",
-          "options": {
-            "order": 1
-          }
+          "type": "helmert"
         },
         "features": [
           {
@@ -215,27 +188,6 @@
                 41.8719711
               ]
             }
-          },
-          {
-            "type": "Feature",
-            "properties": {
-              "resourceCoords": [
-                4201.5,
-                1256.0
-              ],
-              "creator": {
-                "id": "https://oldinsurancemaps.net/profile/danvk",
-                "type": "Person"
-              },
-              "type": "gcp"
-            },
-            "geometry": {
-              "type": "Point",
-              "coordinates": [
-                -87.64231592146,
-                41.871987815836725
-              ]
-            }
           }
         ]
       }
@@ -258,8 +210,8 @@
           "value": "4"
         }
       ],
-      "created": "2026-05-25T13:23:24Z",
-      "modified": "2026-05-25T13:23:24Z",
+      "created": "2026-06-10T19:14:36Z",
+      "modified": "2026-06-10T19:14:36Z",
       "creator": [
         {
           "id": "https://oldinsurancemaps.net/profile/danvk",
@@ -278,17 +230,14 @@
         },
         "selector": {
           "type": "SvgSelector",
-          "value": "<svg><polygon points=\"0,7323 0,0 5882,0 5882,7323 0,7323\" /></svg>"
+          "value": "<svg><polygon points=\"1755.2,6226.4 1716.6,0.0 4077.0,0.0 4132.7,6228.3 1755.2,6226.4\" /></svg>"
         }
       },
       "body": {
         "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd410m:g4104m:g4104cm:g01790195001N:01790_01N_1950-0102W/gcps",
         "type": "FeatureCollection",
         "transformation": {
-          "type": "polynomial",
-          "options": {
-            "order": 1
-          }
+          "type": "helmert"
         },
         "features": [
           {
@@ -332,27 +281,6 @@
                 41.8697525
               ]
             }
-          },
-          {
-            "type": "Feature",
-            "properties": {
-              "resourceCoords": [
-                4132.7,
-                1290.6
-              ],
-              "creator": {
-                "id": "https://oldinsurancemaps.net/profile/danvk",
-                "type": "Person"
-              },
-              "type": "gcp"
-            },
-            "geometry": {
-              "type": "Point",
-              "coordinates": [
-                -87.64087146649575,
-                41.8720138514541
-              ]
-            }
           }
         ]
       }
@@ -375,8 +303,8 @@
           "value": "4"
         }
       ],
-      "created": "2026-05-25T13:23:24Z",
-      "modified": "2026-05-25T13:23:24Z",
+      "created": "2026-06-10T19:14:36Z",
+      "modified": "2026-06-10T19:14:36Z",
       "creator": [
         {
           "id": "https://oldinsurancemaps.net/profile/danvk",
@@ -395,17 +323,14 @@
         },
         "selector": {
           "type": "SvgSelector",
-          "value": "<svg><polygon points=\"0,7323 0,0 5844,0 5844,7323 0,7323\" /></svg>"
+          "value": "<svg><polygon points=\"1603.6,1251.1 4117.9,1231.5 4152.3,6222.5 1682.9,6208.1 1603.6,1251.1\" /></svg>"
         }
       },
       "body": {
         "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd410m:g4104m:g4104cm:g01790195001N:01790_01N_1950-0103W/gcps",
         "type": "FeatureCollection",
         "transformation": {
-          "type": "polynomial",
-          "options": {
-            "order": 1
-          }
+          "type": "helmert"
         },
         "features": [
           {
@@ -449,27 +374,6 @@
                 41.8697525
               ]
             }
-          },
-          {
-            "type": "Feature",
-            "properties": {
-              "resourceCoords": [
-                1682.9,
-                1233.0
-              ],
-              "creator": {
-                "id": "https://oldinsurancemaps.net/profile/danvk",
-                "type": "Person"
-              },
-              "type": "gcp"
-            },
-            "geometry": {
-              "type": "Point",
-              "coordinates": [
-                -87.64085013239752,
-                41.87201760416809
-              ]
-            }
           }
         ]
       }
@@ -492,8 +396,8 @@
           "value": "2"
         }
       ],
-      "created": "2026-05-25T13:23:24Z",
-      "modified": "2026-05-25T13:23:24Z",
+      "created": "2026-06-10T19:14:36Z",
+      "modified": "2026-06-10T19:14:36Z",
       "creator": [
         {
           "id": "https://oldinsurancemaps.net/profile/danvk",
@@ -512,17 +416,14 @@
         },
         "selector": {
           "type": "SvgSelector",
-          "value": "<svg><polygon points=\"0,7323 0,0 5901,0 5901,7323 0,7323\" /></svg>"
+          "value": "<svg><polygon points=\"1440.9,4711.8 1440.6,2380.7 3938.4,2352.6 3912.0,0.0 5901.0,0.0 5901.0,7323.0 5147.0,7323.0 5145.6,4709.8 1440.9,4711.8\" /></svg>"
         }
       },
       "body": {
         "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd410m:g4104m:g4104cm:g01790195001N:01790_01N_1950-0104W/gcps",
         "type": "FeatureCollection",
         "transformation": {
-          "type": "polynomial",
-          "options": {
-            "order": 1
-          }
+          "type": "helmert"
         },
         "features": [
           {
@@ -566,51 +467,30 @@
                 41.8697612
               ]
             }
-          },
-          {
-            "type": "Feature",
-            "properties": {
-              "resourceCoords": [
-                5901.0,
-                3769.5
-              ],
-              "creator": {
-                "id": "https://oldinsurancemaps.net/profile/danvk",
-                "type": "Person"
-              },
-              "type": "projected"
-            },
-            "geometry": {
-              "type": "Point",
-              "coordinates": [
-                -87.6366245508491,
-                41.87093817044732
-              ]
-            }
           }
         ]
       }
     },
     {
-      "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd410m:g4104m:g4104cm:g01790195001N:01790_01N_1950-0105W/georef",
+      "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd410m:g4104m:g4104cm:g01790195001N:01790_01N_1950-0106W/georef",
       "type": "Annotation",
       "@context": [
         "http://iiif.io/api/extension/georef/1/context.json",
         "http://iiif.io/api/presentation/3/context.json"
       ],
-      "label": "Chicago, Ill. | 1950 | Vol. 1 p105W",
+      "label": "Chicago, Ill. | 1950 | Vol. 1 p106W",
       "metadata": [
         {
           "label": "streets",
-          "value": "2"
+          "value": "3"
         },
         {
           "label": "intersections",
-          "value": "1"
+          "value": "2"
         }
       ],
-      "created": "2026-05-25T13:23:24Z",
-      "modified": "2026-05-25T13:23:24Z",
+      "created": "2026-06-10T19:14:36Z",
+      "modified": "2026-06-10T19:14:36Z",
       "creator": [
         {
           "id": "https://oldinsurancemaps.net/profile/danvk",
@@ -619,47 +499,44 @@
       ],
       "motivation": "georeferencing",
       "target": {
-        "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd410m:g4104m:g4104cm:g01790195001N:01790_01N_1950-0105W/selector",
+        "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd410m:g4104m:g4104cm:g01790195001N:01790_01N_1950-0106W/selector",
         "type": "SpecificResource",
         "source": {
-          "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd410m:g4104m:g4104cm:g01790195001N:01790_01N_1950-0105W/info.json",
+          "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd410m:g4104m:g4104cm:g01790195001N:01790_01N_1950-0106W/info.json",
           "type": "ImageService2",
           "height": 7323,
-          "width": 5849
+          "width": 5901
         },
         "selector": {
           "type": "SvgSelector",
-          "value": "<svg><polygon points=\"0,7323 0,0 5849,0 5849,7323 0,7323\" /></svg>"
+          "value": "<svg><polygon points=\"2285.3,7017.3 2287.4,6810.5 -0.0,6789.9 -0.0,1498.1 2286.3,1532.6 2287.4,0.0 5901.0,0.0 5901.0,7323.0 5157.1,7323.0 5155.4,7040.2 2285.3,7017.3\" /></svg>"
         }
       },
       "body": {
-        "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd410m:g4104m:g4104cm:g01790195001N:01790_01N_1950-0105W/gcps",
+        "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd410m:g4104m:g4104cm:g01790195001N:01790_01N_1950-0106W/gcps",
         "type": "FeatureCollection",
         "transformation": {
-          "type": "polynomial",
-          "options": {
-            "order": 1
-          }
+          "type": "helmert"
         },
         "features": [
           {
             "type": "Feature",
             "properties": {
               "resourceCoords": [
-                0.0,
-                0.0
+                2287.8,
+                6913.9
               ],
               "creator": {
                 "id": "https://oldinsurancemaps.net/profile/danvk",
                 "type": "Person"
               },
-              "type": "corner"
+              "type": "gcp"
             },
             "geometry": {
               "type": "Point",
               "coordinates": [
-                -87.68317753573604,
-                41.89793830188146
+                -87.6392291,
+                41.8672683
               ]
             }
           },
@@ -667,62 +544,20 @@
             "type": "Feature",
             "properties": {
               "resourceCoords": [
-                5849.0,
-                0.0
+                2284.9,
+                1532.6
               ],
               "creator": {
                 "id": "https://oldinsurancemaps.net/profile/danvk",
                 "type": "Person"
               },
-              "type": "corner"
+              "type": "gcp"
             },
             "geometry": {
               "type": "Point",
               "coordinates": [
-                -87.68310448184444,
-                41.89529839433088
-              ]
-            }
-          },
-          {
-            "type": "Feature",
-            "properties": {
-              "resourceCoords": [
-                5849.0,
-                7323.0
-              ],
-              "creator": {
-                "id": "https://oldinsurancemaps.net/profile/danvk",
-                "type": "Person"
-              },
-              "type": "corner"
-            },
-            "geometry": {
-              "type": "Point",
-              "coordinates": [
-                -87.68754429650745,
-                41.895230281920504
-              ]
-            }
-          },
-          {
-            "type": "Feature",
-            "properties": {
-              "resourceCoords": [
-                0.0,
-                7323.0
-              ],
-              "creator": {
-                "id": "https://oldinsurancemaps.net/profile/danvk",
-                "type": "Person"
-              },
-              "type": "corner"
-            },
-            "geometry": {
-              "type": "Point",
-              "coordinates": [
-                -87.68761735039905,
-                41.897870189471085
+                -87.6392994,
+                41.8697612
               ]
             }
           }
@@ -747,8 +582,8 @@
           "value": "2"
         }
       ],
-      "created": "2026-05-25T13:23:24Z",
-      "modified": "2026-05-25T13:23:24Z",
+      "created": "2026-06-10T19:14:36Z",
+      "modified": "2026-06-10T19:14:36Z",
       "creator": [
         {
           "id": "https://oldinsurancemaps.net/profile/danvk",
@@ -767,17 +602,14 @@
         },
         "selector": {
           "type": "SvgSelector",
-          "value": "<svg><polygon points=\"0,7323 0,0 5849,0 5849,7323 0,7323\" /></svg>"
+          "value": "<svg><polygon points=\"-0.0,7323.0 -0.0,7019.5 2224.5,7051.8 2311.5,1046.9 3420.9,1065.3 3236.0,7323.0 -0.0,7323.0\" /></svg>"
         }
       },
       "body": {
         "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd410m:g4104m:g4104cm:g01790195001N:01790_01N_1950-0107W/gcps",
         "type": "FeatureCollection",
         "transformation": {
-          "type": "polynomial",
-          "options": {
-            "order": 1
-          }
+          "type": "helmert"
         },
         "features": [
           {
@@ -821,27 +653,6 @@
                 41.8696118
               ]
             }
-          },
-          {
-            "type": "Feature",
-            "properties": {
-              "resourceCoords": [
-                0.0,
-                3719.1
-              ],
-              "creator": {
-                "id": "https://oldinsurancemaps.net/profile/danvk",
-                "type": "Person"
-              },
-              "type": "projected"
-            },
-            "geometry": {
-              "type": "Point",
-              "coordinates": [
-                -87.64542472592423,
-                41.870990380176195
-              ]
-            }
           }
         ]
       }
@@ -864,8 +675,8 @@
           "value": "2"
         }
       ],
-      "created": "2026-05-25T13:23:24Z",
-      "modified": "2026-05-25T13:23:24Z",
+      "created": "2026-06-10T19:14:36Z",
+      "modified": "2026-06-10T19:14:36Z",
       "creator": [
         {
           "id": "https://oldinsurancemaps.net/profile/danvk",
@@ -884,17 +695,14 @@
         },
         "selector": {
           "type": "SvgSelector",
-          "value": "<svg><polygon points=\"0,7323 0,0 5877,0 5877,7323 0,7323\" /></svg>"
+          "value": "<svg><polygon points=\"5877.0,7323.0 -0.0,7323.0 -0.0,1065.1 5092.6,1002.1 5101.7,1712.1 5718.5,1698.2 5679.2,-0.0 5877.0,-0.0 5877.0,7323.0\" /></svg>"
         }
       },
       "body": {
         "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd410m:g4104m:g4104cm:g01790195001N:01790_01N_1950-0108W/gcps",
         "type": "FeatureCollection",
         "transformation": {
-          "type": "polynomial",
-          "options": {
-            "order": 1
-          }
+          "type": "helmert"
         },
         "features": [
           {
@@ -938,27 +746,6 @@
                 41.8672095
               ]
             }
-          },
-          {
-            "type": "Feature",
-            "properties": {
-              "resourceCoords": [
-                0.0,
-                3684.5
-              ],
-              "creator": {
-                "id": "https://oldinsurancemaps.net/profile/danvk",
-                "type": "Person"
-              },
-              "type": "projected"
-            },
-            "geometry": {
-              "type": "Point",
-              "coordinates": [
-                -87.64534456306248,
-                41.869481918453126
-              ]
-            }
           }
         ]
       }
@@ -981,8 +768,8 @@
           "value": "6"
         }
       ],
-      "created": "2026-05-25T13:23:24Z",
-      "modified": "2026-05-25T13:23:24Z",
+      "created": "2026-06-10T19:14:36Z",
+      "modified": "2026-06-10T19:14:36Z",
       "creator": [
         {
           "id": "https://oldinsurancemaps.net/profile/danvk",
@@ -1001,17 +788,14 @@
         },
         "selector": {
           "type": "SvgSelector",
-          "value": "<svg><polygon points=\"0,7323 0,0 5861,0 5861,7323 0,7323\" /></svg>"
+          "value": "<svg><polygon points=\"4167.6,995.3 4102.7,7323.0 918.1,7323.0 918.4,6686.5 1651.1,6694.1 1711.6,956.4 4167.6,995.3\" /></svg>"
         }
       },
       "body": {
         "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd410m:g4104m:g4104cm:g01790195001N:01790_01N_1950-0109W/gcps",
         "type": "FeatureCollection",
         "transformation": {
-          "type": "polynomial",
-          "options": {
-            "order": 1
-          }
+          "type": "helmert"
         },
         "features": [
           {
@@ -1055,27 +839,6 @@
                 41.8697104
               ]
             }
-          },
-          {
-            "type": "Feature",
-            "properties": {
-              "resourceCoords": [
-                4149.4,
-                956.4
-              ],
-              "creator": {
-                "id": "https://oldinsurancemaps.net/profile/danvk",
-                "type": "Person"
-              },
-              "type": "gcp"
-            },
-            "geometry": {
-              "type": "Point",
-              "coordinates": [
-                -87.64228225719306,
-                41.86974798134937
-              ]
-            }
           }
         ]
       }
@@ -1098,8 +861,8 @@
           "value": "8"
         }
       ],
-      "created": "2026-05-25T13:23:24Z",
-      "modified": "2026-05-25T13:23:24Z",
+      "created": "2026-06-10T19:14:36Z",
+      "modified": "2026-06-10T19:14:36Z",
       "creator": [
         {
           "id": "https://oldinsurancemaps.net/profile/danvk",
@@ -1118,17 +881,14 @@
         },
         "selector": {
           "type": "SvgSelector",
-          "value": "<svg><polygon points=\"0,7323 0,0 5809,0 5809,7323 0,7323\" /></svg>"
+          "value": "<svg><polygon points=\"4111.5,725.9 4137.2,6528.9 1679.9,6530.8 1680.0,732.7 4111.5,725.9\" /></svg>"
         }
       },
       "body": {
         "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd410m:g4104m:g4104cm:g01790195001N:01790_01N_1950-0010N/gcps",
         "type": "FeatureCollection",
         "transformation": {
-          "type": "polynomial",
-          "options": {
-            "order": 1
-          }
+          "type": "helmert"
         },
         "features": [
           {
@@ -1172,27 +932,6 @@
                 41.8940363
               ]
             }
-          },
-          {
-            "type": "Feature",
-            "properties": {
-              "resourceCoords": [
-                4120.5,
-                2967.2
-              ],
-              "creator": {
-                "id": "https://oldinsurancemaps.net/profile/danvk",
-                "type": "Person"
-              },
-              "type": "gcp"
-            },
-            "geometry": {
-              "type": "Point",
-              "coordinates": [
-                -87.62975102464432,
-                41.89565158953739
-              ]
-            }
           }
         ]
       }
@@ -1208,15 +947,15 @@
       "metadata": [
         {
           "label": "streets",
-          "value": "7"
+          "value": "6"
         },
         {
           "label": "intersections",
-          "value": "9"
+          "value": "8"
         }
       ],
-      "created": "2026-05-25T13:23:24Z",
-      "modified": "2026-05-25T13:23:24Z",
+      "created": "2026-06-10T19:14:36Z",
+      "modified": "2026-06-10T19:14:36Z",
       "creator": [
         {
           "id": "https://oldinsurancemaps.net/profile/danvk",
@@ -1235,17 +974,14 @@
         },
         "selector": {
           "type": "SvgSelector",
-          "value": "<svg><polygon points=\"0,7323 0,0 5877,0 5877,7323 0,7323\" /></svg>"
+          "value": "<svg><polygon points=\"1699.7,967.9 4270.1,984.7 4244.5,6445.6 4126.9,6446.2 4125.3,7323.0 1691.4,7243.2 1699.7,967.9\" /></svg>"
         }
       },
       "body": {
         "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd410m:g4104m:g4104cm:g01790195001N:01790_01N_1950-0110W/gcps",
         "type": "FeatureCollection",
         "transformation": {
-          "type": "polynomial",
-          "options": {
-            "order": 1
-          }
+          "type": "helmert"
         },
         "features": [
           {
@@ -1273,8 +1009,8 @@
             "type": "Feature",
             "properties": {
               "resourceCoords": [
-                4085.1,
-                2633.1
+                1699.7,
+                967.9
               ],
               "creator": {
                 "id": "https://oldinsurancemaps.net/profile/danvk",
@@ -1285,29 +1021,8 @@
             "geometry": {
               "type": "Point",
               "coordinates": [
-                -87.6407824,
-                41.8690097
-              ]
-            }
-          },
-          {
-            "type": "Feature",
-            "properties": {
-              "resourceCoords": [
-                4085.1,
-                4433.6
-              ],
-              "creator": {
-                "id": "https://oldinsurancemaps.net/profile/danvk",
-                "type": "Person"
-              },
-              "type": "gcp"
-            },
-            "geometry": {
-              "type": "Point",
-              "coordinates": [
-                -87.64076512080163,
-                41.86819364677179
+                -87.6422705,
+                41.8697309
               ]
             }
           }
@@ -1332,8 +1047,8 @@
           "value": "5"
         }
       ],
-      "created": "2026-05-25T13:23:24Z",
-      "modified": "2026-05-25T13:23:24Z",
+      "created": "2026-06-10T19:14:36Z",
+      "modified": "2026-06-10T19:14:36Z",
       "creator": [
         {
           "id": "https://oldinsurancemaps.net/profile/danvk",
@@ -1352,17 +1067,14 @@
         },
         "selector": {
           "type": "SvgSelector",
-          "value": "<svg><polygon points=\"0,7323 0,0 5861,0 5861,7323 0,7323\" /></svg>"
+          "value": "<svg><polygon points=\"405.1,6483.3 2892.0,6518.6 2888.6,6732.7 5861.0,6774.5 5861.0,7323.0 402.3,7323.0 405.1,6483.3\" /></svg>"
         }
       },
       "body": {
         "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd410m:g4104m:g4104cm:g01790195001N:01790_01N_1950-0111W/gcps",
         "type": "FeatureCollection",
         "transformation": {
-          "type": "polynomial",
-          "options": {
-            "order": 1
-          }
+          "type": "helmert"
         },
         "features": [
           {
@@ -1406,27 +1118,6 @@
                 41.8697525
               ]
             }
-          },
-          {
-            "type": "Feature",
-            "properties": {
-              "resourceCoords": [
-                2818.1,
-                1002.5
-              ],
-              "creator": {
-                "id": "https://oldinsurancemaps.net/profile/danvk",
-                "type": "Person"
-              },
-              "type": "gcp"
-            },
-            "geometry": {
-              "type": "Point",
-              "coordinates": [
-                -87.639364646986,
-                41.869781610003365
-              ]
-            }
           }
         ]
       }
@@ -1446,11 +1137,11 @@
         },
         {
           "label": "intersections",
-          "value": "17"
+          "value": "15"
         }
       ],
-      "created": "2026-05-25T13:23:24Z",
-      "modified": "2026-05-25T13:23:24Z",
+      "created": "2026-06-10T19:14:36Z",
+      "modified": "2026-06-10T19:14:36Z",
       "creator": [
         {
           "id": "https://oldinsurancemaps.net/profile/danvk",
@@ -1469,17 +1160,14 @@
         },
         "selector": {
           "type": "SvgSelector",
-          "value": "<svg><polygon points=\"0,7323 0,0 5806,0 5806,7323 0,7323\" /></svg>"
+          "value": "<svg><polygon points=\"4114.6,6548.7 1538.7,6539.4 1538.7,798.0 903.4,796.9 907.3,61.1 5806.0,0.0 5806.0,801.3 4121.2,804.1 4114.6,6548.7\" /></svg>"
         }
       },
       "body": {
         "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd410m:g4104m:g4104cm:g01790195001N:01790_01N_1950-0011N/gcps",
         "type": "FeatureCollection",
         "transformation": {
-          "type": "polynomial",
-          "options": {
-            "order": 1
-          }
+          "type": "helmert"
         },
         "features": [
           {
@@ -1523,27 +1211,6 @@
                 41.8966555
               ]
             }
-          },
-          {
-            "type": "Feature",
-            "properties": {
-              "resourceCoords": [
-                4157.8,
-                2996.0
-              ],
-              "creator": {
-                "id": "https://oldinsurancemaps.net/profile/danvk",
-                "type": "Person"
-              },
-              "type": "gcp"
-            },
-            "geometry": {
-              "type": "Point",
-              "coordinates": [
-                -87.62815847745573,
-                41.895686326466034
-              ]
-            }
           }
         ]
       }
@@ -1566,8 +1233,8 @@
           "value": "14"
         }
       ],
-      "created": "2026-05-25T13:23:24Z",
-      "modified": "2026-05-25T13:23:24Z",
+      "created": "2026-06-10T19:14:36Z",
+      "modified": "2026-06-10T19:14:36Z",
       "creator": [
         {
           "id": "https://oldinsurancemaps.net/profile/danvk",
@@ -1586,17 +1253,14 @@
         },
         "selector": {
           "type": "SvgSelector",
-          "value": "<svg><polygon points=\"0,7323 0,0 5809,0 5809,7323 0,7323\" /></svg>"
+          "value": "<svg><polygon points=\"4043.1,732.1 4044.1,6517.4 1798.0,6522.1 1788.5,741.4 4043.1,732.1\" /></svg>"
         }
       },
       "body": {
         "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd410m:g4104m:g4104cm:g01790195001N:01790_01N_1950-0012N/gcps",
         "type": "FeatureCollection",
         "transformation": {
-          "type": "polynomial",
-          "options": {
-            "order": 1
-          }
+          "type": "helmert"
         },
         "features": [
           {
@@ -1640,27 +1304,6 @@
                 41.8940776
               ]
             }
-          },
-          {
-            "type": "Feature",
-            "properties": {
-              "resourceCoords": [
-                1798.0,
-                2944.2
-              ],
-              "creator": {
-                "id": "https://oldinsurancemaps.net/profile/danvk",
-                "type": "Person"
-              },
-              "type": "gcp"
-            },
-            "geometry": {
-              "type": "Point",
-              "coordinates": [
-                -87.62817945716951,
-                41.89568721901286
-              ]
-            }
           }
         ]
       }
@@ -1676,15 +1319,15 @@
       "metadata": [
         {
           "label": "streets",
-          "value": "6"
+          "value": "7"
         },
         {
           "label": "intersections",
-          "value": "9"
+          "value": "12"
         }
       ],
-      "created": "2026-05-25T13:23:24Z",
-      "modified": "2026-05-25T13:23:24Z",
+      "created": "2026-06-10T19:14:36Z",
+      "modified": "2026-06-10T19:14:36Z",
       "creator": [
         {
           "id": "https://oldinsurancemaps.net/profile/danvk",
@@ -1703,40 +1346,16 @@
         },
         "selector": {
           "type": "SvgSelector",
-          "value": "<svg><polygon points=\"0,7323 0,0 5806,0 5806,7323 0,7323\" /></svg>"
+          "value": "<svg><polygon points=\"842.1,740.8 288.0,741.1 288.0,0.0 5806.0,66.6 5806.0,6470.4 5123.0,6469.3 5125.0,7233.4 4840.1,7232.7 4837.7,6464.1 827.0,6473.2 842.1,740.8\" /></svg>"
         }
       },
       "body": {
         "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd410m:g4104m:g4104cm:g01790195001N:01790_01N_1950-0013N/gcps",
         "type": "FeatureCollection",
         "transformation": {
-          "type": "polynomial",
-          "options": {
-            "order": 1
-          }
+          "type": "helmert"
         },
         "features": [
-          {
-            "type": "Feature",
-            "properties": {
-              "resourceCoords": [
-                827.0,
-                4710.1
-              ],
-              "creator": {
-                "id": "https://oldinsurancemaps.net/profile/danvk",
-                "type": "Person"
-              },
-              "type": "gcp"
-            },
-            "geometry": {
-              "type": "Point",
-              "coordinates": [
-                -87.6268047,
-                41.8948999
-              ]
-            }
-          },
           {
             "type": "Feature",
             "properties": {
@@ -1762,8 +1381,8 @@
             "type": "Feature",
             "properties": {
               "resourceCoords": [
-                3057.2,
-                2932.7
+                827.0,
+                6473.2
               ],
               "creator": {
                 "id": "https://oldinsurancemaps.net/profile/danvk",
@@ -1774,8 +1393,8 @@
             "geometry": {
               "type": "Point",
               "coordinates": [
-                -87.62546906243782,
-                41.895728630480285
+                -87.6267812,
+                41.894099
               ]
             }
           }
@@ -1800,8 +1419,8 @@
           "value": "7"
         }
       ],
-      "created": "2026-05-25T13:23:24Z",
-      "modified": "2026-05-25T13:23:24Z",
+      "created": "2026-06-10T19:14:36Z",
+      "modified": "2026-06-10T19:14:36Z",
       "creator": [
         {
           "id": "https://oldinsurancemaps.net/profile/danvk",
@@ -1820,17 +1439,14 @@
         },
         "selector": {
           "type": "SvgSelector",
-          "value": "<svg><polygon points=\"0,7323 0,0 5809,0 5809,7323 0,7323\" /></svg>"
+          "value": "<svg><polygon points=\"4718.6,0.0 4720.5,726.6 5809.0,730.4 5809.0,6537.5 1032.5,6541.8 1015.6,0.0 4718.6,0.0\" /></svg>"
         }
       },
       "body": {
         "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd410m:g4104m:g4104cm:g01790195001N:01790_01N_1950-0014N/gcps",
         "type": "FeatureCollection",
         "transformation": {
-          "type": "polynomial",
-          "options": {
-            "order": 1
-          }
+          "type": "helmert"
         },
         "features": [
           {
@@ -1874,27 +1490,6 @@
                 41.8941636
               ]
             }
-          },
-          {
-            "type": "Feature",
-            "properties": {
-              "resourceCoords": [
-                440.9,
-                2944.2
-              ],
-              "creator": {
-                "id": "https://oldinsurancemaps.net/profile/danvk",
-                "type": "Person"
-              },
-              "type": "gcp"
-            },
-            "geometry": {
-              "type": "Point",
-              "coordinates": [
-                -87.6241405546017,
-                41.89574365484056
-              ]
-            }
           }
         ]
       }
@@ -1914,11 +1509,11 @@
         },
         {
           "label": "intersections",
-          "value": "5"
+          "value": "4"
         }
       ],
-      "created": "2026-05-25T13:23:24Z",
-      "modified": "2026-05-25T13:23:24Z",
+      "created": "2026-06-10T19:14:36Z",
+      "modified": "2026-06-10T19:14:36Z",
       "creator": [
         {
           "id": "https://oldinsurancemaps.net/profile/danvk",
@@ -1937,17 +1532,14 @@
         },
         "selector": {
           "type": "SvgSelector",
-          "value": "<svg><polygon points=\"0,7323 0,0 5806,0 5806,7323 0,7323\" /></svg>"
+          "value": "<svg><polygon points=\"1066.6,6542.2 1081.6,772.2 914.2,771.0 175.9,767.6 -0.0,765.5 -0.0,-0.0 5806.0,0.0 5806.0,6517.1 1066.6,6542.2\" /></svg>"
         }
       },
       "body": {
         "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd410m:g4104m:g4104cm:g01790195001N:01790_01N_1950-0015N/gcps",
         "type": "FeatureCollection",
         "transformation": {
-          "type": "polynomial",
-          "options": {
-            "order": 1
-          }
+          "type": "helmert"
         },
         "features": [
           {
@@ -1991,27 +1583,6 @@
                 41.8942136
               ]
             }
-          },
-          {
-            "type": "Feature",
-            "properties": {
-              "resourceCoords": [
-                5610.1,
-                4734.6
-              ],
-              "creator": {
-                "id": "https://oldinsurancemaps.net/profile/danvk",
-                "type": "Person"
-              },
-              "type": "projected"
-            },
-            "geometry": {
-              "type": "Point",
-              "coordinates": [
-                -87.61818919096412,
-                41.895045436501924
-              ]
-            }
           }
         ]
       }
@@ -2034,8 +1605,8 @@
           "value": "6"
         }
       ],
-      "created": "2026-05-25T13:23:24Z",
-      "modified": "2026-05-25T13:23:24Z",
+      "created": "2026-06-10T19:14:36Z",
+      "modified": "2026-06-10T19:14:36Z",
       "creator": [
         {
           "id": "https://oldinsurancemaps.net/profile/danvk",
@@ -2054,17 +1625,14 @@
         },
         "selector": {
           "type": "SvgSelector",
-          "value": "<svg><polygon points=\"0,7323 0,0 5798,0 5798,7323 0,7323\" /></svg>"
+          "value": "<svg><polygon points=\"1104.6,5481.9 1467.3,0.0 5798.0,0.0 5798.0,7323.0 5182.9,5743.6 1542.4,5894.6 1565.8,5512.2 1104.6,5481.9\" /></svg>"
         }
       },
       "body": {
         "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd410m:g4104m:g4104cm:g01790195001N:01790_01N_1950-0016N/gcps",
         "type": "FeatureCollection",
         "transformation": {
-          "type": "polynomial",
-          "options": {
-            "order": 1
-          }
+          "type": "helmert"
         },
         "features": [
           {
@@ -2108,27 +1676,6 @@
                 41.8968396
               ]
             }
-          },
-          {
-            "type": "Feature",
-            "properties": {
-              "resourceCoords": [
-                5898.9,
-                6493.3
-              ],
-              "creator": {
-                "id": "https://oldinsurancemaps.net/profile/danvk",
-                "type": "Person"
-              },
-              "type": "gcp"
-            },
-            "geometry": {
-              "type": "Point",
-              "coordinates": [
-                -87.61520821374421,
-                41.89442373534083
-              ]
-            }
           }
         ]
       }
@@ -2151,8 +1698,8 @@
           "value": "5"
         }
       ],
-      "created": "2026-05-25T13:23:24Z",
-      "modified": "2026-05-25T13:23:24Z",
+      "created": "2026-06-10T19:14:36Z",
+      "modified": "2026-06-10T19:14:36Z",
       "creator": [
         {
           "id": "https://oldinsurancemaps.net/profile/danvk",
@@ -2171,17 +1718,14 @@
         },
         "selector": {
           "type": "SvgSelector",
-          "value": "<svg><polygon points=\"0,7323 0,0 5806,0 5806,7323 0,7323\" /></svg>"
+          "value": "<svg><polygon points=\"4315.2,958.0 4726.3,6286.6 4681.5,7323.0 270.3,7219.6 216.0,6699.4 652.6,5646.8 655.8,923.1 4315.2,958.0\" /></svg>"
         }
       },
       "body": {
         "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd410m:g4104m:g4104cm:g01790195001N:01790_01N_1950-0017N/gcps",
         "type": "FeatureCollection",
         "transformation": {
-          "type": "polynomial",
-          "options": {
-            "order": 1
-          }
+          "type": "helmert"
         },
         "features": [
           {
@@ -2225,27 +1769,6 @@
                 41.893922
               ]
             }
-          },
-          {
-            "type": "Feature",
-            "properties": {
-              "resourceCoords": [
-                2143.8,
-                962.2
-              ],
-              "creator": {
-                "id": "https://oldinsurancemaps.net/profile/danvk",
-                "type": "Person"
-              },
-              "type": "gcp"
-            },
-            "geometry": {
-              "type": "Point",
-              "coordinates": [
-                -87.64174236574497,
-                41.89388762575259
-              ]
-            }
           }
         ]
       }
@@ -2268,8 +1791,8 @@
           "value": "8"
         }
       ],
-      "created": "2026-05-25T13:23:24Z",
-      "modified": "2026-05-25T13:23:24Z",
+      "created": "2026-06-10T19:14:36Z",
+      "modified": "2026-06-10T19:14:36Z",
       "creator": [
         {
           "id": "https://oldinsurancemaps.net/profile/danvk",
@@ -2288,17 +1811,14 @@
         },
         "selector": {
           "type": "SvgSelector",
-          "value": "<svg><polygon points=\"0,7323 0,0 5798,0 5798,7323 0,7323\" /></svg>"
+          "value": "<svg><polygon points=\"5559.3,6337.6 483.0,6366.0 417.5,5635.4 -0.0,4885.0 -0.0,973.3 5519.0,955.6 5559.3,6337.6\" /></svg>"
         }
       },
       "body": {
         "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd410m:g4104m:g4104cm:g01790195001N:01790_01N_1950-0018N/gcps",
         "type": "FeatureCollection",
         "transformation": {
-          "type": "polynomial",
-          "options": {
-            "order": 1
-          }
+          "type": "helmert"
         },
         "features": [
           {
@@ -2342,27 +1862,6 @@
                 41.8915062
               ]
             }
-          },
-          {
-            "type": "Feature",
-            "properties": {
-              "resourceCoords": [
-                5538.6,
-                6352.2
-              ],
-              "creator": {
-                "id": "https://oldinsurancemaps.net/profile/danvk",
-                "type": "Person"
-              },
-              "type": "gcp"
-            },
-            "geometry": {
-              "type": "Point",
-              "coordinates": [
-                -87.63703132981877,
-                41.8915368195104
-              ]
-            }
           }
         ]
       }
@@ -2385,8 +1884,8 @@
           "value": "4"
         }
       ],
-      "created": "2026-05-25T13:23:24Z",
-      "modified": "2026-05-25T13:23:24Z",
+      "created": "2026-06-10T19:14:36Z",
+      "modified": "2026-06-10T19:14:36Z",
       "creator": [
         {
           "id": "https://oldinsurancemaps.net/profile/danvk",
@@ -2405,17 +1904,14 @@
         },
         "selector": {
           "type": "SvgSelector",
-          "value": "<svg><polygon points=\"0,7322 0,0 5794,0 5794,7322 0,7322\" /></svg>"
+          "value": "<svg><polygon points=\"4049.2,6324.2 1694.1,6307.7 1685.0,967.4 4053.8,972.7 4049.2,6324.2\" /></svg>"
         }
       },
       "body": {
         "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd410m:g4104m:g4104cm:g01790195001N:01790_01N_1950-0019N/gcps",
         "type": "FeatureCollection",
         "transformation": {
-          "type": "polynomial",
-          "options": {
-            "order": 1
-          }
+          "type": "helmert"
         },
         "features": [
           {
@@ -2459,27 +1955,6 @@
                 41.8915431
               ]
             }
-          },
-          {
-            "type": "Feature",
-            "properties": {
-              "resourceCoords": [
-                5240.8,
-                4534.1
-              ],
-              "creator": {
-                "id": "https://oldinsurancemaps.net/profile/danvk",
-                "type": "Person"
-              },
-              "type": "projected"
-            },
-            "geometry": {
-              "type": "Point",
-              "coordinates": [
-                -87.63488503766281,
-                41.892377708112775
-              ]
-            }
           }
         ]
       }
@@ -2502,8 +1977,8 @@
           "value": "8"
         }
       ],
-      "created": "2026-05-25T13:23:24Z",
-      "modified": "2026-05-25T13:23:24Z",
+      "created": "2026-06-10T19:14:36Z",
+      "modified": "2026-06-10T19:14:36Z",
       "creator": [
         {
           "id": "https://oldinsurancemaps.net/profile/danvk",
@@ -2522,17 +1997,14 @@
         },
         "selector": {
           "type": "SvgSelector",
-          "value": "<svg><polygon points=\"0,7323 0,0 5798,0 5798,7323 0,7323\" /></svg>"
+          "value": "<svg><polygon points=\"4221.1,916.9 4261.8,6324.9 1711.7,6322.9 1700.2,916.1 4221.1,916.9\" /></svg>"
         }
       },
       "body": {
         "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd410m:g4104m:g4104cm:g01790195001N:01790_01N_1950-0020N/gcps",
         "type": "FeatureCollection",
         "transformation": {
-          "type": "polynomial",
-          "options": {
-            "order": 1
-          }
+          "type": "helmert"
         },
         "features": [
           {
@@ -2576,27 +2048,6 @@
                 41.8939783
               ]
             }
-          },
-          {
-            "type": "Feature",
-            "properties": {
-              "resourceCoords": [
-                4239.0,
-                4522.9
-              ],
-              "creator": {
-                "id": "https://oldinsurancemaps.net/profile/danvk",
-                "type": "Person"
-              },
-              "type": "gcp"
-            },
-            "geometry": {
-              "type": "Point",
-              "coordinates": [
-                -87.63408636080301,
-                41.89238243348672
-              ]
-            }
           }
         ]
       }
@@ -2619,8 +2070,8 @@
           "value": "4"
         }
       ],
-      "created": "2026-05-25T13:23:24Z",
-      "modified": "2026-05-25T13:23:24Z",
+      "created": "2026-06-10T19:14:36Z",
+      "modified": "2026-06-10T19:14:36Z",
       "creator": [
         {
           "id": "https://oldinsurancemaps.net/profile/danvk",
@@ -2639,17 +2090,14 @@
         },
         "selector": {
           "type": "SvgSelector",
-          "value": "<svg><polygon points=\"0,7322 0,0 5794,0 5794,7322 0,7322\" /></svg>"
+          "value": "<svg><polygon points=\"3863.7,6276.9 1653.8,6267.4 1653.8,945.1 4187.2,960.4 4176.8,2733.2 3920.3,2733.0 3863.7,6276.9\" /></svg>"
         }
       },
       "body": {
         "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd410m:g4104m:g4104cm:g01790195001N:01790_01N_1950-0021N/gcps",
         "type": "FeatureCollection",
         "transformation": {
-          "type": "polynomial",
-          "options": {
-            "order": 1
-          }
+          "type": "helmert"
         },
         "features": [
           {
@@ -2693,27 +2141,6 @@
                 41.8915756
               ]
             }
-          },
-          {
-            "type": "Feature",
-            "properties": {
-              "resourceCoords": [
-                3757.0,
-                945.1
-              ],
-              "creator": {
-                "id": "https://oldinsurancemaps.net/profile/danvk",
-                "type": "Person"
-              },
-              "type": "gcp"
-            },
-            "geometry": {
-              "type": "Point",
-              "coordinates": [
-                -87.63284875583267,
-                41.89402073692706
-              ]
-            }
           }
         ]
       }
@@ -2736,8 +2163,8 @@
           "value": "4"
         }
       ],
-      "created": "2026-05-25T13:23:24Z",
-      "modified": "2026-05-25T13:23:24Z",
+      "created": "2026-06-10T19:14:36Z",
+      "modified": "2026-06-10T19:14:36Z",
       "creator": [
         {
           "id": "https://oldinsurancemaps.net/profile/danvk",
@@ -2756,17 +2183,14 @@
         },
         "selector": {
           "type": "SvgSelector",
-          "value": "<svg><polygon points=\"0,7323 0,0 5798,0 5798,7323 0,7323\" /></svg>"
+          "value": "<svg><polygon points=\"1578.3,5326.3 1609.7,2775.9 1868.1,2774.2 1865.7,989.9 4178.5,991.0 4175.6,7323.0 1580.5,7323.0 1587.3,5326.3 1578.3,5326.3\" /></svg>"
         }
       },
       "body": {
         "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd410m:g4104m:g4104cm:g01790195001N:01790_01N_1950-0022N/gcps",
         "type": "FeatureCollection",
         "transformation": {
-          "type": "polynomial",
-          "options": {
-            "order": 1
-          }
+          "type": "helmert"
         },
         "features": [
           {
@@ -2810,27 +2234,6 @@
                 41.8940363
               ]
             }
-          },
-          {
-            "type": "Feature",
-            "properties": {
-              "resourceCoords": [
-                2400.5,
-                1879.7
-              ],
-              "creator": {
-                "id": "https://oldinsurancemaps.net/profile/danvk",
-                "type": "Person"
-              },
-              "type": "projected"
-            },
-            "geometry": {
-              "type": "Point",
-              "coordinates": [
-                -87.63225214782034,
-                41.89362050554815
-              ]
-            }
           }
         ]
       }
@@ -2853,8 +2256,8 @@
           "value": "8"
         }
       ],
-      "created": "2026-05-25T13:23:24Z",
-      "modified": "2026-05-25T13:23:24Z",
+      "created": "2026-06-10T19:14:36Z",
+      "modified": "2026-06-10T19:14:36Z",
       "creator": [
         {
           "id": "https://oldinsurancemaps.net/profile/danvk",
@@ -2873,17 +2276,14 @@
         },
         "selector": {
           "type": "SvgSelector",
-          "value": "<svg><polygon points=\"0,7322 0,0 5794,0 5794,7322 0,7322\" /></svg>"
+          "value": "<svg><polygon points=\"4101.3,959.0 4121.6,6355.6 1640.9,6366.1 1639.5,962.6 4101.3,959.0\" /></svg>"
         }
       },
       "body": {
         "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd410m:g4104m:g4104cm:g01790195001N:01790_01N_1950-0023N/gcps",
         "type": "FeatureCollection",
         "transformation": {
-          "type": "polynomial",
-          "options": {
-            "order": 1
-          }
+          "type": "helmert"
         },
         "features": [
           {
@@ -2927,27 +2327,6 @@
                 41.8924393
               ]
             }
-          },
-          {
-            "type": "Feature",
-            "properties": {
-              "resourceCoords": [
-                4122.9,
-                4535.5
-              ],
-              "creator": {
-                "id": "https://oldinsurancemaps.net/profile/danvk",
-                "type": "Person"
-              },
-              "type": "gcp"
-            },
-            "geometry": {
-              "type": "Point",
-              "coordinates": [
-                -87.6296556576536,
-                41.892457820210325
-              ]
-            }
           }
         ]
       }
@@ -2967,11 +2346,11 @@
         },
         {
           "label": "intersections",
-          "value": "15"
+          "value": "12"
         }
       ],
-      "created": "2026-05-25T13:23:24Z",
-      "modified": "2026-05-25T13:23:24Z",
+      "created": "2026-06-10T19:14:36Z",
+      "modified": "2026-06-10T19:14:36Z",
       "creator": [
         {
           "id": "https://oldinsurancemaps.net/profile/danvk",
@@ -2990,17 +2369,14 @@
         },
         "selector": {
           "type": "SvgSelector",
-          "value": "<svg><polygon points=\"0,7323 0,0 5798,0 5798,7323 0,7323\" /></svg>"
+          "value": "<svg><polygon points=\"1685.5,889.0 4285.2,971.2 4100.5,7323.0 1495.9,7323.0 1685.5,889.0\" /></svg>"
         }
       },
       "body": {
         "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd410m:g4104m:g4104cm:g01790195001N:01790_01N_1950-0024N/gcps",
         "type": "FeatureCollection",
         "transformation": {
-          "type": "polynomial",
-          "options": {
-            "order": 1
-          }
+          "type": "helmert"
         },
         "features": [
           {
@@ -3044,27 +2420,6 @@
                 41.8916443
               ]
             }
-          },
-          {
-            "type": "Feature",
-            "properties": {
-              "resourceCoords": [
-                1527.3,
-                2751.2
-              ],
-              "creator": {
-                "id": "https://oldinsurancemaps.net/profile/danvk",
-                "type": "Person"
-              },
-              "type": "gcp"
-            },
-            "geometry": {
-              "type": "Point",
-              "coordinates": [
-                -87.6297434540647,
-                41.89321850889849
-              ]
-            }
           }
         ]
       }
@@ -3080,15 +2435,15 @@
       "metadata": [
         {
           "label": "streets",
-          "value": "9"
+          "value": "8"
         },
         {
           "label": "intersections",
-          "value": "21"
+          "value": "12"
         }
       ],
-      "created": "2026-05-25T13:23:24Z",
-      "modified": "2026-05-25T13:23:24Z",
+      "created": "2026-06-10T19:14:36Z",
+      "modified": "2026-06-10T19:14:36Z",
       "creator": [
         {
           "id": "https://oldinsurancemaps.net/profile/danvk",
@@ -3107,25 +2462,22 @@
         },
         "selector": {
           "type": "SvgSelector",
-          "value": "<svg><polygon points=\"0,7322 0,0 5794,0 5794,7322 0,7322\" /></svg>"
+          "value": "<svg><polygon points=\"5047.4,6287.2 582.0,6296.6 582.0,904.8 5038.3,900.6 5047.4,6287.2\" /></svg>"
         }
       },
       "body": {
         "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd410m:g4104m:g4104cm:g01790195001N:01790_01N_1950-0025N/gcps",
         "type": "FeatureCollection",
         "transformation": {
-          "type": "polynomial",
-          "options": {
-            "order": 1
-          }
+          "type": "helmert"
         },
         "features": [
           {
             "type": "Feature",
             "properties": {
               "resourceCoords": [
-                2843.7,
-                2708.7
+                582.0,
+                4486.6
               ],
               "creator": {
                 "id": "https://oldinsurancemaps.net/profile/danvk",
@@ -3136,8 +2488,8 @@
             "geometry": {
               "type": "Point",
               "coordinates": [
-                -87.6267605,
-                41.8932946
+                -87.6280935,
+                41.8924761
               ]
             }
           },
@@ -3146,7 +2498,7 @@
             "properties": {
               "resourceCoords": [
                 582.0,
-                6276.0
+                904.8
               ],
               "creator": {
                 "id": "https://oldinsurancemaps.net/profile/danvk",
@@ -3157,29 +2509,8 @@
             "geometry": {
               "type": "Point",
               "coordinates": [
-                -87.628071,
-                41.8916668
-              ]
-            }
-          },
-          {
-            "type": "Feature",
-            "properties": {
-              "resourceCoords": [
-                582.0,
-                2708.7
-              ],
-              "creator": {
-                "id": "https://oldinsurancemaps.net/profile/danvk",
-                "type": "Person"
-              },
-              "type": "gcp"
-            },
-            "geometry": {
-              "type": "Point",
-              "coordinates": [
-                -87.62812526101742,
-                41.893268988038926
+                -87.628138,
+                41.8940776
               ]
             }
           }
@@ -3201,11 +2532,11 @@
         },
         {
           "label": "intersections",
-          "value": "14"
+          "value": "11"
         }
       ],
-      "created": "2026-05-25T13:23:24Z",
-      "modified": "2026-05-25T13:23:24Z",
+      "created": "2026-06-10T19:14:36Z",
+      "modified": "2026-06-10T19:14:36Z",
       "creator": [
         {
           "id": "https://oldinsurancemaps.net/profile/danvk",
@@ -3224,17 +2555,14 @@
         },
         "selector": {
           "type": "SvgSelector",
-          "value": "<svg><polygon points=\"0,7323 0,0 5803,0 5803,7323 0,7323\" /></svg>"
+          "value": "<svg><polygon points=\"677.1,852.7 2544.2,854.1 2542.3,1631.4 2830.5,1633.7 2832.6,860.9 5162.4,879.4 5152.1,4474.0 2803.5,4430.5 2810.3,4264.3 2517.3,4256.1 2518.1,4428.3 665.9,4414.3 677.1,852.7\" /></svg>"
         }
       },
       "body": {
         "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd410m:g4104m:g4104cm:g01790195001N:01790_01N_1950-0026N/gcps",
         "type": "FeatureCollection",
         "transformation": {
-          "type": "polynomial",
-          "options": {
-            "order": 1
-          }
+          "type": "helmert"
         },
         "features": [
           {
@@ -3278,27 +2606,6 @@
                 41.8941207
               ]
             }
-          },
-          {
-            "type": "Feature",
-            "properties": {
-              "resourceCoords": [
-                2743.0,
-                4453.7
-              ],
-              "creator": {
-                "id": "https://oldinsurancemaps.net/profile/danvk",
-                "type": "Person"
-              },
-              "type": "gcp"
-            },
-            "geometry": {
-              "type": "Point",
-              "coordinates": [
-                -87.62415676069689,
-                41.892529422192695
-              ]
-            }
           }
         ]
       }
@@ -3321,8 +2628,8 @@
           "value": "8"
         }
       ],
-      "created": "2026-05-25T13:23:24Z",
-      "modified": "2026-05-25T13:23:24Z",
+      "created": "2026-06-10T19:14:36Z",
+      "modified": "2026-06-10T19:14:36Z",
       "creator": [
         {
           "id": "https://oldinsurancemaps.net/profile/danvk",
@@ -3341,17 +2648,14 @@
         },
         "selector": {
           "type": "SvgSelector",
-          "value": "<svg><polygon points=\"0,7322 0,0 5794,0 5794,7322 0,7322\" /></svg>"
+          "value": "<svg><polygon points=\"851.4,962.4 4928.2,908.9 4983.3,7299.2 915.7,7322.0 851.4,962.4\" /></svg>"
         }
       },
       "body": {
         "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd410m:g4104m:g4104cm:g01790195001N:01790_01N_1950-0027N/gcps",
         "type": "FeatureCollection",
         "transformation": {
-          "type": "polynomial",
-          "options": {
-            "order": 1
-          }
+          "type": "helmert"
         },
         "features": [
           {
@@ -3395,27 +2699,6 @@
                 41.8941636
               ]
             }
-          },
-          {
-            "type": "Feature",
-            "properties": {
-              "resourceCoords": [
-                852.8,
-                6296.2
-              ],
-              "creator": {
-                "id": "https://oldinsurancemaps.net/profile/danvk",
-                "type": "Person"
-              },
-              "type": "gcp"
-            },
-            "geometry": {
-              "type": "Point",
-              "coordinates": [
-                -87.62271136641908,
-                41.89177752266415
-              ]
-            }
           }
         ]
       }
@@ -3438,8 +2721,8 @@
           "value": "3"
         }
       ],
-      "created": "2026-05-25T13:23:24Z",
-      "modified": "2026-05-25T13:23:24Z",
+      "created": "2026-06-10T19:14:36Z",
+      "modified": "2026-06-10T19:14:36Z",
       "creator": [
         {
           "id": "https://oldinsurancemaps.net/profile/danvk",
@@ -3458,17 +2741,14 @@
         },
         "selector": {
           "type": "SvgSelector",
-          "value": "<svg><polygon points=\"0,7323 0,0 5803,0 5803,7323 0,7323\" /></svg>"
+          "value": "<svg><polygon points=\"325.4,954.6 4071.3,956.8 4071.6,0.0 4520.9,0.0 4561.8,4571.4 3450.9,4572.8 3439.0,7323.0 329.5,7323.0 325.4,954.6\" /></svg>"
         }
       },
       "body": {
         "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd410m:g4104m:g4104cm:g01790195001N:01790_01N_1950-0028N/gcps",
         "type": "FeatureCollection",
         "transformation": {
-          "type": "polynomial",
-          "options": {
-            "order": 1
-          }
+          "type": "helmert"
         },
         "features": [
           {
@@ -3512,27 +2792,6 @@
                 41.891803
               ]
             }
-          },
-          {
-            "type": "Feature",
-            "properties": {
-              "resourceCoords": [
-                2040.0,
-                6323.4
-              ],
-              "creator": {
-                "id": "https://oldinsurancemaps.net/profile/danvk",
-                "type": "Person"
-              },
-              "type": "gcp"
-            },
-            "geometry": {
-              "type": "Point",
-              "coordinates": [
-                -87.61920110938192,
-                41.891820125635164
-              ]
-            }
           }
         ]
       }
@@ -3548,15 +2807,15 @@
       "metadata": [
         {
           "label": "streets",
-          "value": "4"
+          "value": "5"
         },
         {
           "label": "intersections",
           "value": "3"
         }
       ],
-      "created": "2026-05-25T13:23:24Z",
-      "modified": "2026-05-25T13:23:24Z",
+      "created": "2026-06-10T19:14:36Z",
+      "modified": "2026-06-10T19:14:36Z",
       "creator": [
         {
           "id": "https://oldinsurancemaps.net/profile/danvk",
@@ -3575,17 +2834,14 @@
         },
         "selector": {
           "type": "SvgSelector",
-          "value": "<svg><polygon points=\"0,7323 0,0 5753,0 5753,7323 0,7323\" /></svg>"
+          "value": "<svg><polygon points=\"-0.0,4175.6 409.5,0.0 3947.6,0.0 4480.9,1557.5 4545.5,0.0 5753.0,0.0 5753.0,5062.3 4350.1,4895.2 4375.0,4672.5 -0.0,4175.6\" /></svg>"
         }
       },
       "body": {
         "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd410m:g4104m:g4104cm:g01790195001N:01790_01N_1950-0029N/gcps",
         "type": "FeatureCollection",
         "transformation": {
-          "type": "polynomial",
-          "options": {
-            "order": 1
-          }
+          "type": "helmert"
         },
         "features": [
           {
@@ -3613,8 +2869,8 @@
             "type": "Feature",
             "properties": {
               "resourceCoords": [
-                5424.6,
-                4583.4
+                4295.3,
+                1016.9
               ],
               "creator": {
                 "id": "https://oldinsurancemaps.net/profile/danvk",
@@ -3625,29 +2881,8 @@
             "geometry": {
               "type": "Point",
               "coordinates": [
-                -87.6145965,
-                41.8926846
-              ]
-            }
-          },
-          {
-            "type": "Feature",
-            "properties": {
-              "resourceCoords": [
-                5424.6,
-                3595.2
-              ],
-              "creator": {
-                "id": "https://oldinsurancemaps.net/profile/danvk",
-                "type": "Person"
-              },
-              "type": "gcp"
-            },
-            "geometry": {
-              "type": "Point",
-              "coordinates": [
-                -87.61469909757592,
-                41.89306481917319
+                -87.6153782,
+                41.894289
               ]
             }
           }
@@ -3672,8 +2907,8 @@
           "value": "5"
         }
       ],
-      "created": "2026-05-25T13:23:24Z",
-      "modified": "2026-05-25T13:23:24Z",
+      "created": "2026-06-10T19:14:36Z",
+      "modified": "2026-06-10T19:14:36Z",
       "creator": [
         {
           "id": "https://oldinsurancemaps.net/profile/danvk",
@@ -3692,17 +2927,14 @@
         },
         "selector": {
           "type": "SvgSelector",
-          "value": "<svg><polygon points=\"0,7323 0,0 5845,0 5845,7323 0,7323\" /></svg>"
+          "value": "<svg><polygon points=\"4136.7,6569.2 1715.4,6571.9 1714.4,6340.5 -0.0,6357.2 -0.0,0.0 3850.7,0.0 4136.7,992.1 4136.7,6569.2\" /></svg>"
         }
       },
       "body": {
         "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd410m:g4104m:g4104cm:g01790195001N:01790_01N_1950-0002N/gcps",
         "type": "FeatureCollection",
         "transformation": {
-          "type": "polynomial",
-          "options": {
-            "order": 1
-          }
+          "type": "helmert"
         },
         "features": [
           {
@@ -3746,27 +2978,6 @@
                 41.8947101
               ]
             }
-          },
-          {
-            "type": "Feature",
-            "properties": {
-              "resourceCoords": [
-                2313.2,
-                3821.4
-              ],
-              "creator": {
-                "id": "https://oldinsurancemaps.net/profile/danvk",
-                "type": "Person"
-              },
-              "type": "projected"
-            },
-            "geometry": {
-              "type": "Point",
-              "coordinates": [
-                -87.64256482027696,
-                41.895097997987584
-              ]
-            }
           }
         ]
       }
@@ -3789,8 +3000,8 @@
           "value": "6"
         }
       ],
-      "created": "2026-05-25T13:23:24Z",
-      "modified": "2026-05-25T13:23:24Z",
+      "created": "2026-06-10T19:14:36Z",
+      "modified": "2026-06-10T19:14:36Z",
       "creator": [
         {
           "id": "https://oldinsurancemaps.net/profile/danvk",
@@ -3809,17 +3020,14 @@
         },
         "selector": {
           "type": "SvgSelector",
-          "value": "<svg><polygon points=\"0,7323 0,0 5803,0 5803,7323 0,7323\" /></svg>"
+          "value": "<svg><polygon points=\"-0.0,0.0 5803.0,-0.0 5803.0,6347.5 -0.0,6389.1 -0.0,0.0\" /></svg>"
         }
       },
       "body": {
         "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd410m:g4104m:g4104cm:g01790195001N:01790_01N_1950-0030N/gcps",
         "type": "FeatureCollection",
         "transformation": {
-          "type": "polynomial",
-          "options": {
-            "order": 1
-          }
+          "type": "helmert"
         },
         "features": [
           {
@@ -3863,27 +3071,6 @@
                 41.8911123
               ]
             }
-          },
-          {
-            "type": "Feature",
-            "properties": {
-              "resourceCoords": [
-                1524.2,
-                999.6
-              ],
-              "creator": {
-                "id": "https://oldinsurancemaps.net/profile/danvk",
-                "type": "Person"
-              },
-              "type": "gcp"
-            },
-            "geometry": {
-              "type": "Point",
-              "coordinates": [
-                -87.61188628128528,
-                41.89192576576524
-              ]
-            }
           }
         ]
       }
@@ -3906,8 +3093,8 @@
           "value": "10"
         }
       ],
-      "created": "2026-05-25T13:23:24Z",
-      "modified": "2026-05-25T13:23:24Z",
+      "created": "2026-06-10T19:14:36Z",
+      "modified": "2026-06-10T19:14:36Z",
       "creator": [
         {
           "id": "https://oldinsurancemaps.net/profile/danvk",
@@ -3926,17 +3113,14 @@
         },
         "selector": {
           "type": "SvgSelector",
-          "value": "<svg><polygon points=\"0,7323 0,0 5753,0 5753,7323 0,7323\" /></svg>"
+          "value": "<svg><polygon points=\"2792.0,6502.1 -0.0,6657.1 -0.0,1201.6 5112.9,1015.1 5301.5,6432.2 3521.6,6483.0 3593.8,7256.1 5303.4,7209.1 5315.6,7323.0 2811.5,7323.0 2792.0,6502.1\" /></svg>"
         }
       },
       "body": {
         "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd410m:g4104m:g4104cm:g01790195001N:01790_01N_1950-0031N/gcps",
         "type": "FeatureCollection",
         "transformation": {
-          "type": "polynomial",
-          "options": {
-            "order": 1
-          }
+          "type": "helmert"
         },
         "features": [
           {
@@ -3980,27 +3164,6 @@
                 41.889119
               ]
             }
-          },
-          {
-            "type": "Feature",
-            "properties": {
-              "resourceCoords": [
-                1449.1,
-                2800.1
-              ],
-              "creator": {
-                "id": "https://oldinsurancemaps.net/profile/danvk",
-                "type": "Person"
-              },
-              "type": "gcp"
-            },
-            "geometry": {
-              "type": "Point",
-              "coordinates": [
-                -87.63922929039069,
-                41.89077526633602
-              ]
-            }
           }
         ]
       }
@@ -4023,8 +3186,8 @@
           "value": "6"
         }
       ],
-      "created": "2026-05-25T13:23:24Z",
-      "modified": "2026-05-25T13:23:24Z",
+      "created": "2026-06-10T19:14:36Z",
+      "modified": "2026-06-10T19:14:36Z",
       "creator": [
         {
           "id": "https://oldinsurancemaps.net/profile/danvk",
@@ -4043,17 +3206,14 @@
         },
         "selector": {
           "type": "SvgSelector",
-          "value": "<svg><polygon points=\"0,7323 0,0 5803,0 5803,7323 0,7323\" /></svg>"
+          "value": "<svg><polygon points=\"1662.5,1060.1 4077.2,1038.5 4163.5,4655.4 1714.8,7323.0 -0.0,7323.0 -0.0,6540.7 1662.5,1060.1\" /></svg>"
         }
       },
       "body": {
         "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd410m:g4104m:g4104cm:g01790195001N:01790_01N_1950-0032N/gcps",
         "type": "FeatureCollection",
         "transformation": {
-          "type": "polynomial",
-          "options": {
-            "order": 1
-          }
+          "type": "helmert"
         },
         "features": [
           {
@@ -4097,27 +3257,6 @@
                 41.8915431
               ]
             }
-          },
-          {
-            "type": "Feature",
-            "properties": {
-              "resourceCoords": [
-                1662.5,
-                4655.4
-              ],
-              "creator": {
-                "id": "https://oldinsurancemaps.net/profile/danvk",
-                "type": "Person"
-              },
-              "type": "gcp"
-            },
-            "geometry": {
-              "type": "Point",
-              "coordinates": [
-                -87.63701091733452,
-                41.889955908072885
-              ]
-            }
           }
         ]
       }
@@ -4137,11 +3276,11 @@
         },
         {
           "label": "intersections",
-          "value": "8"
+          "value": "6"
         }
       ],
-      "created": "2026-05-25T13:23:24Z",
-      "modified": "2026-05-25T13:23:24Z",
+      "created": "2026-06-10T19:14:36Z",
+      "modified": "2026-06-10T19:14:36Z",
       "creator": [
         {
           "id": "https://oldinsurancemaps.net/profile/danvk",
@@ -4160,17 +3299,14 @@
         },
         "selector": {
           "type": "SvgSelector",
-          "value": "<svg><polygon points=\"0,7323 0,0 5825,0 5825,7323 0,7323\" /></svg>"
+          "value": "<svg><polygon points=\"4210.9,3737.4 1746.9,3890.2 1746.2,1121.5 5825.0,1164.3 5825.0,4635.3 4454.9,4718.6 4200.2,4617.9 4210.9,3737.4\" /></svg>"
         }
       },
       "body": {
         "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd410m:g4104m:g4104cm:g01790195001N:01790_01N_1950-0033N/gcps",
         "type": "FeatureCollection",
         "transformation": {
-          "type": "polynomial",
-          "options": {
-            "order": 1
-          }
+          "type": "helmert"
         },
         "features": [
           {
@@ -4214,27 +3350,6 @@
                 41.8899822
               ]
             }
-          },
-          {
-            "type": "Feature",
-            "properties": {
-              "resourceCoords": [
-                4200.2,
-                2970.1
-              ],
-              "creator": {
-                "id": "https://oldinsurancemaps.net/profile/danvk",
-                "type": "Person"
-              },
-              "type": "gcp"
-            },
-            "geometry": {
-              "type": "Point",
-              "coordinates": [
-                -87.63404085464316,
-                41.89073935573375
-              ]
-            }
           }
         ]
       }
@@ -4257,8 +3372,8 @@
           "value": "4"
         }
       ],
-      "created": "2026-05-25T13:23:24Z",
-      "modified": "2026-05-25T13:23:24Z",
+      "created": "2026-06-10T19:14:36Z",
+      "modified": "2026-06-10T19:14:36Z",
       "creator": [
         {
           "id": "https://oldinsurancemaps.net/profile/danvk",
@@ -4277,17 +3392,14 @@
         },
         "selector": {
           "type": "SvgSelector",
-          "value": "<svg><polygon points=\"0,7323 0,0 5825,0 5825,7323 0,7323\" /></svg>"
+          "value": "<svg><polygon points=\"3444.7,4515.2 3415.4,1003.0 4015.4,1002.8 4013.8,4515.6 3444.7,4515.2\" /></svg>"
         }
       },
       "body": {
         "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd410m:g4104m:g4104cm:g01790195001N:01790_01N_1950-0034N/gcps",
         "type": "FeatureCollection",
         "transformation": {
-          "type": "polynomial",
-          "options": {
-            "order": 1
-          }
+          "type": "helmert"
         },
         "features": [
           {
@@ -4331,27 +3443,6 @@
                 41.8899822
               ]
             }
-          },
-          {
-            "type": "Feature",
-            "properties": {
-              "resourceCoords": [
-                3946.7,
-                4511.3
-              ],
-              "creator": {
-                "id": "https://oldinsurancemaps.net/profile/danvk",
-                "type": "Person"
-              },
-              "type": "gcp"
-            },
-            "geometry": {
-              "type": "Point",
-              "coordinates": [
-                -87.63270253837042,
-                41.890001700295585
-              ]
-            }
           }
         ]
       }
@@ -4374,8 +3465,8 @@
           "value": "4"
         }
       ],
-      "created": "2026-05-25T13:23:24Z",
-      "modified": "2026-05-25T13:23:24Z",
+      "created": "2026-06-10T19:14:36Z",
+      "modified": "2026-06-10T19:14:36Z",
       "creator": [
         {
           "id": "https://oldinsurancemaps.net/profile/danvk",
@@ -4394,17 +3485,14 @@
         },
         "selector": {
           "type": "SvgSelector",
-          "value": "<svg><polygon points=\"0,7323 0,0 5831,0 5831,7323 0,7323\" /></svg>"
+          "value": "<svg><polygon points=\"1416.8,4613.7 1409.4,2026.2 4042.3,2024.4 4042.5,2794.6 5831.0,2802.2 5831.0,4813.1 5748.0,4606.7 1416.8,4613.7\" /></svg>"
         }
       },
       "body": {
         "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd410m:g4104m:g4104cm:g01790195001N:01790_01N_1950-0035N/gcps",
         "type": "FeatureCollection",
         "transformation": {
-          "type": "polynomial",
-          "options": {
-            "order": 1
-          }
+          "type": "helmert"
         },
         "features": [
           {
@@ -4448,27 +3536,6 @@
                 41.8916211
               ]
             }
-          },
-          {
-            "type": "Feature",
-            "properties": {
-              "resourceCoords": [
-                452.3,
-                2814.5
-              ],
-              "creator": {
-                "id": "https://oldinsurancemaps.net/profile/danvk",
-                "type": "Person"
-              },
-              "type": "projected"
-            },
-            "geometry": {
-              "type": "Point",
-              "coordinates": [
-                -87.6332573039146,
-                41.89079477537513
-              ]
-            }
           }
         ]
       }
@@ -4484,15 +3551,15 @@
       "metadata": [
         {
           "label": "streets",
-          "value": "6"
+          "value": "5"
         },
         {
           "label": "intersections",
-          "value": "10"
+          "value": "6"
         }
       ],
-      "created": "2026-05-25T13:23:24Z",
-      "modified": "2026-05-25T13:23:24Z",
+      "created": "2026-06-10T19:14:36Z",
+      "modified": "2026-06-10T19:14:36Z",
       "creator": [
         {
           "id": "https://oldinsurancemaps.net/profile/danvk",
@@ -4511,17 +3578,14 @@
         },
         "selector": {
           "type": "SvgSelector",
-          "value": "<svg><polygon points=\"0,7323 0,0 5825,0 5825,7323 0,7323\" /></svg>"
+          "value": "<svg><polygon points=\"1761.9,973.9 4250.5,974.7 4248.7,2770.3 3714.8,4774.5 3533.3,4774.5 3534.3,4568.0 1754.4,2748.3 1761.9,973.9\" /></svg>"
         }
       },
       "body": {
         "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd410m:g4104m:g4104cm:g01790195001N:01790_01N_1950-0036N/gcps",
         "type": "FeatureCollection",
         "transformation": {
-          "type": "polynomial",
-          "options": {
-            "order": 1
-          }
+          "type": "helmert"
         },
         "features": [
           {
@@ -4565,27 +3629,6 @@
                 41.8892182
               ]
             }
-          },
-          {
-            "type": "Feature",
-            "properties": {
-              "resourceCoords": [
-                4240.6,
-                4554.5
-              ],
-              "creator": {
-                "id": "https://oldinsurancemaps.net/profile/danvk",
-                "type": "Person"
-              },
-              "type": "gcp"
-            },
-            "geometry": {
-              "type": "Point",
-              "coordinates": [
-                -87.62959788676223,
-                41.8900491124962
-              ]
-            }
           }
         ]
       }
@@ -4605,11 +3648,11 @@
         },
         {
           "label": "intersections",
-          "value": "12"
+          "value": "9"
         }
       ],
-      "created": "2026-05-25T13:23:24Z",
-      "modified": "2026-05-25T13:23:24Z",
+      "created": "2026-06-10T19:14:36Z",
+      "modified": "2026-06-10T19:14:36Z",
       "creator": [
         {
           "id": "https://oldinsurancemaps.net/profile/danvk",
@@ -4628,17 +3671,14 @@
         },
         "selector": {
           "type": "SvgSelector",
-          "value": "<svg><polygon points=\"0,7323 0,0 5831,0 5831,7323 0,7323\" /></svg>"
+          "value": "<svg><polygon points=\"1468.8,2958.9 4090.8,2915.2 4081.4,3718.1 1459.3,3690.6 1468.8,2958.9\" /></svg>"
         }
       },
       "body": {
         "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd410m:g4104m:g4104cm:g01790195001N:01790_01N_1950-0037N/gcps",
         "type": "FeatureCollection",
         "transformation": {
-          "type": "polynomial",
-          "options": {
-            "order": 1
-          }
+          "type": "helmert"
         },
         "features": [
           {
@@ -4682,27 +3722,6 @@
                 41.8916668
               ]
             }
-          },
-          {
-            "type": "Feature",
-            "properties": {
-              "resourceCoords": [
-                4102.4,
-                5490.8
-              ],
-              "creator": {
-                "id": "https://oldinsurancemaps.net/profile/danvk",
-                "type": "Person"
-              },
-              "type": "gcp"
-            },
-            "geometry": {
-              "type": "Point",
-              "coordinates": [
-                -87.62800011439573,
-                41.890082119089925
-              ]
-            }
           }
         ]
       }
@@ -4718,15 +3737,15 @@
       "metadata": [
         {
           "label": "streets",
-          "value": "7"
+          "value": "6"
         },
         {
           "label": "intersections",
-          "value": "12"
+          "value": "7"
         }
       ],
-      "created": "2026-05-25T13:23:24Z",
-      "modified": "2026-05-25T13:23:24Z",
+      "created": "2026-06-10T19:14:36Z",
+      "modified": "2026-06-10T19:14:36Z",
       "creator": [
         {
           "id": "https://oldinsurancemaps.net/profile/danvk",
@@ -4745,17 +3764,14 @@
         },
         "selector": {
           "type": "SvgSelector",
-          "value": "<svg><polygon points=\"0,7323 0,0 5825,0 5825,7323 0,7323\" /></svg>"
+          "value": "<svg><polygon points=\"1947.4,3673.0 1937.4,1859.3 4220.4,1846.6 4222.3,3655.0 1947.4,3673.0\" /></svg>"
         }
       },
       "body": {
         "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd410m:g4104m:g4104cm:g01790195001N:01790_01N_1950-0038N/gcps",
         "type": "FeatureCollection",
         "transformation": {
-          "type": "polynomial",
-          "options": {
-            "order": 1
-          }
+          "type": "helmert"
         },
         "features": [
           {
@@ -4763,7 +3779,7 @@
             "properties": {
               "resourceCoords": [
                 1947.4,
-                3667.3
+                3673.0
               ],
               "creator": {
                 "id": "https://oldinsurancemaps.net/profile/danvk",
@@ -4784,7 +3800,7 @@
             "properties": {
               "resourceCoords": [
                 4220.4,
-                1838.0
+                1846.6
               ],
               "creator": {
                 "id": "https://oldinsurancemaps.net/profile/danvk",
@@ -4797,27 +3813,6 @@
               "coordinates": [
                 -87.6267252,
                 41.8916883
-              ]
-            }
-          },
-          {
-            "type": "Feature",
-            "properties": {
-              "resourceCoords": [
-                1947.4,
-                1846.6
-              ],
-              "creator": {
-                "id": "https://oldinsurancemaps.net/profile/danvk",
-                "type": "Person"
-              },
-              "type": "gcp"
-            },
-            "geometry": {
-              "type": "Point",
-              "coordinates": [
-                -87.62806444541081,
-                41.89166931866725
               ]
             }
           }
@@ -4842,8 +3837,8 @@
           "value": "4"
         }
       ],
-      "created": "2026-05-25T13:23:24Z",
-      "modified": "2026-05-25T13:23:24Z",
+      "created": "2026-06-10T19:14:36Z",
+      "modified": "2026-06-10T19:14:36Z",
       "creator": [
         {
           "id": "https://oldinsurancemaps.net/profile/danvk",
@@ -4862,17 +3857,14 @@
         },
         "selector": {
           "type": "SvgSelector",
-          "value": "<svg><polygon points=\"0,7322 0,0 5866,0 5866,7322 0,7322\" /></svg>"
+          "value": "<svg><polygon points=\"1804.0,3489.8 1818.4,1703.8 3182.2,1705.3 3214.1,3495.4 1804.0,3489.8\" /></svg>"
         }
       },
       "body": {
         "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd410m:g4104m:g4104cm:g01790195001N:01790_01N_1950-0039N/gcps",
         "type": "FeatureCollection",
         "transformation": {
-          "type": "polynomial",
-          "options": {
-            "order": 1
-          }
+          "type": "helmert"
         },
         "features": [
           {
@@ -4916,27 +3908,6 @@
                 41.8917123
               ]
             }
-          },
-          {
-            "type": "Feature",
-            "properties": {
-              "resourceCoords": [
-                1792.1,
-                1705.9
-              ],
-              "creator": {
-                "id": "https://oldinsurancemaps.net/profile/danvk",
-                "type": "Person"
-              },
-              "type": "gcp"
-            },
-            "geometry": {
-              "type": "Point",
-              "coordinates": [
-                -87.62674009712705,
-                41.89168708953981
-              ]
-            }
           }
         ]
       }
@@ -4959,8 +3930,8 @@
           "value": "10"
         }
       ],
-      "created": "2026-05-25T13:23:24Z",
-      "modified": "2026-05-25T13:23:24Z",
+      "created": "2026-06-10T19:14:36Z",
+      "modified": "2026-06-10T19:14:36Z",
       "creator": [
         {
           "id": "https://oldinsurancemaps.net/profile/danvk",
@@ -4979,17 +3950,14 @@
         },
         "selector": {
           "type": "SvgSelector",
-          "value": "<svg><polygon points=\"0,7322 0,0 5879,0 5879,7322 0,7322\" /></svg>"
+          "value": "<svg><polygon points=\"1684.2,1047.4 1403.9,70.8 5879.0,0.0 5879.0,723.4 4258.7,728.1 4127.2,1017.1 4148.2,6535.3 1678.1,6535.3 1684.2,1047.4\" /></svg>"
         }
       },
       "body": {
         "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd410m:g4104m:g4104cm:g01790195001N:01790_01N_1950-0003N/gcps",
         "type": "FeatureCollection",
         "transformation": {
-          "type": "polynomial",
-          "options": {
-            "order": 1
-          }
+          "type": "helmert"
         },
         "features": [
           {
@@ -5033,27 +4001,6 @@
                 41.8947101
               ]
             }
-          },
-          {
-            "type": "Feature",
-            "properties": {
-              "resourceCoords": [
-                4141.2,
-                2956.5
-              ],
-              "creator": {
-                "id": "https://oldinsurancemaps.net/profile/danvk",
-                "type": "Person"
-              },
-              "type": "gcp"
-            },
-            "geometry": {
-              "type": "Point",
-              "coordinates": [
-                -87.64002088146752,
-                41.895520636186276
-              ]
-            }
           }
         ]
       }
@@ -5076,8 +4023,8 @@
           "value": "2"
         }
       ],
-      "created": "2026-05-25T13:23:24Z",
-      "modified": "2026-05-25T13:23:24Z",
+      "created": "2026-06-10T19:14:36Z",
+      "modified": "2026-06-10T19:14:36Z",
       "creator": [
         {
           "id": "https://oldinsurancemaps.net/profile/danvk",
@@ -5096,17 +4043,14 @@
         },
         "selector": {
           "type": "SvgSelector",
-          "value": "<svg><polygon points=\"0,7323 0,0 5820,0 5820,7323 0,7323\" /></svg>"
+          "value": "<svg><polygon points=\"711.5,1987.5 676.6,207.2 2500.1,0.0 2652.6,0.0 2789.5,0.0 5097.8,106.1 5820.0,2842.1 5820.0,3601.3 2688.5,6217.5 711.5,1987.5\" /></svg>"
         }
       },
       "body": {
         "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd410m:g4104m:g4104cm:g01790195001N:01790_01N_1950-0040N/gcps",
         "type": "FeatureCollection",
         "transformation": {
-          "type": "polynomial",
-          "options": {
-            "order": 1
-          }
+          "type": "helmert"
         },
         "features": [
           {
@@ -5150,27 +4094,6 @@
                 41.8917508
               ]
             }
-          },
-          {
-            "type": "Feature",
-            "properties": {
-              "resourceCoords": [
-                -4102.8,
-                5433.2
-              ],
-              "creator": {
-                "id": "https://oldinsurancemaps.net/profile/danvk",
-                "type": "Person"
-              },
-              "type": "gcp"
-            },
-            "geometry": {
-              "type": "Point",
-              "coordinates": [
-                -87.62833072403446,
-                41.89014557452253
-              ]
-            }
           }
         ]
       }
@@ -5193,8 +4116,8 @@
           "value": "7"
         }
       ],
-      "created": "2026-05-25T13:23:24Z",
-      "modified": "2026-05-25T13:23:24Z",
+      "created": "2026-06-10T19:14:36Z",
+      "modified": "2026-06-10T19:14:36Z",
       "creator": [
         {
           "id": "https://oldinsurancemaps.net/profile/danvk",
@@ -5213,17 +4136,14 @@
         },
         "selector": {
           "type": "SvgSelector",
-          "value": "<svg><polygon points=\"0,7323 0,0 5820,0 5820,7323 0,7323\" /></svg>"
+          "value": "<svg><polygon points=\"-0.0,2534.1 221.4,592.0 2829.3,780.7 2880.2,0.0 5617.4,0.0 5545.1,973.6 5820.0,1102.5 5528.5,1083.2 5016.7,7323.0 -0.0,7323.0 -0.0,2534.1\" /></svg>"
         }
       },
       "body": {
         "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd410m:g4104m:g4104cm:g01790195001N:01790_01N_1950-0042N/gcps",
         "type": "FeatureCollection",
         "transformation": {
-          "type": "polynomial",
-          "options": {
-            "order": 1
-          }
+          "type": "helmert"
         },
         "features": [
           {
@@ -5267,27 +4187,6 @@
                 41.889126
               ]
             }
-          },
-          {
-            "type": "Feature",
-            "properties": {
-              "resourceCoords": [
-                2829.3,
-                2587.0
-              ],
-              "creator": {
-                "id": "https://oldinsurancemaps.net/profile/danvk",
-                "type": "Person"
-              },
-              "type": "gcp"
-            },
-            "geometry": {
-              "type": "Point",
-              "coordinates": [
-                -87.63543690874387,
-                41.889214684733
-              ]
-            }
           }
         ]
       }
@@ -5310,8 +4209,8 @@
           "value": "3"
         }
       ],
-      "created": "2026-05-25T13:23:24Z",
-      "modified": "2026-05-25T13:23:24Z",
+      "created": "2026-06-10T19:14:36Z",
+      "modified": "2026-06-10T19:14:36Z",
       "creator": [
         {
           "id": "https://oldinsurancemaps.net/profile/danvk",
@@ -5330,17 +4229,14 @@
         },
         "selector": {
           "type": "SvgSelector",
-          "value": "<svg><polygon points=\"0,7323 0,0 5866,0 5866,7323 0,7323\" /></svg>"
+          "value": "<svg><polygon points=\"-0.0,6327.0 1805.2,6207.3 1902.2,0.0 4663.3,0.0 4456.2,7278.9 -0.0,7323.0 -0.0,6327.0\" /></svg>"
         }
       },
       "body": {
         "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd410m:g4104m:g4104cm:g01790195001N:01790_01N_1950-0043N/gcps",
         "type": "FeatureCollection",
         "transformation": {
-          "type": "polynomial",
-          "options": {
-            "order": 1
-          }
+          "type": "helmert"
         },
         "features": [
           {
@@ -5384,27 +4280,6 @@
                 41.8891834
               ]
             }
-          },
-          {
-            "type": "Feature",
-            "properties": {
-              "resourceCoords": [
-                3064.1,
-                4286.6
-              ],
-              "creator": {
-                "id": "https://oldinsurancemaps.net/profile/danvk",
-                "type": "Person"
-              },
-              "type": "projected"
-            },
-            "geometry": {
-              "type": "Point",
-              "coordinates": [
-                -87.63330573925641,
-                41.888155364686476
-              ]
-            }
           }
         ]
       }
@@ -5427,8 +4302,8 @@
           "value": "1"
         }
       ],
-      "created": "2026-05-25T13:23:24Z",
-      "modified": "2026-05-25T13:23:24Z",
+      "created": "2026-06-10T19:14:36Z",
+      "modified": "2026-06-10T19:14:36Z",
       "creator": [
         {
           "id": "https://oldinsurancemaps.net/profile/danvk",
@@ -5447,7 +4322,7 @@
         },
         "selector": {
           "type": "SvgSelector",
-          "value": "<svg><polygon points=\"0,7323 0,0 5828,0 5828,7323 0,7323\" /></svg>"
+          "value": "<svg><polygon points=\"1625.6,6817.2 1872.2,73.6 5828.0,42.8 5828.0,247.0 4142.7,199.3 4049.4,7053.7 5394.1,7094.7 5386.9,7219.8 2385.9,7122.7 2383.7,7323.0 -0.0,7323.0 -0.0,6764.5 1625.6,6817.2\" /></svg>"
         }
       },
       "body": {
@@ -5476,8 +4351,8 @@
             "geometry": {
               "type": "Point",
               "coordinates": [
-                -87.6336029212412,
-                41.88997035340453
+                -87.6336016864351,
+                41.88996998929027
               ]
             }
           },
@@ -5497,8 +4372,8 @@
             "geometry": {
               "type": "Point",
               "coordinates": [
-                -87.63007068379076,
-                41.89005549408424
+                -87.6300711661468,
+                41.89005508875374
               ]
             }
           },
@@ -5518,8 +4393,8 @@
             "geometry": {
               "type": "Point",
               "coordinates": [
-                -87.6299269981427,
-                41.88675078724253
+                -87.62992755035009,
+                41.88675198170654
               ]
             }
           },
@@ -5539,8 +4414,29 @@
             "geometry": {
               "type": "Point",
               "coordinates": [
-                -87.63345923559314,
-                41.886665646562825
+                -87.63345807063838,
+                41.88666688224307
+              ]
+            }
+          },
+          {
+            "type": "Feature",
+            "properties": {
+              "resourceCoords": [
+                4131.2,
+                1800.5
+              ],
+              "creator": {
+                "id": "https://oldinsurancemaps.net/profile/danvk",
+                "type": "Person"
+              },
+              "type": "gcp"
+            },
+            "geometry": {
+              "type": "Point",
+              "coordinates": [
+                -87.6310629,
+                41.8892182
               ]
             }
           }
@@ -5562,11 +4458,11 @@
         },
         {
           "label": "intersections",
-          "value": "3"
+          "value": "2"
         }
       ],
-      "created": "2026-05-25T13:23:24Z",
-      "modified": "2026-05-25T13:23:24Z",
+      "created": "2026-06-10T19:14:36Z",
+      "modified": "2026-06-10T19:14:36Z",
       "creator": [
         {
           "id": "https://oldinsurancemaps.net/profile/danvk",
@@ -5585,17 +4481,14 @@
         },
         "selector": {
           "type": "SvgSelector",
-          "value": "<svg><polygon points=\"0,7323 0,0 5866,0 5866,7323 0,7323\" /></svg>"
+          "value": "<svg><polygon points=\"-0.0,6866.4 1669.5,0.0 4113.9,0.0 5866.0,7002.9 5866.0,7002.9 5866.0,7323.0 -0.0,7323.0 -0.0,6866.4\" /></svg>"
         }
       },
       "body": {
         "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd410m:g4104m:g4104cm:g01790195001N:01790_01N_1950-0045N/gcps",
         "type": "FeatureCollection",
         "transformation": {
-          "type": "polynomial",
-          "options": {
-            "order": 1
-          }
+          "type": "helmert"
         },
         "features": [
           {
@@ -5623,7 +4516,7 @@
             "type": "Feature",
             "properties": {
               "resourceCoords": [
-                1890.0,
+                1676.8,
                 1561.4
               ],
               "creator": {
@@ -5637,27 +4530,6 @@
               "coordinates": [
                 -87.6310629,
                 41.8892182
-              ]
-            }
-          },
-          {
-            "type": "Feature",
-            "properties": {
-              "resourceCoords": [
-                2999.3,
-                3779.6
-              ],
-              "creator": {
-                "id": "https://oldinsurancemaps.net/profile/danvk",
-                "type": "Person"
-              },
-              "type": "projected"
-            },
-            "geometry": {
-              "type": "Point",
-              "coordinates": [
-                -87.6302894981933,
-                41.888125702055
               ]
             }
           }
@@ -5682,8 +4554,8 @@
           "value": "3"
         }
       ],
-      "created": "2026-05-25T13:23:24Z",
-      "modified": "2026-05-25T13:23:24Z",
+      "created": "2026-06-10T19:14:36Z",
+      "modified": "2026-06-10T19:14:36Z",
       "creator": [
         {
           "id": "https://oldinsurancemaps.net/profile/danvk",
@@ -5702,17 +4574,14 @@
         },
         "selector": {
           "type": "SvgSelector",
-          "value": "<svg><polygon points=\"0,7323 0,0 5828,0 5828,7323 0,7323\" /></svg>"
+          "value": "<svg><polygon points=\"413.9,7170.9 378.3,6878.7 1569.1,6889.5 1555.7,1538.3 4255.0,1538.3 4137.3,3160.9 4291.6,3114.6 4343.3,3265.0 4347.1,5412.4 5828.0,5414.5 5828.0,7323.0 413.9,7170.9\" /></svg>"
         }
       },
       "body": {
         "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd410m:g4104m:g4104cm:g01790195001N:01790_01N_1950-0046N/gcps",
         "type": "FeatureCollection",
         "transformation": {
-          "type": "polynomial",
-          "options": {
-            "order": 1
-          }
+          "type": "helmert"
         },
         "features": [
           {
@@ -5756,27 +4625,6 @@
                 41.8892418
               ]
             }
-          },
-          {
-            "type": "Feature",
-            "properties": {
-              "resourceCoords": [
-                4255.0,
-                3462.7
-              ],
-              "creator": {
-                "id": "https://oldinsurancemaps.net/profile/danvk",
-                "type": "Person"
-              },
-              "type": "gcp"
-            },
-            "geometry": {
-              "type": "Point",
-              "coordinates": [
-                -87.62799111986726,
-                41.888424456492906
-              ]
-            }
           }
         ]
       }
@@ -5796,11 +4644,11 @@
         },
         {
           "label": "intersections",
-          "value": "10"
+          "value": "6"
         }
       ],
-      "created": "2026-05-25T13:23:24Z",
-      "modified": "2026-05-25T13:23:24Z",
+      "created": "2026-06-10T19:14:36Z",
+      "modified": "2026-06-10T19:14:36Z",
       "creator": [
         {
           "id": "https://oldinsurancemaps.net/profile/danvk",
@@ -5819,17 +4667,14 @@
         },
         "selector": {
           "type": "SvgSelector",
-          "value": "<svg><polygon points=\"0,7323 0,0 5866,0 5866,7323 0,7323\" /></svg>"
+          "value": "<svg><polygon points=\"5251.9,3557.6 516.5,3640.4 517.9,2060.9 -0.0,2067.9 -0.0,81.9 5357.4,63.7 5388.8,3234.3 5251.9,3557.6\" /></svg>"
         }
       },
       "body": {
         "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd410m:g4104m:g4104cm:g01790195001N:01790_01N_1950-0047N/gcps",
         "type": "FeatureCollection",
         "transformation": {
-          "type": "polynomial",
-          "options": {
-            "order": 1
-          }
+          "type": "helmert"
         },
         "features": [
           {
@@ -5858,7 +4703,7 @@
             "properties": {
               "resourceCoords": [
                 518.6,
-                1846.6
+                1863.9
               ],
               "creator": {
                 "id": "https://oldinsurancemaps.net/profile/danvk",
@@ -5871,27 +4716,6 @@
               "coordinates": [
                 -87.6295984,
                 41.8900425
-              ]
-            }
-          },
-          {
-            "type": "Feature",
-            "properties": {
-              "resourceCoords": [
-                3128.9,
-                3687.4
-              ],
-              "creator": {
-                "id": "https://oldinsurancemaps.net/profile/danvk",
-                "type": "Person"
-              },
-              "type": "gcp"
-            },
-            "geometry": {
-              "type": "Point",
-              "coordinates": [
-                -87.62799044929865,
-                41.88924301139412
               ]
             }
           }
@@ -5913,11 +4737,11 @@
         },
         {
           "label": "intersections",
-          "value": "7"
+          "value": "5"
         }
       ],
-      "created": "2026-05-25T13:23:24Z",
-      "modified": "2026-05-25T13:23:24Z",
+      "created": "2026-06-10T19:14:36Z",
+      "modified": "2026-06-10T19:14:36Z",
       "creator": [
         {
           "id": "https://oldinsurancemaps.net/profile/danvk",
@@ -5936,17 +4760,14 @@
         },
         "selector": {
           "type": "SvgSelector",
-          "value": "<svg><polygon points=\"0,7323 0,0 5828,0 5828,7323 0,7323\" /></svg>"
+          "value": "<svg><polygon points=\"5828.0,7323.0 706.9,7323.0 700.4,5266.2 650.7,5122.2 503.0,5166.8 613.6,3612.5 2801.0,3490.4 2827.0,28.2 5010.9,9.1 5023.7,2948.8 5828.0,2770.3 5828.0,7323.0\" /></svg>"
         }
       },
       "body": {
         "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd410m:g4104m:g4104cm:g01790195001N:01790_01N_1950-0048N/gcps",
         "type": "FeatureCollection",
         "transformation": {
-          "type": "polynomial",
-          "options": {
-            "order": 1
-          }
+          "type": "helmert"
         },
         "features": [
           {
@@ -5990,27 +4811,6 @@
                 41.8892588
               ]
             }
-          },
-          {
-            "type": "Feature",
-            "properties": {
-              "resourceCoords": [
-                5024.2,
-                4350.0
-              ],
-              "creator": {
-                "id": "https://oldinsurancemaps.net/profile/danvk",
-                "type": "Person"
-              },
-              "type": "gcp"
-            },
-            "geometry": {
-              "type": "Point",
-              "coordinates": [
-                -87.62531944567591,
-                41.88895136018735
-              ]
-            }
           }
         ]
       }
@@ -6033,8 +4833,8 @@
           "value": "4"
         }
       ],
-      "created": "2026-05-25T13:23:24Z",
-      "modified": "2026-05-25T13:23:24Z",
+      "created": "2026-06-10T19:14:36Z",
+      "modified": "2026-06-10T19:14:36Z",
       "creator": [
         {
           "id": "https://oldinsurancemaps.net/profile/danvk",
@@ -6053,17 +4853,14 @@
         },
         "selector": {
           "type": "SvgSelector",
-          "value": "<svg><polygon points=\"0,7322 0,0 5847,0 5847,7322 0,7322\" /></svg>"
+          "value": "<svg><polygon points=\"1543.4,4790.9 743.6,4943.6 817.4,2039.4 -0.0,2023.5 -0.0,286.6 2658.0,344.4 2632.0,2054.4 2912.4,2060.5 2940.2,351.4 5242.1,406.8 5226.0,2107.5 5847.0,2123.0 5847.0,7322.0 1468.0,7322.0 1543.4,4790.9\" /></svg>"
         }
       },
       "body": {
         "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd410m:g4104m:g4104cm:g01790195001N:01790_01N_1950-0049N/gcps",
         "type": "FeatureCollection",
         "transformation": {
-          "type": "polynomial",
-          "options": {
-            "order": 1
-          }
+          "type": "helmert"
         },
         "features": [
           {
@@ -6107,27 +4904,6 @@
                 41.8909467
               ]
             }
-          },
-          {
-            "type": "Feature",
-            "properties": {
-              "resourceCoords": [
-                778.1,
-                2057.4
-              ],
-              "creator": {
-                "id": "https://oldinsurancemaps.net/profile/danvk",
-                "type": "Person"
-              },
-              "type": "gcp"
-            },
-            "geometry": {
-              "type": "Point",
-              "coordinates": [
-                -87.62538621576536,
-                41.890907413549826
-              ]
-            }
           }
         ]
       }
@@ -6150,8 +4926,8 @@
           "value": "8"
         }
       ],
-      "created": "2026-05-25T13:23:24Z",
-      "modified": "2026-05-25T13:23:24Z",
+      "created": "2026-06-10T19:14:36Z",
+      "modified": "2026-06-10T19:14:36Z",
       "creator": [
         {
           "id": "https://oldinsurancemaps.net/profile/danvk",
@@ -6170,17 +4946,14 @@
         },
         "selector": {
           "type": "SvgSelector",
-          "value": "<svg><polygon points=\"0,7323 0,0 5845,0 5845,7323 0,7323\" /></svg>"
+          "value": "<svg><polygon points=\"4032.4,694.5 4110.8,6545.2 1692.6,6555.2 1648.6,1001.6 1779.8,710.3 4032.4,694.5\" /></svg>"
         }
       },
       "body": {
         "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd410m:g4104m:g4104cm:g01790195001N:01790_01N_1950-0004N/gcps",
         "type": "FeatureCollection",
         "transformation": {
-          "type": "polynomial",
-          "options": {
-            "order": 1
-          }
+          "type": "helmert"
         },
         "features": [
           {
@@ -6224,27 +4997,6 @@
                 41.8939406
               ]
             }
-          },
-          {
-            "type": "Feature",
-            "properties": {
-              "resourceCoords": [
-                1659.3,
-                2941.3
-              ],
-              "creator": {
-                "id": "https://oldinsurancemaps.net/profile/danvk",
-                "type": "Person"
-              },
-              "type": "gcp"
-            },
-            "geometry": {
-              "type": "Point",
-              "coordinates": [
-                -87.64002819154724,
-                41.895526169900414
-              ]
-            }
           }
         ]
       }
@@ -6267,8 +5019,8 @@
           "value": "2"
         }
       ],
-      "created": "2026-05-25T13:23:24Z",
-      "modified": "2026-05-25T13:23:24Z",
+      "created": "2026-06-10T19:14:36Z",
+      "modified": "2026-06-10T19:14:36Z",
       "creator": [
         {
           "id": "https://oldinsurancemaps.net/profile/danvk",
@@ -6287,17 +5039,14 @@
         },
         "selector": {
           "type": "SvgSelector",
-          "value": "<svg><polygon points=\"0,7323 0,0 5811,0 5811,7323 0,7323\" /></svg>"
+          "value": "<svg><polygon points=\"0.0,0.0 5811.0,1.4 5811.0,7323.0 -0.0,7323.0 0.0,0.0\" /></svg>"
         }
       },
       "body": {
         "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd410m:g4104m:g4104cm:g01790195001N:01790_01N_1950-0052N/gcps",
         "type": "FeatureCollection",
         "transformation": {
-          "type": "polynomial",
-          "options": {
-            "order": 1
-          }
+          "type": "helmert"
         },
         "features": [
           {
@@ -6341,27 +5090,6 @@
                 41.8918751
               ]
             }
-          },
-          {
-            "type": "Feature",
-            "properties": {
-              "resourceCoords": [
-                3725.1,
-                2741.1
-              ],
-              "creator": {
-                "id": "https://oldinsurancemaps.net/profile/danvk",
-                "type": "Person"
-              },
-              "type": "projected"
-            },
-            "geometry": {
-              "type": "Point",
-              "coordinates": [
-                -87.61621310318323,
-                41.89148000284337
-              ]
-            }
           }
         ]
       }
@@ -6384,8 +5112,8 @@
           "value": "11"
         }
       ],
-      "created": "2026-05-25T13:23:24Z",
-      "modified": "2026-05-25T13:23:24Z",
+      "created": "2026-06-10T19:14:36Z",
+      "modified": "2026-06-10T19:14:36Z",
       "creator": [
         {
           "id": "https://oldinsurancemaps.net/profile/danvk",
@@ -6404,17 +5132,14 @@
         },
         "selector": {
           "type": "SvgSelector",
-          "value": "<svg><polygon points=\"0,7323 0,0 5813,0 5813,7323 0,7323\" /></svg>"
+          "value": "<svg><polygon points=\"-0.0,0.0 5813.0,9.2 5813.0,6097.4 1409.6,6060.8 2847.6,7323.0 -0.0,7323.0 -0.0,0.0\" /></svg>"
         }
       },
       "body": {
         "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd410m:g4104m:g4104cm:g01790195001N:01790_01N_1950-0056W/gcps",
         "type": "FeatureCollection",
         "transformation": {
-          "type": "polynomial",
-          "options": {
-            "order": 1
-          }
+          "type": "helmert"
         },
         "features": [
           {
@@ -6458,27 +5183,6 @@
                 41.8933844
               ]
             }
-          },
-          {
-            "type": "Feature",
-            "properties": {
-              "resourceCoords": [
-                1406.4,
-                6084.3
-              ],
-              "creator": {
-                "id": "https://oldinsurancemaps.net/profile/danvk",
-                "type": "Person"
-              },
-              "type": "gcp"
-            },
-            "geometry": {
-              "type": "Point",
-              "coordinates": [
-                -87.64762898769874,
-                41.891183111826166
-              ]
-            }
           }
         ]
       }
@@ -6494,15 +5198,15 @@
       "metadata": [
         {
           "label": "streets",
-          "value": "4"
+          "value": "5"
         },
         {
           "label": "intersections",
-          "value": "4"
+          "value": "5"
         }
       ],
-      "created": "2026-05-25T13:23:24Z",
-      "modified": "2026-05-25T13:23:24Z",
+      "created": "2026-06-10T19:14:36Z",
+      "modified": "2026-06-10T19:14:36Z",
       "creator": [
         {
           "id": "https://oldinsurancemaps.net/profile/danvk",
@@ -6521,17 +5225,14 @@
         },
         "selector": {
           "type": "SvgSelector",
-          "value": "<svg><polygon points=\"0,7323 0,0 5865,0 5865,7323 0,7323\" /></svg>"
+          "value": "<svg><polygon points=\"5468.1,0.0 5466.9,227.0 5865.0,230.3 5865.0,6043.3 1844.6,6057.1 1872.1,0.0 5468.1,0.0\" /></svg>"
         }
       },
       "body": {
         "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd410m:g4104m:g4104cm:g01790195001N:01790_01N_1950-0057W/gcps",
         "type": "FeatureCollection",
         "transformation": {
-          "type": "polynomial",
-          "options": {
-            "order": 1
-          }
+          "type": "helmert"
         },
         "features": [
           {
@@ -6575,27 +5276,6 @@
                 41.8912254
               ]
             }
-          },
-          {
-            "type": "Feature",
-            "properties": {
-              "resourceCoords": [
-                2834.6,
-                3687.4
-              ],
-              "creator": {
-                "id": "https://oldinsurancemaps.net/profile/danvk",
-                "type": "Person"
-              },
-              "type": "gcp"
-            },
-            "geometry": {
-              "type": "Point",
-              "coordinates": [
-                -87.64442160439545,
-                41.89230320362214
-              ]
-            }
           }
         ]
       }
@@ -6618,8 +5298,8 @@
           "value": "10"
         }
       ],
-      "created": "2026-05-25T13:23:24Z",
-      "modified": "2026-05-25T13:23:24Z",
+      "created": "2026-06-10T19:14:36Z",
+      "modified": "2026-06-10T19:14:36Z",
       "creator": [
         {
           "id": "https://oldinsurancemaps.net/profile/danvk",
@@ -6638,17 +5318,14 @@
         },
         "selector": {
           "type": "SvgSelector",
-          "value": "<svg><polygon points=\"0,7323 0,0 5813,0 5813,7323 0,7323\" /></svg>"
+          "value": "<svg><polygon points=\"476.4,1210.0 5813.0,1154.6 5811.8,5963.8 159.5,6053.3 186.6,7323.0 -0.0,7323.0 -0.0,2456.6 1904.3,2435.0 476.4,1210.0\" /></svg>"
         }
       },
       "body": {
         "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd410m:g4104m:g4104cm:g01790195001N:01790_01N_1950-0058W/gcps",
         "type": "FeatureCollection",
         "transformation": {
-          "type": "polynomial",
-          "options": {
-            "order": 1
-          }
+          "type": "helmert"
         },
         "features": [
           {
@@ -6692,27 +5369,6 @@
                 41.8912112
               ]
             }
-          },
-          {
-            "type": "Feature",
-            "properties": {
-              "resourceCoords": [
-                420.8,
-                3629.8
-              ],
-              "creator": {
-                "id": "https://oldinsurancemaps.net/profile/danvk",
-                "type": "Person"
-              },
-              "type": "gcp"
-            },
-            "geometry": {
-              "type": "Point",
-              "coordinates": [
-                -87.64764632084261,
-                41.89009209941024
-              ]
-            }
           }
         ]
       }
@@ -6735,8 +5391,8 @@
           "value": "11"
         }
       ],
-      "created": "2026-05-25T13:23:24Z",
-      "modified": "2026-05-25T13:23:24Z",
+      "created": "2026-06-10T19:14:36Z",
+      "modified": "2026-06-10T19:14:36Z",
       "creator": [
         {
           "id": "https://oldinsurancemaps.net/profile/danvk",
@@ -6755,17 +5411,14 @@
         },
         "selector": {
           "type": "SvgSelector",
-          "value": "<svg><polygon points=\"0,7323 0,0 5865,0 5865,7323 0,7323\" /></svg>"
+          "value": "<svg><polygon points=\"5409.1,6002.2 5446.1,3658.6 5518.6,3657.8 5409.1,6002.2\" /></svg>"
         }
       },
       "body": {
         "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd410m:g4104m:g4104cm:g01790195001N:01790_01N_1950-0059W/gcps",
         "type": "FeatureCollection",
         "transformation": {
-          "type": "polynomial",
-          "options": {
-            "order": 1
-          }
+          "type": "helmert"
         },
         "features": [
           {
@@ -6809,27 +5462,6 @@
                 41.891194
               ]
             }
-          },
-          {
-            "type": "Feature",
-            "properties": {
-              "resourceCoords": [
-                242.0,
-                3675.9
-              ],
-              "creator": {
-                "id": "https://oldinsurancemaps.net/profile/danvk",
-                "type": "Person"
-              },
-              "type": "gcp"
-            },
-            "geometry": {
-              "type": "Point",
-              "coordinates": [
-                -87.64758892588459,
-                41.89007153655477
-              ]
-            }
           }
         ]
       }
@@ -6849,11 +5481,11 @@
         },
         {
           "label": "intersections",
-          "value": "10"
+          "value": "8"
         }
       ],
-      "created": "2026-05-25T13:23:24Z",
-      "modified": "2026-05-25T13:23:24Z",
+      "created": "2026-06-10T19:14:36Z",
+      "modified": "2026-06-10T19:14:36Z",
       "creator": [
         {
           "id": "https://oldinsurancemaps.net/profile/danvk",
@@ -6872,17 +5504,14 @@
         },
         "selector": {
           "type": "SvgSelector",
-          "value": "<svg><polygon points=\"0,7322 0,0 5879,0 5879,7322 0,7322\" /></svg>"
+          "value": "<svg><polygon points=\"1063.1,673.3 1060.3,0.0 5879.0,0.0 5879.0,659.5 4071.6,658.9 4140.7,6413.2 1752.2,6423.0 1675.0,669.0 1063.1,673.3\" /></svg>"
         }
       },
       "body": {
         "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd410m:g4104m:g4104cm:g01790195001N:01790_01N_1950-0005N/gcps",
         "type": "FeatureCollection",
         "transformation": {
-          "type": "polynomial",
-          "options": {
-            "order": 1
-          }
+          "type": "helmert"
         },
         "features": [
           {
@@ -6926,27 +5555,6 @@
                 41.8939406
               ]
             }
-          },
-          {
-            "type": "Feature",
-            "properties": {
-              "resourceCoords": [
-                4095.1,
-                3895.8
-              ],
-              "creator": {
-                "id": "https://oldinsurancemaps.net/profile/danvk",
-                "type": "Person"
-              },
-              "type": "gcp"
-            },
-            "geometry": {
-              "type": "Point",
-              "coordinates": [
-                -87.63713732598931,
-                41.895095265655314
-              ]
-            }
           }
         ]
       }
@@ -6969,8 +5577,8 @@
           "value": "6"
         }
       ],
-      "created": "2026-05-25T13:23:24Z",
-      "modified": "2026-05-25T13:23:24Z",
+      "created": "2026-06-10T19:14:36Z",
+      "modified": "2026-06-10T19:14:36Z",
       "creator": [
         {
           "id": "https://oldinsurancemaps.net/profile/danvk",
@@ -6989,17 +5597,14 @@
         },
         "selector": {
           "type": "SvgSelector",
-          "value": "<svg><polygon points=\"0,7323 0,0 5813,0 5813,7323 0,7323\" /></svg>"
+          "value": "<svg><polygon points=\"1740.2,1261.2 4267.3,1165.2 4313.4,1728.9 5813.0,1734.1 5813.0,6034.3 1755.2,6014.4 1665.7,3639.4 1740.2,1261.2\" /></svg>"
         }
       },
       "body": {
         "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd410m:g4104m:g4104cm:g01790195001N:01790_01N_1950-0060W/gcps",
         "type": "FeatureCollection",
         "transformation": {
-          "type": "polynomial",
-          "options": {
-            "order": 1
-          }
+          "type": "helmert"
         },
         "features": [
           {
@@ -7043,27 +5648,6 @@
                 41.8912254
               ]
             }
-          },
-          {
-            "type": "Feature",
-            "properties": {
-              "resourceCoords": [
-                1709.0,
-                6000.7
-              ],
-              "creator": {
-                "id": "https://oldinsurancemaps.net/profile/danvk",
-                "type": "Person"
-              },
-              "type": "gcp"
-            },
-            "geometry": {
-              "type": "Point",
-              "coordinates": [
-                -87.64436611237042,
-                41.88906045913142
-              ]
-            }
           }
         ]
       }
@@ -7086,8 +5670,8 @@
           "value": "8"
         }
       ],
-      "created": "2026-05-25T13:23:24Z",
-      "modified": "2026-05-25T13:23:24Z",
+      "created": "2026-06-10T19:14:36Z",
+      "modified": "2026-06-10T19:14:36Z",
       "creator": [
         {
           "id": "https://oldinsurancemaps.net/profile/danvk",
@@ -7106,17 +5690,14 @@
         },
         "selector": {
           "type": "SvgSelector",
-          "value": "<svg><polygon points=\"0,7323 0,0 5828,0 5828,7323 0,7323\" /></svg>"
+          "value": "<svg><polygon points=\"941.1,1127.1 252.8,1079.4 253.4,0.0 3101.9,0.0 3075.3,1118.4 5828.0,1031.2 5828.0,4885.4 3376.4,4933.3 3416.7,6094.3 1031.7,6101.9 941.1,1127.1\" /></svg>"
         }
       },
       "body": {
         "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd410m:g4104m:g4104cm:g01790195001N:01790_01N_1950-0062W/gcps",
         "type": "FeatureCollection",
         "transformation": {
-          "type": "polynomial",
-          "options": {
-            "order": 1
-          }
+          "type": "helmert"
         },
         "features": [
           {
@@ -7160,27 +5741,6 @@
                 41.8890802
               ]
             }
-          },
-          {
-            "type": "Feature",
-            "properties": {
-              "resourceCoords": [
-                3416.7,
-                1077.4
-              ],
-              "creator": {
-                "id": "https://oldinsurancemaps.net/profile/danvk",
-                "type": "Person"
-              },
-              "type": "gcp"
-            },
-            "geometry": {
-              "type": "Point",
-              "coordinates": [
-                -87.63992643445721,
-                41.88908809273507
-              ]
-            }
           }
         ]
       }
@@ -7196,15 +5756,15 @@
       "metadata": [
         {
           "label": "streets",
-          "value": "4"
+          "value": "5"
         },
         {
           "label": "intersections",
-          "value": "2"
+          "value": "5"
         }
       ],
-      "created": "2026-05-25T13:23:24Z",
-      "modified": "2026-05-25T13:23:24Z",
+      "created": "2026-06-10T19:14:36Z",
+      "modified": "2026-06-10T19:14:36Z",
       "creator": [
         {
           "id": "https://oldinsurancemaps.net/profile/danvk",
@@ -7223,24 +5783,21 @@
         },
         "selector": {
           "type": "SvgSelector",
-          "value": "<svg><polygon points=\"0,7322 0,0 5877,0 5877,7322 0,7322\" /></svg>"
+          "value": "<svg><polygon points=\"5711.1,633.6 5651.4,5619.6 306.8,5480.9 310.4,4162.9 -0.0,4157.2 -0.0,602.0 5711.1,633.6\" /></svg>"
         }
       },
       "body": {
         "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd410m:g4104m:g4104cm:g01790195001N:01790_01N_1950-0063W/gcps",
         "type": "FeatureCollection",
         "transformation": {
-          "type": "polynomial",
-          "options": {
-            "order": 1
-          }
+          "type": "helmert"
         },
         "features": [
           {
             "type": "Feature",
             "properties": {
               "resourceCoords": [
-                363.0,
+                3301.5,
                 4152.3
               ],
               "creator": {
@@ -7252,8 +5809,8 @@
             "geometry": {
               "type": "Point",
               "coordinates": [
-                -87.6475357,
-                41.8873891
+                -87.6457272,
+                41.8874361
               ]
             }
           },
@@ -7261,8 +5818,8 @@
             "type": "Feature",
             "properties": {
               "resourceCoords": [
-                363.0,
-                5567.1
+                3301.5,
+                590.7
               ],
               "creator": {
                 "id": "https://oldinsurancemaps.net/profile/danvk",
@@ -7273,29 +5830,8 @@
             "geometry": {
               "type": "Point",
               "coordinates": [
-                -87.6475129,
-                41.8867958
-              ]
-            }
-          },
-          {
-            "type": "Feature",
-            "properties": {
-              "resourceCoords": [
-                1777.5,
-                4859.7
-              ],
-              "creator": {
-                "id": "https://oldinsurancemaps.net/profile/danvk",
-                "type": "Person"
-              },
-              "type": "projected"
-            },
-            "geometry": {
-              "type": "Point",
-              "coordinates": [
-                -87.646727348619,
-                41.887109423733065
+                -87.6457947,
+                41.8890393
               ]
             }
           }
@@ -7320,8 +5856,8 @@
           "value": "8"
         }
       ],
-      "created": "2026-05-25T13:23:24Z",
-      "modified": "2026-05-25T13:23:24Z",
+      "created": "2026-06-10T19:14:36Z",
+      "modified": "2026-06-10T19:14:36Z",
       "creator": [
         {
           "id": "https://oldinsurancemaps.net/profile/danvk",
@@ -7340,17 +5876,14 @@
         },
         "selector": {
           "type": "SvgSelector",
-          "value": "<svg><polygon points=\"0,7323 0,0 5828,0 5828,7323 0,7323\" /></svg>"
+          "value": "<svg><polygon points=\"440.1,5594.7 489.7,592.0 5310.5,725.2 5290.8,5738.1 440.1,5594.7\" /></svg>"
         }
       },
       "body": {
         "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd410m:g4104m:g4104cm:g01790195001N:01790_01N_1950-0064W/gcps",
         "type": "FeatureCollection",
         "transformation": {
-          "type": "polynomial",
-          "options": {
-            "order": 1
-          }
+          "type": "helmert"
         },
         "features": [
           {
@@ -7394,27 +5927,6 @@
                 41.889054
               ]
             }
-          },
-          {
-            "type": "Feature",
-            "properties": {
-              "resourceCoords": [
-                2915.4,
-                593.4
-              ],
-              "creator": {
-                "id": "https://oldinsurancemaps.net/profile/danvk",
-                "type": "Person"
-              },
-              "type": "gcp"
-            },
-            "geometry": {
-              "type": "Point",
-              "coordinates": [
-                -87.64287462930757,
-                41.88908569041822
-              ]
-            }
           }
         ]
       }
@@ -7437,8 +5949,8 @@
           "value": "8"
         }
       ],
-      "created": "2026-05-25T13:23:24Z",
-      "modified": "2026-05-25T13:23:24Z",
+      "created": "2026-06-10T19:14:36Z",
+      "modified": "2026-06-10T19:14:36Z",
       "creator": [
         {
           "id": "https://oldinsurancemaps.net/profile/danvk",
@@ -7457,17 +5969,14 @@
         },
         "selector": {
           "type": "SvgSelector",
-          "value": "<svg><polygon points=\"0,7322 0,0 5877,0 5877,7322 0,7322\" /></svg>"
+          "value": "<svg><polygon points=\"1245.0,1283.7 4155.8,1172.7 4662.6,3503.3 5877.0,3445.8 5877.0,6403.1 5194.8,6435.2 4998.1,6234.0 1527.2,6332.2 1536.9,6522.7 36.7,6603.5 154.0,7322.0 -0.0,7322.0 -0.0,0.0 1167.8,26.5 1245.0,1283.7\" /></svg>"
         }
       },
       "body": {
         "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd410m:g4104m:g4104cm:g01790195001N:01790_01N_1950-0065W/gcps",
         "type": "FeatureCollection",
         "transformation": {
-          "type": "polynomial",
-          "options": {
-            "order": 1
-          }
+          "type": "helmert"
         },
         "features": [
           {
@@ -7511,27 +6020,6 @@
                 41.8844146
               ]
             }
-          },
-          {
-            "type": "Feature",
-            "properties": {
-              "resourceCoords": [
-                1526.9,
-                2365.7
-              ],
-              "creator": {
-                "id": "https://oldinsurancemaps.net/profile/danvk",
-                "type": "Person"
-              },
-              "type": "gcp"
-            },
-            "geometry": {
-              "type": "Point",
-              "coordinates": [
-                -87.64735711124126,
-                41.886281814002736
-              ]
-            }
           }
         ]
       }
@@ -7551,11 +6039,11 @@
         },
         {
           "label": "intersections",
-          "value": "10"
+          "value": "9"
         }
       ],
-      "created": "2026-05-25T13:23:24Z",
-      "modified": "2026-05-25T13:23:24Z",
+      "created": "2026-06-10T19:14:36Z",
+      "modified": "2026-06-10T19:14:36Z",
       "creator": [
         {
           "id": "https://oldinsurancemaps.net/profile/danvk",
@@ -7574,19 +6062,37 @@
         },
         "selector": {
           "type": "SvgSelector",
-          "value": "<svg><polygon points=\"0,7323 0,0 5828,0 5828,7323 0,7323\" /></svg>"
+          "value": "<svg><polygon points=\"1788.8,1116.5 2380.0,1129.6 2317.9,3642.4 2180.3,3641.2 1788.8,1116.5\" /></svg>"
         }
       },
       "body": {
         "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd410m:g4104m:g4104cm:g01790195001N:01790_01N_1950-0066W/gcps",
         "type": "FeatureCollection",
         "transformation": {
-          "type": "polynomial",
-          "options": {
-            "order": 1
-          }
+          "type": "helmert"
         },
         "features": [
+          {
+            "type": "Feature",
+            "properties": {
+              "resourceCoords": [
+                4136.9,
+                3667.3
+              ],
+              "creator": {
+                "id": "https://oldinsurancemaps.net/profile/danvk",
+                "type": "Person"
+              },
+              "type": "gcp"
+            },
+            "geometry": {
+              "type": "Point",
+              "coordinates": [
+                -87.6442408,
+                41.8857101
+              ]
+            }
+          },
           {
             "type": "Feature",
             "properties": {
@@ -7605,48 +6111,6 @@
               "coordinates": [
                 -87.644261,
                 41.8862548
-              ]
-            }
-          },
-          {
-            "type": "Feature",
-            "properties": {
-              "resourceCoords": [
-                4136.9,
-                6931.2
-              ],
-              "creator": {
-                "id": "https://oldinsurancemaps.net/profile/danvk",
-                "type": "Person"
-              },
-              "type": "gcp"
-            },
-            "geometry": {
-              "type": "Point",
-              "coordinates": [
-                -87.6441836,
-                41.8844246
-              ]
-            }
-          },
-          {
-            "type": "Feature",
-            "properties": {
-              "resourceCoords": [
-                1766.0,
-                3667.3
-              ],
-              "creator": {
-                "id": "https://oldinsurancemaps.net/profile/danvk",
-                "type": "Person"
-              },
-              "type": "gcp"
-            },
-            "geometry": {
-              "type": "Point",
-              "coordinates": [
-                -87.64553415541843,
-                41.88572094863864
               ]
             }
           }
@@ -7668,11 +6132,11 @@
         },
         {
           "label": "intersections",
-          "value": "10"
+          "value": "7"
         }
       ],
-      "created": "2026-05-25T13:23:24Z",
-      "modified": "2026-05-25T13:23:24Z",
+      "created": "2026-06-10T19:14:36Z",
+      "modified": "2026-06-10T19:14:36Z",
       "creator": [
         {
           "id": "https://oldinsurancemaps.net/profile/danvk",
@@ -7691,17 +6155,14 @@
         },
         "selector": {
           "type": "SvgSelector",
-          "value": "<svg><polygon points=\"0,7322 0,0 5877,0 5877,7322 0,7322\" /></svg>"
+          "value": "<svg><polygon points=\"1839.6,6254.3 1860.2,7322.0 930.2,7322.0 914.2,6496.9 309.1,6503.8 113.3,6288.7 270.7,6019.9 1032.1,6009.1 1123.6,3441.6 -0.0,3454.1 -0.0,1029.4 4136.9,1025.8 4175.4,6230.8 1839.6,6254.3\" /></svg>"
         }
       },
       "body": {
         "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd410m:g4104m:g4104cm:g01790195001N:01790_01N_1950-0067W/gcps",
         "type": "FeatureCollection",
         "transformation": {
-          "type": "polynomial",
-          "options": {
-            "order": 1
-          }
+          "type": "helmert"
         },
         "features": [
           {
@@ -7745,27 +6206,6 @@
                 41.8868117
               ]
             }
-          },
-          {
-            "type": "Feature",
-            "properties": {
-              "resourceCoords": [
-                4136.9,
-                3434.8
-              ],
-              "creator": {
-                "id": "https://oldinsurancemaps.net/profile/danvk",
-                "type": "Person"
-              },
-              "type": "gcp"
-            },
-            "geometry": {
-              "type": "Point",
-              "coordinates": [
-                -87.64278131442829,
-                41.88571332978507
-              ]
-            }
           }
         ]
       }
@@ -7781,15 +6221,15 @@
       "metadata": [
         {
           "label": "streets",
-          "value": "5"
+          "value": "6"
         },
         {
           "label": "intersections",
           "value": "6"
         }
       ],
-      "created": "2026-05-25T13:23:24Z",
-      "modified": "2026-05-25T13:23:24Z",
+      "created": "2026-06-10T19:14:36Z",
+      "modified": "2026-06-10T19:14:36Z",
       "creator": [
         {
           "id": "https://oldinsurancemaps.net/profile/danvk",
@@ -7808,17 +6248,14 @@
         },
         "selector": {
           "type": "SvgSelector",
-          "value": "<svg><polygon points=\"0,7323 0,0 5828,0 5828,7323 0,7323\" /></svg>"
+          "value": "<svg><polygon points=\"4131.3,6237.6 1744.4,6257.7 1676.7,993.9 4042.8,995.5 4131.3,6237.6\" /></svg>"
         }
       },
       "body": {
         "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd410m:g4104m:g4104cm:g01790195001N:01790_01N_1950-0068W/gcps",
         "type": "FeatureCollection",
         "transformation": {
-          "type": "polynomial",
-          "options": {
-            "order": 1
-          }
+          "type": "helmert"
         },
         "features": [
           {
@@ -7862,27 +6299,6 @@
                 41.8868117
               ]
             }
-          },
-          {
-            "type": "Feature",
-            "properties": {
-              "resourceCoords": [
-                4116.8,
-                3422.4
-              ],
-              "creator": {
-                "id": "https://oldinsurancemaps.net/profile/danvk",
-                "type": "Person"
-              },
-              "type": "gcp"
-            },
-            "geometry": {
-              "type": "Point",
-              "coordinates": [
-                -87.64131181406132,
-                41.885713957584365
-              ]
-            }
           }
         ]
       }
@@ -7898,15 +6314,15 @@
       "metadata": [
         {
           "label": "streets",
-          "value": "5"
+          "value": "4"
         },
         {
           "label": "intersections",
-          "value": "6"
+          "value": "4"
         }
       ],
-      "created": "2026-05-25T13:23:24Z",
-      "modified": "2026-05-25T13:23:24Z",
+      "created": "2026-06-10T19:14:36Z",
+      "modified": "2026-06-10T19:14:36Z",
       "creator": [
         {
           "id": "https://oldinsurancemaps.net/profile/danvk",
@@ -7925,17 +6341,14 @@
         },
         "selector": {
           "type": "SvgSelector",
-          "value": "<svg><polygon points=\"0,7322 0,0 5877,0 5877,7322 0,7322\" /></svg>"
+          "value": "<svg><polygon points=\"4096.6,5884.1 1674.6,5798.2 1797.1,697.2 4123.9,762.4 4096.6,5884.1\" /></svg>"
         }
       },
       "body": {
         "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd410m:g4104m:g4104cm:g01790195001N:01790_01N_1950-0069W/gcps",
         "type": "FeatureCollection",
         "transformation": {
-          "type": "polynomial",
-          "options": {
-            "order": 1
-          }
+          "type": "helmert"
         },
         "features": [
           {
@@ -7979,27 +6392,6 @@
                 41.8844479
               ]
             }
-          },
-          {
-            "type": "Feature",
-            "properties": {
-              "resourceCoords": [
-                1696.8,
-                3106.3
-              ],
-              "creator": {
-                "id": "https://oldinsurancemaps.net/profile/danvk",
-                "type": "Person"
-              },
-              "type": "gcp"
-            },
-            "geometry": {
-              "type": "Point",
-              "coordinates": [
-                -87.64135811614159,
-                41.88569121250614
-              ]
-            }
           }
         ]
       }
@@ -8015,15 +6407,15 @@
       "metadata": [
         {
           "label": "streets",
-          "value": "5"
+          "value": "6"
         },
         {
           "label": "intersections",
-          "value": "4"
+          "value": "8"
         }
       ],
-      "created": "2026-05-25T13:23:24Z",
-      "modified": "2026-05-25T13:23:24Z",
+      "created": "2026-06-10T19:14:36Z",
+      "modified": "2026-06-10T19:14:36Z",
       "creator": [
         {
           "id": "https://oldinsurancemaps.net/profile/danvk",
@@ -8042,17 +6434,14 @@
         },
         "selector": {
           "type": "SvgSelector",
-          "value": "<svg><polygon points=\"0,7323 0,0 5839,0 5839,7323 0,7323\" /></svg>"
+          "value": "<svg><polygon points=\"4133.7,6603.2 1709.0,6585.5 1708.8,712.5 3553.7,735.2 3561.8,62.2 4185.1,30.4 4133.7,6603.2\" /></svg>"
         }
       },
       "body": {
         "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd410m:g4104m:g4104cm:g01790195001N:01790_01N_1950-0006N/gcps",
         "type": "FeatureCollection",
         "transformation": {
-          "type": "polynomial",
-          "options": {
-            "order": 1
-          }
+          "type": "helmert"
         },
         "features": [
           {
@@ -8080,7 +6469,7 @@
             "type": "Feature",
             "properties": {
               "resourceCoords": [
-                1709.0,
+                4181.8,
                 743.2
               ],
               "creator": {
@@ -8092,29 +6481,8 @@
             "geometry": {
               "type": "Point",
               "coordinates": [
-                -87.6371778,
-                41.8965563
-              ]
-            }
-          },
-          {
-            "type": "Feature",
-            "properties": {
-              "resourceCoords": [
-                5839.0,
-                3664.4
-              ],
-              "creator": {
-                "id": "https://oldinsurancemaps.net/profile/danvk",
-                "type": "Person"
-              },
-              "type": "projected"
-            },
-            "geometry": {
-              "type": "Point",
-              "coordinates": [
-                -87.63466854249187,
-                41.89530393062021
+                -87.6357092,
+                41.8965708
               ]
             }
           }
@@ -8136,11 +6504,11 @@
         },
         {
           "label": "intersections",
-          "value": "5"
+          "value": "4"
         }
       ],
-      "created": "2026-05-25T13:23:24Z",
-      "modified": "2026-05-25T13:23:24Z",
+      "created": "2026-06-10T19:14:36Z",
+      "modified": "2026-06-10T19:14:36Z",
       "creator": [
         {
           "id": "https://oldinsurancemaps.net/profile/danvk",
@@ -8159,17 +6527,14 @@
         },
         "selector": {
           "type": "SvgSelector",
-          "value": "<svg><polygon points=\"0,7323 0,0 5813,0 5813,7323 0,7323\" /></svg>"
+          "value": "<svg><polygon points=\"5813.0,7323.0 5417.5,7323.0 5421.7,6347.5 1340.8,6269.6 1291.1,0.0 5813.0,0.0 5813.0,7323.0\" /></svg>"
         }
       },
       "body": {
         "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd410m:g4104m:g4104cm:g01790195001N:01790_01N_1950-0070W/gcps",
         "type": "FeatureCollection",
         "transformation": {
-          "type": "polynomial",
-          "options": {
-            "order": 1
-          }
+          "type": "helmert"
         },
         "features": [
           {
@@ -8213,27 +6578,6 @@
                 41.8868193
               ]
             }
-          },
-          {
-            "type": "Feature",
-            "properties": {
-              "resourceCoords": [
-                397.7,
-                3485.8
-              ],
-              "creator": {
-                "id": "https://oldinsurancemaps.net/profile/danvk",
-                "type": "Person"
-              },
-              "type": "gcp"
-            },
-            "geometry": {
-              "type": "Point",
-              "coordinates": [
-                -87.6404302491575,
-                41.885722585120995
-              ]
-            }
           }
         ]
       }
@@ -8249,15 +6593,15 @@
       "metadata": [
         {
           "label": "streets",
-          "value": "6"
+          "value": "5"
         },
         {
           "label": "intersections",
-          "value": "5"
+          "value": "4"
         }
       ],
-      "created": "2026-05-25T13:23:24Z",
-      "modified": "2026-05-25T13:23:24Z",
+      "created": "2026-06-10T19:14:36Z",
+      "modified": "2026-06-10T19:14:36Z",
       "creator": [
         {
           "id": "https://oldinsurancemaps.net/profile/danvk",
@@ -8276,40 +6620,16 @@
         },
         "selector": {
           "type": "SvgSelector",
-          "value": "<svg><polygon points=\"0,7322 0,0 5867,0 5867,7322 0,7322\" /></svg>"
+          "value": "<svg><polygon points=\"1474.9,824.2 1475.7,626.8 2688.1,654.6 2671.2,3417.6 5867.0,3432.8 5867.0,6441.9 394.2,6408.2 386.2,7322.0 -0.0,7322.0 -0.0,822.5 1474.9,824.2\" /></svg>"
         }
       },
       "body": {
         "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd410m:g4104m:g4104cm:g01790195001N:01790_01N_1950-0071W/gcps",
         "type": "FeatureCollection",
         "transformation": {
-          "type": "polynomial",
-          "options": {
-            "order": 1
-          }
+          "type": "helmert"
         },
         "features": [
-          {
-            "type": "Feature",
-            "properties": {
-              "resourceCoords": [
-                1475.4,
-                2097.8
-              ],
-              "creator": {
-                "id": "https://oldinsurancemaps.net/profile/danvk",
-                "type": "Person"
-              },
-              "type": "gcp"
-            },
-            "geometry": {
-              "type": "Point",
-              "coordinates": [
-                -87.6474219,
-                41.8837316
-              ]
-            }
-          },
           {
             "type": "Feature",
             "properties": {
@@ -8335,20 +6655,20 @@
             "type": "Feature",
             "properties": {
               "resourceCoords": [
-                5786.3,
-                4253.2
+                1475.4,
+                625.3
               ],
               "creator": {
                 "id": "https://oldinsurancemaps.net/profile/danvk",
                 "type": "Person"
               },
-              "type": "projected"
+              "type": "gcp"
             },
             "geometry": {
               "type": "Point",
               "coordinates": [
-                -87.64477270802168,
-                41.88280256306729
+                -87.6474391,
+                41.8844146
               ]
             }
           }
@@ -8370,11 +6690,11 @@
         },
         {
           "label": "intersections",
-          "value": "7"
+          "value": "6"
         }
       ],
-      "created": "2026-05-25T13:23:24Z",
-      "modified": "2026-05-25T13:23:24Z",
+      "created": "2026-06-10T19:14:36Z",
+      "modified": "2026-06-10T19:14:36Z",
       "creator": [
         {
           "id": "https://oldinsurancemaps.net/profile/danvk",
@@ -8393,17 +6713,14 @@
         },
         "selector": {
           "type": "SvgSelector",
-          "value": "<svg><polygon points=\"0,7323 0,0 5813,0 5813,7323 0,7323\" /></svg>"
+          "value": "<svg><polygon points=\"4148.6,6461.6 3216.8,6459.9 3198.3,3449.8 -0.0,3454.2 -0.0,690.1 2382.9,743.6 2576.3,961.7 3183.0,962.7 3188.1,1789.6 4120.3,1801.8 4148.6,6461.6\" /></svg>"
         }
       },
       "body": {
         "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd410m:g4104m:g4104cm:g01790195001N:01790_01N_1950-0072W/gcps",
         "type": "FeatureCollection",
         "transformation": {
-          "type": "polynomial",
-          "options": {
-            "order": 1
-          }
+          "type": "helmert"
         },
         "features": [
           {
@@ -8447,27 +6764,6 @@
                 41.8818174
               ]
             }
-          },
-          {
-            "type": "Feature",
-            "properties": {
-              "resourceCoords": [
-                2654.3,
-                5714.1
-              ],
-              "creator": {
-                "id": "https://oldinsurancemaps.net/profile/danvk",
-                "type": "Person"
-              },
-              "type": "projected"
-            },
-            "geometry": {
-              "type": "Point",
-              "coordinates": [
-                -87.64502722803708,
-                41.88214665556366
-              ]
-            }
           }
         ]
       }
@@ -8490,8 +6786,8 @@
           "value": "6"
         }
       ],
-      "created": "2026-05-25T13:23:24Z",
-      "modified": "2026-05-25T13:23:24Z",
+      "created": "2026-06-10T19:14:36Z",
+      "modified": "2026-06-10T19:14:36Z",
       "creator": [
         {
           "id": "https://oldinsurancemaps.net/profile/danvk",
@@ -8510,17 +6806,14 @@
         },
         "selector": {
           "type": "SvgSelector",
-          "value": "<svg><polygon points=\"0,7322 0,0 5867,0 5867,7322 0,7322\" /></svg>"
+          "value": "<svg><polygon points=\"4086.2,6548.3 1751.6,6600.0 1659.8,899.0 3989.1,883.0 4086.2,6548.3\" /></svg>"
         }
       },
       "body": {
         "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd410m:g4104m:g4104cm:g01790195001N:01790_01N_1950-0073W/gcps",
         "type": "FeatureCollection",
         "transformation": {
-          "type": "polynomial",
-          "options": {
-            "order": 1
-          }
+          "type": "helmert"
         },
         "features": [
           {
@@ -8564,27 +6857,6 @@
                 41.8844246
               ]
             }
-          },
-          {
-            "type": "Feature",
-            "properties": {
-              "resourceCoords": [
-                4086.2,
-                899.0
-              ],
-              "creator": {
-                "id": "https://oldinsurancemaps.net/profile/danvk",
-                "type": "Person"
-              },
-              "type": "gcp"
-            },
-            "geometry": {
-              "type": "Point",
-              "coordinates": [
-                -87.64269277858594,
-                41.88443118174366
-              ]
-            }
           }
         ]
       }
@@ -8604,11 +6876,11 @@
         },
         {
           "label": "intersections",
-          "value": "9"
+          "value": "7"
         }
       ],
-      "created": "2026-05-25T13:23:24Z",
-      "modified": "2026-05-25T13:23:24Z",
+      "created": "2026-06-10T19:14:36Z",
+      "modified": "2026-06-10T19:14:36Z",
       "creator": [
         {
           "id": "https://oldinsurancemaps.net/profile/danvk",
@@ -8627,17 +6899,14 @@
         },
         "selector": {
           "type": "SvgSelector",
-          "value": "<svg><polygon points=\"0,7323 0,0 5813,0 5813,7323 0,7323\" /></svg>"
+          "value": "<svg><polygon points=\"4200.3,840.6 4222.2,6521.2 1825.7,6516.4 1825.7,799.4 4200.3,840.6\" /></svg>"
         }
       },
       "body": {
         "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd410m:g4104m:g4104cm:g01790195001N:01790_01N_1950-0074W/gcps",
         "type": "FeatureCollection",
         "transformation": {
-          "type": "polynomial",
-          "options": {
-            "order": 1
-          }
+          "type": "helmert"
         },
         "features": [
           {
@@ -8681,27 +6950,6 @@
                 41.8844384
               ]
             }
-          },
-          {
-            "type": "Feature",
-            "properties": {
-              "resourceCoords": [
-                4242.3,
-                3606.8
-              ],
-              "creator": {
-                "id": "https://oldinsurancemaps.net/profile/danvk",
-                "type": "Person"
-              },
-              "type": "gcp"
-            },
-            "geometry": {
-              "type": "Point",
-              "coordinates": [
-                -87.64124248647066,
-                41.88319129693115
-              ]
-            }
           }
         ]
       }
@@ -8724,8 +6972,8 @@
           "value": "7"
         }
       ],
-      "created": "2026-05-25T13:23:24Z",
-      "modified": "2026-05-25T13:23:24Z",
+      "created": "2026-06-10T19:14:36Z",
+      "modified": "2026-06-10T19:14:36Z",
       "creator": [
         {
           "id": "https://oldinsurancemaps.net/profile/danvk",
@@ -8744,17 +6992,14 @@
         },
         "selector": {
           "type": "SvgSelector",
-          "value": "<svg><polygon points=\"0,7322 0,0 5867,0 5867,7322 0,7322\" /></svg>"
+          "value": "<svg><polygon points=\"4146.7,6384.1 1720.9,6343.0 1754.5,779.1 4179.7,852.4 4054.8,1038.7 4037.5,3270.2 4176.5,3583.1 4146.7,6384.1\" /></svg>"
         }
       },
       "body": {
         "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd410m:g4104m:g4104cm:g01790195001N:01790_01N_1950-0075W/gcps",
         "type": "FeatureCollection",
         "transformation": {
-          "type": "polynomial",
-          "options": {
-            "order": 1
-          }
+          "type": "helmert"
         },
         "features": [
           {
@@ -8798,27 +7043,6 @@
                 41.8818886
               ]
             }
-          },
-          {
-            "type": "Feature",
-            "properties": {
-              "resourceCoords": [
-                1729.0,
-                6385.5
-              ],
-              "creator": {
-                "id": "https://oldinsurancemaps.net/profile/danvk",
-                "type": "Person"
-              },
-              "type": "gcp"
-            },
-            "geometry": {
-              "type": "Point",
-              "coordinates": [
-                -87.64120787602033,
-                41.88185139319912
-              ]
-            }
           }
         ]
       }
@@ -8841,8 +7065,8 @@
           "value": "3"
         }
       ],
-      "created": "2026-05-25T13:23:24Z",
-      "modified": "2026-05-25T13:23:24Z",
+      "created": "2026-06-10T19:14:36Z",
+      "modified": "2026-06-10T19:14:36Z",
       "creator": [
         {
           "id": "https://oldinsurancemaps.net/profile/danvk",
@@ -8861,17 +7085,14 @@
         },
         "selector": {
           "type": "SvgSelector",
-          "value": "<svg><polygon points=\"0,7322 0,0 5828,0 5828,7322 0,7322\" /></svg>"
+          "value": "<svg><polygon points=\"3917.0,7322.0 3914.3,6466.5 1647.9,6440.2 1647.9,3547.2 1500.9,3225.6 1494.2,920.8 1621.1,726.9 5828.0,785.4 5828.0,7322.0 3917.0,7322.0\" /></svg>"
         }
       },
       "body": {
         "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd410m:g4104m:g4104cm:g01790195001N:01790_01N_1950-0076W/gcps",
         "type": "FeatureCollection",
         "transformation": {
-          "type": "polynomial",
-          "options": {
-            "order": 1
-          }
+          "type": "helmert"
         },
         "features": [
           {
@@ -8915,27 +7136,6 @@
                 41.8818886
               ]
             }
-          },
-          {
-            "type": "Feature",
-            "properties": {
-              "resourceCoords": [
-                4540.3,
-                4993.7
-              ],
-              "creator": {
-                "id": "https://oldinsurancemaps.net/profile/danvk",
-                "type": "Person"
-              },
-              "type": "projected"
-            },
-            "geometry": {
-              "type": "Point",
-              "coordinates": [
-                -87.63798493528738,
-                41.88256568608743
-              ]
-            }
           }
         ]
       }
@@ -8958,8 +7158,8 @@
           "value": "5"
         }
       ],
-      "created": "2026-05-25T13:23:24Z",
-      "modified": "2026-05-25T13:23:24Z",
+      "created": "2026-06-10T19:14:36Z",
+      "modified": "2026-06-10T19:14:36Z",
       "creator": [
         {
           "id": "https://oldinsurancemaps.net/profile/danvk",
@@ -8978,17 +7178,14 @@
         },
         "selector": {
           "type": "SvgSelector",
-          "value": "<svg><polygon points=\"0,7322 0,0 5873,0 5873,7322 0,7322\" /></svg>"
+          "value": "<svg><polygon points=\"4322.8,7322.0 1507.6,7322.0 1492.7,921.2 4314.0,927.9 4323.5,4700.8 4321.4,7176.6 4322.8,7322.0\" /></svg>"
         }
       },
       "body": {
         "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd410m:g4104m:g4104cm:g01790195001N:01790_01N_1950-0077W/gcps",
         "type": "FeatureCollection",
         "transformation": {
-          "type": "polynomial",
-          "options": {
-            "order": 1
-          }
+          "type": "helmert"
         },
         "features": [
           {
@@ -9032,27 +7229,6 @@
                 41.8817821
               ]
             }
-          },
-          {
-            "type": "Feature",
-            "properties": {
-              "resourceCoords": [
-                4314.0,
-                6241.4
-              ],
-              "creator": {
-                "id": "https://oldinsurancemaps.net/profile/danvk",
-                "type": "Person"
-              },
-              "type": "gcp"
-            },
-            "geometry": {
-              "type": "Point",
-              "coordinates": [
-                -87.64733733848666,
-                41.880499852611415
-              ]
-            }
           }
         ]
       }
@@ -9075,8 +7251,8 @@
           "value": "4"
         }
       ],
-      "created": "2026-05-25T13:23:24Z",
-      "modified": "2026-05-25T13:23:24Z",
+      "created": "2026-06-10T19:14:36Z",
+      "modified": "2026-06-10T19:14:36Z",
       "creator": [
         {
           "id": "https://oldinsurancemaps.net/profile/danvk",
@@ -9095,17 +7271,14 @@
         },
         "selector": {
           "type": "SvgSelector",
-          "value": "<svg><polygon points=\"0,7322 0,0 5828,0 5828,7322 0,7322\" /></svg>"
+          "value": "<svg><polygon points=\"1342.3,7322.0 1352.5,949.0 4154.2,901.9 4163.5,7322.0 1342.3,7322.0\" /></svg>"
         }
       },
       "body": {
         "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd410m:g4104m:g4104cm:g01790195001N:01790_01N_1950-0078W/gcps",
         "type": "FeatureCollection",
         "transformation": {
-          "type": "polynomial",
-          "options": {
-            "order": 1
-          }
+          "type": "helmert"
         },
         "features": [
           {
@@ -9149,27 +7322,6 @@
                 41.8792628
               ]
             }
-          },
-          {
-            "type": "Feature",
-            "properties": {
-              "resourceCoords": [
-                4154.2,
-                6261.6
-              ],
-              "creator": {
-                "id": "https://oldinsurancemaps.net/profile/danvk",
-                "type": "Person"
-              },
-              "type": "gcp"
-            },
-            "geometry": {
-              "type": "Point",
-              "coordinates": [
-                -87.64729230968119,
-                41.87922304353867
-              ]
-            }
           }
         ]
       }
@@ -9189,11 +7341,11 @@
         },
         {
           "label": "intersections",
-          "value": "7"
+          "value": "6"
         }
       ],
-      "created": "2026-05-25T13:23:24Z",
-      "modified": "2026-05-25T13:23:24Z",
+      "created": "2026-06-10T19:14:36Z",
+      "modified": "2026-06-10T19:14:36Z",
       "creator": [
         {
           "id": "https://oldinsurancemaps.net/profile/danvk",
@@ -9212,17 +7364,14 @@
         },
         "selector": {
           "type": "SvgSelector",
-          "value": "<svg><polygon points=\"0,7322 0,0 5873,0 5873,7322 0,7322\" /></svg>"
+          "value": "<svg><polygon points=\"4121.1,6487.2 1741.6,6529.9 1662.8,899.8 4015.9,852.6 4121.1,6487.2\" /></svg>"
         }
       },
       "body": {
         "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd410m:g4104m:g4104cm:g01790195001N:01790_01N_1950-0079W/gcps",
         "type": "FeatureCollection",
         "transformation": {
-          "type": "polynomial",
-          "options": {
-            "order": 1
-          }
+          "type": "helmert"
         },
         "features": [
           {
@@ -9266,27 +7415,6 @@
                 41.8805412
               ]
             }
-          },
-          {
-            "type": "Feature",
-            "properties": {
-              "resourceCoords": [
-                4069.0,
-                876.0
-              ],
-              "creator": {
-                "id": "https://oldinsurancemaps.net/profile/danvk",
-                "type": "Person"
-              },
-              "type": "gcp"
-            },
-            "geometry": {
-              "type": "Point",
-              "coordinates": [
-                -87.64264057816075,
-                41.88183622900061
-              ]
-            }
           }
         ]
       }
@@ -9302,15 +7430,15 @@
       "metadata": [
         {
           "label": "streets",
-          "value": "7"
+          "value": "6"
         },
         {
           "label": "intersections",
-          "value": "12"
+          "value": "8"
         }
       ],
-      "created": "2026-05-25T13:23:24Z",
-      "modified": "2026-05-25T13:23:24Z",
+      "created": "2026-06-10T19:14:36Z",
+      "modified": "2026-06-10T19:14:36Z",
       "creator": [
         {
           "id": "https://oldinsurancemaps.net/profile/danvk",
@@ -9329,24 +7457,21 @@
         },
         "selector": {
           "type": "SvgSelector",
-          "value": "<svg><polygon points=\"0,7323 0,0 5835,0 5835,7323 0,7323\" /></svg>"
+          "value": "<svg><polygon points=\"1676.1,6494.7 1669.8,0.0 5835.0,0.0 5835.0,696.5 4167.1,709.5 4198.0,6493.6 1676.1,6494.7\" /></svg>"
         }
       },
       "body": {
         "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd410m:g4104m:g4104cm:g01790195001N:01790_01N_1950-0007N/gcps",
         "type": "FeatureCollection",
         "transformation": {
-          "type": "polynomial",
-          "options": {
-            "order": 1
-          }
+          "type": "helmert"
         },
         "features": [
           {
             "type": "Feature",
             "properties": {
               "resourceCoords": [
-                4183.9,
+                1671.3,
                 4715.9
               ],
               "creator": {
@@ -9358,8 +7483,8 @@
             "geometry": {
               "type": "Point",
               "coordinates": [
-                -87.6341577,
-                41.8947921
+                -87.6356698,
+                41.8947745
               ]
             }
           },
@@ -9368,7 +7493,7 @@
             "properties": {
               "resourceCoords": [
                 1671.3,
-                2932.7
+                702.9
               ],
               "creator": {
                 "id": "https://oldinsurancemaps.net/profile/danvk",
@@ -9379,29 +7504,8 @@
             "geometry": {
               "type": "Point",
               "coordinates": [
-                -87.6356819,
-                41.8955757
-              ]
-            }
-          },
-          {
-            "type": "Feature",
-            "properties": {
-              "resourceCoords": [
-                4183.9,
-                2932.7
-              ],
-              "creator": {
-                "id": "https://oldinsurancemaps.net/profile/danvk",
-                "type": "Person"
-              },
-              "type": "gcp"
-            },
-            "geometry": {
-              "type": "Point",
-              "coordinates": [
-                -87.63417151425108,
-                41.89559018574011
+                -87.6357092,
+                41.8965708
               ]
             }
           }
@@ -9426,8 +7530,8 @@
           "value": "8"
         }
       ],
-      "created": "2026-05-25T13:23:24Z",
-      "modified": "2026-05-25T13:23:24Z",
+      "created": "2026-06-10T19:14:36Z",
+      "modified": "2026-06-10T19:14:36Z",
       "creator": [
         {
           "id": "https://oldinsurancemaps.net/profile/danvk",
@@ -9446,17 +7550,14 @@
         },
         "selector": {
           "type": "SvgSelector",
-          "value": "<svg><polygon points=\"0,7322 0,0 5828,0 5828,7322 0,7322\" /></svg>"
+          "value": "<svg><polygon points=\"4174.3,740.5 4124.3,6567.6 1668.0,6526.7 1705.6,710.8 4174.3,740.5\" /></svg>"
         }
       },
       "body": {
         "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd410m:g4104m:g4104cm:g01790195001N:01790_01N_1950-0080W/gcps",
         "type": "FeatureCollection",
         "transformation": {
-          "type": "polynomial",
-          "options": {
-            "order": 1
-          }
+          "type": "helmert"
         },
         "features": [
           {
@@ -9500,27 +7601,6 @@
                 41.8792909
               ]
             }
-          },
-          {
-            "type": "Feature",
-            "properties": {
-              "resourceCoords": [
-                1668.0,
-                3705.7
-              ],
-              "creator": {
-                "id": "https://oldinsurancemaps.net/profile/danvk",
-                "type": "Person"
-              },
-              "type": "gcp"
-            },
-            "geometry": {
-              "type": "Point",
-              "coordinates": [
-                -87.64263567217365,
-                41.88053069993873
-              ]
-            }
           }
         ]
       }
@@ -9543,8 +7623,8 @@
           "value": "6"
         }
       ],
-      "created": "2026-05-25T13:23:24Z",
-      "modified": "2026-05-25T13:23:24Z",
+      "created": "2026-06-10T19:14:36Z",
+      "modified": "2026-06-10T19:14:36Z",
       "creator": [
         {
           "id": "https://oldinsurancemaps.net/profile/danvk",
@@ -9570,10 +7650,7 @@
         "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd410m:g4104m:g4104cm:g01790195001N:01790_01N_1950-0081W/gcps",
         "type": "FeatureCollection",
         "transformation": {
-          "type": "polynomial",
-          "options": {
-            "order": 1
-          }
+          "type": "helmert"
         },
         "features": [
           {
@@ -9617,27 +7694,6 @@
                 41.8793273
               ]
             }
-          },
-          {
-            "type": "Feature",
-            "properties": {
-              "resourceCoords": [
-                1760.8,
-                2299.5
-              ],
-              "creator": {
-                "id": "https://oldinsurancemaps.net/profile/danvk",
-                "type": "Person"
-              },
-              "type": "gcp"
-            },
-            "geometry": {
-              "type": "Point",
-              "coordinates": [
-                -87.64115822431357,
-                41.88058557476099
-              ]
-            }
           }
         ]
       }
@@ -9660,8 +7716,8 @@
           "value": "8"
         }
       ],
-      "created": "2026-05-25T13:23:24Z",
-      "modified": "2026-05-25T13:23:24Z",
+      "created": "2026-06-10T19:14:36Z",
+      "modified": "2026-06-10T19:14:36Z",
       "creator": [
         {
           "id": "https://oldinsurancemaps.net/profile/danvk",
@@ -9680,17 +7736,14 @@
         },
         "selector": {
           "type": "SvgSelector",
-          "value": "<svg><polygon points=\"0,7322 0,0 5828,0 5828,7322 0,7322\" /></svg>"
+          "value": "<svg><polygon points=\"1140.8,1155.5 5828.0,1211.1 5828.0,6825.4 1136.2,6773.0 1140.8,1155.5\" /></svg>"
         }
       },
       "body": {
         "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd410m:g4104m:g4104cm:g01790195001N:01790_01N_1950-0082W/gcps",
         "type": "FeatureCollection",
         "transformation": {
-          "type": "polynomial",
-          "options": {
-            "order": 1
-          }
+          "type": "helmert"
         },
         "features": [
           {
@@ -9734,27 +7787,6 @@
                 41.8818705
               ]
             }
-          },
-          {
-            "type": "Feature",
-            "properties": {
-              "resourceCoords": [
-                3549.2,
-                4014.0
-              ],
-              "creator": {
-                "id": "https://oldinsurancemaps.net/profile/danvk",
-                "type": "Person"
-              },
-              "type": "gcp"
-            },
-            "geometry": {
-              "type": "Point",
-              "coordinates": [
-                -87.63969405442239,
-                41.88059498413645
-              ]
-            }
           }
         ]
       }
@@ -9774,11 +7806,11 @@
         },
         {
           "label": "intersections",
-          "value": "9"
+          "value": "6"
         }
       ],
-      "created": "2026-05-25T13:23:24Z",
-      "modified": "2026-05-25T13:23:24Z",
+      "created": "2026-06-10T19:14:36Z",
+      "modified": "2026-06-10T19:14:36Z",
       "creator": [
         {
           "id": "https://oldinsurancemaps.net/profile/danvk",
@@ -9797,17 +7829,14 @@
         },
         "selector": {
           "type": "SvgSelector",
-          "value": "<svg><polygon points=\"0,7322 0,0 5853,0 5853,7322 0,7322\" /></svg>"
+          "value": "<svg><polygon points=\"4273.6,7120.9 4273.8,7322.0 1462.7,7322.0 1488.0,896.3 4312.9,880.7 4273.6,7120.9\" /></svg>"
         }
       },
       "body": {
         "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd410m:g4104m:g4104cm:g01790195001N:01790_01N_1950-0083W/gcps",
         "type": "FeatureCollection",
         "transformation": {
-          "type": "polynomial",
-          "options": {
-            "order": 1
-          }
+          "type": "helmert"
         },
         "features": [
           {
@@ -9851,27 +7880,6 @@
                 41.8785826
               ]
             }
-          },
-          {
-            "type": "Feature",
-            "properties": {
-              "resourceCoords": [
-                2873.2,
-                1123.8
-              ],
-              "creator": {
-                "id": "https://oldinsurancemaps.net/profile/danvk",
-                "type": "Person"
-              },
-              "type": "gcp"
-            },
-            "geometry": {
-              "type": "Point",
-              "coordinates": [
-                -87.6441494364238,
-                41.87863293380611
-              ]
-            }
           }
         ]
       }
@@ -9891,11 +7899,11 @@
         },
         {
           "label": "intersections",
-          "value": "6"
+          "value": "4"
         }
       ],
-      "created": "2026-05-25T13:23:24Z",
-      "modified": "2026-05-25T13:23:24Z",
+      "created": "2026-06-10T19:14:36Z",
+      "modified": "2026-06-10T19:14:36Z",
       "creator": [
         {
           "id": "https://oldinsurancemaps.net/profile/danvk",
@@ -9914,17 +7922,14 @@
         },
         "selector": {
           "type": "SvgSelector",
-          "value": "<svg><polygon points=\"0,7323 0,0 5868,0 5868,7323 0,7323\" /></svg>"
+          "value": "<svg><polygon points=\"1592.0,7323.0 1596.8,906.1 4377.1,889.7 4409.0,7323.0 1592.0,7323.0\" /></svg>"
         }
       },
       "body": {
         "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd410m:g4104m:g4104cm:g01790195001N:01790_01N_1950-0084W/gcps",
         "type": "FeatureCollection",
         "transformation": {
-          "type": "polynomial",
-          "options": {
-            "order": 1
-          }
+          "type": "helmert"
         },
         "features": [
           {
@@ -9968,27 +7973,6 @@
                 41.8773156
               ]
             }
-          },
-          {
-            "type": "Feature",
-            "properties": {
-              "resourceCoords": [
-                1584.4,
-                1161.0
-              ],
-              "creator": {
-                "id": "https://oldinsurancemaps.net/profile/danvk",
-                "type": "Person"
-              },
-              "type": "gcp"
-            },
-            "geometry": {
-              "type": "Point",
-              "coordinates": [
-                -87.64413713128145,
-                41.8779869008678
-              ]
-            }
           }
         ]
       }
@@ -10011,8 +7995,8 @@
           "value": "6"
         }
       ],
-      "created": "2026-05-25T13:23:24Z",
-      "modified": "2026-05-25T13:23:24Z",
+      "created": "2026-06-10T19:14:36Z",
+      "modified": "2026-06-10T19:14:36Z",
       "creator": [
         {
           "id": "https://oldinsurancemaps.net/profile/danvk",
@@ -10031,17 +8015,14 @@
         },
         "selector": {
           "type": "SvgSelector",
-          "value": "<svg><polygon points=\"0,7322 0,0 5853,0 5853,7322 0,7322\" /></svg>"
+          "value": "<svg><polygon points=\"4131.0,850.7 4191.6,6479.1 1808.3,6462.5 1752.2,877.4 4131.0,850.7\" /></svg>"
         }
       },
       "body": {
         "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd410m:g4104m:g4104cm:g01790195001N:01790_01N_1950-0085W/gcps",
         "type": "FeatureCollection",
         "transformation": {
-          "type": "polynomial",
-          "options": {
-            "order": 1
-          }
+          "type": "helmert"
         },
         "features": [
           {
@@ -10085,27 +8066,6 @@
                 41.8767364
               ]
             }
-          },
-          {
-            "type": "Feature",
-            "properties": {
-              "resourceCoords": [
-                1752.2,
-                6477.7
-              ],
-              "creator": {
-                "id": "https://oldinsurancemaps.net/profile/danvk",
-                "type": "Person"
-              },
-              "type": "gcp"
-            },
-            "geometry": {
-              "type": "Point",
-              "coordinates": [
-                -87.6439790229228,
-                41.87671981735112
-              ]
-            }
           }
         ]
       }
@@ -10121,15 +8081,15 @@
       "metadata": [
         {
           "label": "streets",
-          "value": "5"
+          "value": "4"
         },
         {
           "label": "intersections",
-          "value": "4"
+          "value": "3"
         }
       ],
-      "created": "2026-05-25T13:23:24Z",
-      "modified": "2026-05-25T13:23:24Z",
+      "created": "2026-06-10T19:14:36Z",
+      "modified": "2026-06-10T19:14:36Z",
       "creator": [
         {
           "id": "https://oldinsurancemaps.net/profile/danvk",
@@ -10148,17 +8108,14 @@
         },
         "selector": {
           "type": "SvgSelector",
-          "value": "<svg><polygon points=\"0,7323 0,0 5868,0 5868,7323 0,7323\" /></svg>"
+          "value": "<svg><polygon points=\"1758.3,5392.2 1739.8,826.6 4134.8,838.3 4136.3,5413.7 1758.3,5392.2\" /></svg>"
         }
       },
       "body": {
         "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd410m:g4104m:g4104cm:g01790195001N:01790_01N_1950-0086W/gcps",
         "type": "FeatureCollection",
         "transformation": {
-          "type": "polynomial",
-          "options": {
-            "order": 1
-          }
+          "type": "helmert"
         },
         "features": [
           {
@@ -10202,27 +8159,6 @@
                 41.8786453
               ]
             }
-          },
-          {
-            "type": "Feature",
-            "properties": {
-              "resourceCoords": [
-                3168.8,
-                2961.5
-              ],
-              "creator": {
-                "id": "https://oldinsurancemaps.net/profile/danvk",
-                "type": "Person"
-              },
-              "type": "projected"
-            },
-            "geometry": {
-              "type": "Point",
-              "coordinates": [
-                -87.64168600492478,
-                41.87834157552303
-              ]
-            }
           }
         ]
       }
@@ -10245,8 +8181,8 @@
           "value": "6"
         }
       ],
-      "created": "2026-05-25T13:23:24Z",
-      "modified": "2026-05-25T13:23:24Z",
+      "created": "2026-06-10T19:14:36Z",
+      "modified": "2026-06-10T19:14:36Z",
       "creator": [
         {
           "id": "https://oldinsurancemaps.net/profile/danvk",
@@ -10265,17 +8201,14 @@
         },
         "selector": {
           "type": "SvgSelector",
-          "value": "<svg><polygon points=\"0,7322 0,0 5853,0 5853,7322 0,7322\" /></svg>"
+          "value": "<svg><polygon points=\"1723.3,887.5 4113.6,920.1 4163.7,5258.7 3983.3,7322.0 1670.3,7322.0 1723.3,887.5\" /></svg>"
         }
       },
       "body": {
         "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd410m:g4104m:g4104cm:g01790195001N:01790_01N_1950-0087W/gcps",
         "type": "FeatureCollection",
         "transformation": {
-          "type": "polynomial",
-          "options": {
-            "order": 1
-          }
+          "type": "helmert"
         },
         "features": [
           {
@@ -10319,27 +8252,6 @@
                 41.8793088
               ]
             }
-          },
-          {
-            "type": "Feature",
-            "properties": {
-              "resourceCoords": [
-                1723.3,
-                3694.1
-              ],
-              "creator": {
-                "id": "https://oldinsurancemaps.net/profile/danvk",
-                "type": "Person"
-              },
-              "type": "gcp"
-            },
-            "geometry": {
-              "type": "Point",
-              "coordinates": [
-                -87.64107659078985,
-                41.87802131523548
-              ]
-            }
           }
         ]
       }
@@ -10355,15 +8267,15 @@
       "metadata": [
         {
           "label": "streets",
-          "value": "3"
+          "value": "4"
         },
         {
           "label": "intersections",
-          "value": "4"
+          "value": "5"
         }
       ],
-      "created": "2026-05-25T13:23:24Z",
-      "modified": "2026-05-25T13:23:24Z",
+      "created": "2026-06-10T19:14:36Z",
+      "modified": "2026-06-10T19:14:36Z",
       "creator": [
         {
           "id": "https://oldinsurancemaps.net/profile/danvk",
@@ -10382,17 +8294,14 @@
         },
         "selector": {
           "type": "SvgSelector",
-          "value": "<svg><polygon points=\"0,7323 0,0 5868,0 5868,7323 0,7323\" /></svg>"
+          "value": "<svg><polygon points=\"5868.0,0.0 5868.0,6530.0 1356.7,6451.0 1524.3,5215.5 1503.7,858.5 3786.9,917.2 3797.8,0.0 5868.0,0.0\" /></svg>"
         }
       },
       "body": {
         "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd410m:g4104m:g4104cm:g01790195001N:01790_01N_1950-0088W/gcps",
         "type": "FeatureCollection",
         "transformation": {
-          "type": "polynomial",
-          "options": {
-            "order": 1
-          }
+          "type": "helmert"
         },
         "features": [
           {
@@ -10436,27 +8345,6 @@
                 41.8793273
               ]
             }
-          },
-          {
-            "type": "Feature",
-            "properties": {
-              "resourceCoords": [
-                4289.4,
-                2251.3
-              ],
-              "creator": {
-                "id": "https://oldinsurancemaps.net/profile/danvk",
-                "type": "Person"
-              },
-              "type": "projected"
-            },
-            "geometry": {
-              "type": "Point",
-              "coordinates": [
-                -87.63791550524147,
-                41.87873865291959
-              ]
-            }
           }
         ]
       }
@@ -10472,15 +8360,15 @@
       "metadata": [
         {
           "label": "streets",
-          "value": "4"
+          "value": "5"
         },
         {
           "label": "intersections",
-          "value": "2"
+          "value": "4"
         }
       ],
-      "created": "2026-05-25T13:23:24Z",
-      "modified": "2026-05-25T13:23:24Z",
+      "created": "2026-06-10T19:14:36Z",
+      "modified": "2026-06-10T19:14:36Z",
       "creator": [
         {
           "id": "https://oldinsurancemaps.net/profile/danvk",
@@ -10499,25 +8387,22 @@
         },
         "selector": {
           "type": "SvgSelector",
-          "value": "<svg><polygon points=\"0,7323 0,0 5822,0 5822,7323 0,7323\" /></svg>"
+          "value": "<svg><polygon points=\"1107.0,7323.0 1295.0,823.2 5822.0,943.3 5822.0,6300.6 5503.4,6395.1 5822.0,6488.9 5822.0,7323.0 1107.0,7323.0\" /></svg>"
         }
       },
       "body": {
         "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd410m:g4104m:g4104cm:g01790195001N:01790_01N_1950-0089W/gcps",
         "type": "FeatureCollection",
         "transformation": {
-          "type": "polynomial",
-          "options": {
-            "order": 1
-          }
+          "type": "helmert"
         },
         "features": [
           {
             "type": "Feature",
             "properties": {
               "resourceCoords": [
-                2860.6,
-                910.3
+                1129.3,
+                6283.0
               ],
               "creator": {
                 "id": "https://oldinsurancemaps.net/profile/danvk",
@@ -10528,8 +8413,8 @@
             "geometry": {
               "type": "Point",
               "coordinates": [
-                -87.6439182,
-                41.8759164
+                -87.647203,
+                41.8766797
               ]
             }
           },
@@ -10551,27 +8436,6 @@
               "coordinates": [
                 -87.6438986,
                 41.8752612
-              ]
-            }
-          },
-          {
-            "type": "Feature",
-            "properties": {
-              "resourceCoords": [
-                3729.1,
-                2647.5
-              ],
-              "creator": {
-                "id": "https://oldinsurancemaps.net/profile/danvk",
-                "type": "Person"
-              },
-              "type": "projected"
-            },
-            "geometry": {
-              "type": "Point",
-              "coordinates": [
-                -87.64478834024801,
-                41.875574205918156
               ]
             }
           }
@@ -10596,8 +8460,8 @@
           "value": "8"
         }
       ],
-      "created": "2026-05-25T13:23:24Z",
-      "modified": "2026-05-25T13:23:24Z",
+      "created": "2026-06-10T19:14:36Z",
+      "modified": "2026-06-10T19:14:36Z",
       "creator": [
         {
           "id": "https://oldinsurancemaps.net/profile/danvk",
@@ -10616,17 +8480,14 @@
         },
         "selector": {
           "type": "SvgSelector",
-          "value": "<svg><polygon points=\"0,7323 0,0 5839,0 5839,7323 0,7323\" /></svg>"
+          "value": "<svg><polygon points=\"4270.8,6561.1 1668.8,6559.3 1654.5,719.1 4036.1,710.4 4021.7,2962.9 4307.5,2962.3 4270.8,6561.1\" /></svg>"
         }
       },
       "body": {
         "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd410m:g4104m:g4104cm:g01790195001N:01790_01N_1950-0008N/gcps",
         "type": "FeatureCollection",
         "transformation": {
-          "type": "polynomial",
-          "options": {
-            "order": 1
-          }
+          "type": "helmert"
         },
         "features": [
           {
@@ -10670,27 +8531,6 @@
                 41.8940169
               ]
             }
-          },
-          {
-            "type": "Feature",
-            "properties": {
-              "resourceCoords": [
-                4141.5,
-                2961.5
-              ],
-              "creator": {
-                "id": "https://oldinsurancemaps.net/profile/danvk",
-                "type": "Person"
-              },
-              "type": "gcp"
-            },
-            "geometry": {
-              "type": "Point",
-              "coordinates": [
-                -87.63270386365649,
-                41.89561310302946
-              ]
-            }
           }
         ]
       }
@@ -10713,8 +8553,8 @@
           "value": "2"
         }
       ],
-      "created": "2026-05-25T13:23:24Z",
-      "modified": "2026-05-25T13:23:24Z",
+      "created": "2026-06-10T19:14:36Z",
+      "modified": "2026-06-10T19:14:36Z",
       "creator": [
         {
           "id": "https://oldinsurancemaps.net/profile/danvk",
@@ -10733,17 +8573,14 @@
         },
         "selector": {
           "type": "SvgSelector",
-          "value": "<svg><polygon points=\"0,7323 0,0 5868,0 5868,7323 0,7323\" /></svg>"
+          "value": "<svg><polygon points=\"-0.0,7323.0 -0.0,7213.5 2389.2,7120.9 2357.9,6312.3 2608.5,6313.6 2045.5,6233.4 2350.9,6129.8 2149.7,936.3 5868.0,919.7 5868.0,7323.0 -0.0,7323.0\" /></svg>"
         }
       },
       "body": {
         "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd410m:g4104m:g4104cm:g01790195001N:01790_01N_1950-0090W/gcps",
         "type": "FeatureCollection",
         "transformation": {
-          "type": "polynomial",
-          "options": {
-            "order": 1
-          }
+          "type": "helmert"
         },
         "features": [
           {
@@ -10787,27 +8624,6 @@
                 41.874359
               ]
             }
-          },
-          {
-            "type": "Feature",
-            "properties": {
-              "resourceCoords": [
-                4744.5,
-                3059.4
-              ],
-              "creator": {
-                "id": "https://oldinsurancemaps.net/profile/danvk",
-                "type": "Person"
-              },
-              "type": "gcp"
-            },
-            "geometry": {
-              "type": "Point",
-              "coordinates": [
-                -87.64516886206714,
-                41.87351863311184
-              ]
-            }
           }
         ]
       }
@@ -10830,8 +8646,8 @@
           "value": "4"
         }
       ],
-      "created": "2026-05-25T13:23:24Z",
-      "modified": "2026-05-25T13:23:24Z",
+      "created": "2026-06-10T19:14:36Z",
+      "modified": "2026-06-10T19:14:36Z",
       "creator": [
         {
           "id": "https://oldinsurancemaps.net/profile/danvk",
@@ -10850,17 +8666,14 @@
         },
         "selector": {
           "type": "SvgSelector",
-          "value": "<svg><polygon points=\"0,7323 0,0 5867,0 5867,7323 0,7323\" /></svg>"
+          "value": "<svg><polygon points=\"4123.0,4312.3 4114.0,6324.3 1711.7,6303.2 1731.7,1072.0 4120.7,1107.7 4117.9,3143.9 5029.4,3139.5 4955.4,4313.8 4123.0,4312.3\" /></svg>"
         }
       },
       "body": {
         "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd410m:g4104m:g4104cm:g01790195001N:01790_01N_1950-0091W/gcps",
         "type": "FeatureCollection",
         "transformation": {
-          "type": "polynomial",
-          "options": {
-            "order": 1
-          }
+          "type": "helmert"
         },
         "features": [
           {
@@ -10904,27 +8717,6 @@
                 41.8767364
               ]
             }
-          },
-          {
-            "type": "Feature",
-            "properties": {
-              "resourceCoords": [
-                1711.7,
-                1106.2
-              ],
-              "creator": {
-                "id": "https://oldinsurancemaps.net/profile/danvk",
-                "type": "Person"
-              },
-              "type": "gcp"
-            },
-            "geometry": {
-              "type": "Point",
-              "coordinates": [
-                -87.64395700898122,
-                41.87671179434323
-              ]
-            }
           }
         ]
       }
@@ -10940,15 +8732,15 @@
       "metadata": [
         {
           "label": "streets",
-          "value": "4"
+          "value": "5"
         },
         {
           "label": "intersections",
-          "value": "4"
+          "value": "6"
         }
       ],
-      "created": "2026-05-25T13:23:24Z",
-      "modified": "2026-05-25T13:23:24Z",
+      "created": "2026-06-10T19:14:36Z",
+      "modified": "2026-06-10T19:14:36Z",
       "creator": [
         {
           "id": "https://oldinsurancemaps.net/profile/danvk",
@@ -10967,17 +8759,14 @@
         },
         "selector": {
           "type": "SvgSelector",
-          "value": "<svg><polygon points=\"0,7323 0,0 5866,0 5866,7323 0,7323\" /></svg>"
+          "value": "<svg><polygon points=\"1714.3,0.0 4096.5,0.0 4140.0,5232.3 1765.7,5241.5 1714.3,0.0\" /></svg>"
         }
       },
       "body": {
         "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd410m:g4104m:g4104cm:g01790195001N:01790_01N_1950-0092W/gcps",
         "type": "FeatureCollection",
         "transformation": {
-          "type": "polynomial",
-          "options": {
-            "order": 1
-          }
+          "type": "helmert"
         },
         "features": [
           {
@@ -10985,48 +8774,6 @@
             "properties": {
               "resourceCoords": [
                 4143.1,
-                3817.1
-              ],
-              "creator": {
-                "id": "https://oldinsurancemaps.net/profile/danvk",
-                "type": "Person"
-              },
-              "type": "gcp"
-            },
-            "geometry": {
-              "type": "Point",
-              "coordinates": [
-                -87.6410117,
-                41.8753051
-              ]
-            }
-          },
-          {
-            "type": "Feature",
-            "properties": {
-              "resourceCoords": [
-                1728.7,
-                3817.1
-              ],
-              "creator": {
-                "id": "https://oldinsurancemaps.net/profile/danvk",
-                "type": "Person"
-              },
-              "type": "gcp"
-            },
-            "geometry": {
-              "type": "Point",
-              "coordinates": [
-                -87.6424471,
-                41.8752853
-              ]
-            }
-          },
-          {
-            "type": "Feature",
-            "properties": {
-              "resourceCoords": [
-                1728.7,
                 6332.0
               ],
               "creator": {
@@ -11038,8 +8785,29 @@
             "geometry": {
               "type": "Point",
               "coordinates": [
-                -87.64241939789864,
-                41.874171862437976
+                -87.6409931,
+                41.8743938
+              ]
+            }
+          },
+          {
+            "type": "Feature",
+            "properties": {
+              "resourceCoords": [
+                1728.7,
+                1100.5
+              ],
+              "creator": {
+                "id": "https://oldinsurancemaps.net/profile/danvk",
+                "type": "Person"
+              },
+              "type": "gcp"
+            },
+            "geometry": {
+              "type": "Point",
+              "coordinates": [
+                -87.6424927,
+                41.8767364
               ]
             }
           }
@@ -11064,8 +8832,8 @@
           "value": "2"
         }
       ],
-      "created": "2026-05-25T13:23:24Z",
-      "modified": "2026-05-25T13:23:24Z",
+      "created": "2026-06-10T19:14:36Z",
+      "modified": "2026-06-10T19:14:36Z",
       "creator": [
         {
           "id": "https://oldinsurancemaps.net/profile/danvk",
@@ -11084,46 +8852,22 @@
         },
         "selector": {
           "type": "SvgSelector",
-          "value": "<svg><polygon points=\"0,7323 0,0 5867,0 5867,7323 0,7323\" /></svg>"
+          "value": "<svg><polygon points=\"-0.0,4219.4 -0.0,2952.1 1571.1,2858.8 1481.3,1563.4 4009.1,1450.8 4161.3,4875.3 1694.9,5053.1 1643.4,4124.9 -0.0,4219.4\" /></svg>"
         }
       },
       "body": {
         "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd410m:g4104m:g4104cm:g01790195001N:01790_01N_1950-0093W/gcps",
         "type": "FeatureCollection",
         "transformation": {
-          "type": "polynomial",
-          "options": {
-            "order": 1
-          }
+          "type": "helmert"
         },
         "features": [
           {
             "type": "Feature",
             "properties": {
               "resourceCoords": [
-                1763.6,
-                6288.8
-              ],
-              "creator": {
-                "id": "https://oldinsurancemaps.net/profile/danvk",
-                "type": "Person"
-              },
-              "type": "gcp"
-            },
-            "geometry": {
-              "type": "Point",
-              "coordinates": [
-                -87.6409931,
-                41.8743938
-              ]
-            }
-          },
-          {
-            "type": "Feature",
-            "properties": {
-              "resourceCoords": [
                 4178.4,
-                6288.8
+                6159.2
               ],
               "creator": {
                 "id": "https://oldinsurancemaps.net/profile/danvk",
@@ -11143,20 +8887,20 @@
             "type": "Feature",
             "properties": {
               "resourceCoords": [
-                2971.0,
-                3874.7
+                1763.6,
+                6288.8
               ],
               "creator": {
                 "id": "https://oldinsurancemaps.net/profile/danvk",
                 "type": "Person"
               },
-              "type": "projected"
+              "type": "gcp"
             },
             "geometry": {
               "type": "Point",
               "coordinates": [
-                -87.64032790880725,
-                41.87541691584033
+                -87.6409931,
+                41.8743938
               ]
             }
           }
@@ -11178,11 +8922,11 @@
         },
         {
           "label": "intersections",
-          "value": "3"
+          "value": "2"
         }
       ],
-      "created": "2026-05-25T13:23:24Z",
-      "modified": "2026-05-25T13:23:24Z",
+      "created": "2026-06-10T19:14:36Z",
+      "modified": "2026-06-10T19:14:36Z",
       "creator": [
         {
           "id": "https://oldinsurancemaps.net/profile/danvk",
@@ -11201,17 +8945,14 @@
         },
         "selector": {
           "type": "SvgSelector",
-          "value": "<svg><polygon points=\"0,7323 0,0 5866,0 5866,7323 0,7323\" /></svg>"
+          "value": "<svg><polygon points=\"3044.0,6318.9 492.5,6292.3 367.1,5622.7 402.0,1239.3 476.6,1092.0 5012.9,1130.4 5002.7,0.0 5866.0,0.0 5866.0,7323.0 3058.1,7323.0 3044.0,6318.9\" /></svg>"
         }
       },
       "body": {
         "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd410m:g4104m:g4104cm:g01790195001N:01790_01N_1950-0094W/gcps",
         "type": "FeatureCollection",
         "transformation": {
-          "type": "polynomial",
-          "options": {
-            "order": 1
-          }
+          "type": "helmert"
         },
         "features": [
           {
@@ -11255,27 +8996,6 @@
                 41.8744068
               ]
             }
-          },
-          {
-            "type": "Feature",
-            "properties": {
-              "resourceCoords": [
-                5514.5,
-                3688.9
-              ],
-              "creator": {
-                "id": "https://oldinsurancemaps.net/profile/danvk",
-                "type": "Person"
-              },
-              "type": "projected"
-            },
-            "geometry": {
-              "type": "Point",
-              "coordinates": [
-                -87.63649903274509,
-                41.8756552147224
-              ]
-            }
           }
         ]
       }
@@ -11298,8 +9018,8 @@
           "value": "4"
         }
       ],
-      "created": "2026-05-25T13:23:24Z",
-      "modified": "2026-05-25T13:23:24Z",
+      "created": "2026-06-10T19:14:36Z",
+      "modified": "2026-06-10T19:14:36Z",
       "creator": [
         {
           "id": "https://oldinsurancemaps.net/profile/danvk",
@@ -11318,17 +9038,14 @@
         },
         "selector": {
           "type": "SvgSelector",
-          "value": "<svg><polygon points=\"0,7323 0,0 5867,0 5867,7323 0,7323\" /></svg>"
+          "value": "<svg><polygon points=\"1765.3,4008.4 1741.9,1041.4 4144.5,1043.4 4171.4,5056.8 -0.0,5116.1 -0.0,4002.8 1765.3,4008.4\" /></svg>"
         }
       },
       "body": {
         "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd410m:g4104m:g4104cm:g01790195001N:01790_01N_1950-0095W/gcps",
         "type": "FeatureCollection",
         "transformation": {
-          "type": "polynomial",
-          "options": {
-            "order": 1
-          }
+          "type": "helmert"
         },
         "features": [
           {
@@ -11372,27 +9089,6 @@
                 41.874359
               ]
             }
-          },
-          {
-            "type": "Feature",
-            "properties": {
-              "resourceCoords": [
-                4178.4,
-                1042.9
-              ],
-              "creator": {
-                "id": "https://oldinsurancemaps.net/profile/danvk",
-                "type": "Person"
-              },
-              "type": "gcp"
-            },
-            "geometry": {
-              "type": "Point",
-              "coordinates": [
-                -87.64240307709967,
-                41.87437516328598
-              ]
-            }
           }
         ]
       }
@@ -11415,8 +9111,8 @@
           "value": "4"
         }
       ],
-      "created": "2026-05-25T13:23:24Z",
-      "modified": "2026-05-25T13:23:24Z",
+      "created": "2026-06-10T19:14:36Z",
+      "modified": "2026-06-10T19:14:36Z",
       "creator": [
         {
           "id": "https://oldinsurancemaps.net/profile/danvk",
@@ -11435,17 +9131,14 @@
         },
         "selector": {
           "type": "SvgSelector",
-          "value": "<svg><polygon points=\"0,7323 0,0 5866,0 5866,7323 0,7323\" /></svg>"
+          "value": "<svg><polygon points=\"1800.6,5011.5 1775.0,0.0 4115.2,0.0 4114.0,1083.9 5866.0,1085.8 5866.0,6297.7 4183.4,6306.1 4166.1,5001.3 1800.6,5011.5\" /></svg>"
         }
       },
       "body": {
         "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd410m:g4104m:g4104cm:g01790195001N:01790_01N_1950-0096W/gcps",
         "type": "FeatureCollection",
         "transformation": {
-          "type": "polynomial",
-          "options": {
-            "order": 1
-          }
+          "type": "helmert"
         },
         "features": [
           {
@@ -11489,27 +9182,6 @@
                 41.8720083
               ]
             }
-          },
-          {
-            "type": "Feature",
-            "properties": {
-              "resourceCoords": [
-                4183.4,
-                1088.9
-              ],
-              "creator": {
-                "id": "https://oldinsurancemaps.net/profile/danvk",
-                "type": "Person"
-              },
-              "type": "gcp"
-            },
-            "geometry": {
-              "type": "Point",
-              "coordinates": [
-                -87.64095054874083,
-                41.87439205109056
-              ]
-            }
           }
         ]
       }
@@ -11532,8 +9204,8 @@
           "value": "4"
         }
       ],
-      "created": "2026-05-25T13:23:24Z",
-      "modified": "2026-05-25T13:23:24Z",
+      "created": "2026-06-10T19:14:36Z",
+      "modified": "2026-06-10T19:14:36Z",
       "creator": [
         {
           "id": "https://oldinsurancemaps.net/profile/danvk",
@@ -11552,17 +9224,14 @@
         },
         "selector": {
           "type": "SvgSelector",
-          "value": "<svg><polygon points=\"0,7323 0,0 5867,0 5867,7323 0,7323\" /></svg>"
+          "value": "<svg><polygon points=\"2664.2,6228.6 2742.4,1140.1 1031.6,1112.0 1050.0,0.0 3272.0,0.0 3376.5,1150.5 5867.0,1191.5 5867.0,7323.0 3454.4,7323.0 3466.6,6236.9 2664.2,6228.6\" /></svg>"
         }
       },
       "body": {
         "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd410m:g4104m:g4104cm:g01790195001N:01790_01N_1950-0097W/gcps",
         "type": "FeatureCollection",
         "transformation": {
-          "type": "polynomial",
-          "options": {
-            "order": 1
-          }
+          "type": "helmert"
         },
         "features": [
           {
@@ -11606,27 +9275,6 @@
                 41.8743938
               ]
             }
-          },
-          {
-            "type": "Feature",
-            "properties": {
-              "resourceCoords": [
-                3466.6,
-                1112.0
-              ],
-              "creator": {
-                "id": "https://oldinsurancemaps.net/profile/danvk",
-                "type": "Person"
-              },
-              "type": "gcp"
-            },
-            "geometry": {
-              "type": "Point",
-              "coordinates": [
-                -87.63946394038346,
-                41.87442992560197
-              ]
-            }
           }
         ]
       }
@@ -11649,8 +9297,8 @@
           "value": "8"
         }
       ],
-      "created": "2026-05-25T13:23:24Z",
-      "modified": "2026-05-25T13:23:24Z",
+      "created": "2026-06-10T19:14:36Z",
+      "modified": "2026-06-10T19:14:36Z",
       "creator": [
         {
           "id": "https://oldinsurancemaps.net/profile/danvk",
@@ -11669,17 +9317,14 @@
         },
         "selector": {
           "type": "SvgSelector",
-          "value": "<svg><polygon points=\"0,7323 0,0 5835,0 5835,7323 0,7323\" /></svg>"
+          "value": "<svg><polygon points=\"4053.3,6537.8 1723.0,6538.7 1749.7,2982.6 1467.3,2983.9 1475.6,758.1 786.9,760.6 787.0,65.7 5835.0,0.0 5835.0,742.5 4048.5,749.0 4053.3,6537.8\" /></svg>"
         }
       },
       "body": {
         "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd410m:g4104m:g4104cm:g01790195001N:01790_01N_1950-0009N/gcps",
         "type": "FeatureCollection",
         "transformation": {
-          "type": "polynomial",
-          "options": {
-            "order": 1
-          }
+          "type": "helmert"
         },
         "features": [
           {
@@ -11721,27 +9366,6 @@
               "coordinates": [
                 -87.6312427,
                 41.8966335
-              ]
-            }
-          },
-          {
-            "type": "Feature",
-            "properties": {
-              "resourceCoords": [
-                4048.5,
-                4767.7
-              ],
-              "creator": {
-                "id": "https://oldinsurancemaps.net/profile/danvk",
-                "type": "Person"
-              },
-              "type": "gcp"
-            },
-            "geometry": {
-              "type": "Point",
-              "coordinates": [
-                -87.63120228771334,
-                41.89483057226306
               ]
             }
           }
