@@ -613,6 +613,7 @@ def _finalize_georef(
     labels_path: str,
     centerlines_path: str,
     initial_pair: tuple[int, int] | None = None,
+    extra_fields: dict | None = None,
 ) -> tuple[float, tuple[float, float]]:
     """Print fit stats, write georef JSON, and return (scale_deg_per_px, page_center)."""
 
@@ -696,6 +697,8 @@ def _finalize_georef(
         "streets": streets_out,
         "intersections": intersections_out,
     }
+    if extra_fields:
+        result.update(extra_fields)
     with open(output_path, "w") as f:
         f.write(json.dumps(result, indent=2))
     print(
@@ -1056,6 +1059,18 @@ def process_image(
     )
 
 
+@dataclass
+class RotationDecision:
+    """Outcome of the rotation-direction resolution for a 1-GCP deferred image."""
+
+    rotation: float  # chosen directed rotation (radians)
+    confirmed: bool  # True when ≥2 adjacent neighbours agreed
+    method: str  # "neighbor_confirmed" | "neighbor_plurality" | "north_up_fallback"
+    n_agree: int  # adjacent neighbours matching the chosen direction
+    n_other: int  # adjacent neighbours matching the other direction
+    adjacent_deg: list[float]  # rotation of every adjacent neighbour (degrees)
+
+
 def _angle_diff_abs(a: float, b: float) -> float:
     """Smallest angular separation between two angles (radians), result in [0, π]."""
     d = (a - b) % (2 * math.pi)
@@ -1068,14 +1083,17 @@ def _rotation_from_neighbors(
     page_dim_deg: tuple[float, float],
     neighbor_rotations: list[tuple[tuple[float, float], float]],
     angle_threshold_rad: float = 10 * math.pi / 180,
-) -> float | None:
-    """Validate and direct an undirected rotation using adjacent pages' rotation angles.
+) -> RotationDecision:
+    """Select and validate a directed rotation using adjacent pages' rotation angles.
 
     candidate is undirected (in [0, π)); the two directed candidates are candidate and
     candidate + π. Neighbours within 1.5× page dimensions in both lon and lat are
-    considered adjacent. If 2+ adjacent neighbours agree with one of the two directed
-    candidates (within angle_threshold_rad), returns that directed rotation.
-    Returns None if no candidate has sufficient adjacent support.
+    considered adjacent.
+
+    If one candidate has strictly more adjacent supporters than the other, that
+    candidate is chosen ('neighbor_confirmed' when the winner has ≥2, else
+    'neighbor_plurality'). When both are equally supported (including 0 vs 0), the
+    180° ambiguity is resolved by requiring north to point upward ('north_up_fallback').
     """
     approx_lon, approx_lat = approx_center
     page_dim_lon, page_dim_lat = page_dim_deg
@@ -1088,31 +1106,60 @@ def _rotation_from_neighbors(
         if abs(n_lon - approx_lon) <= thresh_lon
         and abs(n_lat - approx_lat) <= thresh_lat
     ]
+    adjacent_deg = [math.degrees(r) for r in adjacent]
 
-    print(
-        f"  Rotation validation: {len(adjacent)} adjacent georeferenced page(s) found.",
-        file=sys.stderr,
+    c1 = sum(
+        1 for r in adjacent if _angle_diff_abs(r, candidate) <= angle_threshold_rad
+    )
+    c2 = sum(
+        1
+        for r in adjacent
+        if _angle_diff_abs(r, candidate + math.pi) <= angle_threshold_rad
     )
 
-    for directed in (candidate, candidate + math.pi):
-        n_agree = sum(
-            1 for r in adjacent if _angle_diff_abs(r, directed) <= angle_threshold_rad
+    if c1 > c2:
+        chosen = candidate
+        n_agree, n_other = c1, c2
+        method = "neighbor_confirmed" if c1 >= 2 else "neighbor_plurality"
+    elif c2 > c1:
+        chosen = candidate + math.pi
+        n_agree, n_other = c2, c1
+        method = "neighbor_confirmed" if c2 >= 2 else "neighbor_plurality"
+    else:
+        # Equal support (including 0 vs 0): north-up heuristic resolves the ambiguity.
+        chosen = candidate if math.cos(candidate) >= 0 else candidate + math.pi
+        n_agree, n_other = c1, c2
+        method = "north_up_fallback"
+
+    confirmed = method == "neighbor_confirmed"
+
+    # Log decision with annotated list of every adjacent neighbour.
+    adj_parts = [
+        f"{r_deg:.1f}°{'✓' if _angle_diff_abs(r_rad, chosen) <= angle_threshold_rad else ''}"
+        for r_deg, r_rad in zip(adjacent_deg, adjacent)
+    ]
+    adj_str = ", ".join(adj_parts) if adj_parts else "(no adjacent pages)"
+    if confirmed:
+        status_str = f"confirmed by {n_agree}/{len(adjacent)} adjacent"
+    elif method == "neighbor_plurality":
+        status_str = (
+            f"chosen by plurality ({n_agree} vs {n_other}, {len(adjacent)} adjacent)"
         )
-        if n_agree >= 2:
-            print(
-                f"  Rotation {math.degrees(directed):.1f}° confirmed by {n_agree} neighbours.",
-                file=sys.stderr,
-            )
-            return directed
-
-    candidates_deg = (
-        f"{math.degrees(candidate):.1f}° / {math.degrees(candidate + math.pi):.1f}°"
-    )
+    else:
+        status_str = f"chosen by north-up fallback ({n_agree} vs {n_other}, {len(adjacent)} adjacent)"
     print(
-        f"  Neither rotation candidate ({candidates_deg}) supported by ≥2 adjacent pages; skipping.",
+        f"  Rotation {math.degrees(chosen):.1f}° {status_str}: {adj_str}",
         file=sys.stderr,
     )
-    return None
+
+    return RotationDecision(
+        rotation=chosen,
+        confirmed=confirmed,
+        method=method,
+        n_agree=n_agree,
+        n_other=n_other,
+        adjacent_deg=adjacent_deg,
+    )
 
 
 def _rotation_from_gcp_features(
@@ -1150,8 +1197,10 @@ def process_deferred_image(
     Uses the provided scale (deg/px) and estimates rotation from the two streets at the
     single GCP. The undirected rotation is then validated against adjacent pages (already
     successfully georeferenced): if ≥2 neighbours within 1.5× page dimensions agree with
-    one of the two directed candidates (±180°), that direction is used. If fewer than 2
-    neighbours agree, the image is skipped.
+    one of the two directed candidates (±180°), that candidate is used. When both are
+    equally supported, the 180° ambiguity is resolved by the north-up heuristic. Confirmed
+    fits (≥2 neighbours) are written to output_path (.georef.json); unconfirmed fits are
+    written to a .georef-1gcp.json sidecar instead and returned with success=False.
     """
     image_path: str = deferred["image_path"]
     output_path: str = deferred["output_path"]
@@ -1163,22 +1212,20 @@ def process_deferred_image(
     img_h: int = deferred["img_h"]
     gcp = gcps[0]
 
-    rotation = _rotation_from_gcp_features(gcp, block_index)
-    if rotation is None:
+    undirected = _rotation_from_gcp_features(gcp, block_index)
+    if undirected is None:
         print("Could not estimate rotation from GCP street angles.", file=sys.stderr)
         return ProcessResult(success=False)
 
     page_dim_lat = scale_deg_per_px * img_h
     page_dim_lon = scale_deg_per_px * img_w / cos_phi
-    directed_rotation = _rotation_from_neighbors(
-        candidate=rotation,
+    decision = _rotation_from_neighbors(
+        candidate=undirected,
         approx_center=gcp.geo,
         page_dim_deg=(page_dim_lon, page_dim_lat),
         neighbor_rotations=neighbor_rotations,
     )
-    if directed_rotation is None:
-        return ProcessResult(success=False)
-    rotation = directed_rotation
+    rotation = decision.rotation
 
     pos_threshold = 0.001
     A = build_affine_from_scale_rotation_gcp(scale_deg_per_px, rotation, gcp, cos_phi)
@@ -1209,6 +1256,21 @@ def process_deferred_image(
             float(np.linalg.norm(np.array([lon - nearest_lon, lat - nearest_lat])))
         )
 
+    actual_output_path = (
+        output_path
+        if decision.confirmed
+        else output_path.replace(".georef.json", ".georef-1gcp.json")
+    )
+    one_gcp_extra = {
+        "one_gcp": {
+            "method": decision.method,
+            "confirmed": decision.confirmed,
+            "rotation_deg": round(math.degrees(decision.rotation), 2),
+            "n_agree": decision.n_agree,
+            "n_other": decision.n_other,
+            "adjacent_rotations_deg": [round(r, 1) for r in decision.adjacent_deg],
+        }
+    }
     scale, center = _finalize_georef(
         A,
         features,
@@ -1216,11 +1278,14 @@ def process_deferred_image(
         inlier_feat_indices,
         residuals,
         image_path,
-        output_path,
+        actual_output_path,
         labels_path,
         centerlines_path,
+        extra_fields=one_gcp_extra,
     )
-    return ProcessResult(success=True, scale_deg_per_px=scale, center=center)
+    return ProcessResult(
+        success=decision.confirmed, scale_deg_per_px=scale, center=center
+    )
 
 
 def main() -> None:
@@ -1373,7 +1438,11 @@ def main() -> None:
         # doesn't leave a previous result in place.
         if os.path.exists(output_path):
             os.remove(output_path)
-        for stale_suffix in (".georef-misscale.json", ".georef-outlier.json"):
+        for stale_suffix in (
+            ".georef-misscale.json",
+            ".georef-outlier.json",
+            ".georef-1gcp.json",
+        ):
             stale_path = output_path.replace(".georef.json", stale_suffix)
             if os.path.exists(stale_path):
                 os.remove(stale_path)

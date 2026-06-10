@@ -390,41 +390,50 @@ def _neighbors(angles_deg: list[float], center: tuple[float, float] = (0.0, 0.0)
 
 
 def test_rotation_from_neighbors_two_agree_candidate():
-    # Two neighbours match the candidate (5°); should return ~5°.
+    # Two neighbours match the candidate (5°); confirmed, rotation ≈ 5°.
     result = _rotation_from_neighbors(
         candidate=math.radians(5),
         approx_center=(0.0, 0.0),
         page_dim_deg=_PAGE_DIM,
         neighbor_rotations=_neighbors([4, 6, 180 + 90]),
     )
-    assert result is not None
-    assert abs(math.degrees(result) - 5) < 1
+    assert result.confirmed is True
+    assert result.method == "neighbor_confirmed"
+    assert abs(math.degrees(result.rotation) - 5) < 1
+    assert result.n_agree == 2
+    assert len(result.adjacent_deg) == 3
 
 
 def test_rotation_from_neighbors_two_agree_flipped():
-    # Two neighbours match candidate+180 (185°); should return ~185°.
+    # Two neighbours match candidate+180 (185°); confirmed, rotation ≈ 185°.
     result = _rotation_from_neighbors(
         candidate=math.radians(5),
         approx_center=(0.0, 0.0),
         page_dim_deg=_PAGE_DIM,
         neighbor_rotations=_neighbors([184, 186, 5]),
     )
-    assert result is not None
-    assert abs(math.degrees(result) - 185) < 1
+    assert result.confirmed is True
+    assert result.method == "neighbor_confirmed"
+    assert abs(math.degrees(result.rotation) - 185) < 1
 
 
-def test_rotation_from_neighbors_only_one_agree_returns_none():
+def test_rotation_from_neighbors_plurality():
+    # Only 1 neighbour agrees with candidate — unconfirmed plurality.
     result = _rotation_from_neighbors(
         candidate=math.radians(5),
         approx_center=(0.0, 0.0),
         page_dim_deg=_PAGE_DIM,
         neighbor_rotations=_neighbors([4, 90, 135]),
     )
-    assert result is None
+    assert result.confirmed is False
+    assert result.method == "neighbor_plurality"
+    assert abs(math.degrees(result.rotation) - 5) < 1
+    assert result.n_agree == 1
+    assert result.n_other == 0
 
 
-def test_rotation_from_neighbors_no_adjacent_returns_none():
-    # Neighbours are far away (> 1.5 × page_dim).
+def test_rotation_from_neighbors_no_adjacent_north_up_fallback():
+    # No adjacent neighbours → north-up fallback.
     far = [((-1.0, -1.0), math.radians(5)), ((-1.0, -1.0), math.radians(6))]
     result = _rotation_from_neighbors(
         candidate=math.radians(5),
@@ -432,11 +441,27 @@ def test_rotation_from_neighbors_no_adjacent_returns_none():
         page_dim_deg=_PAGE_DIM,
         neighbor_rotations=far,
     )
-    assert result is None
+    assert result.confirmed is False
+    assert result.method == "north_up_fallback"
+    assert result.n_agree == 0
+    assert result.n_other == 0
+    assert result.adjacent_deg == []
+
+
+def test_rotation_from_neighbors_tie_uses_north_up():
+    # Equal supporters (1 vs 1) → north-up fallback, not plurality.
+    result = _rotation_from_neighbors(
+        candidate=math.radians(5),
+        approx_center=(0.0, 0.0),
+        page_dim_deg=_PAGE_DIM,
+        neighbor_rotations=_neighbors([4, 184]),
+    )
+    assert result.confirmed is False
+    assert result.method == "north_up_fallback"
 
 
 def test_rotation_from_neighbors_adjacency_boundary():
-    # Neighbours exactly at 1.5 × page_dim should be included.
+    # Neighbours exactly at 1.5 × page_dim should be included and confirm.
     on_edge = [
         ((1.5 * _PAGE_DIM[0], 1.5 * _PAGE_DIM[1]), math.radians(a)) for a in [4, 6]
     ]
@@ -446,4 +471,5 @@ def test_rotation_from_neighbors_adjacency_boundary():
         page_dim_deg=_PAGE_DIM,
         neighbor_rotations=on_edge,
     )
-    assert result is not None
+    assert result.confirmed is True
+    assert result.n_agree == 2
