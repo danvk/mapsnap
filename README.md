@@ -111,18 +111,6 @@ Sometimes these fits aren't the best, but they're often pretty good and they sig
 
 [page 431]: https://oldinsurancemaps.net/document/46009
 
-## Development
-
-Quickstart:
-
-```
-uv sync
-uv run pytest
-uv run pyright
-uv run ruff check
-uv run ruff format
-```
-
 ## Pipeline
 
 - Load a map into OldInsuranceMaps.net by filling out their form or messaging Adam Cox on Slack.
@@ -155,15 +143,11 @@ The pipeline is set up to get imagery from OIM, but it's not dependent on OIM in
 
 ## Debugging output
 
-This repo comes with a small web app to help you debug individual maps:
+This repo comes with a small web app to help you debug individual maps. You can access it at:
 
-```
-cd app
-npm i
-npm run dev
-```
+🌎 [Mapsnap Debugger](https://www.danvk.org/mapsnap/)
 
-Then visit localhost:5173 and drag the image file and its associated georef.json file into the browser window.
+Drag & drop an image and either a `streets.json` or `georef.json` file to use it. All of the screenshots above were taken using the debugger.
 
 ## Notes on the model
 
@@ -232,7 +216,19 @@ Claude Code and ChatGPT were both instrumental in getting this to work.
 
 [shensky]: https://repositories.lib.utexas.edu/items/3f080054-8ff0-4e4c-8ef7-ea93b0fc36e0
 
-## Debugger
+## Development
+
+Quickstart:
+
+```
+uv sync
+uv run pytest
+uv run pyright
+uv run ruff check
+uv run ruff format
+```
+
+### Debugger
 
 🌎 [Mapsnap Debugger](https://www.danvk.org/mapsnap/)
 
