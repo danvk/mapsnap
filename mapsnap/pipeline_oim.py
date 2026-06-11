@@ -21,7 +21,11 @@ def main() -> None:
             "run OCR, georeference, build IIIF, and compare against OIM."
         )
     )
-    parser.add_argument("sanborn_slug", metavar="SLUG", help="OIM Sanborn volume slug")
+    parser.add_argument(
+        "sanborn_slug",
+        metavar="SLUG",
+        help="OIM Sanborn volume slug, e.g. sanborn05791_053",
+    )
     parser.add_argument("dir", metavar="DIR", help="Output directory")
     parser.add_argument(
         "relation", metavar="RELATION", help="OSM relation ID for the street network"
