@@ -59,7 +59,7 @@ def main() -> None:
     run_cmd(
         [
             "mapsnap",
-            "get-osm",
+            "download-osm",
             args.relation,
             "--output",
             str(dir_path / "streets.osm.json"),

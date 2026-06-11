@@ -4,6 +4,7 @@ import importlib
 import sys
 
 SUBCOMMANDS: dict[str, tuple[str, str]] = {
+    # Pipelines
     "run-loc": (
         "mapsnap.pipeline_loc",
         "Full LOC pipeline: download, OCR, georeference, IIIF",
@@ -16,6 +17,7 @@ SUBCOMMANDS: dict[str, tuple[str, str]] = {
         "mapsnap.fit",
         "Georeference, build IIIF, and optionally compare (fast pipeline)",
     ),
+    # Individual commands
     "ocr": ("mapsnap.detect_text", "Detect text regions in map images"),
     "georef": (
         "mapsnap.georef_from_labels",
@@ -29,7 +31,7 @@ SUBCOMMANDS: dict[str, tuple[str, str]] = {
         "mapsnap.compare_iiif_georef",
         "Compare human vs computer IIIF georeferencing",
     ),
-    "get-osm": ("mapsnap.download_osm", "Download street data from OSM"),
+    "download-osm": ("mapsnap.download_osm", "Download street data from OSM"),
     "osm-to-geojson": ("mapsnap.osm_to_centerlines", "Convert OSM data to GeoJSON."),
     "scale": ("mapsnap.scale_images", "Shrink images by a uniform amount."),
     "download-oim": (
@@ -40,7 +42,7 @@ SUBCOMMANDS: dict[str, tuple[str, str]] = {
         "mapsnap.download_loc_iiif",
         "Fetch all images for a Sanborn volume from the Library of Congress (loc.gov)",
     ),
-    "split": ("mapsnap.split_twopage", "Split two-page images in half"),
+    "split-twopage": ("mapsnap.split_twopage", "Split two-page images in half"),
 }
 
 _cmd_width = max(len(cmd) for cmd in SUBCOMMANDS)
