@@ -1,3 +1,7 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
 [project]
 name = "mapsnap"
 version = "0.1.0"
@@ -6,7 +10,6 @@ readme = "README.md"
 requires-python = ">=3.12,<4.0"
 dependencies = [
     "easyocr>=1.7.2",
-    "haversine>=2.9.0",
     "numpy>=2.0",
     "opencv-python>=4.13.0.92",
     "pillow>=12.2.0",
