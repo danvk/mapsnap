@@ -22,9 +22,7 @@ def main() -> None:
         )
     )
     parser.add_argument("sanborn_slug", metavar="SLUG", help="OIM Sanborn volume slug")
-    parser.add_argument(
-        "dirname", metavar="DIR", help="Output directory name (created under data/)"
-    )
+    parser.add_argument("dir", metavar="DIR", help="Output directory")
     parser.add_argument(
         "relation", metavar="RELATION", help="OSM relation ID for the street network"
     )
@@ -34,11 +32,11 @@ def main() -> None:
     args = parser.parse_args()
 
     print(args.sanborn_slug)
-    print(args.dirname)
+    print(args.dir)
     print(args.relation)
     print(args.oim_prefix)
 
-    dir_path = Path("data") / args.dirname
+    dir_path = Path(args.dir)
     dir_path.mkdir(parents=True, exist_ok=True)
 
     base_url = f"https://oldinsurancemaps.net/iiif/mosaic/{args.sanborn_slug}"

@@ -12,16 +12,16 @@
 set -o errexit
 set -x
 
-sanborn_slug=$1
-dirname=$2
-relation=$3
+dir=$1
+relation=$2
 
-echo $sanborn_slug
-echo $dirname
+echo $dir
 echo $relation
 
-dir=data/$dirname
 test -d $dir
+test -e $dir/manifest.json
+
+uv run python mapsnap/download_loc_iif.py --scale pct:25 $dir/manifest.json
 
 uv run python mapsnap/download_osm.py $relation --output $dir/streets.osm.json
 
@@ -31,7 +31,6 @@ uv run python mapsnap/osm_to_centerlines.py \
 
 uv run python mapsnap/detect_text.py \
     --centerlines $dir/centerlines.geojson \
-    --num-workers 2 \
-    $dir/*.scaled.jpg
+    $dir/p*.raw.jpg
 
 uv run mapsnap fit $dir init
