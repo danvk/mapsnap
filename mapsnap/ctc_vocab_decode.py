@@ -29,6 +29,7 @@ import numpy as np
 
 from mapsnap.streets import (
     DIRECTION_ABBREVS,
+    HINT_STRINGS,
     ORDINAL_WORD_TO_NUM,
     STREET_ABBREVS,
 )
@@ -54,22 +55,8 @@ for _abbrev, _full in STREET_ABBREVS.items():
         _TYPE_TO_ABBREVS[_full] = [_full]
     _TYPE_TO_ABBREVS[_full].append(_abbrev)
 
-# Hint strings are marked "hint" in streets.json and are not used as standalone GCPs.
-# They serve as anchors for promote_avenue_letters (recovering single-letter avenue
-# names like "X" or "W" from "AVENUE X" labels that CRAFT splits into two boxes).
-# AVENUE and STREET (and their abbreviations) are hints; "K STREET" in Washington DC
-# is the same pattern. All other type words (COURT, BOULEVARD, …) and direction
-# words remain regular detections.
-_LETTERED_TYPE_ABBREVS: frozenset[str] = frozenset(
-    k for k, v in STREET_ABBREVS.items() if v in ("AVENUE", "STREET")
-)
-HINT_STRINGS: frozenset[str] = frozenset(
-    {"AVENUE", "STREET"}
-    | _LETTERED_TYPE_ABBREVS  # AVE, AV, ST
-    | {a + "." for a in _LETTERED_TYPE_ABBREVS}  # AVE., AV., ST.
-    # Spaced forms: Sanborn typography sometimes gaps characters (e.g. "A V", "S T").
-    | {" ".join(a) for a in _LETTERED_TYPE_ABBREVS if len(a) > 1}  # A V, A V E, S T
-)
+# HINT_STRINGS is defined in streets.py (alongside STREET_TYPES) and re-exported here
+# for callers that import from ctc_vocab_decode.
 
 
 def generate_vocab_strings(normalized_streets: set[str]) -> list[str]:

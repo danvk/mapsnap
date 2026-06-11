@@ -24,7 +24,7 @@ from PIL import Image
 
 from mapsnap.streets import (
     DIRECTION_WORDS,
-    STREET_TYPES,
+    HINT_STRINGS,
     Block,
     build_block_index,
     canonical_street_matches,
@@ -713,6 +713,22 @@ def _finalize_georef(
     return affine_scale_deg_per_px(A), center
 
 
+def _are_quadrant_siblings(matches: list[str]) -> bool:
+    """Return True if all matches share the same base name differing only in trailing direction suffix.
+
+    e.g. ["NORTH STREET NORTHEAST", "NORTH STREET NORTHWEST", ...] → True
+    ["NORTH PLACE", "NORTH STREET NORTHEAST"] → False
+    """
+    if not matches:
+        return False
+    bases: set[str] = set()
+    for m in matches:
+        parts = m.rsplit(" ", 1)
+        base = parts[0] if (len(parts) == 2 and parts[1] in DIRECTION_WORDS) else m
+        bases.add(base)
+    return len(bases) == 1
+
+
 def promote_avenue_letters(
     hint_detections: list[dict],
     all_detections: list[dict],
@@ -735,12 +751,16 @@ def promote_avenue_letters(
     The parallel (along-street) gap is unconstrained.
     """
     type_hints = [
-        h for h in hint_detections if h.get("text", "").upper().strip() in STREET_TYPES
+        h for h in hint_detections if h.get("text", "").upper().strip() in HINT_STRINGS
     ]
     if not type_hints:
         return []
 
-    candidates = list(all_detections)
+    # Sort by confidence descending so the highest-quality reading of each physical
+    # box wins the promotion slot when multiple OCR readings overlap the same position.
+    candidates = sorted(
+        all_detections, key=lambda d: d.get("confidence", 0.0), reverse=True
+    )
 
     if not candidates:
         return []
@@ -789,7 +809,18 @@ def promote_avenue_letters(
 
             matches = canonical_street_matches(text, normalized_streets)
             if len(matches) != 1:
-                continue
+                # Bare letter is ambiguous. Try "N ST" style: combining the letter
+                # with the hint type disambiguates lettered streets (e.g. "N STREET")
+                # from direction abbreviations (e.g. "NORTH"). Allow promotion when
+                # all combined matches are quadrant siblings of the same street.
+                hint_type_text = hint.get("text", "").strip()
+                combined_matches = canonical_street_matches(
+                    f"{text} {hint_type_text}", normalized_streets
+                )
+                if combined_matches and _are_quadrant_siblings(combined_matches):
+                    matches = combined_matches
+                else:
+                    continue
 
             promoted_centers.append((det_cx, det_cy))
             # Strip "hint" so the promoted detection is treated as a regular detection
@@ -820,7 +851,7 @@ def correct_square_feature_dirs(
     column hint during promotion and must not be overwritten by a different nearby hint.
     """
     type_hints = [
-        h for h in hint_detections if h.get("text", "").upper().strip() in STREET_TYPES
+        h for h in hint_detections if h.get("text", "").upper().strip() in HINT_STRINGS
     ]
     if not type_hints:
         return

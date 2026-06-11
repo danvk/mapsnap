@@ -59,6 +59,22 @@ STRIPPABLE_PREFIXES: frozenset[str] = DIRECTION_WORDS | {"SAINT"}
 # Full street-type words (STREET, AVENUE, …); used to identify bare-name aliases in build_block_index.
 STREET_TYPES: frozenset[str] = frozenset(STREET_ABBREVS.values())
 
+# Abbreviations of AVENUE and STREET (the two types used as "hints" in Sanborn maps).
+_LETTERED_TYPE_ABBREVS: frozenset[str] = frozenset(
+    k for k, v in STREET_ABBREVS.items() if v in ("AVENUE", "STREET")
+)
+
+# All hint string forms: full names, abbreviations, dotted, and spaced variants.
+# Used by detect_text.py to mark detections as hints and by georef_from_labels.py
+# to identify which hint detections are type-word anchors for promote_avenue_letters.
+HINT_STRINGS: frozenset[str] = frozenset(
+    {"AVENUE", "STREET"}
+    | _LETTERED_TYPE_ABBREVS  # AVE, AV, ST
+    | {a + "." for a in _LETTERED_TYPE_ABBREVS}  # AVE., AV., ST.
+    # Spaced forms: Sanborn typography sometimes gaps characters (e.g. "A V", "S T").
+    | {" ".join(a) for a in _LETTERED_TYPE_ABBREVS if len(a) > 1}  # A V, A V E, S T
+)
+
 # Irregular ordinal words for 1–19.
 _ORDINAL_ONES = [
     "",
@@ -235,16 +251,19 @@ def canonical_street_match(
     if raw != normalized and raw in normalized_streets:
         return raw
     if normalized in DIRECTION_WORDS:
-        # Bare direction word (e.g. "EAST", "WEST"): only match exact key aliases
-        # or two-word "DIRECTION TYPE" keys (e.g. "EAST STREET", "WEST AVENUE").
-        # Prevents "EAST" from prefix-matching all "EAST 103RD STREET",
-        # "EAST FOURTH STREET", etc. via candidate.startswith("EAST ").
+        # Bare direction word (e.g. "N", "EAST"): only match exact key aliases or
+        # keys where the word immediately after the direction prefix is a street type
+        # (e.g. "NORTH STREET NORTHWEST", "EAST AVENUE", "WEST PLACE SOUTHEAST").
+        # Prevents "EAST" from prefix-matching "EAST 103RD STREET", "EAST GRAND AVENUE",
+        # etc., while still matching DC-style "NORTH STREET NORTHWEST" (the leading N
+        # is a lettered street, not a direction prefix for a named/numbered street).
+        prefix_len = len(normalized) + 1
         for s in normalized_streets:
             if s == normalized:
                 return s
             if (
                 s.startswith(normalized + " ")
-                and s[len(normalized) + 1 :] in STREET_TYPES
+                and s[prefix_len:].split(" ", 1)[0] in STREET_TYPES
             ):
                 return s
         return None
@@ -278,22 +297,25 @@ def canonical_street_matches(
     raw text is itself a known alias (e.g. "W" for "AVENUE W"), only that alias is
     returned — preventing "W" from matching all 70+ "WEST X" streets.
 
-    Bare direction words (e.g. "EAST", "WEST") only match exact key aliases or
-    two-word "DIRECTION TYPE" keys (e.g. "EAST STREET") — not direction-prefixed
-    named/numbered streets like "EAST 103RD STREET".
+    Bare direction words (e.g. "N", "EAST") match exact key aliases or keys where
+    the word immediately after the direction prefix is a street type — including
+    direction-suffixed forms like "NORTH STREET NORTHWEST" — but not
+    direction-prefixed named/numbered streets like "EAST 103RD STREET" or
+    "NORTH CAROLINA AVENUE NORTHEAST".
     """
     normalized = normalize_street(text)
     raw = text.upper().strip()
     if raw != normalized and raw in normalized_streets:
         return [raw]
     if normalized in DIRECTION_WORDS:
+        prefix_len = len(normalized) + 1
         matches = []
         for s in normalized_streets:
             if s == normalized:
                 matches.append(s)
             elif (
                 s.startswith(normalized + " ")
-                and s[len(normalized) + 1 :] in STREET_TYPES
+                and s[prefix_len:].split(" ", 1)[0] in STREET_TYPES
             ):
                 matches.append(s)
         return matches

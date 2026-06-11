@@ -1,6 +1,12 @@
 """Tests for mapsnap.streets."""
 
-from mapsnap.streets import _ORDINALS, _num_to_ordinal_word, normalize_street
+from mapsnap.streets import (
+    _ORDINALS,
+    _num_to_ordinal_word,
+    canonical_street_match,
+    canonical_street_matches,
+    normalize_street,
+)
 
 # --- _num_to_ordinal_word ---
 
@@ -73,3 +79,67 @@ def test_normalize_no_ordinal_unchanged():
 def test_normalize_ordinal_does_not_expand_non_ordinal_numbers():
     # Bare numbers (no suffix) should not be altered.
     assert normalize_street("Route 66") == "ROUTE 66"
+
+
+# --- canonical_street_matches / canonical_street_match: direction-suffixed type keys ---
+
+_DC_STREETS = {
+    "NORTH STREET NORTHEAST",
+    "NORTH STREET NORTHWEST",
+    "NORTH STREET SOUTHEAST",
+    "NORTH STREET SOUTHWEST",
+    "NORTH PLACE",
+    "NORTH PLACE SOUTHEAST",
+    "NORTH ROAD",
+    "NORTH CAROLINA AVENUE NORTHEAST",
+    "NORTH DAKOTA AVENUE NORTHWEST",
+    "NORTH CAPITOL STREET NORTHWEST",
+    "EAST STREET NORTHEAST",
+    "EAST GRAND AVENUE",
+}
+
+
+def test_direction_word_matches_suffixed_type_key():
+    # "N" → "NORTH": should match "NORTH STREET NORTHWEST" (first word of remainder is STREET).
+    matches = canonical_street_matches("N", _DC_STREETS)
+    assert "NORTH STREET NORTHEAST" in matches
+    assert "NORTH STREET NORTHWEST" in matches
+    assert "NORTH STREET SOUTHEAST" in matches
+    assert "NORTH STREET SOUTHWEST" in matches
+
+
+def test_direction_word_still_matches_plain_type_key():
+    # Two-word "NORTH PLACE" still works after the fix.
+    matches = canonical_street_matches("N", _DC_STREETS)
+    assert "NORTH PLACE" in matches
+    assert "NORTH PLACE SOUTHEAST" in matches
+    assert "NORTH ROAD" in matches
+
+
+def test_direction_word_does_not_match_named_streets():
+    # "N" must NOT match streets where the word after the direction is not a type word.
+    matches = canonical_street_matches("N", _DC_STREETS)
+    assert "NORTH CAROLINA AVENUE NORTHEAST" not in matches
+    assert "NORTH DAKOTA AVENUE NORTHWEST" not in matches
+    assert "NORTH CAPITOL STREET NORTHWEST" not in matches
+
+
+def test_direction_word_does_not_match_east_grand_avenue():
+    # "E" must NOT match "EAST GRAND AVENUE" (GRAND is not a street type).
+    matches = canonical_street_matches("E", _DC_STREETS)
+    assert "EAST GRAND AVENUE" not in matches
+    assert "EAST STREET NORTHEAST" in matches
+
+
+def test_canonical_street_match_direction_suffixed():
+    # canonical_street_match (singular) is consistent with canonical_street_matches.
+    result = canonical_street_match("N", _DC_STREETS)
+    assert result in {
+        "NORTH STREET NORTHEAST",
+        "NORTH STREET NORTHWEST",
+        "NORTH STREET SOUTHEAST",
+        "NORTH STREET SOUTHWEST",
+        "NORTH PLACE",
+        "NORTH PLACE SOUTHEAST",
+        "NORTH ROAD",
+    }
