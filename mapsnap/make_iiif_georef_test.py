@@ -220,6 +220,17 @@ def test_service_url_non_sheet_returns_none():
     assert _service_url_to_page_key("...-titl") is None
 
 
+_DC = "https://tile.loc.gov/image-services/iiif/service:gmd:gmd385m:g3851m:g3851gm:g01227003"
+
+
+def test_service_url_sb_format():
+    # Washington DC 1916 uses sb-format: sb{5-digit page}{suffix char}
+    assert _service_url_to_page_key(f"{_DC}:sb001250") == "p125"
+    assert _service_url_to_page_key(f"{_DC}:sb002160") == "p216"
+    assert _service_url_to_page_key(f"{_DC}:sb00154s") == "p154s"
+    assert _service_url_to_page_key(f"{_DC}:sb00001a") == "p1a"
+
+
 # ---------------------------------------------------------------------------
 # georef_path_to_page_key
 # ---------------------------------------------------------------------------
