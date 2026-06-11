@@ -993,7 +993,7 @@ def process_image(
         ix = f"{gcps[0].feat_a.raw_text} x {gcps[0].feat_b.raw_text}"
         if not one_gcp_fits:
             print(
-                f"Only 1 intersection GCP: {ix}; skipping (use --one-gcp-fits to enable).",
+                f"Only 1 intersection GCP: {ix}; skipping (use --disable-one-gcp-fits to suppress).",
                 file=sys.stderr,
             )
             return ProcessResult(success=False)

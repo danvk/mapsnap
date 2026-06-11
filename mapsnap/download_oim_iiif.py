@@ -59,15 +59,16 @@ def download_with_retry(
 def download_oim_image(url: str, dest: Path) -> None:
     """Download an OIM image, retrying with a documents↔regions URL swap on 404.
 
-    Split pages (containing '__') swap /documents/ → /regions/ on 404.
+    Split pages (dest filename contains '__') swap /documents/ → /regions/ on 404.
     Unsplit pages swap /regions/ → /documents/ on 404.
     """
+    is_split = "__" in dest.name
     try:
         download_with_retry(url, dest)
     except urllib.error.HTTPError as exc:
-        if exc.code == 404 and "/documents/" in url and "__" in url:
+        if exc.code == 404 and "/documents/" in url and is_split:
             actual_url = url.replace("/documents/", "/regions/")
-        elif exc.code == 404 and "/regions/" in url and "__" not in url:
+        elif exc.code == 404 and "/regions/" in url and not is_split:
             actual_url = url.replace("/regions/", "/documents/")
         else:
             raise
