@@ -15,20 +15,24 @@ Volume | Pages | Num Fit | Median RMSE | Within 15ft | Within 25ft | Allmaps
 [Detroit 1929 Vol 11][detroit] | 103 | 84 (82%) | 13ft | 58% | 75% | [view][detroit-iiif]
 [Chicago 1950 Vol 1][chicago] | 111 | 100 (90%) | 10ft | 72% | 88% | [view][chicago-iiif]
 [Champaign, Ill. 1915][champaign] | 33 | 26 (79%)[^1] | 11ft | 85% | 100% | [view][champaign-iiif]
+[Brooklyn 1939 Vol 1][brooklyn1] | 62 | 50 (81%) | 8ft | 78% | 84% | [view][brooklyn1-iiif]
 
-RMSE was measured across 49 equally-spaced points on each image. You can view the fits on Allmaps or get the IIIF files from the `gallery` directory. For notes on poor fits, see [test data notes][].
+RMSE was measured across 49 equally-spaced points on each image. You can view the fits on Allmaps or get the IIIF files from the `gallery` directory. For notes on poor fits, see [test data notes].
 
 [nola5]: https://oldinsurancemaps.net/map/sanborn03376_029
 [nola2]: https://oldinsurancemaps.net/map/sanborn03376_006
 [detroit]: https://oldinsurancemaps.net/map/sanborn03985_041
 [chicago]: https://oldinsurancemaps.net/map/sanborn01790_085
 [champaign]: https://oldinsurancemaps.net/map/sanborn01778_006
+[brooklyn1]: https://oldinsurancemaps.net/map/sanborn05791_053
 
 [nola5-iiif]: https://dev.viewer.allmaps.org/?url=https%3A%2F%2Fraw.githubusercontent.com%2Fdanvk%2Fmapsnap%2Frefs%2Fheads%2Fmain%2Fgallery%2Fnew_orleans_la_1951_vol_5.iiif.json
 [nola2-iiif]: https://dev.viewer.allmaps.org/?url=https%3A%2F%2Fraw.githubusercontent.com%2Fdanvk%2Fmapsnap%2Frefs%2Fheads%2Fmain%2Fgallery%2Fnew_orleans_la_1896_vol_2.iiif.json
 [detroit-iiif]: https://dev.viewer.allmaps.org/?url=https%3A%2F%2Fraw.githubusercontent.com%2Fdanvk%2Fmapsnap%2Frefs%2Fheads%2Fmain%2Fgallery%2Fdetroit_mich_1929_vol_11.iiif.json
 [chicago-iiif]: https://dev.viewer.allmaps.org/?url=https%3A%2F%2Fraw.githubusercontent.com%2Fdanvk%2Fmapsnap%2Frefs%2Fheads%2Fmain%2Fgallery%2Fchicago_il_1950_vol_1.iiif.json
 [champaign-iiif]: https://dev.viewer.allmaps.org/?url=https%3A%2F%2Fraw.githubusercontent.com%2Fdanvk%2Fmapsnap%2Frefs%2Fheads%2Fmain%2Fgallery%2Fchampaign_ill_1915.iiif.json
+[brooklyn1-iiif]: https://dev.viewer.allmaps.org/?url=https%3A%2F%2Fraw.githubusercontent.com%2Fdanvk%2Fmapsnap%2Frefs%2Fheads%2Fmain%2Fgallery%2Fbrooklyn_ny_1939_vol_1.iii
+f.json
 [test data notes]: https://github.com/danvk/mapsnap/wiki/Test-data-notes
 
 [^1]: Requires running with `--scale-outlier-threshold 0` since this volume contains maps using two different scales.
