@@ -35,4 +35,4 @@ uv run python mapsnap/detect_text.py \
     --num-workers 2 \
     $dir/*.scaled.jpg
 
-./fit.sh $dir mapsnap
+uv run mapsnap fit $dir init

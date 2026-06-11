@@ -22,12 +22,7 @@ else
 fi
 
 uv run mapsnap/georef_from_labels.py $input_images \
-    --centerlines $centerlines \
-    --min-long-side 45 \
-    --min-short-side 20 \
-    --edge-margin 0 \
-    --min-confidence 0.15 \
-    --min-aspect-ratio 1.75
+    --centerlines $centerlines
 
 if [ -e $dir/main.iiif.json ]; then
     ref_iiif=$dir/main.iiif.json
