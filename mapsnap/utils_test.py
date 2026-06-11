@@ -75,19 +75,10 @@ def test_source_id_split_label():
 _DC = "https://tile.loc.gov/image-services/iiif/service:gmd:gmd385m:g3851m:g3851gm:g01227003"
 
 
-def test_source_id_sb_no_suffix():
+def test_source_id_sb():
     assert source_id_to_page_key(f"{_DC}:sb001250", "") == "p125"
-
-
-def test_source_id_sb_strips_leading_zeros():
     assert source_id_to_page_key(f"{_DC}:sb002160", "") == "p216"
-
-
-def test_source_id_sb_letter_suffix():
     assert source_id_to_page_key(f"{_DC}:sb00154s", "") == "p154s"
-
-
-def test_source_id_sb_single_digit_with_letter():
     assert source_id_to_page_key(f"{_DC}:sb00001a", "") == "p1a"
 
 
