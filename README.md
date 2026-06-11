@@ -15,20 +15,24 @@ Volume | Pages | Num Fit | Median RMSE | Within 15ft | Within 25ft | Allmaps
 [Detroit 1929 Vol 11][detroit] | 103 | 84 (82%) | 13ft | 58% | 75% | [view][detroit-iiif]
 [Chicago 1950 Vol 1][chicago] | 111 | 100 (90%) | 10ft | 72% | 88% | [view][chicago-iiif]
 [Champaign, Ill. 1915][champaign] | 33 | 26 (79%)[^1] | 11ft | 85% | 100% | [view][champaign-iiif]
+[Brooklyn 1939 Vol 1][brooklyn1] | 62 | 50 (81%) | 8ft | 78% | 84% | [view][brooklyn1-iiif]
 
-RMSE was measured across 49 equally-spaced points on each image. You can view the fits on Allmaps or get the IIIF files from the `gallery` directory. For notes on poor fits, see [test data notes][].
+RMSE was measured across 49 equally-spaced points on each image. You can view the fits on Allmaps or get the IIIF files from the `gallery` directory. For notes on poor fits, see [test data notes].
 
 [nola5]: https://oldinsurancemaps.net/map/sanborn03376_029
 [nola2]: https://oldinsurancemaps.net/map/sanborn03376_006
 [detroit]: https://oldinsurancemaps.net/map/sanborn03985_041
 [chicago]: https://oldinsurancemaps.net/map/sanborn01790_085
 [champaign]: https://oldinsurancemaps.net/map/sanborn01778_006
+[brooklyn1]: https://oldinsurancemaps.net/map/sanborn05791_053
 
 [nola5-iiif]: https://dev.viewer.allmaps.org/?url=https%3A%2F%2Fraw.githubusercontent.com%2Fdanvk%2Fmapsnap%2Frefs%2Fheads%2Fmain%2Fgallery%2Fnew_orleans_la_1951_vol_5.iiif.json
 [nola2-iiif]: https://dev.viewer.allmaps.org/?url=https%3A%2F%2Fraw.githubusercontent.com%2Fdanvk%2Fmapsnap%2Frefs%2Fheads%2Fmain%2Fgallery%2Fnew_orleans_la_1896_vol_2.iiif.json
 [detroit-iiif]: https://dev.viewer.allmaps.org/?url=https%3A%2F%2Fraw.githubusercontent.com%2Fdanvk%2Fmapsnap%2Frefs%2Fheads%2Fmain%2Fgallery%2Fdetroit_mich_1929_vol_11.iiif.json
 [chicago-iiif]: https://dev.viewer.allmaps.org/?url=https%3A%2F%2Fraw.githubusercontent.com%2Fdanvk%2Fmapsnap%2Frefs%2Fheads%2Fmain%2Fgallery%2Fchicago_il_1950_vol_1.iiif.json
 [champaign-iiif]: https://dev.viewer.allmaps.org/?url=https%3A%2F%2Fraw.githubusercontent.com%2Fdanvk%2Fmapsnap%2Frefs%2Fheads%2Fmain%2Fgallery%2Fchampaign_ill_1915.iiif.json
+[brooklyn1-iiif]: https://dev.viewer.allmaps.org/?url=https%3A%2F%2Fraw.githubusercontent.com%2Fdanvk%2Fmapsnap%2Frefs%2Fheads%2Fmain%2Fgallery%2Fbrooklyn_ny_1939_vol_1.iii
+f.json
 [test data notes]: https://github.com/danvk/mapsnap/wiki/Test-data-notes
 
 [^1]: Requires running with `--scale-outlier-threshold 0` since this volume contains maps using two different scales.
@@ -130,17 +134,19 @@ Mapsnap automatically generates clipping polygons for each image using the under
 
 ## Pipeline
 
-Mapsnap can, in principle, run on any type of map. But it's only been tested on Sanborn maps. This repo contains tools for downloading and georeferencing Sanborn maps from two sources:
+Mapsnap requires a directory of images, OSM data, and a IIIF manifest to operate. Once you have those, you can georeference the images and produce a IIIF Georeference of your own.
+
+Mapsnap also includes tools to help you produce those files. While it can run on any type of map in principle, it's only been tested on Sanborn maps. There are tools for downloading and georeferencing Sanborn maps from two sources:
 
 1. **OldInsuranceMaps** (OIM). OIM hosts a subset of volumes (~1,000) that have already been manually split and georeferenced. You can download images from it reliably. Mapsnap uses it for truth data.
 2. **Library of Congress** (loc.gov). The LoC hosts most of the Sanborn volumes that are in the public domain (~30,000). These have not been georeferenced, and downloads are somewhat unreliable.
 
-Depending on where you get your Sanborn maps, the next steps will be different.
+So depending on where you get your Sanborn maps, the next steps will be different.
 
 ### OldInsuranceMaps
 
 ```bash
-./pipeline-oim.sh sanborn03376_029 new_orleans_la_1951_vol_5 r1836428 'https://s3.us-central-1.wasabisys.com/oldinsurancemaps/uploaded/documents/new_orleans_la_1951_vol_5_'
+mapsnap run-oim sanborn03376_029 new_orleans_la_1951_vol_5 r1836428 'https://s3.us-central-1.wasabisys.com/oldinsurancemaps/uploaded/documents/new_orleans_la_1951_vol_5_'
 ```
 
 The four arguments here are:
@@ -150,18 +156,20 @@ The four arguments here are:
 - r1836428: Relation containing this map in OSM, usually a county. This is used to download all the streets in the area of the map.
 - 'https://...': OIM S3 bucket prefix for images. You can get this by downloading a JPEG of a page from the OIM web site.
 
-See `pipeline-oim.sh` details about how to run the pipeline. The high-level steps are:
+`mapsnap run-oim` invokes the following subcommands:
 
-- `download_oim_iiif.py`: download all the Sanborn images from OIM. This is easier than downloading directly from the Library of Congress and gets you splits.
-- `scale_images.py`: reduces the size of the images by a uniform scale factor so that OCR runs faster.
-- `download_osm.py`: downloads all street data in the area from OpenStreetMap.
-- `osm_to_centerlines.py`: converts raw OSM data to GeoJSON.
-- `detect_text.py`: runs OCR over the downscaled images, saving candidate detections to `streets.json` files.
-- `georef_from_labels.py`: georeferences images based on street detections, writing out `georef.json` files where it can find a good fit.
-- `make_iiif_georef.py`: produces a IIIF Georeference Extension. You can find examples of these in the `gallery` directory. View them on Allmaps.
-- `compare_iiif_georef.py`: compares the generated IIIF file with the human-generated one from OIM, producing a report on the accuracy of the fit.
+- `mapsnap download-oim`: Downloads manifests and images from OldInsuranceMaps.
+- `mapsnap scale-images`: reduces the size of the images by a uniform scale factor so that OCR runs faster.
+- `mapsnap download-osm` + `mapsnap osm-to-geojson`: Downloads all street data in the area from OpenStreetMap.
+- `mapsnap ocr`: runs OCR over the downscaled images, saving candidate detections to `boxes.json` and `streets.json` files.
+- `mapsnap fit`: another pipeline that runs:
+  - `mapsnap georef`: georeferences images based on street detections, writing out `georef.json` files where it can find a good fit.
+  - `mapsnap iiif`: produces a IIIF Georeference Extension. You can find examples of these in the `gallery` directory. View them on Allmaps.
+  - `mapsnap compare`: compares the generated IIIF file with the human-generated one from OIM, producing a report on the accuracy of the fit.
 
-The last three steps run relatively quickly. You can experiment with options and iterate on them using `fit.sh`.
+`mapsnap ocr` is typically the slowest step. The steps under `mapsnap fit` run relatively quickly. You can run `mapsnap fit` yourself to experiment.
+
+The end result is a IIIF file pointing at Library of Congress imagery that you can view in Allmaps, along with a text file comparing Mapsnap's results against OIM's.
 
 ### Library of Congress
 
@@ -169,25 +177,28 @@ Again, using New Orleans 1951 Vol 5 as an example:
 
 - Go to https://www.loc.gov/item/sanborn03376_029.
 - Download the IIIF Presentation Manifest ("Manifest (JSON/LD)"). You have to do this by hand in your browser due to the LoC's Cloudflare DoS protections.
-- Make a directory and put this file in `data/new_orleans_la_1951_vol_5/loc.manifest.json`.
+- Make a directory and put the manifest file in it, e.g. `data/new_orleans_la_1951_vol_5/manifest.json`.
 
-Next, download all the images at 25% resolution by running:
-
-```bash
-uv run mapsnap/download_loc_iiif.py --scale pct:25 data/new_orleans_la_1951_vol_5/loc.manifest.json
-```
-
-This will go slowly. It might fail and you might have to wait a few hours to restart it and try again. But it will eventually get all the images.
-
-From here, the process is similar to OldInsuranceMaps:
+With the IIIF Manifest in place, you can run the rest of the pipeline via:
 
 ```bash
-./pipeline-loc.sh sanborn03376_029 new_orleans_la_1951_vol_5 r1836428
+mapsnap run-loc data/new_orleans_la_1951_vol_5 r1836428
 ```
 
-See above for an explanation of these three parameters. This script downloads OSM data, runs OCR over the images, and then runs `fit.sh`.
+This starts by downloading all of the images from loc.gov at 25% resolution. This will go slowly. It might fail and you might have to wait a few hours to restart it and try again. But it will eventually get all the images.
 
-The end result is a IIIF Georeference Extension that you can view with Allmaps. Since there's no truth data, you won't get a comparison at the end.
+From there, the pipeline is very similar to OldInsuranceMaps. The end result is a IIIF Georeference Extension that you can view with Allmaps. Since there's no truth data, you won't get a comparison at the end. As with OIM-sourced data, you can run `mapsnap fit` to iterate.
+
+### Bring your own Data
+
+If you have your own directory of images that you've put together in some other way, Mapsnap should also be able to run over it.
+
+- Name the images after some notion of page number, e.g. `p123.jpg`.
+- Run `mapsnap download-osm` + `mapsnap osm-to-geojson` to get OSM data for the area around your images.
+- Run `mapsnap ocr` to find street labels for all your images. Use the Mapsnap debugger app to test if it worked on a few images.
+- Run `mapsnap georef` to georeference the images. Again, you may want to spot check a few maps in the debugger app.
+
+If you have a IIIF Manifest for your images, you can then run `mapsnap iiif` to produce a Georeference AnnotationPage that you can use to look at your complete map.
 
 ### Multivolume Runs
 

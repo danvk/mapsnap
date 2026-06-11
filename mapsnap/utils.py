@@ -2,7 +2,17 @@
 
 import re
 import struct
+import subprocess
+import sys
 from pathlib import Path
+
+
+def run_cmd(cmd: list[str]) -> None:
+    """Print and run a subprocess command, exiting with its return code on failure."""
+    print("+ " + " ".join(cmd), flush=True)
+    result = subprocess.run(cmd)
+    if result.returncode != 0:
+        sys.exit(result.returncode)
 
 
 def jpeg_dimensions(path: Path) -> tuple[int, int]:
@@ -26,6 +36,46 @@ def jpeg_dimensions(path: Path) -> tuple[int, int]:
                 return width, height
             f.seek(length - 2, 1)
     raise ValueError(f"No SOF marker found in {path}")
+
+
+def source_id_to_page_key(source_id: str, label: str) -> str:
+    """Extract a short page key like 'p425' from a LOC IIIF image service URL.
+
+    Leading zeros in the page number are stripped and a 'p' prefix is added:
+      "https://...1950-0006N/info.json", ""           → "p6N"
+      "https://...1951-0425/info.json",  ""           → "p425"
+      "https://...service:...:sb001250", ""           → "p125"
+      "https://...service:...:sb00154s", ""           → "p154s"
+    Labels ending with "[N]" produce a split suffix:
+      "https://...1950-0156/info.json",  "... [2]"   → "p156__2"
+
+    The sb-format encodes the page number as 5 zero-padded digits followed by
+    one character: '0' means no suffix, a letter is used directly as a suffix.
+    """
+    split_suffix = ""
+    if label.endswith("]"):
+        m = re.search(r"\[(\d+)\]$", label)
+        assert m
+        split_suffix = f"__{m.group(1)}"
+
+    # Sanborn sb-format: service:...:sb{5-digit page}{suffix char}
+    m = re.search(r":sb(\d{5})([a-z0-9])$", source_id, re.IGNORECASE)
+    if m:
+        page_num = int(m.group(1))
+        suffix_char = m.group(2).lower()
+        suffix = "" if suffix_char == "0" else suffix_char
+        return f"p{page_num}{suffix}" + split_suffix
+
+    # Standard LOC format: -NNNN[letter] optionally followed by /info.json
+    m = re.search(r"-(\d+)([a-zA-Z]?)(?:/info\.json)?$", source_id)
+    if m:
+        page_key = f"p{int(m.group(1))}{m.group(2)}"
+    else:
+        # Fall back to the suffix after the last hyphen in the last colon-segment
+        # (e.g. "...01790_01N_1950-covr" → "covr", "...01790_01N_1950-ind1" → "ind1").
+        last_segment = source_id.removesuffix("/info.json").split(":")[-1]
+        page_key = last_segment.rsplit("-", 1)[-1]
+    return page_key + split_suffix
 
 
 def label_to_page_key(label: str) -> str | None:

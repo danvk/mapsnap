@@ -118,15 +118,6 @@ wheels = [
 ]
 
 [[package]]
-name = "haversine"
-version = "2.9.0"
-source = { registry = "https://pypi.org/simple" }
-sdist = { url = "https://files.pythonhosted.org/packages/1f/fe/5dc394a9db15c9f08c64ae050c03c01128227632fce07cc62aa5d32240d5/haversine-2.9.0.tar.gz", hash = "sha256:1103d7e1f0f108c25b31b63452c54d9d6f29389a70de7dd75fd4b908329b6fcf", size = 10171 }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/fb/80/c9fa943acea97ec173deba84f7c83cc0639798c1dd97970bb90a73c1dc91/haversine-2.9.0-py2.py3-none-any.whl", hash = "sha256:d32031b6b4232e37764730a781a3b8cb248710f92aca6f553b8097524420754d", size = 7728 },
-]
-
-[[package]]
 name = "imageio"
 version = "2.37.3"
 source = { registry = "https://pypi.org/simple" }
@@ -175,10 +166,9 @@ wheels = [
 [[package]]
 name = "mapsnap"
 version = "0.1.0"
-source = { virtual = "." }
+source = { editable = "." }
 dependencies = [
     { name = "easyocr" },
-    { name = "haversine" },
     { name = "numpy" },
     { name = "opencv-python" },
     { name = "pillow" },
@@ -196,7 +186,6 @@ dev = [
 [package.metadata]
 requires-dist = [
     { name = "easyocr", specifier = ">=1.7.2" },
-    { name = "haversine", specifier = ">=2.9.0" },
     { name = "numpy", specifier = ">=2.0" },
     { name = "opencv-python", specifier = ">=4.13.0.92" },
     { name = "pillow", specifier = ">=12.2.0" },

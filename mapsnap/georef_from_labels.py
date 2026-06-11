@@ -993,7 +993,7 @@ def process_image(
         ix = f"{gcps[0].feat_a.raw_text} x {gcps[0].feat_b.raw_text}"
         if not one_gcp_fits:
             print(
-                f"Only 1 intersection GCP: {ix}; skipping (use --one-gcp-fits to enable).",
+                f"Only 1 intersection GCP: {ix}; skipping (use --disable-one-gcp-fits to suppress).",
                 file=sys.stderr,
             )
             return ProcessResult(success=False)
@@ -1310,30 +1310,30 @@ def main() -> None:
     parser.add_argument(
         "--min-confidence",
         type=float,
-        default=0.5,
+        default=0.15,
         metavar="THRESHOLD",
-        help="Minimum OCR confidence to accept a detection (default: 0.5)",
+        help="Minimum OCR confidence to accept a detection (default: %(default)s)",
     )
     parser.add_argument(
         "--min-long-side",
         type=float,
-        default=250.0,
+        default=45.0,
         metavar="PX",
-        help="Minimum long side of a text polygon to accept (default: 250)",
+        help="Minimum long side of a text polygon to accept (default: %(default)s)",
     )
     parser.add_argument(
         "--min-short-side",
         type=float,
-        default=60.0,
+        default=20.0,
         metavar="PX",
-        help="Minimum short side of a text polygon to accept (default: 60)",
+        help="Minimum short side of a text polygon to accept (default: %(default)s)",
     )
     parser.add_argument(
         "--min-aspect-ratio",
         type=float,
-        default=2.0,
+        default=1.75,
         metavar="RATIO",
-        help="Minimum long/short side ratio for a text polygon (default: 2.0)",
+        help="Minimum long/short side ratio for a text polygon (default: %(default)s)",
     )
     parser.add_argument(
         "--scale",
@@ -1348,11 +1348,11 @@ def main() -> None:
     parser.add_argument(
         "--edge-margin",
         type=float,
-        default=0.02,
+        default=0.0,
         metavar="FRAC",
         help=(
             "Ignore detections whose center is within this fraction of the image edge "
-            "(default: 0.02 = 2%%). Headers, stamps, and marginal text are filtered out."
+            "(default: %(default)s, disabled). Headers, stamps, and marginal text are filtered out."
         ),
     )
     parser.add_argument(
@@ -1386,12 +1386,12 @@ def main() -> None:
         ),
     )
     parser.add_argument(
-        "--one-gcp-fits",
+        "--disable-one-gcp-fits",
         action="store_true",
         default=False,
         help=(
-            "Attempt to georeference pages with only 1 intersection GCP using the "
-            "median scale from other pages (less reliable; disabled by default)."
+            "Disable georeferencing of pages with only 1 intersection GCP. "
+            "By default, such pages are attempted using the median scale from other pages."
         ),
     )
     parser.add_argument(
@@ -1459,7 +1459,7 @@ def main() -> None:
             min_aspect_ratio=args.min_aspect_ratio,
             edge_margin=args.edge_margin,
             force_intersection=force_intersection,
-            one_gcp_fits=args.one_gcp_fits,
+            one_gcp_fits=not args.disable_one_gcp_fits,
             debug=args.debug,
         )
         if result.success:

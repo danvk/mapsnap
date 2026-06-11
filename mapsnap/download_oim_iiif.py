@@ -56,6 +56,26 @@ def download_with_retry(
                 raise
 
 
+def download_oim_image(url: str, dest: Path) -> None:
+    """Download an OIM image, retrying with a documents↔regions URL swap on 404.
+
+    Split pages (dest filename contains '__') swap /documents/ → /regions/ on 404.
+    Unsplit pages swap /regions/ → /documents/ on 404.
+    """
+    is_split = "__" in dest.name
+    try:
+        download_with_retry(url, dest)
+    except urllib.error.HTTPError as exc:
+        if exc.code == 404 and "/documents/" in url and is_split:
+            actual_url = url.replace("/documents/", "/regions/")
+        elif exc.code == 404 and "/regions/" in url and not is_split:
+            actual_url = url.replace("/regions/", "/documents/")
+        else:
+            raise
+        print(f"    404; retrying with: {actual_url}", file=sys.stderr)
+        download_with_retry(actual_url, dest)
+
+
 def _download_unsplit_image(
     base_key: str,
     output_dir: Path,
@@ -78,7 +98,7 @@ def _download_unsplit_image(
         return
 
     print(f"    Downloading unsplit → {unsplit_path.name} ...", file=sys.stderr)
-    download_with_retry(unsplit_url, unsplit_path)
+    download_oim_image(unsplit_url, unsplit_path)
     dl_width, dl_height = jpeg_dimensions(unsplit_path)
     print(f"    Unsplit downloaded: {dl_width}×{dl_height}", file=sys.stderr)
 
@@ -122,15 +142,7 @@ def process_annotation(
 
         if not dry_run:
             print(f"    Downloading → {image_path.name} ...", file=sys.stderr)
-            try:
-                download_with_retry(image_url, image_path)
-            except urllib.error.HTTPError as exc:
-                if exc.code == 404 and "documents" in image_url and "__" in image_url:
-                    actual_url = image_url.replace("/documents/", "/regions/")
-                    print(f"    404; retrying with: {actual_url}", file=sys.stderr)
-                    download_with_retry(actual_url, image_path)
-                else:
-                    raise
+            download_oim_image(image_url, image_path)
             dl_width, dl_height = jpeg_dimensions(image_path)
             print(f"    Downloaded: {dl_width}×{dl_height}", file=sys.stderr)
 

@@ -408,7 +408,7 @@ def main() -> None:
         type=int,
         default=15,
         metavar="PX",
-        help="Minimum short side passed to the EasyOCR detector (default: 15)",
+        help="Minimum short side passed to the EasyOCR detector (default: %(default)s)",
     )
     parser.add_argument(
         "--link-threshold",
@@ -449,7 +449,7 @@ def main() -> None:
         default=1,
         metavar="N",
         help=(
-            "Number of parallel worker processes (default: 1). Each worker loads its "
+            "Number of parallel worker processes (default: %(default)s). Each worker loads its "
             "own EasyOCR reader. With GPU enabled, workers share the GPU via CUDA "
             "context switching; each worker requires ~500 MB of VRAM for model weights."
         ),
@@ -462,11 +462,11 @@ def main() -> None:
     parser.add_argument(
         "--min-long-side",
         type=int,
-        default=0,
+        default=20,
         metavar="PX",
         help=(
             "Skip recognition for CRAFT detections whose long side is below this "
-            "threshold (default: 0, no filtering). Set to match the --min-long-side "
+            "threshold (default: %(default)s). Set to match the --min-long-side "
             "used by georef_from_labels.py to avoid recognizing boxes that will be "
             "filtered downstream."
         ),
