@@ -16,9 +16,8 @@ import time
 from collections import Counter
 from pathlib import Path
 
-from mapsnap.compare_iiif_georef import source_id_to_page_key
 from mapsnap.download_oim_iiif import download_with_retry
-from mapsnap.utils import jpeg_dimensions
+from mapsnap.utils import jpeg_dimensions, source_id_to_page_key
 
 
 def canvas_to_page_key(canvas_id: str, label: str) -> str:

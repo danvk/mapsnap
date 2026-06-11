@@ -27,6 +27,8 @@ from pathlib import Path
 
 import numpy as np
 
+from mapsnap.utils import source_id_to_page_key
+
 GCP = tuple[tuple[float, float], tuple[float, float]]  # ((px, py), (lon, lat))
 EARTH_RADIUS_FT = 20_925_524.0
 
@@ -194,26 +196,9 @@ def truth_distortion(A: np.ndarray) -> tuple[float, float]:
 
 
 def angle_diff(a: float, b: float) -> float:
-    """Signed angular difference (a − b) in degrees, normalized to (−180, 180]."""
+    """Signed angular difference (a - b) in degrees, normalized to (-180, 180]."""
     d = (a - b) % 360.0
     return d - 360.0 if d > 180.0 else d
-
-
-def source_id_to_page_key(source_id: str, label: str) -> str:
-    """Extract a short page key like 'p425' from a LOC IIIF image service URL."""
-    split_suffix = ""
-    if label.endswith("]"):
-        m = re.search(r"\[(\d+)\]$", label)
-        assert m
-        split = m.group(1)
-        split_suffix = f"__{split}"
-    m = re.search(r"-(\d+)([a-zA-Z]?)(?:/info\.json)?$", source_id)
-    if m:
-        page_key = f"p{int(m.group(1))}{m.group(2)}"
-    else:
-        page_key = source_id.split("/")[-2] or source_id
-    page_key += split_suffix
-    return page_key
 
 
 def analyze_pair(truth_item: dict, gen_item: dict) -> dict:

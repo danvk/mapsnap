@@ -38,6 +38,28 @@ def jpeg_dimensions(path: Path) -> tuple[int, int]:
     raise ValueError(f"No SOF marker found in {path}")
 
 
+def source_id_to_page_key(source_id: str, label: str) -> str:
+    """Extract a short page key like 'p425' from a LOC IIIF image service URL.
+
+    Leading zeros in the page number are stripped and a 'p' prefix is added:
+      "https://...1950-0006N/info.json", ""     → "p6N"
+      "https://...1951-0425/info.json",  ""     → "p425"
+    Labels ending with "[N]" produce a split suffix:
+      "https://...1950-0156/info.json", "... [2]" → "p156__2"
+    """
+    split_suffix = ""
+    if label.endswith("]"):
+        m = re.search(r"\[(\d+)\]$", label)
+        assert m
+        split_suffix = f"__{m.group(1)}"
+    m = re.search(r"-(\d+)([a-zA-Z]?)(?:/info\.json)?$", source_id)
+    if m:
+        page_key = f"p{int(m.group(1))}{m.group(2)}"
+    else:
+        page_key = source_id.split("/")[-2] or source_id
+    return page_key + split_suffix
+
+
 def label_to_page_key(label: str) -> str | None:
     """Extract the page key from an OIM IIIF annotation label.
 
