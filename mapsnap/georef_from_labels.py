@@ -1310,30 +1310,30 @@ def main() -> None:
     parser.add_argument(
         "--min-confidence",
         type=float,
-        default=0.5,
+        default=0.15,
         metavar="THRESHOLD",
-        help="Minimum OCR confidence to accept a detection (default: 0.5)",
+        help="Minimum OCR confidence to accept a detection (default: %(default)s)",
     )
     parser.add_argument(
         "--min-long-side",
         type=float,
-        default=250.0,
+        default=45.0,
         metavar="PX",
-        help="Minimum long side of a text polygon to accept (default: 250)",
+        help="Minimum long side of a text polygon to accept (default: %(default)s)",
     )
     parser.add_argument(
         "--min-short-side",
         type=float,
-        default=60.0,
+        default=20.0,
         metavar="PX",
-        help="Minimum short side of a text polygon to accept (default: 60)",
+        help="Minimum short side of a text polygon to accept (default: %(default)s)",
     )
     parser.add_argument(
         "--min-aspect-ratio",
         type=float,
-        default=2.0,
+        default=1.75,
         metavar="RATIO",
-        help="Minimum long/short side ratio for a text polygon (default: 2.0)",
+        help="Minimum long/short side ratio for a text polygon (default: %(default)s)",
     )
     parser.add_argument(
         "--scale",
@@ -1348,11 +1348,11 @@ def main() -> None:
     parser.add_argument(
         "--edge-margin",
         type=float,
-        default=0.02,
+        default=0.0,
         metavar="FRAC",
         help=(
             "Ignore detections whose center is within this fraction of the image edge "
-            "(default: 0.02 = 2%%). Headers, stamps, and marginal text are filtered out."
+            "(default: %(default)s, disabled). Headers, stamps, and marginal text are filtered out."
         ),
     )
     parser.add_argument(
@@ -1388,10 +1388,10 @@ def main() -> None:
     parser.add_argument(
         "--one-gcp-fits",
         action="store_true",
-        default=False,
+        default=True,
         help=(
             "Attempt to georeference pages with only 1 intersection GCP using the "
-            "median scale from other pages (less reliable; disabled by default)."
+            "median scale from other pages (less reliable; enabled by default)."
         ),
     )
     parser.add_argument(
