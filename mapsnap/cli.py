@@ -25,6 +25,10 @@ SUBCOMMANDS: dict[str, tuple[str, str]] = {
         "mapsnap.pipeline_oim",
         "Full OIM pipeline: download, OCR, georeference, IIIF, compare",
     ),
+    "run-loc": (
+        "mapsnap.pipeline_loc",
+        "Full LOC pipeline: download, OCR, georeference, IIIF",
+    ),
     "get-osm": ("mapsnap.download_osm", "Download street data from OSM"),
     "osm-to-geojson": ("mapsnap.osm_to_centerlines", "Convert OSM data to GeoJSON."),
     "scale": ("mapsnap.scale_images", "Shrink images by a uniform amount."),
