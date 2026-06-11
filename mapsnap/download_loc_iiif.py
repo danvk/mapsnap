@@ -28,7 +28,9 @@ def canvas_to_page_key(canvas_id: str, label: str) -> str:
     (e.g. "covr", "titl", "ind1").
     """
     last_segment = canvas_id.split(":")[-1]
-    if re.search(r"-\d", last_segment):
+    if re.search(r"-\d", last_segment) or re.match(
+        r"sb\d", last_segment, re.IGNORECASE
+    ):
         return source_id_to_page_key(canvas_id, label)
     return last_segment
 
