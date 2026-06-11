@@ -132,6 +132,33 @@ def test_generate_west_street():
     assert "W ST" in vocab
 
 
+def test_generate_direction_suffix_numbered():
+    # DC-style names like "EIGHTH STREET NORTHEAST": quadrant suffix omitted on map labels.
+    vocab = set(generate_vocab_strings({"EIGHTH STREET NORTHEAST"}))
+    assert "EIGHTH" in vocab
+    assert "8TH" in vocab
+    assert "8 TH" in vocab
+    assert "EIGHTH ST" in vocab
+    assert "EIGHTH STREET" in vocab
+    # Full form with quadrant suffix is NOT required (map labels never show it).
+
+
+def test_generate_direction_suffix_lettered():
+    # "A STREET NORTHEAST": map label is just "A" or "A ST".
+    vocab = set(generate_vocab_strings({"A STREET NORTHEAST"}))
+    assert "A" in vocab
+    assert "A ST" in vocab
+    assert "A STREET" in vocab
+
+
+def test_generate_direction_suffix_avenue():
+    # "MASSACHUSETTS AVENUE NORTHEAST": labels omit quadrant.
+    vocab = set(generate_vocab_strings({"MASSACHUSETTS AVENUE NORTHEAST"}))
+    assert "MASSACHUSETTS" in vocab
+    assert "MASSACHUSETTS AVE" in vocab
+    assert "MASSACHUSETTS AVENUE" in vocab
+
+
 def test_generate_includes_hint_strings():
     # AVENUE- and STREET-family hints appear in every vocab regardless of streets present.
     vocab = set(generate_vocab_strings({"MAGAZINE STREET"}))

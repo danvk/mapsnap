@@ -106,6 +106,12 @@ def generate_vocab_strings(normalized_streets: set[str]) -> list[str]:
         if not body:
             continue
 
+        # Strip a trailing direction word (e.g. "NORTHEAST" in "EIGHTH STREET NORTHEAST").
+        # DC-style centerline names carry the quadrant as a suffix, but map labels omit
+        # it; stripping here lets the trie emit "EIGHTH", "8TH", "EIGHTH ST", etc.
+        if len(body) >= 2 and body[-1] in _DIR_TO_ABBREVS:
+            body = body[:-1]
+
         # --- Determine street-type suffix variants ---
         last = body[-1]
         if last in _TYPE_TO_ABBREVS:

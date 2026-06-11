@@ -440,6 +440,19 @@ def build_block_index(geojson: dict) -> dict[str, list[Block]]:
             # Same list object as the full-name entry; see comment above.
             index[stripped] = index[full_names[0]]
 
+    # Build aliases with direction suffix stripped for unambiguous cases.
+    # e.g. "MAIN STREET NORTHEAST" → also index under "MAIN STREET" (then "MAIN" via
+    # bare-name alias) when only one direction of that street exists.
+    # Iterating list(index.keys()) captures both original keys and aliases added above.
+    dir_suffix_stripped_to_full: dict[str, list[str]] = defaultdict(list)
+    for key in list(index.keys()):
+        parts = key.rsplit(" ", 1)
+        if len(parts) == 2 and parts[1] in DIRECTION_WORDS and parts[0] not in index:
+            dir_suffix_stripped_to_full[parts[0]].append(key)
+    for stripped, full_names in dir_suffix_stripped_to_full.items():
+        if len(full_names) == 1:
+            index[stripped] = index[full_names[0]]
+
     # Build aliases with leading type word stripped for unambiguous cases.
     # e.g. "AVENUE X" → also index under "X".
     # Iterating list(index.keys()) captures all aliases added so far.
