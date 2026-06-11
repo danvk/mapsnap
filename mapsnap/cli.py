@@ -17,6 +17,18 @@ SUBCOMMANDS: dict[str, tuple[str, str]] = {
         "mapsnap.compare_iiif_georef",
         "Compare human vs computer IIIF georeferencing",
     ),
+    "get-osm": ("mapsnap.download_osm", "Download street data from OSM"),
+    "osm-to-geojson": ("mapsnap.osm_to_centerlines", "Convert OSM data to GeoJSON."),
+    "scale": ("mapsnap.scale_images", "Shrink images by a uniform amount."),
+    "download-oim": (
+        "mapsnap.download_oim_iiif",
+        "Fetch all images for a Sanborn volume from OldInsuranceMaps.net",
+    ),
+    "download-loc": (
+        "mapsnap.download_loc_iiif",
+        "Fetch all images for a Sanborn volume from the Library of Congress (loc.gov)",
+    ),
+    "split": ("mapsnap.split_twopage", "Split two-page images in half"),
 }
 
 _cmd_width = max(len(cmd) for cmd in SUBCOMMANDS)
