@@ -6,6 +6,8 @@ import subprocess
 import sys
 from pathlib import Path
 
+from mapsnap.utils import run_cmd
+
 
 def find_centerlines(dir_path: Path) -> Path:
     """Return the centerlines GeoJSON, checking dir then parent dir."""
@@ -37,14 +39,6 @@ def find_ref_iiif(dir_path: Path) -> Path | None:
     if len(manifests) > 1:
         sys.exit(f"Found multiple manifest.json files in {dir_path}")
     return Path(manifests[0]) if manifests else None
-
-
-def run_cmd(cmd: list[str]) -> None:
-    """Print and run a command, exiting with its return code on failure."""
-    print("+ " + " ".join(cmd), flush=True)
-    result = subprocess.run(cmd)
-    if result.returncode != 0:
-        sys.exit(result.returncode)
 
 
 def main() -> None:

@@ -2,7 +2,17 @@
 
 import re
 import struct
+import subprocess
+import sys
 from pathlib import Path
+
+
+def run_cmd(cmd: list[str]) -> None:
+    """Print and run a subprocess command, exiting with its return code on failure."""
+    print("+ " + " ".join(cmd), flush=True)
+    result = subprocess.run(cmd)
+    if result.returncode != 0:
+        sys.exit(result.returncode)
 
 
 def jpeg_dimensions(path: Path) -> tuple[int, int]:
