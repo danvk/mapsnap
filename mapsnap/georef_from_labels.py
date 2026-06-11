@@ -1386,12 +1386,12 @@ def main() -> None:
         ),
     )
     parser.add_argument(
-        "--one-gcp-fits",
+        "--disable-one-gcp-fits",
         action="store_true",
-        default=True,
+        default=False,
         help=(
-            "Attempt to georeference pages with only 1 intersection GCP using the "
-            "median scale from other pages (less reliable; enabled by default)."
+            "Disable georeferencing of pages with only 1 intersection GCP. "
+            "By default, such pages are attempted using the median scale from other pages."
         ),
     )
     parser.add_argument(
@@ -1459,7 +1459,7 @@ def main() -> None:
             min_aspect_ratio=args.min_aspect_ratio,
             edge_margin=args.edge_margin,
             force_intersection=force_intersection,
-            one_gcp_fits=args.one_gcp_fits,
+            one_gcp_fits=not args.disable_one_gcp_fits,
             debug=args.debug,
         )
         if result.success:

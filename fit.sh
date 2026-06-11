@@ -27,8 +27,7 @@ uv run mapsnap/georef_from_labels.py $input_images \
     --min-short-side 20 \
     --edge-margin 0 \
     --min-confidence 0.15 \
-    --min-aspect-ratio 1.75 \
-    --one-gcp-fits
+    --min-aspect-ratio 1.75
 
 if [ -e $dir/main.iiif.json ]; then
     ref_iiif=$dir/main.iiif.json
