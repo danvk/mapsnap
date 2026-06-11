@@ -1,13 +1,10 @@
 #!/usr/bin/env bash
 # This runs the full pipeline on a map from the Library of Congress (LoC).
-# Downloading the manifest and imagery is time-consuming and needs babysitting,
-# so this script assumes you've already done that.
-# The directory should contain a manifest.json file, and images named p*.raw.jpg.
-# - downloading images from OIM and streets from OSM
-# - running OCR on the images
-# - georeferencing the images
-# - making an IIIF file
-# - comparing the generated IIIF against OIM's
+# This script assumes you've already downloaded the manifest.json file to <dir>/manifest.json.
+# - Downloads images from OIM and streets from OSM
+# - Runs OCR on the images
+# - Georeferences the images
+# - Makes an IIIF file
 
 set -o errexit
 set -x
