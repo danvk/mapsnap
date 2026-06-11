@@ -94,8 +94,6 @@ def test_source_id_chicago():
 
 
 def test_source_id_chicago_non_sheet():
-    # Non-sheet pages (cover, title, index) have no digit after the final hyphen
-    # and fall through to the split("/")[-2] fallback, which returns "iiif".
-    assert source_id_to_page_key(f"{_CHI}:01790_01N_1950-covr", "") == "iiif"
-    assert source_id_to_page_key(f"{_CHI}:01790_01N_1950-titl", "") == "iiif"
-    assert source_id_to_page_key(f"{_CHI}:01790_01N_1950-ind1", "") == "iiif"
+    assert source_id_to_page_key(f"{_CHI}:01790_01N_1950-covr", "") == "covr"
+    assert source_id_to_page_key(f"{_CHI}:01790_01N_1950-titl", "") == "titl"
+    assert source_id_to_page_key(f"{_CHI}:01790_01N_1950-ind1", "") == "ind1"

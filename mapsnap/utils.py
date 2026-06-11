@@ -71,7 +71,10 @@ def source_id_to_page_key(source_id: str, label: str) -> str:
     if m:
         page_key = f"p{int(m.group(1))}{m.group(2)}"
     else:
-        page_key = source_id.split("/")[-2] or source_id
+        # Fall back to the suffix after the last hyphen in the last colon-segment
+        # (e.g. "...01790_01N_1950-covr" → "covr", "...01790_01N_1950-ind1" → "ind1").
+        last_segment = source_id.removesuffix("/info.json").split(":")[-1]
+        page_key = last_segment.rsplit("-", 1)[-1]
     return page_key + split_suffix
 
 
