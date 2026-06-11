@@ -4,6 +4,18 @@ import importlib
 import sys
 
 SUBCOMMANDS: dict[str, tuple[str, str]] = {
+    "run-loc": (
+        "mapsnap.pipeline_loc",
+        "Full LOC pipeline: download, OCR, georeference, IIIF",
+    ),
+    "run-oim": (
+        "mapsnap.pipeline_oim",
+        "Full OIM pipeline: download, OCR, georeference, IIIF, compare",
+    ),
+    "fit": (
+        "mapsnap.fit",
+        "Georeference, build IIIF, and optionally compare (fast pipeline)",
+    ),
     "ocr": ("mapsnap.detect_text", "Detect text regions in map images"),
     "georef": (
         "mapsnap.georef_from_labels",
@@ -16,18 +28,6 @@ SUBCOMMANDS: dict[str, tuple[str, str]] = {
     "compare": (
         "mapsnap.compare_iiif_georef",
         "Compare human vs computer IIIF georeferencing",
-    ),
-    "fit": (
-        "mapsnap.fit",
-        "Georeference, build IIIF, and compare (full pipeline)",
-    ),
-    "run-oim": (
-        "mapsnap.pipeline_oim",
-        "Full OIM pipeline: download, OCR, georeference, IIIF, compare",
-    ),
-    "run-loc": (
-        "mapsnap.pipeline_loc",
-        "Full LOC pipeline: download, OCR, georeference, IIIF",
     ),
     "get-osm": ("mapsnap.download_osm", "Download street data from OSM"),
     "osm-to-geojson": ("mapsnap.osm_to_centerlines", "Convert OSM data to GeoJSON."),
