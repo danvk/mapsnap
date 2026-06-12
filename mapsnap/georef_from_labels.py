@@ -792,6 +792,19 @@ def promote_avenue_letters(
             if det_bucket != hint_bucket:
                 continue
 
+            # dir_pix is mod π, so angle=90 and angle=270 share the same bucket.
+            # Require the EasyOCR `angle` to also match so a box read in the
+            # opposite direction (e.g. angle=90 vs angle=270) is not promoted.
+            # This uses the orientation of the "ST" hint to distinguish "M" from "W".
+            hint_angle = hint.get("angle")
+            det_angle = det.get("angle")
+            if (
+                hint_angle is not None
+                and det_angle is not None
+                and hint_angle != det_angle
+            ):
+                continue
+
             det_poly = det["polygon"]
             det_cx = sum(p[0] for p in det_poly) / 4.0
             det_cy = sum(p[1] for p in det_poly) / 4.0
