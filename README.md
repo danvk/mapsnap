@@ -129,6 +129,10 @@ The solution to this is a **mask**. Each image in the IIIF file has a clipping p
 
 Mapsnap automatically generates clipping polygons for each image using the underlying street grid. The idea is that each "block" should only be represented by one page from the Sanborn volume. We choose the page that has the most color for that block. This sometimes generates more complex polygons than a human would, but it tends to work well in practice, at least in areas where the street grid hasn't changed much since the map was made. See [PR #31] for details.
 
+The end result is a IIIF Georeference Extension for a full volume of images, which you can view on Allmaps:
+
+![Map showing many georeferenced and masked Sanborn images from Brooklyn, NY](/images/brooklyn-iiif.jpg)
+
 [multimask]: https://docs.oldinsurancemaps.net/guides/trimming/
 [PR #31]: https://github.com/danvk/mapsnap/pull/31
 
