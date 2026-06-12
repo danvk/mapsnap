@@ -4,6 +4,18 @@ The goal of Mapsnap is to automatically georeference Sanborn Insurance Maps.
 
 If you'd like to georeference a map using Mapsnap, read about [How it Works](#how-it-works) then head down to the [Pipeline](#pipeline) section.
 
+TL;DR:
+
+```bash
+$ uv tool install mapsnap-cli
+$ mkdir mymap
+# (download manifest.json for a Sanborn map from loc.gov into mymap dir)
+# (Find a relation on OSM that contains the map area, e.g. its city or county.)
+$ mapsnap run-loc mymap r1234567
+```
+
+After a few minutes, depending on the number of images in the Sanborn volume, you'll get a IIIF Georeference AnnotationPage that you can view on [Allmaps][brooklyn1-iiif].
+
 ## Performance
 
 Test data comes from hand-geocoding by volunteers on OldInsuranceMaps.net:
