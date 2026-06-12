@@ -3,8 +3,8 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [project]
-name = "mapsnap"
-version = "0.1.0"
+name = "mapsnap-cli"
+version = "1.1.0"
 description = "Georeferencing tools for historical maps"
 readme = "README.md"
 requires-python = ">=3.12,<4.0"
@@ -19,6 +19,9 @@ dependencies = [
 
 [project.scripts]
 mapsnap = "mapsnap.cli:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["mapsnap"]
 
 [tool.ruff]
 line-length = 88
