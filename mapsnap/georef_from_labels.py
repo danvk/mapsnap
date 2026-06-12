@@ -952,9 +952,12 @@ def process_image(
     hint_detections = [d for d in all_detections if d.get("hint")]
     all_detections = [d for d in all_detections if not d.get("hint")]
     if hint_detections:
+        confident_hints = [
+            d for d in hint_detections if d.get("confidence", 0) >= min_confidence
+        ]
         print(
-            f"Hint detections ({len(hint_detections)}): "
-            + ", ".join(d["text"] for d in hint_detections),
+            f"Hint detections ({len(confident_hints)}): "
+            + ", ".join(d["text"] for d in confident_hints),
             file=sys.stderr,
         )
     normalized_streets = set(block_index.keys())
