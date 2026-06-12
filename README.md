@@ -254,6 +254,8 @@ There are cases where this breaks down, though. If the streets in a large area h
 
 If the streets have all been renamed, this can also throw off georeferencing. For example, the borough of Queens in New York City systematically renamed all its streets in 1911. Mapsnap does well on 1945 Queens maps, but it does terribly on the [1898 maps][queens1898].
 
+Mapsnap also has trouble in places where the street names are all very short, for example "AVENUE T" or "K ST" or "1ST ST". This is because the underlying OCR library, EasyOCR, works better with longer runs of text. The orientation of  a single letter like O, X or M/W is ambiguous. Washington, D.C. is a nightmare scenario for Mapsnap, and it does pretty poorly there.
+
 [queens1898]: https://www.loc.gov/item/sanborn06198_001
 
 ### How I developed this model

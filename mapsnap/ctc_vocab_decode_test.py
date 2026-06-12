@@ -132,6 +132,33 @@ def test_generate_west_street():
     assert "W ST" in vocab
 
 
+def test_generate_direction_suffix_numbered():
+    # DC-style names like "EIGHTH STREET NORTHEAST": quadrant suffix omitted on map labels.
+    vocab = set(generate_vocab_strings({"EIGHTH STREET NORTHEAST"}))
+    assert "EIGHTH" in vocab
+    assert "8TH" in vocab
+    assert "8 TH" in vocab
+    assert "EIGHTH ST" in vocab
+    assert "EIGHTH STREET" in vocab
+    # Full form with quadrant suffix is NOT required (map labels never show it).
+
+
+def test_generate_direction_suffix_lettered():
+    # "A STREET NORTHEAST": map label is just "A" or "A ST".
+    vocab = set(generate_vocab_strings({"A STREET NORTHEAST"}))
+    assert "A" in vocab
+    assert "A ST" in vocab
+    assert "A STREET" in vocab
+
+
+def test_generate_direction_suffix_avenue():
+    # "MASSACHUSETTS AVENUE NORTHEAST": labels omit quadrant.
+    vocab = set(generate_vocab_strings({"MASSACHUSETTS AVENUE NORTHEAST"}))
+    assert "MASSACHUSETTS" in vocab
+    assert "MASSACHUSETTS AVE" in vocab
+    assert "MASSACHUSETTS AVENUE" in vocab
+
+
 def test_generate_includes_hint_strings():
     # AVENUE- and STREET-family hints appear in every vocab regardless of streets present.
     vocab = set(generate_vocab_strings({"MAGAZINE STREET"}))
@@ -140,7 +167,7 @@ def test_generate_includes_hint_strings():
 
 
 def test_hint_strings_constant():
-    # HINT_STRINGS contains AVENUE and STREET families only.
+    # HINT_STRINGS contains AVENUE/STREET families and quadrant abbreviations.
     assert "AVENUE" in HINT_STRINGS
     assert "AVE" in HINT_STRINGS
     assert "AV" in HINT_STRINGS
@@ -150,7 +177,13 @@ def test_hint_strings_constant():
     assert "ST" in HINT_STRINGS
     assert "ST." in HINT_STRINGS
     assert "S T" in HINT_STRINGS
-    # Other type words and direction words are no longer hints.
+    # Quadrant abbreviations in all four forms.
+    for q in ("NW", "NE", "SE", "SW"):
+        assert q in HINT_STRINGS, f"{q} missing"
+        assert " ".join(q) in HINT_STRINGS, f"{' '.join(q)} missing"
+        assert f"{q[0]}.{q[1]}." in HINT_STRINGS, f"{q[0]}.{q[1]}. missing"
+        assert f"{q[0]}. {q[1]}." in HINT_STRINGS, f"{q[0]}. {q[1]}. missing"
+    # Other type words and full direction words remain non-hints.
     assert "COURT" not in HINT_STRINGS
     assert "NORTH" not in HINT_STRINGS
     assert "N." not in HINT_STRINGS

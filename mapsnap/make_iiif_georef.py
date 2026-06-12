@@ -158,10 +158,21 @@ def _service_url_to_page_key(url: str) -> str | None:
       "...:01790_01N_1950-0103W"           → "p103w"
       "...:05791_02_1939-0027s"            → "p27s"
 
+    Sanborn sb-format (e.g. Washington DC 1916):
+      "...:sb001250"                        → "p125"
+      "...:sb00154s"                        → "p154s"
+
     Non-sheet URLs (covers, indexes: "...-covr", "...-titl", etc.) start with a
     letter after the "-" and return None.
     """
     url = url.removesuffix("/info.json")
+    # Sanborn sb-format: service:...:sb{5-digit page}{suffix char}
+    m = re.search(r":sb(\d{5})([a-z0-9])$", url, re.IGNORECASE)
+    if m:
+        page_num = int(m.group(1))
+        suffix_char = m.group(2).lower()
+        suffix = "" if suffix_char == "0" else suffix_char
+        return f"p{page_num}{suffix}"
     m = re.search(r"-0*(\d+)([a-z]*)$", url, re.IGNORECASE)
     if m is None:
         return None
