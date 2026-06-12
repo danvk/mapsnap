@@ -167,7 +167,7 @@ def test_generate_includes_hint_strings():
 
 
 def test_hint_strings_constant():
-    # HINT_STRINGS contains AVENUE and STREET families only.
+    # HINT_STRINGS contains AVENUE/STREET families and quadrant abbreviations.
     assert "AVENUE" in HINT_STRINGS
     assert "AVE" in HINT_STRINGS
     assert "AV" in HINT_STRINGS
@@ -177,7 +177,13 @@ def test_hint_strings_constant():
     assert "ST" in HINT_STRINGS
     assert "ST." in HINT_STRINGS
     assert "S T" in HINT_STRINGS
-    # Other type words and direction words are no longer hints.
+    # Quadrant abbreviations in all four forms.
+    for q in ("NW", "NE", "SE", "SW"):
+        assert q in HINT_STRINGS, f"{q} missing"
+        assert " ".join(q) in HINT_STRINGS, f"{' '.join(q)} missing"
+        assert f"{q[0]}.{q[1]}." in HINT_STRINGS, f"{q[0]}.{q[1]}. missing"
+        assert f"{q[0]}. {q[1]}." in HINT_STRINGS, f"{q[0]}. {q[1]}. missing"
+    # Other type words and full direction words remain non-hints.
     assert "COURT" not in HINT_STRINGS
     assert "NORTH" not in HINT_STRINGS
     assert "N." not in HINT_STRINGS

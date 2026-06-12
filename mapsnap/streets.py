@@ -64,6 +64,11 @@ _LETTERED_TYPE_ABBREVS: frozenset[str] = frozenset(
     k for k, v in STREET_ABBREVS.items() if v in ("AVENUE", "STREET")
 )
 
+# Two-letter quadrant abbreviations that appear as standalone labels on Sanborn maps
+# (e.g. "N.W." printed at a street corner). All four forms per quadrant are included
+# so the CTC decoder can output them instead of falling back to a look-alike letter.
+_QUADRANT_ABBREVS: frozenset[str] = frozenset({"NE", "NW", "SE", "SW"})
+
 # All hint string forms: full names, abbreviations, dotted, and spaced variants.
 # Used by detect_text.py to mark detections as hints and by georef_from_labels.py
 # to identify which hint detections are type-word anchors for promote_avenue_letters.
@@ -73,6 +78,11 @@ HINT_STRINGS: frozenset[str] = frozenset(
     | {a + "." for a in _LETTERED_TYPE_ABBREVS}  # AVE., AV., ST.
     # Spaced forms: Sanborn typography sometimes gaps characters (e.g. "A V", "S T").
     | {" ".join(a) for a in _LETTERED_TYPE_ABBREVS if len(a) > 1}  # A V, A V E, S T
+    # Quadrant labels: NW / N W / N.W. / N. W.  (and NE, SE, SW equivalents).
+    | _QUADRANT_ABBREVS  # NE, NW, SE, SW
+    | {" ".join(q) for q in _QUADRANT_ABBREVS}  # N E, N W, S E, S W
+    | {f"{q[0]}.{q[1]}." for q in _QUADRANT_ABBREVS}  # N.E., N.W., S.E., S.W.
+    | {f"{q[0]}. {q[1]}." for q in _QUADRANT_ABBREVS}  # N. E., N. W., S. E., S. W.
 )
 
 # Irregular ordinal words for 1–19.
