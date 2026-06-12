@@ -51,13 +51,15 @@ def main() -> None:
     parser.add_argument(
         "tag", metavar="TAG", help="Tag for output files (e.g. 'init' or YYYY-MM-DD)"
     )
-    args = parser.parse_args()
+    args, georef_extra = parser.parse_known_args()
 
     dir_path = Path(args.dir)
     centerlines = find_centerlines(dir_path)
     images = find_input_images(dir_path)
 
-    run_cmd(["mapsnap", "georef", *images, "--centerlines", str(centerlines)])
+    run_cmd(
+        ["mapsnap", "georef", *images, "--centerlines", str(centerlines), *georef_extra]
+    )
 
     ref_iiif = find_ref_iiif(dir_path)
     if ref_iiif is None:
