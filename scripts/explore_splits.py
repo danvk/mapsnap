@@ -1,12 +1,22 @@
 #!/usr/bin/env python3
 """Exploration script: validate LSD+graph approach for Sanborn split-page detection.
 
-For each image in data/splits/, runs the pipeline and saves per-stage outputs:
+For each image in data/splits/, runs the pipeline and saves per-stage outputs. The
+front-end is selected by DETECTION_METHOD.
+
+Common:
   <name>.binary.png   - binarized ink mask (dark = ink, white = paper; 50px border removed)
+  <name>.filtered.png - image with filtered + merged divider segments
+  <name>.panels.png   - image with detected panels overlaid in color
+
+"skeleton" front-end (medial axis):
+  <name>.closed.png   - ink mask after a light morphological close
+  <name>.skeleton.png - thickness-filtered medial-axis centerlines overlaid in red
+  <name>.segments.png - image with raw Hough segments (green=passes filter, blue=does not)
+
+"downscale" front-end (erode + LSD):
   <name>.mask.png     - thick-features mask (binary after erosion)
   <name>.lsd.png      - image with raw LSD segments (green=passes filter, blue=does not)
-  <name>.filtered.png - image with filtered + merged segments
-  <name>.panels.png   - image with detected panels overlaid in color
 
 Run from the project root:
   uv run python scripts/explore_splits.py
@@ -20,18 +30,41 @@ import numpy as np
 from PIL import Image, ImageDraw
 from shapely.geometry import LineString, Point
 from shapely.ops import polygonize, unary_union
+from skimage.morphology import medial_axis
 
 SPLITS_DIR = Path("data/splits")
 OUTPUT_DIR = Path("data/splits_output")
+
+# Front-end that turns the binary ink mask into candidate divider segments:
+#   "skeleton"  - light close → medial-axis centerlines → thickness filter → Hough
+#   "downscale" - erode → shrink → LSD (the original axis-aligned-friendly approach)
+#   "union"     - both of the above, concatenated; merge_collinear then collapses the
+#                 duplicate detections of each divider while filling each other's gaps
+DETECTION_METHOD = "union"
 
 # Tunable pipeline parameters.
 BORDER_PX = 50  # pixels to remove from each edge before processing (dark scan border)
 COLOR_SPREAD_MAX = 40  # max RGB channel spread (max−min) to count a pixel as black ink;
 # colored pixels (brick, vegetation, water tints) are never part of a divider
+COLOR_PROXIMITY_PX = 0  # erase ink within this many px of a colored pixel (0 = off):
+# building outlines hug their colored fills. Cleans building edges nicely where buildings
+# are set back from dividers (e.g. nola-1896-p101), but where dividers abut colored
+# buildings (washington-p244) it erases the dividers too — a net regression, so off by
+# default. Set to ~5 to re-enable.
 EROSION_KERNEL_PX = (
     5  # thins map linework; the pre-LSD downscale suppresses the rest, so a light
     # kernel here preserves thinner black dividers (e.g. on color scans)
 )
+CLOSE_KERNEL_PX = 3  # light close to fuse a divider's broken core into one solid blob;
+# a heavier close would fuse neighbouring map features and erase the thick/thin distinction
+SKELETON_MIN_THICK_PX = 6.0  # keep medial-axis centerlines of features at least this
+# thick; well above the ~2px map-linework median but low enough to retain thin dividers
+# (9px dropped too many; 6px is the sweet spot across the test set)
+HOUGH_THRESHOLD = 40  # min Hough accumulator votes for a line
+HOUGH_MIN_LEN_FRAC = (
+    0.10  # min Hough segment length as fraction of shorter page dimension
+)
+HOUGH_MAX_GAP_PX = 30  # max gap (px) Hough will bridge along a line
 LSD_DOWNSCALE = 0.2  # shrink mask before LSD so each thick divider collapses to a
 # single thin line — LSD then detects the divider once, down its centerline, instead
 # of detecting both of its edges as two parallel lines.
@@ -93,13 +126,35 @@ def binarize(rgb: np.ndarray, gray: np.ndarray) -> np.ndarray:
 
     Otsu on luminance selects dark pixels, then a chroma gate drops any that are colored.
     Dividers are always black, so colored map content (brick, vegetation, water tints) —
-    which can be dark enough to pass an Otsu luminance threshold — is excluded. For
-    grayscale scans the chroma gate is a no-op, matching plain Otsu.
+    which can be dark enough to pass an Otsu luminance threshold — is excluded. Finally,
+    ink near colored pixels is erased (see suppress_near_color). For grayscale scans both
+    color steps are no-ops, matching plain Otsu.
     """
     _, dark = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY_INV | cv2.THRESH_OTSU)
     spread = rgb.max(axis=2).astype(np.int16) - rgb.min(axis=2).astype(np.int16)
     achromatic = (spread <= COLOR_SPREAD_MAX).astype(np.uint8) * 255
-    return cv2.bitwise_and(dark, achromatic)
+    ink = cv2.bitwise_and(dark, achromatic)
+    return suppress_near_color(ink, spread)
+
+
+def suppress_near_color(
+    ink: np.ndarray, spread: np.ndarray, proximity_px: int = COLOR_PROXIMITY_PX
+) -> np.ndarray:
+    """Erase ink pixels within proximity_px of a colored pixel.
+
+    Building outlines run right alongside their colored fills (brick red, frame yellow),
+    while black dividers stay clear of color. Dilating the colored-pixel mask and clearing
+    ink inside it removes building edges and other content hugging color, leaving dividers.
+    `spread` is the per-pixel RGB channel spread (max−min) already computed by binarize.
+    """
+    if proximity_px <= 0:
+        return ink
+    colored = (spread > COLOR_SPREAD_MAX).astype(np.uint8)
+    ksize = 2 * proximity_px + 1
+    dilated = cv2.dilate(colored, np.ones((ksize, ksize), np.uint8))
+    out = ink.copy()
+    out[dilated > 0] = 0
+    return out
 
 
 def compute_thick_mask(
@@ -131,6 +186,62 @@ def run_lsd(
     if result[0] is None:
         return np.zeros((0, 4), dtype=float), np.zeros(0, dtype=float)
     return result[0][:, 0, :] / downscale, result[1][:, 0]
+
+
+def morphological_close(
+    binary: np.ndarray, kernel_px: int = CLOSE_KERNEL_PX
+) -> np.ndarray:
+    """Close small gaps so a divider's broken/speckled core becomes one solid blob.
+
+    A light close lets the medial axis measure the divider's true thickness; a heavy close
+    would fuse neighbouring map features and destroy the thick/thin distinction.
+    """
+    kernel = np.ones((kernel_px, kernel_px), np.uint8)
+    return cv2.morphologyEx(binary, cv2.MORPH_CLOSE, kernel)
+
+
+def thick_skeleton(
+    closed: np.ndarray, min_thickness_px: float = SKELETON_MIN_THICK_PX
+) -> np.ndarray:
+    """Return medial-axis centerlines of features at least min_thickness_px wide.
+
+    medial_axis returns the 1px skeleton plus, at each skeleton pixel, the distance to the
+    nearest background pixel — the local half-thickness. Keeping pixels whose full thickness
+    (2×distance) clears the threshold isolates thick divider centerlines from thin map
+    linework. This is the thick/thin discrimination that erosion provides in the downscale
+    front-end, but applied after skeletonization so it is orientation-independent (a steep
+    diagonal collapses to a single centerline instead of two parallel edges).
+
+    Returns a uint8 image (255 = kept skeleton pixel, 0 elsewhere).
+    """
+    # Seed the RNG: medial_axis breaks ties between equally-removable pixels randomly,
+    # so without a fixed seed the skeleton (and thus the panel result) varies run to run.
+    skeleton, distance = medial_axis(closed > 0, return_distance=True, rng=0)
+    thick = (2.0 * distance >= min_thickness_px) & skeleton
+    return (thick * 255).astype(np.uint8)
+
+
+def run_hough(skeleton_img: np.ndarray, image_h: int, image_w: int) -> np.ndarray:
+    """Vectorize a 1px skeleton into line segments via the probabilistic Hough transform.
+
+    Hough connects collinear skeleton pixels into segments and tolerates small gaps, which
+    suits a thin centerline image. (LSD is an edge detector and shatters a skeleton into
+    many fragments, so it is not used here.)
+
+    Returns lines with shape (N, 4); columns are [x1, y1, x2, y2].
+    """
+    min_length = int(HOUGH_MIN_LEN_FRAC * min(image_h, image_w))
+    lines = cv2.HoughLinesP(
+        skeleton_img,
+        rho=1,
+        theta=np.pi / 180,
+        threshold=HOUGH_THRESHOLD,
+        minLineLength=min_length,
+        maxLineGap=HOUGH_MAX_GAP_PX,
+    )
+    if lines is None:
+        return np.zeros((0, 4), dtype=float)
+    return lines[:, 0, :].astype(float)
 
 
 def filter_segments(lines: np.ndarray, image_h: int, image_w: int) -> np.ndarray:
@@ -558,6 +669,13 @@ def draw_lsd_segments(
     return out
 
 
+def draw_skeleton(rgb: np.ndarray, skeleton_img: np.ndarray) -> np.ndarray:
+    """Overlay a thickness-filtered skeleton on rgb in red for inspection."""
+    out = rgb.copy()
+    out[skeleton_img > 0] = (220, 30, 30)
+    return out
+
+
 def draw_merged_segments(
     rgb: np.ndarray,
     segments: list[tuple[float, float, float, float]],
@@ -586,6 +704,43 @@ def image_stem(image_path: Path) -> str:
     return image_path.stem
 
 
+def detect_downscale(binary: np.ndarray, rgb: np.ndarray, stem: str) -> np.ndarray:
+    """Downscale front-end: erode → shrink → LSD. Saves .mask.png and .lsd.png.
+
+    Returns raw candidate segments, shape (N, 4) with columns [x1, y1, x2, y2].
+    """
+    h, w = binary.shape
+    mask = compute_thick_mask(binary)
+    Image.fromarray(mask).save(OUTPUT_DIR / f"{stem}.mask.png")
+    lines, _ = run_lsd(mask)
+    print(f"  LSD: {len(lines)} raw segments")
+    Image.fromarray(draw_lsd_segments(rgb, lines, h, w)).save(
+        OUTPUT_DIR / f"{stem}.lsd.png"
+    )
+    return lines
+
+
+def detect_skeleton(binary: np.ndarray, rgb: np.ndarray, stem: str) -> np.ndarray:
+    """Skeleton front-end: close → medial-axis thickness filter → Hough.
+
+    Saves .closed.png (closed ink mask), .skeleton.png (kept centerlines overlaid in red),
+    and .segments.png (raw Hough segments). Returns segments, shape (N, 4) [x1, y1, x2, y2].
+    """
+    h, w = binary.shape
+    closed = morphological_close(binary)
+    Image.fromarray(closed).save(OUTPUT_DIR / f"{stem}.closed.png")
+    skeleton_img = thick_skeleton(closed)
+    Image.fromarray(draw_skeleton(rgb, skeleton_img)).save(
+        OUTPUT_DIR / f"{stem}.skeleton.png"
+    )
+    lines = run_hough(skeleton_img, h, w)
+    print(f"  Hough: {len(lines)} raw segments")
+    Image.fromarray(draw_lsd_segments(rgb, lines, h, w)).save(
+        OUTPUT_DIR / f"{stem}.segments.png"
+    )
+    return lines
+
+
 def process_image(image_path: Path) -> None:
     """Run the full pipeline on one image and save per-stage output images."""
     stem = image_stem(image_path)
@@ -598,15 +753,15 @@ def process_image(image_path: Path) -> None:
     binary = binarize(rgb, gray)
     Image.fromarray(binary).save(OUTPUT_DIR / f"{stem}.binary.png")
 
-    mask = compute_thick_mask(binary)
-    Image.fromarray(mask).save(OUTPUT_DIR / f"{stem}.mask.png")
-
-    # Shrink the mask before LSD so each thick divider collapses to a single thin line.
-    lines, widths = run_lsd(mask)
-    print(f"  LSD: {len(lines)} raw segments")
-    Image.fromarray(draw_lsd_segments(rgb, lines, h, w)).save(
-        OUTPUT_DIR / f"{stem}.lsd.png"
-    )
+    if DETECTION_METHOD == "skeleton":
+        lines = detect_skeleton(binary, rgb, stem)
+    elif DETECTION_METHOD == "downscale":
+        lines = detect_downscale(binary, rgb, stem)
+    else:  # union: concatenate both front-ends' raw segments
+        lines = np.vstack(
+            [detect_downscale(binary, rgb, stem), detect_skeleton(binary, rgb, stem)]
+        )
+        print(f"  Union: {len(lines)} raw segments")
 
     filtered = filter_segments(lines, h, w)
     print(f"  Filtered (length): {len(filtered)} segments")
@@ -614,11 +769,11 @@ def process_image(image_path: Path) -> None:
     gap_tol = MERGE_GAP_FRAC * min(h, w)
     merged = merge_collinear(filtered, gap_tol)
     long_segs = keep_long_segments(merged, h, w)
-    skeleton = keep_connectors(merged, long_segs, h, w)
-    extended = extend_long_segments(skeleton, h, w)
+    connected = keep_connectors(merged, long_segs, h, w)
+    extended = extend_long_segments(connected, h, w)
     snapped = snap_to_boundary(extended, h, w)
     bridged = bridge_junctions(snapped, h, w)
-    print(f"  Merged+filtered → {len(bridged)} long segments")
+    print(f"  Merged+filtered → {len(bridged)} segments")
     Image.fromarray(draw_merged_segments(rgb, bridged)).save(
         OUTPUT_DIR / f"{stem}.filtered.png"
     )
