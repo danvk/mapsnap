@@ -18,7 +18,7 @@ from pathlib import Path
 import cv2
 import numpy as np
 from PIL import Image, ImageDraw
-from shapely.geometry import LineString
+from shapely.geometry import LineString, Point
 from shapely.ops import polygonize, unary_union
 
 SPLITS_DIR = Path("data/splits")
@@ -44,6 +44,10 @@ MERGE_GAP_FRAC = 0.15  # max endpoint gap as fraction of shorter page dimension
 DIVIDER_MIN_FRAC = (
     0.15  # after merging, only segments longer than this go into the graph
 )
+CONNECTOR_TOL_PX = (
+    40.0  # max gap for treating endpoints as joined when re-admitting and
+)
+# welding short "step" segments that chain long divider runs (e.g. staircase dividers)
 SNAP_PX = 50.0  # snap endpoints within this distance to the page boundary
 EXTEND_FRAC = (
     0.20  # segments longer than this fraction of page get extended to boundary
@@ -154,6 +158,113 @@ def keep_long_segments(
         for seg in segments
         if (seg[2] - seg[0]) ** 2 + (seg[3] - seg[1]) ** 2 >= min_length**2
     ]
+
+
+def weld_endpoints(
+    segments: list[tuple[float, float, float, float]],
+    tol: float = CONNECTOR_TOL_PX,
+) -> list[tuple[float, float, float, float]]:
+    """Snap near-coincident segment endpoints to a shared point so the graph is connected.
+
+    Detected divider pieces often end a few pixels apart at a junction, which leaves the
+    planar graph open (polygonize only nodes geometry that actually touches). Clustering
+    endpoints within tol and moving each to its cluster centroid welds those near-misses
+    into true shared nodes.
+    """
+    centroids: list[list[float]] = []  # [x, y, count] per cluster
+    cluster_of: list[int] = []
+    for seg in segments:
+        for px, py in [(seg[0], seg[1]), (seg[2], seg[3])]:
+            match = None
+            for idx, (cx, cy, _) in enumerate(centroids):
+                if (px - cx) ** 2 + (py - cy) ** 2 <= tol * tol:
+                    match = idx
+                    break
+            if match is None:
+                centroids.append([px, py, 1])
+                cluster_of.append(len(centroids) - 1)
+            else:
+                cx, cy, count = centroids[match]
+                centroids[match] = [
+                    (cx * count + px) / (count + 1),
+                    (cy * count + py) / (count + 1),
+                    count + 1,
+                ]
+                cluster_of.append(match)
+
+    welded = []
+    for i in range(len(segments)):
+        ax, ay, _ = centroids[cluster_of[2 * i]]
+        bx, by, _ = centroids[cluster_of[2 * i + 1]]
+        welded.append((ax, ay, bx, by))
+    return welded
+
+
+def keep_connectors(
+    merged: list[tuple[float, float, float, float]],
+    long_segments: list[tuple[float, float, float, float]],
+    h: int,
+    w: int,
+    tol: float = CONNECTOR_TOL_PX,
+) -> list[tuple[float, float, float, float]]:
+    """Re-admit short segments that chain long divider runs to each other or the boundary.
+
+    A staircase divider is a sequence of long horizontal (or vertical) runs joined by short
+    perpendicular steps; the steps fall below the long-segment length filter, so dropping
+    them leaves the runs disconnected and no panel boundary closes. This re-admits a short
+    segment when it lies on a path between two "anchors" — a long segment or the page edge —
+    while still discarding short segments that merely dangle in open space (lot lines,
+    building walls). Surviving connectors and the long segments are then welded at their
+    shared junctions so the network is topologically closed.
+    """
+    short = [seg for seg in merged if seg not in long_segments]
+    if not short:
+        return list(long_segments)
+
+    long_geoms = [LineString([(s[0], s[1]), (s[2], s[3])]) for s in long_segments]
+
+    # Cluster short-segment endpoints into nodes and record each segment's two node ids.
+    node_points: list[tuple[float, float]] = []
+
+    def node_id(px: float, py: float) -> int:
+        for idx, (qx, qy) in enumerate(node_points):
+            if (px - qx) ** 2 + (py - qy) ** 2 <= tol * tol:
+                return idx
+        node_points.append((px, py))
+        return len(node_points) - 1
+
+    seg_nodes = [(node_id(s[0], s[1]), node_id(s[2], s[3])) for s in short]
+
+    # A node is anchored if it touches the page boundary or any long segment.
+    anchored = []
+    for px, py in node_points:
+        point = Point(px, py)
+        on_long = any(geom.distance(point) <= tol for geom in long_geoms)
+        anchored.append(on_boundary(px, py, h, w, tol) or on_long)
+
+    # Iteratively prune connectors with a non-anchored leaf endpoint: such a segment
+    # dead-ends in open space and cannot be part of an anchor-to-anchor path.
+    alive = [True] * len(short)
+    changed = True
+    while changed:
+        changed = False
+        degree = [0] * len(node_points)
+        for i, (a, b) in enumerate(seg_nodes):
+            if alive[i]:
+                degree[a] += 1
+                degree[b] += 1
+        for i, (a, b) in enumerate(seg_nodes):
+            if alive[i] and (
+                (degree[a] <= 1 and not anchored[a])
+                or (degree[b] <= 1 and not anchored[b])
+            ):
+                alive[i] = False
+                changed = True
+
+    connectors = [short[i] for i in range(len(short)) if alive[i]]
+    if not connectors:
+        return list(long_segments)
+    return weld_endpoints(list(long_segments) + connectors, tol)
 
 
 def seg_angle_deg(line: np.ndarray) -> float:
@@ -503,7 +614,8 @@ def process_image(image_path: Path) -> None:
     gap_tol = MERGE_GAP_FRAC * min(h, w)
     merged = merge_collinear(filtered, gap_tol)
     long_segs = keep_long_segments(merged, h, w)
-    extended = extend_long_segments(long_segs, h, w)
+    skeleton = keep_connectors(merged, long_segs, h, w)
+    extended = extend_long_segments(skeleton, h, w)
     snapped = snap_to_boundary(extended, h, w)
     bridged = bridge_junctions(snapped, h, w)
     print(f"  Merged+filtered → {len(bridged)} long segments")
