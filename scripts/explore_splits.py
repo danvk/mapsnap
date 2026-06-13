@@ -471,8 +471,8 @@ def draw_panels(rgb: np.ndarray, panels: list) -> np.ndarray:
 
 
 def image_stem(image_path: Path) -> str:
-    """Return image base name without extension or .scaled suffix."""
-    return image_path.stem.removesuffix(".scaled")
+    """Return image base name without extension."""
+    return image_path.stem
 
 
 def process_image(image_path: Path) -> None:
