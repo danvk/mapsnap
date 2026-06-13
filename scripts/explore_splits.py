@@ -26,8 +26,11 @@ OUTPUT_DIR = Path("data/splits_output")
 
 # Tunable pipeline parameters.
 BORDER_PX = 50  # pixels to remove from each edge before processing (dark scan border)
+COLOR_SPREAD_MAX = 40  # max RGB channel spread (max−min) to count a pixel as black ink;
+# colored pixels (brick, vegetation, water tints) are never part of a divider
 EROSION_KERNEL_PX = (
-    7  # eliminates thin map linework (1–5px), keeps thick dividers (10px+)
+    5  # thins map linework; the pre-LSD downscale suppresses the rest, so a light
+    # kernel here preserves thinner black dividers (e.g. on color scans)
 )
 LSD_DOWNSCALE = 0.2  # shrink mask before LSD so each thick divider collapses to a
 # single thin line — LSD then detects the divider once, down its centerline, instead
@@ -81,10 +84,18 @@ def crop_border(arr: np.ndarray, border: int = BORDER_PX) -> np.ndarray:
     return arr[border:-border, border:-border, :]
 
 
-def binarize(gray: np.ndarray) -> np.ndarray:
-    """Threshold grayscale to binary using Otsu's method: dark ink pixels become 255, paper becomes 0."""
-    _, binary = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY_INV | cv2.THRESH_OTSU)
-    return binary
+def binarize(rgb: np.ndarray, gray: np.ndarray) -> np.ndarray:
+    """Threshold to a black-ink mask: dark pixels become 255, paper and color become 0.
+
+    Otsu on luminance selects dark pixels, then a chroma gate drops any that are colored.
+    Dividers are always black, so colored map content (brick, vegetation, water tints) —
+    which can be dark enough to pass an Otsu luminance threshold — is excluded. For
+    grayscale scans the chroma gate is a no-op, matching plain Otsu.
+    """
+    _, dark = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY_INV | cv2.THRESH_OTSU)
+    spread = rgb.max(axis=2).astype(np.int16) - rgb.min(axis=2).astype(np.int16)
+    achromatic = (spread <= COLOR_SPREAD_MAX).astype(np.uint8) * 255
+    return cv2.bitwise_and(dark, achromatic)
 
 
 def compute_thick_mask(
@@ -473,7 +484,7 @@ def process_image(image_path: Path) -> None:
     gray = crop_border(load_gray(image_path))
     h, w = gray.shape
 
-    binary = binarize(gray)
+    binary = binarize(rgb, gray)
     Image.fromarray(binary).save(OUTPUT_DIR / f"{stem}.binary.png")
 
     mask = compute_thick_mask(binary)
