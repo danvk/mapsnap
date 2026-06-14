@@ -94,19 +94,11 @@ NODE_OVERSHOOT_PX = (
     5.0  # push just past a reached segment so polygonize nodes the crossing
 )
 MIN_PANEL_FRAC = 0.05  # min panel area as fraction of total page area
-GUTTER_OFFSET_PX = (
-    10  # start sampling this far off a candidate divider (clear its own ink)
-)
-GUTTER_BAND_PX = 25  # width of the flanking band sampled on each side
-GUTTER_GATE = (
-    0.05  # no-split gate: if even the best candidate divider's larger flanking
-)
-# band exceeds this ink fraction, the page has no real divider (its strongest "divider" is
-# a street or building wall) and is treated as a single, unsplit panel. Applied to the best
-# candidate only — not per segment — so multi-segment dividers (L-shapes, staircases) where
-# one leg passes near content are kept intact.
 COVERAGE_MIN_FRAC = 0.90  # if the kept panels tile less than this, the partition is
-# unreliable (over-fragmented) — treat the page as a single, unsplit panel
+# over-fragmented (e.g. a dense downtown page split along many building walls) — treat the
+# page as a single, unsplit panel. A gutter-emptiness test was tried as a no-split signal
+# but real dividers between dense adjacent panels have content hugging them, overlapping
+# the spurious cases, so coverage is the more reliable guard.
 
 PANEL_COLORS: list[tuple[int, int, int, int]] = [
     (255, 80, 80, 100),
@@ -283,59 +275,6 @@ def keep_long_segments(
         for seg in segments
         if (seg[2] - seg[0]) ** 2 + (seg[3] - seg[1]) ** 2 >= min_length**2
     ]
-
-
-def gutter_ink_density(
-    binary: np.ndarray,
-    seg: tuple[float, float, float, float],
-    offset_px: int = GUTTER_OFFSET_PX,
-    band_px: int = GUTTER_BAND_PX,
-) -> float:
-    """Return the larger ink fraction of the two bands flanking a segment.
-
-    Samples a band parallel to the segment on each side (offset to clear the segment's own
-    ink) and returns max(left, right) ink fraction. A real divider sits in a blank gutter,
-    so both sides are near-zero; a street or building wall has map content (high ink) on at
-    least one side, raising the maximum.
-    """
-    x0, y0, x1, y1 = seg
-    dx, dy = x1 - x0, y1 - y0
-    length = (dx**2 + dy**2) ** 0.5
-    if length < 1:
-        return 1.0
-    ux, uy = dx / length, dy / length
-    nx, ny = -uy, ux  # unit normal
-    h, w = binary.shape
-    samples = np.linspace(0.0, 1.0, max(2, int(length)))
-    base_x, base_y = x0 + samples * dx, y0 + samples * dy
-    offsets = np.arange(offset_px, offset_px + band_px)
-    side_densities = []
-    for sign in (1.0, -1.0):
-        px = np.round(base_x[:, None] + sign * nx * offsets[None, :]).astype(int)
-        py = np.round(base_y[:, None] + sign * ny * offsets[None, :]).astype(int)
-        valid = (px >= 0) & (px < w) & (py >= 0) & (py < h)
-        if not valid.any():
-            side_densities.append(1.0)
-            continue
-        ink = binary[np.clip(py, 0, h - 1), np.clip(px, 0, w - 1)] > 0
-        side_densities.append(float(ink[valid].mean()))
-    return max(side_densities)
-
-
-def best_gutter_density(
-    segments: list[tuple[float, float, float, float]],
-    binary: np.ndarray,
-) -> float:
-    """Return the smallest flanking-ink density over all candidate dividers.
-
-    The best (most gutter-like) candidate. If even this exceeds GUTTER_GATE the page has no
-    real divider — its strongest long, thick feature is a street or building wall — so it
-    should be treated as a single, unsplit panel.
-    """
-    return min(
-        (gutter_ink_density(binary, seg) for seg in segments),
-        default=1.0,
-    )
 
 
 def weld_endpoints(
@@ -836,15 +775,7 @@ def process_image(image_path: Path) -> None:
     gap_tol = MERGE_GAP_FRAC * min(h, w)
     merged = merge_collinear(filtered, gap_tol)
     long_segs = keep_long_segments(merged, h, w)
-    # No-split gate: if no candidate divider sits in a blank gutter, the strongest long
-    # feature is a street or building wall, so the page is unsplit — drop all dividers and
-    # let polygonize return the whole page as one panel.
-    best_gutter = best_gutter_density(long_segs, binary)
-    if best_gutter > GUTTER_GATE:
-        print(f"  No gutter divider (best {best_gutter:.3f}) → single panel")
-        connected = []
-    else:
-        connected = keep_connectors(merged, long_segs, h, w)
+    connected = keep_connectors(merged, long_segs, h, w)
     extended = extend_long_segments(connected, h, w)
     snapped = snap_to_boundary(extended, h, w)
     bridged = bridge_junctions(snapped, h, w)
