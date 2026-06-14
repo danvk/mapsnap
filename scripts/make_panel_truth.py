@@ -250,12 +250,16 @@ def main() -> None:
 
     written = 0
     for path in image_paths:
+        out_path = path.parent / f"{path.stem}.panels.json"
+        if out_path.exists() and json.loads(out_path.read_text()).get("manual"):
+            print(f"  {path.name}: hand-authored truth (manual), keeping")
+            if args.visualize:
+                save_visualization(path, json.loads(out_path.read_text()), out_dir)
+            continue
         truth = build_truth(path, args.data_root)
         if truth is None:
             continue
-        (path.parent / f"{path.stem}.panels.json").write_text(
-            json.dumps(truth, indent=2)
-        )
+        out_path.write_text(json.dumps(truth, indent=2))
         if args.visualize:
             save_visualization(path, truth, out_dir)
         written += 1
