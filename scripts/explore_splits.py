@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """Exploration script: validate LSD+graph approach for Sanborn split-page detection.
 
-For each image in data/splits/, runs the pipeline and saves per-stage outputs. The
-front-end is selected by DETECTION_METHOD.
+For each image in the input directory, runs the pipeline and saves per-stage outputs.
+The front-end is selected by DETECTION_METHOD.
 
 Common:
   <name>.binary.png   - binarized ink mask (dark = ink, white = paper; 50px border removed)
@@ -19,9 +19,10 @@ Common:
   <name>.lsd.png      - image with raw LSD segments (green=passes filter, blue=does not)
 
 Run from the project root:
-  uv run python scripts/explore_splits.py
+  uv run python scripts/explore_splits.py [INPUT_DIR] [-o OUTPUT_DIR]
 """
 
+import argparse
 import sys
 from pathlib import Path
 
@@ -786,6 +787,30 @@ def process_image(image_path: Path) -> None:
 
 
 def main() -> None:
+    global SPLITS_DIR, OUTPUT_DIR
+
+    parser = argparse.ArgumentParser(
+        description="Detect Sanborn split-page panels and save per-stage debug images."
+    )
+    parser.add_argument(
+        "input_dir",
+        nargs="?",
+        default=SPLITS_DIR,
+        type=Path,
+        help="Directory of input images (default: data/splits).",
+    )
+    parser.add_argument(
+        "-o",
+        "--output-dir",
+        type=Path,
+        default=None,
+        help="Output directory for per-stage images (default: <input_dir>_output).",
+    )
+    args = parser.parse_args()
+
+    SPLITS_DIR = args.input_dir
+    OUTPUT_DIR = args.output_dir or SPLITS_DIR.parent / f"{SPLITS_DIR.name}_output"
+
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
     image_paths = sorted(SPLITS_DIR.glob("*.jpg")) + sorted(SPLITS_DIR.glob("*.png"))
     if not image_paths:
