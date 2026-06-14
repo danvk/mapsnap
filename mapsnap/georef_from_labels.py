@@ -11,11 +11,13 @@ which can be pasted into the textarea to preview the warped image on a MapLibre 
 """
 
 import argparse
+import contextlib
+import io
 import json
 import math
 import os
 import sys
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from itertools import combinations
 from pathlib import Path
 
@@ -70,6 +72,33 @@ class ProcessResult:
     center: tuple[float, float] | None = None  # (lon, lat) page center, set on success
     rotation: float | None = None  # directed rotation in radians, set on success
     deferred: dict | None = None  # set when deferred (exactly 1 GCP, needs scale)
+    n_gcps: int = 0  # number of intersection GCPs found
+    n_inliers: int = 0  # number of RANSAC inlier labels (0 unless a fit succeeded)
+
+
+@dataclass(frozen=True)
+class Thresholds:
+    """One set of detection-quality thresholds for the georef filter step."""
+
+    min_confidence: float
+    min_long_side: float
+    min_short_side: float
+
+
+# Ordered relaxations tried (least → most permissive) when a page fails or fits
+# weakly at the strict baseline. The confidence bar is *raised* on the rows where the
+# size threshold first drops: admitting smaller boxes adds noise, so a higher
+# confidence requirement compensates. These values are the main tuning knobs of the
+# adaptive-threshold feature.
+RELAXATION_LADDER: list[Thresholds] = [
+    Thresholds(0.10, 45, 20),  # same size, lower confidence — faint big labels
+    Thresholds(0.07, 45, 20),
+    Thresholds(0.25, 30, 14),  # first size drop → raise confidence to offset noise
+    Thresholds(0.15, 30, 14),
+    Thresholds(0.10, 30, 14),
+    Thresholds(0.25, 24, 11),  # second size drop → raise the bar again
+    Thresholds(0.12, 24, 11),
+]
 
 
 def label_features(labels: list[dict]) -> list[LabelFeature]:
@@ -1035,7 +1064,7 @@ def process_image(
     print(f"Intersection GCPs: {len(gcps)}", file=sys.stderr)
     if len(gcps) == 0:
         print("No intersection GCPs found.", file=sys.stderr)
-        return ProcessResult(success=False)
+        return ProcessResult(success=False, n_gcps=0)
     if len(gcps) == 1:
         ix = f"{gcps[0].feat_a.raw_text} x {gcps[0].feat_b.raw_text}"
         if not one_gcp_fits:
@@ -1043,13 +1072,14 @@ def process_image(
                 f"Only 1 intersection GCP: {ix}; skipping (use --disable-one-gcp-fits to suppress).",
                 file=sys.stderr,
             )
-            return ProcessResult(success=False)
+            return ProcessResult(success=False, n_gcps=1)
         print(
             f"Only 1 intersection GCP: {ix}; deferring for median-scale processing.",
             file=sys.stderr,
         )
         return ProcessResult(
             success=False,
+            n_gcps=1,
             deferred={
                 "image_path": image_path,
                 "output_path": output_path,
@@ -1067,7 +1097,7 @@ def process_image(
     )
     if A is None:
         print("RANSAC failed: no valid affine found.", file=sys.stderr)
-        return ProcessResult(success=False)
+        return ProcessResult(success=False, n_gcps=len(gcps))
     print(
         f"RANSAC: {len(inlier_feat_indices)} / {len(features)} inlier labels",
         file=sys.stderr,
@@ -1102,7 +1132,12 @@ def process_image(
     )
     rotation = math.atan2(float(A[1, 0]), float(-A[1, 1]))
     return ProcessResult(
-        success=True, scale_deg_per_px=scale, center=center, rotation=rotation
+        success=True,
+        scale_deg_per_px=scale,
+        center=center,
+        rotation=rotation,
+        n_gcps=len(gcps),
+        n_inliers=len(inlier_feat_indices),
     )
 
 
@@ -1331,8 +1366,308 @@ def process_deferred_image(
         extra_fields=one_gcp_extra,
     )
     return ProcessResult(
-        success=decision.confirmed, scale_deg_per_px=scale, center=center
+        success=decision.confirmed,
+        scale_deg_per_px=scale,
+        center=center,
+        n_gcps=1,
+        n_inliers=len(inlier_feat_indices),
     )
+
+
+@dataclass
+class GeorefConfig:
+    """Constants shared across every per-image fit in one run."""
+
+    block_index: dict[str, list[Block]]
+    cos_phi: float
+    centerlines_path: str
+    min_aspect_ratio: float
+    edge_margin: float
+    force_intersection: tuple[int, int] | None
+    one_gcp_fits: bool
+    debug: bool
+
+
+@dataclass
+class PageFit:
+    """A successful page fit reduced to the fields used for neighbor consistency."""
+
+    image_path: str
+    px_per_ft: float
+    center: tuple[float, float]
+
+
+@dataclass
+class FitRecords:
+    """Running tallies of successful fits, for the median scale and outlier passes."""
+
+    n_success: int = 0
+    scales: list[float] = field(default_factory=list)
+    scale_records: list[tuple[str, float]] = field(default_factory=list)
+    location_records: list[tuple[str, tuple[float, float]]] = field(
+        default_factory=list
+    )
+    neighbor_rotations: list[tuple[tuple[float, float], float]] = field(
+        default_factory=list
+    )
+
+    def add_success(self, image_path: str, result: ProcessResult) -> None:
+        """Record a full (>=2 GCP) successful fit."""
+        self.n_success += 1
+        if result.scale_deg_per_px is not None:
+            px_per_ft = deg_per_px_to_px_per_ft(result.scale_deg_per_px)
+            self.scales.append(px_per_ft)
+            self.scale_records.append((image_path, px_per_ft))
+        if result.center is not None:
+            self.location_records.append((image_path, result.center))
+            if result.rotation is not None:
+                self.neighbor_rotations.append((result.center, result.rotation))
+
+
+@dataclass
+class AcceptanceRef:
+    """Reference used to decide whether an adaptively-relaxed fit is trustworthy."""
+
+    ref_scale_px_per_ft: float | None
+    centers: list[tuple[float, float]]
+    reliable: bool  # False when too few consistent pages exist to trust neighbor checks
+    scale_outlier_threshold: float
+    max_dist_km: float
+
+    def accepts(self, result: ProcessResult) -> bool:
+        """Return True if a relaxed fit should be accepted under this reference."""
+        if result.scale_deg_per_px is None or result.center is None:
+            return False
+        if self.reliable:
+            return fit_is_neighbor_consistent(
+                deg_per_px_to_px_per_ft(result.scale_deg_per_px),
+                result.center,
+                self.ref_scale_px_per_ft,
+                self.centers,
+                self.scale_outlier_threshold,
+                self.max_dist_km,
+            )
+        # No trustworthy neighbor reference: fall back to internal fit quality.
+        return result.n_gcps >= 2 and result.n_inliers >= 2
+
+
+@contextlib.contextmanager
+def suppressed_output():
+    """Silence stdout/stderr; used around exploratory adaptive fits."""
+    sink = io.StringIO()
+    with contextlib.redirect_stdout(sink), contextlib.redirect_stderr(sink):
+        yield
+
+
+def remove_outputs(output_path: str) -> None:
+    """Delete a page's .georef.json and any stale sidecar variants."""
+    paths = [output_path] + [
+        output_path.replace(".georef.json", suffix)
+        for suffix in (
+            ".georef-misscale.json",
+            ".georef-outlier.json",
+            ".georef-1gcp.json",
+        )
+    ]
+    for path in paths:
+        if os.path.exists(path):
+            os.remove(path)
+
+
+def fit_image(
+    image_path: str, thresholds: Thresholds, config: GeorefConfig
+) -> ProcessResult:
+    """Run process_image for one page at the given detection thresholds."""
+    labels_path, output_path = derive_paths(image_path)
+    return process_image(
+        image_path=image_path,
+        labels_path=labels_path,
+        output_path=output_path,
+        block_index=config.block_index,
+        cos_phi=config.cos_phi,
+        centerlines_path=config.centerlines_path,
+        min_confidence=thresholds.min_confidence,
+        min_long_side=thresholds.min_long_side,
+        min_short_side=thresholds.min_short_side,
+        min_aspect_ratio=config.min_aspect_ratio,
+        edge_margin=config.edge_margin,
+        force_intersection=config.force_intersection,
+        one_gcp_fits=config.one_gcp_fits,
+        debug=config.debug,
+    )
+
+
+def build_baseline_ladder(strict: Thresholds, floors: Thresholds) -> list[Thresholds]:
+    """Return [strict, *relaxations], dropping relaxation steps below any floor."""
+    ladder = [strict]
+    for step in RELAXATION_LADDER:
+        if (
+            step.min_confidence >= floors.min_confidence
+            and step.min_long_side >= floors.min_long_side
+            and step.min_short_side >= floors.min_short_side
+        ):
+            ladder.append(step)
+    return ladder
+
+
+def fit_is_neighbor_consistent(
+    px_per_ft: float,
+    center: tuple[float, float],
+    ref_scale_px_per_ft: float | None,
+    other_centers: list[tuple[float, float]],
+    scale_outlier_threshold: float,
+    max_dist_km: float,
+) -> bool:
+    """Return True if a fit's scale and location agree with the established reference.
+
+    The scale check is skipped when no reference scale is known or the threshold is 0.
+    The location check is skipped when disabled (max_dist_km <= 0) or there are no other
+    pages to compare against.
+    """
+    if ref_scale_px_per_ft is not None and scale_outlier_threshold > 0:
+        if abs(px_per_ft / ref_scale_px_per_ft - 1.0) > scale_outlier_threshold:
+            return False
+    if max_dist_km > 0 and other_centers:
+        if min(_dist_km(center, other) for other in other_centers) > max_dist_km:
+            return False
+    return True
+
+
+def consistent_reference_fits(
+    fits: list[PageFit],
+    scale_outlier_threshold: float,
+    max_dist_km: float,
+) -> list[PageFit]:
+    """Return the largest mutually-consistent subset of page fits.
+
+    A subset is consistent when every member's scale is within scale_outlier_threshold of
+    the subset median and the members form a single location cluster (single-linkage within
+    max_dist_km). Used to decide whether Phase 1 produced a trustworthy reference and, if so,
+    to supply the reference scale and centers for adaptive acceptance.
+    """
+    if not fits:
+        return []
+    if scale_outlier_threshold > 0:
+        median = float(np.median([f.px_per_ft for f in fits]))
+        scale_ok = [
+            f
+            for f in fits
+            if abs(f.px_per_ft / median - 1.0) <= scale_outlier_threshold
+        ]
+    else:
+        scale_ok = list(fits)
+    if max_dist_km <= 0 or len(scale_ok) <= 1:
+        return scale_ok
+
+    # Largest connected component under the distance threshold (single-linkage union-find).
+    parent = list(range(len(scale_ok)))
+
+    def find(x: int) -> int:
+        while parent[x] != x:
+            parent[x] = parent[parent[x]]
+            x = parent[x]
+        return x
+
+    for i in range(len(scale_ok)):
+        for j in range(i + 1, len(scale_ok)):
+            if _dist_km(scale_ok[i].center, scale_ok[j].center) <= max_dist_km:
+                parent[find(i)] = find(j)
+    groups: dict[int, list[PageFit]] = {}
+    for i in range(len(scale_ok)):
+        groups.setdefault(find(i), []).append(scale_ok[i])
+    return max(groups.values(), key=len)
+
+
+def strong_reference_fits(
+    phase1: dict[str, tuple[ProcessResult, str, str]],
+) -> list[PageFit]:
+    """Extract PageFits for strongly-fit pages (>=3 GCPs) from a Phase-1 result map."""
+    fits: list[PageFit] = []
+    for image_path, (result, _, _) in phase1.items():
+        if (
+            result.success
+            and result.n_gcps >= 3
+            and result.scale_deg_per_px is not None
+            and result.center is not None
+        ):
+            fits.append(
+                PageFit(
+                    image_path,
+                    deg_per_px_to_px_per_ft(result.scale_deg_per_px),
+                    result.center,
+                )
+            )
+    return fits
+
+
+def run_phase1(
+    images: list[str], thresholds: Thresholds, config: GeorefConfig
+) -> dict[str, tuple[ProcessResult, str, str]]:
+    """Fit every image at one threshold setting; return {image: (result, labels, output)}.
+
+    Deletes stale outputs first so a failed fit never leaves a previous result in place.
+    """
+    results: dict[str, tuple[ProcessResult, str, str]] = {}
+    multi = len(images) > 1
+    for image_path in images:
+        if multi:
+            print(f"\n--- {image_path} ---", file=sys.stderr)
+        labels_path, output_path = derive_paths(image_path)
+        remove_outputs(output_path)
+        result = fit_image(image_path, thresholds, config)
+        results[image_path] = (result, labels_path, output_path)
+    return results
+
+
+def escalate_page(
+    image_path: str,
+    baseline_result: ProcessResult,
+    baseline_index: int,
+    baseline_ladder: list[Thresholds],
+    config: GeorefConfig,
+    acceptance: AcceptanceRef,
+) -> ProcessResult:
+    """Relax thresholds to try to improve a weak/failed page; return the final result.
+
+    Walks the ladder steps below the current baseline. Among steps that produce a fit which
+    is both better-supported than the baseline (more GCPs, then more inliers) and accepted by
+    the neighbor-consistency reference, keeps the best, stopping early once a strong (>=3 GCP)
+    consistent fit is found. If nothing qualifies, restores the page's baseline output and
+    returns the baseline result unchanged.
+    """
+    _, output_path = derive_paths(image_path)
+    baseline_support = (baseline_result.n_gcps, baseline_result.n_inliers)
+    best: tuple[tuple[int, int], Thresholds] | None = None
+    for thresholds in baseline_ladder[baseline_index + 1 :]:
+        with suppressed_output():
+            result = fit_image(image_path, thresholds, config)
+        if not result.success:
+            continue
+        support = (result.n_gcps, result.n_inliers)
+        if support <= baseline_support or not acceptance.accepts(result):
+            continue
+        if best is None or support > best[0]:
+            best = (support, thresholds)
+        if result.n_gcps >= 3:
+            break
+
+    # Exploratory fits may have overwritten the page's output; clear it before finalizing.
+    remove_outputs(output_path)
+    if best is not None:
+        chosen = best[1]
+        final = fit_image(image_path, chosen, config)
+        print(
+            f"  Adaptive: refit at conf>={chosen.min_confidence:g} "
+            f"long>={chosen.min_long_side:g} short>={chosen.min_short_side:g} "
+            f"→ {final.n_gcps} GCPs, {final.n_inliers} inliers",
+            file=sys.stderr,
+        )
+        return final
+    if baseline_result.success:
+        # Weak 2-GCP baseline: regenerate its file at the baseline thresholds.
+        return fit_image(image_path, baseline_ladder[baseline_index], config)
+    # Failed or 1-GCP deferred: nothing better; keep the baseline result (no file written).
+    return baseline_result
 
 
 def main() -> None:
@@ -1442,6 +1777,49 @@ def main() -> None:
         ),
     )
     parser.add_argument(
+        "--disable-adaptive",
+        action="store_true",
+        default=False,
+        help=(
+            "Disable adaptive threshold escalation. By default (multi-image runs), pages "
+            "that fail or fit weakly are retried with progressively lower confidence/size "
+            "thresholds, accepting a relaxed fit only when its scale and location agree "
+            "with the rest of the volume."
+        ),
+    )
+    parser.add_argument(
+        "--min-reference-pages",
+        type=int,
+        default=3,
+        metavar="N",
+        help=(
+            "Minimum number of mutually-consistent strong fits needed to trust the volume "
+            "as a reference for adaptive acceptance (default: %(default)s). If the strict "
+            "baseline yields fewer, the whole-volume baseline is stepped down the ladder."
+        ),
+    )
+    parser.add_argument(
+        "--min-confidence-floor",
+        type=float,
+        default=0.07,
+        metavar="THRESHOLD",
+        help="Lowest confidence the adaptive ladder may relax to (default: %(default)s).",
+    )
+    parser.add_argument(
+        "--min-long-side-floor",
+        type=float,
+        default=24.0,
+        metavar="PX",
+        help="Smallest long side the adaptive ladder may relax to (default: %(default)s).",
+    )
+    parser.add_argument(
+        "--min-short-side-floor",
+        type=float,
+        default=11.0,
+        metavar="PX",
+        help="Smallest short side the adaptive ladder may relax to (default: %(default)s).",
+    )
+    parser.add_argument(
         "--debug", action="store_true", help="Print additional debug information"
     )
     args = parser.parse_args()
@@ -1466,74 +1844,120 @@ def main() -> None:
         file=sys.stderr,
     )
 
-    n_success = 0
-    scales: list[float] = []
-    scale_records: list[
-        tuple[str, float]
-    ] = []  # (image_path, px_per_ft) for outlier check
-    location_records: list[tuple[str, tuple[float, float]]] = []  # (image_path, center)
-    neighbor_rotations: list[
-        tuple[tuple[float, float], float]
-    ] = []  # (center, rotation)
-    deferred_list: list[dict] = []
+    strict = Thresholds(args.min_confidence, args.min_long_side, args.min_short_side)
+    floors = Thresholds(
+        args.min_confidence_floor, args.min_long_side_floor, args.min_short_side_floor
+    )
+    baseline_ladder = build_baseline_ladder(strict, floors)
+    config = GeorefConfig(
+        block_index=block_index,
+        cos_phi=cos_phi,
+        centerlines_path=args.centerlines,
+        min_aspect_ratio=args.min_aspect_ratio,
+        edge_margin=args.edge_margin,
+        force_intersection=force_intersection,
+        one_gcp_fits=not args.disable_one_gcp_fits,
+        debug=args.debug,
+    )
+    # Adaptation is volume-level: it needs neighbors to validate relaxed fits, so it is
+    # only active for multi-image runs without a forced intersection.
+    adaptive = (
+        not args.disable_adaptive
+        and len(args.images) > 1
+        and force_intersection is None
+    )
 
-    for image_path in args.images:
-        if len(args.images) > 1:
-            print(f"\n--- {image_path} ---", file=sys.stderr)
-        labels_path, output_path = derive_paths(image_path)
-        # Delete stale georef file before attempting a new fit so a failed run
-        # doesn't leave a previous result in place.
-        if os.path.exists(output_path):
-            os.remove(output_path)
-        for stale_suffix in (
-            ".georef-misscale.json",
-            ".georef-outlier.json",
-            ".georef-1gcp.json",
-        ):
-            stale_path = output_path.replace(".georef.json", stale_suffix)
-            if os.path.exists(stale_path):
-                os.remove(stale_path)
-        result = process_image(
-            image_path=image_path,
-            labels_path=labels_path,
-            output_path=output_path,
-            block_index=block_index,
-            cos_phi=cos_phi,
-            centerlines_path=args.centerlines,
-            min_confidence=args.min_confidence,
-            min_long_side=args.min_long_side,
-            min_short_side=args.min_short_side,
-            min_aspect_ratio=args.min_aspect_ratio,
-            edge_margin=args.edge_margin,
-            force_intersection=force_intersection,
-            one_gcp_fits=not args.disable_one_gcp_fits,
-            debug=args.debug,
+    def build_reference(
+        phase1: dict[str, tuple[ProcessResult, str, str]],
+    ) -> list[PageFit]:
+        """Largest mutually-consistent subset of strong fits in a Phase-1 result map."""
+        return consistent_reference_fits(
+            strong_reference_fits(phase1),
+            args.scale_outlier_threshold,
+            args.min_distance_for_outlier_km,
         )
+
+    # Phase 1: fit every image at the strict baseline.
+    phase1 = run_phase1(args.images, baseline_ladder[0], config)
+    baseline_index = 0
+    reference = build_reference(phase1)
+
+    # Volume bootstrap: if the strict baseline cannot anchor a trustworthy reference,
+    # step the whole-volume baseline down the ladder (quietly) until it can.
+    strict_reliable = (
+        args.scale is not None or len(reference) >= args.min_reference_pages
+    )
+    if adaptive and not strict_reliable:
+        best_index, best_count = 0, len(reference)
+        for idx in range(1, len(baseline_ladder)):
+            with suppressed_output():
+                candidate = run_phase1(args.images, baseline_ladder[idx], config)
+                candidate_ref = build_reference(candidate)
+            if len(candidate_ref) > best_count:
+                best_index, best_count = idx, len(candidate_ref)
+            if len(candidate_ref) >= args.min_reference_pages:
+                break
+        baseline_index = best_index
+        step = baseline_ladder[baseline_index]
+        print(
+            f"\nAdaptive bootstrap: volume baseline → conf>={step.min_confidence:g} "
+            f"long>={step.min_long_side:g} short>={step.min_short_side:g}",
+            file=sys.stderr,
+        )
+        # Re-run the chosen baseline with normal output to restore authoritative files.
+        phase1 = run_phase1(args.images, baseline_ladder[baseline_index], config)
+        reference = build_reference(phase1)
+        if len(reference) < args.min_reference_pages:
+            print(
+                f"Warning: only {len(reference)} consistent reference page(s) "
+                f"(< {args.min_reference_pages}); adaptive acceptance falls back to "
+                "internal fit quality.",
+                file=sys.stderr,
+            )
+
+    if args.scale is not None:
+        accept_ref_scale: float | None = args.scale
+    elif reference:
+        accept_ref_scale = float(np.median([f.px_per_ft for f in reference]))
+    else:
+        accept_ref_scale = None
+    acceptance = AcceptanceRef(
+        ref_scale_px_per_ft=accept_ref_scale,
+        centers=[f.center for f in reference],
+        reliable=args.scale is not None or len(reference) >= args.min_reference_pages,
+        scale_outlier_threshold=args.scale_outlier_threshold,
+        max_dist_km=args.min_distance_for_outlier_km,
+    )
+
+    # Phase 2: settle each page to its final fit, escalating weak/failed pages.
+    records = FitRecords()
+    deferred_list: list[dict] = []
+    for image_path in args.images:
+        result, _, _ = phase1[image_path]
+        is_weak = (result.success and result.n_gcps < 3) or result.deferred is not None
+        is_failed = not result.success and result.deferred is None
+        if adaptive and (is_weak or is_failed):
+            result = escalate_page(
+                image_path, result, baseline_index, baseline_ladder, config, acceptance
+            )
         if result.success:
-            n_success += 1
-            if result.scale_deg_per_px is not None:
-                px_per_ft = deg_per_px_to_px_per_ft(result.scale_deg_per_px)
-                scales.append(px_per_ft)
-                scale_records.append((image_path, px_per_ft))
-            if result.center is not None:
-                location_records.append((image_path, result.center))
-                if result.rotation is not None:
-                    neighbor_rotations.append((result.center, result.rotation))
+            records.add_success(image_path, result)
         elif result.deferred is not None:
             deferred_list.append(result.deferred)
 
     # Determine reference scale: explicit override takes priority, then median.
     if args.scale is not None:
         ref_scale_px_per_ft: float | None = args.scale
-    elif scales:
-        ref_scale_px_per_ft = float(np.median(scales))
+    elif records.scales:
+        ref_scale_px_per_ft = float(np.median(records.scales))
     else:
         ref_scale_px_per_ft = None
 
     # Print median scale whenever multiple images were processed.
-    if scales and len(args.images) > 1:
+    if records.scales and len(args.images) > 1:
         print(
-            f"\nMedian scale: {float(np.median(scales)):.4f} px/ft ({len(scales)} images)",
+            f"\nMedian scale: {float(np.median(records.scales)):.4f} px/ft "
+            f"({len(records.scales)} images)",
             file=sys.stderr,
         )
 
@@ -1558,19 +1982,19 @@ def main() -> None:
                     scale_deg_per_px=scale_deg_per_px,
                     block_index=block_index,
                     cos_phi=cos_phi,
-                    neighbor_rotations=neighbor_rotations,
+                    neighbor_rotations=records.neighbor_rotations,
                 )
                 if deferred_result.success:
-                    n_success += 1
+                    records.n_success += 1
                     if deferred_result.center is not None:
-                        location_records.append(
+                        records.location_records.append(
                             (deferred_image_path, deferred_result.center)
                         )
 
     # Drop georef files whose fitted scale is a major outlier vs the reference.
     if ref_scale_px_per_ft is not None and args.scale_outlier_threshold > 0:
         n_dropped = 0
-        for img_path, px_per_ft in scale_records:
+        for img_path, px_per_ft in records.scale_records:
             ratio = px_per_ft / ref_scale_px_per_ft
             if abs(ratio - 1.0) > args.scale_outlier_threshold:
                 _, out_path = derive_paths(img_path)
@@ -1579,7 +2003,7 @@ def main() -> None:
                 )
                 if os.path.exists(out_path):
                     os.rename(out_path, misscale_path)
-                    n_success -= 1
+                    records.n_success -= 1
                     n_dropped += 1
                     print(
                         f"Dropped scale outlier {img_path}: "
@@ -1591,10 +2015,12 @@ def main() -> None:
             print(f"Dropped {n_dropped} scale outlier(s).", file=sys.stderr)
 
     # Drop georef files whose center is far from every other georeferenced page.
-    if args.min_distance_for_outlier_km > 0 and len(location_records) >= 2:
+    if args.min_distance_for_outlier_km > 0 and len(records.location_records) >= 2:
         # Only pages whose .georef.json still exists (not already renamed by scale check).
         active = [
-            (p, c) for p, c in location_records if os.path.exists(derive_paths(p)[1])
+            (p, c)
+            for p, c in records.location_records
+            if os.path.exists(derive_paths(p)[1])
         ]
         n_dropped = 0
         for img_path, center in active:
@@ -1604,7 +2030,7 @@ def main() -> None:
                 _, out_path = derive_paths(img_path)
                 outlier_path = out_path.replace(".georef.json", ".georef-outlier.json")
                 os.rename(out_path, outlier_path)
-                n_success -= 1
+                records.n_success -= 1
                 n_dropped += 1
                 print(
                     f"Dropped location outlier {img_path}: "
@@ -1615,7 +2041,10 @@ def main() -> None:
             print(f"Dropped {n_dropped} location outlier(s).", file=sys.stderr)
 
     if len(args.images) > 1:
-        print(f"\n{n_success}/{len(args.images)} images georeferenced", file=sys.stderr)
+        print(
+            f"\n{records.n_success}/{len(args.images)} images georeferenced",
+            file=sys.stderr,
+        )
 
 
 if __name__ == "__main__":

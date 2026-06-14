@@ -4,12 +4,22 @@ import math
 
 import numpy as np
 
+import mapsnap.georef_from_labels as gfl
 from mapsnap.georef_from_labels import (
     _FT_PER_DEG_LAT,
+    AcceptanceRef,
+    PageFit,
+    ProcessResult,
+    Thresholds,
     _angle_diff_abs,
     _cluster_geo_coords,
     _rotation_from_neighbors,
+    build_baseline_ladder,
+    consistent_reference_fits,
     correct_square_feature_dirs,
+    deg_per_px_to_px_per_ft,
+    escalate_page,
+    fit_is_neighbor_consistent,
     label_features,
     promote_avenue_letters,
     project_to_polyline,
@@ -473,3 +483,197 @@ def test_rotation_from_neighbors_adjacency_boundary():
     )
     assert result.confirmed is True
     assert result.n_agree == 2
+
+
+# ---------------------------------------------------------------------------
+# build_baseline_ladder
+# ---------------------------------------------------------------------------
+
+
+def test_build_baseline_ladder_keeps_all_by_default():
+    # Default floors (matching the most permissive ladder row) keep every relaxation.
+    strict = Thresholds(0.15, 45, 20)
+    floors = Thresholds(0.07, 24, 11)
+    ladder = build_baseline_ladder(strict, floors)
+    assert ladder[0] == strict
+    assert len(ladder) == 1 + len(gfl.RELAXATION_LADDER)
+
+
+def test_build_baseline_ladder_floors_clamp():
+    # Raising the floors drops every relaxation step, leaving only the strict baseline.
+    strict = Thresholds(0.15, 45, 20)
+    ladder = build_baseline_ladder(strict, Thresholds(0.3, 40, 20))
+    assert ladder == [strict]
+
+
+# ---------------------------------------------------------------------------
+# fit_is_neighbor_consistent
+# ---------------------------------------------------------------------------
+
+_CENTER = (-90.0, 30.0)
+
+
+def test_neighbor_consistent_in_band():
+    assert fit_is_neighbor_consistent(10.0, _CENTER, 10.0, [_CENTER], 0.25, 1.5)
+
+
+def test_neighbor_inconsistent_scale():
+    # 50% larger scale than reference exceeds the 25% band.
+    assert not fit_is_neighbor_consistent(15.0, _CENTER, 10.0, [_CENTER], 0.25, 1.5)
+
+
+def test_neighbor_inconsistent_location():
+    # ~900 km from the only reference center is far outside 1.5 km.
+    far = (-80.0, 30.0)
+    assert not fit_is_neighbor_consistent(10.0, far, 10.0, [_CENTER], 0.25, 1.5)
+
+
+def test_neighbor_no_reference_scale_skips_scale_check():
+    # With ref_scale=None, only the location check applies (and here it passes).
+    assert fit_is_neighbor_consistent(999.0, _CENTER, None, [_CENTER], 0.25, 1.5)
+
+
+def test_neighbor_empty_centers_skips_location_check():
+    assert fit_is_neighbor_consistent(10.0, _CENTER, 10.0, [], 0.25, 1.5)
+
+
+# ---------------------------------------------------------------------------
+# consistent_reference_fits
+# ---------------------------------------------------------------------------
+
+
+def test_consistent_reference_drops_scale_outlier():
+    fits = [
+        PageFit("a", 10.0, _CENTER),
+        PageFit("b", 10.0, _CENTER),
+        PageFit("c", 10.0, _CENTER),
+        PageFit("d", 20.0, _CENTER),  # 2× the median scale → dropped
+    ]
+    result = consistent_reference_fits(fits, 0.25, 1.5)
+    assert {f.image_path for f in result} == {"a", "b", "c"}
+
+
+def test_consistent_reference_picks_largest_location_cluster():
+    near = _CENTER
+    far = (-80.0, 30.0)  # ~900 km away
+    fits = [
+        PageFit("a", 10.0, near),
+        PageFit("b", 10.0, near),
+        PageFit("c", 10.0, near),
+        PageFit("d", 10.0, far),
+    ]
+    result = consistent_reference_fits(fits, 0.25, 1.5)
+    assert {f.image_path for f in result} == {"a", "b", "c"}
+
+
+def test_consistent_reference_sparse_returns_subset():
+    # A single fit is "consistent" with itself; the caller decides if it meets the minimum.
+    result = consistent_reference_fits([PageFit("a", 10.0, _CENTER)], 0.25, 1.5)
+    assert len(result) == 1
+
+
+# ---------------------------------------------------------------------------
+# escalate_page
+# ---------------------------------------------------------------------------
+
+_SCALE_DEG_PER_PX = 1e-5
+_REF_PX_PER_FT = deg_per_px_to_px_per_ft(_SCALE_DEG_PER_PX)
+
+
+def _success(n_gcps: int, n_inliers: int, center=_CENTER) -> ProcessResult:
+    return ProcessResult(
+        success=True,
+        scale_deg_per_px=_SCALE_DEG_PER_PX,
+        center=center,
+        rotation=0.0,
+        n_gcps=n_gcps,
+        n_inliers=n_inliers,
+    )
+
+
+_FAIL = ProcessResult(success=False, n_gcps=0)
+
+# escalate_page only forwards config to the (patched-out) fit_image, so its contents are
+# irrelevant in these tests; this placeholder just satisfies the type signature.
+_DUMMY_CONFIG = gfl.GeorefConfig(
+    block_index={},
+    cos_phi=0.76,
+    centerlines_path="",
+    min_aspect_ratio=1.75,
+    edge_margin=0.0,
+    force_intersection=None,
+    one_gcp_fits=True,
+    debug=False,
+)
+
+
+def _reliable_acceptance(centers=None) -> AcceptanceRef:
+    return AcceptanceRef(
+        ref_scale_px_per_ft=_REF_PX_PER_FT,
+        centers=[_CENTER] if centers is None else centers,
+        reliable=True,
+        scale_outlier_threshold=0.25,
+        max_dist_km=1.5,
+    )
+
+
+def _patch_fit_image(monkeypatch, by_thresholds: dict[Thresholds, ProcessResult]):
+    def fake(image_path, thresholds, config):
+        return by_thresholds[thresholds]
+
+    monkeypatch.setattr(gfl, "fit_image", fake)
+
+
+def test_escalate_rescues_failed_page(monkeypatch):
+    strict = Thresholds(0.15, 45, 20)
+    step_a = Thresholds(0.10, 45, 20)
+    step_b = Thresholds(0.07, 45, 20)
+    ladder = [strict, step_a, step_b]
+    _patch_fit_image(
+        monkeypatch,
+        {strict: _FAIL, step_a: _FAIL, step_b: _success(3, 5)},
+    )
+    result = escalate_page(
+        "p1.jpg", _FAIL, 0, ladder, _DUMMY_CONFIG, _reliable_acceptance()
+    )
+    assert result.success
+    assert result.n_gcps == 3
+
+
+def test_escalate_improves_weak_page(monkeypatch):
+    strict = Thresholds(0.15, 45, 20)
+    step_a = Thresholds(0.10, 45, 20)
+    ladder = [strict, step_a]
+    weak = _success(2, 2)
+    _patch_fit_image(monkeypatch, {strict: weak, step_a: _success(4, 6)})
+    result = escalate_page(
+        "p1.jpg", weak, 0, ladder, _DUMMY_CONFIG, _reliable_acceptance()
+    )
+    assert result.n_gcps == 4
+
+
+def test_escalate_keeps_weak_when_relaxed_is_inconsistent(monkeypatch):
+    strict = Thresholds(0.15, 45, 20)
+    step_a = Thresholds(0.10, 45, 20)
+    ladder = [strict, step_a]
+    weak = _success(2, 2)
+    far = _success(5, 8, center=(-80.0, 30.0))  # strong but ~900 km away → rejected
+    _patch_fit_image(monkeypatch, {strict: weak, step_a: far})
+    result = escalate_page(
+        "p1.jpg", weak, 0, ladder, _DUMMY_CONFIG, _reliable_acceptance()
+    )
+    # Falls back to the strict baseline (re-fit at index 0).
+    assert result.n_gcps == 2
+    assert result.center == _CENTER
+
+
+def test_escalate_internal_quality_fallback_when_unreliable(monkeypatch):
+    # No trustworthy reference: a relaxed 2-GCP / 2-inlier fit is accepted on its own merits.
+    strict = Thresholds(0.15, 45, 20)
+    step_a = Thresholds(0.10, 45, 20)
+    ladder = [strict, step_a]
+    _patch_fit_image(monkeypatch, {strict: _FAIL, step_a: _success(2, 2)})
+    unreliable = AcceptanceRef(None, [], False, 0.25, 1.5)
+    result = escalate_page("p1.jpg", _FAIL, 0, ladder, _DUMMY_CONFIG, unreliable)
+    assert result.success
+    assert result.n_gcps == 2
