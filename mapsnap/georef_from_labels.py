@@ -1657,8 +1657,9 @@ def escalate_page(
         chosen = best[1]
         final = fit_image(image_path, chosen, config)
         print(
-            f"  Adaptive: refit at conf>={chosen.min_confidence:g} "
-            f"long>={chosen.min_long_side:g} short>={chosen.min_short_side:g} "
+            f"  Adaptive: {Path(image_path).name} refit at "
+            f"conf>={chosen.min_confidence:g} long>={chosen.min_long_side:g} "
+            f"short>={chosen.min_short_side:g} "
             f"→ {final.n_gcps} GCPs, {final.n_inliers} inliers",
             file=sys.stderr,
         )
@@ -2023,7 +2024,8 @@ def main() -> None:
             if os.path.exists(derive_paths(p)[1])
         ]
         n_dropped = 0
-        for img_path, center in active:
+        # Needs at least two surviving pages to compare; a lone page has no neighbor.
+        for img_path, center in active if len(active) >= 2 else []:
             other_centers = [c for p, c in active if p != img_path]
             min_dist_km = min(_dist_km(center, other) for other in other_centers)
             if min_dist_km > args.min_distance_for_outlier_km:
