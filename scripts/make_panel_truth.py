@@ -100,22 +100,30 @@ def extract_page_panels(
 ) -> list[np.ndarray]:
     """Return all panel polygons for a page in unsplit-image coordinates.
 
-    Prefers a full-page-sized raw (decomposed into content + masked panels — robust and
-    template-match-free). Falls back to locating each tight crop by template matching when
-    no full-page raw exists (e.g. a page stored as overlapping strips).
+    Prefers decomposing a full-page-sized raw (content + masked components — robust and
+    template-match-free), which captures panels with no raw of their own. But the masked
+    regions of two+ other panels can merge into one component and undercount, so this only
+    trusts decomposition when it yields at least as many panels as there are raw files;
+    otherwise it falls back to per-raw extraction (each raw's non-white region at its located
+    offset), which also covers pages with no full-page raw (e.g. overlapping strips).
     """
     uh, uw = unsplit_hw
     full_page = [
         r for r in panel_raws if np.array(Image.open(r).convert("L")).shape == (uh, uw)
     ]
     if full_page:
-        return decompose_full_page(full_page[0])
+        decomposed = decompose_full_page(full_page[0])
+        if len(decomposed) >= len(panel_raws):
+            return decomposed
 
     polygons = []
     for raw_path in panel_raws:
-        offset_x, offset_y = locate_split_in_unsplit(
-            raw_path, unsplit_path, min_score=FALLBACK_MIN_SCORE
-        )
+        if np.array(Image.open(raw_path).convert("L")).shape == (uh, uw):
+            offset_x, offset_y = 0, 0
+        else:
+            offset_x, offset_y = locate_split_in_unsplit(
+                raw_path, unsplit_path, min_score=FALLBACK_MIN_SCORE
+            )
         raw = np.array(Image.open(raw_path).convert("L"))
         poly = mask_to_polygon((raw < WHITE_THRESHOLD).astype(np.uint8))
         if poly is None:

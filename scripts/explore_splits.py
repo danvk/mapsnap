@@ -29,7 +29,7 @@ from pathlib import Path
 import cv2
 import numpy as np
 from PIL import Image, ImageDraw
-from shapely.geometry import LineString, Point, box
+from shapely.geometry import LineString, Point, Polygon, box
 from shapely.ops import polygonize, unary_union
 from skimage.morphology import medial_axis
 
@@ -45,6 +45,10 @@ DETECTION_METHOD = "union"
 
 # Tunable pipeline parameters.
 BORDER_PX = 50  # pixels to remove from each edge before processing (dark scan border)
+EDGE_SNAP_PX = (
+    2  # when expanding cropped panels to the full frame, vertices this close to
+)
+# the cropped boundary are pushed out to the full-frame edge (re-opens the cropped border)
 COLOR_SPREAD_MAX = 40  # max RGB channel spread (max−min) to count a pixel as black ink;
 # colored pixels (brick, vegetation, water tints) are never part of a divider
 COLOR_PROXIMITY_PX = 0  # erase ink within this many px of a colored pixel (0 = off):
@@ -747,6 +751,95 @@ def detect_skeleton(binary: np.ndarray, rgb: np.ndarray, stem: str) -> np.ndarra
     return lines
 
 
+def detect_lines(binary: np.ndarray) -> np.ndarray:
+    """Candidate divider segments in cropped coords per DETECTION_METHOD (no image output).
+
+    The I/O-free counterpart of detect_downscale / detect_skeleton, used by compute_panels.
+    """
+    h, w = binary.shape
+    if DETECTION_METHOD == "skeleton":
+        return run_hough(thick_skeleton(morphological_close(binary)), h, w)
+    if DETECTION_METHOD == "downscale":
+        return run_lsd(compute_thick_mask(binary))[0]
+    downscale_lines = run_lsd(compute_thick_mask(binary))[0]
+    skeleton_lines = run_hough(thick_skeleton(morphological_close(binary)), h, w)
+    return np.vstack([downscale_lines, skeleton_lines])
+
+
+def connected_dividers(
+    lines: np.ndarray, h: int, w: int
+) -> list[tuple[float, float, float, float]]:
+    """Filter, merge, length-filter, and re-admit connectors → divider segments."""
+    merged = merge_collinear(filter_segments(lines, h, w), MERGE_GAP_FRAC * min(h, w))
+    return keep_connectors(merged, keep_long_segments(merged, h, w), h, w)
+
+
+def expand_to_full_frame(
+    panels: list, cropped_h: int, cropped_w: int, border: int
+) -> list:
+    """Translate cropped panels into the full frame, pushing edge vertices to the full edges.
+
+    Detection crops a border off each edge; the panels partition that cropped rectangle.
+    Shifting them back by the border and snapping their cropped-boundary vertices out to the
+    full-frame edges re-opens the border so the panels tile the whole scaled image (the same
+    extension needed to cut split images, and the frame the panels.json truth uses).
+    """
+    full_h, full_w = cropped_h + 2 * border, cropped_w + 2 * border
+    expanded = []
+    for panel in panels:
+        coords = []
+        for x, y in panel.exterior.coords:
+            x += border
+            y += border
+            if x <= border + EDGE_SNAP_PX:
+                x = 0.0
+            elif x >= full_w - border - EDGE_SNAP_PX:
+                x = float(full_w)
+            if y <= border + EDGE_SNAP_PX:
+                y = 0.0
+            elif y >= full_h - border - EDGE_SNAP_PX:
+                y = float(full_h)
+            coords.append((x, y))
+        expanded.append(Polygon(coords))
+    return expanded
+
+
+def finalize_panels(
+    connected: list[tuple[float, float, float, float]],
+    cropped_h: int,
+    cropped_w: int,
+    border: int = BORDER_PX,
+) -> tuple[list, list[tuple[float, float, float, float]]]:
+    """Close the divider graph in the cropped frame, then expand panels to the full frame.
+
+    Returns (full_frame_panels, cropped_bridged_segments). The graph closure runs in cropped
+    coordinates (where detection happened); only the resulting panels are expanded to the
+    full scaled-image frame so they line up with the panels.json ground truth.
+    """
+    extended = extend_long_segments(connected, cropped_h, cropped_w)
+    snapped = snap_to_boundary(extended, cropped_h, cropped_w)
+    bridged = bridge_junctions(snapped, cropped_h, cropped_w)
+    panels = build_and_polygonize(bridged, cropped_h, cropped_w)
+    if sum(p.area for p in panels) / (cropped_h * cropped_w) < COVERAGE_MIN_FRAC:
+        # Over-fragmented partition (kept faces don't tile the page) → treat as unsplit.
+        panels = [box(0, 0, cropped_w, cropped_h)]
+    return expand_to_full_frame(panels, cropped_h, cropped_w, border), bridged
+
+
+def compute_panels(image_path: Path, border: int = BORDER_PX) -> list:
+    """Detect panels for one image as polygons in the full (uncropped) scaled-image frame.
+
+    The I/O-free pipeline used by the scoring harness; process_image mirrors it while also
+    writing per-stage debug images.
+    """
+    rgb = crop_border(load_rgb(image_path), border)
+    gray = crop_border(load_gray(image_path), border)
+    h, w = gray.shape
+    connected = connected_dividers(detect_lines(binarize(rgb, gray)), h, w)
+    panels, _ = finalize_panels(connected, h, w, border)
+    return panels
+
+
 def process_image(image_path: Path) -> None:
     """Run the full pipeline on one image and save per-stage output images."""
     stem = image_stem(image_path)
@@ -769,31 +862,22 @@ def process_image(image_path: Path) -> None:
         )
         print(f"  Union: {len(lines)} raw segments")
 
-    filtered = filter_segments(lines, h, w)
-    print(f"  Filtered (length): {len(filtered)} segments")
+    connected = connected_dividers(lines, h, w)
+    panels, bridged = finalize_panels(connected, h, w)
 
-    gap_tol = MERGE_GAP_FRAC * min(h, w)
-    merged = merge_collinear(filtered, gap_tol)
-    long_segs = keep_long_segments(merged, h, w)
-    connected = keep_connectors(merged, long_segs, h, w)
-    extended = extend_long_segments(connected, h, w)
-    snapped = snap_to_boundary(extended, h, w)
-    bridged = bridge_junctions(snapped, h, w)
-    print(f"  Merged+filtered → {len(bridged)} segments")
+    # Divider overlay stays in the cropped detection frame; panels are expanded to the full
+    # (uncropped) frame so they match the panels.json truth.
     Image.fromarray(draw_merged_segments(rgb, bridged)).save(
         OUTPUT_DIR / f"{stem}.filtered.png"
     )
-
-    panels = build_and_polygonize(bridged, h, w)
-    coverage = sum(p.area for p in panels) / (h * w)
-    if coverage < COVERAGE_MIN_FRAC:
-        # Over-fragmented partition (kept faces don't tile the page) → treat as unsplit.
-        print(f"  Coverage {coverage:.0%} < {COVERAGE_MIN_FRAC:.0%} → single panel")
-        panels = [box(0, 0, w, h)]
+    full_rgb = load_rgb(image_path)
+    full_h, full_w = full_rgb.shape[:2]
     print(f"  Panels: {len(panels)}")
     for i, panel in enumerate(panels):
-        print(f"    [{i + 1}] {panel.area / (h * w):.1%} of page")
-    Image.fromarray(draw_panels(rgb, panels)).save(OUTPUT_DIR / f"{stem}.panels.png")
+        print(f"    [{i + 1}] {panel.area / (full_h * full_w):.1%} of page")
+    Image.fromarray(draw_panels(full_rgb, panels)).save(
+        OUTPUT_DIR / f"{stem}.panels.png"
+    )
 
 
 def main() -> None:
