@@ -68,6 +68,12 @@ CLOSE_KERNEL_PX = (
 MIN_DIVIDER_THICK_PX = 5.0  # drop candidate dividers whose median thickness on the raw
 # binary is below this: real dividers are heavy (6-8px); dense-grid block/street lines that
 # the close fattened are thin (3-4px) on the raw binary, so this rejects them
+MAX_DIVIDER_CANDIDATES = (
+    12  # safety gate: a page with more long candidates than this is a
+)
+# dense street/block grid (15-32), not a real split (≤8), so treat it as a single panel.
+# Backstop for editions whose grid lines are heavy enough to pass the thickness filter
+# (e.g. Brooklyn 1904-1908), where thickness alone can't tell a street from a divider
 SKELETON_MIN_THICK_PX = 6.0  # keep medial-axis centerlines of features at least this
 # thick; well above the ~2px map-linework median but low enough to retain thin dividers
 # (9px dropped too many; 6px is the sweet spot across the test set)
@@ -805,10 +811,14 @@ def connected_dividers(
     lines that the morphological close fattened are still rejected as too thin.
     """
     merged = merge_collinear(filter_segments(lines, h, w), MERGE_GAP_FRAC * min(h, w))
+    long_candidates = keep_long_segments(merged, h, w)
+    if len(long_candidates) > MAX_DIVIDER_CANDIDATES:
+        # Too many long candidates → dense street/block grid, not a split → single panel.
+        return []
     dist = cv2.distanceTransform((binary > 0).astype(np.uint8), cv2.DIST_L2, 5)
     long_segs = [
         seg
-        for seg in keep_long_segments(merged, h, w)
+        for seg in long_candidates
         if segment_thickness(dist, seg) >= MIN_DIVIDER_THICK_PX
     ]
     return keep_connectors(merged, long_segs, h, w)
