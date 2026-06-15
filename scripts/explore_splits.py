@@ -60,8 +60,15 @@ EROSION_KERNEL_PX = (
     5  # thins map linework; the pre-LSD downscale suppresses the rest, so a light
     # kernel here preserves thinner black dividers (e.g. on color scans)
 )
-CLOSE_KERNEL_PX = 3  # light close to fuse a divider's broken core into one solid blob;
-# a heavier close would fuse neighbouring map features and erase the thick/thin distinction
+CLOSE_KERNEL_PX = (
+    3  # light close to fuse a divider's broken/stepped core into one solid
+)
+# blob so the medial axis traces it continuously (helps washington / nola-p528). The close
+# also fattens thin block/street lines fused with adjacent text, so dividers are separately
+# thickness-filtered on the raw binary (see MIN_DIVIDER_THICK_PX)
+MIN_DIVIDER_THICK_PX = 5.0  # drop candidate dividers whose median thickness on the raw
+# binary is below this: real dividers are heavy (6-8px); dense-grid block/street lines that
+# the close fattened are thin (3-4px) on the raw binary, so this rejects them
 SKELETON_MIN_THICK_PX = 6.0  # keep medial-axis centerlines of features at least this
 # thick; well above the ~2px map-linework median but low enough to retain thin dividers
 # (9px dropped too many; 6px is the sweet spot across the test set)
@@ -766,12 +773,46 @@ def detect_lines(binary: np.ndarray) -> np.ndarray:
     return np.vstack([downscale_lines, skeleton_lines])
 
 
+def segment_thickness(
+    dist: np.ndarray, seg: tuple[float, float, float, float]
+) -> float:
+    """Median ink thickness (2× distance-to-background) sampled along a segment.
+
+    `dist` is the distance transform of the raw binary ink mask. A small perpendicular
+    window picks up the local ridge so a slightly off-center segment still measures the
+    feature's true width.
+    """
+    x0, y0, x1, y1 = seg
+    length = int(np.hypot(x1 - x0, y1 - y0))
+    if length < 2:
+        return 0.0
+    h, w = dist.shape
+    widths = []
+    for t in np.linspace(0.0, 1.0, length):
+        x = int(round(x0 + t * (x1 - x0)))
+        y = int(round(y0 + t * (y1 - y0)))
+        window = dist[max(0, y - 4) : y + 5, max(0, x - 4) : x + 5]
+        if window.size:
+            widths.append(2.0 * float(window.max()))
+    return float(np.median(widths)) if widths else 0.0
+
+
 def connected_dividers(
-    lines: np.ndarray, h: int, w: int
+    lines: np.ndarray, h: int, w: int, binary: np.ndarray
 ) -> list[tuple[float, float, float, float]]:
-    """Filter, merge, length-filter, and re-admit connectors → divider segments."""
+    """Filter, merge, length-filter, drop thin (grid-line) candidates, re-admit connectors.
+
+    The thickness filter measures each long candidate on the raw binary, so block/street
+    lines that the morphological close fattened are still rejected as too thin.
+    """
     merged = merge_collinear(filter_segments(lines, h, w), MERGE_GAP_FRAC * min(h, w))
-    return keep_connectors(merged, keep_long_segments(merged, h, w), h, w)
+    dist = cv2.distanceTransform((binary > 0).astype(np.uint8), cv2.DIST_L2, 5)
+    long_segs = [
+        seg
+        for seg in keep_long_segments(merged, h, w)
+        if segment_thickness(dist, seg) >= MIN_DIVIDER_THICK_PX
+    ]
+    return keep_connectors(merged, long_segs, h, w)
 
 
 def expand_to_full_frame(
@@ -835,7 +876,8 @@ def compute_panels(image_path: Path, border: int = BORDER_PX) -> list:
     rgb = crop_border(load_rgb(image_path), border)
     gray = crop_border(load_gray(image_path), border)
     h, w = gray.shape
-    connected = connected_dividers(detect_lines(binarize(rgb, gray)), h, w)
+    binary = binarize(rgb, gray)
+    connected = connected_dividers(detect_lines(binary), h, w, binary)
     panels, _ = finalize_panels(connected, h, w, border)
     return panels
 
@@ -862,7 +904,7 @@ def process_image(image_path: Path) -> None:
         )
         print(f"  Union: {len(lines)} raw segments")
 
-    connected = connected_dividers(lines, h, w)
+    connected = connected_dividers(lines, h, w, binary)
     panels, bridged = finalize_panels(connected, h, w)
 
     # Divider overlay stays in the cropped detection frame; panels are expanded to the full
