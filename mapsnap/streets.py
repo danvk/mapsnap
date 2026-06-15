@@ -193,6 +193,24 @@ def normalize_street(text: str) -> str:
     words = text.split()
     if not words:
         return ""
+    # Merge a bare digit token with a following ordinal-suffix token ("21", "ST" → "21ST").
+    # Sanborn maps sometimes print a typographic gap between digit and suffix, causing the
+    # CTC decoder to emit "21 ST" instead of "21ST". Merging must precede STREET_ABBREVS
+    # expansion so that "ST" is not consumed as "STREET" before the ordinal is recognised.
+    merged: list[str] = []
+    i = 0
+    while i < len(words):
+        if (
+            i + 1 < len(words)
+            and words[i].isdigit()
+            and words[i + 1] in ("ST", "ND", "RD", "TH")
+        ):
+            merged.append(words[i] + words[i + 1])
+            i += 2
+        else:
+            merged.append(words[i])
+            i += 1
+    words = merged
     # Expand numeric ordinals; may expand one token to two ("21ST" → ["TWENTY", "FIRST"]).
     words = [w for token in words for w in _ORDINALS.get(token, token).split()]
     words[0] = DIRECTION_ABBREVS.get(words[0], words[0])

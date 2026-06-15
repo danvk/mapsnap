@@ -81,6 +81,26 @@ def test_normalize_ordinal_does_not_expand_non_ordinal_numbers():
     assert normalize_street("Route 66") == "ROUTE 66"
 
 
+def test_normalize_spaced_ordinal_suffix():
+    # "21 ST" (CTC gap between digit and suffix) should match "21ST" form.
+    assert normalize_street("21 ST") == normalize_street("21ST")
+    assert normalize_street("5 TH") == normalize_street("5TH")
+    assert normalize_street("2 ND") == normalize_street("2ND")
+    assert normalize_street("3 RD") == normalize_street("3RD")
+
+
+def test_normalize_spaced_ordinal_with_street_type():
+    # "21 ST ST" → "TWENTY FIRST STREET" (ordinal merged, then trailing ST→STREET)
+    assert normalize_street("21 ST ST") == "TWENTY FIRST STREET"
+    assert normalize_street("S 4 TH ST") == "SOUTH FOURTH STREET"
+
+
+def test_normalize_spaced_ordinal_does_not_merge_non_digit():
+    # Only bare digit tokens trigger the merge; letters must be left alone.
+    assert normalize_street("N ST") == normalize_street("N STREET")  # "N STREET"
+    assert normalize_street("K ST") == normalize_street("K STREET")
+
+
 # --- canonical_street_matches / canonical_street_match: direction-suffixed type keys ---
 
 _DC_STREETS = {
