@@ -630,11 +630,12 @@ def test_escalate_rescues_failed_page(monkeypatch):
         monkeypatch,
         {strict: _FAIL, step_a: _FAIL, step_b: _success(3, 5)},
     )
-    result = escalate_page(
+    result, chosen = escalate_page(
         "p1.jpg", _FAIL, 0, ladder, _DUMMY_CONFIG, _reliable_acceptance()
     )
     assert result.success
     assert result.n_gcps == 3
+    assert chosen == step_b
 
 
 def test_escalate_improves_weak_page(monkeypatch):
@@ -643,10 +644,11 @@ def test_escalate_improves_weak_page(monkeypatch):
     ladder = [strict, step_a]
     weak = _success(2, 2)
     _patch_fit_image(monkeypatch, {strict: weak, step_a: _success(4, 6)})
-    result = escalate_page(
+    result, chosen = escalate_page(
         "p1.jpg", weak, 0, ladder, _DUMMY_CONFIG, _reliable_acceptance()
     )
     assert result.n_gcps == 4
+    assert chosen == step_a
 
 
 def test_escalate_keeps_weak_when_relaxed_is_inconsistent(monkeypatch):
@@ -656,12 +658,13 @@ def test_escalate_keeps_weak_when_relaxed_is_inconsistent(monkeypatch):
     weak = _success(2, 2)
     far = _success(5, 8, center=(-80.0, 30.0))  # strong but ~900 km away → rejected
     _patch_fit_image(monkeypatch, {strict: weak, step_a: far})
-    result = escalate_page(
+    result, chosen = escalate_page(
         "p1.jpg", weak, 0, ladder, _DUMMY_CONFIG, _reliable_acceptance()
     )
-    # Falls back to the strict baseline (re-fit at index 0).
+    # Falls back to the strict baseline (re-fit at index 0); chosen is None.
     assert result.n_gcps == 2
     assert result.center == _CENTER
+    assert chosen is None
 
 
 def test_escalate_internal_quality_fallback_when_unreliable(monkeypatch):
@@ -671,6 +674,9 @@ def test_escalate_internal_quality_fallback_when_unreliable(monkeypatch):
     ladder = [strict, step_a]
     _patch_fit_image(monkeypatch, {strict: _FAIL, step_a: _success(2, 2)})
     unreliable = AcceptanceRef(None, [], False, 0.25, 1.5)
-    result = escalate_page("p1.jpg", _FAIL, 0, ladder, _DUMMY_CONFIG, unreliable)
+    result, chosen = escalate_page(
+        "p1.jpg", _FAIL, 0, ladder, _DUMMY_CONFIG, unreliable
+    )
     assert result.success
     assert result.n_gcps == 2
+    assert chosen == step_a

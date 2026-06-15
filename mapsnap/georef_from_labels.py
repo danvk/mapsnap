@@ -1630,14 +1630,17 @@ def escalate_page(
     baseline_ladder: list[Thresholds],
     config: GeorefConfig,
     acceptance: AcceptanceRef,
-) -> ProcessResult:
-    """Relax thresholds to try to improve a weak/failed page; return the final result.
+) -> tuple[ProcessResult, Thresholds | None]:
+    """Relax thresholds to try to improve a weak/failed page; return (result, chosen_rung).
 
     Walks the ladder steps below the current baseline. Among steps that produce a fit which
     is both better-supported than the baseline (more GCPs, then more inliers) and accepted by
     the neighbor-consistency reference, keeps the best, stopping early once a strong (>=3 GCP)
     consistent fit is found. If nothing qualifies, restores the page's baseline output and
-    returns the baseline result unchanged.
+    returns (baseline_result, None).
+
+    chosen_rung is the Thresholds entry from baseline_ladder that was selected, or None when
+    no improvement was found and the baseline was kept.
     """
     _, output_path = derive_paths(image_path)
     baseline_support = (baseline_result.n_gcps, baseline_result.n_inliers)
@@ -1667,12 +1670,12 @@ def escalate_page(
             f"→ {final.n_gcps} GCPs, {final.n_inliers} inliers",
             file=sys.stderr,
         )
-        return final
+        return final, chosen
     if baseline_result.success:
         # Weak 2-GCP baseline: regenerate its file at the baseline thresholds.
-        return fit_image(image_path, baseline_ladder[baseline_index], config)
+        return fit_image(image_path, baseline_ladder[baseline_index], config), None
     # Failed or 1-GCP deferred: nothing better; keep the baseline result (no file written).
-    return baseline_result
+    return baseline_result, None
 
 
 def main() -> None:
@@ -1915,14 +1918,23 @@ def main() -> None:
     # Phase 2: settle each page to its final fit, escalating weak/failed pages.
     records = FitRecords()
     deferred_list: list[dict] = []
+    # escalation_stats tracks how many pages chose each ladder rung and whether
+    # they were gains (no fit at baseline) or refinements (weak fit improved).
+    escalation_stats: dict[Thresholds, dict[str, int]] = {}
     for image_path in args.images:
         result, _, _ = phase1[image_path]
         is_weak = (result.success and result.n_gcps < 3) or result.deferred is not None
         is_failed = not result.success and result.deferred is None
         if adaptive and (is_weak or is_failed):
-            result = escalate_page(
+            result, chosen = escalate_page(
                 image_path, result, baseline_index, baseline_ladder, config, acceptance
             )
+            if chosen is not None:
+                kind = "gains" if is_failed else "refinements"
+                bucket = escalation_stats.setdefault(
+                    chosen, {"gains": 0, "refinements": 0}
+                )
+                bucket[kind] += 1
         if result.success:
             records.add_success(image_path, result)
         elif result.deferred is not None:
@@ -2023,6 +2035,34 @@ def main() -> None:
                 )
         if n_dropped:
             print(f"Dropped {n_dropped} location outlier(s).", file=sys.stderr)
+
+    if escalation_stats:
+        total_gains = sum(v["gains"] for v in escalation_stats.values())
+        total_refs = sum(v["refinements"] for v in escalation_stats.values())
+        print(
+            f"\nAdaptive fits: {total_gains + total_refs} pages escalated"
+            f" ({total_gains} gain{'s' if total_gains != 1 else ''},"
+            f" {total_refs} refinement{'s' if total_refs != 1 else ''})",
+            file=sys.stderr,
+        )
+        # Print in ladder order so rows appear from least to most permissive.
+        for rung in baseline_ladder:
+            if rung not in escalation_stats:
+                continue
+            g = escalation_stats[rung]["gains"]
+            r = escalation_stats[rung]["refinements"]
+            print(
+                f"  conf>={rung.min_confidence:g} long>={rung.min_long_side:g}"
+                f" short>={rung.min_short_side:g}:"
+                f" {g} gain{'s' if g != 1 else ''},"
+                f" {r} refinement{'s' if r != 1 else ''}",
+                file=sys.stderr,
+            )
+    elif adaptive:
+        print(
+            "Adaptive thresholds enabled but no escalations were performed.",
+            file=sys.stderr,
+        )
 
     if len(args.images) > 1:
         print(
