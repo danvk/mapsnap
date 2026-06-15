@@ -1,9 +1,8 @@
 #!/usr/bin/env python3
 """Score split detection against ground-truth panels.json via matched IoU.
 
-For each <name>.panels.json in the splits directory, runs explore_splits.compute_panels on
-<name>.jpg and compares the detected panels to the truth with a matched
-intersection-over-union score:
+Runs mapsnap.split.compute_panels on each given image and compares the detected panels to
+ground truth with a matched intersection-over-union score:
 
   Each detected panel is matched to a truth panel by an optimal assignment that maximizes
   total intersection (one-to-one). The image score is sum(intersection) / sum(union) over
@@ -11,15 +10,16 @@ intersection-over-union score:
   union. 1.0 is a perfect split; missing or spurious large panels are penalized more than
   small ones.
 
-Both detected and truth panels are in the full (uncropped) scaled-image frame.
+Images and truth files are paired by file-name stem before the first dot, so p217.raw.jpg
+pairs with p217.scaled.panels.json. An image with no truth file is scored as a single panel.
+Truth records its own width/height, so it is scaled to the image's pixel frame as needed.
 
-Run from the project root:
-  uv run python scripts/score_splits.py [SPLITS_DIR]
+Run from the project root, e.g.:
+  uv run python scripts/score_splits.py --truth_dir testdata/splits/<volume> <images-glob>
 """
 
 import argparse
 import json
-import sys
 from pathlib import Path
 
 import numpy as np
@@ -65,6 +65,18 @@ def make_valid(polygon: Polygon) -> Polygon:
     return polygon if polygon.is_valid else polygon.buffer(0)
 
 
+def stem_key(path: Path) -> str:
+    """Pairing key: the file name up to the first dot (p217.raw.jpg → p217)."""
+    return path.name.split(".", 1)[0]
+
+
+def single_panel_truth(image_path: Path) -> list[Polygon]:
+    """Truth for a page with no truth file: one panel covering the whole image."""
+    with Image.open(image_path) as img:
+        w, h = img.size
+    return [Polygon([(0, 0), (w, 0), (w, h), (0, h)])]
+
+
 def load_truth(json_path: Path, image_path: Path) -> list[Polygon]:
     """Load truth panel polygons, scaling to the actual image size if needed.
 
@@ -90,32 +102,39 @@ def main() -> None:
         description="Score split detection against panels.json ground truth."
     )
     parser.add_argument(
-        "splits_dir",
-        nargs="?",
-        default="data/splits",
+        "images",
+        nargs="+",
         type=Path,
-        help="Directory of split images and their .panels.json truth (default: data/splits).",
+        metavar="IMAGE",
+        help="Image files to split and score (e.g. a shell glob).",
+    )
+    parser.add_argument(
+        "--truth_dir",
+        required=True,
+        type=Path,
+        help="Directory of <stem>.panels.json truth files, paired with images by the "
+        "file-name stem before the first dot. An image with no truth file scores as "
+        "a single panel.",
     )
     args = parser.parse_args()
 
-    truth_files = sorted(args.splits_dir.glob("*.panels.json"))
-    if not truth_files:
-        print(f"No .panels.json files in {args.splits_dir}", file=sys.stderr)
-        sys.exit(1)
+    truth_by_key = {
+        stem_key(f): f for f in sorted(args.truth_dir.glob("*.panels.json"))
+    }
 
     print(f"{'image':18s}{'truth':>7s}{'detected':>10s}{'IoU':>8s}")
     scores = []
-    for truth_path in truth_files:
-        name = truth_path.name.removesuffix(".panels.json")
-        image_path = args.splits_dir / f"{name}.jpg"
-        if not image_path.exists():
-            print(f"{name:18s}  (no image {image_path.name})")
-            continue
-        truth = load_truth(truth_path, image_path)
+    for image_path in args.images:
+        truth_path = truth_by_key.get(stem_key(image_path))
+        truth = (
+            load_truth(truth_path, image_path)
+            if truth_path is not None
+            else single_panel_truth(image_path)
+        )
         gen = [make_valid(p) for p in es.compute_panels(image_path)]
         score = matched_iou(truth, gen)
         scores.append(score)
-        print(f"{name:18s}{len(truth):>7d}{len(gen):>10d}{score:>8.3f}")
+        print(f"{stem_key(image_path):18s}{len(truth):>7d}{len(gen):>10d}{score:>8.3f}")
 
     if scores:
         print(f"\nmean IoU over {len(scores)} images: {np.mean(scores):.3f}")
