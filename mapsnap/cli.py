@@ -43,6 +43,7 @@ SUBCOMMANDS: dict[str, tuple[str, str]] = {
         "Fetch all images for a Sanborn volume from the Library of Congress (loc.gov)",
     ),
     "split-twopage": ("mapsnap.split_twopage", "Split two-page images in half"),
+    "split": ("mapsnap.split", "Split map pages into individual panels"),
 }
 
 _cmd_width = max(len(cmd) for cmd in SUBCOMMANDS)

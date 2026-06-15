@@ -27,8 +27,7 @@ from PIL import Image
 from scipy.optimize import linear_sum_assignment
 from shapely.geometry import Polygon
 
-sys.path.insert(0, str(Path(__file__).resolve().parent))
-import explore_splits as es  # noqa: E402
+from mapsnap import split as es
 
 
 def matched_iou(truth: list[Polygon], gen: list[Polygon]) -> float:

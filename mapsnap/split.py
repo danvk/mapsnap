@@ -1,28 +1,19 @@
-#!/usr/bin/env python3
-"""Exploration script: validate LSD+graph approach for Sanborn split-page detection.
+"""Split Sanborn map pages into individual panels.
 
-For each image in the input directory, detects panels and saves <name>.panels.png — but
-only for images that actually split (a single full-page panel is skipped). The front-end is
-selected by DETECTION_METHOD.
+Each scanned page may contain 2-4 map panels separated by thick black divider lines (often
+non-rectangular: L-shapes, diagonals, staircases). For each input image this detects the
+panel partition and, when the page actually splits, writes each panel to <base>__N.jpg in
+the same directory (the panel cropped to its bounding box, with any out-of-panel area masked
+white). Pages that are a single panel are left alone.
 
-With --debug, every image is processed and all per-stage outputs are written:
-  <name>.binary.png   - binarized ink mask (dark = ink, white = paper; 50px border removed)
-  <name>.filtered.png - image with filtered + merged divider segments
-  <name>.panels.png   - image with detected panels overlaid in color
-  "skeleton" front-end (medial axis):
-    <name>.closed.png   - ink mask after a light morphological close
-    <name>.skeleton.png - thickness-filtered medial-axis centerlines overlaid in red
-    <name>.segments.png - image with raw Hough segments (green=passes filter, blue=does not)
-  "downscale" front-end (erode + LSD):
-    <name>.mask.png     - thick-features mask (binary after erosion)
-    <name>.lsd.png      - image with raw LSD segments (green=passes filter, blue=does not)
+With --debug, the per-stage images are also written next to each input (binary mask, detected
+segments, panel overlay, and front-end-specific stages).
 
-Run from the project root:
-  uv run python scripts/explore_splits.py [INPUT_DIR] [-o OUTPUT_DIR] [--debug]
+Usage:
+  mapsnap split IMAGE [IMAGE ...] [--debug]
 """
 
 import argparse
-import sys
 from pathlib import Path
 
 import cv2
@@ -31,9 +22,6 @@ from PIL import Image, ImageDraw
 from shapely.geometry import LineString, Point, Polygon, box
 from shapely.ops import polygonize, unary_union
 from skimage.morphology import medial_axis
-
-SPLITS_DIR = Path("data/splits")
-OUTPUT_DIR = Path("data/splits_output")
 
 # Front-end that turns the binary ink mask into candidate divider segments:
 #   "skeleton"  - light close → medial-axis centerlines → thickness filter → Hough
@@ -721,44 +709,52 @@ def draw_panels(rgb: np.ndarray, panels: list) -> np.ndarray:
     return np.array(Image.alpha_composite(base, overlay).convert("RGB"))
 
 
-def image_stem(image_path: Path) -> str:
-    """Return image base name without extension."""
-    return image_path.stem
+def panel_basename(image_path: Path) -> str:
+    """Base name for outputs: the stem with any .raw/.scaled qualifier removed.
+
+    e.g. p45.raw.jpg → p45, p195.scaled.jpg → p195, champaign-p20.jpg → champaign-p20.
+    """
+    base = image_path.stem
+    for suffix in (".raw", ".scaled"):
+        base = base.removesuffix(suffix)
+    return base
 
 
-def detect_downscale(binary: np.ndarray, rgb: np.ndarray, stem: str) -> np.ndarray:
-    """Downscale front-end: erode → shrink → LSD. Saves .mask.png and .lsd.png.
+def detect_downscale(
+    binary: np.ndarray, rgb: np.ndarray, out_dir: Path, base: str
+) -> np.ndarray:
+    """Downscale front-end: erode → shrink → LSD. Saves <base>.mask.png and <base>.lsd.png.
 
     Returns raw candidate segments, shape (N, 4) with columns [x1, y1, x2, y2].
     """
     h, w = binary.shape
     mask = compute_thick_mask(binary)
-    Image.fromarray(mask).save(OUTPUT_DIR / f"{stem}.mask.png")
+    Image.fromarray(mask).save(out_dir / f"{base}.mask.png")
     lines, _ = run_lsd(mask)
-    print(f"  LSD: {len(lines)} raw segments")
     Image.fromarray(draw_lsd_segments(rgb, lines, h, w)).save(
-        OUTPUT_DIR / f"{stem}.lsd.png"
+        out_dir / f"{base}.lsd.png"
     )
     return lines
 
 
-def detect_skeleton(binary: np.ndarray, rgb: np.ndarray, stem: str) -> np.ndarray:
+def detect_skeleton(
+    binary: np.ndarray, rgb: np.ndarray, out_dir: Path, base: str
+) -> np.ndarray:
     """Skeleton front-end: close → medial-axis thickness filter → Hough.
 
-    Saves .closed.png (closed ink mask), .skeleton.png (kept centerlines overlaid in red),
-    and .segments.png (raw Hough segments). Returns segments, shape (N, 4) [x1, y1, x2, y2].
+    Saves <base>.closed.png, <base>.skeleton.png (kept centerlines overlaid in red), and
+    <base>.segments.png (raw Hough segments). Returns segments, shape (N, 4) [x1, y1, x2, y2].
     """
     h, w = binary.shape
     closed = morphological_close(binary)
-    Image.fromarray(closed).save(OUTPUT_DIR / f"{stem}.closed.png")
+    Image.fromarray(closed).save(out_dir / f"{base}.closed.png")
     skeleton_img = thick_skeleton(closed)
     Image.fromarray(draw_skeleton(rgb, skeleton_img)).save(
-        OUTPUT_DIR / f"{stem}.skeleton.png"
+        out_dir / f"{base}.skeleton.png"
     )
     lines = run_hough(skeleton_img, h, w)
-    print(f"  Hough: {len(lines)} raw segments")
     Image.fromarray(draw_lsd_segments(rgb, lines, h, w)).save(
-        OUTPUT_DIR / f"{stem}.segments.png"
+        out_dir / f"{base}.segments.png"
     )
     return lines
 
@@ -891,15 +887,39 @@ def compute_panels(image_path: Path, border: int = BORDER_PX) -> list:
     return panels
 
 
-def process_image(image_path: Path, debug: bool = False) -> None:
-    """Detect panels for one image and save the panels overlay.
+def write_panels(image_path: Path, panels: list, base: str) -> list[Path]:
+    """Write each panel to <base>__N.jpg next to image_path; return the written paths.
 
-    With debug=True, also save every per-stage image (binary, mask/lsd or
-    closed/skeleton/segments, filtered). Without debug, save only panels.png, and only when
-    the result is an actual split (not a single panel covering the whole page).
+    A panel is cropped to its bounding box, with any pixels outside its (possibly
+    non-rectangular) polygon set to white. Panels are numbered in reading order: top to
+    bottom, then left to right.
     """
-    stem = image_stem(image_path)
-    print(f"\n{stem}")
+    rgb = load_rgb(image_path)
+    h, w = rgb.shape[:2]
+    ordered = sorted(panels, key=lambda p: (round(p.bounds[1] / 50), p.bounds[0]))
+    out_paths = []
+    for i, panel in enumerate(ordered, start=1):
+        mask = np.zeros((h, w), dtype=np.uint8)
+        ring = np.array(
+            [[int(round(x)), int(round(y))] for x, y in panel.exterior.coords],
+            dtype=np.int32,
+        )
+        cv2.fillPoly(mask, [ring], 255)
+        masked = rgb.copy()
+        masked[mask == 0] = 255
+        minx, miny, maxx, maxy = panel.bounds
+        x0, y0 = max(0, int(minx)), max(0, int(miny))
+        x1, y1 = min(w, int(round(maxx))), min(h, int(round(maxy)))
+        out_path = image_path.parent / f"{base}__{i}.jpg"
+        Image.fromarray(masked[y0:y1, x0:x1]).save(out_path, quality=92)
+        out_paths.append(out_path)
+    return out_paths
+
+
+def process_image(image_path: Path, debug: bool = False) -> None:
+    """Split one image into panel files, writing per-stage debug PNGs when debug is set."""
+    base = panel_basename(image_path)
+    out_dir = image_path.parent
 
     rgb = crop_border(load_rgb(image_path))
     gray = crop_border(load_gray(image_path))
@@ -907,19 +927,18 @@ def process_image(image_path: Path, debug: bool = False) -> None:
     binary = binarize(rgb, gray)
 
     if debug:
-        Image.fromarray(binary).save(OUTPUT_DIR / f"{stem}.binary.png")
+        Image.fromarray(binary).save(out_dir / f"{base}.binary.png")
         if DETECTION_METHOD == "skeleton":
-            lines = detect_skeleton(binary, rgb, stem)
+            lines = detect_skeleton(binary, rgb, out_dir, base)
         elif DETECTION_METHOD == "downscale":
-            lines = detect_downscale(binary, rgb, stem)
+            lines = detect_downscale(binary, rgb, out_dir, base)
         else:  # union: concatenate both front-ends' raw segments
             lines = np.vstack(
                 [
-                    detect_downscale(binary, rgb, stem),
-                    detect_skeleton(binary, rgb, stem),
+                    detect_downscale(binary, rgb, out_dir, base),
+                    detect_skeleton(binary, rgb, out_dir, base),
                 ]
             )
-            print(f"  Union: {len(lines)} raw segments")
     else:
         lines = detect_lines(binary)
 
@@ -927,64 +946,41 @@ def process_image(image_path: Path, debug: bool = False) -> None:
     panels, bridged = finalize_panels(connected, h, w)
     full_h, full_w = h + 2 * BORDER_PX, w + 2 * BORDER_PX
 
-    print(f"  Panels: {len(panels)}")
-    for i, panel in enumerate(panels):
-        print(f"    [{i + 1}] {panel.area / (full_h * full_w):.1%} of page")
-
     if debug:
-        # Divider overlay in the cropped detection frame.
         Image.fromarray(draw_merged_segments(rgb, bridged)).save(
-            OUTPUT_DIR / f"{stem}.filtered.png"
+            out_dir / f"{base}.filtered.png"
+        )
+        Image.fromarray(draw_panels(load_rgb(image_path), panels)).save(
+            out_dir / f"{base}.panels.png"
         )
 
-    # Panels are expanded to the full (uncropped) frame so they match the panels.json truth.
+    # A single panel covering the whole page means no split was found.
     is_single_full = len(panels) == 1 and panels[0].area >= 0.99 * full_h * full_w
-    if debug or not is_single_full:
-        full_rgb = load_rgb(image_path)
-        Image.fromarray(draw_panels(full_rgb, panels)).save(
-            OUTPUT_DIR / f"{stem}.panels.png"
-        )
+    if is_single_full:
+        print(f"{image_path.name}: single panel — not split")
+        return
+    out_paths = write_panels(image_path, panels, base)
+    print(
+        f"{image_path.name}: {len(panels)} panels → {', '.join(p.name for p in out_paths)}"
+    )
 
 
 def main() -> None:
-    global SPLITS_DIR, OUTPUT_DIR
-
     parser = argparse.ArgumentParser(
-        description="Detect Sanborn split-page panels and save per-stage debug images."
+        description="Split Sanborn map pages into individual panel images."
     )
     parser.add_argument(
-        "input_dir",
-        nargs="?",
-        default=SPLITS_DIR,
-        type=Path,
-        help="Directory of input images (default: data/splits).",
-    )
-    parser.add_argument(
-        "-o",
-        "--output-dir",
-        type=Path,
-        default=None,
-        help="Output directory for per-stage images (default: <input_dir>_output).",
+        "images", nargs="+", type=Path, metavar="IMAGE", help="Image files to split."
     )
     parser.add_argument(
         "--debug",
         action="store_true",
-        help="Save all per-stage debug images. Without it, only panels.png is written, "
-        "and only for images that actually split (not a single full-page panel).",
+        help="Also write per-stage debug PNGs (binary, segments, panel overlay) "
+        "next to each input image.",
     )
     args = parser.parse_args()
-
-    SPLITS_DIR = args.input_dir
-    OUTPUT_DIR = args.output_dir or SPLITS_DIR.parent / f"{SPLITS_DIR.name}_output"
-
-    OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
-    image_paths = sorted(SPLITS_DIR.glob("*.jpg")) + sorted(SPLITS_DIR.glob("*.png"))
-    if not image_paths:
-        print(f"No images found in {SPLITS_DIR}", file=sys.stderr)
-        sys.exit(1)
-    print(f"Processing {len(image_paths)} images → {OUTPUT_DIR}/")
-    for path in image_paths:
-        process_image(path, debug=args.debug)
+    for image_path in args.images:
+        process_image(image_path, debug=args.debug)
 
 
 if __name__ == "__main__":
