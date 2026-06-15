@@ -23,6 +23,7 @@ import sys
 from pathlib import Path
 
 import numpy as np
+from PIL import Image
 from scipy.optimize import linear_sum_assignment
 from shapely.geometry import Polygon
 
@@ -65,10 +66,24 @@ def make_valid(polygon: Polygon) -> Polygon:
     return polygon if polygon.is_valid else polygon.buffer(0)
 
 
-def load_truth(json_path: Path) -> list[Polygon]:
-    """Load truth panel polygons (full scaled-image frame) from a panels.json file."""
+def load_truth(json_path: Path, image_path: Path) -> list[Polygon]:
+    """Load truth panel polygons, scaling to the actual image size if needed.
+
+    panels.json records the frame it was generated in via width/height. If the test image
+    is a different size (e.g. truth was produced from a higher-res version), coordinates
+    are scaled proportionally so the metric runs in the test image's pixel frame.
+    """
     data = json.loads(json_path.read_text())
-    return [make_valid(Polygon(ring)) for ring in data["panels"]]
+    truth_w, truth_h = data["width"], data["height"]
+    with Image.open(image_path) as img:
+        img_w, img_h = img.size
+    sx = img_w / truth_w
+    sy = img_h / truth_h
+    polys = []
+    for ring in data["panels"]:
+        scaled = [[x * sx, y * sy] for x, y in ring]
+        polys.append(make_valid(Polygon(scaled)))
+    return polys
 
 
 def main() -> None:
@@ -97,7 +112,7 @@ def main() -> None:
         if not image_path.exists():
             print(f"{name:18s}  (no image {image_path.name})")
             continue
-        truth = load_truth(truth_path)
+        truth = load_truth(truth_path, image_path)
         gen = [make_valid(p) for p in es.compute_panels(image_path)]
         score = matched_iou(truth, gen)
         scores.append(score)

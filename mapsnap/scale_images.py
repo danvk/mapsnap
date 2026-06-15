@@ -25,16 +25,13 @@ def main() -> None:
     )
     parser.add_argument("images", nargs="+", metavar="IMAGE", help="Input image files.")
     parser.add_argument(
-        "--long-side",
-        type=int,
-        default=2048,
-        metavar="PX",
-        help="Target long-side pixel length for the largest image (default: 2048).",
+        "--percent",
+        type=float,
+        default=25.0,
+        help="Amount by which to scale images (25.0=25%, 100.0=no change)",
     )
     args = parser.parse_args()
 
-    # Pass 1: read dimensions and find the maximum long side.
-    # Skip unsplit originals; they exist only as template-matching references.
     args.images = [p for p in args.images if "unsplit" not in Path(p).name]
     if not args.images:
         print(
@@ -42,23 +39,20 @@ def main() -> None:
             file=sys.stderr,
         )
         sys.exit(1)
-    sizes: list[tuple[int, int]] = []
-    for image_path in args.images:
-        with Image.open(image_path) as img:
-            sizes.append(img.size)  # (width, height)
 
-    max_long_side = max(max(w, h) for w, h in sizes)
-
-    # Never upscale: cap the scale factor at 1.0.
-    scale = min(1.0, args.long_side / max_long_side)
+    scale = args.percent / 100.0
+    if not (0.0 < scale < 1.0):
+        print(f"Error: {args.percent} must be in (0, 100)")
+        sys.exit(1)
     print(
-        f"Scale factor: {scale:.6f}  "
-        f"(largest long side {max_long_side}px → {round(max_long_side * scale)}px)",
+        f"Scale factor: {scale:.6f}",
         file=sys.stderr,
     )
 
     # Pass 2: resize and save each image in color.
-    for image_path, (w, h) in zip(args.images, sizes):
+    for image_path in args.images:
+        with Image.open(image_path) as img:
+            w, h = img.size
         new_w = round(w * scale)
         new_h = round(h * scale)
         stem = image_stem(image_path)

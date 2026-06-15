@@ -16,12 +16,11 @@ the precise dividing boundary, since the masked-out region outside a panel is pu
 (255) while the panel's own scan paper is below WHITE_THRESHOLD.
 
 Run from the project root:
-  uv run python scripts/make_panel_truth.py [SPLITS_DIR] [--data-root DIR] [--visualize]
+  uv run python scripts/make_panel_truth.py [SPLITS_DIR] [--visualize]
 """
 
 import argparse
 import json
-import re
 import sys
 from pathlib import Path
 
@@ -31,31 +30,11 @@ from PIL import Image
 
 from mapsnap.make_iiif_georef import locate_split_in_unsplit
 
-# Maps a splits-image name prefix to its source directory under the data root.
-PREFIX_TO_DIR = {
-    "champaign": "champaign_ill_1915",
-    "detroit": "detroit_mich_1929_vol_11",
-    "nola-1896": "new_orleans_la_1896_vol_2",
-    "nola": "new_orleans_la_1951_vol_5",
-    "washington": "washington_dc_1916_vol_2",
-}
-
 WHITE_THRESHOLD = 250  # pixels at or above this are masked-out (not part of the panel)
 CLOSE_KERNEL_PX = 25  # close small holes/noise in the panel mask before contouring
 APPROX_EPS_FRAC = 0.003  # Douglas-Peucker tolerance as a fraction of contour perimeter
 MIN_PANEL_AREA_FRAC = 0.03  # ignore content/masked components smaller than this
 FALLBACK_MIN_SCORE = 0.70  # template-match threshold for pages with no full-page raw
-
-
-def parse_splits_name(stem: str) -> tuple[str, str] | None:
-    """Split a name like 'nola-1896-p101' into ('nola-1896', 'p101').
-
-    Returns None if the stem doesn't match the '<prefix>-p<number>' pattern.
-    """
-    match = re.match(r"^(?P<prefix>.+)-(?P<page>p\d+[a-z]*)$", stem)
-    if match is None:
-        return None
-    return match.group("prefix"), match.group("page")
 
 
 def mask_to_polygon(mask: np.ndarray) -> np.ndarray | None:
@@ -134,22 +113,13 @@ def extract_page_panels(
     return polygons
 
 
-def build_truth(splits_path: Path, data_root: Path) -> dict | None:
+def build_truth(splits_path: Path) -> dict | None:
     """Build the panels.json content for one splits image, or None if unresolvable.
 
     Polygons are scaled from unsplit pixels to the splits image's pixel frame.
     """
-    parsed = parse_splits_name(splits_path.stem)
-    if parsed is None:
-        print(f"  {splits_path.name}: unrecognized name pattern, skipping")
-        return None
-    prefix, page = parsed
-    source_dir = data_root / PREFIX_TO_DIR.get(prefix, "")
-    if prefix not in PREFIX_TO_DIR or not source_dir.is_dir():
-        print(
-            f"  {splits_path.name}: no source directory for prefix '{prefix}', skipping"
-        )
-        return None
+    page = splits_path.stem.split(".")[0]
+    source_dir = splits_path.parent
 
     with Image.open(splits_path) as img:
         scaled_w, scaled_h = img.size
@@ -227,12 +197,6 @@ def main() -> None:
         help="Directory of split test images (default: data/splits).",
     )
     parser.add_argument(
-        "--data-root",
-        type=Path,
-        default=Path("data"),
-        help="Root holding the per-city source directories (default: data).",
-    )
-    parser.add_argument(
         "--visualize",
         action="store_true",
         help="Also save <name>.truth.png overlays in <splits_dir>_output.",
@@ -256,7 +220,7 @@ def main() -> None:
             if args.visualize:
                 save_visualization(path, json.loads(out_path.read_text()), out_dir)
             continue
-        truth = build_truth(path, args.data_root)
+        truth = build_truth(path)
         if truth is None:
             continue
         out_path.write_text(json.dumps(truth, indent=2))
