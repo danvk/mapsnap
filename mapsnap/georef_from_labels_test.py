@@ -491,19 +491,16 @@ def test_rotation_from_neighbors_adjacency_boundary():
 
 
 def test_build_baseline_ladder_keeps_all_by_default():
-    # Default floors (matching the most permissive ladder row) keep every relaxation.
-    strict = Thresholds(0.15, 45, 20)
-    floors = Thresholds(0.07, 24, 11)
-    ladder = build_baseline_ladder(strict, floors)
-    assert ladder[0] == strict
-    assert len(ladder) == 1 + len(gfl.RELAXATION_LADDER)
+    # Default floors (matching the most permissive ladder row) keep every step.
+    ladder = build_baseline_ladder(Thresholds(0.07, 24, 11))
+    assert ladder[0] == gfl.RELAXATION_LADDER[0]  # strict baseline always first
+    assert len(ladder) == len(gfl.RELAXATION_LADDER)
 
 
 def test_build_baseline_ladder_floors_clamp():
     # Raising the floors drops every relaxation step, leaving only the strict baseline.
-    strict = Thresholds(0.15, 45, 20)
-    ladder = build_baseline_ladder(strict, Thresholds(0.3, 40, 20))
-    assert ladder == [strict]
+    ladder = build_baseline_ladder(Thresholds(0.3, 40, 20))
+    assert ladder == [gfl.RELAXATION_LADDER[0]]
 
 
 # ---------------------------------------------------------------------------

@@ -85,12 +85,12 @@ class Thresholds:
     min_short_side: float
 
 
-# Ordered relaxations tried (least → most permissive) when a page fails or fits
-# weakly at the strict baseline. The confidence bar is *raised* on the rows where the
-# size threshold first drops: admitting smaller boxes adds noise, so a higher
-# confidence requirement compensates. These values are the main tuning knobs of the
-# adaptive-threshold feature.
+# Thresholds tried from strictest (the baseline, index 0) to most permissive when a page
+# fails or fits weakly. The confidence bar is *raised* on the rows where the size threshold
+# first drops: admitting smaller boxes adds noise, so a higher confidence requirement
+# compensates. These values are the main tuning knobs of the adaptive-threshold feature.
 RELAXATION_LADDER: list[Thresholds] = [
+    Thresholds(0.15, 45, 20),  # strict baseline applied to every page first
     Thresholds(0.10, 45, 20),  # same size, lower confidence — faint big labels
     Thresholds(0.07, 45, 20),
     Thresholds(0.25, 30, 14),  # first size drop → raise confidence to offset noise
@@ -1497,10 +1497,14 @@ def fit_image(
     )
 
 
-def build_baseline_ladder(strict: Thresholds, floors: Thresholds) -> list[Thresholds]:
-    """Return [strict, *relaxations], dropping relaxation steps below any floor."""
-    ladder = [strict]
-    for step in RELAXATION_LADDER:
+def build_baseline_ladder(floors: Thresholds) -> list[Thresholds]:
+    """Return RELAXATION_LADDER with relaxation steps below any floor dropped.
+
+    The first entry (the strict baseline, applied to every page) is always kept; the floors
+    only clamp how far the looser steps that follow are allowed to relax.
+    """
+    ladder = [RELAXATION_LADDER[0]]
+    for step in RELAXATION_LADDER[1:]:
         if (
             step.min_confidence >= floors.min_confidence
             and step.min_long_side >= floors.min_long_side
@@ -1691,27 +1695,6 @@ def main() -> None:
         "--centerlines", required=True, metavar="FILE", help="centerlines.geojson"
     )
     parser.add_argument(
-        "--min-confidence",
-        type=float,
-        default=0.15,
-        metavar="THRESHOLD",
-        help="Minimum OCR confidence to accept a detection (default: %(default)s)",
-    )
-    parser.add_argument(
-        "--min-long-side",
-        type=float,
-        default=45.0,
-        metavar="PX",
-        help="Minimum long side of a text polygon to accept (default: %(default)s)",
-    )
-    parser.add_argument(
-        "--min-short-side",
-        type=float,
-        default=20.0,
-        metavar="PX",
-        help="Minimum short side of a text polygon to accept (default: %(default)s)",
-    )
-    parser.add_argument(
         "--min-aspect-ratio",
         type=float,
         default=1.75,
@@ -1845,11 +1828,10 @@ def main() -> None:
         file=sys.stderr,
     )
 
-    strict = Thresholds(args.min_confidence, args.min_long_side, args.min_short_side)
     floors = Thresholds(
         args.min_confidence_floor, args.min_long_side_floor, args.min_short_side_floor
     )
-    baseline_ladder = build_baseline_ladder(strict, floors)
+    baseline_ladder = build_baseline_ladder(floors)
     config = GeorefConfig(
         block_index=block_index,
         cos_phi=cos_phi,
