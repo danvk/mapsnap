@@ -48,11 +48,12 @@ Use the following format for JSDoc comments:
 
 ### Python files
 
-Run ruff to format and lint after editing any `.py` file:
+Run ruff to format and lint after editing any `.py` file, and run `pyright` to check for type errors:
 
 ```
 uv run ruff format <file>
 uv run ruff check --fix <file>
+uv run pyright
 ```
 
 ### TypeScript / frontend files

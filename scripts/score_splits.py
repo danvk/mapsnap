@@ -57,7 +57,7 @@ def matched_iou(truth: list[Polygon], gen: list[Polygon]) -> float:
     for j, g in enumerate(gen):
         if j not in matched_g:
             total_union += g.area
-    return total_int / total_union if total_union > 0 else 1.0
+    return float(total_int / total_union) if total_union > 0 else 1.0
 
 
 def make_valid(polygon: Polygon) -> Polygon:
