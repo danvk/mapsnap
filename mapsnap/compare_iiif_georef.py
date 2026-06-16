@@ -23,11 +23,14 @@ import json
 import math
 import re
 import sys
+from collections import defaultdict
 from pathlib import Path
 
 import numpy as np
 
 from mapsnap.utils import source_id_to_page_key
+
+Rect = tuple[float, float, float, float]  # (x, y, w, h) in canvas pixels
 
 GCP = tuple[tuple[float, float], tuple[float, float]]  # ((px, py), (lon, lat))
 EARTH_RADIUS_FT = 20_925_524.0
@@ -401,19 +404,98 @@ def print_tsv(rows: list[dict], missing: list[dict]) -> None:
         print("\t".join(row_vals[f] for f in fields))
 
 
-def load_items_by_source(path: Path) -> dict[str, dict]:
-    """Load a IIIF AnnotationPage and index items by target.source.id."""
+def annotations_by_source(path: Path) -> dict[str, list[dict]]:
+    """Load a IIIF AnnotationPage, grouping items by target.source.id.
+
+    Split pages produce several items per source id (they share the parent canvas);
+    full pages produce one. Group order follows file order.
+    """
     data: dict = json.loads(path.read_text())
-    index: dict[str, dict] = {}
+    groups: dict[str, list[dict]] = defaultdict(list)
     for item in data.get("items", []):
-        source_id: str = item["target"]["source"]["id"]
-        if item["label"].endswith("]"):
-            m = re.search(r"\[(\d+)\]$", item["label"])
-            assert m
-            split = m.group(1)
-            source_id += f"__{split}"
-        index[source_id] = item
-    return index
+        groups[item["target"]["source"]["id"]].append(item)
+    return dict(groups)
+
+
+def label_split_index(item: dict) -> int | None:
+    """Return split number N from a label ending in '[N]', or None for full pages."""
+    m = re.search(r"\[(\d+)\]$", item.get("label", ""))
+    return int(m.group(1)) if m else None
+
+
+def gen_split_region(item: dict) -> Rect | None:
+    """Return a generated annotation's split canvas region (x, y, w, h), or None."""
+    cx = extract_metadata_float(item, "split_canvas_x")
+    cy = extract_metadata_float(item, "split_canvas_y")
+    cw = extract_metadata_float(item, "split_canvas_w")
+    ch = extract_metadata_float(item, "split_canvas_h")
+    if cx is None or cy is None or cw is None or ch is None:
+        return None
+    return (cx, cy, cw, ch)
+
+
+def rect_iou(a: Rect, b: Rect) -> float:
+    """Intersection-over-union of two (x, y, w, h) rectangles."""
+    ax, ay, aw, ah = a
+    bx, by, bw, bh = b
+    ix = max(0.0, min(ax + aw, bx + bw) - max(ax, bx))
+    iy = max(0.0, min(ay + ah, by + bh) - max(ay, by))
+    inter = ix * iy
+    union = aw * ah + bw * bh - inter
+    return inter / union if union > 0 else 0.0
+
+
+def load_truth_split_regions(oim_dir: Path, page_key: str) -> dict[int, Rect]:
+    """Load OIM split canvas regions (x, y, w, h) keyed by split index.
+
+    Reads oim/<page_key>.panels.json, written by `mapsnap oim-split-truth`, whose rings
+    are bounding rectangles in full-resolution canvas coordinates. Returns {} if absent.
+    """
+    path = oim_dir / f"{page_key}.panels.json"
+    if not path.exists():
+        return {}
+    data = json.loads(path.read_text())
+    regions: dict[int, Rect] = {}
+    for i, ring in enumerate(data["panels"], start=1):
+        xs = [pt[0] for pt in ring]
+        ys = [pt[1] for pt in ring]
+        regions[i] = (min(xs), min(ys), max(xs) - min(xs), max(ys) - min(ys))
+    return regions
+
+
+def match_split_pairs(
+    truth_items: list[dict],
+    gen_items: list[dict],
+    truth_regions: dict[int, Rect],
+) -> tuple[list[tuple[dict, dict]], list[dict]]:
+    """Associate truth and generated split annotations by canvas-region overlap.
+
+    OIM's split numbering need not match ours, so each truth split is paired with the
+    generated split whose split_canvas region has the highest IoU (greedily, each
+    generated split used once). Returns (pairs, unmatched_truth_items).
+    """
+    available = list(gen_items)
+    pairs: list[tuple[dict, dict]] = []
+    unmatched: list[dict] = []
+    for truth in truth_items:
+        truth_index = label_split_index(truth)
+        truth_rect = truth_regions.get(truth_index) if truth_index else None
+        best_gen: dict | None = None
+        best_iou = 0.0
+        if truth_rect is not None:
+            for gen in available:
+                gen_rect = gen_split_region(gen)
+                if gen_rect is None:
+                    continue
+                iou = rect_iou(truth_rect, gen_rect)
+                if iou > best_iou:
+                    best_iou, best_gen = iou, gen
+        if best_gen is not None:
+            pairs.append((truth, best_gen))
+            available.remove(best_gen)
+        else:
+            unmatched.append(truth)
+    return pairs, unmatched
 
 
 def main() -> None:
@@ -441,23 +523,36 @@ def main() -> None:
     )
     args = parser.parse_args()
 
-    truth_items = load_items_by_source(Path(args.truth))
-    gen_items = load_items_by_source(Path(args.generated))
+    truth_by_source = annotations_by_source(Path(args.truth))
+    gen_by_source = annotations_by_source(Path(args.generated))
+    oim_dir = Path(args.truth).parent / "oim"
 
-    n_truth_total = len(truth_items)
+    n_truth_total = sum(len(items) for items in truth_by_source.values())
+    n_gen_total = sum(len(items) for items in gen_by_source.values())
     print(
-        f"Truth: {n_truth_total} pages  |  Generated: {len(gen_items)} pages",
+        f"Truth: {n_truth_total} pages  |  Generated: {n_gen_total} pages",
         file=sys.stderr,
     )
 
     rows: list[dict] = []
     missing: list[dict] = []
-    for source_id, truth_item in sorted(truth_items.items()):
-        gen_item = gen_items.get(source_id)
-        if gen_item is None:
-            missing.append(analyze_truth_only(truth_item))
-        else:
-            rows.append(analyze_pair(truth_item, gen_item))
+    for source_id, truth_items in sorted(truth_by_source.items()):
+        gen_items = gen_by_source.get(source_id, [])
+        truth_splits = [t for t in truth_items if label_split_index(t) is not None]
+        if not truth_splits:
+            # Full page: pair the single truth and generated annotations directly.
+            gen_item = gen_items[0] if gen_items else None
+            if gen_item is None:
+                missing.append(analyze_truth_only(truth_items[0]))
+            else:
+                rows.append(analyze_pair(truth_items[0], gen_item))
+            continue
+        # Split page: associate by canvas-region overlap (numbering may differ).
+        page_key = source_id_to_page_key(source_id, "")
+        truth_regions = load_truth_split_regions(oim_dir, page_key)
+        pairs, unmatched = match_split_pairs(truth_splits, gen_items, truth_regions)
+        rows.extend(analyze_pair(t, g) for t, g in pairs)
+        missing.extend(analyze_truth_only(t) for t in unmatched)
 
     if args.omit_missing:
         missing = []

@@ -1,12 +1,16 @@
 """Unit tests for make_iiif_georef helpers."""
 
+from shapely.geometry import box
+
 from mapsnap.make_iiif_georef import (
     GcpPoint,
     _load_oim_index,
     _service_url_to_page_key,
     georef_gcp_points,
     georef_path_to_page_key,
+    make_annotation,
 )
+from mapsnap.split import write_panels_json
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -285,17 +289,92 @@ def test_load_oim_index_simple():
     assert list(index.keys()) == ["p6n"]
 
 
-def test_load_oim_index_split_label():
-    # Label " [1]" suffix → page key gets "__1" appended.
+def test_load_oim_index_split_label_keys_by_parent():
+    # Split labels are keyed by the unsplit parent page; the "[N]" suffix is dropped.
     data = {"items": [_make_oim_item(_BASE_URL, "Page 6 [1]")]}
     index = _load_oim_index(data)
-    assert list(index.keys()) == ["p6n__1"]
+    assert list(index.keys()) == ["p6n"]
 
 
-def test_load_oim_index_split_label_second_half():
-    data = {"items": [_make_oim_item(_BASE_URL, "Page 6 [2]")]}
+def test_load_oim_index_splits_share_one_parent_entry():
+    # Both halves of a split page collapse to a single parent canvas entry.
+    data = {
+        "items": [
+            _make_oim_item(_BASE_URL, "Page 6 [1]"),
+            _make_oim_item(_BASE_URL, "Page 6 [2]"),
+        ]
+    }
     index = _load_oim_index(data)
-    assert list(index.keys()) == ["p6n__2"]
+    assert list(index.keys()) == ["p6n"]
+
+
+def _metadata_value(annotation: dict, label: str) -> str | None:
+    for entry in annotation["metadata"]:
+        if entry["label"] == label:
+            return entry["value"]
+    return None
+
+
+def test_make_annotation_split_uses_panels_json(tmp_path):
+    # Parent page is 200×400 at 25%; the full canvas is 4× larger (800×1600).
+    write_panels_json(
+        tmp_path / "p4.jpg", [box(10, 20, 60, 120)], width=200, height=400
+    )
+    item = {
+        "label": "P4",
+        "target": {
+            "source": {
+                "id": "http://example/p4/info.json",
+                "type": "ImageService3",
+                "width": 800,
+                "height": 1600,
+            }
+        },
+    }
+    georef = make_georef(width=50, height=100, intersections=[])
+
+    annotation = make_annotation(
+        item,
+        georef,
+        "p4__1",
+        tmp_path / "p4__1.jpg",
+        creator_url="http://example/me",
+        now="2026-01-01T00:00:00Z",
+    )
+
+    # Panel bbox (10,20)-(60,120) in the 25% frame scales ×4 to the full canvas.
+    assert _metadata_value(annotation, "split_canvas_x") == "40.0"
+    assert _metadata_value(annotation, "split_canvas_y") == "80.0"
+    assert _metadata_value(annotation, "split_canvas_w") == "200.0"
+    assert _metadata_value(annotation, "split_canvas_h") == "400.0"
+    assert annotation["id"] == "http://example/p4__1/georef"
+    # The first corner GCP (pixel 0,0) maps to the panel's top-left on the canvas.
+    assert annotation["body"]["features"][0]["properties"]["resourceCoords"] == [
+        40.0,
+        80.0,
+    ]
+
+
+def test_make_annotation_split_missing_panels_raises(tmp_path):
+    item = {
+        "label": "P4",
+        "target": {
+            "source": {
+                "id": "http://example/p4/info.json",
+                "width": 800,
+                "height": 1600,
+            }
+        },
+    }
+    georef = make_georef(width=50, height=100, intersections=[])
+    try:
+        make_annotation(
+            item, georef, "p4__1", tmp_path / "p4__1.jpg", "http://x", "now"
+        )
+    except ValueError as exc:
+        assert "panels.json" in str(exc)
+    else:
+        raise AssertionError("expected ValueError for missing panels.json")
 
 
 def test_load_oim_index_non_sheet_skipped():
