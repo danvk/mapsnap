@@ -121,6 +121,11 @@ def load_gray(image_path: Path) -> np.ndarray:
 
 def crop_border(arr: np.ndarray, border: int = BORDER_PX) -> np.ndarray:
     """Remove border pixels from all edges to exclude dark scan artifacts."""
+    h, w = arr.shape[:2]
+    if h <= 2 * border or w <= 2 * border:
+        raise ValueError(
+            f"image {w}×{h} is too small to crop a {border}px border from each edge"
+        )
     if arr.ndim == 2:
         return arr[border:-border, border:-border]
     return arr[border:-border, border:-border, :]
@@ -677,6 +682,11 @@ def assemble_panels(faces: list, h: int, w: int) -> list:
             panels[best] = unary_union([panels[best], face])
             progressed = True
         leftovers = deferred
+    # Any face never adjacent to a panel (shouldn't happen in a connected partition) is
+    # attached to the nearest panel so the panels still tile the whole page.
+    for face in leftovers:
+        nearest = min(range(len(panels)), key=lambda i: panels[i].distance(face))
+        panels[nearest] = unary_union([panels[nearest], face])
     return panels
 
 

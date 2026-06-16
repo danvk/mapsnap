@@ -1,10 +1,8 @@
 """Rescale a collection of images by a uniform factor.
 
-Finds the largest image (by long side), computes the scale factor that brings its
-long side to --long-side (default 2048), then applies that same factor to every image.
-This keeps all images at a consistent pixel-per-metre ratio, which matters for
-operations that use pixel measurements (--min-long-side, --min-short-side, scale
-filtering). Outputs color JPEGs with a .scaled.jpg suffix.
+Scales every image by --percent (default 25%), the same factor for all of them, so pixel
+measurements stay consistent across the collection. Outputs color JPEGs with a .scaled.jpg
+suffix. Unsplit originals (template-matching references) are skipped.
 """
 
 import argparse
@@ -28,7 +26,7 @@ def main() -> None:
         "--percent",
         type=float,
         default=25.0,
-        help="Amount by which to scale images (25.0=25%, 100.0=no change)",
+        help="Percent to scale images to (25.0 = quarter size; must be in (0, 100)).",
     )
     args = parser.parse_args()
 
@@ -49,7 +47,7 @@ def main() -> None:
         file=sys.stderr,
     )
 
-    # Pass 2: resize and save each image in color.
+    # Resize and save each image in color.
     for image_path in args.images:
         with Image.open(image_path) as img:
             w, h = img.size
