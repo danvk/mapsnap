@@ -646,9 +646,9 @@ def build_and_polygonize(
     h: int,
     w: int,
 ) -> list:
-    """Polygonize merged divider segments combined with the page boundary.
+    """Polygonize divider segments + the page boundary into the full set of faces.
 
-    Returns Shapely Polygon objects whose area exceeds MIN_PANEL_FRAC of the page.
+    Returns every face of the partition (no area filter), so their union tiles the page.
     """
     lines = [
         LineString([(0, 0), (w, 0)]),
@@ -658,9 +658,53 @@ def build_and_polygonize(
     ]
     for x0, y0, x1, y1 in segments:
         lines.append(LineString([(x0, y0), (x1, y1)]))
-    polygons = list(polygonize(unary_union(lines)))
-    min_area = MIN_PANEL_FRAC * h * w
-    return [p for p in polygons if p.area >= min_area]
+    return list(polygonize(unary_union(lines)))
+
+
+def panel_compactness(geom) -> float:
+    """Polsby-Popper compactness 4πA/P²: ~1 for a circle, low for ragged/disconnected shapes."""
+    return 4 * np.pi * geom.area / (geom.length**2) if geom.length else 0.0
+
+
+def assemble_panels(faces: list, h: int, w: int) -> list:
+    """Turn polygonize faces into panels that tile the whole page.
+
+    Faces below MIN_PANEL_FRAC are leftover slivers / small insets. If there is at most one
+    real panel — or the real panels are too fragmented to trust (they cover less than
+    COVERAGE_MIN_FRAC of the page) — the page is a single panel covering everything.
+    Otherwise each leftover face is glued onto the real panel whose union with it is most
+    compact, so the panels cover 100% of the page with the least raggedness.
+    """
+    total = h * w
+    min_area = MIN_PANEL_FRAC * total
+    big = [f for f in faces if f.area >= min_area]
+    if len(big) <= 1 or sum(f.area for f in big) / total < COVERAGE_MIN_FRAC:
+        return [box(0, 0, w, h)]
+
+    # Glue each leftover face onto an *adjacent* panel — the one whose union with it is most
+    # compact — so panels stay connected and grow to absorb the gap. Iterate so a leftover
+    # only reachable through another leftover gets absorbed once its neighbour is.
+    panels = list(big)
+    leftovers = [f for f in faces if f.area < min_area]
+    progressed = True
+    while leftovers and progressed:
+        progressed = False
+        deferred = []
+        for face in leftovers:
+            adjacent = [
+                i for i, p in enumerate(panels) if p.intersection(face).length > 1e-9
+            ]
+            if not adjacent:
+                deferred.append(face)
+                continue
+            best = max(
+                adjacent,
+                key=lambda i: panel_compactness(unary_union([panels[i], face])),
+            )
+            panels[best] = unary_union([panels[best], face])
+            progressed = True
+        leftovers = deferred
+    return panels
 
 
 def draw_lsd_segments(
@@ -865,10 +909,8 @@ def finalize_panels(
     extended = extend_long_segments(connected, cropped_h, cropped_w)
     snapped = snap_to_boundary(extended, cropped_h, cropped_w)
     bridged = bridge_junctions(snapped, cropped_h, cropped_w)
-    panels = build_and_polygonize(bridged, cropped_h, cropped_w)
-    if sum(p.area for p in panels) / (cropped_h * cropped_w) < COVERAGE_MIN_FRAC:
-        # Over-fragmented partition (kept faces don't tile the page) → treat as unsplit.
-        panels = [box(0, 0, cropped_w, cropped_h)]
+    faces = build_and_polygonize(bridged, cropped_h, cropped_w)
+    panels = assemble_panels(faces, cropped_h, cropped_w)
     return expand_to_full_frame(panels, cropped_h, cropped_w, border), bridged
 
 
