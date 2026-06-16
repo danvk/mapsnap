@@ -38,11 +38,6 @@ EDGE_SNAP_PX = (
 # the cropped boundary are pushed out to the full-frame edge (re-opens the cropped border)
 COLOR_SPREAD_MAX = 40  # max RGB channel spread (max−min) to count a pixel as black ink;
 # colored pixels (brick, vegetation, water tints) are never part of a divider
-COLOR_PROXIMITY_PX = 0  # erase ink within this many px of a colored pixel (0 = off):
-# building outlines hug their colored fills. Cleans building edges nicely where buildings
-# are set back from dividers (e.g. nola-1896-p101), but where dividers abut colored
-# buildings (washington-p244) it erases the dividers too — a net regression, so off by
-# default. Set to ~5 to re-enable.
 EROSION_KERNEL_PX = (
     5  # thins map linework; the pre-LSD downscale suppresses the rest, so a light
     # kernel here preserves thinner black dividers (e.g. on color scans)
@@ -136,35 +131,13 @@ def binarize(rgb: np.ndarray, gray: np.ndarray) -> np.ndarray:
 
     Otsu on luminance selects dark pixels, then a chroma gate drops any that are colored.
     Dividers are always black, so colored map content (brick, vegetation, water tints) —
-    which can be dark enough to pass an Otsu luminance threshold — is excluded. Finally,
-    ink near colored pixels is erased (see suppress_near_color). For grayscale scans both
-    color steps are no-ops, matching plain Otsu.
+    which can be dark enough to pass an Otsu luminance threshold — is excluded. For grayscale
+    scans the chroma gate is a no-op, matching plain Otsu.
     """
     _, dark = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY_INV | cv2.THRESH_OTSU)
     spread = rgb.max(axis=2).astype(np.int16) - rgb.min(axis=2).astype(np.int16)
     achromatic = (spread <= COLOR_SPREAD_MAX).astype(np.uint8) * 255
-    ink = cv2.bitwise_and(dark, achromatic)
-    return suppress_near_color(ink, spread)
-
-
-def suppress_near_color(
-    ink: np.ndarray, spread: np.ndarray, proximity_px: int = COLOR_PROXIMITY_PX
-) -> np.ndarray:
-    """Erase ink pixels within proximity_px of a colored pixel.
-
-    Building outlines run right alongside their colored fills (brick red, frame yellow),
-    while black dividers stay clear of color. Dilating the colored-pixel mask and clearing
-    ink inside it removes building edges and other content hugging color, leaving dividers.
-    `spread` is the per-pixel RGB channel spread (max−min) already computed by binarize.
-    """
-    if proximity_px <= 0:
-        return ink
-    colored = (spread > COLOR_SPREAD_MAX).astype(np.uint8)
-    ksize = 2 * proximity_px + 1
-    dilated = cv2.dilate(colored, np.ones((ksize, ksize), np.uint8))
-    out = ink.copy()
-    out[dilated > 0] = 0
-    return out
+    return cv2.bitwise_and(dark, achromatic)
 
 
 def compute_thick_mask(
