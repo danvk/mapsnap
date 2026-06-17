@@ -51,7 +51,7 @@ def process_canvas(
     page_key = canvas_to_page_key(canvas_id, label)
     assert page_key != "iiif", f"Could not extract valid page key from {canvas_id}"
     image_url = f"{canvas_id}/full/{scale}/0/default.jpg"
-    image_path = output_dir / f"{page_key}.raw.jpg"
+    image_path = output_dir / f"{page_key}.jpg"
 
     if image_path.exists():
         print(f"  Already done: {image_path.name}", file=sys.stderr)
@@ -76,7 +76,7 @@ def main() -> None:
     parser = argparse.ArgumentParser(
         description=(
             "Download LOC images from a local IIIF Presentation manifest. "
-            "Saves one .raw.jpg per canvas alongside the IIIF file."
+            "Saves one <page_key>.jpg per canvas alongside the IIIF file."
         )
     )
     parser.add_argument(

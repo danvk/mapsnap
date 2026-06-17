@@ -5,7 +5,7 @@ import glob
 import sys
 from pathlib import Path
 
-from mapsnap.utils import run_cmd
+from mapsnap.utils import list_pages, run_cmd, write_run_record
 
 
 def main() -> None:
@@ -31,8 +31,15 @@ def main() -> None:
 
     print(args.dir)
     print(args.relation)
+    write_run_record(
+        dir_path, "loc", {"manifest": str(manifest), "relation": args.relation}
+    )
 
     run_cmd(["mapsnap", "download-loc", "--scale", "pct:25", str(manifest)])
+
+    # Detect and write split panels (pN__i.jpg + pN.panels.json) for pages that split.
+    page_images = sorted(glob.glob(str(dir_path / "p*.jpg")))
+    run_cmd(["mapsnap", "split", *page_images])
 
     run_cmd(
         [
@@ -54,14 +61,14 @@ def main() -> None:
         ]
     )
 
-    raw_images = sorted(glob.glob(str(dir_path / "p*.raw.jpg")))
+    ocr_images = [str(p) for p in list_pages(dir_path)]
     run_cmd(
         [
             "mapsnap",
             "ocr",
             "--centerlines",
             str(dir_path / "centerlines.geojson"),
-            *raw_images,
+            *ocr_images,
         ]
     )
 

@@ -1,5 +1,7 @@
 """Unit tests for the geometry helpers in mapsnap.split."""
 
+from pathlib import Path
+
 import cv2
 import numpy as np
 import pytest
@@ -12,20 +14,56 @@ from mapsnap.split import (
     merge_collinear,
     panel_basename,
     panel_compactness,
+    panels_json_path,
+    read_panels_json,
+    remove_split_outputs,
     seg_angle_deg,
     segment_thickness,
+    write_panels_json,
 )
 
 # --- panel_basename ---
 
 
 def test_panel_basename_strips_raw_and_scaled():
-    from pathlib import Path
-
     assert panel_basename(Path("p45.raw.jpg")) == "p45"
     assert panel_basename(Path("p195.scaled.jpg")) == "p195"
     assert panel_basename(Path("dir/champaign-p20.jpg")) == "champaign-p20"
     assert panel_basename(Path("p8.jpg")) == "p8"
+
+
+# --- panels.json round-trip and cleanup ---
+
+
+def test_write_panels_json_records_ordered_rings(tmp_path):
+    image_path = tmp_path / "p7.jpg"
+    panels = [box(0, 0, 50, 100), box(50, 0, 120, 100)]
+    out_path = write_panels_json(image_path, panels, width=120, height=100)
+
+    assert out_path == panels_json_path(image_path) == tmp_path / "p7.panels.json"
+    data = read_panels_json(out_path)
+    assert data["image"] == "p7.jpg"
+    assert (data["width"], data["height"]) == (120, 100)
+    assert len(data["panels"]) == 2
+    # First ring is the left panel; rings are closed (first point repeats).
+    xs = [pt[0] for pt in data["panels"][0]]
+    assert min(xs) == 0 and max(xs) == 50
+    assert data["panels"][0][0] == data["panels"][0][-1]
+
+
+def test_remove_split_outputs_deletes_panels_and_json(tmp_path):
+    (tmp_path / "p2__1.jpg").touch()
+    (tmp_path / "p2__2.jpg").touch()
+    (tmp_path / "p2.panels.json").touch()
+    # An unrelated page must be left alone.
+    (tmp_path / "p3__1.jpg").touch()
+
+    remove_split_outputs(tmp_path / "p2.jpg")
+
+    assert not (tmp_path / "p2__1.jpg").exists()
+    assert not (tmp_path / "p2__2.jpg").exists()
+    assert not (tmp_path / "p2.panels.json").exists()
+    assert (tmp_path / "p3__1.jpg").exists()
 
 
 # --- crop_border ---

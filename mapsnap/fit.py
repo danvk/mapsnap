@@ -6,7 +6,7 @@ import subprocess
 import sys
 from pathlib import Path
 
-from mapsnap.utils import run_cmd
+from mapsnap.utils import list_pages, run_cmd
 
 
 def find_centerlines(dir_path: Path) -> Path:
@@ -21,12 +21,11 @@ def find_centerlines(dir_path: Path) -> Path:
 
 
 def find_input_images(dir_path: Path) -> list[str]:
-    """Return image paths, preferring p*.scaled.jpg over p*.raw.jpg."""
-    for pattern in ("p*.scaled.jpg", "p*.raw.jpg", "p*.jpg"):
-        images = sorted(glob.glob(str(dir_path / pattern)))
-        if images:
-            return images
-    sys.exit(f"No p*.scaled.jpg, p*.raw.jpg, or p*.jpg found in {dir_path}")
+    """Return the effective page images (split panels supersede their parent page)."""
+    images = [str(p) for p in list_pages(dir_path)]
+    if not images:
+        sys.exit(f"No p*.jpg found in {dir_path}")
+    return images
 
 
 def find_ref_iiif(dir_path: Path) -> Path | None:

@@ -44,6 +44,10 @@ SUBCOMMANDS: dict[str, tuple[str, str]] = {
     ),
     "split-twopage": ("mapsnap.split_twopage", "Split two-page images in half"),
     "split": ("mapsnap.split", "Split map pages into individual panels"),
+    "oim-split-truth": (
+        "mapsnap.oim_truth",
+        "Locate OIM's manual split regions on the canvas for comparison",
+    ),
 }
 
 _cmd_width = max(len(cmd) for cmd in SUBCOMMANDS)

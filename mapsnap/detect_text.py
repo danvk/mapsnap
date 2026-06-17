@@ -100,6 +100,18 @@ def _streets_path(image_path: str) -> str:
     return str(Path(image_path).parent / (stem + ".streets.json"))
 
 
+def has_split_panels(image_path: str) -> bool:
+    """True if image_path is a whole page already split into <stem>__N.jpg panels.
+
+    Such a parent page is superseded by its panels and should not be OCR'd; the panels
+    are processed instead. Returns False for the panels themselves (stems with '__').
+    """
+    stem = image_stem(image_path)
+    if "__" in stem:
+        return False
+    return any(Path(image_path).parent.glob(f"{stem}__*.jpg"))
+
+
 def _craft_detect_all_angles(
     img: Image.Image,
     reader: easyocr.Reader,
@@ -503,7 +515,19 @@ def main() -> None:
         file=sys.stderr,
     )
 
+    # Never OCR a page that has been split into panels; OCR its panels instead. This
+    # mirrors mapsnap.utils.list_pages so the rule holds however ocr is invoked (pipeline
+    # or a raw shell glob that happens to include the parent).
     images = args.images
+    superseded = [p for p in images if has_split_panels(p)]
+    if superseded:
+        images = [p for p in images if p not in superseded]
+        print(
+            f"Skipping {len(superseded)} split parent page(s): "
+            + ", ".join(Path(p).name for p in superseded),
+            file=sys.stderr,
+        )
+
     if args.resume:
         images = [
             p

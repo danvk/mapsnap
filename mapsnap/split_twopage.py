@@ -3,8 +3,8 @@
 Uses the filename numbering scheme — no OCR needed.
 
 Filename format:
-  sb000NNN0.raw.jpg  →  left page = NNN  (e.g. sb000060 → page 6, sb000570 → page 57)
-  sb00001d.raw.jpg   →  left page = 1    (special first-page naming)
+  sb000NNN0.jpg  →  left page = NNN  (e.g. sb000060 → page 6, sb000570 → page 57)
+  sb00001d.jpg   →  left page = 1    (special first-page naming)
 
 Content type is determined by the difference between consecutive page numbers:
   diff = 1 (file increment  10):  both halves show the same page number —
@@ -24,6 +24,8 @@ from pathlib import Path
 import numpy as np
 from PIL import Image
 
+from mapsnap.utils import image_stem
+
 # RGB spread threshold for color detection: max(R,G,B) - min(R,G,B) > this value.
 _COLOR_SPREAD = 50
 
@@ -38,12 +40,13 @@ def color_fraction(img: Image.Image) -> float:
 def parse_page_number(filename: str) -> int | None:
     """Extract the left-page number from a two-page filename.
 
-    sb00001d.raw.jpg → 1   (special first-page case)
-    sb000060.raw.jpg → 6
-    sb000570.raw.jpg → 57
-    Returns None for unrecognized patterns (e.g. sb00001a/b/c).
+    sb00001d.jpg → 1   (special first-page case)
+    sb000060.jpg → 6
+    sb000570.jpg → 57
+    Returns None for unrecognized patterns (e.g. sb00001a/b/c). Legacy ``.raw.jpg``
+    names are accepted too, since image_stem strips all extensions.
     """
-    stem = filename.removesuffix(".raw.jpg")
+    stem = image_stem(filename)
     if re.fullmatch(r"sb0+1d", stem):
         return 1
     m = re.fullmatch(r"sb(\d+)", stem)
@@ -55,7 +58,7 @@ def parse_page_number(filename: str) -> int | None:
 
 
 def page_filename(page_num: int, skeleton: bool) -> str:
-    return f"p{page_num}{'s' if skeleton else ''}.raw.jpg"
+    return f"p{page_num}{'s' if skeleton else ''}.jpg"
 
 
 def save_half(
@@ -105,9 +108,9 @@ def main() -> None:
     in_dir = Path(args.input_dir)
     out_dir = Path(args.output_dir)
 
-    all_files = sorted(in_dir.glob("*.raw.jpg"))
+    all_files = sorted(in_dir.glob("*.jpg"))
     if not all_files:
-        print(f"No .raw.jpg files in {in_dir}", file=sys.stderr)
+        print(f"No .jpg files in {in_dir}", file=sys.stderr)
         sys.exit(1)
 
     # Parse page numbers; skip files with unrecognised names.

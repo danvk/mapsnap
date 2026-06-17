@@ -218,4 +218,5 @@ __marimo__/
 .streamlit/secrets.toml
 
 data
+backup-data
 .claude/settings.local.json

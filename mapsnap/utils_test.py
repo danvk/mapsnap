@@ -1,6 +1,21 @@
 """Tests for mapsnap.utils."""
 
-from mapsnap.utils import image_stem, source_id_to_page_key
+from mapsnap.utils import image_stem, list_pages, source_id_to_page_key
+
+
+def test_list_pages_splits_supersede_parent(tmp_path):
+    for name in ("p1.jpg", "p2.jpg", "p2__1.jpg", "p2__2.jpg", "p3.jpg"):
+        (tmp_path / name).touch()
+    # raw/ and oim/ subdirectories are ignored.
+    (tmp_path / "raw").mkdir()
+    (tmp_path / "raw" / "p1.jpg").touch()
+
+    names = [p.name for p in list_pages(tmp_path)]
+    assert names == ["p1.jpg", "p2__1.jpg", "p2__2.jpg", "p3.jpg"]
+
+
+def test_list_pages_empty_dir(tmp_path):
+    assert list_pages(tmp_path) == []
 
 
 def test_single_extension():

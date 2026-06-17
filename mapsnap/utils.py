@@ -1,9 +1,11 @@
 """Shared utilities for mapsnap scripts."""
 
+import json
 import re
 import struct
 import subprocess
 import sys
+from datetime import datetime, timezone
 from pathlib import Path
 
 
@@ -13,6 +15,23 @@ def run_cmd(cmd: list[str]) -> None:
     result = subprocess.run(cmd)
     if result.returncode != 0:
         sys.exit(result.returncode)
+
+
+def write_run_record(dir_path: Path, source: str, params: dict[str, str]) -> None:
+    """Record the pipeline invocation in dir_path/mapsnap.json for reproducibility.
+
+    source is the pipeline kind ("loc" or "oim"); params holds the volume-specific
+    arguments (slug/manifest, relation, etc.). The command line and a UTC timestamp are
+    added automatically.
+    """
+    # cli.py rewrites argv[0] to "mapsnap <subcommand>"; split it back into tokens.
+    record = {
+        "source": source,
+        "command": [*sys.argv[0].split(), *sys.argv[1:]],
+        "created": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+        "params": params,
+    }
+    (dir_path / "mapsnap.json").write_text(json.dumps(record, indent=2))
 
 
 def jpeg_dimensions(path: Path) -> tuple[int, int]:
@@ -104,3 +123,19 @@ def image_stem(image_path: str) -> str:
     ``p50n.2048px.jpg`` become ``p50n`` rather than ``p50n.2048px``.
     """
     return Path(image_path).name.split(".")[0]
+
+
+def list_pages(dir_path: Path) -> list[Path]:
+    """Return the effective page images in dir_path, splits superseding their parent.
+
+    Globs top-level ``p*.jpg`` (ignoring the ``raw/`` and ``oim/`` subdirectories). A
+    whole-page ``pN.jpg`` is dropped when any of its panels ``pN__*.jpg`` is present, so
+    callers operate on the split panels instead. Returns paths sorted by name.
+    """
+    images = sorted(dir_path.glob("p*.jpg"))
+    split_parents = {p.stem.split("__")[0] for p in images if "__" in p.stem}
+    return [
+        p
+        for p in images
+        if "__" in p.stem or p.stem.split("__")[0] not in split_parents
+    ]

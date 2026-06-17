@@ -5,7 +5,7 @@ import glob
 import urllib.request
 from pathlib import Path
 
-from mapsnap.utils import run_cmd
+from mapsnap.utils import list_pages, run_cmd, write_run_record
 
 
 def download_file(url: str, dest: Path) -> None:
@@ -42,6 +42,15 @@ def main() -> None:
 
     dir_path = Path(args.dir)
     dir_path.mkdir(parents=True, exist_ok=True)
+    write_run_record(
+        dir_path,
+        "oim",
+        {
+            "sanborn_slug": args.sanborn_slug,
+            "relation": args.relation,
+            "oim_prefix": args.oim_prefix,
+        },
+    )
 
     base_url = f"https://oldinsurancemaps.net/iiif/mosaic/{args.sanborn_slug}"
     download_file(f"{base_url}/main-content/?trim=true", dir_path / "main.iiif.json")
@@ -57,8 +66,13 @@ def main() -> None:
         ]
     )
 
-    raw_images = sorted(glob.glob(str(dir_path / "*.raw.jpg")))
-    run_cmd(["mapsnap", "scale", *raw_images])
+    # Downscale the full-resolution raw/ pages to 25% top-level pN.jpg images.
+    raw_images = sorted(glob.glob(str(dir_path / "raw" / "*.jpg")))
+    run_cmd(["mapsnap", "scale", *raw_images, "--output-dir", str(dir_path)])
+
+    # Detect and write split panels (pN__i.jpg + pN.panels.json) for pages that split.
+    page_images = sorted(glob.glob(str(dir_path / "p*.jpg")))
+    run_cmd(["mapsnap", "split", *page_images])
 
     run_cmd(
         [
@@ -80,16 +94,19 @@ def main() -> None:
         ]
     )
 
-    scaled_images = sorted(glob.glob(str(dir_path / "*.scaled.jpg")))
+    ocr_images = [str(p) for p in list_pages(dir_path)]
     run_cmd(
         [
             "mapsnap",
             "ocr",
             "--centerlines",
             str(dir_path / "centerlines.geojson"),
-            *scaled_images,
+            *ocr_images,
         ]
     )
+
+    # Locate OIM's manual split regions on the canvas (ground truth for compare).
+    run_cmd(["mapsnap", "oim-split-truth", str(dir_path / "main.iiif.json")])
 
     run_cmd(["mapsnap", "fit", str(dir_path), "mapsnap"])
 

@@ -4,22 +4,20 @@ Accepts two input formats for the source IIIF file:
 
   OIM AnnotationPage (type: AnnotationPage)
     Each item has a label, target.source.{id,width,height}, and body.features (GCPs).
-    Split pages (labels ending in "[N]") are supported: the unsplit original is located
-    via template matching to determine a non-circular canvas placement.
 
   LOC sc:Manifest (@type: sc:Manifest)
-    Each canvas has a label like "Page 8" and an image service URL. No split pages;
-    the script asserts that all matching georef page keys are unsplit.
+    Each canvas has a label like "Page 8" and an image service URL.
 
-For images where the raw file covers the full source canvas (raw_dims ≈ source_dims),
-resource coordinates are computed by simple proportional scaling:
+Georefs are computed in the 25%-scale page-image pixel frame (pN.jpg). Resource
+coordinates are mapped into the full source canvas by proportional scaling:
 
     resourceCoords = georef_pixel × source_dim / georef_dim
 
-For OIM split sub-images (raw_dims << source_dims), the unsplit original (e.g.
-p4.unsplit.jpg) is located via template matching to determine the sub-image's pixel
-offset within the full canvas. Raises an error and skips the page if the unsplit file
-is absent or the match score is too low.
+Split pages (georef key pN__i) are placed within the parent page's canvas using the
+panel polygon recorded in pN.panels.json: the panel's bounding box (in the pN.jpg frame)
+is scaled to canvas coordinates to give the sub-image's offset and extent. The split
+panels of a page all share the parent page's full canvas (matching how OIM expresses
+split annotations).
 
 Usage:
     python make_iiif_georef.py <main.iiif.json> <georef_glob> [--output FILE] [--creator URL]
@@ -34,109 +32,16 @@ import sys
 from datetime import datetime, timezone
 from pathlib import Path
 
-import cv2
 import numpy as np
-from PIL import Image
 from shapely.geometry import Polygon as ShapelyPolygon
 from shapely.geometry import mapping as geom_mapping
 
 from mapsnap.clip_masks import compute_all_clip_masks, geo_polygon_to_svg
+from mapsnap.split import panels_json_path, read_panels_json
 from mapsnap.utils import jpeg_dimensions
 
-
-def _replace_white(arr: np.ndarray, white_threshold: int = 250) -> np.ndarray:
-    """Replace pure-white pixels with the mean of non-white pixels.
-
-    White pixels (≥ white_threshold) are masked-out regions on Sanborn map splits
-    that share no content with the corresponding area in the unsplit image.
-    Replacing them with the template mean gives zero contribution to TM_CCOEFF_NORMED,
-    preventing them from pulling the match towards the wrong location.
-    """
-    non_white = arr < white_threshold
-    if not non_white.any():
-        return arr
-    mean_val = int(round(float(arr[non_white].mean())))
-    out = arr.copy()
-    out[~non_white] = mean_val
-    return out
-
-
-def locate_split_in_unsplit(
-    split_path: Path,
-    unsplit_path: Path,
-    min_score: float = 0.90,
-    coarse_downsample: int = 4,
-    refine_margin: int = 20,
-) -> tuple[int, int]:
-    """Find the pixel offset of a split sub-image within its unsplit original.
-
-    Uses a two-stage search: coarse normalized cross-correlation at downsampled
-    resolution to find the rough location, then full-resolution refinement in a
-    small window around that estimate. Pure-white pixels in the split (masked-out
-    regions) are replaced with the template mean so they contribute nothing to the
-    correlation score.
-
-    Raises ValueError if the refined match score is below min_score (uncertain
-    placement) or if the located region overflows the unsplit image bounds.
-
-    Returns (offset_x, offset_y) in unsplit image pixel coordinates (top-left corner).
-    """
-    split_arr = _replace_white(
-        np.array(Image.open(split_path).convert("L"), dtype=np.uint8)
-    )
-    unsplit_arr = np.array(Image.open(unsplit_path).convert("L"), dtype=np.uint8)
-
-    ds = coarse_downsample
-    split_small = split_arr[::ds, ::ds]
-    unsplit_small = unsplit_arr[::ds, ::ds]
-
-    if (
-        split_small.shape[0] > unsplit_small.shape[0]
-        or split_small.shape[1] > unsplit_small.shape[1]
-    ):
-        raise ValueError(
-            f"Split ({split_arr.shape[1]}×{split_arr.shape[0]}) is larger than "
-            f"unsplit ({unsplit_arr.shape[1]}×{unsplit_arr.shape[0]}) at coarse resolution"
-        )
-
-    coarse_result = cv2.matchTemplate(unsplit_small, split_small, cv2.TM_CCOEFF_NORMED)
-    _, _, _, coarse_loc = cv2.minMaxLoc(coarse_result)
-    coarse_x = coarse_loc[0] * ds
-    coarse_y = coarse_loc[1] * ds
-
-    # Refine at full resolution within a small window around the coarse estimate.
-    sh, sw = split_arr.shape
-    uh, uw = unsplit_arr.shape
-    x1 = max(0, coarse_x - refine_margin)
-    x2 = min(uw, coarse_x + sw + refine_margin)
-    y1 = max(0, coarse_y - refine_margin)
-    y2 = min(uh, coarse_y + sh + refine_margin)
-
-    if x2 - x1 < sw or y2 - y1 < sh:
-        raise ValueError(
-            f"Refinement window too small ({x2 - x1}×{y2 - y1}) for template ({sw}×{sh})"
-        )
-
-    region = unsplit_arr[y1:y2, x1:x2]
-    result = cv2.matchTemplate(region, split_arr, cv2.TM_CCOEFF_NORMED)
-    _, max_score, _, max_loc = cv2.minMaxLoc(result)
-
-    if max_score < min_score:
-        raise ValueError(
-            f"Template match score {max_score:.3f} < threshold {min_score} "
-            f"({split_path.name} in {unsplit_path.name})"
-        )
-
-    offset_x = x1 + max_loc[0]
-    offset_y = y1 + max_loc[1]
-
-    if offset_x + sw > uw or offset_y + sh > uh:
-        raise ValueError(
-            f"Located position ({offset_x}, {offset_y}) + {sw}×{sh} overflows "
-            f"unsplit bounds {uw}×{uh}"
-        )
-
-    return offset_x, offset_y
+# Page images are stored at 25% scale, so the full-resolution canvas is 4× larger.
+FULL_RES_FACTOR = 4
 
 
 def georef_path_to_page_key(path: str) -> str | None:
@@ -180,11 +85,13 @@ def _service_url_to_page_key(url: str) -> str | None:
 
 
 def _load_oim_index(data: dict) -> dict[str, dict]:
-    """Build page_key → item dict from an OIM IIIF AnnotationPage.
+    """Build parent-page_key → item dict from an OIM IIIF AnnotationPage.
 
-    Labels ending with "[N]" (e.g. "Page 4 [1]") denote split sub-images; the
-    split number is appended to the page key as "__N" (e.g. "p4__1") to match
-    the naming convention used by georef_path_to_page_key.
+    Items are keyed by the unsplit page key (e.g. "p4"), dropping any "[N]" split
+    suffix in the label. OIM expresses each split annotation in the parent page's full
+    canvas (all splits of a page share the same source id and width/height), so a single
+    full-canvas item per page is all make_annotation needs; our own splits are placed
+    within it via panels.json.
     """
     index: dict[str, dict] = {}
     for item in data.get("items", []):
@@ -192,22 +99,19 @@ def _load_oim_index(data: dict) -> dict[str, dict]:
         page_key = _service_url_to_page_key(source_id)
         if page_key is None:
             continue
-        label: str = item.get("label", "")
-        m = re.search(r"\[(\d+)\]$", label)
-        if m:
-            page_key += f"__{m.group(1)}"
         index[page_key] = item
     return index
 
 
-def _load_loc_index(data: dict, raw_dir: Path) -> dict[str, dict]:
+def _load_loc_index(data: dict) -> dict[str, dict]:
     """Build page_key → normalized item dict from a LOC sc:Manifest.
 
     Normalizes each canvas into the same shape make_annotation expects:
       {"label": str, "target": {"source": {"id": str, "width": int, "height": int}}}
 
-    Full image dimensions come from the raw.jpg on disk when present; otherwise the
-    pct thumbnail scale factor is parsed from the resource URL and applied.
+    The manifest's resource dimensions are at the requested pct scale (we download at
+    pct:25), so the full-resolution source dimensions are recovered by scaling up by
+    100/pct (e.g. ×4 for pct:25).
     """
     manifest_label: str = data.get("label", "")
     canvases: list[dict] = data["sequences"][0]["canvases"]
@@ -220,22 +124,11 @@ def _load_loc_index(data: dict, raw_dir: Path) -> dict[str, dict]:
         if page_key is None:
             continue
 
-        raw_path = raw_dir / f"{page_key}.raw.jpg"
+        # Resource URL contains e.g. "/full/pct:25/0/default.jpg"; scale up to full res.
         pct_m = re.search(r"/pct:(\d+)/", resource.get("@id", ""))
         scale = 100.0 / int(pct_m.group(1)) if pct_m else 1.0
-        if raw_path.exists():
-            raw_w, raw_h = jpeg_dimensions(raw_path)
-            # raw.jpg may be the pct thumbnail (raw_w ≈ resource["width"]) or the
-            # full-resolution image (raw_w ≈ resource["width"] * scale). Only apply
-            # scale if the raw image is at thumbnail resolution.
-            res_w = resource.get("width", 0)
-            effective_scale = 1.0 if (res_w > 0 and raw_w > res_w * 1.5) else scale
-            source_width = int(round(raw_w * effective_scale))
-            source_height = int(round(raw_h * effective_scale))
-        else:
-            # Resource URL contains e.g. "/full/pct:25/0/default.jpg"; scale up.
-            source_width = int(round(resource["width"] * scale))
-            source_height = int(round(resource["height"] * scale))
+        source_width = int(round(resource["width"] * scale))
+        source_height = int(round(resource["height"] * scale))
 
         index[page_key] = {
             "label": f"{manifest_label} | {canvas_label}",
@@ -258,7 +151,7 @@ def _georef_metadata(
     """Build IIIF metadata entries for streets, intersections, and split canvas bounds.
 
     split_canvas, when present, gives the sub-image region within the full canvas as
-    (x, y, w, h) in canvas pixel coordinates, derived via template matching.
+    (x, y, w, h) in canvas pixel coordinates, derived from the panel polygon.
     """
     n_streets = len(
         set(s["street"] for s in georef.get("streets", []) if s.get("inlier"))
@@ -347,7 +240,8 @@ def georef_gcp_points(georef: dict) -> list[GcpPoint]:
 def make_annotation(
     item: dict,
     georef: dict,
-    raw_path: Path,
+    page_key: str,
+    image_path: Path,
     creator_url: str,
     now: str,
     geo_mask: ShapelyPolygon | None = None,
@@ -355,13 +249,17 @@ def make_annotation(
     """Build a IIIF georeferencing annotation for one page.
 
     item must have {"label": str, "target": {"source": {"id", "width", "height"}}};
-    both OIM AnnotationPage items and normalized LOC canvas items satisfy this.
+    both OIM AnnotationPage items and normalized LOC canvas items satisfy this. source
+    width/height are the full-resolution canvas dimensions.
 
-    For full-canvas images (raw_dims ≈ source_dims), resource coords are computed
-    by simple proportional scaling. For split sub-images, the unsplit original
-    (e.g. p4.unsplit.jpg) is located via template matching to determine the non-circular
-    canvas placement. Raises ValueError if the unsplit file is missing or the match
-    is too uncertain.
+    page_key is the georef page key (e.g. "p4" or split "p4__2"). The georef ran on the
+    25%-scale page image, so full-page coordinates are scaled up to the full canvas. For
+    split pages, the parent page's pN.panels.json is read and panel N's bounding box (in
+    the pN.jpg frame) is scaled to canvas coordinates to place the sub-image. Raises
+    ValueError if the panels.json is missing or has too few panels.
+
+    image_path is the georeferenced image (e.g. dir/p4__2.jpg); its directory is used to
+    locate the parent panels.json.
 
     geo_mask, when provided, is a Shapely Polygon in geographic (lon/lat) space used
     as the SvgSelector clipping polygon. Falls back to the full-page rectangle if None.
@@ -373,36 +271,22 @@ def make_annotation(
     source_height: int = source["height"]
     label: str = item["label"]
 
-    # Derive a unique canvas ID from the source URL; append split number if present.
-    canvas_id = source_id.removesuffix("/info.json")
-    m = re.search(r"\[(\d+)\]$", label)
-    if m:
-        canvas_id += f"__{m.group(1)}"
-
     creator = {"id": creator_url, "type": "Person"}
     georef_width = georef["width"]
     georef_height = georef["height"]
 
-    if not raw_path.exists():
-        raise ValueError(f"raw image not found: {raw_path}")
-    raw_width, raw_height = jpeg_dimensions(raw_path)
-
-    # Full canvas: raw covers the complete canvas extent, possibly at lower resolution
-    # (e.g. a pct:25 download). Split sub-images (OIM only) have "__" in the filename
-    # and are routed to template matching regardless of size ratios.
-    is_split_raw = "__" in raw_path.name
-    is_full_canvas = (
-        abs(raw_width - source_width) <= 2 and abs(raw_height - source_height) <= 2
-    ) or (
-        not is_split_raw
-        and source_width > 0
-        and abs(raw_width / source_width - raw_height / source_height) <= 0.01
-    )
-    split_canvas: tuple[float, float, float, float] | None = None
+    # Derive a unique canvas ID from the source URL; append split number if present.
+    canvas_id = source_id.removesuffix("/info.json")
+    split_index: int | None = None
+    if "__" in page_key:
+        split_index = int(page_key.split("__")[1])
+        canvas_id += f"__{split_index}"
 
     gcp_pts = georef_gcp_points(georef)
+    split_canvas: tuple[float, float, float, float] | None = None
 
-    if is_full_canvas:
+    if split_index is None:
+        # Full page: scale 25%-page coordinates up to the full canvas.
         scale_x = source_width / georef_width
         scale_y = source_height / georef_height
         resource_coords_list = [
@@ -410,32 +294,30 @@ def make_annotation(
             for (px, py), _, _ in gcp_pts
         ]
     else:
-        # True sub-image: locate via template matching for a non-circular placement.
-        page_key_from_raw = raw_path.name.removesuffix(".raw.jpg")
-        if "__" in page_key_from_raw:
-            base_key = page_key_from_raw.split("__")[0]
-            unsplit_path = raw_path.parent / f"{base_key}.unsplit.jpg"
-        else:
-            unsplit_path = None
-
-        if unsplit_path is None or not unsplit_path.exists():
-            missing = unsplit_path.name if unsplit_path else "unsplit file"
+        # Split page: place the panel within the parent canvas using panels.json.
+        parent_key = page_key.split("__")[0]
+        panels_path = panels_json_path(image_path.parent / f"{parent_key}.jpg")
+        if not panels_path.exists():
+            raise ValueError(f"panels.json not found: {panels_path}")
+        panels_data = read_panels_json(panels_path)
+        panels = panels_data["panels"]
+        if not (1 <= split_index <= len(panels)):
             raise ValueError(
-                f"{missing} not found; cannot place sub-image non-circularly"
+                f"split index {split_index} out of range for {panels_path.name} "
+                f"({len(panels)} panels)"
             )
+        ring = panels[split_index - 1]
+        xs = [pt[0] for pt in ring]
+        ys = [pt[1] for pt in ring]
+        minx, miny, maxx, maxy = min(xs), min(ys), max(xs), max(ys)
 
-        # locate_split_in_unsplit raises ValueError if the match is uncertain.
-        offset_x_px, offset_y_px = locate_split_in_unsplit(raw_path, unsplit_path)
-        unsplit_width, unsplit_height = jpeg_dimensions(unsplit_path)
-
-        # Scale from unsplit pixel coordinates to canvas coordinates.
-        scale_x = source_width / unsplit_width
-        scale_y = source_height / unsplit_height
-
-        split_cx = offset_x_px * scale_x
-        split_cy = offset_y_px * scale_y
-        split_cw = raw_width * scale_x
-        split_ch = raw_height * scale_y
+        # panels.json records polygons in the pN.jpg (25%) frame; scale to full canvas.
+        page_scale_x = source_width / panels_data["width"]
+        page_scale_y = source_height / panels_data["height"]
+        split_cx = minx * page_scale_x
+        split_cy = miny * page_scale_y
+        split_cw = (maxx - minx) * page_scale_x
+        split_ch = (maxy - miny) * page_scale_y
         split_canvas = (
             round(split_cx, 1),
             round(split_cy, 1),
@@ -516,16 +398,16 @@ def _load_s3_items(
 ) -> tuple[list[tuple[str, dict, dict, Path, Path]], str, str]:
     """Load volume items for self-hosted images (no IIIF manifest needed).
 
-    Constructs canvas items directly from raw.jpg dimensions on disk and a
-    base URL, so no LOC or OIM manifest file is required. Resource coordinates
-    are in the raw.jpg pixel space (scale factor 1.0 — no rescaling needed).
+    Constructs canvas items directly from the 25%-scale page image dimensions on disk
+    and a base URL, so no LOC or OIM manifest file is required. The full-resolution
+    canvas dimensions are 4× the page image; split pages share their parent's canvas.
 
     source_type should match the image server in use:
       'ImageService3' — IIIF Image API v3 (e.g. serverless-iiif v3 on Lambda)
       'ImageService2' — IIIF Image API v2
       'Image'         — plain static JPEG (no tile server; limited viewer support)
 
-    The image URL for each page is: {image_base_url}/{page_key}.raw.jpg
+    The image URL for each page is: {image_base_url}/{parent_key}.jpg
     """
     georef_paths = sorted(glob.glob(georef_glob_pattern))
     if not georef_paths:
@@ -539,24 +421,30 @@ def _load_s3_items(
         if not page_key:
             print(f"Warning: could not parse page key from '{path}'", file=sys.stderr)
             continue
-        raw_path = Path(path).parent / f"{page_key}.raw.jpg"
-        if not raw_path.exists():
-            print(f"Warning: raw image not found: {raw_path}", file=sys.stderr)
+        # Splits share their parent page's full canvas.
+        parent_key = page_key.split("__")[0]
+        image_path = Path(path).parent / f"{page_key}.jpg"
+        parent_image = Path(path).parent / f"{parent_key}.jpg"
+        if not parent_image.exists():
+            print(f"Warning: page image not found: {parent_image}", file=sys.stderr)
             continue
-        raw_w, raw_h = jpeg_dimensions(raw_path)
+        # The page image is at 25% scale; the full-resolution canvas is 4× larger.
+        page_w, page_h = jpeg_dimensions(parent_image)
+        source_width = page_w * FULL_RES_FACTOR
+        source_height = page_h * FULL_RES_FACTOR
         canvas_item = {
             "label": page_key,
             "target": {
                 "source": {
-                    "id": f"{base_url}/{page_key}.raw.jpg",
+                    "id": f"{base_url}/{parent_key}.jpg",
                     "type": source_type,
-                    "width": raw_w,
-                    "height": raw_h,
+                    "width": source_width,
+                    "height": source_height,
                 }
             },
         }
         georef = json.load(open(path))
-        valid_items.append((page_key, canvas_item, georef, raw_path, Path(path)))
+        valid_items.append((page_key, canvas_item, georef, image_path, Path(path)))
 
     # Drop skeleton pages within this volume.
     non_skeleton_keys = {pk for pk, _, _, _, _ in valid_items if not pk.endswith("s")}
@@ -600,17 +488,14 @@ def _load_volume_items(
     if not georef_paths:
         print(f"Error: no files matched '{georef_glob_pattern}'.", file=sys.stderr)
         sys.exit(1)
-    raw_dir = Path(georef_paths[0]).parent
 
     if source_data.get("type") == "AnnotationPage":
         items_by_key = _load_oim_index(source_data)
         result_id = source_data.get("id", "") + "/generated"
-        is_loc = False
         print(f"Loaded {len(items_by_key)} OIM annotations.", file=sys.stderr)
     elif source_data.get("@type") == "sc:Manifest":
-        items_by_key = _load_loc_index(source_data, raw_dir)
+        items_by_key = _load_loc_index(source_data)
         result_id = source_data.get("@id", "") + "/generated"
-        is_loc = True
         print(f"Loaded {len(items_by_key)} LOC canvases.", file=sys.stderr)
     else:
         print(
@@ -628,20 +513,18 @@ def _load_volume_items(
         if not page_key:
             print(f"Warning: could not parse page key from '{path}'", file=sys.stderr)
             continue
-        if is_loc:
-            assert "__" not in page_key, (
-                f"LOC manifests have no split pages; found split key '{page_key}' in {path}"
-            )
-        canvas_item = items_by_key.get(page_key)
+        # Splits (pN__i) share their parent page's canvas item.
+        parent_key = page_key.split("__")[0]
+        canvas_item = items_by_key.get(parent_key)
         if not canvas_item:
             print(
-                f"Warning: no canvas for page key '{page_key}' ({path})",
+                f"Warning: no canvas for page key '{parent_key}' ({path})",
                 file=sys.stderr,
             )
             continue
         georef = json.load(open(path))
-        raw_path = Path(path).parent / f"{page_key}.raw.jpg"
-        valid_items.append((page_key, canvas_item, georef, raw_path, Path(path)))
+        image_path = Path(path).parent / f"{page_key}.jpg"
+        valid_items.append((page_key, canvas_item, georef, image_path, Path(path)))
 
     # Drop skeleton pages (key ends in 's') when a full-color counterpart exists
     # within this volume. Scoped per-volume so skeletons in one volume are never
@@ -690,7 +573,7 @@ def main() -> None:
         help=(
             "Add a volume. Without --image-base-url: ARG1=IIIF manifest, ARG2=georef glob. "
             "With --image-base-url: ARG1=georef glob, ARG2=path suffix appended to the base URL "
-            "(e.g. 'vol1' gives {base_url}/vol1/{page}.raw.jpg). "
+            "(e.g. 'vol1' gives {base_url}/vol1/{page}.jpg). "
             "Repeatable for multi-volume output."
         ),
     )
@@ -721,8 +604,8 @@ def main() -> None:
         help=(
             "Base URL for plain-image hosting (e.g. an S3 bucket). "
             "When set, no IIIF manifest is needed: canvas items are built directly "
-            "from the raw.jpg files on disk. The URL for each page is "
-            "{URL}/{page_key}.raw.jpg. Provide the georef glob as the sole "
+            "from the page images on disk. The URL for each page is "
+            "{URL}/{parent_key}.jpg. Provide the georef glob as the sole "
             "positional argument."
         ),
     )
@@ -827,7 +710,7 @@ def main() -> None:
             all_georefs,
             centerlines_geojson,
             debug_blocks_out=debug_blocks,
-            raw_paths=[raw_path for _, _, _, raw_path, _ in all_valid_items],
+            raw_paths=[image_path for _, _, _, image_path, _ in all_valid_items],
         )
         n_masked = sum(m is not None for m in geo_masks)
         print(
@@ -862,13 +745,19 @@ def main() -> None:
     # Pass 2: build annotations with the per-page geo mask.
     annotations: list[dict] = []
     annotation_georef_paths: list[Path] = []
-    for (page_key, canvas_item, georef, raw_path, georef_path), geo_mask in zip(
+    for (page_key, canvas_item, georef, image_path, georef_path), geo_mask in zip(
         all_valid_items, geo_masks
     ):
         try:
             annotations.append(
                 make_annotation(
-                    canvas_item, georef, raw_path, args.creator, now, geo_mask
+                    canvas_item,
+                    georef,
+                    page_key,
+                    image_path,
+                    args.creator,
+                    now,
+                    geo_mask,
                 )
             )
             annotation_georef_paths.append(georef_path)

@@ -28,7 +28,7 @@ import cv2
 import numpy as np
 from PIL import Image
 
-from mapsnap.make_iiif_georef import locate_split_in_unsplit
+from mapsnap.oim_truth import locate_split_in_unsplit
 
 WHITE_THRESHOLD = 250  # pixels at or above this are masked-out (not part of the panel)
 CLOSE_KERNEL_PX = 25  # close small holes/noise in the panel mask before contouring

@@ -1364,7 +1364,7 @@ def main() -> None:
     parser.add_argument(
         "--min-long-side",
         type=float,
-        default=45.0,
+        default=40.0,
         metavar="PX",
         help="Minimum long side of a text polygon to accept (default: %(default)s)",
     )

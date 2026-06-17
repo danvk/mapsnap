@@ -14,7 +14,9 @@ Usage:
 """
 
 import argparse
+import json
 from pathlib import Path
+from typing import TypedDict
 
 import cv2
 import numpy as np
@@ -22,6 +24,23 @@ from PIL import Image, ImageDraw
 from shapely.geometry import LineString, Point, Polygon, box
 from shapely.ops import polygonize, unary_union
 from skimage.morphology import medial_axis
+
+from mapsnap.utils import image_stem
+
+
+class PanelsJson(TypedDict):
+    """Contents of a <stem>.panels.json sidecar.
+
+    panels is a list of polygon rings (one per panel) in the pixel frame of the named
+    image, recorded via width/height. Panels are in reading order so panels[i-1]
+    corresponds to <base>__i.jpg.
+    """
+
+    image: str
+    width: int
+    height: int
+    panels: list[list[list[float]]]
+
 
 # Front-end that turns the binary ink mask into candidate divider segments:
 #   "skeleton"  - light close → medial-axis centerlines → thickness filter → Hough
@@ -737,14 +756,46 @@ def draw_panels(rgb: np.ndarray, panels: list) -> np.ndarray:
 
 
 def panel_basename(image_path: Path) -> str:
-    """Base name for outputs: the stem with any .raw/.scaled qualifier removed.
+    """Base name for split outputs: the stem with all extensions stripped.
 
-    e.g. p45.raw.jpg → p45, p195.scaled.jpg → p195, champaign-p20.jpg → champaign-p20.
+    e.g. p45.jpg → p45, champaign-p20.jpg → champaign-p20. Legacy multi-extension names
+    like p195.scaled.jpg also collapse to p195 via image_stem.
     """
-    base = image_path.stem
-    for suffix in (".raw", ".scaled"):
-        base = base.removesuffix(suffix)
-    return base
+    return image_stem(str(image_path))
+
+
+def panels_json_path(image_path: Path) -> Path:
+    """Path to the panels.json sidecar (<stem>.panels.json) beside image_path."""
+    return image_path.parent / f"{panel_basename(image_path)}.panels.json"
+
+
+def read_panels_json(path: Path) -> PanelsJson:
+    """Load a panels.json sidecar; see PanelsJson for the shape."""
+    return json.loads(path.read_text())
+
+
+def write_panels_json(
+    image_path: Path, ordered_panels: list[Polygon], width: int, height: int
+) -> Path:
+    """Write ordered panel polygons to <stem>.panels.json beside image_path.
+
+    Rings are in image_path's pixel frame (recorded via width/height) and ordered to
+    match the __i.jpg numbering: ordered_panels[i-1] corresponds to <base>__i.jpg.
+    Returns the written path.
+    """
+    rings = [
+        [[round(x, 1), round(y, 1)] for x, y in panel.exterior.coords]
+        for panel in ordered_panels
+    ]
+    data: PanelsJson = {
+        "image": image_path.name,
+        "width": width,
+        "height": height,
+        "panels": rings,
+    }
+    out_path = panels_json_path(image_path)
+    out_path.write_text(json.dumps(data, indent=2))
+    return out_path
 
 
 def detect_downscale(
@@ -917,7 +968,8 @@ def write_panels(image_path: Path, panels: list, base: str) -> list[Path]:
 
     A panel is cropped to its bounding box, with any pixels outside its (possibly
     non-rectangular) polygon set to white. Panels are numbered in reading order: top to
-    bottom, then left to right.
+    bottom, then left to right. Also writes <base>.panels.json recording the panel
+    polygons in image_path's pixel frame, in the same order as the numbering.
     """
     rgb = load_rgb(image_path)
     h, w = rgb.shape[:2]
@@ -938,13 +990,29 @@ def write_panels(image_path: Path, panels: list, base: str) -> list[Path]:
         out_path = image_path.parent / f"{base}__{i}.jpg"
         Image.fromarray(masked[y0:y1, x0:x1]).save(out_path, quality=92)
         out_paths.append(out_path)
+    write_panels_json(image_path, ordered, w, h)
     return out_paths
+
+
+def remove_split_outputs(image_path: Path) -> None:
+    """Delete any existing <base>__N.jpg panels and <base>.panels.json for image_path.
+
+    Called before re-splitting so outputs always reflect the current code and settings.
+    """
+    base = panel_basename(image_path)
+    for stale in image_path.parent.glob(f"{base}__*.jpg"):
+        stale.unlink()
+    panels_path = panels_json_path(image_path)
+    panels_path.unlink(missing_ok=True)
 
 
 def process_image(image_path: Path, debug: bool = False) -> None:
     """Split one image into panel files, writing per-stage debug PNGs when debug is set."""
     base = panel_basename(image_path)
     out_dir = image_path.parent
+
+    # Regenerate from scratch: drop any stale panels from a previous run.
+    remove_split_outputs(image_path)
 
     rgb = crop_border(load_rgb(image_path))
     gray = crop_border(load_gray(image_path))
@@ -1005,6 +1073,9 @@ def main() -> None:
     )
     args = parser.parse_args()
     for image_path in args.images:
+        # Skip panels themselves (e.g. p2__1.jpg); only split whole pages.
+        if "__" in panel_basename(image_path):
+            continue
         process_image(image_path, debug=args.debug)
 
 
