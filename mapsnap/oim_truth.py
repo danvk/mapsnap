@@ -26,21 +26,21 @@ from mapsnap.split import PanelsJson, panels_json_path
 from mapsnap.utils import label_to_page_key
 
 
-def _replace_white(arr: np.ndarray, white_threshold: int = 250) -> np.ndarray:
-    """Replace pure-white pixels with the mean of non-white pixels.
+WHITE_THRESHOLD = 250  # pixels at or above this are masked-out (not part of the panel)
 
-    White pixels (≥ white_threshold) are masked-out regions on Sanborn map splits
-    that share no content with the corresponding area in the unsplit image.
-    Replacing them with the template mean gives zero contribution to TM_CCOEFF_NORMED,
-    preventing them from pulling the match towards the wrong location.
+
+def _masked_match(
+    image: np.ndarray, template: np.ndarray, mask: np.ndarray
+) -> np.ndarray:
+    """Masked normalized cross-correlation of template (with mask) over image.
+
+    Pure-white masked-out pixels are excluded from the correlation entirely, rather
+    than merely zeroed, so a non-rectangular panel matches its true location even when
+    the unsplit page has unrelated content in the masked area. Returns the score map
+    with any NaN/inf (from degenerate, fully-masked windows) replaced by 0.
     """
-    non_white = arr < white_threshold
-    if not non_white.any():
-        return arr
-    mean_val = int(round(float(arr[non_white].mean())))
-    out = arr.copy()
-    out[~non_white] = mean_val
-    return out
+    result = cv2.matchTemplate(image, template, cv2.TM_CCORR_NORMED, mask=mask)
+    return np.nan_to_num(result, nan=0.0, posinf=0.0, neginf=0.0)
 
 
 def locate_split_in_unsplit(
@@ -52,24 +52,25 @@ def locate_split_in_unsplit(
 ) -> tuple[int, int]:
     """Find the pixel offset of a split sub-image within its unsplit original.
 
-    Uses a two-stage search: coarse normalized cross-correlation at downsampled
-    resolution to find the rough location, then full-resolution refinement in a
-    small window around that estimate. Pure-white pixels in the split (masked-out
-    regions) are replaced with the template mean so they contribute nothing to the
-    correlation score.
+    Uses a two-stage search: coarse masked normalized cross-correlation at downsampled
+    resolution to find the rough location, then full-resolution refinement in a small
+    window around that estimate. Pure-white pixels in the split are masked-out regions
+    that share no content with the unsplit page, so they are excluded from the match via
+    an OpenCV mask (without this, the unsplit content under those pixels suppresses the
+    correlation score of an otherwise correct match).
 
     Raises ValueError if the refined match score is below min_score (uncertain
     placement) or if the located region overflows the unsplit image bounds.
 
     Returns (offset_x, offset_y) in unsplit image pixel coordinates (top-left corner).
     """
-    split_arr = _replace_white(
-        np.array(Image.open(split_path).convert("L"), dtype=np.uint8)
-    )
+    split_arr = np.array(Image.open(split_path).convert("L"), dtype=np.uint8)
     unsplit_arr = np.array(Image.open(unsplit_path).convert("L"), dtype=np.uint8)
+    mask = ((split_arr < WHITE_THRESHOLD).astype(np.uint8)) * 255
 
     ds = coarse_downsample
     split_small = split_arr[::ds, ::ds]
+    mask_small = mask[::ds, ::ds]
     unsplit_small = unsplit_arr[::ds, ::ds]
 
     if (
@@ -81,7 +82,7 @@ def locate_split_in_unsplit(
             f"unsplit ({unsplit_arr.shape[1]}×{unsplit_arr.shape[0]}) at coarse resolution"
         )
 
-    coarse_result = cv2.matchTemplate(unsplit_small, split_small, cv2.TM_CCOEFF_NORMED)
+    coarse_result = _masked_match(unsplit_small, split_small, mask_small)
     _, _, _, coarse_loc = cv2.minMaxLoc(coarse_result)
     coarse_x = coarse_loc[0] * ds
     coarse_y = coarse_loc[1] * ds
@@ -100,7 +101,7 @@ def locate_split_in_unsplit(
         )
 
     region = unsplit_arr[y1:y2, x1:x2]
-    result = cv2.matchTemplate(region, split_arr, cv2.TM_CCOEFF_NORMED)
+    result = _masked_match(region, split_arr, mask)
     _, max_score, _, max_loc = cv2.minMaxLoc(result)
 
     if max_score < min_score:
