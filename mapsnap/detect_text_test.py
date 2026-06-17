@@ -2,12 +2,33 @@
 
 import numpy as np
 
-from mapsnap.detect_text import NON_STREET_TEXT, _erase_underlines, filter_args
+from mapsnap.detect_text import (
+    NON_STREET_TEXT,
+    _erase_underlines,
+    filter_args,
+    has_split_panels,
+)
 from mapsnap.streets import (
     canonical_street_match,
     matches_any_street,
     normalize_street,
 )
+
+
+def test_has_split_panels(tmp_path):
+    (tmp_path / "p428.jpg").touch()
+    (tmp_path / "p428__1.jpg").touch()
+    (tmp_path / "p428__2.jpg").touch()
+    (tmp_path / "p528.jpg").touch()  # unsplit page, no panels
+
+    # Parent with panels is superseded; panels and unsplit pages are not.
+    assert has_split_panels(str(tmp_path / "p428.jpg")) is True
+    assert has_split_panels(str(tmp_path / "p428__1.jpg")) is False
+    assert has_split_panels(str(tmp_path / "p528.jpg")) is False
+    # The "p4__" prefix must not match "p428__N" (delimiter-aware).
+    (tmp_path / "p4.jpg").touch()
+    assert has_split_panels(str(tmp_path / "p4.jpg")) is False
+
 
 # ---------------------------------------------------------------------------
 # normalize_street
