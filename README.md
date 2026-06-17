@@ -162,13 +162,13 @@ So depending on where you get your Sanborn maps, the next steps will be differen
 ### OldInsuranceMaps
 
 ```bash
-mapsnap run-oim sanborn03376_029 new_orleans_la_1951_vol_5 r1836428 'https://s3.us-central-1.wasabisys.com/oldinsurancemaps/uploaded/documents/new_orleans_la_1951_vol_5_'
+mapsnap run-oim sanborn03376_029 data/new_orleans_la_1951_vol_5 r1836428 'https://s3.us-central-1.wasabisys.com/oldinsurancemaps/uploaded/documents/new_orleans_la_1951_vol_5_'
 ```
 
 The four arguments here are:
 
 - sanborn03376_029: Library of Congress (LoC) Sanborn Map ID number, also in the OIM URL.
-- new_orleans_la_1951_vol_5: directory slug. Output will go in `data/new_orleans_la_1951_vol_5`.
+- data/new_orleans_la_1951_vol_5: Output directory.
 - r1836428: Relation containing this map in OSM, usually a county. This is used to download all the streets in the area of the map.
 - 'https://...': OIM S3 bucket prefix for images. You can get this by downloading a JPEG of a page from the OIM web site.
 
@@ -176,11 +176,12 @@ The four arguments here are:
 
 - `mapsnap download-oim`: Downloads manifests and images from OldInsuranceMaps.
 - `mapsnap scale-images`: reduces the size of the images by a uniform scale factor so that OCR runs faster.
+- `mapsnap split`: Split composite maps into individual images.
 - `mapsnap download-osm` + `mapsnap osm-to-geojson`: Downloads all street data in the area from OpenStreetMap.
 - `mapsnap ocr`: runs OCR over the downscaled images, saving candidate detections to `boxes.json` and `streets.json` files.
 - `mapsnap fit`: another pipeline that runs:
   - `mapsnap georef`: georeferences images based on street detections, writing out `georef.json` files where it can find a good fit.
-  - `mapsnap iiif`: produces a IIIF Georeference Extension. You can find examples of these in the `gallery` directory. View them on Allmaps.
+  - `mapsnap iiif`: produces a IIIF Georeference Extension with clipping masks. You can find examples of these in the `gallery` directory. View them on Allmaps.
   - `mapsnap compare`: compares the generated IIIF file with the human-generated one from OIM, producing a report on the accuracy of the fit.
 
 `mapsnap ocr` is typically the slowest step. The steps under `mapsnap fit` run relatively quickly. You can run `mapsnap fit` yourself to experiment.
@@ -211,10 +212,11 @@ If you have your own directory of images that you've put together in some other 
 
 - Name the images after some notion of page number, e.g. `p123.jpg`.
 - Run `mapsnap download-osm` + `mapsnap osm-to-geojson` to get OSM data for the area around your images.
+- Run `mapsnap split` to detect split maps, if needed.
 - Run `mapsnap ocr` to find street labels for all your images. Use the Mapsnap debugger app to test if it worked on a few images.
 - Run `mapsnap georef` to georeference the images. Again, you may want to spot check a few maps in the debugger app.
 
-If you have a IIIF Manifest for your images, you can then run `mapsnap iiif` to produce a Georeference AnnotationPage that you can use to look at your complete map.
+If you have a IIIF Manifest for your images, you can then run `mapsnap iiif` to produce a Georeference AnnotationPage that you can use to look at your complete map. This will also produce clipping masks.
 
 ### Multivolume Runs
 
