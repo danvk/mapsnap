@@ -28,11 +28,15 @@ from pathlib import Path
 
 import numpy as np
 from shapely.geometry import Polygon as ShapelyPolygon
+from shapely.geometry import box
 
 from mapsnap.utils import source_id_to_page_key
 
 GCP = tuple[tuple[float, float], tuple[float, float]]  # ((px, py), (lon, lat))
 EARTH_RADIUS_FT = 20_925_524.0
+MIN_SPLIT_IOU = (
+    0.1  # minimum panel overlap to treat a truth and generated split as the same region
+)
 
 
 def extract_metadata_int(item: dict, label: str) -> int | None:
@@ -206,11 +210,16 @@ def angle_diff(a: float, b: float) -> float:
 def analyze_pair(truth_item: dict, gen_item: dict) -> dict:
     """Compute accuracy metrics for one page by comparing two IIIF georef annotations.
 
-    Returns a dict with keys: page_key, n_truth, n_gen, rmse_ft, max_ft, trans_ft,
-    rot_err, scale_pct, skew_deg, aniso.
+    Returns a dict with keys: page_key, gen_page_key, n_truth, n_gen, rmse_ft, max_ft,
+    trans_ft, rot_err, scale_pct, skew_deg, aniso. page_key uses the truth's split
+    numbering; gen_page_key uses the matched generated split's numbering (they can differ
+    when OIM and our splitter number panels differently).
     """
     source_id: str = truth_item["target"]["source"]["id"]
     page_key = source_id_to_page_key(source_id, truth_item["label"])
+    gen_index = annotation_split_index(gen_item)
+    base_key = source_id_to_page_key(source_id, "")
+    gen_page_key = f"{base_key}__{gen_index}" if gen_index is not None else base_key
 
     truth_gcps = extract_gcps(truth_item)
     gen_gcps = extract_gcps(gen_item)
@@ -269,6 +278,7 @@ def analyze_pair(truth_item: dict, gen_item: dict) -> dict:
 
     return {
         "page_key": page_key,
+        "gen_page_key": gen_page_key,
         "n_truth": len(truth_gcps),
         "n_gen": len(gen_gcps),
         "n_streets": extract_metadata_int(gen_item, "streets"),
@@ -303,12 +313,23 @@ def analyze_truth_only(truth_item: dict) -> dict:
     }
 
 
+def split_numbers_disagree(row: dict) -> bool:
+    """True if a paired row's truth and generated split numbering differ."""
+    gen_page_key = row.get("gen_page_key")
+    return gen_page_key is not None and gen_page_key != row["page_key"]
+
+
+def page_label(row: dict) -> str:
+    """Page column text: the truth page key, marked '(t)' when our numbering disagrees."""
+    return f"{row['page_key']} (t)" if split_numbers_disagree(row) else row["page_key"]
+
+
 def print_table(rows: list[dict], missing: list[dict]) -> None:
     """Print paired results (sorted by RMSE desc) then missing pages, with summary stats."""
     rows_sorted = sorted(rows, key=lambda r: r["rmse_ft"], reverse=True)
 
     header = (
-        f"{'Page':<9} {'n_t':>3} {'n_g':>3} {'str':>4} {'int':>4}  "
+        f"{'Page':<13} {'n_t':>3} {'n_g':>3} {'str':>4} {'int':>4}  "
         f"{'t.px/ft':>7}  {'g.px/ft':>7}  "
         f"{'rmse_ft':>8}  {'max_ft':>8}  {'trans_ft':>9}  "
         f"{'rot_err':>8}  {'scale_%':>7}  {'skew°':>6}  {'aniso':>6}"
@@ -319,18 +340,21 @@ def print_table(rows: list[dict], missing: list[dict]) -> None:
     for r in rows_sorted:
         n_str = r["n_streets"] if r["n_streets"] is not None else "—"
         n_int = r["n_intersections"] if r["n_intersections"] is not None else "—"
+        # When the split numbers disagree, note the matched generated page in the trailing
+        # column (where missing rows show "(no fit)").
+        trailing = f"  ({r['gen_page_key']})" if split_numbers_disagree(r) else ""
         print(
-            f"{r['page_key']:<9} {r['n_truth']:>3} {r['n_gen']:>3} {n_str!s:>4} {n_int!s:>4}  "
+            f"{page_label(r):<13} {r['n_truth']:>3} {r['n_gen']:>3} {n_str!s:>4} {n_int!s:>4}  "
             f"{r['truth_px_per_ft']:>7.2f}  {r['gen_px_per_ft']:>7.2f}  "
             f"{r['rmse_ft']:>8.1f}  {r['max_ft']:>8.1f}  {r['trans_ft']:>9.1f}  "
             f"{r['rot_err']:>+8.2f}  {r['scale_pct']:>+7.2f}  "
-            f"{r['skew_deg']:>+6.2f}  {r['aniso']:>6.3f}"
+            f"{r['skew_deg']:>+6.2f}  {r['aniso']:>6.3f}{trailing}"
         )
     if missing:
         missing_sorted = sorted(missing, key=lambda r: r["page_key"])
         for r in missing_sorted:
             print(
-                f"{r['page_key']:<9} {r['n_truth']:>3} {'—':>3} {'—':>4} {'—':>4}  "
+                f"{r['page_key']:<13} {r['n_truth']:>3} {'—':>3} {'—':>4} {'—':>4}  "
                 f"{'—':>7}  {'—':>7}  "
                 f"{'—':>8}  {'—':>8}  {'—':>9}  "
                 f"{'—':>8}  {'—':>7}  "
@@ -472,36 +496,54 @@ def match_split_pairs(
     gen_items: list[dict],
     truth_polygons: dict[int, ShapelyPolygon],
     gen_polygons: dict[int, ShapelyPolygon],
+    canvas_polygon: ShapelyPolygon | None = None,
 ) -> tuple[list[tuple[dict, dict]], list[dict]]:
     """Associate truth and generated split annotations by panel-polygon overlap.
 
-    OIM's split numbering need not match ours, so each truth split is paired with the
-    generated split whose panel polygon has the highest IoU (greedily, each generated
-    split used once). Both sides' polygons are in canvas coordinates. Returns
-    (pairs, unmatched_truth_items).
+    OIM's split numbering need not match ours, so pairs are chosen by greatest panel IoU
+    globally: every (truth, generated) pair with IoU >= MIN_SPLIT_IOU is considered, and
+    the highest-overlap pairs are assigned first (each split used once). Choosing globally
+    rather than per-truth-in-file-order matters — a truth split that merely grazes a
+    generated panel must not claim it ahead of the truth split that actually overlaps it.
+
+    When OIM split a page but we kept it whole, the generated annotation has no split index;
+    canvas_polygon (the full page) then stands in as its panel, so it pairs with the truth
+    split it most overlaps — i.e. the largest split. Both sides' polygons are in canvas
+    coordinates. Returns (pairs, unmatched_truth_items).
     """
-    available = list(gen_items)
-    pairs: list[tuple[dict, dict]] = []
-    unmatched: list[dict] = []
-    for truth in truth_items:
+
+    def gen_polygon(gen: dict) -> ShapelyPolygon | None:
+        gen_index = annotation_split_index(gen)
+        if gen_index is not None:
+            return gen_polygons.get(gen_index)
+        return canvas_polygon  # unsplit page: one panel covering the whole canvas
+
+    candidates: list[tuple[float, int, int]] = []  # (iou, truth_idx, gen_idx)
+    for ti, truth in enumerate(truth_items):
         truth_index = label_split_index(truth)
         truth_poly = truth_polygons.get(truth_index) if truth_index else None
-        best_gen: dict | None = None
-        best_iou = 0.0
-        if truth_poly is not None:
-            for gen in available:
-                gen_index = annotation_split_index(gen)
-                gen_poly = gen_polygons.get(gen_index) if gen_index else None
-                if gen_poly is None:
-                    continue
-                iou = polygon_iou(truth_poly, gen_poly)
-                if iou > best_iou:
-                    best_iou, best_gen = iou, gen
-        if best_gen is not None:
-            pairs.append((truth, best_gen))
-            available.remove(best_gen)
-        else:
-            unmatched.append(truth)
+        if truth_poly is None:
+            continue
+        for gi, gen in enumerate(gen_items):
+            gen_poly = gen_polygon(gen)
+            if gen_poly is None:
+                continue
+            iou = polygon_iou(truth_poly, gen_poly)
+            if iou >= MIN_SPLIT_IOU:
+                candidates.append((iou, ti, gi))
+
+    candidates.sort(reverse=True)  # assign highest-overlap pairs first
+    used_truth: set[int] = set()
+    used_gen: set[int] = set()
+    pairs: list[tuple[dict, dict]] = []
+    for _iou, ti, gi in candidates:
+        if ti in used_truth or gi in used_gen:
+            continue
+        pairs.append((truth_items[ti], gen_items[gi]))
+        used_truth.add(ti)
+        used_gen.add(gi)
+
+    unmatched = [t for ti, t in enumerate(truth_items) if ti not in used_truth]
     return pairs, unmatched
 
 
@@ -563,8 +605,11 @@ def main() -> None:
         gen_polygons = load_split_polygons(
             gen_dir / f"{page_key}.panels.json", source_dims
         )
+        # If we kept the page whole, a generated annotation with no split index stands in
+        # for a panel covering the full canvas, matching the largest truth split.
+        canvas_polygon = box(0.0, 0.0, source_dims[0], source_dims[1])
         pairs, unmatched = match_split_pairs(
-            truth_splits, gen_items, truth_polygons, gen_polygons
+            truth_splits, gen_items, truth_polygons, gen_polygons, canvas_polygon
         )
         rows.extend(analyze_pair(t, g) for t, g in pairs)
         missing.extend(analyze_truth_only(t) for t in unmatched)
