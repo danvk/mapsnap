@@ -49,6 +49,8 @@ def test_locate_oim_splits_writes_canvas_rings(tmp_path):
 
     assert (panels["width"], panels["height"]) == (160, 200)
     assert len(panels["panels"]) == 2
-    # Second region starts at y≈120 (top-left corner of the ring).
+    # Second region's polygon spans the bottom strip y≈[120, 200] on the canvas.
     second_ring = panels["panels"][1]
-    assert abs(second_ring[0][1] - 120) <= 1
+    ys = [pt[1] for pt in second_ring]
+    assert abs(min(ys) - 120) <= 4
+    assert abs(max(ys) - 200) <= 4

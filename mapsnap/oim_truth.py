@@ -27,6 +27,27 @@ from mapsnap.utils import label_to_page_key
 
 
 WHITE_THRESHOLD = 250  # pixels at or above this are masked-out (not part of the panel)
+CLOSE_KERNEL_PX = 25  # close small holes/noise in the panel mask before contouring
+APPROX_EPS_FRAC = 0.003  # Douglas-Peucker tolerance as a fraction of contour perimeter
+
+
+def panel_polygon(split_gray: np.ndarray) -> np.ndarray | None:
+    """Largest non-white region of a split image as an (N, 2) [x, y] polygon.
+
+    Pure-white pixels are masked-out (not part of the panel), so the remaining shape is
+    the panel's true, possibly non-rectangular outline, in the split image's own pixel
+    frame. Returns None if the image has no non-white content.
+    """
+    mask = ((split_gray < WHITE_THRESHOLD).astype(np.uint8)) * 255
+    closed = cv2.morphologyEx(
+        mask, cv2.MORPH_CLOSE, np.ones((CLOSE_KERNEL_PX, CLOSE_KERNEL_PX), np.uint8)
+    )
+    contours, _ = cv2.findContours(closed, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+    if not contours:
+        return None
+    contour = max(contours, key=cv2.contourArea)
+    eps = APPROX_EPS_FRAC * cv2.arcLength(contour, True)
+    return cv2.approxPolyDP(contour, eps, closed=True).reshape(-1, 2).astype(float)
 
 
 def _masked_match(
@@ -131,9 +152,12 @@ def locate_oim_splits(
     """Build a canvas-coordinate panels.json for one page's OIM split regions.
 
     Template-matches each OIM split region oim/<parent>__<i>.jpg against the unsplit
-    full-resolution page raw/<parent>.jpg, recording the located rectangle as a polygon
-    ring in canvas (full-resolution) pixel coordinates. Panels are ordered by OIM split
-    index. Raises ValueError if a required image is missing or a match is too uncertain.
+    full-resolution page raw/<parent>.jpg, then extracts the region's non-white panel
+    polygon and translates it by the matched offset into canvas (full-resolution) pixel
+    coordinates. This captures the true split shape (e.g. when OIM serves a full-canvas
+    image with the other panels masked white) rather than just a bounding box. Panels are
+    ordered by OIM split index. Raises ValueError if a required image is missing or a
+    match is too uncertain.
     """
     unsplit_path = raw_dir / f"{parent_key}.jpg"
     if not unsplit_path.exists():
@@ -146,11 +170,19 @@ def locate_oim_splits(
         split_path = oim_dir / f"{parent_key}__{i}.jpg"
         if not split_path.exists():
             raise ValueError(f"OIM split region not found: {split_path}")
+        split_gray = np.array(Image.open(split_path).convert("L"))
         offset_x, offset_y = locate_split_in_unsplit(split_path, unsplit_path)
-        split_w, split_h = Image.open(split_path).size
-        x0, y0 = float(offset_x), float(offset_y)
-        x1, y1 = float(offset_x + split_w), float(offset_y + split_h)
-        rings.append([[x0, y0], [x1, y0], [x1, y1], [x0, y1], [x0, y0]])
+
+        poly = panel_polygon(split_gray)
+        if poly is None:
+            # No masked-out pixels: fall back to the full region rectangle.
+            split_h, split_w = split_gray.shape
+            poly = np.array(
+                [[0, 0], [split_w, 0], [split_w, split_h], [0, split_h]], dtype=float
+            )
+        ring = [[round(x + offset_x, 1), round(y + offset_y, 1)] for x, y in poly]
+        ring.append(ring[0])  # close the ring
+        rings.append(ring)
 
     return {
         "image": f"{parent_key}.jpg",

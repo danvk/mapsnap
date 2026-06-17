@@ -27,10 +27,9 @@ from collections import defaultdict
 from pathlib import Path
 
 import numpy as np
+from shapely.geometry import Polygon as ShapelyPolygon
 
 from mapsnap.utils import source_id_to_page_key
-
-Rect = tuple[float, float, float, float]  # (x, y, w, h) in canvas pixels
 
 GCP = tuple[tuple[float, float], tuple[float, float]]  # ((px, py), (lon, lat))
 EARTH_RADIUS_FT = 20_925_524.0
@@ -423,71 +422,79 @@ def label_split_index(item: dict) -> int | None:
     return int(m.group(1)) if m else None
 
 
-def gen_split_region(item: dict) -> Rect | None:
-    """Return a generated annotation's split canvas region (x, y, w, h), or None."""
-    cx = extract_metadata_float(item, "split_canvas_x")
-    cy = extract_metadata_float(item, "split_canvas_y")
-    cw = extract_metadata_float(item, "split_canvas_w")
-    ch = extract_metadata_float(item, "split_canvas_h")
-    if cx is None or cy is None or cw is None or ch is None:
-        return None
-    return (cx, cy, cw, ch)
+def annotation_split_index(item: dict) -> int | None:
+    """Return split number N from a generated annotation id like '...__N/georef'."""
+    m = re.search(r"__(\d+)/", item.get("id", ""))
+    return int(m.group(1)) if m else None
 
 
-def rect_iou(a: Rect, b: Rect) -> float:
-    """Intersection-over-union of two (x, y, w, h) rectangles."""
-    ax, ay, aw, ah = a
-    bx, by, bw, bh = b
-    ix = max(0.0, min(ax + aw, bx + bw) - max(ax, bx))
-    iy = max(0.0, min(ay + ah, by + bh) - max(ay, by))
-    inter = ix * iy
-    union = aw * ah + bw * bh - inter
+def ring_to_polygon(ring: list[list[float]]) -> ShapelyPolygon:
+    """A panels.json ring as a valid Shapely polygon (buffer(0) repairs self-intersection)."""
+    polygon = ShapelyPolygon(ring)
+    return polygon if polygon.is_valid else polygon.buffer(0)
+
+
+def polygon_iou(a: ShapelyPolygon, b: ShapelyPolygon) -> float:
+    """Intersection-over-union of two polygons; 0 if disjoint or empty."""
+    if a.is_empty or b.is_empty:
+        return 0.0
+    inter = a.intersection(b).area
+    union = a.area + b.area - inter
     return inter / union if union > 0 else 0.0
 
 
-def load_truth_split_regions(oim_dir: Path, page_key: str) -> dict[int, Rect]:
-    """Load OIM split canvas regions (x, y, w, h) keyed by split index.
+def load_split_polygons(
+    path: Path, source_dims: tuple[float, float] | None = None
+) -> dict[int, ShapelyPolygon]:
+    """Load panels.json rings as polygons keyed by 1-based split index.
 
-    Reads oim/<page_key>.panels.json, written by `mapsnap oim-split-truth`, whose rings
-    are bounding rectangles in full-resolution canvas coordinates. Returns {} if absent.
+    OIM truth panels (oim/pN.panels.json) are already in canvas coordinates, so pass
+    source_dims=None. Our generated panels (pN.panels.json) are in the 25%-scale page
+    frame; pass the canvas (source) width/height to scale them up to canvas coordinates.
+    Returns {} if the file is absent.
     """
-    path = oim_dir / f"{page_key}.panels.json"
     if not path.exists():
         return {}
     data = json.loads(path.read_text())
-    regions: dict[int, Rect] = {}
-    for i, ring in enumerate(data["panels"], start=1):
-        xs = [pt[0] for pt in ring]
-        ys = [pt[1] for pt in ring]
-        regions[i] = (min(xs), min(ys), max(xs) - min(xs), max(ys) - min(ys))
-    return regions
+    if source_dims is not None:
+        scale_x = source_dims[0] / data["width"]
+        scale_y = source_dims[1] / data["height"]
+    else:
+        scale_x = scale_y = 1.0
+    return {
+        i: ring_to_polygon([[x * scale_x, y * scale_y] for x, y in ring])
+        for i, ring in enumerate(data["panels"], start=1)
+    }
 
 
 def match_split_pairs(
     truth_items: list[dict],
     gen_items: list[dict],
-    truth_regions: dict[int, Rect],
+    truth_polygons: dict[int, ShapelyPolygon],
+    gen_polygons: dict[int, ShapelyPolygon],
 ) -> tuple[list[tuple[dict, dict]], list[dict]]:
-    """Associate truth and generated split annotations by canvas-region overlap.
+    """Associate truth and generated split annotations by panel-polygon overlap.
 
     OIM's split numbering need not match ours, so each truth split is paired with the
-    generated split whose split_canvas region has the highest IoU (greedily, each
-    generated split used once). Returns (pairs, unmatched_truth_items).
+    generated split whose panel polygon has the highest IoU (greedily, each generated
+    split used once). Both sides' polygons are in canvas coordinates. Returns
+    (pairs, unmatched_truth_items).
     """
     available = list(gen_items)
     pairs: list[tuple[dict, dict]] = []
     unmatched: list[dict] = []
     for truth in truth_items:
         truth_index = label_split_index(truth)
-        truth_rect = truth_regions.get(truth_index) if truth_index else None
+        truth_poly = truth_polygons.get(truth_index) if truth_index else None
         best_gen: dict | None = None
         best_iou = 0.0
-        if truth_rect is not None:
+        if truth_poly is not None:
             for gen in available:
-                gen_rect = gen_split_region(gen)
-                if gen_rect is None:
+                gen_index = annotation_split_index(gen)
+                gen_poly = gen_polygons.get(gen_index) if gen_index else None
+                if gen_poly is None:
                     continue
-                iou = rect_iou(truth_rect, gen_rect)
+                iou = polygon_iou(truth_poly, gen_poly)
                 if iou > best_iou:
                     best_iou, best_gen = iou, gen
         if best_gen is not None:
@@ -526,6 +533,7 @@ def main() -> None:
     truth_by_source = annotations_by_source(Path(args.truth))
     gen_by_source = annotations_by_source(Path(args.generated))
     oim_dir = Path(args.truth).parent / "oim"
+    gen_dir = Path(args.generated).parent
 
     n_truth_total = sum(len(items) for items in truth_by_source.values())
     n_gen_total = sum(len(items) for items in gen_by_source.values())
@@ -547,10 +555,17 @@ def main() -> None:
             else:
                 rows.append(analyze_pair(truth_items[0], gen_item))
             continue
-        # Split page: associate by canvas-region overlap (numbering may differ).
+        # Split page: associate by panel-polygon overlap (numbering may differ).
         page_key = source_id_to_page_key(source_id, "")
-        truth_regions = load_truth_split_regions(oim_dir, page_key)
-        pairs, unmatched = match_split_pairs(truth_splits, gen_items, truth_regions)
+        source = truth_items[0]["target"]["source"]
+        source_dims = (float(source["width"]), float(source["height"]))
+        truth_polygons = load_split_polygons(oim_dir / f"{page_key}.panels.json")
+        gen_polygons = load_split_polygons(
+            gen_dir / f"{page_key}.panels.json", source_dims
+        )
+        pairs, unmatched = match_split_pairs(
+            truth_splits, gen_items, truth_polygons, gen_polygons
+        )
         rows.extend(analyze_pair(t, g) for t, g in pairs)
         missing.extend(analyze_truth_only(t) for t in unmatched)
 
