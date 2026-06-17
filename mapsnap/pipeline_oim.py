@@ -42,6 +42,15 @@ def main() -> None:
 
     dir_path = Path(args.dir)
     dir_path.mkdir(parents=True, exist_ok=True)
+    write_run_record(
+        dir_path,
+        "oim",
+        {
+            "sanborn_slug": args.sanborn_slug,
+            "relation": args.relation,
+            "oim_prefix": args.oim_prefix,
+        },
+    )
 
     base_url = f"https://oldinsurancemaps.net/iiif/mosaic/{args.sanborn_slug}"
     download_file(f"{base_url}/main-content/?trim=true", dir_path / "main.iiif.json")
@@ -100,16 +109,6 @@ def main() -> None:
     run_cmd(["mapsnap", "oim-split-truth", str(dir_path / "main.iiif.json")])
 
     run_cmd(["mapsnap", "fit", str(dir_path), "mapsnap"])
-
-    write_run_record(
-        dir_path,
-        "oim",
-        {
-            "sanborn_slug": args.sanborn_slug,
-            "relation": args.relation,
-            "oim_prefix": args.oim_prefix,
-        },
-    )
 
 
 if __name__ == "__main__":

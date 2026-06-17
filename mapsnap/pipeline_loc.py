@@ -31,6 +31,9 @@ def main() -> None:
 
     print(args.dir)
     print(args.relation)
+    write_run_record(
+        dir_path, "loc", {"manifest": str(manifest), "relation": args.relation}
+    )
 
     run_cmd(["mapsnap", "download-loc", "--scale", "pct:25", str(manifest)])
 
@@ -70,10 +73,6 @@ def main() -> None:
     )
 
     run_cmd(["mapsnap", "fit", str(dir_path), "mapsnap"])
-
-    write_run_record(
-        dir_path, "loc", {"manifest": str(manifest), "relation": args.relation}
-    )
 
 
 if __name__ == "__main__":
