@@ -8,11 +8,16 @@ Usage:
 import argparse
 import json
 import sys
+import time
 import urllib.error
 import urllib.parse
 import urllib.request
 
 OVERPASS_URL = "https://overpass-api.de/api/interpreter"
+
+MAX_ATTEMPTS = 5  # total Overpass attempts before giving up
+INITIAL_RETRY_DELAY = 2.0  # seconds before the first retry; doubles each attempt
+MAX_RETRY_DELAY = 60.0  # cap on the exponential backoff delay
 
 
 def form_osm_query_bbox(sw: tuple[float, float], ne: tuple[float, float]) -> str:
@@ -48,30 +53,54 @@ out skel qt;
 """
 
 
-def download_osm(query: str) -> dict:
-    """Submit an Overpass query and return the parsed JSON response."""
+def download_osm(
+    query: str,
+    max_attempts: int = MAX_ATTEMPTS,
+    initial_delay: float = INITIAL_RETRY_DELAY,
+) -> dict:
+    """Submit an Overpass query and return the parsed JSON response.
 
+    Retries with exponential backoff on transient errors: HTTP 429 (Overpass rate-limits
+    when busy) and 5xx (e.g. 504 when overloaded), and network/timeout errors. Exits with
+    an error message on a non-transient HTTP error or once all attempts are exhausted.
+    """
     data = urllib.parse.urlencode({"data": query}).encode()
-    req = urllib.request.Request(
-        OVERPASS_URL,
-        data=data,
-        method="get",
-        headers={
-            "User-Agent": "mapsnap/0.1",
-            "Accept": "application/json",
-        },
-    )
-    try:
-        with urllib.request.urlopen(req, timeout=90) as resp:
-            return json.loads(resp.read())
-    except urllib.error.HTTPError as exc:
-        print(
-            f"Error: Overpass returned HTTP {exc.code}: {exc.reason}", file=sys.stderr
+    delay = initial_delay
+    for attempt in range(1, max_attempts + 1):
+        req = urllib.request.Request(
+            OVERPASS_URL,
+            data=data,
+            method="get",
+            headers={
+                "User-Agent": "mapsnap/0.1",
+                "Accept": "application/json",
+            },
         )
-        sys.exit(1)
-    except urllib.error.URLError as exc:
-        print(f"Error: {exc.reason}", file=sys.stderr)
-        sys.exit(1)
+        try:
+            with urllib.request.urlopen(req, timeout=90) as resp:
+                return json.loads(resp.read())
+        except urllib.error.HTTPError as exc:
+            transient = exc.code == 429 or 500 <= exc.code < 600
+            if not transient or attempt == max_attempts:
+                sys.exit(f"Error: Overpass returned HTTP {exc.code}: {exc.reason}")
+            print(
+                f"  Overpass HTTP {exc.code} ({exc.reason}); retrying in {delay:.0f}s "
+                f"(attempt {attempt}/{max_attempts})",
+                file=sys.stderr,
+            )
+        except urllib.error.URLError as exc:
+            if attempt == max_attempts:
+                sys.exit(f"Error: {exc.reason}")
+            print(
+                f"  Overpass request failed ({exc.reason}); retrying in {delay:.0f}s "
+                f"(attempt {attempt}/{max_attempts})",
+                file=sys.stderr,
+            )
+        time.sleep(delay)
+        delay = min(delay * 2, MAX_RETRY_DELAY)
+
+    # Unreachable: the final attempt always returns or exits above.
+    sys.exit("Error: exhausted Overpass retries")
 
 
 def main() -> None:
