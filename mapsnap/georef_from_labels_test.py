@@ -1,5 +1,6 @@
 """Tests for georef_from_labels helpers."""
 
+import json
 import math
 
 import numpy as np
@@ -9,6 +10,7 @@ from mapsnap.georef_from_labels import (
     _angle_diff_abs,
     _cluster_geo_coords,
     _rotation_from_neighbors,
+    compute_auto_min_short_side,
     correct_square_feature_dirs,
     label_features,
     promote_avenue_letters,
@@ -473,3 +475,59 @@ def test_rotation_from_neighbors_adjacency_boundary():
     )
     assert result.confirmed is True
     assert result.n_agree == 2
+
+
+# ---------------------------------------------------------------------------
+# compute_auto_min_short_side
+# ---------------------------------------------------------------------------
+
+
+def _write_streets_json(path, detections: list[dict]) -> None:
+    """Write a minimal <stem>.streets.json fixture file."""
+    path.write_text(json.dumps({"streets": detections}))
+
+
+def test_compute_auto_min_short_side_basic_percentile(tmp_path):
+    dets = [_make_det(f"MAIN ST {i}", 0, 0, short_side=float(i)) for i in range(1, 101)]
+    _write_streets_json(tmp_path / "p1.streets.json", dets)
+    image_path = str(tmp_path / "p1.2048px.jpg")
+
+    result = compute_auto_min_short_side(
+        [image_path], min_confidence=0.3, percentile=25
+    )
+    assert result == 25.75
+
+
+def test_compute_auto_min_short_side_excludes_hints_and_low_confidence(tmp_path):
+    dets = [
+        _make_det("MAIN STREET", 0, 0, short_side=10.0, confidence=0.9),
+        _make_det("LOW CONFIDENCE", 0, 0, short_side=1000.0, confidence=0.1),
+        _make_det("N", 0, 0, short_side=1000.0, confidence=0.9, hint=True),
+        _make_det("A", 0, 0, short_side=1000.0, confidence=0.9),  # < 2 letters
+    ]
+    _write_streets_json(tmp_path / "p1.streets.json", dets)
+    image_path = str(tmp_path / "p1.2048px.jpg")
+
+    result = compute_auto_min_short_side(
+        [image_path], min_confidence=0.3, percentile=25
+    )
+    assert result == 10.0
+
+
+def test_compute_auto_min_short_side_no_qualifying_detections(tmp_path):
+    dets = [_make_det("A", 0, 0, confidence=0.9)]  # < 2 letters
+    _write_streets_json(tmp_path / "p1.streets.json", dets)
+    image_path = str(tmp_path / "p1.2048px.jpg")
+
+    result = compute_auto_min_short_side(
+        [image_path], min_confidence=0.3, percentile=25
+    )
+    assert result is None
+
+
+def test_compute_auto_min_short_side_skips_missing_labels_file(tmp_path):
+    image_path = str(tmp_path / "p1.2048px.jpg")  # no p1.streets.json written
+    result = compute_auto_min_short_side(
+        [image_path], min_confidence=0.3, percentile=25
+    )
+    assert result is None

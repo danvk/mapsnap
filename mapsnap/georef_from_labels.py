@@ -14,6 +14,7 @@ import argparse
 import json
 import math
 import os
+import statistics
 import sys
 from dataclasses import dataclass
 from itertools import combinations
@@ -614,6 +615,7 @@ def _finalize_georef(
     centerlines_path: str,
     initial_pair: tuple[int, int] | None = None,
     extra_fields: dict | None = None,
+    parameters: dict | None = None,
 ) -> tuple[float, tuple[float, float]]:
     """Print fit stats, write georef JSON, and return (scale_deg_per_px, page_center)."""
 
@@ -693,6 +695,7 @@ def _finalize_georef(
             "labels": labels_path,
             "centerlines": centerlines_path,
             "image": image_path,
+            "parameters": parameters,
         },
         "streets": streets_out,
         "intersections": intersections_out,
@@ -911,6 +914,55 @@ def derive_paths(image_path: str) -> tuple[str, str]:
     return str(base) + ".streets.json", str(base) + ".georef.json"
 
 
+def load_detections(labels_path: str) -> list[dict]:
+    """Load cached label detections from a <stem>.streets.json file."""
+    labels_raw = json.load(open(labels_path))
+    if isinstance(labels_raw, dict):
+        return labels_raw.get(
+            "streets", labels_raw.get("detections", labels_raw.get("accepted", []))
+        )
+    return labels_raw
+
+
+# Used when a volume has no detections confident enough to derive an auto threshold.
+FALLBACK_MIN_SHORT_SIDE = 20.0
+
+
+def compute_auto_min_short_side(
+    images: list[str], min_confidence: float, percentile: float
+) -> float | None:
+    """Derive a volume-wide min_short_side floor from the volume's own detections.
+
+    Collects short_side values from confident (>= min_confidence) street detections
+    (non-hint, non-ignored, with at least 2 letters in the detected text) across every
+    image's cached <stem>.streets.json, then returns the given percentile of that
+    distribution. Returns None if no qualifying detections are found anywhere in the
+    volume.
+    """
+    short_sides: list[float] = []
+    for image_path in images:
+        labels_path, _ = derive_paths(image_path)
+        if not os.path.exists(labels_path):
+            continue
+        for det in load_detections(labels_path):
+            if det.get("ignore") or det.get("hint"):
+                continue
+            text = det.get("text", "")
+            n_letters = sum(1 for c in text if c.isalpha())
+            if det.get("confidence", 0.0) < min_confidence or n_letters < 2:
+                continue
+            short_side = det.get("short_side")
+            if short_side is not None:
+                short_sides.append(float(short_side))
+
+    if not short_sides:
+        return None
+    quantiles = statistics.quantiles(short_sides, n=100, method="inclusive")
+    index = round(percentile) - 1
+    index = max(0, min(len(quantiles) - 1, index))
+    return quantiles[index]
+
+
 def process_image(
     image_path: str,
     labels_path: str,
@@ -926,6 +978,7 @@ def process_image(
     force_intersection: tuple[int, int] | None = None,
     one_gcp_fits: bool = False,
     debug: bool = False,
+    parameters: dict | None = None,
 ) -> ProcessResult:
     """Fit a georeference model for one image and write GCPs to output_path.
 
@@ -939,13 +992,7 @@ def process_image(
     with Image.open(image_path) as pil_img:
         img_w, img_h = pil_img.size
 
-    labels_raw = json.load(open(labels_path))
-    if isinstance(labels_raw, dict):
-        all_detections: list[dict] = labels_raw.get(
-            "streets", labels_raw.get("detections", labels_raw.get("accepted", []))
-        )
-    else:
-        all_detections = labels_raw
+    all_detections = load_detections(labels_path)
 
     print(f"All detections: {len(all_detections)}")
     all_detections = [d for d in all_detections if not d.get("ignore")]
@@ -1059,6 +1106,7 @@ def process_image(
                 "gcps": gcps,
                 "img_w": img_w,
                 "img_h": img_h,
+                "parameters": parameters,
             },
         )
 
@@ -1099,6 +1147,7 @@ def process_image(
         labels_path,
         centerlines_path,
         initial_pair=seed_pair,
+        parameters=parameters,
     )
     rotation = math.atan2(float(A[1, 0]), float(-A[1, 1]))
     return ProcessResult(
@@ -1257,6 +1306,7 @@ def process_deferred_image(
     gcps: list[IntersectionGCP] = deferred["gcps"]
     img_w: int = deferred["img_w"]
     img_h: int = deferred["img_h"]
+    parameters: dict | None = deferred["parameters"]
     gcp = gcps[0]
 
     undirected = _rotation_from_gcp_features(gcp, block_index)
@@ -1329,6 +1379,7 @@ def process_deferred_image(
         labels_path,
         centerlines_path,
         extra_fields=one_gcp_extra,
+        parameters=parameters,
     )
     return ProcessResult(
         success=decision.confirmed, scale_deg_per_px=scale, center=center
@@ -1364,16 +1415,43 @@ def main() -> None:
     parser.add_argument(
         "--min-long-side",
         type=float,
-        default=40.0,
+        default=None,
         metavar="PX",
-        help="Minimum long side of a text polygon to accept (default: %(default)s)",
+        help=(
+            "Minimum long side of a text polygon to accept. If not given, defaults to "
+            "2x the (auto or explicit) min-short-side."
+        ),
     )
     parser.add_argument(
         "--min-short-side",
         type=float,
-        default=20.0,
+        default=None,
         metavar="PX",
-        help="Minimum short side of a text polygon to accept (default: %(default)s)",
+        help=(
+            "Minimum short side of a text polygon to accept. If not given, it is "
+            "derived automatically from this volume's own detections (see "
+            "--auto-threshold-confidence and --auto-threshold-percentile)."
+        ),
+    )
+    parser.add_argument(
+        "--auto-threshold-confidence",
+        type=float,
+        default=0.3,
+        metavar="THRESHOLD",
+        help=(
+            "Minimum OCR confidence for a detection to count towards the automatic "
+            "min-short-side calculation (default: %(default)s)"
+        ),
+    )
+    parser.add_argument(
+        "--auto-threshold-percentile",
+        type=float,
+        default=25.0,
+        metavar="PCT",
+        help=(
+            "Percentile of confident street-detection short sides used as the "
+            "automatic min-short-side floor (default: %(default)s)"
+        ),
     )
     parser.add_argument(
         "--min-aspect-ratio",
@@ -1466,6 +1544,45 @@ def main() -> None:
         file=sys.stderr,
     )
 
+    if args.min_short_side is not None:
+        min_short_side = args.min_short_side
+    else:
+        auto_min_short_side = compute_auto_min_short_side(
+            args.images, args.auto_threshold_confidence, args.auto_threshold_percentile
+        )
+        if auto_min_short_side is None:
+            min_short_side = FALLBACK_MIN_SHORT_SIDE
+            print(
+                f"No confident (>= {args.auto_threshold_confidence:g}) street "
+                f"detections found; falling back to min-short-side="
+                f"{min_short_side:g}px.",
+                file=sys.stderr,
+            )
+        else:
+            min_short_side = auto_min_short_side
+            print(
+                f"Auto min-short-side: {min_short_side:.1f}px "
+                f"(p{args.auto_threshold_percentile:g} of confidence>="
+                f"{args.auto_threshold_confidence:g} street detections)",
+                file=sys.stderr,
+            )
+    min_long_side = (
+        args.min_long_side if args.min_long_side is not None else 2 * min_short_side
+    )
+    print(
+        f"Thresholds: min_confidence={args.min_confidence:g} "
+        f"min_long_side={min_long_side:.1f}px min_short_side={min_short_side:.1f}px",
+        file=sys.stderr,
+    )
+    parameters = {
+        "min_confidence": args.min_confidence,
+        "min_long_side": min_long_side,
+        "min_short_side": min_short_side,
+        "min_aspect_ratio": args.min_aspect_ratio,
+        "auto_threshold_confidence": args.auto_threshold_confidence,
+        "auto_threshold_percentile": args.auto_threshold_percentile,
+    }
+
     n_success = 0
     scales: list[float] = []
     scale_records: list[
@@ -1501,13 +1618,14 @@ def main() -> None:
             cos_phi=cos_phi,
             centerlines_path=args.centerlines,
             min_confidence=args.min_confidence,
-            min_long_side=args.min_long_side,
-            min_short_side=args.min_short_side,
+            min_long_side=min_long_side,
+            min_short_side=min_short_side,
             min_aspect_ratio=args.min_aspect_ratio,
             edge_margin=args.edge_margin,
             force_intersection=force_intersection,
             one_gcp_fits=not args.disable_one_gcp_fits,
             debug=args.debug,
+            parameters=parameters,
         )
         if result.success:
             n_success += 1
