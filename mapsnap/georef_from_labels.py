@@ -977,6 +977,31 @@ def compute_auto_min_short_side(
     return quantiles[index]
 
 
+def confidence_relaxed_threshold(
+    confidence: float,
+    min_confidence: float,
+    base_threshold: float,
+    high_confidence_floor: float,
+) -> float:
+    """Compute the size threshold required for a detection at a given confidence.
+
+    A detection right at min_confidence must meet base_threshold; one at confidence
+    1.0 only needs to meet high_confidence_floor. Confidence values in between are
+    interpolated via a power law (linear in log-confidence vs. log-threshold), so a
+    smaller-than-base_threshold detection can still be admitted if it's proportionally
+    more confident than min_confidence (see issue #78). Returns base_threshold
+    unchanged if confidence <= min_confidence or high_confidence_floor >=
+    base_threshold (i.e. relaxation is disabled).
+    """
+    if confidence <= min_confidence or high_confidence_floor >= base_threshold:
+        return base_threshold
+    confidence = min(confidence, 1.0)
+    exponent = math.log(high_confidence_floor / base_threshold) / math.log(
+        min_confidence
+    )
+    return base_threshold * (min_confidence / confidence) ** exponent
+
+
 class _Tee:
     """File-like object that writes to multiple streams (used to mirror logs under --debug)."""
 
@@ -1028,6 +1053,7 @@ def _init_worker(
     one_gcp_fits: bool,
     debug: bool,
     parameters: dict,
+    high_confidence_size_fraction: float,
 ) -> None:
     """Populate _worker_state once per worker process (or once in the main process)."""
     _worker_state.update(
@@ -1043,6 +1069,7 @@ def _init_worker(
         one_gcp_fits=one_gcp_fits,
         debug=debug,
         parameters=parameters,
+        high_confidence_size_fraction=high_confidence_size_fraction,
     )
 
 
@@ -1083,6 +1110,9 @@ def _process_one_image(image_path: str) -> tuple[str, ProcessResult]:
             one_gcp_fits=_worker_state["one_gcp_fits"],
             debug=_worker_state["debug"],
             parameters=_worker_state["parameters"],
+            high_confidence_size_fraction=_worker_state[
+                "high_confidence_size_fraction"
+            ],
         )
     if result.deferred is not None:
         result.deferred["log_path"] = log_path
@@ -1105,6 +1135,7 @@ def process_image(
     one_gcp_fits: bool = False,
     debug: bool = False,
     parameters: dict | None = None,
+    high_confidence_size_fraction: float = 0.7,
 ) -> ProcessResult:
     """Fit a georeference model for one image and write GCPs to output_path.
 
@@ -1155,19 +1186,27 @@ def process_image(
             # Promoted single-char avenue letters bypass size/aspect checks; confidence only.
             if det["confidence"] < min_confidence or is_number_only(det["text"]):
                 continue
-        elif not (
-            det["confidence"] >= min_confidence
-            and det.get("long_side", float("inf")) >= min_long_side
-            and det.get("short_side", float("inf")) >= min_short_side
-            and det.get("long_side", float("inf"))
-            >= min_aspect_ratio * det.get("short_side", 1.0)
-            and not is_number_only(det["text"])
-            and (
-                normalize_street(det["text"]) not in DIRECTION_WORDS
-                or det["text"].upper().strip() in normalized_streets
+        else:
+            required_short_side = confidence_relaxed_threshold(
+                det["confidence"],
+                min_confidence,
+                min_short_side,
+                min_short_side * high_confidence_size_fraction,
             )
-        ):
-            continue
+            required_long_side = min_long_side * (required_short_side / min_short_side)
+            if not (
+                det["confidence"] >= min_confidence
+                and det.get("long_side", float("inf")) >= required_long_side
+                and det.get("short_side", float("inf")) >= required_short_side
+                and det.get("long_side", float("inf"))
+                >= min_aspect_ratio * det.get("short_side", 1.0)
+                and not is_number_only(det["text"])
+                and (
+                    normalize_street(det["text"]) not in DIRECTION_WORDS
+                    or det["text"].upper().strip() in normalized_streets
+                )
+            ):
+                continue
         if edge_margin > 0 and not is_promoted:
             poly = np.array(det["polygon"], dtype=float)
             cx, cy = float(poly[:, 0].mean()), float(poly[:, 1].mean())
@@ -1595,6 +1634,19 @@ def main() -> None:
         help="Minimum long/short side ratio for a text polygon (default: %(default)s)",
     )
     parser.add_argument(
+        "--high-confidence-size-fraction",
+        type=float,
+        default=0.7,
+        metavar="FRACTION",
+        help=(
+            "Smaller detections are admitted if they're proportionally more "
+            "confident than --min-confidence: a detection at confidence 1.0 only "
+            "needs to meet this fraction of min-long-side/min-short-side, with "
+            "confidences in between interpolated on a power-law curve. Set to 1.0 "
+            "to disable (default: %(default)s)"
+        ),
+    )
+    parser.add_argument(
         "--scale",
         type=float,
         default=None,
@@ -1732,6 +1784,7 @@ def main() -> None:
         "auto_threshold_confidence": args.auto_threshold_confidence,
         "auto_threshold_percentile": args.auto_threshold_percentile,
         "auto_threshold_include_hints": auto_threshold_include_hints,
+        "high_confidence_size_fraction": args.high_confidence_size_fraction,
     }
 
     n_success = 0
@@ -1758,6 +1811,7 @@ def main() -> None:
         not args.disable_one_gcp_fits,
         args.debug,
         parameters,
+        args.high_confidence_size_fraction,
     )
     if args.num_workers > 1:
         with multiprocessing.Pool(
