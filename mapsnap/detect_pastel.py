@@ -1,14 +1,25 @@
 """Identify the pastel-colored regions on a Sanborn key map.
 
-A key map page is mostly three things: the light, yellowed color of aged paper;
-black ink (text, lines, hatching); and pastel-colored regions (pink, yellow,
-green, blue) that show where each detailed sheet sits. This module picks out just
-the pastel pixels.
+A key map page is mostly three things: the dominant color of aged paper (anywhere
+from near-white to a deep sepia); black ink (text, lines, hatching); and
+pastel-colored regions (pink, yellow, green, blue) that show where each detailed
+sheet sits. This module picks out just the pastel pixels.
 
-The discriminator is saturation, but with a twist: aged paper is itself yellowish,
-so in the yellow hue band the paper and the yellow pastel overlap and we need a
-higher saturation threshold to separate them. In the green/blue/pink hue bands the
-paper essentially never appears, so a low saturation threshold suffices.
+The paper color varies enormously from scan to scan, so a fixed color threshold
+does not generalize: a threshold that isolates pastels on near-white paper flags
+the whole page when the paper has yellowed to sepia. Instead we calibrate per image:
+
+1. Estimate the paper color as the modal color (the largest uniform area on the
+   page is always the paper).
+2. Measure each pixel's chroma distance from the paper in CIELAB's a*/b* plane.
+   This ignores lightness, so paper shadows and the paper's own tint sit near zero,
+   while colored washes stand out regardless of how dark the paper is.
+3. Threshold that distance with the triangle method, which adapts to each scan: the
+   distances form a tall paper peak near zero with a tail of pastel pixels, and the
+   triangle method places the cut in the valley after the peak.
+4. Drop dark pixels by a lightness floor. Black ink is chroma-neutral, so on tinted
+   paper it sits a full paper-chroma away from the paper and would otherwise be
+   flagged; pastels are always light washes, so a lightness floor separates them.
 
 The raw per-pixel mask is then cleaned with a morphological opening (to drop
 isolated speckle on the paper) followed by a closing (to bridge the black lot
@@ -17,6 +28,10 @@ region into many disconnected fragments). The closing kernel is sized to fill th
 gaps while staying smaller than the white streets between regions, so neighboring
 regions are not merged. Kernel sizes are tuned for full-resolution scans (~5000-6000
 px wide); scale them down for smaller images.
+
+Localized paper damage (foxing, water stains) drifts the paper color toward the
+warm/yellow part of the a*/b* plane, the same direction as yellow pastels, so badly
+stained areas can be flagged as pastel. Heavy stains are a known limitation.
 
 Run as a script to write a sidecar "<stem>.pastel.png" next to each input image: a
 copy of the original with every pastel pixel painted bright red.
@@ -32,17 +47,24 @@ from PIL import Image
 
 from mapsnap.utils import image_stem
 
-# Hue range (OpenCV 0-179 scale) where aged paper lives, so we demand more
-# saturation there to avoid flagging the paper itself.
-PAPER_HUE_LO = 12
-PAPER_HUE_HI = 40
+# Bin width (per RGB channel) used when finding the modal paper color. Coarse enough
+# to pool scanning noise into one bin, fine enough not to merge paper with pastels.
+PAPER_QUANT = 16
 
-# Minimum saturation (0-255) to count as pastel, inside vs. outside the paper hue band.
-SATURATION_THRESHOLD_YELLOW = 45
-SATURATION_THRESHOLD_OTHER = 25
+# Chroma distances are clipped to this before the triangle threshold, so a handful of
+# very saturated pixels can't stretch the histogram and skew the computed cut.
+DISTANCE_CAP = 64
 
-# Minimum value (0-255); excludes black ink and deep shadows.
-VALUE_THRESHOLD = 120
+# Floor on the auto-computed chroma threshold. On very clean scans the paper peak is
+# so tall and narrow that the triangle method cuts right beside it, flagging the JPEG
+# color fringe around dense text; real pastel washes always sit at least this far from
+# the paper, so a wash perceptibly different from paper never drops below this.
+MIN_CHROMA_THRESHOLD = 10.0
+
+# Minimum CIELAB lightness (OpenCV 0-255 scale) for a pixel to count as pastel.
+# Excludes black ink, which is chroma-neutral and otherwise reads as far from tinted
+# paper. Ink lands near L=30; the palest pastel washes stay well above L=80.
+LIGHTNESS_FLOOR = 60
 
 # Morphological cleanup kernel diameters (pixels), tuned for full-res scans.
 # Opening removes speckle; closing bridges lot lines, text, and sheet numbers.
@@ -53,22 +75,82 @@ CLOSE_KERNEL_SIZE = 25
 RED = (255, 0, 0)
 
 
-def pastel_mask(rgb: np.ndarray) -> np.ndarray:
+def estimate_paper_color(rgb: np.ndarray) -> np.ndarray:
+    """Modal (most common) color of an RGB image, as a length-3 uint8 array.
+
+    Colors are quantized into PAPER_QUANT-wide bins before counting, so scanning
+    noise within the paper pools into a single bin. The paper is the largest uniform
+    area on a key map, so its color wins the vote.
+    """
+    flat = rgb.reshape(-1, 3)
+    quantized = flat // PAPER_QUANT
+    codes = (
+        (quantized[:, 0].astype(np.int32) << 16)
+        + (quantized[:, 1].astype(np.int32) << 8)
+        + quantized[:, 2].astype(np.int32)
+    )
+    values, counts = np.unique(codes, return_counts=True)
+    code = int(values[counts.argmax()])
+    half = PAPER_QUANT // 2
+    return np.array(
+        [
+            ((code >> 16) & 0xFF) * PAPER_QUANT + half,
+            ((code >> 8) & 0xFF) * PAPER_QUANT + half,
+            (code & 0xFF) * PAPER_QUANT + half,
+        ],
+        dtype=np.uint8,
+    )
+
+
+def lab_distance_ab(lab: np.ndarray, paper_lab: np.ndarray) -> np.ndarray:
+    """a*/b* (chroma) distance of a float32 LAB image from a single LAB color."""
+    da = lab[..., 1] - paper_lab[1]
+    db = lab[..., 2] - paper_lab[2]
+    return np.sqrt(da * da + db * db)
+
+
+def chroma_distance(rgb: np.ndarray, paper_rgb: np.ndarray) -> np.ndarray:
+    """Per-pixel CIELAB a*/b* distance from the paper color (float32 HxW).
+
+    Distance is measured only in the a*/b* (chroma) plane, ignoring lightness, so it
+    responds to colored washes but not to how light or dark the paper is.
+    """
+    lab = cv2.cvtColor(rgb, cv2.COLOR_RGB2LAB).astype(np.float32)
+    paper_lab = cv2.cvtColor(paper_rgb.reshape(1, 1, 3), cv2.COLOR_RGB2LAB)[
+        0, 0
+    ].astype(np.float32)
+    return lab_distance_ab(lab, paper_lab)
+
+
+def auto_threshold(distance: np.ndarray) -> float:
+    """Triangle-method chroma threshold for a distance map, clamped to a floor.
+
+    The distances form one tall peak (paper) with a tail (pastels); the triangle
+    method puts the cut after the peak. Returns at least MIN_CHROMA_THRESHOLD.
+    """
+    capped = np.clip(distance, 0, DISTANCE_CAP).astype(np.uint8)
+    threshold, _ = cv2.threshold(
+        capped, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_TRIANGLE
+    )
+    return max(threshold, MIN_CHROMA_THRESHOLD)
+
+
+def pastel_mask(rgb: np.ndarray, *, threshold: float | None = None) -> np.ndarray:
     """Boolean mask of the pastel-colored pixels in an RGB image.
 
-    Takes an HxWx3 uint8 RGB array and returns an HxW boolean array that is True
-    for pixels belonging to a pastel region (and False for paper and ink).
+    Takes an HxWx3 uint8 RGB array and returns an HxW boolean array that is True for
+    pixels belonging to a pastel region (and False for paper and ink). The paper
+    color is estimated per image; the chroma-distance ``threshold`` is chosen
+    automatically per image unless one is supplied.
     """
-    hsv = cv2.cvtColor(rgb, cv2.COLOR_RGB2HSV)
-    hue = hsv[..., 0].astype(np.int16)
-    saturation = hsv[..., 1].astype(np.int16)
-    value = hsv[..., 2].astype(np.int16)
-
-    in_paper_hue = (hue >= PAPER_HUE_LO) & (hue < PAPER_HUE_HI)
-    threshold = np.where(
-        in_paper_hue, SATURATION_THRESHOLD_YELLOW, SATURATION_THRESHOLD_OTHER
-    )
-    return (saturation >= threshold) & (value >= VALUE_THRESHOLD)
+    lab = cv2.cvtColor(rgb, cv2.COLOR_RGB2LAB).astype(np.float32)
+    paper_lab = cv2.cvtColor(
+        estimate_paper_color(rgb).reshape(1, 1, 3), cv2.COLOR_RGB2LAB
+    )[0, 0].astype(np.float32)
+    distance = lab_distance_ab(lab, paper_lab)
+    if threshold is None:
+        threshold = auto_threshold(distance)
+    return (distance > threshold) & (lab[..., 0] >= LIGHTNESS_FLOOR)
 
 
 def clean_mask(
@@ -113,13 +195,19 @@ def main() -> None:
         action="store_true",
         help="Skip morphological cleanup and paint the raw per-pixel mask.",
     )
+    parser.add_argument(
+        "--threshold",
+        type=float,
+        default=None,
+        help="Chroma-distance threshold to override the per-image auto value.",
+    )
     args = parser.parse_args()
 
     for image in args.images:
         image_path = Path(image)
         with Image.open(image_path) as img:
             rgb = np.asarray(img.convert("RGB"))
-        mask = pastel_mask(rgb)
+        mask = pastel_mask(rgb, threshold=args.threshold)
         if not args.raw:
             mask = clean_mask(mask)
         painted = paint_pastels(rgb, mask)
