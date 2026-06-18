@@ -313,13 +313,14 @@ def canonical_street_matches(
     text: str,
     normalized_streets: set[str],
 ) -> list[str]:
-    """Return all keys from normalized_streets that match text.
+    """Return all keys from normalized_streets that match text, sorted alphabetically.
 
     Returns every key with at least one prefix-compatible candidate matching
-    normalize_street(text). Collects all matches rather than returning whichever
-    the set iteration yields first, eliminating nondeterminism when a bare label
-    (e.g. "CLINTON") could match multiple full names (e.g. "CLINTON AVENUE" and
-    "CLINTON STREET").
+    normalize_street(text), in alphabetical order so a length tie among multiple
+    matches (e.g. a bare label like "CLINTON" matching both "CLINTON AVENUE" and
+    "CLINTON STREET") resolves the same way every time, rather than depending on
+    the iteration order of the normalized_streets set (which Python's per-process
+    string-hash randomization makes nondeterministic).
 
     When normalization expands a direction abbreviation (e.g. "W"→"WEST") and the
     raw text is itself a known alias (e.g. "W" for "AVENUE W"), only that alias is
@@ -338,7 +339,7 @@ def canonical_street_matches(
     if normalized in DIRECTION_WORDS:
         prefix_len = len(normalized) + 1
         matches = []
-        for s in normalized_streets:
+        for s in sorted(normalized_streets):
             if s == normalized:
                 matches.append(s)
             elif (
@@ -348,7 +349,7 @@ def canonical_street_matches(
                 matches.append(s)
         return matches
     matches: list[str] = []
-    for s in normalized_streets:
+    for s in sorted(normalized_streets):
         for candidate in _match_candidates(s):
             if (
                 normalized == candidate

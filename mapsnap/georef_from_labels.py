@@ -15,6 +15,7 @@ import json
 import math
 import os
 import sys
+import time
 from dataclasses import dataclass
 from itertools import combinations
 from pathlib import Path
@@ -1053,6 +1054,7 @@ def calibrate_thresholds(
     best_thresholds = candidates[0]
     best_fraction = -1.0
     for thresholds in candidates:
+        rung_start = time.monotonic()
         n_qualifying = 0
         for image_path in images:
             labels_path, _ = derive_paths(image_path)
@@ -1066,8 +1068,10 @@ def calibrate_thresholds(
             if len(gcps) >= min_gcps:
                 n_qualifying += 1
         fraction = n_qualifying / len(images)
+        rung_elapsed = time.monotonic() - rung_start
         print(
-            f"  thresholds={thresholds}: frac(pages >= {min_gcps} GCP) = {fraction:.2f}",
+            f"  thresholds={thresholds}: frac(pages >= {min_gcps} GCP) = {fraction:.2f}"
+            f"  ({rung_elapsed:.2f}s)",
             file=sys.stderr,
         )
         if fraction > best_fraction:
@@ -1732,6 +1736,7 @@ def main() -> None:
         )
     else:
         print("\nAuto-calibrating detection thresholds...", file=sys.stderr)
+        calibration_start = time.monotonic()
         thresholds = calibrate_thresholds(
             args.images,
             block_index,
@@ -1739,7 +1744,11 @@ def main() -> None:
             default_thresholds,
             min_gcps=args.min_gcps_for_calibration,
         )
-        print(f"Auto thresholds: {thresholds}\n", file=sys.stderr)
+        print(
+            f"Auto thresholds: {thresholds}"
+            f"  (auto-calibration: {time.monotonic() - calibration_start:.2f}s)\n",
+            file=sys.stderr,
+        )
 
     n_success = 0
     scales: list[float] = []
