@@ -11,17 +11,22 @@ which can be pasted into the textarea to preview the warped image on a MapLibre 
 """
 
 import argparse
+import contextlib
+import io
 import json
 import math
+import multiprocessing
 import os
 import statistics
 import sys
 from dataclasses import dataclass
 from itertools import combinations
 from pathlib import Path
+from typing import Any
 
 import numpy as np
 from PIL import Image
+from tqdm import tqdm
 
 from mapsnap.streets import (
     DIRECTION_WORDS,
@@ -902,16 +907,20 @@ def correct_square_feature_dirs(
             feat.dir_pix = round(best_dir % math.pi, 4)
 
 
-def derive_paths(image_path: str) -> tuple[str, str]:
-    """Derive labels and output paths from an image path.
+def derive_paths(image_path: str) -> tuple[str, str, str]:
+    """Derive labels, output, and per-page log paths from an image path.
 
     Strips everything after the first '.' in the filename to form the stem:
-      p123.2048px.jpg → (p123.streets.json, p123.georef.json)
+      p123.2048px.jpg → (p123.streets.json, p123.georef.json, p123.txt)
     """
     p = Path(image_path)
     stem = image_stem(image_path)
     base = p.parent / stem
-    return str(base) + ".streets.json", str(base) + ".georef.json"
+    return (
+        str(base) + ".streets.json",
+        str(base) + ".georef.json",
+        str(base) + ".txt",
+    )
 
 
 def load_detections(labels_path: str) -> list[dict]:
@@ -941,7 +950,7 @@ def compute_auto_min_short_side(
     """
     short_sides: list[float] = []
     for image_path in images:
-        labels_path, _ = derive_paths(image_path)
+        labels_path, _, _ = derive_paths(image_path)
         if not os.path.exists(labels_path):
             continue
         for det in load_detections(labels_path):
@@ -961,6 +970,118 @@ def compute_auto_min_short_side(
     index = round(percentile) - 1
     index = max(0, min(len(quantiles) - 1, index))
     return quantiles[index]
+
+
+class _Tee:
+    """File-like object that writes to multiple streams (used to mirror logs under --debug)."""
+
+    def __init__(self, *streams: Any) -> None:
+        self.streams = streams
+
+    def write(self, s: str) -> int:
+        for stream in self.streams:
+            stream.write(s)
+        return len(s)
+
+    def flush(self) -> None:
+        for stream in self.streams:
+            stream.flush()
+
+
+@contextlib.contextmanager
+def _captured_page_log(log_path: str, debug: bool, append: bool = False):
+    """Redirect stdout/stderr to log_path for the duration of the block.
+
+    Under --debug, output is also mirrored to the real stderr in addition to being
+    written to log_path. append=True is used for the second (deferred-image) pass so
+    its output joins the page's first-pass log rather than overwriting it.
+    """
+    buf = io.StringIO()
+    target = _Tee(buf, sys.stderr) if debug else buf
+    with contextlib.redirect_stdout(target), contextlib.redirect_stderr(target):
+        yield
+    with open(log_path, "a" if append else "w") as f:
+        f.write(buf.getvalue())
+
+
+# Module-level state populated by _init_worker, used by _process_one_image. Each
+# multiprocessing worker process gets its own copy; with --num-workers=1 this is
+# populated directly in the main process instead of spawning a pool.
+_worker_state: dict[str, Any] = {}
+
+
+def _init_worker(
+    block_index: dict[str, list[Block]],
+    cos_phi: float,
+    centerlines_path: str,
+    min_confidence: float,
+    min_long_side: float,
+    min_short_side: float,
+    min_aspect_ratio: float,
+    edge_margin: float,
+    force_intersection: tuple[int, int] | None,
+    one_gcp_fits: bool,
+    debug: bool,
+    parameters: dict,
+) -> None:
+    """Populate _worker_state once per worker process (or once in the main process)."""
+    _worker_state.update(
+        block_index=block_index,
+        cos_phi=cos_phi,
+        centerlines_path=centerlines_path,
+        min_confidence=min_confidence,
+        min_long_side=min_long_side,
+        min_short_side=min_short_side,
+        min_aspect_ratio=min_aspect_ratio,
+        edge_margin=edge_margin,
+        force_intersection=force_intersection,
+        one_gcp_fits=one_gcp_fits,
+        debug=debug,
+        parameters=parameters,
+    )
+
+
+def _process_one_image(image_path: str) -> tuple[str, ProcessResult]:
+    """Georeference one image using _worker_state, capturing its log to a <stem>.txt sidecar.
+
+    Runs the same way whether dispatched to a multiprocessing worker (--num-workers > 1)
+    or called directly in the main process (--num-workers == 1), so a page's output and
+    log file are identical either way.
+    """
+    labels_path, output_path, log_path = derive_paths(image_path)
+    if os.path.exists(output_path):
+        os.remove(output_path)
+    for stale_suffix in (
+        ".georef-misscale.json",
+        ".georef-outlier.json",
+        ".georef-1gcp.json",
+    ):
+        stale_path = output_path.replace(".georef.json", stale_suffix)
+        if os.path.exists(stale_path):
+            os.remove(stale_path)
+
+    with _captured_page_log(log_path, _worker_state["debug"]):
+        print(f"--- {image_path} ---")
+        result = process_image(
+            image_path=image_path,
+            labels_path=labels_path,
+            output_path=output_path,
+            block_index=_worker_state["block_index"],
+            cos_phi=_worker_state["cos_phi"],
+            centerlines_path=_worker_state["centerlines_path"],
+            min_confidence=_worker_state["min_confidence"],
+            min_long_side=_worker_state["min_long_side"],
+            min_short_side=_worker_state["min_short_side"],
+            min_aspect_ratio=_worker_state["min_aspect_ratio"],
+            edge_margin=_worker_state["edge_margin"],
+            force_intersection=_worker_state["force_intersection"],
+            one_gcp_fits=_worker_state["one_gcp_fits"],
+            debug=_worker_state["debug"],
+            parameters=_worker_state["parameters"],
+        )
+    if result.deferred is not None:
+        result.deferred["log_path"] = log_path
+    return image_path, result
 
 
 def process_image(
@@ -1522,6 +1643,16 @@ def main() -> None:
     parser.add_argument(
         "--debug", action="store_true", help="Print additional debug information"
     )
+    parser.add_argument(
+        "--num-workers",
+        type=int,
+        default=1,
+        metavar="N",
+        help=(
+            "Number of worker processes for the per-image fitting pass "
+            "(default: %(default)s, sequential)"
+        ),
+    )
     args = parser.parse_args()
 
     force_intersection: tuple[int, int] | None = None
@@ -1594,39 +1725,39 @@ def main() -> None:
     ] = []  # (center, rotation)
     deferred_list: list[dict] = []
 
-    for image_path in args.images:
-        if len(args.images) > 1:
-            print(f"\n--- {image_path} ---", file=sys.stderr)
-        labels_path, output_path = derive_paths(image_path)
-        # Delete stale georef file before attempting a new fit so a failed run
-        # doesn't leave a previous result in place.
-        if os.path.exists(output_path):
-            os.remove(output_path)
-        for stale_suffix in (
-            ".georef-misscale.json",
-            ".georef-outlier.json",
-            ".georef-1gcp.json",
-        ):
-            stale_path = output_path.replace(".georef.json", stale_suffix)
-            if os.path.exists(stale_path):
-                os.remove(stale_path)
-        result = process_image(
-            image_path=image_path,
-            labels_path=labels_path,
-            output_path=output_path,
-            block_index=block_index,
-            cos_phi=cos_phi,
-            centerlines_path=args.centerlines,
-            min_confidence=args.min_confidence,
-            min_long_side=min_long_side,
-            min_short_side=min_short_side,
-            min_aspect_ratio=args.min_aspect_ratio,
-            edge_margin=args.edge_margin,
-            force_intersection=force_intersection,
-            one_gcp_fits=not args.disable_one_gcp_fits,
-            debug=args.debug,
-            parameters=parameters,
-        )
+    worker_initargs = (
+        block_index,
+        cos_phi,
+        args.centerlines,
+        args.min_confidence,
+        min_long_side,
+        min_short_side,
+        args.min_aspect_ratio,
+        args.edge_margin,
+        force_intersection,
+        not args.disable_one_gcp_fits,
+        args.debug,
+        parameters,
+    )
+    if args.num_workers > 1:
+        with multiprocessing.Pool(
+            args.num_workers, initializer=_init_worker, initargs=worker_initargs
+        ) as pool:
+            page_results = list(
+                tqdm(
+                    pool.imap_unordered(_process_one_image, args.images),
+                    total=len(args.images),
+                    smoothing=0,
+                )
+            )
+    else:
+        _init_worker(*worker_initargs)
+        page_results = [
+            _process_one_image(image_path)
+            for image_path in tqdm(args.images, smoothing=0)
+        ]
+
+    for image_path, result in page_results:
         if result.success:
             n_success += 1
             if result.scale_deg_per_px is not None:
@@ -1667,17 +1798,15 @@ def main() -> None:
             scale_deg_per_px = px_per_ft_to_deg_per_px(ref_scale_px_per_ft)
             for deferred in deferred_list:
                 deferred_image_path: str = deferred["image_path"]
-                if len(args.images) > 1:
-                    print(
-                        f"\n--- {deferred_image_path} (deferred) ---", file=sys.stderr
+                with _captured_page_log(deferred["log_path"], args.debug, append=True):
+                    print(f"\n--- {deferred_image_path} (deferred) ---")
+                    deferred_result = process_deferred_image(
+                        deferred=deferred,
+                        scale_deg_per_px=scale_deg_per_px,
+                        block_index=block_index,
+                        cos_phi=cos_phi,
+                        neighbor_rotations=neighbor_rotations,
                     )
-                deferred_result = process_deferred_image(
-                    deferred=deferred,
-                    scale_deg_per_px=scale_deg_per_px,
-                    block_index=block_index,
-                    cos_phi=cos_phi,
-                    neighbor_rotations=neighbor_rotations,
-                )
                 if deferred_result.success:
                     n_success += 1
                     if deferred_result.center is not None:
@@ -1691,7 +1820,7 @@ def main() -> None:
         for img_path, px_per_ft in scale_records:
             ratio = px_per_ft / ref_scale_px_per_ft
             if abs(ratio - 1.0) > args.scale_outlier_threshold:
-                _, out_path = derive_paths(img_path)
+                _, out_path, _ = derive_paths(img_path)
                 misscale_path = out_path.replace(
                     ".georef.json", ".georef-misscale.json"
                 )
@@ -1719,7 +1848,7 @@ def main() -> None:
             other_centers = [c for p, c in active if p != img_path]
             min_dist_km = min(_dist_km(center, other) for other in other_centers)
             if min_dist_km > args.min_distance_for_outlier_km:
-                _, out_path = derive_paths(img_path)
+                _, out_path, _ = derive_paths(img_path)
                 outlier_path = out_path.replace(".georef.json", ".georef-outlier.json")
                 os.rename(out_path, outlier_path)
                 n_success -= 1
