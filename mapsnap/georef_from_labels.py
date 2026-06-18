@@ -464,6 +464,7 @@ def _cluster_geo_coords(
 def find_intersection_gcps(
     features: list[LabelFeature],
     block_index: dict[str, list[Block]],
+    min_gcps: int | None = None,
 ) -> list[IntersectionGCP]:
     """Find GCPs from pairs of detected labels whose streets share a GeoJSON coordinate.
 
@@ -478,7 +479,10 @@ def find_intersection_gcps(
     and divided highways (two carriageway crossings) — both yield two candidate GCPs that
     RANSAC can evaluate independently.
 
-    Returns GCPs sorted by pixel_dist ascending (closer labels = better pixel estimate).
+    Returns GCPs sorted by pixel_dist ascending (closer labels = better pixel estimate),
+    unless min_gcps is given, in which case the search stops as soon as min_gcps GCPs
+    are found and the (unsorted) partial result is returned — for callers that only
+    need to know whether enough GCPs exist, not the full ranked list.
     """
     street_coords: dict[str, set[tuple[float, float]]] = {}
     for feat in features:
@@ -537,6 +541,8 @@ def find_intersection_gcps(
                             )
                 if best is not None:
                     gcps.append(best)
+                    if min_gcps is not None and len(gcps) >= min_gcps:
+                        return gcps
 
     return sorted(gcps, key=lambda g: g.pixel_dist)
 
@@ -953,6 +959,13 @@ def derive_paths(image_path: str) -> tuple[str, str]:
 # different resolution.
 ADMIT_FRACTION_LEVELS: list[float] = [40, 55, 70, 85]
 
+# Floor applied to percentile-derived rungs so calibration never tests implausibly
+# loose thresholds — these are also the rungs that admit the most detections and so
+# are the most expensive to evaluate.
+ABSOLUTE_MIN_THRESHOLDS = Thresholds(
+    min_confidence=0.05, min_long_side=20.0, min_short_side=10.0
+)
+
 
 def detection_percentiles(
     images: list[str], min_aspect_ratio: float
@@ -1022,6 +1035,30 @@ def thresholds_at_admit_fraction(
     )
 
 
+def clamp_to_floor(thresholds: Thresholds, floor: Thresholds) -> Thresholds:
+    """Raise each of thresholds' fields up to the matching field in floor, if lower."""
+    return Thresholds(
+        min_confidence=max(thresholds.min_confidence, floor.min_confidence),
+        min_long_side=max(thresholds.min_long_side, floor.min_long_side),
+        min_short_side=max(thresholds.min_short_side, floor.min_short_side),
+    )
+
+
+def dominates(loose: Thresholds, strict: Thresholds) -> bool:
+    """True if every detection admitted by strict is also admitted by loose.
+
+    Holds when loose's fields are all <= strict's, since admission requires meeting
+    or exceeding each field. Used by calibrate_thresholds to skip re-testing pages
+    that already qualified at a stricter rung: monotonicity guarantees they still
+    qualify once thresholds only relax.
+    """
+    return (
+        loose.min_confidence <= strict.min_confidence
+        and loose.min_long_side <= strict.min_long_side
+        and loose.min_short_side <= strict.min_short_side
+    )
+
+
 def calibrate_thresholds(
     images: list[str],
     block_index: dict[str, list[Block]],
@@ -1034,29 +1071,42 @@ def calibrate_thresholds(
 
     Evaluates the CLI default thresholds plus every percentile rung in
     ADMIT_FRACTION_LEVELS (derived from this volume's own detections, so the ladder is
-    scale-invariant across scans of different resolution) and returns whichever rung
-    achieves the highest fraction. This is a plain best-of-N search rather than a
-    walk-outward-until-good-enough search, because the fraction is not guaranteed to
-    be monotonic in relaxation level (a volume can dip at one percentile rung before
-    recovering at a looser one). Ties are broken in favor of the strictest (least
-    relaxed) rung, so a volume that's already fine at the default is never
-    gratuitously loosened.
+    scale-invariant across scans of different resolution, then clamped to
+    ABSOLUTE_MIN_THRESHOLDS) and returns whichever rung achieves the highest fraction.
+    This is a plain best-of-N search rather than a walk-outward-until-good-enough
+    search, because the fraction is not guaranteed to be monotonic in relaxation level
+    (a volume can dip at one percentile rung before recovering at a looser one). Ties
+    are broken in favor of the strictest (least relaxed) rung, so a volume that's
+    already fine at the default is never gratuitously loosened.
+
+    A page that already qualifies at one rung is guaranteed to still qualify at any
+    later rung whose thresholds are all <= it (relaxing thresholds can only admit more
+    detections, never fewer), so such pages are skipped rather than re-tested.
     """
     normalized_streets = set(block_index.keys())
     confidences, long_sides, short_sides = detection_percentiles(
         images, min_aspect_ratio
     )
     candidates = [default_thresholds] + [
-        thresholds_at_admit_fraction(confidences, long_sides, short_sides, level)
+        clamp_to_floor(
+            thresholds_at_admit_fraction(confidences, long_sides, short_sides, level),
+            ABSOLUTE_MIN_THRESHOLDS,
+        )
         for level in ADMIT_FRACTION_LEVELS
     ]
 
     best_thresholds = candidates[0]
     best_fraction = -1.0
+    qualified: set[str] = set()
+    prev_thresholds: Thresholds | None = None
     for thresholds in candidates:
         rung_start = time.monotonic()
-        n_qualifying = 0
-        for image_path in images:
+        if prev_thresholds is not None and dominates(thresholds, prev_thresholds):
+            pages_to_test = [p for p in images if p not in qualified]
+        else:
+            qualified = set()
+            pages_to_test = images
+        for image_path in pages_to_test:
             labels_path, _ = derive_paths(image_path)
             _, gcps = candidate_gcps_for_page(
                 labels_path,
@@ -1064,19 +1114,21 @@ def calibrate_thresholds(
                 min_aspect_ratio,
                 block_index,
                 normalized_streets,
+                min_gcps=min_gcps,
             )
             if len(gcps) >= min_gcps:
-                n_qualifying += 1
-        fraction = n_qualifying / len(images)
+                qualified.add(image_path)
+        fraction = len(qualified) / len(images)
         rung_elapsed = time.monotonic() - rung_start
         print(
             f"  thresholds={thresholds}: frac(pages >= {min_gcps} GCP) = {fraction:.2f}"
-            f"  ({rung_elapsed:.2f}s)",
+            f"  ({rung_elapsed:.2f}s, {len(pages_to_test)} pages tested)",
             file=sys.stderr,
         )
         if fraction > best_fraction:
             best_fraction = fraction
             best_thresholds = thresholds
+        prev_thresholds = thresholds
 
     return best_thresholds
 
@@ -1090,6 +1142,7 @@ def candidate_gcps_for_page(
     edge_margin: float = 0.0,
     img_size: tuple[int, int] | None = None,
     verbose: bool = False,
+    min_gcps: int | None = None,
 ) -> tuple[list[LabelFeature], list[IntersectionGCP]]:
     """Load a page's cached detections and find its candidate intersection GCPs.
 
@@ -1098,6 +1151,9 @@ def candidate_gcps_for_page(
     resolution, square-feature direction correction) up to the point where RANSAC would
     take over, so this is cheap to call repeatedly (e.g. once per threshold rung during
     calibration) without writing any output or fitting an affine transform.
+
+    If min_gcps is given, GCP search stops as soon as min_gcps are found (see
+    find_intersection_gcps) — for callers that only need a >= min_gcps check.
     """
     labels_raw = json.load(open(labels_path))
     if isinstance(labels_raw, dict):
@@ -1200,7 +1256,7 @@ def candidate_gcps_for_page(
             file=sys.stderr,
         )
 
-    gcps = find_intersection_gcps(features, block_index)
+    gcps = find_intersection_gcps(features, block_index, min_gcps=min_gcps)
     if verbose:
         print(f"Intersection GCPs: {len(gcps)}", file=sys.stderr)
     return features, gcps

@@ -339,7 +339,7 @@ def canonical_street_matches(
     if normalized in DIRECTION_WORDS:
         prefix_len = len(normalized) + 1
         matches = []
-        for s in sorted(normalized_streets):
+        for s in normalized_streets:
             if s == normalized:
                 matches.append(s)
             elif (
@@ -347,9 +347,9 @@ def canonical_street_matches(
                 and s[prefix_len:].split(" ", 1)[0] in STREET_TYPES
             ):
                 matches.append(s)
-        return matches
+        return sorted(matches)
     matches: list[str] = []
-    for s in sorted(normalized_streets):
+    for s in normalized_streets:
         for candidate in _match_candidates(s):
             if (
                 normalized == candidate
@@ -361,7 +361,7 @@ def canonical_street_matches(
             ):
                 matches.append(s)
                 break  # count each key at most once
-    return matches
+    return sorted(matches)
 
 
 def polygon_side_lengths(polygon: list[list[int]]) -> list[float]:
