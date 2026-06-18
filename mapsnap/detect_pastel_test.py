@@ -4,6 +4,7 @@ from mapsnap.detect_pastel import (
     auto_threshold,
     chroma_distance,
     clean_mask,
+    detect_pastels,
     estimate_paper_color,
     paint_pastels,
     pastel_mask,
@@ -77,6 +78,24 @@ def test_paint_pastels_marks_only_masked_pixels_red():
     painted = paint_pastels(img, pastel_mask(img))
     assert (painted[0:20, 0:20] == (255, 0, 0)).all()  # pink patch
     assert (painted[80:, 80:] == img[80:, 80:]).all()  # paper corner untouched
+
+
+def test_detect_pastels_preserves_image_size():
+    img = scene(WHITE_PAPER, PINK)
+    mask = detect_pastels(img)
+    assert mask.shape == img.shape[:2]
+
+
+def test_detect_pastels_ignores_pastels_in_the_margin():
+    # 200x200 with a 4% (8px) margin: a patch in the corner margin must be ignored,
+    # while an interior patch is still detected.
+    img = np.empty((200, 200, 3), dtype=np.uint8)
+    img[:] = WHITE_PAPER
+    img[0:6, 0:6] = PINK  # inside the 8px margin
+    img[90:130, 90:130] = PINK  # interior
+    mask = detect_pastels(img, raw=True)
+    assert not mask[0:6, 0:6].any()
+    assert mask[95:125, 95:125].all()
 
 
 def test_clean_mask_removes_isolated_speckle():

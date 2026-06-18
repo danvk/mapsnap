@@ -7,7 +7,10 @@ sheet sits. This module picks out just the pastel pixels.
 
 The paper color varies enormously from scan to scan, so a fixed color threshold
 does not generalize: a threshold that isolates pastels on near-white paper flags
-the whole page when the paper has yellowed to sepia. Instead we calibrate per image:
+the whole page when the paper has yellowed to sepia. Instead we calibrate per image,
+after first cropping a margin off every side (pastel regions sit in the page
+interior, so the margin only contributes scan edges, binding shadows, and edge
+stains that would skew the calibration):
 
 1. Estimate the paper color as the modal color (the largest uniform area on the
    page is always the paper).
@@ -65,6 +68,11 @@ MIN_CHROMA_THRESHOLD = 10.0
 # Excludes black ink, which is chroma-neutral and otherwise reads as far from tinted
 # paper. Ink lands near L=30; the palest pastel washes stay well above L=80.
 LIGHTNESS_FLOOR = 60
+
+# Fraction of each side cropped off before analysis. Pastel regions sit in the page
+# interior, while the margin holds scan edges, binding shadows, and edge stains that
+# would skew the paper-color estimate and the auto threshold.
+MARGIN_FRACTION = 0.04
 
 # Morphological cleanup kernel diameters (pixels), tuned for full-res scans.
 # Opening removes speckle; closing bridges lot lines, text, and sheet numbers.
@@ -175,6 +183,35 @@ def clean_mask(
     return binary.astype(bool)
 
 
+def detect_pastels(
+    rgb: np.ndarray,
+    *,
+    margin_fraction: float = MARGIN_FRACTION,
+    threshold: float | None = None,
+    raw: bool = False,
+) -> np.ndarray:
+    """Full-size boolean pastel mask, ignoring a margin around the page edge.
+
+    Crops ``margin_fraction`` off every side before estimating the paper color and
+    thresholding, so scan edges, binding shadows, and edge stains do not skew the
+    per-image calibration. Detection and (unless ``raw``) the morphological cleanup
+    run on the interior; the result is pasted back into a full-size mask so its pixels
+    line up one-for-one with ``rgb``, with the margin left all False.
+    """
+    height, width = rgb.shape[:2]
+    margin_y = round(height * margin_fraction)
+    margin_x = round(width * margin_fraction)
+    interior = rgb[margin_y : height - margin_y, margin_x : width - margin_x]
+
+    interior_mask = pastel_mask(interior, threshold=threshold)
+    if not raw:
+        interior_mask = clean_mask(interior_mask)
+
+    mask = np.zeros((height, width), dtype=bool)
+    mask[margin_y : height - margin_y, margin_x : width - margin_x] = interior_mask
+    return mask
+
+
 def paint_pastels(rgb: np.ndarray, mask: np.ndarray) -> np.ndarray:
     """Copy of an RGB image with every pixel in ``mask`` painted bright red."""
     out = rgb.copy()
@@ -201,15 +238,21 @@ def main() -> None:
         default=None,
         help="Chroma-distance threshold to override the per-image auto value.",
     )
+    parser.add_argument(
+        "--margin",
+        type=float,
+        default=MARGIN_FRACTION,
+        help="Fraction of each side to ignore during analysis (default %(default)s).",
+    )
     args = parser.parse_args()
 
     for image in args.images:
         image_path = Path(image)
         with Image.open(image_path) as img:
             rgb = np.asarray(img.convert("RGB"))
-        mask = pastel_mask(rgb, threshold=args.threshold)
-        if not args.raw:
-            mask = clean_mask(mask)
+        mask = detect_pastels(
+            rgb, margin_fraction=args.margin, threshold=args.threshold, raw=args.raw
+        )
         painted = paint_pastels(rgb, mask)
         output_path = image_path.parent / (image_stem(image) + ".pastel.png")
         Image.fromarray(painted).save(output_path)
