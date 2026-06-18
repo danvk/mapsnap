@@ -11,6 +11,7 @@ from mapsnap.georef_from_labels import (
     _cluster_geo_coords,
     _rotation_from_neighbors,
     compute_auto_min_short_side,
+    confidence_relaxed_threshold,
     correct_square_feature_dirs,
     label_features,
     promote_avenue_letters,
@@ -545,3 +546,73 @@ def test_compute_auto_min_short_side_skips_missing_labels_file(tmp_path):
         [image_path], min_confidence=0.3, percentile=25
     )
     assert result is None
+
+
+# ---------------------------------------------------------------------------
+# confidence_relaxed_threshold
+# ---------------------------------------------------------------------------
+
+
+def test_confidence_relaxed_threshold_at_min_confidence():
+    # At min_confidence, the full base_threshold is required (no relaxation).
+    result = confidence_relaxed_threshold(
+        confidence=0.15,
+        min_confidence=0.15,
+        base_threshold=18.0,
+        high_confidence_floor=12.6,
+    )
+    assert result == 18.0
+
+
+def test_confidence_relaxed_threshold_below_min_confidence():
+    # Below min_confidence, still returns base_threshold (this detection wouldn't
+    # pass the confidence check anyway).
+    result = confidence_relaxed_threshold(
+        confidence=0.1,
+        min_confidence=0.15,
+        base_threshold=18.0,
+        high_confidence_floor=12.6,
+    )
+    assert result == 18.0
+
+
+def test_confidence_relaxed_threshold_at_max_confidence():
+    # At confidence 1.0, the relaxed floor applies exactly.
+    result = confidence_relaxed_threshold(
+        confidence=1.0,
+        min_confidence=0.15,
+        base_threshold=18.0,
+        high_confidence_floor=12.6,
+    )
+    assert math.isclose(result, 12.6)
+
+
+def test_confidence_relaxed_threshold_interpolates_between_endpoints():
+    # Matches the schedule from issue #78: as confidence rises from min_confidence
+    # towards 1.0, the required short side relaxes from 18px towards ~12.6px (0.7x).
+    result_mid_low = confidence_relaxed_threshold(
+        confidence=0.3,
+        min_confidence=0.15,
+        base_threshold=18.0,
+        high_confidence_floor=12.6,
+    )
+    result_mid_high = confidence_relaxed_threshold(
+        confidence=0.6,
+        min_confidence=0.15,
+        base_threshold=18.0,
+        high_confidence_floor=12.6,
+    )
+    assert 12.6 < result_mid_high < result_mid_low < 18.0
+    assert math.isclose(result_mid_low, 15.8, abs_tol=0.1)
+    assert math.isclose(result_mid_high, 13.9, abs_tol=0.1)
+
+
+def test_confidence_relaxed_threshold_disabled_when_floor_not_below_base():
+    # high_confidence_floor >= base_threshold disables relaxation entirely.
+    result = confidence_relaxed_threshold(
+        confidence=1.0,
+        min_confidence=0.15,
+        base_threshold=18.0,
+        high_confidence_floor=18.0,
+    )
+    assert result == 18.0
