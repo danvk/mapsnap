@@ -11,16 +11,22 @@ which can be pasted into the textarea to preview the warped image on a MapLibre 
 """
 
 import argparse
+import contextlib
+import io
 import json
 import math
+import multiprocessing
 import os
+import statistics
 import sys
 from dataclasses import dataclass
 from itertools import combinations
 from pathlib import Path
+from typing import Any
 
 import numpy as np
 from PIL import Image
+from tqdm import tqdm
 
 from mapsnap.streets import (
     DIRECTION_WORDS,
@@ -614,6 +620,7 @@ def _finalize_georef(
     centerlines_path: str,
     initial_pair: tuple[int, int] | None = None,
     extra_fields: dict | None = None,
+    parameters: dict | None = None,
 ) -> tuple[float, tuple[float, float]]:
     """Print fit stats, write georef JSON, and return (scale_deg_per_px, page_center)."""
 
@@ -693,6 +700,7 @@ def _finalize_georef(
             "labels": labels_path,
             "centerlines": centerlines_path,
             "image": image_path,
+            "parameters": parameters,
         },
         "streets": streets_out,
         "intersections": intersections_out,
@@ -899,16 +907,186 @@ def correct_square_feature_dirs(
             feat.dir_pix = round(best_dir % math.pi, 4)
 
 
-def derive_paths(image_path: str) -> tuple[str, str]:
-    """Derive labels and output paths from an image path.
+def derive_paths(image_path: str) -> tuple[str, str, str]:
+    """Derive labels, output, and per-page log paths from an image path.
 
     Strips everything after the first '.' in the filename to form the stem:
-      p123.2048px.jpg → (p123.streets.json, p123.georef.json)
+      p123.2048px.jpg → (p123.streets.json, p123.georef.json, p123.txt)
     """
     p = Path(image_path)
     stem = image_stem(image_path)
     base = p.parent / stem
-    return str(base) + ".streets.json", str(base) + ".georef.json"
+    return (
+        str(base) + ".streets.json",
+        str(base) + ".georef.json",
+        str(base) + ".txt",
+    )
+
+
+def load_detections(labels_path: str) -> list[dict]:
+    """Load cached label detections from a <stem>.streets.json file."""
+    labels_raw = json.load(open(labels_path))
+    if isinstance(labels_raw, dict):
+        return labels_raw.get(
+            "streets", labels_raw.get("detections", labels_raw.get("accepted", []))
+        )
+    return labels_raw
+
+
+# Used when a volume has no detections confident enough to derive an auto threshold.
+FALLBACK_MIN_SHORT_SIDE = 20.0
+
+
+def compute_auto_min_short_side(
+    images: list[str],
+    min_confidence: float,
+    percentile: float,
+    include_hints: bool = False,
+) -> float | None:
+    """Derive a volume-wide min_short_side floor from the volume's own detections.
+
+    Collects short_side values from confident (>= min_confidence) street detections
+    (non-ignored, with at least 2 letters in the detected text; hint detections are
+    excluded unless include_hints is set) across every image's cached
+    <stem>.streets.json, then returns the given percentile of that distribution.
+    Returns None if no qualifying detections are found anywhere in the volume.
+    """
+    short_sides: list[float] = []
+    for image_path in images:
+        labels_path, _, _ = derive_paths(image_path)
+        if not os.path.exists(labels_path):
+            continue
+        for det in load_detections(labels_path):
+            if det.get("ignore") or (not include_hints and det.get("hint")):
+                continue
+            text = det.get("text", "")
+            n_letters = sum(1 for c in text if c.isalpha())
+            if det.get("confidence", 0.0) < min_confidence or n_letters < 2:
+                continue
+            short_side = det.get("short_side")
+            if short_side is not None:
+                short_sides.append(float(short_side))
+
+    if not short_sides:
+        return None
+    if len(short_sides) == 1:
+        return short_sides[0]
+    quantiles = statistics.quantiles(short_sides, n=100, method="inclusive")
+    index = round(percentile) - 1
+    index = max(0, min(len(quantiles) - 1, index))
+    return quantiles[index]
+
+
+class _Tee:
+    """File-like object that writes to multiple streams (used to mirror logs under --debug)."""
+
+    def __init__(self, *streams: Any) -> None:
+        self.streams = streams
+
+    def write(self, s: str) -> int:
+        for stream in self.streams:
+            stream.write(s)
+        return len(s)
+
+    def flush(self) -> None:
+        for stream in self.streams:
+            stream.flush()
+
+
+@contextlib.contextmanager
+def _captured_page_log(log_path: str, debug: bool, append: bool = False):
+    """Redirect stdout/stderr to log_path for the duration of the block.
+
+    Under --debug, output is also mirrored to the real stderr in addition to being
+    written to log_path. append=True is used for the second (deferred-image) pass so
+    its output joins the page's first-pass log rather than overwriting it.
+    """
+    buf = io.StringIO()
+    target = _Tee(buf, sys.stderr) if debug else buf
+    with contextlib.redirect_stdout(target), contextlib.redirect_stderr(target):
+        yield
+    with open(log_path, "a" if append else "w") as f:
+        f.write(buf.getvalue())
+
+
+# Module-level state populated by _init_worker, used by _process_one_image. Each
+# multiprocessing worker process gets its own copy; with --num-workers=1 this is
+# populated directly in the main process instead of spawning a pool.
+_worker_state: dict[str, Any] = {}
+
+
+def _init_worker(
+    block_index: dict[str, list[Block]],
+    cos_phi: float,
+    centerlines_path: str,
+    min_confidence: float,
+    min_long_side: float,
+    min_short_side: float,
+    min_aspect_ratio: float,
+    edge_margin: float,
+    force_intersection: tuple[int, int] | None,
+    one_gcp_fits: bool,
+    debug: bool,
+    parameters: dict,
+) -> None:
+    """Populate _worker_state once per worker process (or once in the main process)."""
+    _worker_state.update(
+        block_index=block_index,
+        cos_phi=cos_phi,
+        centerlines_path=centerlines_path,
+        min_confidence=min_confidence,
+        min_long_side=min_long_side,
+        min_short_side=min_short_side,
+        min_aspect_ratio=min_aspect_ratio,
+        edge_margin=edge_margin,
+        force_intersection=force_intersection,
+        one_gcp_fits=one_gcp_fits,
+        debug=debug,
+        parameters=parameters,
+    )
+
+
+def _process_one_image(image_path: str) -> tuple[str, ProcessResult]:
+    """Georeference one image using _worker_state, capturing its log to a <stem>.txt sidecar.
+
+    Runs the same way whether dispatched to a multiprocessing worker (--num-workers > 1)
+    or called directly in the main process (--num-workers == 1), so a page's output and
+    log file are identical either way.
+    """
+    labels_path, output_path, log_path = derive_paths(image_path)
+    if os.path.exists(output_path):
+        os.remove(output_path)
+    for stale_suffix in (
+        ".georef-misscale.json",
+        ".georef-outlier.json",
+        ".georef-1gcp.json",
+    ):
+        stale_path = output_path.replace(".georef.json", stale_suffix)
+        if os.path.exists(stale_path):
+            os.remove(stale_path)
+
+    with _captured_page_log(log_path, _worker_state["debug"]):
+        print(f"--- {image_path} ---")
+        result = process_image(
+            image_path=image_path,
+            labels_path=labels_path,
+            output_path=output_path,
+            block_index=_worker_state["block_index"],
+            cos_phi=_worker_state["cos_phi"],
+            centerlines_path=_worker_state["centerlines_path"],
+            min_confidence=_worker_state["min_confidence"],
+            min_long_side=_worker_state["min_long_side"],
+            min_short_side=_worker_state["min_short_side"],
+            min_aspect_ratio=_worker_state["min_aspect_ratio"],
+            edge_margin=_worker_state["edge_margin"],
+            force_intersection=_worker_state["force_intersection"],
+            one_gcp_fits=_worker_state["one_gcp_fits"],
+            debug=_worker_state["debug"],
+            parameters=_worker_state["parameters"],
+        )
+    if result.deferred is not None:
+        result.deferred["log_path"] = log_path
+    return image_path, result
 
 
 def process_image(
@@ -926,6 +1104,7 @@ def process_image(
     force_intersection: tuple[int, int] | None = None,
     one_gcp_fits: bool = False,
     debug: bool = False,
+    parameters: dict | None = None,
 ) -> ProcessResult:
     """Fit a georeference model for one image and write GCPs to output_path.
 
@@ -939,13 +1118,7 @@ def process_image(
     with Image.open(image_path) as pil_img:
         img_w, img_h = pil_img.size
 
-    labels_raw = json.load(open(labels_path))
-    if isinstance(labels_raw, dict):
-        all_detections: list[dict] = labels_raw.get(
-            "streets", labels_raw.get("detections", labels_raw.get("accepted", []))
-        )
-    else:
-        all_detections = labels_raw
+    all_detections = load_detections(labels_path)
 
     print(f"All detections: {len(all_detections)}")
     all_detections = [d for d in all_detections if not d.get("ignore")]
@@ -1059,6 +1232,7 @@ def process_image(
                 "gcps": gcps,
                 "img_w": img_w,
                 "img_h": img_h,
+                "parameters": parameters,
             },
         )
 
@@ -1099,6 +1273,7 @@ def process_image(
         labels_path,
         centerlines_path,
         initial_pair=seed_pair,
+        parameters=parameters,
     )
     rotation = math.atan2(float(A[1, 0]), float(-A[1, 1]))
     return ProcessResult(
@@ -1257,6 +1432,7 @@ def process_deferred_image(
     gcps: list[IntersectionGCP] = deferred["gcps"]
     img_w: int = deferred["img_w"]
     img_h: int = deferred["img_h"]
+    parameters: dict | None = deferred["parameters"]
     gcp = gcps[0]
 
     undirected = _rotation_from_gcp_features(gcp, block_index)
@@ -1329,6 +1505,7 @@ def process_deferred_image(
         labels_path,
         centerlines_path,
         extra_fields=one_gcp_extra,
+        parameters=parameters,
     )
     return ProcessResult(
         success=decision.confirmed, scale_deg_per_px=scale, center=center
@@ -1364,16 +1541,51 @@ def main() -> None:
     parser.add_argument(
         "--min-long-side",
         type=float,
-        default=40.0,
+        default=None,
         metavar="PX",
-        help="Minimum long side of a text polygon to accept (default: %(default)s)",
+        help=(
+            "Minimum long side of a text polygon to accept. If not given, defaults to "
+            "2x the (auto or explicit) min-short-side."
+        ),
     )
     parser.add_argument(
         "--min-short-side",
         type=float,
-        default=20.0,
+        default=None,
         metavar="PX",
-        help="Minimum short side of a text polygon to accept (default: %(default)s)",
+        help=(
+            "Minimum short side of a text polygon to accept. If not given, it is "
+            "derived automatically from this volume's own detections (see "
+            "--auto-threshold-confidence and --auto-threshold-percentile)."
+        ),
+    )
+    parser.add_argument(
+        "--auto-threshold-confidence",
+        type=float,
+        default=0.5,
+        metavar="THRESHOLD",
+        help=(
+            "Minimum OCR confidence for a detection to count towards the automatic "
+            "min-short-side calculation (default: %(default)s)"
+        ),
+    )
+    parser.add_argument(
+        "--auto-threshold-percentile",
+        type=float,
+        default=25.0,
+        metavar="PCT",
+        help=(
+            "Percentile of confident detection short sides used as the automatic "
+            "min-short-side floor (default: %(default)s)"
+        ),
+    )
+    parser.add_argument(
+        "--auto-threshold-exclude-hints",
+        action="store_true",
+        help=(
+            "Only count street-name detections (not hint/type-word detections) "
+            "towards the automatic min-short-side calculation"
+        ),
     )
     parser.add_argument(
         "--min-aspect-ratio",
@@ -1444,6 +1656,16 @@ def main() -> None:
     parser.add_argument(
         "--debug", action="store_true", help="Print additional debug information"
     )
+    parser.add_argument(
+        "--num-workers",
+        type=int,
+        default=1,
+        metavar="N",
+        help=(
+            "Number of worker processes for the per-image fitting pass "
+            "(default: %(default)s, sequential)"
+        ),
+    )
     args = parser.parse_args()
 
     force_intersection: tuple[int, int] | None = None
@@ -1466,6 +1688,52 @@ def main() -> None:
         file=sys.stderr,
     )
 
+    auto_threshold_include_hints = not args.auto_threshold_exclude_hints
+    if args.min_short_side is not None:
+        min_short_side = args.min_short_side
+    else:
+        auto_min_short_side = compute_auto_min_short_side(
+            args.images,
+            args.auto_threshold_confidence,
+            args.auto_threshold_percentile,
+            auto_threshold_include_hints,
+        )
+        detection_kind = (
+            "detections" if auto_threshold_include_hints else "street detections"
+        )
+        if auto_min_short_side is None:
+            min_short_side = FALLBACK_MIN_SHORT_SIDE
+            print(
+                f"No confident (>= {args.auto_threshold_confidence:g}) {detection_kind} "
+                f"found; falling back to min-short-side={min_short_side:g}px.",
+                file=sys.stderr,
+            )
+        else:
+            min_short_side = auto_min_short_side
+            print(
+                f"Auto min-short-side: {min_short_side:.1f}px "
+                f"(p{args.auto_threshold_percentile:g} of confidence>="
+                f"{args.auto_threshold_confidence:g} {detection_kind})",
+                file=sys.stderr,
+            )
+    min_long_side = (
+        args.min_long_side if args.min_long_side is not None else 2 * min_short_side
+    )
+    print(
+        f"Thresholds: min_confidence={args.min_confidence:g} "
+        f"min_long_side={min_long_side:.1f}px min_short_side={min_short_side:.1f}px",
+        file=sys.stderr,
+    )
+    parameters = {
+        "min_confidence": args.min_confidence,
+        "min_long_side": min_long_side,
+        "min_short_side": min_short_side,
+        "min_aspect_ratio": args.min_aspect_ratio,
+        "auto_threshold_confidence": args.auto_threshold_confidence,
+        "auto_threshold_percentile": args.auto_threshold_percentile,
+        "auto_threshold_include_hints": auto_threshold_include_hints,
+    }
+
     n_success = 0
     scales: list[float] = []
     scale_records: list[
@@ -1477,38 +1745,39 @@ def main() -> None:
     ] = []  # (center, rotation)
     deferred_list: list[dict] = []
 
-    for image_path in args.images:
-        if len(args.images) > 1:
-            print(f"\n--- {image_path} ---", file=sys.stderr)
-        labels_path, output_path = derive_paths(image_path)
-        # Delete stale georef file before attempting a new fit so a failed run
-        # doesn't leave a previous result in place.
-        if os.path.exists(output_path):
-            os.remove(output_path)
-        for stale_suffix in (
-            ".georef-misscale.json",
-            ".georef-outlier.json",
-            ".georef-1gcp.json",
-        ):
-            stale_path = output_path.replace(".georef.json", stale_suffix)
-            if os.path.exists(stale_path):
-                os.remove(stale_path)
-        result = process_image(
-            image_path=image_path,
-            labels_path=labels_path,
-            output_path=output_path,
-            block_index=block_index,
-            cos_phi=cos_phi,
-            centerlines_path=args.centerlines,
-            min_confidence=args.min_confidence,
-            min_long_side=args.min_long_side,
-            min_short_side=args.min_short_side,
-            min_aspect_ratio=args.min_aspect_ratio,
-            edge_margin=args.edge_margin,
-            force_intersection=force_intersection,
-            one_gcp_fits=not args.disable_one_gcp_fits,
-            debug=args.debug,
-        )
+    worker_initargs = (
+        block_index,
+        cos_phi,
+        args.centerlines,
+        args.min_confidence,
+        min_long_side,
+        min_short_side,
+        args.min_aspect_ratio,
+        args.edge_margin,
+        force_intersection,
+        not args.disable_one_gcp_fits,
+        args.debug,
+        parameters,
+    )
+    if args.num_workers > 1:
+        with multiprocessing.Pool(
+            args.num_workers, initializer=_init_worker, initargs=worker_initargs
+        ) as pool:
+            page_results = list(
+                tqdm(
+                    pool.imap_unordered(_process_one_image, args.images),
+                    total=len(args.images),
+                    smoothing=0,
+                )
+            )
+    else:
+        _init_worker(*worker_initargs)
+        page_results = [
+            _process_one_image(image_path)
+            for image_path in tqdm(args.images, smoothing=0)
+        ]
+
+    for image_path, result in page_results:
         if result.success:
             n_success += 1
             if result.scale_deg_per_px is not None:
@@ -1549,17 +1818,15 @@ def main() -> None:
             scale_deg_per_px = px_per_ft_to_deg_per_px(ref_scale_px_per_ft)
             for deferred in deferred_list:
                 deferred_image_path: str = deferred["image_path"]
-                if len(args.images) > 1:
-                    print(
-                        f"\n--- {deferred_image_path} (deferred) ---", file=sys.stderr
+                with _captured_page_log(deferred["log_path"], args.debug, append=True):
+                    print(f"\n--- {deferred_image_path} (deferred) ---")
+                    deferred_result = process_deferred_image(
+                        deferred=deferred,
+                        scale_deg_per_px=scale_deg_per_px,
+                        block_index=block_index,
+                        cos_phi=cos_phi,
+                        neighbor_rotations=neighbor_rotations,
                     )
-                deferred_result = process_deferred_image(
-                    deferred=deferred,
-                    scale_deg_per_px=scale_deg_per_px,
-                    block_index=block_index,
-                    cos_phi=cos_phi,
-                    neighbor_rotations=neighbor_rotations,
-                )
                 if deferred_result.success:
                     n_success += 1
                     if deferred_result.center is not None:
@@ -1573,7 +1840,7 @@ def main() -> None:
         for img_path, px_per_ft in scale_records:
             ratio = px_per_ft / ref_scale_px_per_ft
             if abs(ratio - 1.0) > args.scale_outlier_threshold:
-                _, out_path = derive_paths(img_path)
+                _, out_path, _ = derive_paths(img_path)
                 misscale_path = out_path.replace(
                     ".georef.json", ".georef-misscale.json"
                 )
@@ -1601,7 +1868,7 @@ def main() -> None:
             other_centers = [c for p, c in active if p != img_path]
             min_dist_km = min(_dist_km(center, other) for other in other_centers)
             if min_dist_km > args.min_distance_for_outlier_km:
-                _, out_path = derive_paths(img_path)
+                _, out_path, _ = derive_paths(img_path)
                 outlier_path = out_path.replace(".georef.json", ".georef-outlier.json")
                 os.rename(out_path, outlier_path)
                 n_success -= 1
