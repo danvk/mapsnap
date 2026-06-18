@@ -514,6 +514,20 @@ def test_compute_auto_min_short_side_excludes_hints_and_low_confidence(tmp_path)
     assert result == 10.0
 
 
+def test_compute_auto_min_short_side_include_hints(tmp_path):
+    dets = [
+        _make_det("MAIN STREET", 0, 0, short_side=10.0, confidence=0.9),
+        _make_det("EAST", 0, 0, short_side=1000.0, confidence=0.9, hint=True),
+    ]
+    _write_streets_json(tmp_path / "p1.streets.json", dets)
+    image_path = str(tmp_path / "p1.2048px.jpg")
+
+    result = compute_auto_min_short_side(
+        [image_path], min_confidence=0.3, percentile=25, include_hints=True
+    )
+    assert result == 257.5
+
+
 def test_compute_auto_min_short_side_no_qualifying_detections(tmp_path):
     dets = [_make_det("A", 0, 0, confidence=0.9)]  # < 2 letters
     _write_streets_json(tmp_path / "p1.streets.json", dets)

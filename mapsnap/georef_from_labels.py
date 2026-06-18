@@ -938,15 +938,18 @@ FALLBACK_MIN_SHORT_SIDE = 20.0
 
 
 def compute_auto_min_short_side(
-    images: list[str], min_confidence: float, percentile: float
+    images: list[str],
+    min_confidence: float,
+    percentile: float,
+    include_hints: bool = False,
 ) -> float | None:
     """Derive a volume-wide min_short_side floor from the volume's own detections.
 
     Collects short_side values from confident (>= min_confidence) street detections
-    (non-hint, non-ignored, with at least 2 letters in the detected text) across every
-    image's cached <stem>.streets.json, then returns the given percentile of that
-    distribution. Returns None if no qualifying detections are found anywhere in the
-    volume.
+    (non-ignored, with at least 2 letters in the detected text; hint detections are
+    excluded unless include_hints is set) across every image's cached
+    <stem>.streets.json, then returns the given percentile of that distribution.
+    Returns None if no qualifying detections are found anywhere in the volume.
     """
     short_sides: list[float] = []
     for image_path in images:
@@ -954,7 +957,7 @@ def compute_auto_min_short_side(
         if not os.path.exists(labels_path):
             continue
         for det in load_detections(labels_path):
-            if det.get("ignore") or det.get("hint"):
+            if det.get("ignore") or (not include_hints and det.get("hint")):
                 continue
             text = det.get("text", "")
             n_letters = sum(1 for c in text if c.isalpha())
@@ -1575,6 +1578,14 @@ def main() -> None:
         ),
     )
     parser.add_argument(
+        "--auto-threshold-include-hints",
+        action="store_true",
+        help=(
+            "Include hint (type-word) detections, not just street-name detections, "
+            "in the automatic min-short-side calculation"
+        ),
+    )
+    parser.add_argument(
         "--min-aspect-ratio",
         type=float,
         default=1.75,
@@ -1679,7 +1690,10 @@ def main() -> None:
         min_short_side = args.min_short_side
     else:
         auto_min_short_side = compute_auto_min_short_side(
-            args.images, args.auto_threshold_confidence, args.auto_threshold_percentile
+            args.images,
+            args.auto_threshold_confidence,
+            args.auto_threshold_percentile,
+            args.auto_threshold_include_hints,
         )
         if auto_min_short_side is None:
             min_short_side = FALLBACK_MIN_SHORT_SIDE
@@ -1712,6 +1726,7 @@ def main() -> None:
         "min_aspect_ratio": args.min_aspect_ratio,
         "auto_threshold_confidence": args.auto_threshold_confidence,
         "auto_threshold_percentile": args.auto_threshold_percentile,
+        "auto_threshold_include_hints": args.auto_threshold_include_hints,
     }
 
     n_success = 0
