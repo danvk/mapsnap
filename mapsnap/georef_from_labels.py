@@ -62,6 +62,15 @@ class IntersectionGCP:
 
 
 @dataclass
+class Thresholds:
+    """Detection-acceptance thresholds passed to process_image / candidate_gcps_for_page."""
+
+    min_confidence: float
+    min_long_side: float
+    min_short_side: float
+
+
+@dataclass
 class ProcessResult:
     """Outcome of processing a single map image."""
 
@@ -288,50 +297,68 @@ def project_to_polyline(
     Returns None if blocks is empty.
     """
     q = np.array([lon, lat])
-    best_dist = float("inf")
-    best_pt: np.ndarray | None = None
-    best_tangent: float = 0.0
-
     terminal = _terminal_endpoints(blocks) if extrapolate else set()
 
+    def extrapolation_t(p1: np.ndarray, p2: np.ndarray) -> float:
+        """Max |t| beyond [0, 1] that stays within max_extrapolation_ft along p1->p2."""
+        seg = p2 - p1
+        mid_lat = float((p1[1] + p2[1]) / 2)
+        ft_per_deg_lon = _FT_PER_DEG_LAT * math.cos(math.radians(mid_lat))
+        seg_ft = math.sqrt(
+            (float(seg[0]) * ft_per_deg_lon) ** 2
+            + (float(seg[1]) * _FT_PER_DEG_LAT) ** 2
+        )
+        return (max_extrapolation_ft / seg_ft) if seg_ft > 0 else 0.0
+
+    # Stack every segment from every block into flat (p1, p2, t_min, t_max) arrays so the
+    # nearest-point search below is a handful of vectorized numpy ops instead of a Python
+    # loop with one numpy call per segment — this is the dominant cost of RANSAC's inlier
+    # scoring, called for every (candidate affine, feature) pair.
+    p1_chunks: list[np.ndarray] = []
+    p2_chunks: list[np.ndarray] = []
+    t_min_chunks: list[np.ndarray] = []
+    t_max_chunks: list[np.ndarray] = []
     for block in blocks:
         pts = block.coords  # shape (N, 2), columns [lon, lat]
         n_segs = len(pts) - 1
-        start_terminal = (float(pts[0, 0]), float(pts[0, 1])) in terminal
-        end_terminal = (float(pts[-1, 0]), float(pts[-1, 1])) in terminal
-        for k in range(n_segs):
-            p1, p2 = pts[k], pts[k + 1]
-            seg = p2 - p1
-            seg_len_sq = float(np.dot(seg, seg))
-            if seg_len_sq < 1e-20:
-                continue
-            t_raw = float(np.dot(q - p1, seg) / seg_len_sq)
-            is_start_terminal = k == 0 and start_terminal and extrapolate
-            is_end_terminal = k == n_segs - 1 and end_terminal and extrapolate
-            t_min = 0.0
-            t_max = 1.0
-            if is_start_terminal or is_end_terminal:
-                mid_lat = float((p1[1] + p2[1]) / 2)
-                ft_per_deg_lon = _FT_PER_DEG_LAT * math.cos(math.radians(mid_lat))
-                seg_ft = math.sqrt(
-                    (float(seg[0]) * ft_per_deg_lon) ** 2
-                    + (float(seg[1]) * _FT_PER_DEG_LAT) ** 2
-                )
-                max_t = (max_extrapolation_ft / seg_ft) if seg_ft > 0 else 0.0
-                if is_start_terminal:
-                    t_min = -max_t
-                if is_end_terminal:
-                    t_max = 1.0 + max_t
-            t = float(np.clip(t_raw, t_min, t_max))
-            nearest = p1 + t * seg
-            dist = float(np.linalg.norm(q - nearest))
-            if dist < best_dist:
-                best_dist = dist
-                best_pt = nearest
-                best_tangent = float(np.arctan2(seg[1], seg[0])) % np.pi
+        if n_segs <= 0:
+            continue
+        t_min = np.zeros(n_segs)
+        t_max = np.ones(n_segs)
+        if extrapolate:
+            start_terminal = (float(pts[0, 0]), float(pts[0, 1])) in terminal
+            end_terminal = (float(pts[-1, 0]), float(pts[-1, 1])) in terminal
+            if start_terminal:
+                t_min[0] = -extrapolation_t(pts[0], pts[1])
+            if end_terminal:
+                t_max[-1] = 1.0 + extrapolation_t(pts[-2], pts[-1])
+        p1_chunks.append(pts[:-1])
+        p2_chunks.append(pts[1:])
+        t_min_chunks.append(t_min)
+        t_max_chunks.append(t_max)
 
-    if best_pt is None:
+    if not p1_chunks:
         return None
+
+    p1 = np.concatenate(p1_chunks, axis=0)
+    p2 = np.concatenate(p2_chunks, axis=0)
+    t_min = np.concatenate(t_min_chunks, axis=0)
+    t_max = np.concatenate(t_max_chunks, axis=0)
+
+    seg = p2 - p1
+    seg_len_sq = np.sum(seg * seg, axis=1)
+    valid = seg_len_sq >= 1e-20
+    t_raw = np.sum((q - p1) * seg, axis=1) / np.where(valid, seg_len_sq, 1.0)
+    t = np.clip(t_raw, t_min, t_max)
+    nearest = p1 + t[:, np.newaxis] * seg
+    dist = np.where(valid, np.linalg.norm(q - nearest, axis=1), np.inf)
+
+    best_idx = int(np.argmin(dist))
+    if not valid[best_idx]:
+        return None
+    best_pt = nearest[best_idx]
+    best_seg = seg[best_idx]
+    best_tangent = float(np.arctan2(best_seg[1], best_seg[0])) % np.pi
     return (float(best_pt[0]), float(best_pt[1]), best_tangent)
 
 
@@ -522,12 +549,18 @@ def ransac_hybrid(
     dir_threshold: float = np.pi / 6,
     force_pair: tuple[int, int] | None = None,
     debug: bool = False,
+    max_gcps: int = 40,
 ) -> tuple[np.ndarray | None, list[int], tuple[int, int] | None]:
     """Find the best similarity affine using intersection GCPs as seeds, label-based inlier scoring.
 
     Generates candidate affines from all C(n, 2) pairs of intersection GCPs, solving for
     the 4-parameter similarity transform (equal metric scale + orthogonality) at each pair.
     Inlier counting uses point-to-polyline + direction for every label.
+
+    `gcps` is truncated to the `max_gcps` closest-label pairs (it arrives sorted by
+    pixel_dist ascending) before the O(n^2) pair search, since looser detection
+    thresholds can otherwise admit hundreds of candidates per page and make this
+    search the dominant cost of a run; the closest pairs are also the most reliable.
 
     A global rotation estimate R_est is derived from a histogram cross-correlation of label
     angles vs OSM tangents before the main loop. Each candidate is penalized by rot_penalty
@@ -538,6 +571,7 @@ def ransac_hybrid(
     If force_pair is set, all pairs are still evaluated and printed, but that
     pair is selected regardless of score.
     """
+    gcps = gcps[:max_gcps]
     n = len(gcps)
     if n < 2:
         return None, [], None
@@ -911,6 +945,263 @@ def derive_paths(image_path: str) -> tuple[str, str]:
     return str(base) + ".streets.json", str(base) + ".georef.json"
 
 
+# Admit-fraction levels for the percentile-derived threshold ladder used by
+# calibrate_thresholds. Each level N means "use the thresholds that admit the top N%
+# of this volume's own plausible detections" (see detection_percentiles) — there is no
+# universal pixel/confidence constant, since that doesn't generalize across scans of
+# different resolution.
+ADMIT_FRACTION_LEVELS: list[float] = [40, 55, 70, 85]
+
+
+def detection_percentiles(
+    images: list[str], min_aspect_ratio: float
+) -> tuple[list[float], list[float], list[float]]:
+    """Collect (confidence, long_side, short_side) for plausible detections in a volume.
+
+    "Plausible" means not ignored, not a hint, not number-only, and passing the
+    aspect-ratio check — independent of confidence/size, since those are exactly what
+    we're calibrating. Each list is sorted ascending for later percentile lookup.
+    """
+    confidences: list[float] = []
+    long_sides: list[float] = []
+    short_sides: list[float] = []
+    for image_path in images:
+        labels_path, _ = derive_paths(image_path)
+        labels_raw = json.load(open(labels_path))
+        detections = (
+            labels_raw.get(
+                "streets", labels_raw.get("detections", labels_raw.get("accepted", []))
+            )
+            if isinstance(labels_raw, dict)
+            else labels_raw
+        )
+        for det in detections:
+            if det.get("ignore") or det.get("hint") or is_number_only(det["text"]):
+                continue
+            long_side = det.get("long_side", 0.0)
+            short_side = det.get("short_side", 0.0)
+            if short_side <= 0 or long_side < min_aspect_ratio * short_side:
+                continue
+            confidences.append(det["confidence"])
+            long_sides.append(long_side)
+            short_sides.append(short_side)
+    confidences.sort()
+    long_sides.sort()
+    short_sides.sort()
+    return confidences, long_sides, short_sides
+
+
+def thresholds_at_admit_fraction(
+    confidences: list[float],
+    long_sides: list[float],
+    short_sides: list[float],
+    fraction: float,
+) -> Thresholds:
+    """Return the (confidence, long_side, short_side) thresholds that each admit the
+    top `fraction` percent of the given (independently sorted) value lists."""
+
+    def percentile(sorted_values: list[float]) -> float:
+        if not sorted_values:
+            return 0.0
+        # Round before truncating so floating-point error in `1 - fraction / 100`
+        # (e.g. 80 -> 0.19999999999999996) doesn't shift the index by one.
+        index = max(
+            0,
+            min(
+                len(sorted_values) - 1,
+                math.floor(round(len(sorted_values) * (1 - fraction / 100), 9)),
+            ),
+        )
+        return sorted_values[index]
+
+    return Thresholds(
+        min_confidence=percentile(confidences),
+        min_long_side=percentile(long_sides),
+        min_short_side=percentile(short_sides),
+    )
+
+
+def calibrate_thresholds(
+    images: list[str],
+    block_index: dict[str, list[Block]],
+    min_aspect_ratio: float,
+    default_thresholds: Thresholds,
+    min_gcps: int = 2,
+) -> Thresholds:
+    """Pick volume-wide detection thresholds by maximizing the fraction of pages with
+    at least `min_gcps` candidate intersection GCPs.
+
+    Evaluates the CLI default thresholds plus every percentile rung in
+    ADMIT_FRACTION_LEVELS (derived from this volume's own detections, so the ladder is
+    scale-invariant across scans of different resolution) and returns whichever rung
+    achieves the highest fraction. This is a plain best-of-N search rather than a
+    walk-outward-until-good-enough search, because the fraction is not guaranteed to
+    be monotonic in relaxation level (a volume can dip at one percentile rung before
+    recovering at a looser one). Ties are broken in favor of the strictest (least
+    relaxed) rung, so a volume that's already fine at the default is never
+    gratuitously loosened.
+    """
+    normalized_streets = set(block_index.keys())
+    confidences, long_sides, short_sides = detection_percentiles(
+        images, min_aspect_ratio
+    )
+    candidates = [default_thresholds] + [
+        thresholds_at_admit_fraction(confidences, long_sides, short_sides, level)
+        for level in ADMIT_FRACTION_LEVELS
+    ]
+
+    best_thresholds = candidates[0]
+    best_fraction = -1.0
+    for thresholds in candidates:
+        n_qualifying = 0
+        for image_path in images:
+            labels_path, _ = derive_paths(image_path)
+            _, gcps = candidate_gcps_for_page(
+                labels_path,
+                thresholds,
+                min_aspect_ratio,
+                block_index,
+                normalized_streets,
+            )
+            if len(gcps) >= min_gcps:
+                n_qualifying += 1
+        fraction = n_qualifying / len(images)
+        print(
+            f"  thresholds={thresholds}: frac(pages >= {min_gcps} GCP) = {fraction:.2f}",
+            file=sys.stderr,
+        )
+        if fraction > best_fraction:
+            best_fraction = fraction
+            best_thresholds = thresholds
+
+    return best_thresholds
+
+
+def candidate_gcps_for_page(
+    labels_path: str,
+    thresholds: Thresholds,
+    min_aspect_ratio: float,
+    block_index: dict[str, list[Block]],
+    normalized_streets: set[str],
+    edge_margin: float = 0.0,
+    img_size: tuple[int, int] | None = None,
+    verbose: bool = False,
+) -> tuple[list[LabelFeature], list[IntersectionGCP]]:
+    """Load a page's cached detections and find its candidate intersection GCPs.
+
+    Mirrors process_image's preprocessing exactly (ignore/hint filtering, avenue-letter
+    promotion, dedup, size/confidence/aspect filtering, canonical street-name
+    resolution, square-feature direction correction) up to the point where RANSAC would
+    take over, so this is cheap to call repeatedly (e.g. once per threshold rung during
+    calibration) without writing any output or fitting an affine transform.
+    """
+    labels_raw = json.load(open(labels_path))
+    if isinstance(labels_raw, dict):
+        all_detections: list[dict] = labels_raw.get(
+            "streets", labels_raw.get("detections", labels_raw.get("accepted", []))
+        )
+    else:
+        all_detections = labels_raw
+
+    if verbose:
+        print(f"All detections: {len(all_detections)}")
+    all_detections = [d for d in all_detections if not d.get("ignore")]
+    hint_detections = [d for d in all_detections if d.get("hint")]
+    all_detections = [d for d in all_detections if not d.get("hint")]
+    if hint_detections and verbose:
+        confident_hints = [
+            d
+            for d in hint_detections
+            if d.get("confidence", 0) >= thresholds.min_confidence
+        ]
+        print(
+            f"Hint detections ({len(confident_hints)}): "
+            + ", ".join(d["text"] for d in confident_hints),
+            file=sys.stderr,
+        )
+    promoted = promote_avenue_letters(
+        hint_detections, all_detections, normalized_streets
+    )
+    if promoted:
+        if verbose:
+            print(
+                f"Promoted detections ({len(promoted)}): "
+                + ", ".join(d["text"] for d in promoted),
+                file=sys.stderr,
+            )
+        all_detections = promoted + all_detections
+    all_detections = deduplicate_detections(
+        all_detections, normalized_streets=normalized_streets
+    )
+    if verbose:
+        print(f"Deduped detections: {len(all_detections)}")
+    labels_data = []
+    for det in all_detections:
+        is_promoted = det.get("promoted")
+        if is_promoted:
+            # Promoted single-char avenue letters bypass size/aspect checks; confidence only.
+            if det["confidence"] < thresholds.min_confidence or is_number_only(
+                det["text"]
+            ):
+                continue
+        elif not (
+            det["confidence"] >= thresholds.min_confidence
+            and det.get("long_side", float("inf")) >= thresholds.min_long_side
+            and det.get("short_side", float("inf")) >= thresholds.min_short_side
+            and det.get("long_side", float("inf"))
+            >= min_aspect_ratio * det.get("short_side", 1.0)
+            and not is_number_only(det["text"])
+            and (
+                normalize_street(det["text"]) not in DIRECTION_WORDS
+                or det["text"].upper().strip() in normalized_streets
+            )
+        ):
+            continue
+        if edge_margin > 0 and not is_promoted and img_size is not None:
+            img_w, img_h = img_size
+            poly = np.array(det["polygon"], dtype=float)
+            cx, cy = float(poly[:, 0].mean()), float(poly[:, 1].mean())
+            if (
+                cx < edge_margin * img_w
+                or cx > (1 - edge_margin) * img_w
+                or cy < edge_margin * img_h
+                or cy > (1 - edge_margin) * img_h
+            ):
+                continue
+        canonicals = canonical_street_matches(det["text"], normalized_streets)
+        # Deduplicate by block-list identity: aliases like "HENRY" and "HENRY STREET"
+        # map to the *same list object* in block_index (set by build_block_index), so
+        # id() detects them as duplicates and keeps only the longest (most specific) name.
+        seen_block_ids: set[int] = set()
+        for canonical in sorted(canonicals, key=len, reverse=True):
+            bid = id(block_index[canonical])
+            if bid in seen_block_ids:
+                continue
+            seen_block_ids.add(bid)
+            if canonical != normalize_street(det["text"]):
+                entry = dict(det)
+                entry["_canonical_text"] = canonical
+            else:
+                entry = det
+            labels_data.append(entry)
+
+    if verbose:
+        print(f"Filtered detections: {len(labels_data)}")
+
+    features = label_features(labels_data)
+    correct_square_feature_dirs(features, hint_detections)
+    if verbose:
+        print(
+            f"Labels ({len(features)}): {', '.join(f.text for f in features)}",
+            file=sys.stderr,
+        )
+
+    gcps = find_intersection_gcps(features, block_index)
+    if verbose:
+        print(f"Intersection GCPs: {len(gcps)}", file=sys.stderr)
+    return features, gcps
+
+
 def process_image(
     image_path: str,
     labels_path: str,
@@ -939,100 +1230,17 @@ def process_image(
     with Image.open(image_path) as pil_img:
         img_w, img_h = pil_img.size
 
-    labels_raw = json.load(open(labels_path))
-    if isinstance(labels_raw, dict):
-        all_detections: list[dict] = labels_raw.get(
-            "streets", labels_raw.get("detections", labels_raw.get("accepted", []))
-        )
-    else:
-        all_detections = labels_raw
-
-    print(f"All detections: {len(all_detections)}")
-    all_detections = [d for d in all_detections if not d.get("ignore")]
-    hint_detections = [d for d in all_detections if d.get("hint")]
-    all_detections = [d for d in all_detections if not d.get("hint")]
-    if hint_detections:
-        confident_hints = [
-            d for d in hint_detections if d.get("confidence", 0) >= min_confidence
-        ]
-        print(
-            f"Hint detections ({len(confident_hints)}): "
-            + ", ".join(d["text"] for d in confident_hints),
-            file=sys.stderr,
-        )
     normalized_streets = set(block_index.keys())
-    promoted = promote_avenue_letters(
-        hint_detections, all_detections, normalized_streets
+    features, gcps = candidate_gcps_for_page(
+        labels_path,
+        Thresholds(min_confidence, min_long_side, min_short_side),
+        min_aspect_ratio,
+        block_index,
+        normalized_streets,
+        edge_margin=edge_margin,
+        img_size=(img_w, img_h),
+        verbose=True,
     )
-    if promoted:
-        print(
-            f"Promoted detections ({len(promoted)}): "
-            + ", ".join(d["text"] for d in promoted),
-            file=sys.stderr,
-        )
-        all_detections = promoted + all_detections
-    all_detections = deduplicate_detections(
-        all_detections, normalized_streets=normalized_streets
-    )
-    print(f"Deduped detections: {len(all_detections)}")
-    labels_data = []
-    for det in all_detections:
-        is_promoted = det.get("promoted")
-        if is_promoted:
-            # Promoted single-char avenue letters bypass size/aspect checks; confidence only.
-            if det["confidence"] < min_confidence or is_number_only(det["text"]):
-                continue
-        elif not (
-            det["confidence"] >= min_confidence
-            and det.get("long_side", float("inf")) >= min_long_side
-            and det.get("short_side", float("inf")) >= min_short_side
-            and det.get("long_side", float("inf"))
-            >= min_aspect_ratio * det.get("short_side", 1.0)
-            and not is_number_only(det["text"])
-            and (
-                normalize_street(det["text"]) not in DIRECTION_WORDS
-                or det["text"].upper().strip() in normalized_streets
-            )
-        ):
-            continue
-        if edge_margin > 0 and not is_promoted:
-            poly = np.array(det["polygon"], dtype=float)
-            cx, cy = float(poly[:, 0].mean()), float(poly[:, 1].mean())
-            if (
-                cx < edge_margin * img_w
-                or cx > (1 - edge_margin) * img_w
-                or cy < edge_margin * img_h
-                or cy > (1 - edge_margin) * img_h
-            ):
-                continue
-        canonicals = canonical_street_matches(det["text"], normalized_streets)
-        # Deduplicate by block-list identity: aliases like "HENRY" and "HENRY STREET"
-        # map to the *same list object* in block_index (set by build_block_index), so
-        # id() detects them as duplicates and keeps only the longest (most specific) name.
-        seen_block_ids: set[int] = set()
-        for canonical in sorted(canonicals, key=len, reverse=True):
-            bid = id(block_index[canonical])
-            if bid in seen_block_ids:
-                continue
-            seen_block_ids.add(bid)
-            if canonical != normalize_street(det["text"]):
-                entry = dict(det)
-                entry["_canonical_text"] = canonical
-            else:
-                entry = det
-            labels_data.append(entry)
-
-    print(f"Filtered detections: {len(labels_data)}")
-
-    features = label_features(labels_data)
-    correct_square_feature_dirs(features, hint_detections)
-    print(
-        f"Labels ({len(features)}): {', '.join(f.text for f in features)}",
-        file=sys.stderr,
-    )
-
-    gcps = find_intersection_gcps(features, block_index)
-    print(f"Intersection GCPs: {len(gcps)}", file=sys.stderr)
     if len(gcps) == 0:
         print("No intersection GCPs found.", file=sys.stderr)
         return ProcessResult(success=False)
@@ -1357,23 +1565,34 @@ def main() -> None:
     parser.add_argument(
         "--min-confidence",
         type=float,
-        default=0.15,
+        default=None,
         metavar="THRESHOLD",
-        help="Minimum OCR confidence to accept a detection (default: %(default)s)",
+        help=(
+            "Minimum OCR confidence to accept a detection. If omitted (along with "
+            "--min-long-side and --min-short-side) and more than one image is given, "
+            "this is auto-calibrated per volume (see --disable-auto-threshold); "
+            "otherwise defaults to 0.15."
+        ),
     )
     parser.add_argument(
         "--min-long-side",
         type=float,
-        default=40.0,
+        default=None,
         metavar="PX",
-        help="Minimum long side of a text polygon to accept (default: %(default)s)",
+        help=(
+            "Minimum long side of a text polygon to accept. See --min-confidence for "
+            "auto-calibration behavior; otherwise defaults to 40.0."
+        ),
     )
     parser.add_argument(
         "--min-short-side",
         type=float,
-        default=20.0,
+        default=None,
         metavar="PX",
-        help="Minimum short side of a text polygon to accept (default: %(default)s)",
+        help=(
+            "Minimum short side of a text polygon to accept. See --min-confidence for "
+            "auto-calibration behavior; otherwise defaults to 20.0."
+        ),
     )
     parser.add_argument(
         "--min-aspect-ratio",
@@ -1442,6 +1661,25 @@ def main() -> None:
         ),
     )
     parser.add_argument(
+        "--min-gcps-for-calibration",
+        type=int,
+        default=2,
+        metavar="N",
+        help=(
+            "Number of candidate intersection GCPs a page needs to count as "
+            "'qualifying' during auto-threshold calibration (default: %(default)s)"
+        ),
+    )
+    parser.add_argument(
+        "--disable-auto-threshold",
+        action="store_true",
+        default=False,
+        help=(
+            "Disable auto-calibration of --min-confidence/--min-long-side/"
+            "--min-short-side; always use the fixed defaults (0.15, 40.0, 20.0)."
+        ),
+    )
+    parser.add_argument(
         "--debug", action="store_true", help="Print additional debug information"
     )
     args = parser.parse_args()
@@ -1465,6 +1703,43 @@ def main() -> None:
         f"Block index: {n_blocks} segments across {len(block_index)} streets",
         file=sys.stderr,
     )
+
+    manual_thresholds = (
+        args.min_confidence is not None
+        or args.min_long_side is not None
+        or args.min_short_side is not None
+    )
+    default_thresholds = Thresholds(
+        min_confidence=0.15, min_long_side=40.0, min_short_side=20.0
+    )
+    if manual_thresholds or args.disable_auto_threshold or len(args.images) <= 1:
+        thresholds = Thresholds(
+            min_confidence=(
+                args.min_confidence
+                if args.min_confidence is not None
+                else default_thresholds.min_confidence
+            ),
+            min_long_side=(
+                args.min_long_side
+                if args.min_long_side is not None
+                else default_thresholds.min_long_side
+            ),
+            min_short_side=(
+                args.min_short_side
+                if args.min_short_side is not None
+                else default_thresholds.min_short_side
+            ),
+        )
+    else:
+        print("\nAuto-calibrating detection thresholds...", file=sys.stderr)
+        thresholds = calibrate_thresholds(
+            args.images,
+            block_index,
+            args.min_aspect_ratio,
+            default_thresholds,
+            min_gcps=args.min_gcps_for_calibration,
+        )
+        print(f"Auto thresholds: {thresholds}\n", file=sys.stderr)
 
     n_success = 0
     scales: list[float] = []
@@ -1500,9 +1775,9 @@ def main() -> None:
             block_index=block_index,
             cos_phi=cos_phi,
             centerlines_path=args.centerlines,
-            min_confidence=args.min_confidence,
-            min_long_side=args.min_long_side,
-            min_short_side=args.min_short_side,
+            min_confidence=thresholds.min_confidence,
+            min_long_side=thresholds.min_long_side,
+            min_short_side=thresholds.min_short_side,
             min_aspect_ratio=args.min_aspect_ratio,
             edge_margin=args.edge_margin,
             force_intersection=force_intersection,

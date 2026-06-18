@@ -1,18 +1,23 @@
 """Tests for georef_from_labels helpers."""
 
+import json
 import math
 
 import numpy as np
 
 from mapsnap.georef_from_labels import (
     _FT_PER_DEG_LAT,
+    Thresholds,
     _angle_diff_abs,
     _cluster_geo_coords,
     _rotation_from_neighbors,
+    calibrate_thresholds,
+    candidate_gcps_for_page,
     correct_square_feature_dirs,
     label_features,
     promote_avenue_letters,
     project_to_polyline,
+    thresholds_at_admit_fraction,
 )
 from mapsnap.streets import Block
 
@@ -473,3 +478,253 @@ def test_rotation_from_neighbors_adjacency_boundary():
     )
     assert result.confirmed is True
     assert result.n_agree == 2
+
+
+# ---------------------------------------------------------------------------
+# thresholds_at_admit_fraction
+# ---------------------------------------------------------------------------
+
+
+def test_thresholds_at_admit_fraction_independent_percentiles():
+    confidences = [0.1, 0.2, 0.3, 0.4, 0.5]
+    long_sides = [10.0, 20.0, 30.0, 40.0, 50.0]
+    short_sides = [1.0, 2.0, 3.0, 4.0, 5.0]
+    # 80% admit fraction should keep roughly the top 80%, i.e. drop the single
+    # smallest value from each independently-sorted list.
+    result = thresholds_at_admit_fraction(confidences, long_sides, short_sides, 80)
+    assert result.min_confidence == 0.2
+    assert result.min_long_side == 20.0
+    assert result.min_short_side == 2.0
+
+
+def test_thresholds_at_admit_fraction_full_admit():
+    result = thresholds_at_admit_fraction([0.1, 0.5], [10.0, 50.0], [1.0, 5.0], 100)
+    assert result.min_confidence == 0.1
+    assert result.min_long_side == 10.0
+    assert result.min_short_side == 1.0
+
+
+def test_thresholds_at_admit_fraction_empty_lists():
+    result = thresholds_at_admit_fraction([], [], [], 50)
+    assert result == Thresholds(
+        min_confidence=0.0, min_long_side=0.0, min_short_side=0.0
+    )
+
+
+# ---------------------------------------------------------------------------
+# candidate_gcps_for_page
+# ---------------------------------------------------------------------------
+
+
+def _make_vertical_det(
+    text: str,
+    cx: float,
+    cy: float,
+    long_side: float = 60.0,
+    short_side: float = 18.0,
+    confidence: float = 0.9,
+) -> dict:
+    """Build a mock detection dict with a vertical (tall) bounding polygon."""
+    half_long = long_side / 2.0
+    half_short = short_side / 2.0
+    return {
+        "polygon": [
+            [int(cx - half_short), int(cy - half_long)],
+            [int(cx + half_short), int(cy - half_long)],
+            [int(cx + half_short), int(cy + half_long)],
+            [int(cx - half_short), int(cy + half_long)],
+        ],
+        "text": text,
+        "confidence": confidence,
+        "angle": 90,
+        "long_side": long_side,
+        "short_side": short_side,
+        "dir_pix": math.pi / 2,
+    }
+
+
+def test_candidate_gcps_for_page_resolves_ambiguous_canonical_name(tmp_path):
+    # Regression test for a bug where the simulation used to validate this feature
+    # skipped canonical_street_matches: a bare label like "CHURCH" can be ambiguous
+    # (matching both "EAST CHURCH STREET" and "WEST CHURCH STREET"), but should still
+    # resolve to whichever one actually shares a coordinate with another detected
+    # street, rather than being silently dropped because "CHURCH" itself isn't a key.
+    shared_point = (-90.0, 30.0)
+    block_index = {
+        "MAIN": [
+            Block(street_name="MAIN", coords=np.array([shared_point, (-90.0, 30.001)]))
+        ],
+        "EAST CHURCH STREET": [
+            Block(
+                street_name="EAST CHURCH STREET",
+                coords=np.array([shared_point, (-90.001, 30.0)]),
+            )
+        ],
+        "WEST CHURCH STREET": [
+            Block(
+                street_name="WEST CHURCH STREET",
+                coords=np.array([(-89.0, 29.0), (-89.001, 29.0)]),
+            )
+        ],
+    }
+    normalized_streets = set(block_index.keys())
+
+    labels_path = tmp_path / "p1.streets.json"
+    labels_path.write_text(
+        json.dumps(
+            {
+                "streets": [
+                    _make_det("MAIN", cx=100, cy=100),
+                    _make_vertical_det("CHURCH", cx=100, cy=200),
+                ]
+            }
+        )
+    )
+
+    _features, gcps = candidate_gcps_for_page(
+        str(labels_path),
+        Thresholds(min_confidence=0.15, min_long_side=40.0, min_short_side=10.0),
+        min_aspect_ratio=1.75,
+        block_index=block_index,
+        normalized_streets=normalized_streets,
+    )
+    assert len(gcps) == 1
+    assert {gcps[0].label_a, gcps[0].label_b} == {"MAIN", "EAST CHURCH STREET"}
+
+
+def test_candidate_gcps_for_page_no_match_below_threshold(tmp_path):
+    block_index = {
+        "MAIN": [
+            Block(street_name="MAIN", coords=np.array([(-90.0, 30.0), (-90.0, 30.001)]))
+        ],
+    }
+    labels_path = tmp_path / "p1.streets.json"
+    labels_path.write_text(
+        json.dumps({"streets": [_make_det("MAIN", cx=100, cy=100, confidence=0.05)]})
+    )
+    _features, gcps = candidate_gcps_for_page(
+        str(labels_path),
+        Thresholds(min_confidence=0.15, min_long_side=40.0, min_short_side=10.0),
+        min_aspect_ratio=1.75,
+        block_index=block_index,
+        normalized_streets=set(block_index.keys()),
+    )
+    assert gcps == []
+
+
+# ---------------------------------------------------------------------------
+# calibrate_thresholds
+# ---------------------------------------------------------------------------
+
+_DEFAULT_THRESHOLDS = Thresholds(
+    min_confidence=0.15, min_long_side=40.0, min_short_side=20.0
+)
+
+
+def _write_page(
+    tmp_path, name: str, main_confidence: float, church_confidence: float
+) -> str:
+    """Write a <name>.streets.json with a MAIN/CHURCH intersection pair and return
+    the (non-existent, but path-derivable) image path for it."""
+    labels_path = tmp_path / f"{name}.streets.json"
+    labels_path.write_text(
+        json.dumps(
+            {
+                "streets": [
+                    _make_det(
+                        "MAIN",
+                        cx=100,
+                        cy=100,
+                        short_side=22.0,
+                        confidence=main_confidence,
+                    ),
+                    _make_vertical_det(
+                        "CHURCH",
+                        cx=100,
+                        cy=200,
+                        short_side=22.0,
+                        confidence=church_confidence,
+                    ),
+                ]
+            }
+        )
+    )
+    return str(tmp_path / f"{name}.jpg")
+
+
+def _church_block_index() -> dict[str, list[Block]]:
+    shared_point = (-90.0, 30.0)
+    return {
+        "MAIN": [
+            Block(street_name="MAIN", coords=np.array([shared_point, (-90.0, 30.001)]))
+        ],
+        "EAST CHURCH STREET": [
+            Block(
+                street_name="EAST CHURCH STREET",
+                coords=np.array([shared_point, (-90.001, 30.0)]),
+            )
+        ],
+    }
+
+
+def test_calibrate_thresholds_keeps_default_when_already_good(tmp_path):
+    # Every page already qualifies at the default thresholds (confidence 0.9), so
+    # calibration must not loosen anything even though looser rungs would also work.
+    # Each page has exactly one MAIN/CHURCH intersection pair, so min_gcps=1 here.
+    images = [
+        _write_page(tmp_path, f"p{i}", main_confidence=0.9, church_confidence=0.9)
+        for i in range(4)
+    ]
+    result = calibrate_thresholds(
+        images,
+        _church_block_index(),
+        min_aspect_ratio=1.75,
+        default_thresholds=_DEFAULT_THRESHOLDS,
+        min_gcps=1,
+    )
+    assert result == _DEFAULT_THRESHOLDS
+
+
+def test_calibrate_thresholds_relaxes_for_low_confidence_volume(tmp_path):
+    # Every page has confidence 0.05, well below the 0.15 default, so 0 pages qualify
+    # at default but all pages qualify once thresholds relax to admit them.
+    images = [
+        _write_page(tmp_path, f"p{i}", main_confidence=0.05, church_confidence=0.05)
+        for i in range(4)
+    ]
+    result = calibrate_thresholds(
+        images,
+        _church_block_index(),
+        min_aspect_ratio=1.75,
+        default_thresholds=_DEFAULT_THRESHOLDS,
+        min_gcps=1,
+    )
+    assert result.min_confidence <= 0.05
+
+
+def test_calibrate_thresholds_all_zero_gcps_returns_default(tmp_path):
+    # No page can ever produce a GCP (block_index has no shared coordinates), so no
+    # rung helps; calibration should fall back to the default rather than erroring.
+    block_index = {
+        "MAIN": [
+            Block(street_name="MAIN", coords=np.array([(-90.0, 30.0), (-90.0, 30.001)]))
+        ],
+        "EAST CHURCH STREET": [
+            Block(
+                street_name="EAST CHURCH STREET",
+                coords=np.array([(-80.0, 20.0), (-80.001, 20.0)]),
+            )
+        ],
+    }
+    images = [
+        _write_page(tmp_path, f"p{i}", main_confidence=0.9, church_confidence=0.9)
+        for i in range(3)
+    ]
+    result = calibrate_thresholds(
+        images,
+        block_index,
+        min_aspect_ratio=1.75,
+        default_thresholds=_DEFAULT_THRESHOLDS,
+        min_gcps=2,
+    )
+    assert result == _DEFAULT_THRESHOLDS
