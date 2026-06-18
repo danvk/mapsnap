@@ -969,6 +969,8 @@ def compute_auto_min_short_side(
 
     if not short_sides:
         return None
+    if len(short_sides) == 1:
+        return short_sides[0]
     quantiles = statistics.quantiles(short_sides, n=100, method="inclusive")
     index = round(percentile) - 1
     index = max(0, min(len(quantiles) - 1, index))
