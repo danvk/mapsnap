@@ -4,15 +4,18 @@ import json
 import math
 
 import numpy as np
+import pytest
 
 from mapsnap.georef_from_labels import (
     _FT_PER_DEG_LAT,
     _angle_diff_abs,
     _cluster_geo_coords,
     _rotation_from_neighbors,
+    LabelFeature,
     compute_auto_min_short_side,
     correct_square_feature_dirs,
     label_features,
+    label_inliers,
     promote_avenue_letters,
     project_to_polyline,
 )
@@ -352,6 +355,63 @@ def test_project_extrapolation_start_terminal_capped():
 
 def test_project_returns_none_for_empty_blocks():
     assert project_to_polyline(-90.0, 30.0, []) is None
+
+
+# ---------------------------------------------------------------------------
+# label_inliers — rotation penalty
+# ---------------------------------------------------------------------------
+
+
+def _rotation_penalty_setup(dir_pix: float):
+    """One feature centered on a horizontal E-W street, rotated by dir_pix in geo space.
+
+    Returns (features, block_index, affine). The affine is a pure scale s=1e-4 deg/px so
+    affine_scale_deg_per_px(affine) == 1e-4 and the label maps exactly onto the street.
+    """
+    scale = 1e-4
+    affine = np.array([[scale, 0.0, -90.0], [0.0, scale, 30.0]])
+    # center (50, 0) -> (-89.995, 30.0), the midpoint of the E-W street.
+    feat = LabelFeature(
+        raw_text="TEST STREET",
+        text="TEST STREET",
+        center=(50.0, 0.0),
+        dir_pix=dir_pix,
+        long_side=60.0,
+        short_side=18.0,
+    )
+    block = _make_block([(-90.0, 30.0), (-89.99, 30.0)])
+    return [feat], {"TEST STREET": [block]}, affine
+
+
+def test_label_inliers_no_rotation_penalty_without_diagonal():
+    # Misrotated by 15° but still within the direction threshold: with no image diagonal,
+    # only positional error counts, so a perfectly-centered label has zero error.
+    features, block_index, affine = _rotation_penalty_setup(math.radians(15))
+    inliers, err = label_inliers(features, block_index, affine, image_diagonal_px=0.0)
+    assert inliers == [0]
+    assert err == 0.0
+
+
+def test_label_inliers_rotation_penalty_applied():
+    # Same 15° misrotation, but now ½·diagonal·scale·sin(δ) is charged as error.
+    delta = math.radians(15)
+    features, block_index, affine = _rotation_penalty_setup(delta)
+    inliers, err = label_inliers(
+        features, block_index, affine, image_diagonal_px=1000.0
+    )
+    assert inliers == [0]
+    expected = 0.5 * 1000.0 * 1e-4 * math.sin(delta)
+    assert err == pytest.approx(expected, rel=1e-6)
+
+
+def test_label_inliers_no_penalty_when_aligned():
+    # A perfectly-aligned label (δ=0) incurs no rotation penalty even with a diagonal.
+    features, block_index, affine = _rotation_penalty_setup(0.0)
+    inliers, err = label_inliers(
+        features, block_index, affine, image_diagonal_px=1000.0
+    )
+    assert inliers == [0]
+    assert err == pytest.approx(0.0, abs=1e-9)
 
 
 # ---------------------------------------------------------------------------

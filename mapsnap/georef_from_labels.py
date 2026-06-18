@@ -348,6 +348,7 @@ def label_inliers(
     pos_threshold: float = 0.001,
     dir_threshold: float = np.pi / 6,
     extrapolate: bool = True,
+    image_diagonal_px: float = 0.0,
     debug: bool = False,
 ) -> tuple[list[int], float]:
     """Return indices of features whose label center is consistent with the affine.
@@ -357,10 +358,20 @@ def label_inliers(
       - whose mapped direction agrees with the polyline tangent at that point within
         dir_threshold radians (undirected comparison).
 
+    Each inlier's error is the sum of its positional error (degrees of latitude) and a
+    rotation error. The rotation error converts the label's angular misalignment δ into a
+    displacement using the fit's own scale: half the image diagonal, rotated by δ, i.e.
+    ½·diagonal·sin(δ). This expresses "how far off would a feature at the image corner be,
+    given this much rotation" in the same units as positional error, so that a rotated-but-
+    centered fit is penalized rather than scoring identically to an aligned one. The penalty
+    is only applied when image_diagonal_px > 0.
+
     extrapolate is passed through to project_to_polyline; set False when scoring
     candidate orientations to avoid terminal-endpoint extrapolation inflating the fit.
     """
     A_linear = affine[:, :2]
+    # ½·diagonal·scale in degrees of latitude; multiplied by sin(δ) per label below.
+    rot_err_coeff = 0.5 * image_diagonal_px * affine_scale_deg_per_px(affine)
     # Keyed on feat.center so that one raw detection (expanded to multiple canonical
     # street names, e.g. JEFFERSON → EAST JEFFERSON + WEST JEFFERSON) counts at most
     # once as an inlier, using the canonical match with the smallest positional error.
@@ -381,16 +392,21 @@ def label_inliers(
             continue
         d_pixel = np.array([np.cos(feat.dir_pix), np.sin(feat.dir_pix)])
         d_geo = A_linear @ d_pixel
-        d_geo_norm = d_geo / (float(np.linalg.norm(d_geo)) + 1e-10)
+        d_geo_len = float(np.linalg.norm(d_geo))
+        d_geo_norm = d_geo / (d_geo_len + 1e-10)
         tangent_vec = np.array([np.cos(tangent_angle), np.sin(tangent_angle)])
         # Undirected: accept if either direction aligns
         if abs(float(np.dot(d_geo_norm, tangent_vec))) < np.cos(dir_threshold):
             continue
-        if (
-            feat.center not in best_by_center
-            or pos_err < best_by_center[feat.center][1]
-        ):
-            best_by_center[feat.center] = (i, pos_err)
+        # sin(δ) of the angle between the mapped label direction and the (unit) tangent,
+        # via the cross product. Dividing by the true |d_geo| keeps this accurate near
+        # alignment, where 1−cos²δ would lose precision and the normalization epsilon
+        # (negligible for the threshold check above) would dominate.
+        cross = abs(float(d_geo[0] * tangent_vec[1] - d_geo[1] * tangent_vec[0]))
+        sin_delta = cross / d_geo_len if d_geo_len > 0 else 0.0
+        err = pos_err + rot_err_coeff * sin_delta
+        if feat.center not in best_by_center or err < best_by_center[feat.center][1]:
+            best_by_center[feat.center] = (i, err)
     inliers = [idx for idx, _ in best_by_center.values()]
     inlier_err = sum(err for _, err in best_by_center.values())
     if debug:
@@ -526,6 +542,7 @@ def ransac_hybrid(
     cos_phi: float,
     pos_threshold: float = 0.001,
     dir_threshold: float = np.pi / 6,
+    image_diagonal_px: float = 0.0,
     force_pair: tuple[int, int] | None = None,
     debug: bool = False,
 ) -> tuple[np.ndarray | None, list[int], tuple[int, int] | None]:
@@ -535,10 +552,11 @@ def ransac_hybrid(
     the 4-parameter similarity transform (equal metric scale + orthogonality) at each pair.
     Inlier counting uses point-to-polyline + direction for every label.
 
-    A global rotation estimate R_est is derived from a histogram cross-correlation of label
-    angles vs OSM tangents before the main loop. Each candidate is penalized by rot_penalty
-    (inlier-equivalents per radian) for deviating from R_est, biasing selection toward
-    geometrically consistent rotations without hard-fixing rotation or changing the solver.
+    Each inlier contributes (pos_threshold − err) to the candidate's score, where err is its
+    positional error plus a rotation error (see label_inliers). Folding rotation into err
+    means a candidate whose streets are systematically misrotated — but still within the
+    direction threshold — is penalized rather than scoring as well as an aligned fit. The
+    rotation term requires image_diagonal_px > 0; otherwise only positional error is scored.
 
     Returns the best affine and a list of inlier indices into `features`.
     If force_pair is set, all pairs are still evaluated and printed, but that
@@ -569,7 +587,13 @@ def ransac_hybrid(
         except np.linalg.LinAlgError:
             continue
         inliers, err = label_inliers(
-            features, block_index, A, pos_threshold, dir_threshold, debug=debug
+            features,
+            block_index,
+            A,
+            pos_threshold,
+            dir_threshold,
+            image_diagonal_px=image_diagonal_px,
+            debug=debug,
         )
 
         # Each inlier contributes (pos_threshold - pos_err) to the score; an inlier at
@@ -595,7 +619,12 @@ def ransac_hybrid(
         try:
             forced_A = solve_similarity_2pts(forced_pairs, cos_phi)
             forced_inliers, _ = label_inliers(
-                features, block_index, forced_A, pos_threshold, dir_threshold
+                features,
+                block_index,
+                forced_A,
+                pos_threshold,
+                dir_threshold,
+                image_diagonal_px=image_diagonal_px,
             )
             print(f"Forcing pair {force_pair}.", file=sys.stderr)
             return forced_A, forced_inliers, force_pair
@@ -1236,8 +1265,15 @@ def process_image(
             },
         )
 
+    image_diagonal_px = math.hypot(img_w, img_h)
     A, inlier_feat_indices, seed_pair = ransac_hybrid(
-        gcps, features, block_index, cos_phi, force_pair=force_intersection, debug=debug
+        gcps,
+        features,
+        block_index,
+        cos_phi,
+        image_diagonal_px=image_diagonal_px,
+        force_pair=force_intersection,
+        debug=debug,
     )
     if A is None:
         print("RANSAC failed: no valid affine found.", file=sys.stderr)
