@@ -1560,7 +1560,7 @@ def main() -> None:
     parser.add_argument(
         "--auto-threshold-confidence",
         type=float,
-        default=0.3,
+        default=0.5,
         metavar="THRESHOLD",
         help=(
             "Minimum OCR confidence for a detection to count towards the automatic "
@@ -1573,16 +1573,16 @@ def main() -> None:
         default=25.0,
         metavar="PCT",
         help=(
-            "Percentile of confident street-detection short sides used as the "
-            "automatic min-short-side floor (default: %(default)s)"
+            "Percentile of confident detection short sides used as the automatic "
+            "min-short-side floor (default: %(default)s)"
         ),
     )
     parser.add_argument(
-        "--auto-threshold-include-hints",
+        "--auto-threshold-exclude-hints",
         action="store_true",
         help=(
-            "Include hint (type-word) detections, not just street-name detections, "
-            "in the automatic min-short-side calculation"
+            "Only count street-name detections (not hint/type-word detections) "
+            "towards the automatic min-short-side calculation"
         ),
     )
     parser.add_argument(
@@ -1686,6 +1686,7 @@ def main() -> None:
         file=sys.stderr,
     )
 
+    auto_threshold_include_hints = not args.auto_threshold_exclude_hints
     if args.min_short_side is not None:
         min_short_side = args.min_short_side
     else:
@@ -1693,14 +1694,16 @@ def main() -> None:
             args.images,
             args.auto_threshold_confidence,
             args.auto_threshold_percentile,
-            args.auto_threshold_include_hints,
+            auto_threshold_include_hints,
+        )
+        detection_kind = (
+            "detections" if auto_threshold_include_hints else "street detections"
         )
         if auto_min_short_side is None:
             min_short_side = FALLBACK_MIN_SHORT_SIDE
             print(
-                f"No confident (>= {args.auto_threshold_confidence:g}) street "
-                f"detections found; falling back to min-short-side="
-                f"{min_short_side:g}px.",
+                f"No confident (>= {args.auto_threshold_confidence:g}) {detection_kind} "
+                f"found; falling back to min-short-side={min_short_side:g}px.",
                 file=sys.stderr,
             )
         else:
@@ -1708,7 +1711,7 @@ def main() -> None:
             print(
                 f"Auto min-short-side: {min_short_side:.1f}px "
                 f"(p{args.auto_threshold_percentile:g} of confidence>="
-                f"{args.auto_threshold_confidence:g} street detections)",
+                f"{args.auto_threshold_confidence:g} {detection_kind})",
                 file=sys.stderr,
             )
     min_long_side = (
@@ -1726,7 +1729,7 @@ def main() -> None:
         "min_aspect_ratio": args.min_aspect_ratio,
         "auto_threshold_confidence": args.auto_threshold_confidence,
         "auto_threshold_percentile": args.auto_threshold_percentile,
-        "auto_threshold_include_hints": args.auto_threshold_include_hints,
+        "auto_threshold_include_hints": auto_threshold_include_hints,
     }
 
     n_success = 0
