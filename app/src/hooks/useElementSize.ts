@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useRef, useState } from 'react';
 
 /** The rendered size of an element in CSS pixels. */
 export interface ElementSize {
@@ -9,25 +9,28 @@ export interface ElementSize {
 /**
  * Track an element's rendered size with a ResizeObserver.
  *
- * Returns a ref to attach to the element and its current `offsetWidth` /
- * `offsetHeight`. The size updates whenever the element is resized.
+ * Returns a callback ref to attach to the element and its current `offsetWidth`
+ * / `offsetHeight`. Because it is a callback ref, observation is set up whenever
+ * the element attaches — including elements that mount conditionally after the
+ * initial render. The size updates whenever the element is resized.
  */
 export function useElementSize<T extends HTMLElement>(): [
-  React.RefObject<T | null>,
+  (node: T | null) => void,
   ElementSize,
 ] {
-  const ref = useRef<T>(null);
   const [size, setSize] = useState<ElementSize>({ width: 0, height: 0 });
+  const observerRef = useRef<ResizeObserver | null>(null);
 
-  useEffect(() => {
-    const element = ref.current;
-    if (!element) return;
+  const ref = useCallback((node: T | null) => {
+    observerRef.current?.disconnect();
+    observerRef.current = null;
+    if (!node) return;
     const update = () =>
-      setSize({ width: element.offsetWidth, height: element.offsetHeight });
+      setSize({ width: node.offsetWidth, height: node.offsetHeight });
     update();
     const observer = new ResizeObserver(update);
-    observer.observe(element);
-    return () => observer.disconnect();
+    observer.observe(node);
+    observerRef.current = observer;
   }, []);
 
   return [ref, size];

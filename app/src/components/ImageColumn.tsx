@@ -58,10 +58,11 @@ export function ImageColumn(props: ImageColumnProps) {
   const [dragOver, setDragOver] = useState(false);
   const streetsMode = mode === 'streets';
 
-  // In streets mode, select detections under the click point.
+  // In streets mode, select detections under the click point. The wrapper
+  // (currentTarget) tightly wraps the image, so its rect matches the image's.
   function handleClick(e: React.MouseEvent): void {
-    if (!streetsMode || !imgRef.current) return;
-    const rect = imgRef.current.getBoundingClientRect();
+    if (!streetsMode || !imgSize.width || !imgSize.height) return;
+    const rect = e.currentTarget.getBoundingClientRect();
     const imgX = ((e.clientX - rect.left) * jsonWidth) / imgSize.width;
     const imgY = ((e.clientY - rect.top) * jsonHeight) / imgSize.height;
     const hit = filteredDetections
