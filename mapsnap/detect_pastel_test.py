@@ -1,13 +1,24 @@
+import cv2
 import numpy as np
 
 from mapsnap.detect_pastel import (
-    auto_threshold,
-    chroma_distance,
+    INK,
+    INK_DISPLAY_COLOR,
+    PAPER,
+    PAPER_DISPLAY_COLOR,
+    PASTEL,
+    assign_palette,
+    classify_centroids,
+    categorical_segment_image,
+    classify_pastel_centroids,
     clean_mask,
+    color_palette,
     detect_pastels,
-    estimate_paper_color,
     paint_pastels,
+    palette_segmentation,
     pastel_mask,
+    segment_image,
+    segment_page,
 )
 
 WHITE_PAPER = (238, 232, 210)
@@ -17,73 +28,139 @@ PINK = (240, 170, 190)
 BLUE = (160, 195, 225)
 GREEN = (175, 210, 175)
 YELLOW = (235, 220, 120)
-INK = (25, 25, 25)
+INK_COLOR = (25, 25, 25)
 
 
-def scene(paper: tuple[int, int, int], patch: tuple[int, int, int]) -> np.ndarray:
-    """A 100x100 image of mostly `paper` with a 20x20 `patch` in one corner.
+def page(paper: tuple[int, int, int]) -> np.ndarray:
+    """A 120x120 page: mostly `paper`, with one patch each of ink and four pastels.
 
-    Paper stays the dominant color so it is estimated correctly; the patch sits at
-    rows/cols 0:20 and the paper corner at the opposite side.
+    Paper stays the dominant color so it is the most populous cluster. Each patch is
+    20x20; the rest is paper.
     """
-    img = np.empty((100, 100, 3), dtype=np.uint8)
+    img = np.empty((120, 120, 3), dtype=np.uint8)
     img[:] = paper
-    img[0:20, 0:20] = patch
+    img[0:20, 0:20] = INK_COLOR
+    img[0:20, 40:60] = PINK
+    img[0:20, 80:100] = BLUE
+    img[40:60, 0:20] = GREEN
+    img[40:60, 40:60] = YELLOW
     return img
 
 
-def patch_is_detected(paper: tuple[int, int, int], patch: tuple[int, int, int]) -> bool:
-    """Whether the patch is flagged and the paper corner is not."""
-    mask = pastel_mask(scene(paper, patch))
-    return bool(mask[5:15, 5:15].all()) and not bool(mask[80:, 80:].any())
+def test_color_palette_returns_k_centroids():
+    centroids = color_palette(page(WHITE_PAPER), 7)
+    assert centroids.shape == (7, 3)
 
 
-def test_estimate_paper_color_finds_dominant_sepia():
-    paper = estimate_paper_color(scene(SEPIA_PAPER, PINK))
-    # Within one quantization bin of the true sepia paper.
-    assert np.abs(paper.astype(int) - SEPIA_PAPER).max() <= 16
+def test_color_palette_recovers_planted_colors():
+    # Each planted color should have a centroid close to it (in RGB, after LAB->RGB).
+    img = page(SEPIA_PAPER)
+    centroids = color_palette(img, 7)
+    centroid_rgb = cv2.cvtColor(
+        np.clip(centroids, 0, 255).astype(np.uint8).reshape(1, -1, 3),
+        cv2.COLOR_LAB2RGB,
+    ).reshape(-1, 3)
+    for color in (SEPIA_PAPER, INK_COLOR, PINK, BLUE, GREEN, YELLOW):
+        nearest = np.abs(centroid_rgb.astype(int) - color).sum(axis=1).min()
+        assert nearest < 40, (color, nearest)
 
 
-def test_pastels_detected_on_white_paper():
-    for patch in (PINK, BLUE, GREEN, YELLOW):
-        assert patch_is_detected(WHITE_PAPER, patch), patch
+def test_assign_palette_picks_nearest_centroid():
+    centroids = np.array([[0, 128, 128], [255, 128, 128]], dtype=np.float32)
+    lab = np.array([[[10, 128, 128], [250, 128, 128]]], dtype=np.float32)
+    labels = assign_palette(lab, centroids)
+    assert labels.tolist() == [[0, 1]]
 
 
-def test_pastels_detected_on_sepia_paper():
-    # The whole point of the per-image calibration: sepia paper must not swamp it.
-    for patch in (PINK, BLUE, GREEN, YELLOW):
-        assert patch_is_detected(SEPIA_PAPER, patch), patch
+def test_classify_flags_pastels_not_paper_or_ink():
+    img = page(SEPIA_PAPER)
+    centroids = color_palette(img, 7)
+    lab = cv2.cvtColor(img, cv2.COLOR_RGB2LAB).astype(np.float32)
+    labels = assign_palette(lab, centroids)
+    is_pastel = classify_pastel_centroids(centroids, labels)
+    # Four pastel patches -> at least four pastel centroids; paper and ink excluded.
+    assert is_pastel.sum() >= 4
+    # The darkest centroid (ink) is never pastel.
+    assert not is_pastel[centroids[:, 0].argmin()]
+    # The most populous centroid (paper) is never pastel.
+    counts = np.bincount(labels.reshape(-1), minlength=len(centroids))
+    assert not is_pastel[counts.argmax()]
 
 
-def test_ink_is_not_pastel():
-    mask = pastel_mask(scene(WHITE_PAPER, INK))
-    assert not mask[5:15, 5:15].any()
+def test_classify_separates_cool_and_off_axis_from_warm_paper_shade():
+    # On yellow paper, a darker/yellower shade stays on the warm axis (paper), while blue
+    # (opposite the axis), green and pink (off the axis) are pastel. This is the whole
+    # point of the directional test: it must not lump cool/off-axis washes with paper.
+    centroids = np.array(
+        [
+            [180, 128, 145],  # paper (yellow)
+            [140, 128, 152],  # darker, yellower paper shade — along the warm axis
+            [170, 126, 128],  # blue — opposite the warm axis
+            [170, 120, 150],  # green — off the axis
+            [175, 145, 145],  # pink — off the axis
+            [30, 128, 128],  # ink
+        ],
+        dtype=np.float32,
+    )
+    labels = np.array(
+        [[0, 0, 0, 1], [2, 3, 4, 5]], dtype=np.int32
+    )  # paper most populous
+    categories = classify_centroids(centroids, labels)
+    assert categories[0] == PAPER
+    assert categories[1] == PAPER  # warm shade is not mistaken for a pastel
+    assert categories[2] == PASTEL  # blue
+    assert categories[3] == PASTEL  # green
+    assert categories[4] == PASTEL  # pink
+    assert categories[5] == INK
 
 
-def test_chroma_distance_ignores_lightness():
-    # A darker shade of the paper color (same hue, lower lightness) stays near zero.
-    paper = np.array(SEPIA_PAPER, dtype=np.uint8)
-    darker = (paper.astype(np.float32) * 0.6).astype(np.uint8)
-    img = darker.reshape(1, 1, 3)
-    assert chroma_distance(img, paper)[0, 0] < 10
+def test_pastels_detected_on_white_and_sepia_paper():
+    for paper in (WHITE_PAPER, SEPIA_PAPER):
+        mask = pastel_mask(page(paper))
+        for r0, c0 in [
+            (0, 40),
+            (0, 80),
+            (40, 0),
+            (40, 40),
+        ]:  # pink, blue, green, yellow
+            assert mask[r0 + 5 : r0 + 15, c0 + 5 : c0 + 15].all(), (paper, r0, c0)
+        assert not mask[5:15, 5:15].any()  # ink patch
+        assert not mask[100:115, 100:115].any()  # paper corner
 
 
-def test_auto_threshold_floors_when_no_pastels():
-    # All-zero distance (uniform page) must not yield a tiny threshold.
-    assert auto_threshold(np.zeros((50, 50), dtype=np.float32)) >= 10.0
+def test_segment_image_recolors_to_centroid():
+    centroids = np.array([[200, 120, 150], [40, 128, 128]], dtype=np.float32)
+    labels = np.array([[0, 1], [1, 0]], dtype=np.int32)
+    out = segment_image(centroids, labels)
+    assert out.shape == (2, 2, 3)
+    assert out.dtype == np.uint8
+    assert (out[0, 0] == out[1, 1]).all()  # same label -> same color
+    assert (out[0, 0] != out[0, 1]).any()  # different labels -> different colors
 
 
-def test_paint_pastels_marks_only_masked_pixels_red():
-    img = scene(WHITE_PAPER, PINK)
-    painted = paint_pastels(img, pastel_mask(img))
-    assert (painted[0:20, 0:20] == (255, 0, 0)).all()  # pink patch
-    assert (painted[80:, 80:] == img[80:, 80:]).all()  # paper corner untouched
+def test_segment_page_preserves_size():
+    img = page(WHITE_PAPER)
+    out = segment_page(img)
+    assert out.shape == img.shape
+
+
+def test_categorical_segment_uses_white_paper_black_ink_vivid_pastels():
+    img = page(SEPIA_PAPER)
+    centroids, labels = palette_segmentation(img, margin_fraction=0.0)
+    out = categorical_segment_image(centroids, labels)
+    # Paper corner -> white, ink patch -> black.
+    assert (out[100:115, 100:115] == PAPER_DISPLAY_COLOR).all()
+    assert (out[5:15, 5:15] == INK_DISPLAY_COLOR).all()
+    # Each pastel patch -> a single solid color that is neither white nor black.
+    for r0, c0 in [(0, 40), (0, 80), (40, 0), (40, 40)]:
+        patch = out[r0 + 5 : r0 + 15, c0 + 5 : c0 + 15]
+        assert (patch == patch[0, 0]).all()
+        assert tuple(patch[0, 0]) not in (PAPER_DISPLAY_COLOR, INK_DISPLAY_COLOR)
 
 
 def test_detect_pastels_preserves_image_size():
-    img = scene(WHITE_PAPER, PINK)
-    mask = detect_pastels(img)
-    assert mask.shape == img.shape[:2]
+    mask = detect_pastels(page(WHITE_PAPER))
+    assert mask.shape == page(WHITE_PAPER).shape[:2]
 
 
 def test_detect_pastels_ignores_pastels_in_the_margin():
@@ -96,6 +173,15 @@ def test_detect_pastels_ignores_pastels_in_the_margin():
     mask = detect_pastels(img, raw=True)
     assert not mask[0:6, 0:6].any()
     assert mask[95:125, 95:125].all()
+
+
+def test_paint_pastels_marks_only_masked_pixels_red():
+    img = page(WHITE_PAPER)
+    mask = np.zeros(img.shape[:2], dtype=bool)
+    mask[40:60, 40:60] = True
+    painted = paint_pastels(img, mask)
+    assert (painted[40:60, 40:60] == (255, 0, 0)).all()
+    assert (painted[100:115, 100:115] == img[100:115, 100:115]).all()
 
 
 def test_clean_mask_removes_isolated_speckle():
