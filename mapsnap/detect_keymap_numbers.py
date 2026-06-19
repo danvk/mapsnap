@@ -1,13 +1,20 @@
-"""Detect page numbers on Sanborn key maps with vanilla EasyOCR.
+"""Detect page numbers on Sanborn key maps with vocabulary-constrained EasyOCR.
 
-Each pastel block on a key map holds the page number of the detailed sheet that
-covers it. This script runs EasyOCR with default settings — default alphabet, greedy
-decoder, no rotation (the numbers are printed upright) — over each key map and writes
-a ``<stem>.streets.json`` sidecar in the same format as mapsnap.detect_text, so the
-results can be inspected in the debugger app.
+Each pastel block on a key map holds the page number of the detailed sheet that covers
+it, and we know up front exactly which page numbers a volume contains (e.g. Brooklyn
+vol. 2 is pages 1-64). Rather than free-OCR the page and clean up afterward, this
+constrains the recognizer to that closed vocabulary using the prefix-constrained CTC
+beam search in mapsnap.ctc_vocab_decode: every detected box decodes directly to a valid
+page number, and its confidence is the constrained path probability — so a box that
+doesn't actually contain a page number (a lot number, a stray glyph) scores low instead
+of confidently producing the wrong string.
 
-The page numbers are relatively large, so a large detector ``--min-size`` (default 60
-px) skips small text and speeds detection up.
+Detection uses EasyOCR defaults with no rotation (the numbers are printed upright) and a
+large ``--min-size`` (default 60 px), since the page numbers are relatively large.
+Recognition is restricted to digits and to the trie of valid page-number strings.
+
+Writes a ``<stem>.streets.json`` sidecar in the same format as mapsnap.detect_text (so
+it loads in the debugger app); boxes that decode to no valid page number are dropped.
 """
 
 import argparse
@@ -22,8 +29,17 @@ import numpy as np
 from PIL import Image
 from tqdm import tqdm
 
+from mapsnap.ctc_vocab_decode import patch_easyocr_reader
+from mapsnap.snap_page_numbers import parse_page_spec
 from mapsnap.streets import polygon_side_lengths
 from mapsnap.utils import image_stem
+
+# EasyOCR's default beam width for the constrained CTC decoder.
+DEFAULT_BEAM_WIDTH = 20
+
+# Only digits can appear in a page number; restricting the recognizer's alphabet zeros
+# out letter probabilities so the constrained digit paths are cleaner.
+DIGIT_ALLOWLIST = "0123456789"
 
 
 def streets_path(image_path: str) -> str:
@@ -63,20 +79,35 @@ def detection_record(bbox: list[list[float]], text: str, confidence: float) -> d
 def detect_page_numbers(
     image_path: str,
     reader: easyocr.Reader,
+    *,
     min_size: int = 60,
+    beam_width: int = DEFAULT_BEAM_WIDTH,
 ) -> list[dict]:
-    """Run vanilla EasyOCR over one key map and write its <stem>.streets.json sidecar.
+    """Run vocabulary-constrained EasyOCR over one key map and write its sidecar.
 
-    Detection and recognition both use EasyOCR defaults (no allowlist, greedy decoder,
-    upright text only); only the detector ``min_size`` is raised to skip small text.
-    Returns the list of detection records and writes them alongside the image.
+    ``reader`` must already be patched (via patch_easyocr_reader) with the volume's
+    page-number vocabulary; this runs upright detection at ``min_size`` and the
+    constrained ``wordbeamsearch`` decoder. Boxes that decode to no valid page number
+    (empty text) are dropped. Returns the kept detection records and writes them to
+    ``<stem>.streets.json``.
     """
     img = Image.open(image_path).convert("RGB")
     width, height = img.size
 
-    results = cast(list[tuple], reader.readtext(np.array(img), min_size=min_size))
+    results = cast(
+        list[tuple],
+        reader.readtext(
+            np.array(img),
+            decoder="wordbeamsearch",
+            beamWidth=beam_width,
+            allowlist=DIGIT_ALLOWLIST,
+            min_size=min_size,
+        ),
+    )
     detections = [
-        detection_record(bbox, text, confidence) for bbox, text, confidence in results
+        detection_record(bbox, text, confidence)
+        for bbox, text, confidence in results
+        if str(text).strip()
     ]
 
     streets_doc = {
@@ -94,13 +125,19 @@ def detect_page_numbers(
 
 def main() -> None:
     parser = argparse.ArgumentParser(
-        description="Detect page numbers on key maps with vanilla EasyOCR."
+        description="Detect page numbers on key maps with vocabulary-constrained EasyOCR."
     )
     parser.add_argument(
         "images",
         nargs="+",
         metavar="IMAGE",
         help="Input key map image(s). Detections are written to <stem>.streets.json.",
+    )
+    parser.add_argument(
+        "--pages",
+        required=True,
+        metavar="SPEC",
+        help="Valid page numbers for the volume, e.g. '1-64' or '451-577' or '1,3,5-8'.",
     )
     parser.add_argument(
         "--min-size",
@@ -110,15 +147,34 @@ def main() -> None:
         help="Minimum text size passed to the EasyOCR detector (default: %(default)s).",
     )
     parser.add_argument(
+        "--beam-width",
+        type=int,
+        default=DEFAULT_BEAM_WIDTH,
+        metavar="N",
+        help="Beam width for the constrained CTC decoder (default: %(default)s).",
+    )
+    parser.add_argument(
         "--no-gpu",
         action="store_true",
         help="Disable GPU acceleration.",
     )
     args = parser.parse_args()
 
+    page_numbers = parse_page_spec(args.pages)
+    vocab_strings = [str(n) for n in page_numbers]
+    print(
+        f"Constraining recognition to {len(vocab_strings)} page numbers "
+        f"({page_numbers[0]}-{page_numbers[-1]})",
+        file=sys.stderr,
+    )
+
     reader = easyocr.Reader(["en"], gpu=not args.no_gpu, verbose=False)
+    patch_easyocr_reader(reader, vocab_strings, args.beam_width)
+
     for image_path in tqdm(args.images, smoothing=0):
-        detect_page_numbers(image_path, reader, min_size=args.min_size)
+        detect_page_numbers(
+            image_path, reader, min_size=args.min_size, beam_width=args.beam_width
+        )
 
 
 if __name__ == "__main__":
