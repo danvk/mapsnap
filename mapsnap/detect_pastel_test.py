@@ -9,9 +9,10 @@ from mapsnap.detect_pastel import (
     PASTEL,
     assign_palette,
     classify_centroids,
-    categorical_segment_image,
     classify_pastel_centroids,
     clean_mask,
+    cluster_display_colors,
+    cluster_segment_image,
     color_palette,
     detect_pastels,
     paint_pastels,
@@ -144,10 +145,16 @@ def test_segment_page_preserves_size():
     assert out.shape == img.shape
 
 
-def test_categorical_segment_uses_white_paper_black_ink_vivid_pastels():
+def test_cluster_segment_paints_exactly_one_white_one_black_rest_colored():
     img = page(SEPIA_PAPER)
     centroids, labels = palette_segmentation(img, margin_fraction=0.0)
-    out = categorical_segment_image(centroids, labels)
+    colors = cluster_display_colors(centroids, labels)
+    # Exactly one cluster white (background) and exactly one black (darkest).
+    assert np.all(colors == PAPER_DISPLAY_COLOR, axis=1).sum() == 1
+    assert np.all(colors == INK_DISPLAY_COLOR, axis=1).sum() == 1
+
+    out = cluster_segment_image(centroids, labels)
+    assert out.shape == img.shape
     # Paper corner -> white, ink patch -> black.
     assert (out[100:115, 100:115] == PAPER_DISPLAY_COLOR).all()
     assert (out[5:15, 5:15] == INK_DISPLAY_COLOR).all()

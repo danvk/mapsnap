@@ -41,8 +41,10 @@ form its own palette cluster classified as pastel, so badly stained areas can be
 flagged. Heavy stains are a known limitation.
 
 Run as a script to write a sidecar "<stem>.segments.png" next to each input image: the
-page recolored to its palette, so the segmentation can be inspected directly. Pass
---overlay to also write "<stem>.pastel.png" with the detected pastels painted red.
+page with each cluster shown in a distinct color (one cluster white, one black, the rest
+a color palette), so the raw partition can be inspected directly. Pass --natural to
+recolor each cluster to its own posterized color instead, or --overlay to also write
+"<stem>.pastel.png" with the detected pastels painted red.
 """
 
 import argparse
@@ -105,9 +107,9 @@ RED = (255, 0, 0)
 # Centroid categories.
 PAPER, INK, PASTEL = 0, 1, 2
 
-# Display colors for the categorical segmentation image: paper and ink wash out to pure
-# white and black, and each pastel cluster gets a distinct vivid color (cycled if there
-# are more pastel clusters than colors), so cluster assignments are obvious at a glance.
+# Display colors for the cluster segmentation image: the background cluster washes out to
+# white, the darkest to black, and every other cluster gets a distinct vivid color, so the
+# raw k-means partition is obvious at a glance.
 PAPER_DISPLAY_COLOR = (255, 255, 255)
 INK_DISPLAY_COLOR = (0, 0, 0)
 # Each pastel cluster is shown in whichever of these the cluster's own hue is closest to,
@@ -256,25 +258,33 @@ def palette_display_hues() -> np.ndarray:
     return np.arctan2(lab[:, 2] - 128, lab[:, 1] - 128)
 
 
-def categorical_palette(centroids: np.ndarray, labels: np.ndarray) -> np.ndarray:
-    """Display color (Kx3 uint8) for each centroid: white paper, black ink, vivid pastels.
+def cluster_display_colors(centroids: np.ndarray, labels: np.ndarray) -> np.ndarray:
+    """Display color (Kx3 uint8) for each centroid, one per cluster, to show the partition.
 
-    Paper and ink centroids map to pure white and black. Each pastel centroid is shown in
-    the display color whose hue is nearest its own, so the painted color matches the real
-    region color (blue→blue, yellow→yellow). The most saturated pastels are matched first
-    and a display color is not reused, so distinct clusters stay visually distinct.
+    Exactly one cluster is painted white (the background: the most populous cluster) and
+    exactly one black (the darkest cluster); every other cluster gets a distinct palette
+    color, chosen as the PASTEL_DISPLAY_COLORS entry nearest its own hue (most saturated
+    first, no reuse). Unlike a category-based coloring this makes the raw k-means split
+    visible — paper or ink spread across several clusters shows up as several colors.
     """
-    categories = classify_centroids(centroids, labels)
+    counts = np.bincount(labels.reshape(-1), minlength=len(centroids))
+    black_index = int(centroids[:, 0].argmin())
+    counts_without_black = counts.copy()
+    counts_without_black[black_index] = -1
+    white_index = int(counts_without_black.argmax())
+
     colors = np.zeros((len(centroids), 3), dtype=np.uint8)
-    colors[categories == INK] = INK_DISPLAY_COLOR
-    colors[categories == PAPER] = PAPER_DISPLAY_COLOR
+    colors[black_index] = INK_DISPLAY_COLOR
+    colors[white_index] = PAPER_DISPLAY_COLOR
 
     cluster_hue = np.arctan2(centroids[:, 2] - 128, centroids[:, 1] - 128)
     chroma = np.hypot(centroids[:, 1] - 128, centroids[:, 2] - 128)
     palette_hue = palette_display_hues()
     used: set[int] = set()
-    pastel_indices = np.where(categories == PASTEL)[0]
-    for index in pastel_indices[np.argsort(-chroma[pastel_indices])]:
+    remaining = [
+        i for i in range(len(centroids)) if i not in (black_index, white_index)
+    ]
+    for index in sorted(remaining, key=lambda i: -chroma[i]):
         # Circular hue gap to each display color, wrapped to [0, pi].
         gap = np.abs((cluster_hue[index] - palette_hue + np.pi) % (2 * np.pi) - np.pi)
         ranked = [int(slot) for slot in np.argsort(gap)]
@@ -284,9 +294,9 @@ def categorical_palette(centroids: np.ndarray, labels: np.ndarray) -> np.ndarray
     return colors
 
 
-def categorical_segment_image(centroids: np.ndarray, labels: np.ndarray) -> np.ndarray:
-    """Recolor a label map to the clear white/black/vivid categorical palette."""
-    return categorical_palette(centroids, labels)[labels]
+def cluster_segment_image(centroids: np.ndarray, labels: np.ndarray) -> np.ndarray:
+    """Recolor a label map so each cluster shows in a distinct color (one white, one black)."""
+    return cluster_display_colors(centroids, labels)[labels]
 
 
 def pastel_mask(rgb: np.ndarray, *, k: int = DEFAULT_NUM_COLORS) -> np.ndarray:
@@ -364,19 +374,17 @@ def segment_page(
 
 
 def segmentation_legend(centroids: np.ndarray, labels: np.ndarray) -> list[str]:
-    """Human-readable lines describing each cluster (category, colors, coverage).
+    """Human-readable lines describing each cluster (coverage, true color, display color).
 
     Sorted by coverage, descending. Pairs each centroid's true color with the display
-    color it is painted in the categorical segmentation image.
+    color it is painted in the cluster segmentation image.
     """
-    categories = classify_centroids(centroids, labels)
-    display = categorical_palette(centroids, labels)
+    display = cluster_display_colors(centroids, labels)
     centroid_rgb = cv2.cvtColor(
         np.clip(centroids, 0, 255).astype(np.uint8).reshape(1, -1, 3), cv2.COLOR_LAB2RGB
     ).reshape(-1, 3)
     counts = np.bincount(labels.reshape(-1), minlength=len(centroids))
     fractions = counts / counts.sum()
-    names = {PAPER: "paper", INK: "ink", PASTEL: "pastel"}
 
     lines = []
     for index in np.argsort(-counts):
@@ -385,7 +393,7 @@ def segmentation_legend(centroids: np.ndarray, labels: np.ndarray) -> list[str]:
             tuple(int(c) for c in display[index]), "?"
         )
         lines.append(
-            f"  {names[int(categories[index])]:6s} {fractions[index]:5.1%}  "
+            f"  {fractions[index]:5.1%}  "
             f"true rgb({true_r:3d},{true_g:3d},{true_b:3d}) → {display_name}"
         )
     return lines
@@ -450,8 +458,8 @@ def main() -> None:
     parser.add_argument(
         "--natural",
         action="store_true",
-        help="Recolor to each cluster's own (posterized) color instead of the clear "
-        "white/black/vivid categorical palette.",
+        help="Recolor to each cluster's own (posterized) color instead of the "
+        "one-white/one-black/distinct-palette cluster view.",
     )
     parser.add_argument(
         "--overlay",
@@ -471,7 +479,7 @@ def main() -> None:
         if args.natural:
             segments = segment_image(centroids, labels)
         else:
-            segments = categorical_segment_image(centroids, labels)
+            segments = cluster_segment_image(centroids, labels)
         segments_path = image_path.parent / (image_stem(image) + ".segments.png")
         Image.fromarray(segments).save(segments_path)
         print(f"{image_path} → {segments_path}", file=sys.stderr)
