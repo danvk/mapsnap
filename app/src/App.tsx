@@ -16,6 +16,23 @@ import { DetectionsTable } from './components/DetectionsTable';
 
 type Mode = 'georef' | 'streets';
 
+/**
+ * Debug API exposed on `window.mapsnap` so data can be injected without the UI
+ * (e.g. from the browser console or automated tests). `loadJson` accepts either
+ * georef JSON or a streets.json detection list; `setImage` points the viewer at
+ * an image URL.
+ */
+export interface MapsnapDebugApi {
+  loadJson: (text: string) => void;
+  setImage: (url: string) => Promise<void>;
+}
+
+declare global {
+  interface Window {
+    mapsnap: MapsnapDebugApi;
+  }
+}
+
 // Load an image element from a URL, resolving once it has decoded.
 function loadImage(src: string): Promise<HTMLImageElement> {
   return new Promise((resolve, reject) => {
@@ -24,21 +41,6 @@ function loadImage(src: string): Promise<HTMLImageElement> {
     el.onerror = reject;
     el.src = src;
   });
-}
-
-// Serialize georef state for display in the textarea.
-function serializeGeoref(
-  width: number,
-  height: number,
-  corners: Corners | null,
-  streets: Street[],
-  intersections: IntersectionPoint[],
-): string {
-  return JSON.stringify(
-    { width, height, corners, streets, intersections },
-    null,
-    2,
-  );
 }
 
 /** Top-level debugger app: georef mode (map + overlays) and streets mode (detections). */
@@ -56,9 +58,6 @@ export function App() {
   const [detections, setDetections] = useState<Detection[]>([]);
   const [selectedIndices, setSelectedIndices] = useState<Set<number>>(
     new Set(),
-  );
-  const [jsonText, setJsonText] = useState(() =>
-    serializeGeoref(0, 0, null, [], []),
   );
 
   // Display toggles.
@@ -93,7 +92,7 @@ export function App() {
     try {
       data = JSON.parse(text) as GeorefData;
     } catch {
-      return; // invalid JSON mid-edit, skip update
+      return; // not valid JSON, skip update
     }
     setStreets((data.streets ?? []).map((s) => ({ ...s })));
     setIntersections((data.intersections ?? []).map((ix) => ({ ...ix })));
@@ -119,14 +118,12 @@ export function App() {
       setDetections(result.detections);
       setSelectedIndices(new Set());
       setMode('streets');
-      setJsonText(result.text);
       setJsonWidth(result.width);
       setJsonHeight(result.height);
     } else {
       setMode('georef');
       setDetections([]);
       setSelectedIndices(new Set());
-      setJsonText(result.text);
       applyGeorefJson(result.text);
     }
   }
@@ -152,17 +149,6 @@ export function App() {
       fallbackHeight = el.naturalHeight;
       setJsonWidth(el.naturalWidth);
       setJsonHeight(el.naturalHeight);
-      if (!jsonFile && mode === 'georef') {
-        setJsonText(
-          serializeGeoref(
-            el.naturalWidth,
-            el.naturalHeight,
-            precomputedCorners,
-            streets,
-            intersections,
-          ),
-        );
-      }
     }
 
     if (jsonFile) {
@@ -171,22 +157,20 @@ export function App() {
     }
   }
 
-  // Handle JSON dropped onto the textarea (georef data replacement).
-  async function handleTextareaDrop(e: React.DragEvent): Promise<void> {
-    const file = [...e.dataTransfer.files].find((f) =>
-      f.name.endsWith('.json'),
-    );
-    if (!file) return;
-    e.preventDefault();
-    const text = await file.text();
-    processJson(text, jsonWidth, jsonHeight);
-  }
-
-  function handleTextareaChange(value: string): void {
-    setJsonText(value);
-    if (mode === 'streets') return;
-    applyGeorefJson(value);
-  }
+  // Expose a debug API on `window.mapsnap` for injecting data without the UI.
+  // Re-registered each render so it always closes over the latest state.
+  useEffect(() => {
+    window.mapsnap = {
+      loadJson: (text: string) => processJson(text, jsonWidth, jsonHeight),
+      setImage: async (url: string) => {
+        const el = await loadImage(url);
+        setImageEl(el);
+        setImageSrc(url);
+        setJsonWidth(el.naturalWidth);
+        setJsonHeight(el.naturalHeight);
+      },
+    };
+  });
 
   // Cycle warped-image opacity through 0/50/100% on the 'p' key (georef mode).
   useEffect(() => {
@@ -204,16 +188,6 @@ export function App() {
 
   return (
     <div className="container">
-      <textarea
-        rows={50}
-        cols={40}
-        value={jsonText}
-        onChange={(e) => handleTextareaChange(e.target.value)}
-        onDragOver={(e) => {
-          if ([...e.dataTransfer.types].includes('Files')) e.preventDefault();
-        }}
-        onDrop={handleTextareaDrop}
-      />
       <ImageColumn
         mode={mode}
         imageSrc={imageSrc}
