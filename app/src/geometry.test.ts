@@ -3,6 +3,7 @@ import {
   computeCorners,
   distanceMiles,
   pointInPolygon,
+  polygonArea,
   solveLinear3,
 } from './geometry';
 import type { Street } from './types';
@@ -63,6 +64,39 @@ describe('pointInPolygon', () => {
   it('detects points outside', () => {
     expect(pointInPolygon(15, 5, square)).toBe(false);
     expect(pointInPolygon(-1, -1, square)).toBe(false);
+  });
+});
+
+describe('polygonArea', () => {
+  it('computes the area of a rectangle', () => {
+    expect(
+      polygonArea([
+        [0, 0],
+        [10, 0],
+        [10, 5],
+        [0, 5],
+      ]),
+    ).toBe(50);
+  });
+
+  it('is independent of winding order', () => {
+    const cw: [number, number][] = [
+      [0, 0],
+      [0, 5],
+      [10, 5],
+      [10, 0],
+    ];
+    expect(polygonArea(cw)).toBe(50);
+  });
+
+  it('computes the area of a triangle', () => {
+    expect(
+      polygonArea([
+        [0, 0],
+        [4, 0],
+        [0, 3],
+      ]),
+    ).toBe(6);
   });
 });
 

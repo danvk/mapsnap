@@ -1,19 +1,23 @@
 import { useState } from 'react';
 import type { DetectionFilters, IndexedDetection } from '../detections';
 import { pointInPolygon } from '../geometry';
-import type { IntersectionPoint, Street } from '../types';
+import type { IntersectionPoint, PanelPolygon, Street } from '../types';
 import { useElementSize } from '../hooks/useElementSize';
 import { DetectionsOverlay } from './DetectionsOverlay';
 import { GeorefOverlay } from './GeorefOverlay';
+import { PanelsOverlay } from './PanelsOverlay';
+
+export type Mode = 'georef' | 'streets' | 'panels';
 
 interface ImageColumnProps {
-  mode: 'georef' | 'streets';
+  mode: Mode;
   imageSrc: string;
   jsonWidth: number;
   jsonHeight: number;
   streets: Street[];
   intersections: IntersectionPoint[];
   filteredDetections: IndexedDetection[];
+  panels: PanelPolygon[];
   selectedIndices: Set<number>;
   onSelectIndices: (indices: Set<number>) => void;
   showStreetsOnImage: boolean;
@@ -28,9 +32,10 @@ interface ImageColumnProps {
 }
 
 /**
- * Left column: the source image with its SVG overlay, image-side display
- * toggles, and (in streets mode) the detection filter sliders. Accepts dropped
- * image and JSON files anywhere in the column.
+ * Left column: the source image with its mode-specific SVG overlay (georef
+ * streets/intersections, streets detections, or panel polygons), image-side
+ * display toggles, and (in streets mode) the detection filter sliders. Accepts
+ * dropped image and JSON files anywhere in the column.
  */
 export function ImageColumn(props: ImageColumnProps) {
   const {
@@ -41,6 +46,7 @@ export function ImageColumn(props: ImageColumnProps) {
     streets,
     intersections,
     filteredDetections,
+    panels,
     selectedIndices,
     onSelectIndices,
     showStreetsOnImage,
@@ -57,17 +63,23 @@ export function ImageColumn(props: ImageColumnProps) {
   const [imgRef, imgSize] = useElementSize<HTMLImageElement>();
   const [dragOver, setDragOver] = useState(false);
   const streetsMode = mode === 'streets';
+  const panelsMode = mode === 'panels';
+  const georefMode = mode === 'georef';
 
-  // In streets mode, select detections under the click point. The wrapper
+  // In streets/panels mode, select the shapes under the click point. The wrapper
   // (currentTarget) tightly wraps the image, so its rect matches the image's.
   function handleClick(e: React.MouseEvent): void {
-    if (!streetsMode || !imgSize.width || !imgSize.height) return;
+    if (georefMode || !imgSize.width || !imgSize.height) return;
     const rect = e.currentTarget.getBoundingClientRect();
     const imgX = ((e.clientX - rect.left) * jsonWidth) / imgSize.width;
     const imgY = ((e.clientY - rect.top) * jsonHeight) / imgSize.height;
-    const hit = filteredDetections
-      .filter(({ det }) => pointInPolygon(imgX, imgY, det.polygon))
-      .map(({ i }) => i);
+    const hit = panelsMode
+      ? panels.flatMap((polygon, i) =>
+          pointInPolygon(imgX, imgY, polygon) ? [i] : [],
+        )
+      : filteredDetections
+          .filter(({ det }) => pointInPolygon(imgX, imgY, det.polygon))
+          .map(({ i }) => i);
     onSelectIndices(new Set(hit));
   }
 
@@ -98,7 +110,7 @@ export function ImageColumn(props: ImageColumnProps) {
       {imageSrc ? (
         <div
           className="image-wrapper"
-          style={{ cursor: streetsMode ? 'crosshair' : undefined }}
+          style={{ cursor: georefMode ? undefined : 'crosshair' }}
           onClick={handleClick}
         >
           <img
@@ -106,7 +118,7 @@ export function ImageColumn(props: ImageColumnProps) {
             src={imageSrc}
             style={{ aspectRatio: `${jsonWidth} / ${jsonHeight}` }}
           />
-          {streetsMode ? (
+          {streetsMode && (
             <DetectionsOverlay
               detections={filteredDetections}
               selectedIndices={selectedIndices}
@@ -115,7 +127,18 @@ export function ImageColumn(props: ImageColumnProps) {
               jsonWidth={jsonWidth}
               jsonHeight={jsonHeight}
             />
-          ) : (
+          )}
+          {panelsMode && (
+            <PanelsOverlay
+              panels={panels}
+              selectedIndices={selectedIndices}
+              displayWidth={imgSize.width}
+              displayHeight={imgSize.height}
+              jsonWidth={jsonWidth}
+              jsonHeight={jsonHeight}
+            />
+          )}
+          {georefMode && (
             <GeorefOverlay
               streets={streets}
               intersections={intersections}
@@ -135,7 +158,7 @@ export function ImageColumn(props: ImageColumnProps) {
         </div>
       )}
 
-      {!streetsMode && (
+      {georefMode && (
         <>
           <div className="image-controls">
             <input

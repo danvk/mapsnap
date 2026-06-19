@@ -61,3 +61,18 @@ export interface StreetsJsonData {
   command: string[];
   streets: Detection[];
 }
+
+/** A single panel polygon ring (one [x, y] vertex per point, in pixel space). */
+export type PanelPolygon = [number, number][];
+
+/**
+ * panels.json sidecar: panel polygons in reading order in the named image's
+ * pixel frame. `panels[i - 1]` corresponds to the page's `__i.jpg` split.
+ */
+export interface PanelsJsonData {
+  image: string;
+  width: number;
+  height: number;
+  manual?: boolean;
+  panels: PanelPolygon[];
+}

@@ -41,6 +41,17 @@ export function pointInPolygon(
   return inside;
 }
 
+/** Area of a polygon via the shoelace formula. Winding order does not matter. */
+export function polygonArea(polygon: [number, number][]): number {
+  let sum = 0;
+  for (let i = 0, j = polygon.length - 1; i < polygon.length; j = i++) {
+    const [xi, yi] = polygon[i];
+    const [xj, yj] = polygon[j];
+    sum += xj * yi - xi * yj;
+  }
+  return Math.abs(sum) / 2;
+}
+
 /** Haversine distance in miles between two lon/lat points. */
 export function distanceMiles(
   lon1: number,

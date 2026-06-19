@@ -1,4 +1,9 @@
-import type { Detection, StreetsJsonData } from './types';
+import type {
+  Detection,
+  PanelPolygon,
+  PanelsJsonData,
+  StreetsJsonData,
+} from './types';
 
 /** Result of classifying a dropped JSON file. */
 export type ParsedJson =
@@ -8,6 +13,13 @@ export type ParsedJson =
       kind: 'streets';
       text: string;
       detections: Detection[];
+      width: number;
+      height: number;
+    }
+  | {
+      kind: 'panels';
+      text: string;
+      panels: PanelPolygon[];
       width: number;
       height: number;
     };
@@ -30,12 +42,25 @@ function isNewStreetsFormat(parsed: unknown): parsed is StreetsJsonData {
   );
 }
 
+// Whether a parsed object is a panels.json sidecar (polygon list + image metadata).
+function isPanelsFormat(parsed: unknown): parsed is PanelsJsonData {
+  return (
+    typeof parsed === 'object' &&
+    parsed !== null &&
+    'panels' in parsed &&
+    Array.isArray((parsed as PanelsJsonData).panels)
+  );
+}
+
 /**
- * Classify dropped JSON text as a streets detection list or georef data.
+ * Classify dropped JSON text as a streets detection list, panels sidecar, or
+ * georef data.
  *
  * streets.json comes either as a bare array of detections (old format) or as an
- * object with a `streets` array plus image metadata (new format). Anything else
- * is treated as georef data. Returns `{ kind: 'invalid' }` if the text is not JSON.
+ * object with a `streets` array plus image metadata (new format). panels.json is
+ * an object with a `panels` array of polygon rings plus image metadata. Anything
+ * else is treated as georef data. Returns `{ kind: 'invalid' }` if the text is
+ * not JSON.
  */
 export function parseDroppedJson(
   text: string,
@@ -46,6 +71,16 @@ export function parseDroppedJson(
     parsed = JSON.parse(text);
   } catch {
     return { kind: 'invalid' };
+  }
+
+  if (!Array.isArray(parsed) && isPanelsFormat(parsed)) {
+    return {
+      kind: 'panels',
+      text,
+      panels: parsed.panels,
+      width: parsed.width || fallback.width || 1,
+      height: parsed.height || fallback.height || 1,
+    };
   }
 
   const isOldStreetsFormat = Array.isArray(parsed);

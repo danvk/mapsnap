@@ -84,6 +84,36 @@ describe('parseDroppedJson', () => {
     }
   });
 
+  it('recognizes panels.json and reads its dimensions', () => {
+    const text = JSON.stringify({
+      image: 'p20.raw.jpg',
+      width: 1417,
+      height: 2038,
+      manual: true,
+      panels: [
+        [
+          [0, 0],
+          [100, 0],
+          [100, 100],
+          [0, 100],
+        ],
+        [
+          [100, 0],
+          [200, 0],
+          [200, 200],
+          [100, 200],
+        ],
+      ],
+    });
+    const result = parseDroppedJson(text, fallback);
+    expect(result.kind).toBe('panels');
+    if (result.kind === 'panels') {
+      expect(result.panels).toHaveLength(2);
+      expect(result.width).toBe(1417);
+      expect(result.height).toBe(2038);
+    }
+  });
+
   it('treats georef objects as georef', () => {
     const text = JSON.stringify({
       width: 100,

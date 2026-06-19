@@ -4,17 +4,17 @@ import type {
   Corners,
   GeorefData,
   IntersectionPoint,
+  PanelPolygon,
   Street,
   Detection,
 } from './types';
 import { computeCorners } from './geometry';
 import { filterDetections, type DetectionFilters } from './detections';
 import { parseDroppedJson } from './fileLoading';
-import { ImageColumn } from './components/ImageColumn';
+import { ImageColumn, type Mode } from './components/ImageColumn';
 import { MapView } from './components/MapView';
 import { DetectionsTable } from './components/DetectionsTable';
-
-type Mode = 'georef' | 'streets';
+import { PanelsTable } from './components/PanelsTable';
 
 /**
  * Debug API exposed on `window.mapsnap` so data can be injected without the UI
@@ -43,7 +43,10 @@ function loadImage(src: string): Promise<HTMLImageElement> {
   });
 }
 
-/** Top-level debugger app: georef mode (map + overlays) and streets mode (detections). */
+/**
+ * Top-level debugger app with three modes: georef (map + overlays), streets
+ * (text detections), and panels (page-split polygons).
+ */
 export function App() {
   const [mode, setMode] = useState<Mode>('georef');
   const [streets, setStreets] = useState<Street[]>([]);
@@ -56,6 +59,7 @@ export function App() {
   const [imageSrc, setImageSrc] = useState('');
   const [imageEl, setImageEl] = useState<HTMLImageElement | null>(null);
   const [detections, setDetections] = useState<Detection[]>([]);
+  const [panels, setPanels] = useState<PanelPolygon[]>([]);
   const [selectedIndices, setSelectedIndices] = useState<Set<number>>(
     new Set(),
   );
@@ -115,15 +119,24 @@ export function App() {
     });
     if (result.kind === 'invalid') return;
     if (result.kind === 'streets') {
-      setDetections(result.detections);
-      setSelectedIndices(new Set());
       setMode('streets');
+      setSelectedIndices(new Set());
+      setDetections(result.detections);
+      setPanels([]);
+      setJsonWidth(result.width);
+      setJsonHeight(result.height);
+    } else if (result.kind === 'panels') {
+      setMode('panels');
+      setSelectedIndices(new Set());
+      setPanels(result.panels);
+      setDetections([]);
       setJsonWidth(result.width);
       setJsonHeight(result.height);
     } else {
       setMode('georef');
-      setDetections([]);
       setSelectedIndices(new Set());
+      setDetections([]);
+      setPanels([]);
       applyGeorefJson(result.text);
     }
   }
@@ -175,7 +188,7 @@ export function App() {
   // Cycle warped-image opacity through 0/50/100% on the 'p' key (georef mode).
   useEffect(() => {
     function onKeydown(e: KeyboardEvent): void {
-      if (e.key !== 'p' || mode === 'streets') return;
+      if (e.key !== 'p' || mode !== 'georef') return;
       const steps = [0, 50, 100];
       setOpacity((prev) => {
         const nextIdx = (steps.indexOf(prev) + 1) % steps.length;
@@ -196,6 +209,7 @@ export function App() {
         streets={streets}
         intersections={intersections}
         filteredDetections={filteredDetections}
+        panels={panels}
         selectedIndices={selectedIndices}
         onSelectIndices={setSelectedIndices}
         showStreetsOnImage={showStreetsOnImage}
@@ -209,7 +223,7 @@ export function App() {
         onFiles={handleFiles}
       />
       <div className="map-column">
-        {mode === 'georef' ? (
+        {mode === 'georef' && (
           <>
             <MapView
               streets={streets}
@@ -254,12 +268,22 @@ export function App() {
               </label>
             </div>
           </>
-        ) : (
+        )}
+        {mode === 'streets' && (
           <DetectionsTable
             detections={filteredDetections}
             selectedIndices={selectedIndices}
             onSelect={(index) => setSelectedIndices(new Set([index]))}
             image={imageEl}
+            jsonWidth={jsonWidth}
+            jsonHeight={jsonHeight}
+          />
+        )}
+        {mode === 'panels' && (
+          <PanelsTable
+            panels={panels}
+            selectedIndices={selectedIndices}
+            onSelect={(index) => setSelectedIndices(new Set([index]))}
             jsonWidth={jsonWidth}
             jsonHeight={jsonHeight}
           />
