@@ -6,18 +6,26 @@
     "build": "vite build",
     "preview": "vite preview",
     "type-check": "tsc --noEmit",
+    "test": "vitest run",
     "format": "prettier --write .",
     "iiif": "node iiif-server.mjs"
   },
   "type": "module",
   "dependencies": {
-    "maplibre-gl": "^5.19.0"
+    "maplibre-gl": "^5.19.0",
+    "react": "^19.2.7",
+    "react-dom": "^19.2.7"
   },
   "devDependencies": {
+    "@types/react": "^19.2.17",
+    "@types/react-dom": "^19.2.3",
+    "@vitejs/plugin-react": "^5.2.0",
     "express": "^4.22.2",
     "express-iiif": "^1.7.0",
+    "jsdom": "^29.1.1",
     "prettier": "^3.8.1",
     "typescript": "^5.9.3",
-    "vite": "^7.3.1"
+    "vite": "^7.3.1",
+    "vitest": "^3.2.6"
   }
 }
