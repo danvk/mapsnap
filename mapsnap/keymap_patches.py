@@ -15,9 +15,26 @@ from pathlib import Path
 
 import numpy as np
 
-# Fraction to downscale each scan to before extracting patches, so a page number is
-# ~40px and a PATCH_SIZE window captures the number plus its block context.
+# Fraction of a FULL-resolution scan we work at, so a page number is ~40px and a
+# PATCH_SIZE window captures the number plus its block context.
 SCALE = 0.25
+
+# A scan whose larger side is below this is assumed to already be at SCALE (25%); a
+# larger one is full resolution and must be downscaled by SCALE to reach working res.
+FULL_SCALE_THRESHOLD = 4000
+
+
+def working_scale(
+    width: int, height: int, *, full_threshold: int = FULL_SCALE_THRESHOLD
+) -> float:
+    """Factor to bring an image (and its label coords) to working resolution.
+
+    Returns SCALE for a full-resolution scan (larger side >= full_threshold) and 1.0 for
+    one already downscaled to ~25%, so both reach the same ~40px-per-number working size.
+    Label coordinates live in the image's own pixel space, so the same factor applies.
+    """
+    return SCALE if max(width, height) >= full_threshold else 1.0
+
 
 # Side length (px, at SCALE) of the square patches fed to the CNN.
 PATCH_SIZE = 128

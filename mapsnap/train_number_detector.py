@@ -19,11 +19,11 @@ from torch import nn
 from torch.utils.data import DataLoader, Dataset
 
 from mapsnap.keymap_patches import (
-    SCALE,
     build_image_patches,
     labels_path_for,
     load_label_points,
     scale_points,
+    working_scale,
 )
 from mapsnap.number_model import (
     average_precision,
@@ -81,8 +81,11 @@ def build_split(
     all_labels: list[int] = []
     for image_path in image_paths:
         width, height, points = load_label_points(str(labels_path_for(str(image_path))))
-        image = load_scaled_image(str(image_path), SCALE)
-        scaled = scale_points(points, SCALE)
+        if not points:
+            continue
+        factor = working_scale(width, height)
+        image = load_scaled_image(str(image_path), factor)
+        scaled = scale_points(points, factor)
         patches, labels = build_image_patches(image, scaled, rng=rng)
         all_patches.extend(patches)
         all_labels.extend(labels)

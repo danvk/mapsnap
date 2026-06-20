@@ -6,7 +6,15 @@ from mapsnap.keymap_patches import (
     is_far_from_all,
     sample_negative_centers,
     scale_points,
+    working_scale,
 )
+
+
+def test_working_scale_full_vs_quarter():
+    assert working_scale(5866, 7323) == 0.25  # full-res scan
+    assert working_scale(1446, 2038) == 1.0  # already 25%
+    assert working_scale(3999, 3999) == 1.0  # both sides below threshold
+    assert working_scale(4000, 100) == 0.25  # one side at threshold
 
 
 def test_scale_points():
