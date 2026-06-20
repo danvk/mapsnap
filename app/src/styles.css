@@ -5,12 +5,6 @@
   align-items: flex-start;
 }
 
-textarea {
-  font-family: monospace;
-  font-size: 12px;
-  flex-shrink: 0;
-}
-
 .image-column {
   display: flex;
   flex-direction: column;
