@@ -14,6 +14,7 @@ dependencies = [
     "opencv-python>=4.13.0.92",
     "pillow>=12.2.0",
     "shapely>=2.0",
+    "torchvision>=0.27",
     "tqdm>=4.67.1",
 ]
 
@@ -25,6 +26,11 @@ packages = ["mapsnap"]
 
 [tool.ruff]
 line-length = 88
+
+[tool.pyright]
+# torch re-exports many names (device, tensor, sigmoid, ...) without listing them in
+# __all__, which pyright otherwise flags as private-import usage on every call.
+reportPrivateImportUsage = false
 
 [dependency-groups]
 dev = [

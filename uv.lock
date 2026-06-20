@@ -173,6 +173,7 @@ dependencies = [
     { name = "opencv-python" },
     { name = "pillow" },
     { name = "shapely" },
+    { name = "torchvision" },
     { name = "tqdm" },
 ]
 
@@ -190,6 +191,7 @@ requires-dist = [
     { name = "opencv-python", specifier = ">=4.13.0.92" },
     { name = "pillow", specifier = ">=12.2.0" },
     { name = "shapely", specifier = ">=2.0" },
+    { name = "torchvision", specifier = ">=0.27" },
     { name = "tqdm", specifier = ">=4.67.1" },
 ]
 
