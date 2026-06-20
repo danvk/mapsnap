@@ -1,0 +1,135 @@
+/* Reuse the debugger's image-wrapper and detections-table styling. */
+@import '../styles.css';
+
+.keymap-container {
+  display: flex;
+  gap: 16px;
+  padding: 16px;
+  align-items: flex-start;
+  height: 100vh;
+  box-sizing: border-box;
+}
+
+.image-list {
+  flex-shrink: 0;
+  width: 220px;
+  font-family: sans-serif;
+  font-size: 13px;
+  overflow-y: auto;
+  max-height: 100%;
+}
+
+.image-list h2 {
+  font-size: 14px;
+  margin: 0 0 8px;
+}
+
+.image-list ul {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.image-list li {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 8px;
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+.image-list li:hover {
+  background: #f0f0f0;
+}
+
+.image-list li.selected {
+  background: #fff3e0;
+  font-weight: bold;
+}
+
+.image-list .image-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.image-list .label-count {
+  flex-shrink: 0;
+  background: #1e88e5;
+  color: white;
+  border-radius: 10px;
+  padding: 0 7px;
+  font-size: 11px;
+}
+
+.keymap-center {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  justify-content: center;
+}
+
+.keymap-image {
+  display: block;
+  max-height: 90vh;
+  max-width: 100%;
+  width: auto;
+}
+
+.keymap-empty {
+  color: #999;
+  font-family: sans-serif;
+  padding: 40px;
+}
+
+.keymap-right {
+  flex-shrink: 0;
+  width: 320px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.keymap-status {
+  display: flex;
+  justify-content: space-between;
+  font-family: sans-serif;
+  font-size: 12px;
+  color: #555;
+}
+
+.save-status.save-saved {
+  color: #2e7d32;
+}
+
+.save-status.save-error {
+  color: #c62828;
+}
+
+.label-preview {
+  display: block;
+  max-height: 48px;
+  width: auto;
+  border: 1px solid #ddd;
+}
+
+.label-text-input {
+  width: 8em;
+  font-size: 14px;
+  padding: 2px 4px;
+}
+
+.label-delete {
+  border: none;
+  background: none;
+  color: #c62828;
+  cursor: pointer;
+  font-size: 14px;
+  line-height: 1;
+}
+
+.label-delete:hover {
+  color: #8e0000;
+}
