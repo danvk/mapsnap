@@ -4,7 +4,7 @@ import { pointInPolygon } from '../geometry';
 import { useElementSize } from '../hooks/useElementSize';
 import { loadImage } from '../loadImage';
 import { fetchImages, fetchLabels, imageUrl, saveLabels } from './api';
-import { createLabelsJson, labelBox } from './labels';
+import { createLabelsJson, labelBox, labelBoxSize } from './labels';
 import { ImageList } from './ImageList';
 import { LabelsOverlay } from './LabelsOverlay';
 import { LabelsTable } from './LabelsTable';
@@ -95,6 +95,9 @@ export function KeymapApp() {
     setLabels(next);
   }
 
+  // Box size scaled to the image's resolution (full vs. 25%-scale).
+  const box = labelBoxSize(imageWidth, imageHeight);
+
   // Add a label at the click point, or select an existing one if clicked.
   function handleImageClick(e: React.MouseEvent): void {
     if (!selectedName || !imgSize.width || !imgSize.height) return;
@@ -103,7 +106,7 @@ export function KeymapApp() {
     const y = ((e.clientY - rect.top) * imageHeight) / imgSize.height;
     const current = labelsRef.current;
     const hitIndex = current.findIndex((label) =>
-      pointInPolygon(x, y, labelBox(label.x, label.y)),
+      pointInPolygon(x, y, labelBox(label.x, label.y, box.width, box.height)),
     );
     if (hitIndex >= 0) {
       setSelectedIndex(hitIndex);
@@ -165,6 +168,8 @@ export function KeymapApp() {
             <LabelsOverlay
               labels={labels}
               selectedIndex={selectedIndex}
+              boxWidth={box.width}
+              boxHeight={box.height}
               displayWidth={imgSize.width}
               displayHeight={imgSize.height}
               imageWidth={imageWidth}
@@ -200,6 +205,8 @@ export function KeymapApp() {
           selectedIndex={selectedIndex}
           showOnlyUnlabeled={showOnlyUnlabeled}
           image={imageEl}
+          boxWidth={box.width}
+          boxHeight={box.height}
           onSelect={setSelectedIndex}
           onChangeText={handleChangeText}
           onDelete={handleDelete}

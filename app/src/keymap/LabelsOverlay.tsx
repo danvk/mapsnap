@@ -4,6 +4,9 @@ import { labelBox } from './labels';
 interface LabelsOverlayProps {
   labels: Label[];
   selectedIndex: number | null;
+  /** Box size in image pixels (scaled to the image's resolution). */
+  boxWidth: number;
+  boxHeight: number;
   /** Rendered image size in CSS pixels. */
   displayWidth: number;
   displayHeight: number;
@@ -28,6 +31,8 @@ export function LabelsOverlay(props: LabelsOverlayProps) {
   const {
     labels,
     selectedIndex,
+    boxWidth,
+    boxHeight,
     displayWidth,
     displayHeight,
     imageWidth,
@@ -48,8 +53,8 @@ export function LabelsOverlay(props: LabelsOverlayProps) {
       {labels.map((label, i) => {
         const isSelected = i === selectedIndex;
         const color = labelColor(label.text, isSelected);
-        const corners = labelBox(label.x, label.y).map(([x, y]) =>
-          toDisplay(x, y),
+        const corners = labelBox(label.x, label.y, boxWidth, boxHeight).map(
+          ([x, y]) => toDisplay(x, y),
         );
         const points = corners.map(([dx, dy]) => `${dx},${dy}`).join(' ');
         const rightX = Math.max(...corners.map(([dx]) => dx));

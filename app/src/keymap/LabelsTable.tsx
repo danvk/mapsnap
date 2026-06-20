@@ -6,6 +6,9 @@ interface LabelsTableProps {
   selectedIndex: number | null;
   showOnlyUnlabeled: boolean;
   image: HTMLImageElement | null;
+  /** Preview crop size in image pixels (scaled to the image's resolution). */
+  boxWidth: number;
+  boxHeight: number;
   onSelect: (index: number) => void;
   onChangeText: (index: number, text: string) => void;
   onDelete: (index: number) => void;
@@ -25,6 +28,8 @@ export function LabelsTable(props: LabelsTableProps) {
     selectedIndex,
     showOnlyUnlabeled,
     image,
+    boxWidth,
+    boxHeight,
     onSelect,
     onChangeText,
     onDelete,
@@ -58,7 +63,12 @@ export function LabelsTable(props: LabelsTableProps) {
             >
               <td>{i + 1}</td>
               <td>
-                <LabelPreview label={label} image={image} />
+                <LabelPreview
+                  label={label}
+                  image={image}
+                  boxWidth={boxWidth}
+                  boxHeight={boxHeight}
+                />
               </td>
               <td>
                 <input

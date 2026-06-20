@@ -3,6 +3,7 @@ import { pointInPolygon } from '../geometry';
 import {
   createLabelsJson,
   labelBox,
+  labelBoxSize,
   LABEL_BOX_HEIGHT,
   LABEL_BOX_WIDTH,
 } from './labels';
@@ -37,5 +38,25 @@ describe('labelBox', () => {
     expect(pointInPolygon(100, 100, box)).toBe(true);
     expect(pointInPolygon(115, 105, box)).toBe(true);
     expect(pointInPolygon(200, 100, box)).toBe(false);
+  });
+});
+
+describe('labelBoxSize', () => {
+  it('uses full size when a dimension exceeds 4000px', () => {
+    expect(labelBoxSize(5679, 8268)).toEqual({
+      width: LABEL_BOX_WIDTH,
+      height: LABEL_BOX_HEIGHT,
+    });
+    expect(labelBoxSize(4001, 1000)).toEqual({
+      width: LABEL_BOX_WIDTH,
+      height: LABEL_BOX_HEIGHT,
+    });
+  });
+
+  it('shrinks to 25% for smaller (quarter-scale) images', () => {
+    expect(labelBoxSize(1420, 2067)).toEqual({
+      width: Math.round(LABEL_BOX_WIDTH * 0.25),
+      height: Math.round(LABEL_BOX_HEIGHT * 0.25),
+    });
   });
 });
