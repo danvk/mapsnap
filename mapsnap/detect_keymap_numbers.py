@@ -30,7 +30,6 @@ from PIL import Image
 from tqdm import tqdm
 
 from mapsnap.ctc_vocab_decode import patch_easyocr_reader
-from mapsnap.snap_page_numbers import parse_page_spec
 from mapsnap.streets import polygon_side_lengths
 from mapsnap.utils import image_stem
 
@@ -40,6 +39,22 @@ DEFAULT_BEAM_WIDTH = 20
 # Only digits can appear in a page number; restricting the recognizer's alphabet zeros
 # out letter probabilities so the constrained digit paths are cleaner.
 DIGIT_ALLOWLIST = "0123456789"
+
+
+def parse_page_spec(spec: str) -> list[int]:
+    """Parse a page-number spec like '1-64', '451-577', or '1,3,5-8' into a sorted list."""
+    numbers: set[int] = set()
+    for part in spec.split(","):
+        part = part.strip()
+        if not part:
+            continue
+        if "-" in part:
+            lo_str, hi_str = part.split("-", 1)
+            lo, hi = int(lo_str), int(hi_str)
+            numbers.update(range(min(lo, hi), max(lo, hi) + 1))
+        else:
+            numbers.add(int(part))
+    return sorted(numbers)
 
 
 def streets_path(image_path: str) -> str:
