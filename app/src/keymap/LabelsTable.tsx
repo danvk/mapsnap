@@ -4,6 +4,7 @@ import { LabelPreview } from './LabelPreview';
 interface LabelsTableProps {
   labels: Label[];
   selectedIndex: number | null;
+  showOnlyUnlabeled: boolean;
   image: HTMLImageElement | null;
   onSelect: (index: number) => void;
   onChangeText: (index: number, text: string) => void;
@@ -11,13 +12,31 @@ interface LabelsTableProps {
 }
 
 /**
- * Table of labels in creation order. Each row shows the label's index, a
- * cropped preview, and a text box for the truth text, plus a delete button.
- * Editing flows back to the parent, which persists to the labels.json sidecar.
+ * Table of labels, newest first, so a freshly added label's preview is visible
+ * without scrolling. Each row shows the label's index, a cropped preview, and a
+ * text box for the truth text, plus a delete button. When `showOnlyUnlabeled`
+ * is set, only labels without text are shown (plus the selected one, so typing
+ * into it doesn't make the row disappear). Editing flows back to the parent,
+ * which persists to the labels.json sidecar.
  */
 export function LabelsTable(props: LabelsTableProps) {
-  const { labels, selectedIndex, image, onSelect, onChangeText, onDelete } =
-    props;
+  const {
+    labels,
+    selectedIndex,
+    showOnlyUnlabeled,
+    image,
+    onSelect,
+    onChangeText,
+    onDelete,
+  } = props;
+
+  const rows = labels
+    .map((label, i) => ({ label, i }))
+    .filter(
+      ({ label, i }) =>
+        !showOnlyUnlabeled || label.text.trim() === '' || i === selectedIndex,
+    )
+    .reverse();
 
   return (
     <div id="detections-panel">
@@ -31,7 +50,7 @@ export function LabelsTable(props: LabelsTableProps) {
           </tr>
         </thead>
         <tbody>
-          {labels.map((label, i) => (
+          {rows.map(({ label, i }) => (
             <tr
               key={i}
               className={i === selectedIndex ? 'selected' : undefined}

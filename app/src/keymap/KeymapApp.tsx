@@ -25,6 +25,7 @@ export function KeymapApp() {
   const [labels, setLabels] = useState<Label[]>([]);
   const [selectedIndex, setSelectedIndex] = useState<number | null>(null);
   const [saveStatus, setSaveStatus] = useState<SaveStatus>('idle');
+  const [showOnlyUnlabeled, setShowOnlyUnlabeled] = useState(false);
 
   const [imgRef, imgSize] = useElementSize<HTMLImageElement>();
   // Only persist labels that changed via user edits, not freshly loaded ones.
@@ -186,9 +187,18 @@ export function KeymapApp() {
             </>
           )}
         </div>
+        <label className="keymap-controls">
+          <input
+            type="checkbox"
+            checked={showOnlyUnlabeled}
+            onChange={(e) => setShowOnlyUnlabeled(e.target.checked)}
+          />
+          Only show labels without text
+        </label>
         <LabelsTable
           labels={labels}
           selectedIndex={selectedIndex}
+          showOnlyUnlabeled={showOnlyUnlabeled}
           image={imageEl}
           onSelect={setSelectedIndex}
           onChangeText={handleChangeText}

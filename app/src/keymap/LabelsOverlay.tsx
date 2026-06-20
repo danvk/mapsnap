@@ -12,9 +12,17 @@ interface LabelsOverlayProps {
   imageHeight: number;
 }
 
+// Box color: highlight when selected, green once text is entered, else pink.
+function labelColor(text: string, isSelected: boolean): string {
+  if (isSelected) return '#ff6600';
+  return text.trim() ? '#2e7d32' : '#d81b60';
+}
+
 /**
- * SVG overlay drawing a colored box around each label point, with its 1-based
- * index. The selected label is highlighted, mirroring the streets.json overlay.
+ * SVG overlay drawing a colored box around each label point. Boxes are colored
+ * by whether their text has been entered yet, the selected label is highlighted
+ * (mirroring the streets.json overlay), and any entered text is shown beside the
+ * box.
  */
 export function LabelsOverlay(props: LabelsOverlayProps) {
   const {
@@ -39,12 +47,13 @@ export function LabelsOverlay(props: LabelsOverlayProps) {
     >
       {labels.map((label, i) => {
         const isSelected = i === selectedIndex;
-        const color = isSelected ? '#ff6600' : '#1e88e5';
-        const points = labelBox(label.x, label.y)
-          .map(([x, y]) => toDisplay(x, y))
-          .map(([dx, dy]) => `${dx},${dy}`)
-          .join(' ');
-        const [cx, cy] = toDisplay(label.x, label.y);
+        const color = labelColor(label.text, isSelected);
+        const corners = labelBox(label.x, label.y).map(([x, y]) =>
+          toDisplay(x, y),
+        );
+        const points = corners.map(([dx, dy]) => `${dx},${dy}`).join(' ');
+        const rightX = Math.max(...corners.map(([dx]) => dx));
+        const [, cy] = toDisplay(label.x, label.y);
         return (
           <g key={i}>
             <polygon
@@ -54,21 +63,23 @@ export function LabelsOverlay(props: LabelsOverlayProps) {
               stroke={color}
               strokeWidth={isSelected ? 3 : 2}
             />
-            <text
-              x={cx}
-              y={cy}
-              fontSize={18}
-              fontFamily="sans-serif"
-              fontWeight="bold"
-              textAnchor="middle"
-              dominantBaseline="middle"
-              fill={color}
-              stroke="white"
-              strokeWidth={3}
-              paintOrder="stroke"
-            >
-              {i + 1}
-            </text>
+            {label.text.trim() && (
+              <text
+                x={rightX + 4}
+                y={cy}
+                fontSize={18}
+                fontFamily="sans-serif"
+                fontWeight="bold"
+                textAnchor="start"
+                dominantBaseline="middle"
+                fill={color}
+                stroke="white"
+                strokeWidth={3}
+                paintOrder="stroke"
+              >
+                {label.text}
+              </text>
+            )}
           </g>
         );
       })}
