@@ -37,8 +37,8 @@ from mapsnap.crnn_model import (
 from mapsnap.detect_keymap_numbers import (
     detection_record,
     filter_args,
+    keymap_path,
     parse_page_spec,
-    streets_path,
 )
 from mapsnap.detect_numbers_cnn import (
     DEDUP_WORKING,
@@ -117,7 +117,7 @@ def detect_and_read(
     nms_dist: float,
     pages: list[str],
 ) -> list[dict]:
-    """CNN-localize then CRNN-read one image; write <stem>.streets.json."""
+    """CNN-localize then CRNN-read one image; write <stem>.keymap.json."""
     image = np.asarray(Image.open(image_path).convert("RGB"))
     height, width = image.shape[:2]
     centers, factor = detect_candidate_centers(
@@ -162,7 +162,7 @@ def detect_and_read(
         "command": filter_args(sys.argv[:], image_path),
         "streets": detections,
     }
-    with open(streets_path(image_path), "w") as f:
+    with open(keymap_path(image_path), "w") as f:
         json.dump(doc, f, indent=2)
     print(
         f"{Path(image_path).name}: {len(centers)} candidates -> {len(detections)} read",

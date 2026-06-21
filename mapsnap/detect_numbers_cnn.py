@@ -40,8 +40,8 @@ from mapsnap.detect_keymap_numbers import (
     DIGIT_ALLOWLIST,
     detection_record,
     filter_args,
+    keymap_path,
     parse_page_spec,
-    streets_path,
 )
 from mapsnap.keymap_patches import PATCH_SIZE, crop_patch, working_scale
 from mapsnap.number_model import build_model, eval_transform, select_device
@@ -306,7 +306,7 @@ def detect_and_read(
         "command": filter_args(sys.argv[:], image_path),
         "streets": detections,
     }
-    with open(streets_path(image_path), "w") as f:
+    with open(keymap_path(image_path), "w") as f:
         json.dump(doc, f, indent=2)
     print(
         f"{Path(image_path).name}: {len(centers)} candidates -> "

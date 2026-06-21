@@ -57,9 +57,9 @@ def parse_page_spec(spec: str) -> list[int]:
     return sorted(numbers)
 
 
-def streets_path(image_path: str) -> str:
-    """Return the path for the OCR results file (<stem>.streets.json)."""
-    return str(Path(image_path).parent / (image_stem(image_path) + ".streets.json"))
+def keymap_path(image_path: str) -> str:
+    """Return the path for the OCR results file (<stem>.keymap.json)."""
+    return str(Path(image_path).parent / (image_stem(image_path) + ".keymap.json"))
 
 
 def filter_args(argv: list[str], image: str) -> list[str]:
@@ -132,7 +132,7 @@ def detect_page_numbers(
         "command": filter_args(sys.argv[:], image_path),
         "streets": detections,
     }
-    with open(streets_path(image_path), "w") as f:
+    with open(keymap_path(image_path), "w") as f:
         json.dump(streets_doc, f, indent=2)
 
     return detections
