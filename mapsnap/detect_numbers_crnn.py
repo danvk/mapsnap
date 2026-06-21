@@ -151,7 +151,7 @@ def detect_and_read(
         found = [found[k] for k in keep]
 
     detections = [
-        detection_record(polygon, text, confidence)
+        detection_record(cast(list, polygon), text, confidence)
         for polygon, text, confidence in found
     ]
 

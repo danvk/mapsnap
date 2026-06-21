@@ -24,6 +24,7 @@ the input image's own pixel space.
 import argparse
 import json
 import sys
+from collections.abc import Sequence
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import cast
@@ -85,7 +86,7 @@ def window_centers(width: int, height: int, stride: int) -> list[tuple[int, int]
 
 
 def nms_peaks(
-    centers: list[tuple[float, float]], scores: list[float], min_dist: float
+    centers: Sequence[tuple[float, float]], scores: Sequence[float], min_dist: float
 ) -> list[int]:
     """Greedy non-max suppression; return kept indices (highest score first)."""
     order = sorted(range(len(centers)), key=lambda i: scores[i], reverse=True)
