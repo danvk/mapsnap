@@ -28,6 +28,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import cast
 
+import cv2
 import easyocr
 import numpy as np
 import torch
@@ -213,7 +214,7 @@ def tight_box_for_candidate(
     text_threshold: float = CRAFT_TEXT_THRESHOLD,
     low_text: float = CRAFT_LOW_TEXT,
 ) -> list[int] | None:
-    """CRAFT-tight box (image coords) nearest a candidate, or None if CRAFT finds none."""
+    """CRAFT-tight box (image coords) for a candidate, or None if CRAFT finds nothing."""
     height, width = image.shape[:2]
     x0, y0, x1, y1 = region_bounds(cx, cy, region_half, width, height)
     crop = image[y0:y1, x0:x1]
@@ -223,8 +224,6 @@ def tight_box_for_candidate(
         crop, min_size=craft_min, text_threshold=text_threshold, low_text=low_text
     )
     boxes = [[int(v) for v in b] for b in horizontal_agg[0]]
-    if not boxes:
-        return None
     i = select_tight_box(boxes, (x1 - x0) / 2, (y1 - y0) / 2)
     if i < 0:
         return None
@@ -316,12 +315,107 @@ def detect_and_read(
     return detections
 
 
+def scores_to_grid(scores: list[float], n_cols: int, n_rows: int) -> np.ndarray:
+    """Reshape row-major window scores into an (n_rows, n_cols) float32 heatmap grid."""
+    return np.array(scores, dtype=np.float32).reshape(n_rows, n_cols)
+
+
+def heatmap_overlay(image: np.ndarray, grid: np.ndarray) -> np.ndarray:
+    """Blend a JET colormap of the score grid (0..1) over the image (RGB uint8)."""
+    height, width = image.shape[:2]
+    big = cv2.resize(grid, (width, height), interpolation=cv2.INTER_LINEAR)
+    colored = cv2.applyColorMap((big * 255).astype(np.uint8), cv2.COLORMAP_JET)
+    colored = cv2.cvtColor(colored, cv2.COLOR_BGR2RGB)
+    return cv2.addWeighted(image, 0.45, colored, 0.55, 0.0)
+
+
+def write_cnn_debug(
+    image_path: str,
+    model,
+    device,
+    *,
+    stride: int,
+    threshold: float,
+    nms_dist: float,
+) -> None:
+    """Write CNN-only debug artifacts (no OCR): a heatmap PNG and a no-text candidate JSON.
+
+    ``<stem>.heatmap.png`` overlays the dense window-probability heatmap on the scan, and
+    ``<stem>.cnn.json`` holds the NMS'd candidate boxes (text empty, confidence = the CNN
+    peak score) so localization can be inspected in the debugger or scored on its own.
+    """
+    image = np.asarray(Image.open(image_path).convert("RGB"))
+    height, width = image.shape[:2]
+    factor = working_scale(width, height)
+    scaled = (
+        image
+        if factor == 1.0
+        else np.asarray(
+            Image.fromarray(image).resize(
+                (round(width * factor), round(height * factor)),
+                Image.Resampling.LANCZOS,
+            )
+        )
+    )
+
+    centers, scores = score_windows(model, scaled, device, stride=stride)
+    half = stride // 2
+    n_cols = len(range(half, scaled.shape[1], stride))
+    n_rows = len(range(half, scaled.shape[0], stride))
+    grid = scores_to_grid(scores, n_cols, n_rows)
+
+    overlay = heatmap_overlay(image, grid)
+    heatmap_path = Path(image_path).parent / (
+        Path(image_path).name.split(".")[0] + ".heatmap.png"
+    )
+    Image.fromarray(overlay).save(heatmap_path)
+
+    hot = [i for i, s in enumerate(scores) if s >= threshold]
+    hot_centers = [(float(centers[i][0]), float(centers[i][1])) for i in hot]
+    hot_scores = [scores[i] for i in hot]
+    keep = nms_peaks(hot_centers, hot_scores, nms_dist)
+
+    box_half = round(FALLBACK_HALF_WORKING / factor)
+    detections = []
+    for k in keep:
+        cx, cy = hot_centers[k][0] / factor, hot_centers[k][1] / factor
+        x0, y0, x1, y1 = region_bounds(cx, cy, box_half, width, height)
+        polygon = [[x0, y0], [x1, y0], [x1, y1], [x0, y1]]
+        detections.append(detection_record(cast(list, polygon), "", hot_scores[k]))
+
+    doc = {
+        "width": width,
+        "height": height,
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "command": filter_args(sys.argv[:], image_path),
+        "streets": detections,
+    }
+    cnn_path = Path(image_path).parent / (
+        Path(image_path).name.split(".")[0] + ".cnn.json"
+    )
+    with open(cnn_path, "w") as f:
+        json.dump(doc, f, indent=2)
+    print(
+        f"{Path(image_path).name}: {len(detections)} CNN candidates "
+        f"-> {heatmap_path.name}, {cnn_path.name}",
+        file=sys.stderr,
+    )
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(
         description="Locate page numbers with the CNN, tighten with CRAFT, read with OCR."
     )
     parser.add_argument("images", nargs="+", metavar="IMAGE")
-    parser.add_argument("--pages", required=True, metavar="SPEC", help="e.g. '1-111'.")
+    parser.add_argument(
+        "--pages", metavar="SPEC", help="e.g. '1-111' (required unless --debug)."
+    )
+    parser.add_argument(
+        "--debug",
+        action="store_true",
+        help="Write CNN-only debug artifacts (<stem>.heatmap.png, <stem>.cnn.json) and "
+        "skip CRAFT/OCR. No --pages needed.",
+    )
     parser.add_argument(
         "--weights", type=Path, default=Path("models/number_detector.pt")
     )
@@ -342,11 +436,25 @@ def main() -> None:
         help="CRAFT low-text threshold for local detection (default %(default)s).",
     )
     args = parser.parse_args()
+    if not args.debug and not args.pages:
+        parser.error("--pages is required unless --debug is set")
 
     device = select_device()
     model = build_model(pretrained=False)
     model.load_state_dict(torch.load(args.weights, map_location=device))
     model.to(device)
+
+    if args.debug:
+        for image_path in args.images:
+            write_cnn_debug(
+                image_path,
+                model,
+                device,
+                stride=args.stride,
+                threshold=args.threshold,
+                nms_dist=args.nms_dist,
+            )
+        return
 
     vocab = [str(n) for n in parse_page_spec(args.pages)]
     reader = easyocr.Reader(["en"], gpu=False, verbose=False)

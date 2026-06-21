@@ -2,9 +2,17 @@ from mapsnap.detect_numbers_cnn import (
     box_center,
     nms_peaks,
     region_bounds,
+    scores_to_grid,
     select_tight_box,
     window_centers,
 )
+
+
+def test_scores_to_grid_is_row_major():
+    # window_centers iterates y-outer, x-inner, so scores reshape to (n_rows, n_cols).
+    grid = scores_to_grid([0.0, 0.1, 0.2, 0.3, 0.4, 0.5], n_cols=3, n_rows=2)
+    assert grid.shape == (2, 3)
+    assert grid[0, 2] == 0.2 and grid[1, 0] == 0.3
 
 
 def test_window_centers_grid():
