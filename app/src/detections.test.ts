@@ -1,6 +1,74 @@
 import { describe, expect, it } from 'vitest';
-import { confidenceColor, filterDetections } from './detections';
+import {
+  confidenceColor,
+  filterDetections,
+  previewOrientation,
+} from './detections';
 import type { Detection } from './types';
+
+/** Axis-aligned rectangle [width x height] polygon (clockwise from origin). */
+function rect(width: number, height: number): [number, number][] {
+  return [
+    [0, 0],
+    [width, 0],
+    [width, height],
+    [0, height],
+  ];
+}
+
+/** Parallelogram whose longest side points along `deg` (length `len`). */
+function tilted(deg: number, len: number): [number, number][] {
+  const r = (deg * Math.PI) / 180;
+  const dx = Math.cos(r) * len;
+  const dy = Math.sin(r) * len;
+  // Perpendicular short offset so the long side is unambiguously longest.
+  const ox = -Math.sin(r) * 10;
+  const oy = Math.cos(r) * 10;
+  return [
+    [0, 0],
+    [dx, dy],
+    [dx + ox, dy + oy],
+    [ox, oy],
+  ];
+}
+
+describe('previewOrientation', () => {
+  it('does not rotate an axis-aligned wide box (long side horizontal)', () => {
+    const { textAngle, longHorizontal } = previewOrientation(rect(20, 10), 0);
+    expect(textAngle).toBeCloseTo(0);
+    expect(longHorizontal).toBe(true);
+  });
+
+  it('does not rotate an axis-aligned tall box (a number stays upright)', () => {
+    const { textAngle, longHorizontal } = previewOrientation(rect(10, 20), 0);
+    expect(textAngle).toBeCloseTo(0);
+    expect(longHorizontal).toBe(false);
+  });
+
+  it('straightens a slightly tilted box the short way, long side horizontal', () => {
+    const { textAngle, longHorizontal } = previewOrientation(
+      tilted(10, 100),
+      0,
+    );
+    expect(textAngle).toBeCloseTo((10 * Math.PI) / 180);
+    expect(longHorizontal).toBe(true);
+  });
+
+  it('keeps a near-vertical box upright (short side horizontal)', () => {
+    const { textAngle, longHorizontal } = previewOrientation(
+      tilted(80, 100),
+      0,
+    );
+    expect(textAngle).toBeCloseTo((-10 * Math.PI) / 180);
+    expect(longHorizontal).toBe(false);
+  });
+
+  it('rotates a vertical street (angle 90) to horizontal', () => {
+    const { textAngle, longHorizontal } = previewOrientation(rect(10, 20), 90);
+    expect(textAngle).toBeCloseTo(-Math.PI / 2);
+    expect(longHorizontal).toBe(true);
+  });
+});
 
 function makeDetection(overrides: Partial<Detection> = {}): Detection {
   return {

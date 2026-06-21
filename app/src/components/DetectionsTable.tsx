@@ -10,6 +10,8 @@ interface DetectionsTableProps {
   jsonHeight: number;
 }
 
+const NUM_PREVIEW_IMAGES = 100;
+
 /**
  * Table of detections sorted by confidence. Shows all filtered detections, or
  * only the selected ones when a selection is active. The first ten rows render
@@ -66,7 +68,7 @@ export function DetectionsTable(props: DetectionsTableProps) {
                 <td>{type}</td>
                 <td>{det.text}</td>
                 <td>
-                  {rowIdx < 10 && (
+                  {rowIdx < NUM_PREVIEW_IMAGES && (
                     <DetectionCanvas
                       det={det}
                       image={image}
