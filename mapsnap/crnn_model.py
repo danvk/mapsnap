@@ -165,12 +165,48 @@ def greedy_paths(log_probs: torch.Tensor) -> list[list[int]]:
     return [row.tolist() for row in best]
 
 
-def firing_span(path: list[int]) -> tuple[int, int] | None:
-    """(first, last) timestep indices that emitted a non-blank class, or None if all blank."""
-    nonblank = [t for t, idx in enumerate(path) if idx != BLANK_INDEX]
-    if not nonblank:
+# A blank run of at least this many timesteps separates two numbers (within a number, digits
+# are <=2-3 blanks apart; between adjacent numbers the whitespace is ~7+ blanks).
+GAP_STEPS = 4
+
+
+def central_group(path: list[int], *, gap: int = GAP_STEPS) -> tuple[int, int] | None:
+    """(first, last) span of the firing cluster nearest the strip center, or None if all blank.
+
+    The CRNN crop is wide enough to catch a neighboring number; the path then has two firing
+    clusters separated by a wide blank run. The candidate is centered on its own number, so
+    the cluster nearest the center timestep is the one to keep — both for decoding and for
+    boxing — which drops the neighbor's digits. Clusters are split on blank runs >= ``gap``.
+    """
+    clusters: list[tuple[int, int]] = []
+    start: int | None = None
+    last = 0
+    blanks = 0
+    for t, idx in enumerate(path):
+        if idx != BLANK_INDEX:
+            if start is None:
+                start = t
+            last = t
+            blanks = 0
+        elif start is not None:
+            blanks += 1
+            if blanks >= gap:
+                clusters.append((start, last))
+                start = None
+    if start is not None:
+        clusters.append((start, last))
+    if not clusters:
         return None
-    return nonblank[0], nonblank[-1]
+
+    center = (len(path) - 1) / 2
+
+    def distance(cluster: tuple[int, int]) -> float:
+        lo, hi = cluster
+        if lo <= center <= hi:
+            return 0.0
+        return min(abs(lo - center), abs(hi - center))
+
+    return min(clusters, key=distance)
 
 
 def ink_row_center(ink_per_row: np.ndarray) -> float | None:
@@ -194,24 +230,22 @@ NUMBER_HALF_H_STRIP = (
 
 def locate_number(
     strip: np.ndarray,
-    path: list[int],
+    span: tuple[int, int],
+    steps: int,
     crop_box: tuple[int, int, int, int],
     *,
     pad_frac: float = 0.15,
-) -> list[list[int]] | None:
-    """Tight box (image coords) around the read digits, or None if the path is all-blank.
+) -> list[list[int]]:
+    """Tight box (image coords) around one number, given its CTC timestep ``span``.
 
-    Horizontal extent comes from the CTC firing timesteps — each timestep maps to a known
-    column of the strip, giving a precise, well-centered span. Vertical position comes from
-    the ink centroid within those columns, with a number-sized height around it (robust:
-    fragile band-finding under-/over-segments ornate digits). ``crop_box`` is the strip's
-    source region (x0, y0, x1, y1) in image coords (see strip_crop_box).
+    Horizontal extent comes from the firing timesteps in ``span`` — each timestep maps to a
+    known column of the strip (``steps`` total), giving a precise, well-centered span.
+    Vertical position comes from the ink centroid within those columns, with a number-sized
+    height around it (robust: fragile band-finding under-/over-segments ornate digits).
+    ``crop_box`` is the strip's source region (x0, y0, x1, y1) in image coords (see
+    strip_crop_box).
     """
-    span = firing_span(path)
-    if span is None:
-        return None
     first_t, last_t = span
-    steps = len(path)
     height, width = strip.shape
     cell = width / steps
     sx_lo = first_t * cell

@@ -6,10 +6,10 @@ from mapsnap.crnn_model import (
     CRNN_WIDTH,
     NUM_CLASSES,
     build_crnn,
+    central_group,
     ctc_greedy_decode,
     decode_batch,
     encode_text,
-    firing_span,
     greedy_paths,
     ink_row_center,
     locate_number,
@@ -58,22 +58,34 @@ def test_crnn_forward_and_decode_shapes():
     assert len(greedy_paths(log_probs)) == 2
 
 
-def test_firing_span():
-    assert firing_span([0, 3, 3, 0, 2, 0]) == (1, 4)
-    assert firing_span([0, 0, 0]) is None
-    assert firing_span([5]) == (0, 0)
+def test_central_group_picks_cluster_nearest_center():
+    # Left cluster (t2-3) far from center; right cluster (t11-13) straddles center 11.5.
+    path = [0] * 24
+    for t in (2, 3):
+        path[t] = 3
+    for t in (11, 12, 13):
+        path[t] = 4
+    assert central_group(path) == (11, 13)
+
+
+def test_central_group_merges_within_number_gaps():
+    # Digits 2 blanks apart (< GAP_STEPS) belong to one number -> a single cluster.
+    path = [0] * 24
+    for t in (10, 13, 16):
+        path[t] = 2
+    assert central_group(path) == (10, 16)
+
+
+def test_central_group_all_blank_is_none():
+    assert central_group([0] * 24) is None
 
 
 def test_locate_number_brackets_digits():
     # 48x96 strip: white with a dark digit-like block at rows 12..32, cols 40..60.
     strip = np.full((CRNN_HEIGHT, CRNN_WIDTH), 255, dtype=np.uint8)
     strip[12:32, 40:60] = 0
-    # 24-step path (cell width 4): non-blank where the block is (cols 40..60 -> t 10..15).
-    path = [0] * 24
-    for t in range(10, 16):
-        path[t] = 3
-    box = locate_number(strip, path, (0, 0, CRNN_WIDTH, CRNN_HEIGHT))
-    assert box is not None
+    # 24-step path (cell width 4): the number spans cols 40..60 -> timesteps 10..15.
+    box = locate_number(strip, (10, 15), 24, (0, 0, CRNN_WIDTH, CRNN_HEIGHT))
     xs = [p[0] for p in box]
     ys = [p[1] for p in box]
     # Box is much tighter than the full crop and brackets the dark block.
@@ -92,8 +104,3 @@ def test_ink_row_center_is_robust_to_speckle():
 
 def test_ink_row_center_empty():
     assert ink_row_center(np.zeros(48)) is None
-
-
-def test_locate_number_rejects_all_blank():
-    strip = np.full((CRNN_HEIGHT, CRNN_WIDTH), 255, dtype=np.uint8)
-    assert locate_number(strip, [0] * 24, (0, 0, CRNN_WIDTH, CRNN_HEIGHT)) is None

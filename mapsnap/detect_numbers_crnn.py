@@ -26,7 +26,8 @@ from PIL import Image
 
 from mapsnap.crnn_model import (
     build_crnn,
-    decode_batch,
+    central_group,
+    ctc_greedy_decode,
     eval_transform,
     greedy_paths,
     locate_number,
@@ -40,10 +41,12 @@ from mapsnap.detect_keymap_numbers import (
     streets_path,
 )
 from mapsnap.detect_numbers_cnn import (
+    DEDUP_WORKING,
     DEFAULT_NMS_DIST,
     DEFAULT_STRIDE,
     DEFAULT_THRESHOLD,
     detect_candidate_centers,
+    nms_peaks,
 )
 from mapsnap.number_model import build_model, select_device
 
@@ -80,15 +83,16 @@ def read_candidates(
     device,
     *,
     batch_size: int = 256,
-) -> tuple[list[tuple[str, float, list[int]]], list[np.ndarray]]:
-    """Per candidate: (digit string, confidence, CTC path) plus the grayscale strips.
+) -> tuple[list[tuple[float, list[int]]], list[np.ndarray]]:
+    """Per candidate: (confidence, CTC path) plus the grayscale strips.
 
-    An empty string means the CRNN rejected the crop (no number). The CTC path and strip
-    feed locate_number to derive a tight box around the digits.
+    The path is segmented into number clusters downstream (central_group); decoding and
+    boxing use only the cluster nearest the strip center, so a neighbor caught in the wide
+    crop is dropped.
     """
     transform = eval_transform()
     strips = [number_strip(image, cx, cy, factor) for cx, cy in centers]
-    results: list[tuple[str, float, list[int]]] = []
+    results: list[tuple[float, list[int]]] = []
     crnn.eval()
     for start in range(0, len(strips), batch_size):
         batch = strips[start : start + batch_size]
@@ -96,13 +100,9 @@ def read_candidates(
             [cast(torch.Tensor, transform(strip)) for strip in batch]
         ).to(device)
         log_probs = crnn(tensors)  # (T, N, C)
-        texts = decode_batch(log_probs)
         paths = greedy_paths(log_probs)
         confidences = log_probs.exp().max(dim=2).values.mean(dim=0).cpu().numpy()
-        results.extend(
-            (text, float(conf), path)
-            for text, conf, path in zip(texts, confidences, paths)
-        )
+        results.extend((float(conf), path) for conf, path in zip(confidences, paths))
     return results, strips
 
 
@@ -125,17 +125,35 @@ def detect_and_read(
     )
     reads, strips = read_candidates(image, centers, factor, crnn, device)
 
-    detections: list[dict] = []
-    for (cx, cy), (text, confidence, path), strip in zip(centers, reads, strips):
-        text = snap_to_pages(text, pages)
+    # Decode and box only the central number of each crop, dropping a neighbor caught in the
+    # wide window.
+    found: list[tuple[list[list[int]], str, float]] = []
+    for (cx, cy), (confidence, path), strip in zip(centers, reads, strips):
+        group = central_group(path)
+        if group is None:
+            continue  # CRNN emitted nothing -> no number here
+        text = snap_to_pages(ctc_greedy_decode(path[group[0] : group[1] + 1]), pages)
         if not text:
-            continue  # CRNN rejected the crop (no number) or snapped to empty
+            continue
         crop_box = strip_crop_box(width, height, cx, cy, factor)
-        polygon = locate_number(strip, path, crop_box)
-        if polygon is None:
-            x0, y0, x1, y1 = crop_box
-            polygon = [[x0, y0], [x1, y0], [x1, y1], [x0, y1]]
-        detections.append(detection_record(polygon, text, confidence))
+        polygon = locate_number(strip, group, len(path), crop_box)
+        found.append((polygon, text, confidence))
+
+    # Trimming a between-two-numbers candidate can duplicate a neighbor's detection; keep the
+    # higher-confidence box of any that now sit on the same number.
+    if found:
+        box_centers = [
+            (sum(p[0] for p in poly) / 4, sum(p[1] for p in poly) / 4)
+            for poly, _, _ in found
+        ]
+        scores = [confidence for _, _, confidence in found]
+        keep = nms_peaks(box_centers, scores, round(DEDUP_WORKING / factor))
+        found = [found[k] for k in keep]
+
+    detections = [
+        detection_record(polygon, text, confidence)
+        for polygon, text, confidence in found
+    ]
 
     doc = {
         "width": width,
