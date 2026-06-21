@@ -65,8 +65,15 @@ describe('previewOrientation', () => {
 
   it('rotates a vertical street (angle 90) to horizontal', () => {
     const { textAngle, longHorizontal } = previewOrientation(rect(10, 20), 90);
-    expect(textAngle).toBeCloseTo(-Math.PI / 2);
+    expect(textAngle).toBeCloseTo(Math.PI / 2);
     expect(longHorizontal).toBe(true);
+  });
+
+  it('rotates angle 270 the opposite way from angle 90', () => {
+    const at90 = previewOrientation(rect(10, 20), 90);
+    const at270 = previewOrientation(rect(10, 20), 270);
+    expect(at270.textAngle).toBeCloseTo(-Math.PI / 2);
+    expect(at90.textAngle).toBeCloseTo(-at270.textAngle); // 180° apart
   });
 });
 

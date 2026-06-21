@@ -39,7 +39,7 @@ export function filterDetections(
 /**
  * Display rotation for a detection's preview thumbnail.
  *
- * Honors the detection's reading direction (`angle`, degrees CCW), then snaps by the
+ * Honors the detection's reading direction (`angle`, degrees CW), then snaps by the
  * smallest rotation that leaves the box axis-aligned — which may put the long OR the short
  * side along the horizontal, whichever is the smaller turn. So a number whose box is taller
  * than wide stays upright instead of being rotated a quarter turn, while a diagonal street
@@ -69,13 +69,15 @@ export function previewOrientation(
     }
   }
   const rawAngle = Math.atan2(longDy, longDx);
-  // `angle` is CCW; image space is y-down, so the desired text direction is -angle.
-  const target = (-angle * Math.PI) / 180;
+  // `angle` is CW, which matches image space (y-down), so the desired text direction is +angle.
+  const target = (angle * Math.PI) / 180;
   const quarter = Math.PI / 2;
   // Snap the box orientation to the axis-aligned grid point nearest the target direction.
   const k = Math.round((target - rawAngle) / quarter);
+  const snapped = rawAngle + k * quarter;
   return {
-    textAngle: rawAngle + k * quarter,
+    // Normalize to (-π, π] so equivalent rotations compare equal.
+    textAngle: Math.atan2(Math.sin(snapped), Math.cos(snapped)),
     // After rotating, the long side lies at -k*90°: horizontal for even k, vertical for odd.
     longHorizontal: ((k % 2) + 2) % 2 === 0,
   };
