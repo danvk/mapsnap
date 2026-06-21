@@ -15,6 +15,7 @@ import { ImageColumn, type Mode } from './components/ImageColumn';
 import { MapView } from './components/MapView';
 import { DetectionsTable } from './components/DetectionsTable';
 import { PanelsTable } from './components/PanelsTable';
+import { loadImage } from './loadImage';
 
 /**
  * Debug API exposed on `window.mapsnap` so data can be injected without the UI
@@ -31,16 +32,6 @@ declare global {
   interface Window {
     mapsnap: MapsnapDebugApi;
   }
-}
-
-// Load an image element from a URL, resolving once it has decoded.
-function loadImage(src: string): Promise<HTMLImageElement> {
-  return new Promise((resolve, reject) => {
-    const el = new Image();
-    el.onload = () => resolve(el);
-    el.onerror = reject;
-    el.src = src;
-  });
 }
 
 /**

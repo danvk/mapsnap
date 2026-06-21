@@ -1,0 +1,162 @@
+/* Reuse the debugger's image-wrapper and detections-table styling. */
+@import '../styles.css';
+
+/* The page itself scrolls vertically; the tall image scrolls with it while the
+   side columns stay in view via position: sticky. */
+.keymap-container {
+  display: flex;
+  gap: 16px;
+  padding: 16px;
+  align-items: flex-start;
+}
+
+.image-list {
+  position: sticky;
+  top: 16px;
+  flex-shrink: 0;
+  width: 220px;
+  font-family: sans-serif;
+  font-size: 13px;
+  max-height: calc(100vh - 32px);
+  overflow-y: auto;
+}
+
+.image-list h2 {
+  font-size: 14px;
+  margin: 0 0 8px;
+}
+
+.image-list ul {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.image-list li {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 8px;
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+.image-list li:hover {
+  background: #f0f0f0;
+}
+
+.image-list li.selected {
+  background: #fff3e0;
+  font-weight: bold;
+}
+
+.image-list .image-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.image-list .label-count {
+  flex-shrink: 0;
+  background: #1e88e5;
+  color: white;
+  border-radius: 10px;
+  padding: 0 7px;
+  font-size: 11px;
+}
+
+.keymap-center {
+  flex: 1;
+  min-width: 0;
+}
+
+/* Override the shared inline-block wrapper and its `.image-wrapper img` caps
+   (max-width: 800px / max-height: 90vh) so the image fills the column width. */
+.keymap-center .image-wrapper {
+  display: block;
+  width: 100%;
+}
+
+.keymap-center .image-wrapper img {
+  display: block;
+  width: 100%;
+  max-width: none;
+  max-height: none;
+  height: auto;
+}
+
+.keymap-empty {
+  color: #999;
+  font-family: sans-serif;
+  padding: 40px;
+}
+
+.keymap-right {
+  position: sticky;
+  top: 16px;
+  flex-shrink: 0;
+  width: 320px;
+  max-height: calc(100vh - 32px);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+/* The table scrolls within the sticky column; the status and checkbox stay put. */
+.keymap-right #detections-panel {
+  height: auto;
+  flex: 1;
+  min-height: 0;
+}
+
+.keymap-status {
+  display: flex;
+  justify-content: space-between;
+  font-family: sans-serif;
+  font-size: 12px;
+  color: #555;
+}
+
+.keymap-controls {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-family: sans-serif;
+  font-size: 13px;
+  color: #333;
+}
+
+.save-status.save-saved {
+  color: #2e7d32;
+}
+
+.save-status.save-error {
+  color: #c62828;
+}
+
+.label-preview {
+  display: block;
+  max-height: 48px;
+  width: auto;
+  border: 1px solid #ddd;
+}
+
+.label-text-input {
+  width: 8em;
+  font-size: 14px;
+  padding: 2px 4px;
+}
+
+.label-delete {
+  border: none;
+  background: none;
+  color: #c62828;
+  cursor: pointer;
+  font-size: 14px;
+  line-height: 1;
+}
+
+.label-delete:hover {
+  color: #8e0000;
+}
