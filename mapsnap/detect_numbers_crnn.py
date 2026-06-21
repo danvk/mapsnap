@@ -25,12 +25,13 @@ import torch
 from PIL import Image
 
 from mapsnap.crnn_model import (
-    BOX_HALF_H_WORKING,
-    BOX_HALF_W_WORKING,
     build_crnn,
     decode_batch,
     eval_transform,
+    greedy_paths,
+    locate_number,
     number_strip,
+    strip_crop_box,
 )
 from mapsnap.detect_keymap_numbers import (
     detection_record,
@@ -79,24 +80,30 @@ def read_candidates(
     device,
     *,
     batch_size: int = 256,
-) -> list[tuple[str, float]]:
-    """Decode (digit string, confidence) for each candidate center via the CRNN."""
+) -> tuple[list[tuple[str, float, list[int]]], list[np.ndarray]]:
+    """Per candidate: (digit string, confidence, CTC path) plus the grayscale strips.
+
+    An empty string means the CRNN rejected the crop (no number). The CTC path and strip
+    feed locate_number to derive a tight box around the digits.
+    """
     transform = eval_transform()
-    results: list[tuple[str, float]] = []
+    strips = [number_strip(image, cx, cy, factor) for cx, cy in centers]
+    results: list[tuple[str, float, list[int]]] = []
     crnn.eval()
-    for start in range(0, len(centers), batch_size):
-        batch = centers[start : start + batch_size]
-        strips = torch.stack(
-            [
-                cast(torch.Tensor, transform(number_strip(image, cx, cy, factor)))
-                for cx, cy in batch
-            ]
+    for start in range(0, len(strips), batch_size):
+        batch = strips[start : start + batch_size]
+        tensors = torch.stack(
+            [cast(torch.Tensor, transform(strip)) for strip in batch]
         ).to(device)
-        log_probs = crnn(strips)  # (T, N, C)
+        log_probs = crnn(tensors)  # (T, N, C)
         texts = decode_batch(log_probs)
+        paths = greedy_paths(log_probs)
         confidences = log_probs.exp().max(dim=2).values.mean(dim=0).cpu().numpy()
-        results.extend(zip(texts, (float(c) for c in confidences)))
-    return results
+        results.extend(
+            (text, float(conf), path)
+            for text, conf, path in zip(texts, confidences, paths)
+        )
+    return results, strips
 
 
 def detect_and_read(
@@ -116,20 +123,18 @@ def detect_and_read(
     centers, factor = detect_candidate_centers(
         image, cnn, device, stride=stride, threshold=threshold, nms_dist=nms_dist
     )
-    reads = read_candidates(image, centers, factor, crnn, device)
+    reads, strips = read_candidates(image, centers, factor, crnn, device)
 
-    half_w = round(BOX_HALF_W_WORKING / factor)
-    half_h = round(BOX_HALF_H_WORKING / factor)
     detections: list[dict] = []
-    for (cx, cy), (text, confidence) in zip(centers, reads):
+    for (cx, cy), (text, confidence, path), strip in zip(centers, reads, strips):
         text = snap_to_pages(text, pages)
         if not text:
-            continue
-        x0 = max(0, round(cx) - half_w)
-        y0 = max(0, round(cy) - half_h)
-        x1 = min(width, round(cx) + half_w)
-        y1 = min(height, round(cy) + half_h)
-        polygon = [[x0, y0], [x1, y0], [x1, y1], [x0, y1]]
+            continue  # CRNN rejected the crop (no number) or snapped to empty
+        crop_box = strip_crop_box(width, height, cx, cy, factor)
+        polygon = locate_number(strip, path, crop_box)
+        if polygon is None:
+            x0, y0, x1, y1 = crop_box
+            polygon = [[x0, y0], [x1, y0], [x1, y1], [x0, y1]]
         detections.append(detection_record(polygon, text, confidence))
 
     doc = {

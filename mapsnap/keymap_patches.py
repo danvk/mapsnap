@@ -46,6 +46,39 @@ MIN_NEG_DIST = 40
 # Negative patches sampled per positive label.
 NEG_PER_POS = 3
 
+# Largest a page number gets in a FULL-resolution scan (px); at working scale (SCALE) a
+# number is therefore ~this * SCALE, roughly constant across scans. Used to decide whether
+# a candidate negative crop is safe — i.e. contains no part of a real page number.
+NUMBER_MAX_W_FULL = 170
+NUMBER_MAX_H_FULL = 100
+NUMBER_HALF_W_WORKING = NUMBER_MAX_W_FULL * SCALE / 2
+NUMBER_HALF_H_WORKING = NUMBER_MAX_H_FULL * SCALE / 2
+
+
+def crop_excludes_numbers(
+    cx: float,
+    cy: float,
+    label_centers: list[tuple[float, float]],
+    *,
+    crop_half_w: float,
+    crop_half_h: float,
+    number_half_w: float = NUMBER_HALF_W_WORKING,
+    number_half_h: float = NUMBER_HALF_H_WORKING,
+) -> bool:
+    """Whether a crop at (cx, cy) overlaps no page-number box (so it is a safe negative).
+
+    All coordinates and half-sizes are in working units. A number box (centered on a label,
+    half-size number_half_*) and the crop box (half-size crop_half_*) overlap when they are
+    close in BOTH axes; the crop is a safe negative only if every label clears it in at
+    least one axis. This lets negatives sit in the colorful gaps between numbers (e.g.
+    vertically between rows) without clipping a real number into the crop.
+    """
+    margin_x = crop_half_w + number_half_w
+    margin_y = crop_half_h + number_half_h
+    return all(
+        abs(cx - lx) >= margin_x or abs(cy - ly) >= margin_y for lx, ly in label_centers
+    )
+
 
 def load_label_points(path: str) -> tuple[int, int, list[tuple[float, float, str]]]:
     """Read a .labels.json file; return (width, height, [(x, y, text), ...])."""

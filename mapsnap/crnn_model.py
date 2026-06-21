@@ -17,6 +17,8 @@ import torch
 from torch import nn
 from torchvision import transforms
 
+from mapsnap.keymap_patches import NUMBER_MAX_H_FULL, SCALE
+
 # Crop input size fed to the CRNN (grayscale).
 CRNN_HEIGHT = 48
 CRNN_WIDTH = 96
@@ -51,19 +53,27 @@ def ctc_greedy_decode(indices: list[int]) -> str:
     return "".join(out)
 
 
-def number_strip(image: np.ndarray, cx: float, cy: float, factor: float) -> np.ndarray:
-    """Grayscale CRNN_HEIGHT x CRNN_WIDTH crop centered on (cx, cy) in image coords.
+def strip_crop_box(
+    width: int, height: int, cx: float, cy: float, factor: float
+) -> tuple[int, int, int, int]:
+    """Clamped (x0, y0, x1, y1) of the strip's source region around (cx, cy) in image coords.
 
-    The box is sized in working-scale units and converted to the image's own scale with
-    ``factor`` (the localizer's working_scale), so the number fills a consistent fraction.
+    Box is sized in working-scale units and converted to the image's own scale with
+    ``factor`` (the localizer's working_scale), so a number fills a consistent fraction.
     """
     half_w = round(BOX_HALF_W_WORKING / factor)
     half_h = round(BOX_HALF_H_WORKING / factor)
-    height, width = image.shape[:2]
     x0 = max(0, round(cx) - half_w)
     y0 = max(0, round(cy) - half_h)
     x1 = min(width, round(cx) + half_w)
     y1 = min(height, round(cy) + half_h)
+    return x0, y0, x1, y1
+
+
+def number_strip(image: np.ndarray, cx: float, cy: float, factor: float) -> np.ndarray:
+    """Grayscale CRNN_HEIGHT x CRNN_WIDTH crop centered on (cx, cy) in image coords."""
+    height, width = image.shape[:2]
+    x0, y0, x1, y1 = strip_crop_box(width, height, cx, cy, factor)
     crop = image[y0:y1, x0:x1]
     if crop.size == 0:
         return np.full((CRNN_HEIGHT, CRNN_WIDTH), 255, dtype=np.uint8)
@@ -147,3 +157,87 @@ def decode_batch(log_probs: torch.Tensor) -> list[str]:
     """Greedy-CTC decode a (T, N, C) log-prob batch into N digit strings."""
     best = log_probs.argmax(dim=2).permute(1, 0).cpu().numpy()  # (N, T)
     return [ctc_greedy_decode(row.tolist()) for row in best]
+
+
+def greedy_paths(log_probs: torch.Tensor) -> list[list[int]]:
+    """Per-sample raw argmax index path (length T) for a (T, N, C) log-prob batch."""
+    best = log_probs.argmax(dim=2).permute(1, 0).cpu().numpy()  # (N, T)
+    return [row.tolist() for row in best]
+
+
+def firing_span(path: list[int]) -> tuple[int, int] | None:
+    """(first, last) timestep indices that emitted a non-blank class, or None if all blank."""
+    nonblank = [t for t, idx in enumerate(path) if idx != BLANK_INDEX]
+    if not nonblank:
+        return None
+    return nonblank[0], nonblank[-1]
+
+
+def ink_row_center(ink_per_row: np.ndarray) -> float | None:
+    """Ink-weighted mean row of a per-row ink count (the digits' vertical center), or None.
+
+    A weighted centroid is robust to the speckle and shadows on a colored/ornate block that
+    defeat thresholded band-finding: stray dark pixels barely move the center of mass.
+    """
+    total = float(ink_per_row.sum())
+    if total <= 0:
+        return None
+    return float((np.arange(len(ink_per_row)) * ink_per_row).sum() / total)
+
+
+# Half-height (strip rows) of a page number: it is ~NUMBER_MAX_H_FULL px tall in a crop
+# 2*BOX_HALF_H_WORKING working px tall, scaled into the CRNN_HEIGHT strip.
+NUMBER_HALF_H_STRIP = (
+    (NUMBER_MAX_H_FULL * SCALE / 2) / BOX_HALF_H_WORKING * (CRNN_HEIGHT / 2)
+)
+
+
+def locate_number(
+    strip: np.ndarray,
+    path: list[int],
+    crop_box: tuple[int, int, int, int],
+    *,
+    pad_frac: float = 0.15,
+) -> list[list[int]] | None:
+    """Tight box (image coords) around the read digits, or None if the path is all-blank.
+
+    Horizontal extent comes from the CTC firing timesteps — each timestep maps to a known
+    column of the strip, giving a precise, well-centered span. Vertical position comes from
+    the ink centroid within those columns, with a number-sized height around it (robust:
+    fragile band-finding under-/over-segments ornate digits). ``crop_box`` is the strip's
+    source region (x0, y0, x1, y1) in image coords (see strip_crop_box).
+    """
+    span = firing_span(path)
+    if span is None:
+        return None
+    first_t, last_t = span
+    steps = len(path)
+    height, width = strip.shape
+    cell = width / steps
+    sx_lo = first_t * cell
+    sx_hi = (last_t + 1) * cell
+
+    col0 = max(0, int(sx_lo))
+    col1 = min(width, int(round(sx_hi)))
+    sub = strip[:, col0:col1] if col1 > col0 else strip
+    _, ink = cv2.threshold(sub, 0, 255, cv2.THRESH_BINARY_INV | cv2.THRESH_OTSU)
+    center = ink_row_center(ink.sum(axis=1) / 255)
+    if center is None:
+        sy_lo, sy_hi = 0.0, float(height)
+    else:
+        half = NUMBER_HALF_H_STRIP * (1 + pad_frac)
+        sy_lo = max(0.0, center - half)
+        sy_hi = min(float(height), center + half)
+
+    pad_x = pad_frac * (sx_hi - sx_lo)
+    sx_lo = max(0.0, sx_lo - pad_x)
+    sx_hi = min(float(width), sx_hi + pad_x)
+
+    x0, y0, x1, y1 = crop_box
+    crop_w = x1 - x0
+    crop_h = y1 - y0
+    ix_lo = round(x0 + sx_lo / width * crop_w)
+    ix_hi = round(x0 + sx_hi / width * crop_w)
+    iy_lo = round(y0 + sy_lo / height * crop_h)
+    iy_hi = round(y0 + sy_hi / height * crop_h)
+    return [[ix_lo, iy_lo], [ix_hi, iy_lo], [ix_hi, iy_hi], [ix_lo, iy_hi]]

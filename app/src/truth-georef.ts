@@ -489,7 +489,7 @@ function updateDetectionsTable(): void {
     tr.appendChild(textTd);
 
     const imageTd = document.createElement('td');
-    if (rowIdx < 10) {
+    if (rowIdx < 100) {
       const canvas = document.createElement('canvas');
       drawDetectionCanvas(canvas, det);
       imageTd.appendChild(canvas);

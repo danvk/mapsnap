@@ -12,6 +12,7 @@ import argparse
 import sys
 from pathlib import Path
 
+import cv2
 import numpy as np
 import torch
 from PIL import Image
@@ -20,6 +21,8 @@ from torch.utils.data import DataLoader, Dataset
 
 from mapsnap.crnn_model import (
     BLANK_INDEX,
+    BOX_HALF_H_WORKING,
+    BOX_HALF_W_WORKING,
     build_crnn,
     decode_batch,
     encode_text,
@@ -27,8 +30,21 @@ from mapsnap.crnn_model import (
     number_strip,
     train_transform,
 )
-from mapsnap.keymap_patches import labels_path_for, load_label_points, working_scale
+from mapsnap.keymap_patches import (
+    crop_excludes_numbers,
+    labels_path_for,
+    load_label_points,
+    working_scale,
+)
 from mapsnap.utils import image_stem
+
+# Default empty-target negative strips sampled per positive, so the CRNN learns to emit
+# nothing (-> rejected) on the localizer's false positives instead of inventing a number.
+DEFAULT_NEGATIVE_RATIO = 0.5
+
+# Fraction of negatives drawn from the most colorful (high-saturation) safe locations —
+# the pastel gaps between numbers where the localizer tends to false-positive.
+COLORFUL_FRAC = 0.6
 
 
 def labeled_images(data_dir: Path) -> list[Path]:
@@ -44,8 +60,73 @@ def labeled_images(data_dir: Path) -> list[Path]:
     return images
 
 
-def build_split(image_paths: list[Path]) -> tuple[list[np.ndarray], list[str]]:
-    """Strips and digit-string labels for every page number across the given images."""
+def sample_negative_strips(
+    image: np.ndarray,
+    points: list[tuple[float, float, str]],
+    factor: float,
+    count: int,
+    rng: np.random.Generator,
+    *,
+    colorful_frac: float = COLORFUL_FRAC,
+) -> list[np.ndarray]:
+    """Empty-target negative strips at safe centers, biased toward colorful (pastel) areas.
+
+    Safe = the crop contains no part of a real page number (crop_excludes_numbers). Among
+    safe candidates, the most saturated locations are preferred since that is where the
+    localizer false-positives, with the remainder filled randomly for coverage.
+    """
+    if count <= 0:
+        return []
+    height, width = image.shape[:2]
+    label_centers = [(x * factor, y * factor) for x, y, _ in points]
+    crop_half_w = BOX_HALF_W_WORKING
+    crop_half_h = BOX_HALF_H_WORKING
+
+    candidates: list[tuple[int, int]] = []
+    for _ in range(count * 40):
+        cx = int(rng.integers(0, width))
+        cy = int(rng.integers(0, height))
+        if crop_excludes_numbers(
+            cx * factor,
+            cy * factor,
+            label_centers,
+            crop_half_w=crop_half_w,
+            crop_half_h=crop_half_h,
+        ):
+            candidates.append((cx, cy))
+        if len(candidates) >= count * 8:
+            break
+    if not candidates:
+        return []
+
+    saturation = cv2.cvtColor(image, cv2.COLOR_RGB2HSV)[:, :, 1]
+
+    def colorfulness(center: tuple[int, int]) -> float:
+        cx, cy = center
+        x0, x1 = max(0, cx - 10), min(width, cx + 10)
+        y0, y1 = max(0, cy - 10), min(height, cy + 10)
+        return float(saturation[y0:y1, x0:x1].mean())
+
+    candidates.sort(key=colorfulness, reverse=True)
+    n_colorful = min(len(candidates), round(count * colorful_frac))
+    picked = candidates[:n_colorful]
+    rest = candidates[n_colorful:]
+    rng.shuffle(rest)
+    picked += rest[: count - len(picked)]
+    return [number_strip(image, cx, cy, factor) for cx, cy in picked]
+
+
+def build_split(
+    image_paths: list[Path],
+    *,
+    negative_ratio: float = 0.0,
+    rng: np.random.Generator | None = None,
+) -> tuple[list[np.ndarray], list[str]]:
+    """Strips and digit-string labels for every page number across the given images.
+
+    With ``negative_ratio`` > 0, also adds that fraction (per image) of empty-target ("")
+    negative strips so the CRNN learns to reject non-numbers (see sample_negative_strips).
+    """
     strips: list[np.ndarray] = []
     texts: list[str] = []
     for image_path in image_paths:
@@ -54,11 +135,19 @@ def build_split(image_paths: list[Path]) -> tuple[list[np.ndarray], list[str]]:
             continue
         factor = working_scale(width, height)
         image = np.asarray(Image.open(image_path).convert("RGB"))
+        positives = 0
         for px, py, text in points:
             if not encode_text(text):
                 continue
             strips.append(number_strip(image, px, py, factor))
             texts.append("".join(c for c in text if c.isdigit()))
+            positives += 1
+        if negative_ratio > 0 and rng is not None:
+            negatives = sample_negative_strips(
+                image, points, factor, round(negative_ratio * positives), rng
+            )
+            strips.extend(negatives)
+            texts.extend([""] * len(negatives))
     return strips, texts
 
 
@@ -110,10 +199,17 @@ def main() -> None:
     parser.add_argument("--batch-size", type=int, default=64)
     parser.add_argument("--lr", type=float, default=1e-3)
     parser.add_argument("--seed", type=int, default=0)
+    parser.add_argument(
+        "--negative-ratio",
+        type=float,
+        default=DEFAULT_NEGATIVE_RATIO,
+        help="Empty-target negatives per positive, for reject (default %(default)s).",
+    )
     parser.add_argument("--out", type=Path, default=Path("models/number_crnn.pt"))
     args = parser.parse_args()
 
     torch.manual_seed(args.seed)
+    rng = np.random.default_rng(args.seed)
     device = torch.device("cpu")
 
     images = labeled_images(args.data_dir)
@@ -122,11 +218,16 @@ def main() -> None:
     if not val_images:
         sys.exit(f"--val-image {args.val_image!r} not found")
 
-    train_strips, train_texts = build_split(train_images)
-    val_strips, val_texts = build_split(val_images)
+    train_strips, train_texts = build_split(
+        train_images, negative_ratio=args.negative_ratio, rng=rng
+    )
+    val_strips, val_texts = build_split(
+        val_images, negative_ratio=args.negative_ratio, rng=rng
+    )
+    neg_train = sum(1 for t in train_texts if not t)
     print(
-        f"train strips={len(train_strips)} val strips={len(val_strips)} "
-        f"(val={args.val_image})",
+        f"train strips={len(train_strips)} ({neg_train} neg) "
+        f"val strips={len(val_strips)} (val={args.val_image})",
         file=sys.stderr,
     )
 

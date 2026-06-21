@@ -2,12 +2,27 @@ import numpy as np
 
 from mapsnap.keymap_patches import (
     build_image_patches,
+    crop_excludes_numbers,
     crop_patch,
     is_far_from_all,
     sample_negative_centers,
     scale_points,
     working_scale,
 )
+
+
+def test_crop_excludes_numbers():
+    labels = [(100.0, 100.0)]
+    # Crop directly on the label overlaps the number -> not safe.
+    assert not crop_excludes_numbers(100, 100, labels, crop_half_w=55, crop_half_h=30)
+    # Far horizontally (beyond crop_half_w + number_half_w) -> safe.
+    assert crop_excludes_numbers(100 + 200, 100, labels, crop_half_w=55, crop_half_h=30)
+    # In a vertical gap (clears in y) even if x-aligned -> safe.
+    assert crop_excludes_numbers(100, 100 + 100, labels, crop_half_w=55, crop_half_h=30)
+    # Close in both axes -> not safe.
+    assert not crop_excludes_numbers(
+        100 + 40, 100 + 20, labels, crop_half_w=55, crop_half_h=30
+    )
 
 
 def test_working_scale_full_vs_quarter():
