@@ -1,12 +1,12 @@
 """Read key-map page numbers with the CNN localizer + CRNN recognizer (no CRAFT/EasyOCR).
 
 The CNN localizer (mapsnap.keymap.detect_numbers_cnn) proposes page-number centers at ~99%
-recall; the CRNN (mapsnap.crnn_model) reads the digit string from a crop around each
+recall; the CRNN (mapsnap.keymap.crnn_model) reads the digit string from a crop around each
 center. Because the box stays centered on the candidate (no CRAFT box-tightening to drift
 off), recall tracks the localizer and recognition is the learned CRNN — which handles the
 ornate / low-resolution fonts that defeated CRAFT+EasyOCR.
 
-Writes the same ``<stem>.streets.json`` schema as the other detectors. ``--pages`` is
+Writes the same ``<stem>.keymap.json`` schema as the other detectors. ``--pages`` is
 optional: if given, each decode is snapped to the nearest valid page number within edit
 distance 1 (a light constraint); otherwise the raw CRNN output is kept.
 
@@ -34,12 +34,6 @@ from mapsnap.keymap.crnn_model import (
     number_strip,
     strip_crop_box,
 )
-from mapsnap.keymap.records import (
-    detection_record,
-    filter_args,
-    keymap_path,
-    parse_page_spec,
-)
 from mapsnap.keymap.detect_numbers_cnn import (
     DEDUP_WORKING,
     DEFAULT_NMS_DIST,
@@ -49,6 +43,12 @@ from mapsnap.keymap.detect_numbers_cnn import (
     nms_peaks,
 )
 from mapsnap.keymap.number_model import build_model, select_device
+from mapsnap.keymap.records import (
+    detection_record,
+    filter_args,
+    keymap_path,
+    parse_page_spec,
+)
 
 
 def levenshtein(a: str, b: str) -> int:
@@ -132,9 +132,16 @@ def detect_and_read(
         group = central_group(path)
         if group is None:
             continue  # CRNN emitted nothing -> no number here
-        text = snap_to_pages(ctc_greedy_decode(path[group[0] : group[1] + 1]), pages)
+        raw = ctc_greedy_decode(path[group[0] : group[1] + 1])
+        text = snap_to_pages(raw, pages)
         if not text:
             continue
+        if text != raw:
+            print(
+                f"{Path(image_path).name}: snapped {raw!r} -> {text!r} "
+                f"(edit distance {levenshtein(raw, text)})",
+                file=sys.stderr,
+            )
         crop_box = strip_crop_box(width, height, cx, cy, factor)
         polygon = locate_number(strip, group, len(path), crop_box)
         found.append((polygon, text, confidence))

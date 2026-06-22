@@ -10,11 +10,13 @@ a page is an inlier when the model maps its page-number pixel inside that page's
 Because a page can be split, its number may appear several times on the key map; every
 occurrence is tried as a possible match.
 
-Two models are available. A 4-parameter Helmert (uniform scale, rotation, translation) is the
-simplest, but in practice key maps are drawn with anisotropic scale / shear relative to the
-ground, so the default is a 6-parameter affine, which fits much more cleanly (on Washington DC
-vol 2: affine 51/64 inliers at <120 m vs Helmert ~18). World coordinates are projected to a
-local equirectangular metre frame first so distances are meaningful.
+The model is a 4-parameter reflected similarity (uniform scale, rotation, reflection,
+translation) — the same orientation-reversing family the per-page georeferencer uses
+(mapsnap.georef_from_labels.solve_similarity_2pts), since a top-down image maps to a north-up
+world with a y-flip. On Washington DC vol 2 it fits 49/61 inliers, identical to a full
+6-parameter affine (the extra shear/anisotropy DOF buy nothing: the map is near-isotropic).
+World coordinates are projected to a local equirectangular metre frame first so distances are
+meaningful.
 
     uv run python -m mapsnap.keymap.fit_keymap data/washington_dc_1916_vol_2
 """
@@ -23,7 +25,6 @@ import argparse
 import json
 import math
 import re
-from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -34,10 +35,11 @@ from mapsnap.keymap.score_keymap_labels import point_in_polygon
 # Metres per degree of latitude (and of longitude after the cos(lat) correction).
 METERS_PER_DEGREE = 111_320.0
 
+# Point pairs needed to solve the 4-parameter reflected similarity exactly.
+SAMPLE_SIZE = 2
+
 Point = tuple[float, float]
-Model = tuple[float, ...]
-FitFn = Callable[[list[Point], list[Point]], Model]
-ApplyFn = Callable[[Model, Point], Point]
+Model = tuple[float, float, float, float]  # a, b, tx, ty
 
 
 def page_number(stem: str) -> int | None:
@@ -60,72 +62,39 @@ def unproject(x: float, y: float, lon0: float, lat0: float) -> Point:
     return lon, lat
 
 
-def helmert_fit(src: list[Point], dst: list[Point]) -> Model:
-    """Least-squares 4-parameter Helmert (a, b, tx, ty) mapping ``src`` to ``dst``.
+def similarity_fit(src: list[Point], dst: list[Point]) -> Model:
+    """Least-squares 4-parameter reflected similarity (a, b, tx, ty) mapping ``src`` to ``dst``.
 
-    X = a*x - b*y + tx, Y = b*x + a*y + ty (uniform scale, rotation, translation). Needs at
+    X = a*x + b*y + tx, Y = b*x - a*y + ty. The 2x2 part [[a, b], [b, -a]] has determinant
+    -(a^2 + b^2) < 0, i.e. uniform scale + rotation + a reflection — the orientation-reversing
+    family that maps a top-down image to a north-up world (cf. georef_from_labels). Needs at
     least two non-coincident point pairs.
     """
     rows: list[list[float]] = []
     rhs: list[float] = []
     for (x, y), (big_x, big_y) in zip(src, dst):
-        rows.append([x, -y, 1.0, 0.0])
+        rows.append([x, y, 1.0, 0.0])
         rhs.append(big_x)
-        rows.append([y, x, 0.0, 1.0])
+        rows.append([-y, x, 0.0, 1.0])
         rhs.append(big_y)
     solution, *_ = np.linalg.lstsq(np.array(rows), np.array(rhs), rcond=None)
-    return tuple(float(v) for v in solution)
+    a, b, tx, ty = (float(v) for v in solution)
+    return a, b, tx, ty
 
 
-def helmert_apply(model: Model, point: Point) -> Point:
-    """Apply a 4-parameter Helmert transform to a point."""
+def similarity_apply(model: Model, point: Point) -> Point:
+    """Apply a 4-parameter reflected similarity to a point."""
     a, b, tx, ty = model
     x, y = point
-    return a * x - b * y + tx, b * x + a * y + ty
-
-
-def affine_fit(src: list[Point], dst: list[Point]) -> Model:
-    """Least-squares 6-parameter affine (a, b, c, d, e, f) mapping ``src`` to ``dst``.
-
-    X = a*x + b*y + c, Y = d*x + e*y + f. Needs at least three non-collinear point pairs.
-    """
-    rows: list[list[float]] = []
-    rhs: list[float] = []
-    for (x, y), (big_x, big_y) in zip(src, dst):
-        rows.append([x, y, 1.0, 0.0, 0.0, 0.0])
-        rhs.append(big_x)
-        rows.append([0.0, 0.0, 0.0, x, y, 1.0])
-        rhs.append(big_y)
-    solution, *_ = np.linalg.lstsq(np.array(rows), np.array(rhs), rcond=None)
-    return tuple(float(v) for v in solution)
-
-
-def affine_apply(model: Model, point: Point) -> Point:
-    """Apply a 6-parameter affine transform to a point."""
-    a, b, c, d, e, f = model
-    x, y = point
-    return a * x + b * y + c, d * x + e * y + f
+    return a * x + b * y + tx, b * x - a * y + ty
 
 
 def describe_model(model: Model) -> str:
-    """Human-readable scale/rotation summary of a Helmert or affine model."""
-    if len(model) == 4:
-        a, b, _, _ = model
-        return f"scale={math.hypot(a, b):.3f} m/px, rotation={math.degrees(math.atan2(b, a)):+.1f}°"
-    a, b, _, d, e, _ = model
-    scale_x = math.hypot(a, d)
-    scale_y = math.hypot(b, e)
-    rotation = math.degrees(math.atan2(d, a))
-    return (
-        f"scale=({scale_x:.3f}, {scale_y:.3f}) m/px, rotation={rotation:+.1f}°, "
-        f"anisotropy={max(scale_x, scale_y) / min(scale_x, scale_y):.2f}"
-    )
-
-
-MODELS: dict[str, tuple[FitFn, ApplyFn, int]] = {
-    "helmert": (helmert_fit, helmert_apply, 2),
-    "affine": (affine_fit, affine_apply, 3),
-}
+    """Human-readable scale/rotation summary of a reflected-similarity model."""
+    a, b, _, _ = model
+    scale = math.hypot(a, b)
+    rotation = math.degrees(math.atan2(b, a))
+    return f"scale={scale:.3f} m/px, rotation={rotation:+.1f}° (reflected)"
 
 
 @dataclass
@@ -237,24 +206,21 @@ def build_correspondences(
     return correspondences
 
 
-def maps_inside(
-    model: Model, apply_fn: ApplyFn, page: GeorefPage, pixel: Point
-) -> bool:
+def maps_inside(model: Model, page: GeorefPage, pixel: Point) -> bool:
     """Whether ``pixel`` maps inside any of the page's piece frames under ``model``."""
-    world = apply_fn(model, pixel)
+    world = similarity_apply(model, pixel)
     return any(point_in_polygon(world, frame) for frame in page.frames)
 
 
 def inlier_pages(
     model: Model,
-    apply_fn: ApplyFn,
     pages: list[GeorefPage],
     correspondences: list[tuple[int, Point]],
 ) -> set[int]:
     """Page indices whose number maps inside one of the page's own frames under ``model``."""
     inliers: set[int] = set()
     for page_index, pixel in correspondences:
-        if maps_inside(model, apply_fn, pages[page_index], pixel):
+        if maps_inside(model, pages[page_index], pixel):
             inliers.add(page_index)
     return inliers
 
@@ -263,33 +229,30 @@ def ransac(
     pages: list[GeorefPage],
     correspondences: list[tuple[int, Point]],
     *,
-    fit_fn: FitFn,
-    apply_fn: ApplyFn,
-    sample_size: int,
     iterations: int = 5000,
     refit_rounds: int = 5,
     rng: np.random.Generator,
 ) -> tuple[Model | None, set[int]]:
-    """RANSAC a transform (key-map pixels -> world metres); return (model, inlier page indices).
+    """RANSAC the reflected similarity (key-map pixels -> world metres).
 
-    A minimal sample from distinct pages defines a candidate; the score is the number of pages
+    A 2-point sample from distinct pages defines a candidate; the score is the number of pages
     whose number maps inside their frame. The best model is refit by least squares on all inlier
-    correspondences and re-scored a few times.
+    correspondences and re-scored a few times. Returns (model, inlier page indices).
     """
-    if len(correspondences) < sample_size:
+    if len(correspondences) < SAMPLE_SIZE:
         return None, set()
 
     best_model: Model | None = None
     best_inliers: set[int] = set()
     count = len(correspondences)
     for _ in range(iterations):
-        idx = [int(v) for v in rng.choice(count, size=sample_size, replace=False)]
-        if len({correspondences[k][0] for k in idx}) < sample_size:
+        idx = [int(v) for v in rng.choice(count, size=SAMPLE_SIZE, replace=False)]
+        if len({correspondences[k][0] for k in idx}) < SAMPLE_SIZE:
             continue  # need distinct pages
         src = [correspondences[k][1] for k in idx]
         dst = [pages[correspondences[k][0]].centroid for k in idx]
-        model = fit_fn(src, dst)
-        inliers = inlier_pages(model, apply_fn, pages, correspondences)
+        model = similarity_fit(src, dst)
+        inliers = inlier_pages(model, pages, correspondences)
         if len(inliers) > len(best_inliers):
             best_model, best_inliers = model, inliers
 
@@ -299,12 +262,12 @@ def ransac(
         chosen = [
             (pixel, pages[page_index].centroid)
             for page_index, pixel in correspondences
-            if maps_inside(best_model, apply_fn, pages[page_index], pixel)
+            if maps_inside(best_model, pages[page_index], pixel)
         ]
-        if len(chosen) < sample_size:
+        if len(chosen) < SAMPLE_SIZE:
             break
-        best_model = fit_fn([c[0] for c in chosen], [c[1] for c in chosen])
-        best_inliers = inlier_pages(best_model, apply_fn, pages, correspondences)
+        best_model = similarity_fit([c[0] for c in chosen], [c[1] for c in chosen])
+        best_inliers = inlier_pages(best_model, pages, correspondences)
     return best_model, best_inliers
 
 
@@ -328,7 +291,6 @@ def main() -> None:
         type=Path,
         help="Key-map detections JSON (default <volume>/p1b.keymap.json).",
     )
-    parser.add_argument("--model", choices=sorted(MODELS), default="affine")
     parser.add_argument("--iterations", type=int, default=5000)
     parser.add_argument("--seed", type=int, default=0)
     args = parser.parse_args()
@@ -338,17 +300,8 @@ def main() -> None:
     detections = load_detections(keymap_path)
     correspondences = build_correspondences(pages, detections)
 
-    fit_fn, apply_fn, sample_size = MODELS[args.model]
     rng = np.random.default_rng(args.seed)
-    model, inliers = ransac(
-        pages,
-        correspondences,
-        fit_fn=fit_fn,
-        apply_fn=apply_fn,
-        sample_size=sample_size,
-        iterations=args.iterations,
-        rng=rng,
-    )
+    model, inliers = ransac(pages, correspondences, iterations=args.iterations, rng=rng)
     if model is None:
         raise SystemExit("Could not fit a model (too few correspondences).")
 
@@ -367,9 +320,7 @@ def main() -> None:
         )
 
     print(f"key map: {keymap_path.name}   detections: {len(detections)}")
-    print(
-        f"{args.model} fit on {len(pages)} georeferenced pages: {describe_model(model)}"
-    )
+    print(f"fit on {len(pages)} georeferenced pages: {describe_model(model)}")
     print(
         f"  inliers={len(inliers)}  outliers={len(outliers)}  "
         f"not-in-keymap={len(not_detected)}  (of {len(matched)} pages with a match)\n"
@@ -392,7 +343,9 @@ def main() -> None:
     )
     pixel_by_number = {d.number: d.pixel for d in detections}
     for number in ungeoreferenced:
-        lon, lat = unproject(*apply_fn(model, pixel_by_number[number]), lon0, lat0)
+        lon, lat = unproject(
+            *similarity_apply(model, pixel_by_number[number]), lon0, lat0
+        )
         print(f"  p{number}: ~({lat:.5f}, {lon:.5f})")
 
 

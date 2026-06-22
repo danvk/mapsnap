@@ -1,7 +1,7 @@
 """Train the CRNN page-number recognizer on labeled key maps.
 
 For every ``<stem>.labels.json`` it crops a fixed strip around each labeled center (at the
-image's native resolution; see mapsnap.crnn_model.number_strip) paired with that number's
+image's native resolution; see mapsnap.keymap.crnn_model.number_strip) paired with that number's
 digit string, holds out one whole image for validation, and trains the CRNN with CTC.
 Runs on CPU (the model and data are small, and CTC loss is most portable there).
 

@@ -1,7 +1,7 @@
 """Train the tiny page-number localizer on labeled key maps.
 
 Builds a binary patch dataset from every ``<stem>.labels.json`` in a directory (positives
-centered on labels, negatives sampled away from them; see mapsnap.keymap_patches), holds
+centered on labels, negatives sampled away from them; see mapsnap.keymap.keymap_patches), holds
 out one whole image for validation (so the metric reflects generalization to an unseen
 scan), fine-tunes a pretrained MobileNetV3-small, and saves the best weights.
 
