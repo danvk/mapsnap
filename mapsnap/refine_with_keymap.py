@@ -35,7 +35,9 @@ from mapsnap.fit import find_centerlines, find_ref_iiif
 from mapsnap.georef_from_labels import (
     compute_cos_phi,
     deg_per_px_to_px_per_ft,
+    process_deferred_image,
     process_image,
+    px_per_ft_to_deg_per_px,
 )
 from mapsnap.keymap.fit_keymap import (
     Detection,
@@ -152,13 +154,18 @@ def refine_page(
     reader: easyocr.Reader,
     centerlines_path: str,
     params: dict,
+    scale_deg_per_px: float | None,
+    neighbor_rotations: list[tuple[Point, float]],
 ) -> tuple[str, float | None, Path | None]:
     """Re-OCR + re-fit one page against centerlines near ``centers``.
 
+    Pages with only one intersection GCP are fit like `mapsnap georef`'s deferred path,
+    using ``scale_deg_per_px`` (the volume scale) and ``neighbor_rotations`` to resolve
+    rotation; unconfirmed 1-GCP fits are rejected.
+
     Returns (outcome, scale_deg_per_px, georef2_path): outcome is "accepted" (wrote
-    <stem>.georef2.json, scale set), "rejected" (fit wandered or failed; wrote
+    <stem>.georef2.json, scale set), "rejected" (fit wandered/unconfirmed/failed; wrote
     <stem>.georef2-reject.json if a fit was produced), or "skipped" (no nearby streets).
-    The scale is returned so the caller can drop scale outliers against the batch median.
     """
     lon0, lat0 = origin
     stem = image_stem(image_path)
@@ -201,14 +208,35 @@ def refine_page(
         block_index,
         cos_phi,
         centerlines_path,
+        one_gcp_fits=True,
         **params,
     )
+    # A 1-GCP page is deferred by process_image; fit it with the volume scale + neighbor
+    # rotation voting, exactly like `mapsnap georef` does.
+    if (
+        not result.success
+        and result.deferred is not None
+        and scale_deg_per_px is not None
+    ):
+        result = process_deferred_image(
+            result.deferred,
+            scale_deg_per_px,
+            block_index,
+            cos_phi,
+            neighbor_rotations,
+        )
+
     if result.success and result.center is not None:
         center_m = project(result.center[0], result.center[1], lon0, lat0)
         if near_any(center_m, centers, radius):
             return "accepted", result.scale_deg_per_px, georef2
         if georef2.exists():
-            georef2.replace(reject)  # keep the wandered fit for inspection
+            georef2.replace(reject)  # confirmed fit but wandered — keep for inspection
+        return "rejected", None, None
+    # Unconfirmed 1-GCP fits write a georef2 file but return success=False with a center;
+    # keep them as reject for inspection. Hard failures wrote nothing.
+    if result.center is not None and georef2.exists():
+        georef2.replace(reject)
         return "rejected", None, None
     georef2.unlink(missing_ok=True)
     return "rejected", None, None
@@ -235,6 +263,39 @@ def georef_scale_deg_per_px(corners: list, width: float, height: float) -> float
     d_lat_dx = (corners[1][1] - corners[0][1]) / width
     d_lat_dy = (corners[3][1] - corners[0][1]) / height
     return math.hypot(d_lat_dx, d_lat_dy)
+
+
+def georef_rotation(corners: list, width: float, height: float) -> float:
+    """Directed rotation (radians) implied by a georef.json's corner quad.
+
+    Matches georef_from_labels' rotation = atan2(A[1,0], -A[1,1]) (the latitude row), so it
+    feeds the 1-GCP neighbor-rotation voting consistently.
+    """
+    d_lat_dx = (corners[1][1] - corners[0][1]) / width
+    d_lat_dy = (corners[3][1] - corners[0][1]) / height
+    return math.atan2(d_lat_dx, -d_lat_dy)
+
+
+def neighbor_rotations_from_inliers(
+    pages: list, inliers: set[int], volume: Path
+) -> list[tuple[Point, float]]:
+    """(center lon/lat, rotation) for each inlier page — neighbors for 1-GCP rotation voting."""
+    neighbors: list[tuple[Point, float]] = []
+    for i in inliers:
+        for stem in pages[i].piece_ids:
+            path = volume / f"{stem}.georef.json"
+            if path.exists():
+                g = json.load(open(path))
+                corners = g["corners"]
+                center = (
+                    sum(c[0] for c in corners) / len(corners),
+                    sum(c[1] for c in corners) / len(corners),
+                )
+                neighbors.append(
+                    (center, georef_rotation(corners, g["width"], g["height"]))
+                )
+                break
+    return neighbors
 
 
 def reference_scale_px_per_ft(
@@ -311,8 +372,8 @@ def main() -> None:
         "--scale-outlier-threshold",
         type=float,
         default=0.25,
-        help="Reject a refit whose scale deviates from the refit median by more than this "
-        "fraction (default 0.25, matching `mapsnap georef`). 0 disables.",
+        help="Reject a refit whose scale deviates from the volume's reference scale by more "
+        "than this fraction (default 0.25, matching `mapsnap georef`). 0 disables.",
     )
     parser.add_argument(
         "--manifest", type=Path, help="Source IIIF/manifest (default: auto)."
@@ -355,6 +416,9 @@ def main() -> None:
 
     # Split panels supersede their un-split original (skip p126.jpg if p126__1.jpg exists).
     superseded = superseded_stems(volume)
+    # Inputs for the 1-GCP deferred path (volume scale + neighbor rotations).
+    scale_deg_per_px = px_per_ft_to_deg_per_px(ref_scale) if ref_scale else None
+    neighbor_rotations = neighbor_rotations_from_inliers(pages, inliers, volume)
 
     reader = easyocr.Reader(["en"], gpu=not args.no_gpu, verbose=False)
     accepted_fits: list[tuple[Path, float]] = []
@@ -384,6 +448,8 @@ def main() -> None:
             reader,
             str(centerlines_path),
             params,
+            scale_deg_per_px,
+            neighbor_rotations,
         )
         if outcome == "accepted" and georef2 is not None and scale is not None:
             accepted_fits.append((georef2, scale))

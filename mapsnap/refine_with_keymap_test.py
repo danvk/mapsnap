@@ -3,6 +3,7 @@ from mapsnap.refine_with_keymap import (
     expected_centers,
     filter_centerlines,
     frame_diagonal,
+    georef_rotation,
     georef_scale_deg_per_px,
     keymap_centroid_error,
     near_any,
@@ -76,6 +77,12 @@ def test_georef_scale_deg_per_px():
     # 0.001 deg of latitude over 100 px vertically (corners TL,TR,BR,BL), no horizontal tilt.
     corners = [[0.0, 0.0], [0.0, 0.0], [0.0, -0.001], [0.0, -0.001]]
     assert georef_scale_deg_per_px(corners, width=100, height=100) == 0.00001
+
+
+def test_georef_rotation_north_up():
+    # North-up page: lat decreases down the image, no horizontal lat change -> rotation 0.
+    corners = [[0.0, 0.0], [0.0, 0.0], [0.0, -0.001], [0.0, -0.001]]
+    assert georef_rotation(corners, width=100, height=100) == 0.0
 
 
 def test_scale_outlier_indices():
