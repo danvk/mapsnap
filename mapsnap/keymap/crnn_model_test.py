@@ -1,7 +1,7 @@
 import numpy as np
 import torch
 
-from mapsnap.crnn_model import (
+from mapsnap.keymap.crnn_model import (
     CRNN_HEIGHT,
     CRNN_WIDTH,
     NUM_CLASSES,

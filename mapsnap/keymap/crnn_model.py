@@ -1,6 +1,6 @@
 """A tiny CRNN that reads a page number's digit string from a crop around its center.
 
-The CNN localizer (mapsnap.detect_numbers_cnn) already finds page-number centers at ~99%
+The CNN localizer (mapsnap.keymap.detect_numbers_cnn) already finds page-number centers at ~99%
 recall, so this recognizer is fed a fixed crop around each center and reads the 1-3 digit
 string directly — no CRAFT boxing, no EasyOCR. Architecture: a small conv stack collapses
 the crop's height to a width-sequence, a BiLSTM adds context, and a linear head emits
@@ -17,7 +17,7 @@ import torch
 from torch import nn
 from torchvision import transforms
 
-from mapsnap.keymap_patches import NUMBER_MAX_H_FULL, SCALE
+from mapsnap.keymap.keymap_patches import NUMBER_MAX_H_FULL, SCALE
 
 # Crop input size fed to the CRNN (grayscale).
 CRNN_HEIGHT = 48

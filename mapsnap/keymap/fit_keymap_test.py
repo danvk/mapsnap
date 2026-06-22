@@ -2,7 +2,7 @@ import math
 
 import numpy as np
 
-from mapsnap.fit_keymap import (
+from mapsnap.keymap.fit_keymap import (
     Detection,
     GeorefPage,
     affine_apply,

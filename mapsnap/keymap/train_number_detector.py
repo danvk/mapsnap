@@ -5,7 +5,7 @@ centered on labels, negatives sampled away from them; see mapsnap.keymap_patches
 out one whole image for validation (so the metric reflects generalization to an unseen
 scan), fine-tunes a pretrained MobileNetV3-small, and saves the best weights.
 
-    uv run python -m mapsnap.train_number_detector --val-image chicago-p0b
+    uv run python -m mapsnap.keymap.train_number_detector --val-image chicago-p0b
 """
 
 import argparse
@@ -18,14 +18,14 @@ from PIL import Image
 from torch import nn
 from torch.utils.data import DataLoader, Dataset
 
-from mapsnap.keymap_patches import (
+from mapsnap.keymap.keymap_patches import (
     build_image_patches,
     labels_path_for,
     load_label_points,
     scale_points,
     working_scale,
 )
-from mapsnap.number_model import (
+from mapsnap.keymap.number_model import (
     average_precision,
     build_model,
     eval_transform,

@@ -1,4 +1,4 @@
-from mapsnap.score_keymap_labels import (
+from mapsnap.keymap.score_keymap_labels import (
     filter_detections,
     match_detections,
     point_in_polygon,

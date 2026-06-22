@@ -1,7 +1,7 @@
 """Georeference a Sanborn key map by fitting a transform to its page numbers.
 
 Each georeferenced page in a volume has a footprint (``corners`` in its ``p*.georef.json``)
-and hence a centroid in world coordinates. The key-map detector (mapsnap.detect_numbers_crnn)
+and hence a centroid in world coordinates. The key-map detector (mapsnap.keymap.detect_numbers_crnn)
 gives the pixel location of each page number drawn on the index map. Pairing those, a
 transform maps key-map pixels to world coordinates.
 
@@ -16,7 +16,7 @@ ground, so the default is a 6-parameter affine, which fits much more cleanly (on
 vol 2: affine 51/64 inliers at <120 m vs Helmert ~18). World coordinates are projected to a
 local equirectangular metre frame first so distances are meaningful.
 
-    uv run python -m mapsnap.fit_keymap data/washington_dc_1916_vol_2
+    uv run python -m mapsnap.keymap.fit_keymap data/washington_dc_1916_vol_2
 """
 
 import argparse
@@ -29,7 +29,7 @@ from pathlib import Path
 
 import numpy as np
 
-from mapsnap.score_keymap_labels import point_in_polygon
+from mapsnap.keymap.score_keymap_labels import point_in_polygon
 
 # Metres per degree of latitude (and of longitude after the cos(lat) correction).
 METERS_PER_DEGREE = 111_320.0

@@ -1,6 +1,6 @@
 """Score generated key-map page-number detections against hand-labeled truth points.
 
-The generated detections (``<stem>.streets.json`` from mapsnap.detect_keymap_numbers)
+The generated detections (``<stem>.streets.json`` from mapsnap.keymap.records)
 carry a bounding polygon, a text, a confidence, and short/long side lengths. The truth
 data (``<stem>.labels.json`` from the labeler tool) is just points: ``{x, y, text}``.
 

@@ -1,9 +1,7 @@
-from mapsnap.detect_numbers_cnn import (
-    box_center,
+from mapsnap.keymap.detect_numbers_cnn import (
     nms_peaks,
     region_bounds,
     scores_to_grid,
-    select_tight_box,
     window_centers,
 )
 
@@ -39,25 +37,3 @@ def test_nms_peaks_keeps_distant_peaks():
 def test_region_bounds_clamps():
     assert region_bounds(10, 10, 50, 520, 520) == (0, 0, 60, 60)
     assert region_bounds(500, 500, 50, 520, 520) == (450, 450, 520, 520)
-
-
-def test_box_center():
-    assert box_center([10, 30, 100, 140]) == (20.0, 120.0)
-
-
-def test_select_tight_box_prefers_largest_containing():
-    # Two boxes contain (50, 50); pick the larger (bold number over small lot number).
-    small = [45, 55, 45, 55]
-    large = [20, 80, 20, 80]
-    far = [200, 220, 200, 220]
-    assert select_tight_box([small, large, far], 50, 50) == 1
-
-
-def test_select_tight_box_falls_back_to_nearest_when_uncovered():
-    # No box contains (100,100); nearer box center (5,5) beats (210,210).
-    boxes = [[0, 10, 0, 10], [200, 220, 200, 220]]
-    assert select_tight_box(boxes, 100, 100) == 0
-
-
-def test_select_tight_box_empty():
-    assert select_tight_box([], 5, 5) == -1

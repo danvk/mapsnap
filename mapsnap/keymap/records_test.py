@@ -1,6 +1,6 @@
 import math
 
-from mapsnap.detect_keymap_numbers import (
+from mapsnap.keymap.records import (
     detection_record,
     filter_args,
     parse_page_spec,

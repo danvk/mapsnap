@@ -1,6 +1,6 @@
 import numpy as np
 
-from mapsnap.number_model import average_precision
+from mapsnap.keymap.number_model import average_precision
 
 
 def test_average_precision_perfect_ranking():

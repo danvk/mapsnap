@@ -1,6 +1,6 @@
 import numpy as np
 
-from mapsnap.keymap_patches import (
+from mapsnap.keymap.keymap_patches import (
     build_image_patches,
     crop_excludes_numbers,
     crop_patch,

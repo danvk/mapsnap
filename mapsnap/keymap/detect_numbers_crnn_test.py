@@ -1,4 +1,4 @@
-from mapsnap.detect_numbers_crnn import levenshtein, snap_to_pages
+from mapsnap.keymap.detect_numbers_crnn import levenshtein, snap_to_pages
 
 
 def test_levenshtein():

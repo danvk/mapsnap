@@ -1,6 +1,6 @@
 """Read key-map page numbers with the CNN localizer + CRNN recognizer (no CRAFT/EasyOCR).
 
-The CNN localizer (mapsnap.detect_numbers_cnn) proposes page-number centers at ~99%
+The CNN localizer (mapsnap.keymap.detect_numbers_cnn) proposes page-number centers at ~99%
 recall; the CRNN (mapsnap.crnn_model) reads the digit string from a crop around each
 center. Because the box stays centered on the candidate (no CRAFT box-tightening to drift
 off), recall tracks the localizer and recognition is the learned CRNN — which handles the
@@ -10,7 +10,7 @@ Writes the same ``<stem>.streets.json`` schema as the other detectors. ``--pages
 optional: if given, each decode is snapped to the nearest valid page number within edit
 distance 1 (a light constraint); otherwise the raw CRNN output is kept.
 
-    uv run python -m mapsnap.detect_numbers_crnn data/keymaps/chicago-p0b.jpg
+    uv run python -m mapsnap.keymap.detect_numbers_crnn data/keymaps/chicago-p0b.jpg
 """
 
 import argparse
@@ -24,7 +24,7 @@ import numpy as np
 import torch
 from PIL import Image
 
-from mapsnap.crnn_model import (
+from mapsnap.keymap.crnn_model import (
     build_crnn,
     central_group,
     ctc_greedy_decode,
@@ -34,13 +34,13 @@ from mapsnap.crnn_model import (
     number_strip,
     strip_crop_box,
 )
-from mapsnap.detect_keymap_numbers import (
+from mapsnap.keymap.records import (
     detection_record,
     filter_args,
     keymap_path,
     parse_page_spec,
 )
-from mapsnap.detect_numbers_cnn import (
+from mapsnap.keymap.detect_numbers_cnn import (
     DEDUP_WORKING,
     DEFAULT_NMS_DIST,
     DEFAULT_STRIDE,
@@ -48,7 +48,7 @@ from mapsnap.detect_numbers_cnn import (
     detect_candidate_centers,
     nms_peaks,
 )
-from mapsnap.number_model import build_model, select_device
+from mapsnap.keymap.number_model import build_model, select_device
 
 
 def levenshtein(a: str, b: str) -> int:

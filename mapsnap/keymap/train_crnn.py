@@ -5,7 +5,7 @@ image's native resolution; see mapsnap.crnn_model.number_strip) paired with that
 digit string, holds out one whole image for validation, and trains the CRNN with CTC.
 Runs on CPU (the model and data are small, and CTC loss is most portable there).
 
-    uv run python -m mapsnap.train_crnn --val-image chicago-p0b
+    uv run python -m mapsnap.keymap.train_crnn --val-image chicago-p0b
 """
 
 import argparse
@@ -19,7 +19,7 @@ from PIL import Image
 from torch import nn
 from torch.utils.data import DataLoader, Dataset
 
-from mapsnap.crnn_model import (
+from mapsnap.keymap.crnn_model import (
     BLANK_INDEX,
     BOX_HALF_H_WORKING,
     BOX_HALF_W_WORKING,
@@ -30,7 +30,7 @@ from mapsnap.crnn_model import (
     number_strip,
     train_transform,
 )
-from mapsnap.keymap_patches import (
+from mapsnap.keymap.keymap_patches import (
     crop_excludes_numbers,
     labels_path_for,
     load_label_points,
