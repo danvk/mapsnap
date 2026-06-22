@@ -53,6 +53,7 @@ from mapsnap.keymap.fit_keymap import (
     superseded_stems,
     unproject,
 )
+from mapsnap.keymap.score_keymap_labels import point_in_polygon
 from mapsnap.streets import build_block_index
 from mapsnap.utils import image_stem, run_cmd
 
@@ -107,6 +108,32 @@ def expected_centers(
 def near_any(point: Point, centers: list[Point], radius: float) -> bool:
     """Whether ``point`` is within ``radius`` of any of ``centers`` (Euclidean, metres)."""
     return any(math.dist(point, c) <= radius for c in centers)
+
+
+def refit_accepted(
+    georef2: Path,
+    centers: list[Point],
+    origin: Point,
+    radius: float,
+    *,
+    strict: bool,
+) -> bool:
+    """Whether a refined fit is good enough to keep, given its georef2.json and expected centers.
+
+    Multi-GCP fits are well-constrained, so the loose gate (centroid within ``radius`` of an
+    expected center) suffices. 1-GCP fits are weakly constrained (one anchor + assumed scale +
+    voted rotation), so ``strict`` requires an expected point to land INSIDE the refined frame —
+    the same in-frame test that defines a key-map inlier — which rejects plausibly-near-but-wrong
+    placements.
+    """
+    lon0, lat0 = origin
+    frame = [
+        project(c[0], c[1], lon0, lat0) for c in json.load(open(georef2))["corners"]
+    ]
+    if strict:
+        return any(point_in_polygon(c, frame) for c in centers)
+    centroid = (sum(p[0] for p in frame) / 4, sum(p[1] for p in frame) / 4)
+    return near_any(centroid, centers, radius)
 
 
 def _geometry_vertices(geometry: dict) -> list[Point]:
@@ -213,6 +240,7 @@ def refine_page(
     )
     # A 1-GCP page is deferred by process_image; fit it with the volume scale + neighbor
     # rotation voting, exactly like `mapsnap georef` does.
+    one_gcp = False
     if (
         not result.success
         and result.deferred is not None
@@ -225,13 +253,15 @@ def refine_page(
             cos_phi,
             neighbor_rotations,
         )
+        one_gcp = True
 
     if result.success and result.center is not None:
-        center_m = project(result.center[0], result.center[1], lon0, lat0)
-        if near_any(center_m, centers, radius):
+        if refit_accepted(georef2, centers, origin, radius, strict=one_gcp):
             return "accepted", result.scale_deg_per_px, georef2
         if georef2.exists():
-            georef2.replace(reject)  # confirmed fit but wandered — keep for inspection
+            georef2.replace(
+                reject
+            )  # fit landed in the wrong place — keep for inspection
         return "rejected", None, None
     # Unconfirmed 1-GCP fits write a georef2 file but return success=False with a center;
     # keep them as reject for inspection. Hard failures wrote nothing.

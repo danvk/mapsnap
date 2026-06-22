@@ -1,3 +1,5 @@
+import json
+
 from mapsnap.keymap.fit_keymap import Detection
 from mapsnap.refine_with_keymap import (
     expected_centers,
@@ -8,6 +10,7 @@ from mapsnap.refine_with_keymap import (
     keymap_centroid_error,
     near_any,
     pages_to_refine,
+    refit_accepted,
     scale_outlier_indices,
 )
 
@@ -95,6 +98,23 @@ def test_scale_outlier_indices():
     assert scale_outlier_indices(scales, ref, threshold=0.0) == set()  # disabled
     assert scale_outlier_indices(scales, None, threshold=0.25) == set()  # no reference
     assert scale_outlier_indices([], ref, threshold=0.25) == set()
+
+
+def test_refit_accepted_strict_vs_loose(tmp_path):
+    # Square frame lon 0..0.001, lat 0..-0.001 about origin (0,0) -> metres ~ 0..111 / 0..-111.
+    g = tmp_path / "p1.georef2.json"
+    g.write_text(
+        json.dumps({"corners": [[0, 0], [0.001, 0], [0.001, -0.001], [0, -0.001]]})
+    )
+    origin = (0.0, 0.0)
+    inside = (55.0, -55.0)  # metres, inside the frame
+    far = (5000.0, 5000.0)
+    # strict (1-GCP): the expected point must land inside the refined frame.
+    assert refit_accepted(g, [inside], origin, 1000.0, strict=True)
+    assert not refit_accepted(g, [far], origin, 1000.0, strict=True)
+    # loose (multi-GCP): centroid (~55,-55) within radius of an expected center.
+    assert refit_accepted(g, [(60.0, -60.0)], origin, 50.0, strict=False)
+    assert not refit_accepted(g, [far], origin, 50.0, strict=False)
 
 
 def test_keymap_centroid_error():
