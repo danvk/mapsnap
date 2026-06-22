@@ -209,7 +209,7 @@ From there, the pipeline is very similar to OldInsuranceMaps. The end result is 
 
 If you have your own directory of images that you've put together in some other way, Mapsnap should also be able to run over it.
 
-- Name the images after some notion of page number, e.g. `p123.jpg`.
+- Name the images after some notion of page number, e.g. `p123.jpg`. These should be scaled to 25% of full LoC resolution. Use `mapsnap scale` to do this.
 - Run `mapsnap download-osm` + `mapsnap osm-to-geojson` to get OSM data for the area around your images.
 - Run `mapsnap split` to detect split maps, if needed.
 - Run `mapsnap ocr` to find street labels for all your images. Use the Mapsnap debugger app to test if it worked on a few images.
