@@ -130,12 +130,18 @@ MODELS: dict[str, tuple[FitFn, ApplyFn, int]] = {
 
 @dataclass
 class GeorefPage:
-    """A georeferenced page: its id, number, and footprint in local metres."""
+    """A georeferenced page number and its footprint(s) in local metres.
 
-    page_id: str
+    A page number can be mapped by several georeferenced pieces — a full-colour scan and a
+    lower-fidelity ``s`` skeleton of the same area, and each may be split into ``__N`` parts —
+    so ``frames`` holds one polygon per piece and the number maps inside the page when it
+    lands in ANY of them.
+    """
+
     number: int
     centroid: Point
-    frame: list[Point]
+    frames: list[list[Point]]
+    piece_ids: list[str]
 
 
 @dataclass
@@ -153,27 +159,55 @@ def polygon_centroid(polygon: list[list[float]]) -> Point:
     return sum(xs) / len(xs), sum(ys) / len(ys)
 
 
+def superseded_stems(volume: Path) -> set[str]:
+    """Page stems made obsolete by the splitter: if ``p239__1.jpg`` exists, ``p239`` is dead."""
+    stems = {f.name[: -len(".jpg")] for f in volume.glob("p*.jpg")}
+    return {s.split("__")[0] for s in stems if "__" in s}
+
+
+def georef_variant(filename: str) -> tuple[str, str] | None:
+    """(stem, variant) of a georef file, e.g. ('p239__2', '1gcp'); 'canonical' if no suffix."""
+    match = re.match(r"^(p\w+)\.georef(?:-(\w+))?\.json$", filename)
+    if not match:
+        return None
+    return match.group(1), match.group(2) or "canonical"
+
+
 def load_georef_pages(volume: Path) -> tuple[list[GeorefPage], Point]:
-    """Canonical ``p*.georef.json`` pages in a shared local metre frame, plus its (lon0, lat0)."""
-    files = sorted(p for p in volume.glob("*.georef.json"))
-    raw: list[tuple[str, int, list[list[float]]]] = []
-    for path in files:
-        page_id = path.name.split(".")[0]
-        number = page_number(page_id)
-        if number is None:
+    """Georeferenced page footprints grouped by page number, in a shared metre frame.
+
+    Uses only canonical (untossed) georef pieces whose stem was not superseded by the
+    splitter, merging a page's full/skeleton/split pieces into one entry. Also returns the
+    projection origin (lon0, lat0) so results can be reported as lon/lat.
+    """
+    dead = superseded_stems(volume)
+    by_number: dict[int, list[tuple[str, list[list[float]]]]] = {}
+    for path in sorted(volume.glob("*.georef.json")):
+        parsed = georef_variant(path.name)
+        if parsed is None:
+            continue
+        stem, _ = parsed
+        number = page_number(stem)
+        if number is None or stem in dead:
             continue
         corners = json.load(open(path))["corners"]
-        raw.append((page_id, number, corners))
+        by_number.setdefault(number, []).append((stem, corners))
 
-    all_corners = [corner for _, _, corners in raw for corner in corners]
+    all_corners = [c for pieces in by_number.values() for _, cs in pieces for c in cs]
     lon0 = sum(c[0] for c in all_corners) / len(all_corners)
     lat0 = sum(c[1] for c in all_corners) / len(all_corners)
 
     pages: list[GeorefPage] = []
-    for page_id, number, corners in raw:
-        frame = [project(lon, lat, lon0, lat0) for lon, lat in corners]
-        centroid = polygon_centroid([list(p) for p in frame])
-        pages.append(GeorefPage(page_id, number, centroid, frame))
+    for number, pieces in sorted(by_number.items()):
+        frames = [
+            [project(lon, lat, lon0, lat0) for lon, lat in cs] for _, cs in pieces
+        ]
+        points = [pt for frame in frames for pt in frame]
+        centroid = (
+            sum(p[0] for p in points) / len(points),
+            sum(p[1] for p in points) / len(points),
+        )
+        pages.append(GeorefPage(number, centroid, frames, [stem for stem, _ in pieces]))
     return pages, (lon0, lat0)
 
 
@@ -203,16 +237,24 @@ def build_correspondences(
     return correspondences
 
 
+def maps_inside(
+    model: Model, apply_fn: ApplyFn, page: GeorefPage, pixel: Point
+) -> bool:
+    """Whether ``pixel`` maps inside any of the page's piece frames under ``model``."""
+    world = apply_fn(model, pixel)
+    return any(point_in_polygon(world, frame) for frame in page.frames)
+
+
 def inlier_pages(
     model: Model,
     apply_fn: ApplyFn,
     pages: list[GeorefPage],
     correspondences: list[tuple[int, Point]],
 ) -> set[int]:
-    """Page indices whose number maps inside the page's own frame under ``model``."""
+    """Page indices whose number maps inside one of the page's own frames under ``model``."""
     inliers: set[int] = set()
     for page_index, pixel in correspondences:
-        if point_in_polygon(apply_fn(model, pixel), pages[page_index].frame):
+        if maps_inside(model, apply_fn, pages[page_index], pixel):
             inliers.add(page_index)
     return inliers
 
@@ -257,7 +299,7 @@ def ransac(
         chosen = [
             (pixel, pages[page_index].centroid)
             for page_index, pixel in correspondences
-            if point_in_polygon(apply_fn(best_model, pixel), pages[page_index].frame)
+            if maps_inside(best_model, apply_fn, pages[page_index], pixel)
         ]
         if len(chosen) < sample_size:
             break
@@ -320,7 +362,8 @@ def main() -> None:
 
     def ids(indices: set[int]) -> str:
         return " ".join(
-            pages[i].page_id for i in sorted(indices, key=lambda i: pages[i].number)
+            f"p{pages[i].number}"
+            for i in sorted(indices, key=lambda i: pages[i].number)
         )
 
     print(f"key map: {keymap_path.name}   detections: {len(detections)}")
@@ -340,7 +383,7 @@ def main() -> None:
     print(f"GEOREFERENCED but NOT in key map ({len(not_detected)}):")
     print(
         "  "
-        + " ".join(p.page_id for p in sorted(not_detected, key=lambda p: p.number))
+        + " ".join(f"p{p.number}" for p in sorted(not_detected, key=lambda p: p.number))
         + "\n"
     )
     print(
