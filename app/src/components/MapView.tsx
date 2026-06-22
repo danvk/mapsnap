@@ -54,7 +54,7 @@ export function MapView(props: MapViewProps) {
 
   const containerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<maplibregl.Map | null>(null);
-  const lastWarpedUrlRef = useRef('');
+  const lastFittedCornersRef = useRef('');
   const [mapReady, setMapReady] = useState(false);
 
   useEffect(() => {
@@ -110,8 +110,13 @@ export function MapView(props: MapViewProps) {
       });
     }
 
-    if (imageSrc !== lastWarpedUrlRef.current) {
-      lastWarpedUrlRef.current = imageSrc;
+    // Fit the view whenever the corners change (i.e. a new image/georef is
+    // loaded). The image src and corners can arrive in separate renders, so we
+    // key on corners — the value that actually determines the view — rather
+    // than on imageSrc.
+    const cornersKey = JSON.stringify(corners);
+    if (cornersKey !== lastFittedCornersRef.current) {
+      lastFittedCornersRef.current = cornersKey;
       const lons = corners.map((c) => c[0]);
       const lats = corners.map((c) => c[1]);
       const minLon = Math.min(...lons);
