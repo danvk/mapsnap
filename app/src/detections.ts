@@ -36,6 +36,53 @@ export function filterDetections(
     );
 }
 
+/**
+ * Display rotation for a detection's preview thumbnail.
+ *
+ * Honors the detection's reading direction (`angle`, degrees CW), then snaps by the
+ * smallest rotation that leaves the box axis-aligned — which may put the long OR the short
+ * side along the horizontal, whichever is the smaller turn. So a number whose box is taller
+ * than wide stays upright instead of being rotated a quarter turn, while a diagonal street
+ * is straightened the short way.
+ *
+ * Returns the rotation (radians, image space; apply as `ctx.rotate(-textAngle)`) and whether
+ * the long side ends up horizontal (used to size the canvas).
+ */
+export function previewOrientation(
+  polygon: [number, number][],
+  angle: number,
+): { textAngle: number; longHorizontal: boolean } {
+  // Direction of the longest polygon side = the box's orientation in the image.
+  let maxLen = 0;
+  let longDx = 1;
+  let longDy = 0;
+  for (let i = 0; i < 4; i++) {
+    const [x1, y1] = polygon[i];
+    const [x2, y2] = polygon[(i + 1) % 4];
+    const dx = x2 - x1;
+    const dy = y2 - y1;
+    const len = Math.hypot(dx, dy);
+    if (len > maxLen) {
+      maxLen = len;
+      longDx = dx;
+      longDy = dy;
+    }
+  }
+  const rawAngle = Math.atan2(longDy, longDx);
+  // `angle` is CW, which matches image space (y-down), so the desired text direction is +angle.
+  const target = (angle * Math.PI) / 180;
+  const quarter = Math.PI / 2;
+  // Snap the box orientation to the axis-aligned grid point nearest the target direction.
+  const k = Math.round((target - rawAngle) / quarter);
+  const snapped = rawAngle + k * quarter;
+  return {
+    // Normalize to (-π, π] so equivalent rotations compare equal.
+    textAngle: Math.atan2(Math.sin(snapped), Math.cos(snapped)),
+    // After rotating, the long side lies at -k*90°: horizontal for even k, vertical for odd.
+    longHorizontal: ((k % 2) + 2) % 2 === 0,
+  };
+}
+
 /** Options for {@link drawDetectionCanvas}. */
 export interface DrawDetectionOptions {
   canvas: HTMLCanvasElement;
@@ -48,8 +95,8 @@ export interface DrawDetectionOptions {
 /**
  * Draw the rotated image patch for a detection into a canvas.
  *
- * Rotation is derived from the direction of the polygon's longest side so that
- * diagonally-oriented text is also rendered horizontally.
+ * Orientation comes from {@link previewOrientation}: the box is straightened by the
+ * smallest rotation, so wide text reads horizontally while a tall number stays upright.
  */
 export function drawDetectionCanvas(options: DrawDetectionOptions): void {
   const { canvas, det, image, jsonWidth, jsonHeight } = options;
@@ -57,44 +104,24 @@ export function drawDetectionCanvas(options: DrawDetectionOptions): void {
   const cx = det.polygon.reduce((s, [x]) => s + x, 0) / 4;
   const cy = det.polygon.reduce((s, [, y]) => s + y, 0) / 4;
 
-  // Find the direction of the longest polygon side to determine text orientation.
-  let maxLen = 0;
-  let longDx = 1,
-    longDy = 0;
-  for (let i = 0; i < 4; i++) {
-    const [x1, y1] = det.polygon[i];
-    const [x2, y2] = det.polygon[(i + 1) % 4];
-    const dx = x2 - x1,
-      dy = y2 - y1;
-    const len = Math.sqrt(dx * dx + dy * dy);
-    if (len > maxLen) {
-      maxLen = len;
-      longDx = dx;
-      longDy = dy;
-    }
-  }
-  // Use det.angle (0/90/270) to disambiguate the 180° ambiguity of the long-side direction.
-  // 90° and 270° both indicate vertical text; folding to the smaller angle gives the same
-  // reference direction (-π/2) for both, so the disambiguation picks the correct half.
-  const rawAngle = Math.atan2(longDy, longDx);
-  const foldedAngle = Math.min(det.angle, 360 - det.angle);
-  const octantAngle = (-foldedAngle * Math.PI) / 180;
-  let textAngle = rawAngle;
-  if (Math.cos(rawAngle - octantAngle) < 0) {
-    // The long side points the wrong way; flip 180°.
-    textAngle = rawAngle + Math.PI;
-  }
-  if (det.angle == 90) {
-    textAngle += Math.PI;
-  }
+  const { textAngle, longHorizontal } = previewOrientation(
+    det.polygon,
+    det.angle,
+  );
 
-  let scale = 40 / det.short_side;
-  let cW = Math.round(det.long_side * scale);
+  // The side that ends up horizontal sets the canvas width; the other its height. Keeping
+  // the vertical side at 40px (capped at 200px wide) makes a horizontal thumbnail for text
+  // and an upright one for numbers.
+  const horizontalSide = longHorizontal ? det.long_side : det.short_side;
+  const verticalSide = longHorizontal ? det.short_side : det.long_side;
+
+  let scale = 40 / verticalSide;
+  let cW = Math.round(horizontalSide * scale);
   let cH = 40;
   if (cW > 200) {
-    scale = 200 / det.long_side;
+    scale = 200 / horizontalSide;
     cW = 200;
-    cH = Math.round(det.short_side * scale);
+    cH = Math.round(verticalSide * scale);
   }
   canvas.width = cW;
   canvas.height = cH;
