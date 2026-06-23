@@ -1750,6 +1750,18 @@ def main() -> None:
     )
     args = parser.parse_args()
 
+    # A key-map index page (one with a sibling <stem>.keymap.json) has no streets to fit, so
+    # ignore it for georeferencing. Other images still require a <stem>.streets.json downstream.
+    kept_images = []
+    for image_path in args.images:
+        stem = image_stem(str(image_path))
+        keymap_path = os.path.join(os.path.dirname(image_path), f"{stem}.keymap.json")
+        if os.path.exists(keymap_path):
+            print(f"Skipping {image_path}: key-map page", file=sys.stderr)
+        else:
+            kept_images.append(image_path)
+    args.images = kept_images
+
     force_intersection: tuple[int, int] | None = None
     if args.force_intersection is not None:
         if len(args.images) != 1:
