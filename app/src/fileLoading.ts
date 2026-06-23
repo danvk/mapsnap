@@ -20,6 +20,7 @@ export type ParsedJson =
       kind: 'panels';
       text: string;
       panels: PanelPolygon[];
+      labels?: string[];
       width: number;
       height: number;
     };
@@ -78,6 +79,7 @@ export function parseDroppedJson(
       kind: 'panels',
       text,
       panels: parsed.panels,
+      labels: parsed.labels,
       width: parsed.width || fallback.width || 1,
       height: parsed.height || fallback.height || 1,
     };

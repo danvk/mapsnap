@@ -51,6 +51,9 @@ export function App() {
   const [imageEl, setImageEl] = useState<HTMLImageElement | null>(null);
   const [detections, setDetections] = useState<Detection[]>([]);
   const [panels, setPanels] = useState<PanelPolygon[]>([]);
+  const [panelLabels, setPanelLabels] = useState<string[] | undefined>(
+    undefined,
+  );
   const [selectedIndices, setSelectedIndices] = useState<Set<number>>(
     new Set(),
   );
@@ -114,12 +117,14 @@ export function App() {
       setSelectedIndices(new Set());
       setDetections(result.detections);
       setPanels([]);
+      setPanelLabels(undefined);
       setJsonWidth(result.width);
       setJsonHeight(result.height);
     } else if (result.kind === 'panels') {
       setMode('panels');
       setSelectedIndices(new Set());
       setPanels(result.panels);
+      setPanelLabels(result.labels);
       setDetections([]);
       setJsonWidth(result.width);
       setJsonHeight(result.height);
@@ -128,6 +133,7 @@ export function App() {
       setSelectedIndices(new Set());
       setDetections([]);
       setPanels([]);
+      setPanelLabels(undefined);
       applyGeorefJson(result.text);
     }
   }
@@ -201,6 +207,7 @@ export function App() {
         intersections={intersections}
         filteredDetections={filteredDetections}
         panels={panels}
+        panelLabels={panelLabels}
         selectedIndices={selectedIndices}
         onSelectIndices={setSelectedIndices}
         showStreetsOnImage={showStreetsOnImage}
@@ -273,6 +280,7 @@ export function App() {
         {mode === 'panels' && (
           <PanelsTable
             panels={panels}
+            panelLabels={panelLabels}
             selectedIndices={selectedIndices}
             onSelect={(index) => setSelectedIndices(new Set([index]))}
             jsonWidth={jsonWidth}

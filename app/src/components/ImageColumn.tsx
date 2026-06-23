@@ -18,6 +18,7 @@ interface ImageColumnProps {
   intersections: IntersectionPoint[];
   filteredDetections: IndexedDetection[];
   panels: PanelPolygon[];
+  panelLabels?: string[];
   selectedIndices: Set<number>;
   onSelectIndices: (indices: Set<number>) => void;
   showStreetsOnImage: boolean;
@@ -47,6 +48,7 @@ export function ImageColumn(props: ImageColumnProps) {
     intersections,
     filteredDetections,
     panels,
+    panelLabels,
     selectedIndices,
     onSelectIndices,
     showStreetsOnImage,
@@ -131,6 +133,7 @@ export function ImageColumn(props: ImageColumnProps) {
           {panelsMode && (
             <PanelsOverlay
               panels={panels}
+              labels={panelLabels}
               selectedIndices={selectedIndices}
               displayWidth={imgSize.width}
               displayHeight={imgSize.height}

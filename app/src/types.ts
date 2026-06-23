@@ -68,6 +68,10 @@ export type PanelPolygon = [number, number][];
 /**
  * panels.json sidecar: panel polygons in reading order in the named image's
  * pixel frame. `panels[i - 1]` corresponds to the page's `__i.jpg` split.
+ *
+ * `labels`, when present, is parallel to `panels` and gives a display label for
+ * each polygon (e.g. the page number for key-map page regions); the app shows it
+ * instead of the positional index.
  */
 export interface PanelsJsonData {
   image: string;
@@ -75,4 +79,5 @@ export interface PanelsJsonData {
   height: number;
   manual?: boolean;
   panels: PanelPolygon[];
+  labels?: string[];
 }

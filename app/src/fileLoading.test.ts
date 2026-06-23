@@ -111,6 +111,28 @@ describe('parseDroppedJson', () => {
       expect(result.panels).toHaveLength(2);
       expect(result.width).toBe(1417);
       expect(result.height).toBe(2038);
+      expect(result.labels).toBeUndefined();
+    }
+  });
+
+  it('passes through panel labels when present', () => {
+    const text = JSON.stringify({
+      image: 'p0b.jpg',
+      width: 5866,
+      height: 7323,
+      panels: [
+        [
+          [0, 0],
+          [10, 0],
+          [10, 10],
+        ],
+      ],
+      labels: ['55'],
+    });
+    const result = parseDroppedJson(text, fallback);
+    expect(result.kind).toBe('panels');
+    if (result.kind === 'panels') {
+      expect(result.labels).toEqual(['55']);
     }
   });
 
