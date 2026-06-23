@@ -224,6 +224,20 @@ def is_number_only(text: str) -> bool:
     return not bool(re.search(r"[a-zA-Z]", text))
 
 
+def hint_type_word(text: str) -> str | None:
+    """Map a type-word hint to 'STREET' or 'AVENUE', else None.
+
+    Handles dotted/spaced abbreviation forms ('ST', 'ST.', 'S T', 'AVE', 'AV', 'A V', ...) as
+    well as the full words. Quadrant and other hints return None — only STREET/AVENUE have a
+    letter-ordering convention ("K STREET" vs "AVENUE Q").
+    """
+    compact = text.upper().replace(".", "").replace(" ", "")
+    if compact in ("STREET", "AVENUE"):
+        return compact
+    full = STREET_ABBREVS.get(compact)
+    return full if full in ("STREET", "AVENUE") else None
+
+
 def is_bare_letter(text: str) -> bool:
     """Return True if text is a single letter (e.g. "M", "W").
 
