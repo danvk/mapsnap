@@ -5,17 +5,14 @@ its page number printed in black at the centre. Blocks are separated either by a
 boundary line or by a direct change of colour; thinner black street-grid lines run *inside* a
 block. The white/tan paper between blocks is unsaturated.
 
-Recovering one polygon per page is a marker-controlled watershed: each detected page number is
-a seed, and the floods from neighbouring seeds meet along the ridges between pages (black
-boundaries and colour changes). An internal grid line is crossed freely because no competing
-seed sits inside the block, so the whole block becomes one basin. Two equally-coloured blocks
-that abut are still separated, because each owns a seed and they meet at the ridge between them.
-
-The elevation surface is the CIELAB gradient, weighting colour changes above black lines, so a
-basin stops at a colour boundary but flows across an internal grid line. The unsaturated paper is
-given its own marker so floods stop at the block edge (no distance cap, so a tall block fills its
-full height). Each page-number seed is its digit's bounding box grown by a margin, so the marker
-clears the digit's strokes (e.g. the hole in a "0") instead of getting trapped inside them.
+Recovering one polygon per page is a colour-cluster flood fill. The (line-smoothed) image is
+k-means quantized into a handful of colours; a page block is then the connected component of its
+own cluster that the page number sits in. The streets/paper between blocks form the largest
+cluster(s) — the "background" — which both bounds the flood (a flood stops at the street rather
+than leaking into a neighbour, even one whose number was missed) and lets us drop a detection
+whose own pixel lands on background (a number printed on open paper, not a colour block). Interior
+holes (the black page number, an enclosed courtyard) are filled; edge concavities are kept, since
+some blocks are genuinely concave.
 
     uv run python -m mapsnap.keymap.page_regions data/chicago_il_1950_vol_1/p0b.keymap.json
 """
@@ -30,8 +27,6 @@ import numpy as np
 from PIL import Image, ImageDraw
 from scipy import ndimage as ndi
 from skimage.color import lab2rgb, rgb2lab
-from skimage.filters import sobel
-from skimage.segmentation import watershed
 
 Point = tuple[float, float]
 Box = tuple[float, float, float, float]  # x0, y0, x1, y1 (full-res pixels)
@@ -66,45 +61,29 @@ class RegionParams:
     """Tunables for key-map page-region segmentation.
 
     The image is first downscaled so its longer side is ``target_long_side`` (a key map may be
-    anywhere from ~2k to ~7k px). Sizes that should track the map's drawing scale — the line-smooth
-    window and the arm-opening radius — are then derived from the median seed spacing rather than
-    set in absolute pixels, so the same params work across maps of different resolution and block
-    density (Chicago vs New Orleans).
+    anywhere from ~2k to ~7k px). The line-smooth window is then derived from the median seed
+    spacing rather than set in absolute pixels, so the same params work across maps of different
+    resolution and block density (Chicago vs New Orleans).
 
     target_long_side: the segmentation runs on a copy scaled so max(width, height) is this many
         pixels (never upscaled); polygons are returned in full-resolution coordinates.
-    bg_lightness / bg_chroma: a pixel is unsaturated "paper" if its CIELAB lightness exceeds
-        bg_lightness and its chroma is below bg_chroma.
-    n_clusters / cluster_seed: the elevation comes from a k-means colour quantization of the
-        (line-smoothed) image; ~8 clusters separate the pastel block colours from the several
-        background/paper tints. See elevation_map.
-    line_smooth_frac: median-blur window as a fraction of the median seed spacing; it erases black
-        lines thinner than the window (so basins flow across grid lines) while preserving block
-        colour boundaries.
-    smooth_sigma: Gaussian blur (in scaled pixels) applied to the gradient elevation.
-    seed_pad_frac: each page-number marker is its digit's bounding box grown by this fraction of
-        the box's longer side, so the seed clears the digit's strokes (e.g. the hole in a "0" or
-        "8") and starts from the surrounding block colour rather than getting trapped inside it.
-    surround_reach_factor: a coloured pixel farther than this many median seed spacings from the
-        nearest seed is treated as the map's surround (margin/water) and barriered off, so an edge
-        block cannot flood it. Distance is to the nearest *any* seed, so the densely-seeded block
-        grid stays under the threshold and tall blocks are not clipped.
-    arm_open_frac: morphological-opening disk radius, as a fraction of the median seed spacing,
-        applied to each region to delete thin "arms" that flowed down a same-coloured street/margin
-        corridor; bigger than a street half-width, far smaller than a block. See open_thin_arms.
+    n_clusters / cluster_seed: the image is k-means colour-quantized into this many clusters;
+        ~8 separate the pastel block colours from the few background/paper tints. See cluster_image.
+    line_smooth_frac: median-blur window (before clustering) as a fraction of the median seed
+        spacing; it erases black grid lines thinner than the window so they do not split a block.
+    background_area_frac: a cluster is "background" (paper/streets/margin) if its pixel area is at
+        least this fraction of the largest cluster's. See background_clusters.
+    cluster_close_radius: a block's cluster mask is morphologically closed by this radius (scaled
+        pixels) before the flood fill, so it can bridge a stray pixel or two of another colour.
     simplify_tolerance: Douglas-Peucker tolerance (in scaled pixels) for the output polygon.
     """
 
     target_long_side: int = 3000
-    bg_lightness: float = 78.0
-    bg_chroma: float = 12.0
     n_clusters: int = 8
     cluster_seed: int = 0
     line_smooth_frac: float = 0.04
-    smooth_sigma: float = 1.0
-    seed_pad_frac: float = 0.3
-    surround_reach_factor: float = 1.5
-    arm_open_frac: float = 0.12
+    background_area_frac: float = 0.5
+    cluster_close_radius: int = 2
     simplify_tolerance: float = 2.0
 
 
@@ -125,21 +104,17 @@ def nearest_neighbor_distance(points: list[Point]) -> float:
     return float(np.median(nearest))
 
 
-def background_mask(
-    lab: np.ndarray, bg_lightness: float, bg_chroma: float
-) -> np.ndarray:
-    """Boolean mask of unsaturated "paper" pixels (light and near-grey) in a CIELAB image."""
-    lightness = lab[..., 0]
-    chroma = np.hypot(lab[..., 1], lab[..., 2])
-    return (lightness > bg_lightness) & (chroma < bg_chroma)
+def cluster_image(
+    rgb_u8: np.ndarray, n_clusters: int, line_smooth_size: int, seed: int
+) -> tuple[np.ndarray, np.ndarray]:
+    """k-means colour-cluster the median-blurred key map.
 
-
-def quantize_colors(lab: np.ndarray, n_clusters: int, seed: int) -> np.ndarray:
-    """Replace every pixel with its nearest of ``n_clusters`` k-means colour centres (CIELAB).
-
-    k-means is fit on a random subsample for speed, then every pixel is assigned to its nearest
-    centre. Returns a piecewise-constant image the same shape as ``lab``.
+    Median-blur first (window ``line_smooth_size``) so a thin black grid line — the local minority
+    — is replaced by the surrounding block colour and does not split the block. Fit k-means on a
+    random subsample of the CIELAB pixels (for speed), then assign every pixel to its nearest
+    centre. Returns the per-pixel cluster-label image (H x W) and the CIELAB centres (n_clusters x 3).
     """
+    lab = rgb2lab(cv2.medianBlur(rgb_u8, line_smooth_size) / 255.0)
     flat = lab.reshape(-1, 3).astype(np.float32)
     generator = np.random.default_rng(seed)
     if len(flat) > 40000:
@@ -158,47 +133,51 @@ def quantize_colors(lab: np.ndarray, n_clusters: int, seed: int) -> np.ndarray:
         closer = distance < best
         best[closer] = distance[closer]
         labels[closer] = index
-    return centers[labels].reshape(lab.shape)
+    return labels.reshape(rgb_u8.shape[:2]), centers
 
 
-def quantized_lab(
-    rgb_u8: np.ndarray, n_clusters: int, line_smooth_size: int, seed: int
-) -> np.ndarray:
-    """Median-blur the image (erasing thin lines) then k-means colour-quantize it, in CIELAB."""
-    smoothed = cv2.medianBlur(rgb_u8, line_smooth_size)
-    return quantize_colors(rgb2lab(smoothed / 255.0), n_clusters, seed)
+def background_clusters(
+    labels: np.ndarray, n_clusters: int, area_frac: float
+) -> set[int]:
+    """Cluster ids that are background (paper/streets/margin): those covering a large area.
 
-
-def elevation_map(
-    rgb_u8: np.ndarray,
-    n_clusters: int,
-    line_smooth_size: int,
-    smooth_sigma: float,
-    seed: int,
-) -> np.ndarray:
-    """Watershed elevation from the boundaries of a colour quantization of the key map.
-
-    A page block's interior carries thin black street-grid lines and the page number; a block
-    *boundary* is a colour change or a colour-to-paper edge. A plain gradient can't tell them
-    apart — a black line is a strong lightness edge that would dam a basin inside its own block,
-    while the boundary between a *pale* block and a similar-coloured street is a weak ridge a basin
-    floods across as an "arm".
-
-    Two steps fix this. (1) Median-blur the image (``line_smooth_size``): a line thinner than the
-    window is the local minority and is replaced by the surrounding block colour, so internal grid
-    lines vanish. (2) k-means quantize the blurred colours into ``n_clusters`` and take the gradient
-    of the quantized image — piecewise-constant, so it is flat inside a cluster (grid lines, now the
-    block colour, are crossable) and rises at every cluster boundary by the CIELAB distance between
-    the two centres. That distance is a clean step even for two pale-but-distinct colours, so the
-    pale-block/street boundary becomes a real ridge instead of a weak gradient.
+    The paper around and between blocks is the most extensive colour on a key map, so the biggest
+    cluster(s) are background. A cluster counts as background if its pixel area is at least
+    ``area_frac`` of the largest cluster's — this catches the two or three paper / aged-paper tints
+    while leaving the smaller per-colour block clusters as foreground.
     """
-    quant = quantized_lab(rgb_u8, n_clusters, line_smooth_size, seed)
-    gradient = (
-        sobel(quant[..., 0] / 100.0)
-        + sobel(quant[..., 1] / 128.0)
-        + sobel(quant[..., 2] / 128.0)
-    )
-    return ndi.gaussian_filter(gradient, smooth_sigma)
+    counts = np.bincount(labels.ravel(), minlength=n_clusters)
+    threshold = area_frac * counts.max()
+    return {cluster for cluster in range(n_clusters) if counts[cluster] >= threshold}
+
+
+def seed_region(
+    labels: np.ndarray, cluster: int, box: tuple[int, int, int, int], close_radius: int
+) -> np.ndarray | None:
+    """Flood-fill region: the connected component of ``cluster`` the seed box sits in.
+
+    ``box`` is (col0, row0, col1, row1) in label-image pixels. The cluster mask is first closed by
+    ``close_radius`` so the fill can bridge a stray pixel or two of another colour (a faint grid
+    line) to capture more of its own block, then split into connected components; the component
+    holding the most of the seed box is the block. Interior holes (the black page number, an
+    enclosed courtyard) are filled, while edge concavities are kept (some blocks are concave).
+    Returns None if the box overlaps no pixel of the cluster.
+    """
+    mask = (labels == cluster).astype(np.uint8)
+    if close_radius > 0:
+        size = 2 * close_radius + 1
+        kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (size, size))
+        mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, kernel)
+    components, count = ndi.label(mask)  # type: ignore[misc]
+    if count == 0:
+        return None
+    col0, row0, col1, row1 = box
+    patch = components[row0 : row1 + 1, col0 : col1 + 1]
+    patch = patch[patch > 0]
+    if patch.size == 0:
+        return None
+    component = int(np.bincount(patch).argmax())
+    return ndi.binary_fill_holes(components == component)
 
 
 def mask_to_polygon(mask: np.ndarray, simplify_tolerance: float) -> list[Point]:
@@ -234,43 +213,6 @@ def open_thin_arms(mask: np.ndarray, radius: int) -> np.ndarray:
     return opened.astype(bool) if opened.any() else mask
 
 
-def keep_seed_component(basin: np.ndarray) -> np.ndarray:
-    """Largest connected component of a basin mask, with interior holes filled."""
-    filled: np.ndarray = ndi.binary_fill_holes(basin)  # type: ignore[assignment]
-    labels, count = ndi.label(filled)  # type: ignore[misc]
-    if count <= 1:
-        return filled
-    sizes = np.bincount(labels.ravel())
-    sizes[0] = 0  # ignore background
-    return labels == int(np.argmax(sizes))
-
-
-def stamp_seed_markers(
-    shape: tuple[int, int], boxes: list[Box], scale: float, pad_frac: float
-) -> np.ndarray:
-    """Marker image: label 1 is unset, each seed box (grown by ``pad_frac``) gets label index+2.
-
-    Two passes so dense digits cannot erase each other: first the padded boxes (overlaps go to
-    whichever is stamped last), then the tight boxes, guaranteeing every digit keeps its own core.
-    """
-    markers = np.zeros(shape, dtype=np.int32)
-    height, width = shape
-
-    def stamp(box: Box, label: int, pad: float) -> None:
-        x0, y0, x1, y1 = box
-        col0 = max(0, int(round((x0 - pad) * scale)))
-        row0 = max(0, int(round((y0 - pad) * scale)))
-        col1 = min(width, int(round((x1 + pad) * scale)) + 1)
-        row1 = min(height, int(round((y1 + pad) * scale)) + 1)
-        markers[row0:row1, col0:col1] = label
-
-    for index, box in enumerate(boxes, start=2):
-        stamp(box, index, pad_frac * max(box[2] - box[0], box[3] - box[1]))
-    for index, box in enumerate(boxes, start=2):
-        stamp(box, index, 0.0)
-    return markers
-
-
 def working_scale(image_shape: tuple[int, ...], target_long_side: int) -> float:
     """Downscale factor so the image's longer side is ``target_long_side`` (never upscales)."""
     height, width = image_shape[:2]
@@ -283,59 +225,52 @@ def segment_page_regions(
     """Polygon (full-res pixels) of the colored block around each seeded page number.
 
     rgb is a float image in [0, 1] (H x W x 3). ``seeds`` are page-number bounding boxes in
-    full-resolution coordinates. Each block grows by watershed from its (padded) digit box until
-    it meets a neighbouring page or the unsaturated paper between blocks; there is no distance
-    cap, so a tall block fills its full height. Returns a map from seed index to its block
-    polygon; a seed whose block could not be recovered is omitted.
+    full-resolution coordinates. The image is k-means colour-clustered; each block is the connected
+    component of its own cluster that the page number's box sits in (see seed_region). A page number
+    whose box lands on a background cluster (printed on open paper, not a block) is dropped. Returns
+    a map from seed index to its block polygon, omitting dropped and unrecoverable seeds.
     """
     scale = working_scale(rgb.shape, params.target_long_side)
     height, width = rgb.shape[:2]
-    scaled = cv2.resize(
-        rgb, (max(1, round(width * scale)), max(1, round(height * scale)))
-    )
-    scaled_u8 = np.clip(scaled * 255.0, 0, 255).astype(np.uint8)
-    paper = background_mask(rgb2lab(scaled), params.bg_lightness, params.bg_chroma)
+    scaled_u8 = np.clip(
+        cv2.resize(rgb, (max(1, round(width * scale)), max(1, round(height * scale))))
+        * 255.0,
+        0,
+        255,
+    ).astype(np.uint8)
 
-    # Sizes that track the map's drawing scale are derived from the median seed spacing, so the
-    # same params transfer across maps of different resolution and block density.
+    # The line-smooth window tracks the map's drawing scale via the median seed spacing.
     spacing = nearest_neighbor_distance([box_center(box) for box in seeds]) * scale
     line_smooth_size = max(3, int(round(params.line_smooth_frac * spacing)) | 1)
-    arm_open_radius = round(params.arm_open_frac * spacing)
-    elevation = elevation_map(
-        scaled_u8,
-        params.n_clusters,
-        line_smooth_size,
-        params.smooth_sigma,
-        params.cluster_seed,
+    labels, _ = cluster_image(
+        scaled_u8, params.n_clusters, line_smooth_size, params.cluster_seed
     )
-
-    markers = stamp_seed_markers(scaled.shape[:2], seeds, scale, params.seed_pad_frac)
-    markers[paper & (markers == 0)] = 1  # unsaturated paper is its own (non-page) basin
-    markers[0, :] = markers[-1, :] = markers[:, 0] = markers[:, -1] = (
-        1  # frame is paper too
+    background = background_clusters(
+        labels, params.n_clusters, params.background_area_frac
     )
-
-    # Barrier off the map's coloured surround (margin/water): coloured pixels too far from any
-    # seed to belong to a page block. Distance is to the nearest seed, so the densely-seeded grid
-    # stays below the threshold (a block's far end is near its neighbour's seed) and isn't clipped.
-    if spacing > 0:
-        distance_to_seed = ndi.distance_transform_edt(markers < 2)
-        surround = (distance_to_seed > params.surround_reach_factor * spacing) & ~paper
-        markers[surround & (markers == 0)] = 1
-
-    basins = watershed(elevation, markers)
+    label_height, label_width = labels.shape
 
     inverse_scale = 1.0 / scale
     polygons: dict[int, list[Point]] = {}
-    for index in range(2, len(seeds) + 2):
-        basin = (basins == index) & ~paper
-        if not basin.any():
+    for index, box in enumerate(seeds):
+        col0 = max(0, int(round(box[0] * scale)))
+        row0 = max(0, int(round(box[1] * scale)))
+        col1 = min(label_width - 1, int(round(box[2] * scale)))
+        row1 = min(label_height - 1, int(round(box[3] * scale)))
+        patch = labels[row0 : row1 + 1, col0 : col1 + 1]
+        if patch.size == 0:
             continue
-        basin = open_thin_arms(basin, arm_open_radius)
-        component = keep_seed_component(basin)
-        polygon = mask_to_polygon(component, params.simplify_tolerance)
+        cluster = int(np.bincount(patch.ravel(), minlength=params.n_clusters).argmax())
+        if cluster in background:
+            continue  # the page number sits on paper, not a colour block
+        region = seed_region(
+            labels, cluster, (col0, row0, col1, row1), params.cluster_close_radius
+        )
+        if region is None or not region.any():
+            continue
+        polygon = mask_to_polygon(region, params.simplify_tolerance)
         if len(polygon) >= 3:
-            polygons[index - 2] = [
+            polygons[index] = [
                 (x * inverse_scale, y * inverse_scale) for x, y in polygon
             ]
     return polygons
@@ -455,10 +390,10 @@ def main() -> None:
             )
             print(f"Wrote {args.blur_debug}")
         if args.cluster_debug:
-            quant = quantized_lab(
+            labels, centers = cluster_image(
                 scaled, params.n_clusters, line_smooth_size, params.cluster_seed
             )
-            quant_rgb = (np.clip(lab2rgb(quant), 0, 1) * 255).astype(np.uint8)
+            quant_rgb = (np.clip(lab2rgb(centers[labels]), 0, 1) * 255).astype(np.uint8)
             Image.fromarray(quant_rgb).save(args.cluster_debug)
             print(f"Wrote {args.cluster_debug}")
 
