@@ -35,6 +35,7 @@ from mapsnap.streets import (
     build_block_index,
     canonical_street_matches,
     deduplicate_detections,
+    is_bare_letter,
     is_number_only,
     normalize_street,
 )
@@ -1201,6 +1202,10 @@ def process_image(
                 and det.get("long_side", float("inf"))
                 >= min_aspect_ratio * det.get("short_side", 1.0)
                 and not is_number_only(det["text"])
+                # Bare single letters are accepted only via promotion (the is_promoted
+                # branch above); an unpromoted "M"/"W" is almost always a rotated misread of
+                # a quadrant/type box, so reject it here.
+                and not is_bare_letter(det["text"])
                 and (
                     normalize_street(det["text"]) not in DIRECTION_WORDS
                     or det["text"].upper().strip() in normalized_streets

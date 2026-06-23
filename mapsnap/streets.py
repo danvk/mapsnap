@@ -224,6 +224,16 @@ def is_number_only(text: str) -> bool:
     return not bool(re.search(r"[a-zA-Z]", text))
 
 
+def is_bare_letter(text: str) -> bool:
+    """Return True if text is a single letter (e.g. "M", "W").
+
+    Bare single letters are too easily produced by misreading a rotated quadrant/type box
+    (e.g. an "N.W." box read as "M" at the opposite rotation), so the georeferencer only
+    trusts them when promoted by a correctly-oriented type-word hint (see promote_avenue_letters).
+    """
+    return len(text.strip()) == 1 and text.strip().isalpha()
+
+
 def _match_candidates(s: str) -> list[str]:
     """Return the candidate forms to compare against when prefix-matching street key s.
 
