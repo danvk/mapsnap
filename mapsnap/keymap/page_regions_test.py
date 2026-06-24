@@ -4,13 +4,15 @@ from mapsnap.keymap.page_regions import (
     RegionParams,
     background_clusters,
     box_center,
+    box_component,
+    clean_cluster_mask,
     cluster_image,
     mask_to_polygon,
     nearest_neighbor_distance,
     polygon_bounds,
     regions_panels_doc,
-    seed_region,
     segment_page_regions,
+    split_component,
     working_scale,
 )
 
@@ -39,22 +41,38 @@ def test_background_clusters():
     assert background_clusters(labels, 3, area_frac=0.9) == {0}  # only >= 54
 
 
-def test_seed_region_picks_component_and_fills_hole():
-    labels = np.zeros((30, 40), dtype=np.int32)
-    labels[5:20, 5:20] = 1  # block A (cluster 1)
-    labels[10:14, 10:14] = 0  # an enclosed hole inside A
-    labels[5:15, 30:38] = 1  # block B (same cluster) but disconnected
-    region = seed_region(labels, 1, box=(6, 6, 9, 9), close_radius=0)
-    assert region is not None
-    assert region[12, 12]  # interior hole filled
-    assert region[6, 6]  # seed's own block kept
-    assert not region[8, 34]  # the disconnected B block is not included
+def test_clean_cluster_mask_severs_thin_sliver():
+    # Two blocks joined by a 2-px-wide sliver; opening (radius 3) should sever it into two pieces.
+    mask = np.zeros((40, 60), dtype=bool)
+    mask[10:30, 5:25] = True  # block A
+    mask[10:30, 35:55] = True  # block B
+    mask[19:21, 25:35] = True  # thin sliver joining them
+    from scipy import ndimage as ndi
+
+    assert ndi.label(mask)[1] == 1  # joined before cleaning
+    cleaned = clean_cluster_mask(mask, close_radius=0, open_radius=3)
+    assert ndi.label(cleaned)[1] == 2  # severed after
+    assert cleaned[20, 15] and cleaned[20, 45]  # both blocks survive
 
 
-def test_seed_region_box_off_cluster_returns_none():
-    labels = np.zeros((20, 20), dtype=np.int32)
-    labels[2:8, 2:8] = 1
-    assert seed_region(labels, 1, box=(12, 12, 15, 15), close_radius=0) is None
+def test_box_component_picks_majority_and_handles_off():
+    components = np.zeros((20, 20), dtype=np.int32)
+    components[2:10, 2:10] = 1
+    components[2:10, 12:18] = 2
+    assert box_component(components, (3, 3, 6, 6)) == 1
+    assert box_component(components, (13, 3, 16, 6)) == 2
+    assert box_component(components, (10, 10, 11, 11)) is None  # off any component
+
+
+def test_split_component_partitions_between_two_seeds():
+    # One wide component with a seed near each end -> split near the middle.
+    component = np.zeros((20, 80), dtype=bool)
+    component[5:15, 5:75] = True
+    pieces = split_component(component, [(8, 8, 12, 12), (66, 8, 70, 12)])
+    assert len(pieces) == 2
+    assert pieces[0][10, 10] and not pieces[0][10, 70]  # left seed keeps the left
+    assert pieces[1][10, 70] and not pieces[1][10, 10]  # right seed keeps the right
+    assert not (pieces[0] & pieces[1]).any()  # disjoint
 
 
 def test_regions_panels_doc():
@@ -121,3 +139,17 @@ def test_segment_page_regions_two_blocks_and_background_discard():
     assert set(polygons) == {0, 1}  # the background seed is dropped
     assert max(x for x, _ in polygons[0]) <= 40  # red region stays left
     assert min(x for x, _ in polygons[1]) >= 45  # blue region stays right
+
+
+def test_segment_page_regions_splits_shared_block():
+    # One wide red block on grey paper with two page numbers in it -> split between them, not one
+    # region swallowing the other.
+    rgb = np.full((60, 120, 3), 0.85, dtype=np.float64)
+    rgb[20:45, 15:105] = [0.8, 0.1, 0.1]  # a single wide red block
+    params = RegionParams(n_clusters=3, cluster_open_radius=0)
+    seeds = [(25.0, 28.0, 33.0, 36.0), (87.0, 28.0, 95.0, 36.0)]
+    polygons = segment_page_regions(rgb, seeds, params)
+    assert set(polygons) == {0, 1}
+    assert max(x for x, _ in polygons[0]) < min(
+        x for x, _ in polygons[1]
+    )  # split, disjoint

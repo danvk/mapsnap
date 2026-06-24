@@ -10,8 +10,12 @@ Two feature sources, so a viewer (geojson.io etc.) shows them together:
     placed where the fitted key-map model says that page number sits. ``marker-color`` is green
     for an inlier page and red for an outlier, so a wrong global fit shows up as a cluster of
     red points pulled away from their truth polygons.
+  * **key-map region polygons** (``--regions``) — one Polygon per page number, the colored block
+    segmented around it (mapsnap.keymap.page_regions) mapped to lon/lat through the same fit. These
+    carry ``type`` = "keymap-region" and a distinct blue ``fill``, versus ``type`` = "truth" on the
+    footprints, so the segmented blocks read clearly apart from the truth.
 
-    uv run python -m mapsnap.keymap.keymap_geojson data/chicago_il_1950_vol_1 \
+    uv run python -m mapsnap.keymap.keymap_geojson data/chicago_il_1950_vol_1 --regions \
         --output data/chicago_il_1950_vol_1/keymap-debug.geojson
 """
 
@@ -48,6 +52,9 @@ from mapsnap.utils import source_id_to_page_key
 INLIER_COLOR = "#2ca02c"  # green
 OUTLIER_COLOR = "#d62728"  # red
 NEUTRAL_COLOR = "#999999"  # grey: page has no key-map detection
+REGION_FILL = (
+    "#1f77b4"  # blue: segmented key-map region, to stand apart from truth footprints
+)
 
 Point = tuple[float, float]
 
@@ -111,8 +118,10 @@ def region_features(
     """Polygon features for the colored block segmented around each page number.
 
     Each page number's block is found on the key-map image (page_regions.segment_page_regions),
-    then its pixel polygon is mapped to lon/lat through the same key-map fit as the points, so
-    the block overlays its truth footprint. Coloured green/red by inlier/outlier like the points.
+    then its pixel polygon is mapped to lon/lat through the same key-map fit as the points, so the
+    block overlays its truth footprint. The fill is a fixed blue (``REGION_FILL``) so the segmented
+    regions stand apart from the truth footprints at a glance; the stroke still encodes
+    inlier/outlier. Each feature is tagged ``type`` = "keymap-region".
     """
     lon0, lat0 = origin
     boxes, texts = load_seeds(keymap_path)
@@ -122,7 +131,6 @@ def region_features(
     for index, pixel_polygon in polygons.items():
         text = texts[index]
         number = int(text) if text.isdigit() else None
-        color = page_color(number, inlier_numbers, detected)
         ring = [
             list(unproject(*similarity_apply(model, vertex), lon0, lat0))
             for vertex in pixel_polygon
@@ -132,13 +140,14 @@ def region_features(
             {
                 "type": "Feature",
                 "properties": {
+                    "type": "keymap-region",
                     "source": "region",
                     "page": f"p{text}",
                     "inlier": number in inlier_numbers,
-                    "stroke": color,
+                    "stroke": page_color(number, inlier_numbers, detected),
                     "stroke-width": 2,
-                    "fill": color,
-                    "fill-opacity": 0.15,
+                    "fill": REGION_FILL,
+                    "fill-opacity": 0.25,
                 },
                 "geometry": {"type": "Polygon", "coordinates": [ring]},
             }
@@ -187,6 +196,7 @@ def build_geojson(
             {
                 "type": "Feature",
                 "properties": {
+                    "type": "truth",
                     "source": "truth",
                     "page_key": page_key,
                     "stroke": color,
@@ -207,6 +217,7 @@ def build_geojson(
             {
                 "type": "Feature",
                 "properties": {
+                    "type": "keymap-point",
                     "source": "keymap",
                     "page": f"p{page.number}",
                     "inlier": is_inlier,

@@ -19,6 +19,7 @@ some blocks are genuinely concave.
 
 import argparse
 import json
+from collections import defaultdict
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -27,6 +28,7 @@ import numpy as np
 from PIL import Image, ImageDraw
 from scipy import ndimage as ndi
 from skimage.color import lab2rgb, rgb2lab
+from skimage.segmentation import watershed
 
 Point = tuple[float, float]
 Box = tuple[float, float, float, float]  # x0, y0, x1, y1 (full-res pixels)
@@ -73,8 +75,15 @@ class RegionParams:
         spacing; it erases black grid lines thinner than the window so they do not split a block.
     background_area_frac: a cluster is "background" (paper/streets/margin) if its pixel area is at
         least this fraction of the largest cluster's. See background_clusters.
-    cluster_close_radius: a block's cluster mask is morphologically closed by this radius (scaled
-        pixels) before the flood fill, so it can bridge a stray pixel or two of another colour.
+    cluster_close_radius: a cluster mask is morphologically closed by this radius (scaled pixels)
+        before the flood fill, so it can bridge a stray pixel or two of another colour.
+    cluster_open_radius: the cluster mask is then morphologically opened by this radius, deleting
+        thin slivers/arms (narrower than 2x the radius) that would otherwise let one block's flood
+        leak through a hairline connection into a neighbour. Keep it well below a block half-width.
+    cluster_tie_frac: when a seed's box straddles two clusters with comparable pixel counts (the
+        smaller within this fraction of the larger), the block was split across two near-identical
+        colours, so the seed is assigned to whichever candidate has the larger connected component
+        (its real block) rather than the pixel-majority fragment.
     simplify_tolerance: Douglas-Peucker tolerance (in scaled pixels) for the output polygon.
     """
 
@@ -84,7 +93,9 @@ class RegionParams:
     line_smooth_frac: float = 0.08
     background_area_frac: float = 0.5
     cluster_close_radius: int = 2
-    simplify_tolerance: float = 2.0
+    cluster_open_radius: int = 3
+    cluster_tie_frac: float = 0.7
+    simplify_tolerance: float = 4.0
 
 
 def nearest_neighbor_distance(points: list[Point]) -> float:
@@ -151,33 +162,61 @@ def background_clusters(
     return {cluster for cluster in range(n_clusters) if counts[cluster] >= threshold}
 
 
-def seed_region(
-    labels: np.ndarray, cluster: int, box: tuple[int, int, int, int], close_radius: int
-) -> np.ndarray | None:
-    """Flood-fill region: the connected component of ``cluster`` the seed box sits in.
+def clean_cluster_mask(
+    cluster_mask: np.ndarray, close_radius: int, open_radius: int
+) -> np.ndarray:
+    """Close then open a cluster's boolean mask: bridge faint gaps, then delete thin slivers/arms.
 
-    ``box`` is (col0, row0, col1, row1) in label-image pixels. The cluster mask is first closed by
-    ``close_radius`` so the fill can bridge a stray pixel or two of another colour (a faint grid
-    line) to capture more of its own block, then split into connected components; the component
-    holding the most of the seed box is the block. Interior holes (the black page number, an
-    enclosed courtyard) are filled, while edge concavities are kept (some blocks are concave).
-    Returns None if the box overlaps no pixel of the cluster.
+    Closing (radius ``close_radius``) bridges a stray pixel or two of another colour inside a block
+    (a faint grid line). Opening (radius ``open_radius``) then erodes away any connection thinner
+    than ``2 * open_radius`` — the hairline slivers along which one block's flood would otherwise
+    leak into a neighbour — while leaving the compact blocks (bar slight corner rounding).
     """
-    mask = (labels == cluster).astype(np.uint8)
+    mask = cluster_mask.astype(np.uint8)
     if close_radius > 0:
         size = 2 * close_radius + 1
-        kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (size, size))
-        mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, kernel)
-    components, count = ndi.label(mask)  # type: ignore[misc]
-    if count == 0:
-        return None
+        mask = cv2.morphologyEx(
+            mask,
+            cv2.MORPH_CLOSE,
+            cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (size, size)),
+        )
+    if open_radius > 0:
+        size = 2 * open_radius + 1
+        mask = cv2.morphologyEx(
+            mask,
+            cv2.MORPH_OPEN,
+            cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (size, size)),
+        )
+    return mask.astype(bool)
+
+
+def box_component(components: np.ndarray, box: tuple[int, int, int, int]) -> int | None:
+    """Label of the connected component holding the most of ``box`` (col0,row0,col1,row1), or None."""
     col0, row0, col1, row1 = box
     patch = components[row0 : row1 + 1, col0 : col1 + 1]
     patch = patch[patch > 0]
     if patch.size == 0:
         return None
-    component = int(np.bincount(patch).argmax())
-    return ndi.binary_fill_holes(components == component)
+    return int(np.bincount(patch).argmax())
+
+
+def split_component(
+    component_mask: np.ndarray, boxes: list[tuple[int, int, int, int]]
+) -> list[np.ndarray]:
+    """Partition one component among several seed boxes (a distance-transform watershed).
+
+    When two page numbers both land in the same connected component their blocks abut without a
+    separating street (or a hairline join survived the opening); rather than let one swallow the
+    other, split the component by flooding from each seed box and meeting along the distance-
+    transform ridge between them. Returns one boolean mask per input box, in order.
+    """
+    markers = np.zeros(component_mask.shape, dtype=np.int32)
+    for label, (col0, row0, col1, row1) in enumerate(boxes, start=1):
+        inside = component_mask[row0 : row1 + 1, col0 : col1 + 1]
+        markers[row0 : row1 + 1, col0 : col1 + 1][inside] = label
+    distance: np.ndarray = ndi.distance_transform_edt(component_mask)  # type: ignore[assignment]
+    basins = watershed(-distance, markers, mask=component_mask)
+    return [basins == label for label in range(1, len(boxes) + 1)]
 
 
 def mask_to_polygon(mask: np.ndarray, simplify_tolerance: float) -> list[Point]:
@@ -196,23 +235,6 @@ def mask_to_polygon(mask: np.ndarray, simplify_tolerance: float) -> list[Point]:
     return [(float(x), float(y)) for [[x, y]] in approx]
 
 
-def open_thin_arms(mask: np.ndarray, radius: int) -> np.ndarray:
-    """Morphological opening that deletes protrusions narrower than ``2 * radius`` pixels.
-
-    A basin sometimes flows down a same-coloured street/margin corridor as a thin "arm" (the
-    corridor is walled by colour ridges on its long sides, so no neighbour contests it). Opening
-    with a disk erodes such an arm away (it is thinner than the disk) while a compact block, far
-    wider than the disk, is preserved bar some corner rounding. Returns ``mask`` unchanged if the
-    opening would erase it entirely (a genuinely thin block), so a region is never lost.
-    """
-    if radius <= 0:
-        return mask
-    size = 2 * radius + 1
-    kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (size, size))
-    opened = cv2.morphologyEx(mask.astype(np.uint8), cv2.MORPH_OPEN, kernel)
-    return opened.astype(bool) if opened.any() else mask
-
-
 def working_scale(image_shape: tuple[int, ...], target_long_side: int) -> float:
     """Downscale factor so the image's longer side is ``target_long_side`` (never upscales)."""
     height, width = image_shape[:2]
@@ -225,10 +247,12 @@ def segment_page_regions(
     """Polygon (full-res pixels) of the colored block around each seeded page number.
 
     rgb is a float image in [0, 1] (H x W x 3). ``seeds`` are page-number bounding boxes in
-    full-resolution coordinates. The image is k-means colour-clustered; each block is the connected
-    component of its own cluster that the page number's box sits in (see seed_region). A page number
-    whose box lands on a background cluster (printed on open paper, not a block) is dropped. Returns
-    a map from seed index to its block polygon, omitting dropped and unrecoverable seeds.
+    full-resolution coordinates. The image is k-means colour-clustered; each cluster mask is cleaned
+    (closed then opened, so hairline slivers between blocks are severed) and split into connected
+    components. Each page number's block is the component its box sits in; if two page numbers land
+    in the same component their blocks abut, so the component is split between them by a distance
+    watershed. A page number whose box lands on a background cluster (printed on open paper, not a
+    block) is dropped. Returns a map from seed index to its block polygon, omitting dropped seeds.
     """
     scale = working_scale(rgb.shape, params.target_long_side)
     height, width = rgb.shape[:2]
@@ -242,7 +266,6 @@ def segment_page_regions(
     # The line-smooth window tracks the map's drawing scale via the median seed spacing.
     spacing = nearest_neighbor_distance([box_center(box) for box in seeds]) * scale
     line_smooth_size = max(3, int(round(params.line_smooth_frac * spacing)) | 1)
-    print(f"line_smooth_frac={params.line_smooth_frac} {spacing=} {line_smooth_size=}")
     labels, _ = cluster_image(
         scaled_u8, params.n_clusters, line_smooth_size, params.cluster_seed
     )
@@ -251,25 +274,74 @@ def segment_page_regions(
     )
     label_height, label_width = labels.shape
 
-    inverse_scale = 1.0 / scale
-    polygons: dict[int, list[Point]] = {}
+    # Clean (close then open) and connected-component each non-background cluster's mask once.
+    components: dict[int, np.ndarray] = {}
+    component_sizes: dict[int, np.ndarray] = {}
+    for cluster in range(params.n_clusters):
+        if cluster in background:
+            continue
+        mask = clean_cluster_mask(
+            labels == cluster, params.cluster_close_radius, params.cluster_open_radius
+        )
+        labelled, _ = ndi.label(mask)  # type: ignore[misc]
+        components[cluster] = labelled
+        component_sizes[cluster] = np.bincount(labelled.ravel())
+
+    # Assign each page number to one (cluster, component) = its block, grouping seeds that land
+    # in the same one. The seed's cluster is its box's pixel majority, except that near-tied
+    # clusters (a block split across two similar colours) defer to whichever has the larger
+    # component, so both numbers on such a block land in the same component and get split below.
+    ScaledBox = tuple[int, int, int, int]
+    members_by_region: dict[tuple[int, int], list[tuple[int, ScaledBox]]] = defaultdict(
+        list
+    )
     for index, box in enumerate(seeds):
-        col0 = max(0, int(round(box[0] * scale)))
-        row0 = max(0, int(round(box[1] * scale)))
-        col1 = min(label_width - 1, int(round(box[2] * scale)))
-        row1 = min(label_height - 1, int(round(box[3] * scale)))
+        scaled_box: ScaledBox = (
+            max(0, int(round(box[0] * scale))),
+            max(0, int(round(box[1] * scale))),
+            min(label_width - 1, int(round(box[2] * scale))),
+            min(label_height - 1, int(round(box[3] * scale))),
+        )
+        col0, row0, col1, row1 = scaled_box
         patch = labels[row0 : row1 + 1, col0 : col1 + 1]
         if patch.size == 0:
             continue
-        cluster = int(np.bincount(patch.ravel(), minlength=params.n_clusters).argmax())
-        if cluster in background:
-            continue  # the page number sits on paper, not a colour block
-        region = seed_region(
-            labels, cluster, (col0, row0, col1, row1), params.cluster_close_radius
-        )
-        if region is None or not region.any():
+        counts = np.bincount(patch.ravel(), minlength=params.n_clusters)
+        for cluster in background:
+            counts[cluster] = 0  # the page number sits on paper, not a colour block
+        if counts.max() == 0:
             continue
-        polygon = mask_to_polygon(region, params.simplify_tolerance)
+        candidates = np.where(counts >= params.cluster_tie_frac * counts.max())[0]
+        choice: tuple[int, int] | None = None
+        best_size = -1
+        for cluster in candidates:
+            component = box_component(components[cluster], scaled_box)
+            if component is None:
+                continue
+            size = int(component_sizes[cluster][component])
+            if size > best_size:
+                best_size = size
+                choice = (int(cluster), component)
+        if choice is not None:
+            members_by_region[choice].append((index, scaled_box))
+
+    inverse_scale = 1.0 / scale
+    region_masks: dict[int, np.ndarray] = {}
+    for (cluster, component), members in members_by_region.items():
+        component_mask = components[cluster] == component
+        if len(members) == 1:
+            region_masks[members[0][0]] = component_mask
+        else:  # two+ page numbers share a component: split it between them
+            boxes = [scaled_box for _, scaled_box in members]
+            for (index, _), piece in zip(
+                members, split_component(component_mask, boxes)
+            ):
+                region_masks[index] = piece
+
+    polygons: dict[int, list[Point]] = {}
+    for index, mask in region_masks.items():
+        filled: np.ndarray = ndi.binary_fill_holes(mask)  # type: ignore[assignment]
+        polygon = mask_to_polygon(filled, params.simplify_tolerance)
         if len(polygon) >= 3:
             polygons[index] = [
                 (x * inverse_scale, y * inverse_scale) for x, y in polygon
