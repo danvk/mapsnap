@@ -27,10 +27,6 @@ SUBCOMMANDS: dict[str, tuple[str, str]] = {
         "mapsnap.make_iiif_georef",
         "Combine georeferences into a IIIF AnnotationPage",
     ),
-    "refine-with-keymap": (
-        "mapsnap.refine_with_keymap",
-        "Re-OCR and re-fit outlier/un-fit pages using the key map's expected locations",
-    ),
     "compare": (
         "mapsnap.compare_iiif_georef",
         "Compare human vs computer IIIF georeferencing",

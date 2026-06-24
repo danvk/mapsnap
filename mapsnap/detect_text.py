@@ -184,7 +184,6 @@ def detect_text(
     beam_width: int = 20,
     craft_scale: float = 1.0,
     reuse_boxes: bool = False,
-    streets_path: str | None = None,
 ) -> list[dict]:
     """Run CRAFT-based text detection at 0°, 90°, and 270° and return all results.
 
@@ -223,10 +222,6 @@ def detect_text(
     file instead of re-running CRAFT. Useful for iterating on recognition
     parameters without redoing the (slower) detection step. The caller is
     responsible for ensuring the file exists before calling with reuse_boxes=True.
-
-    streets_path overrides where the detections JSON is written (default
-    <stem>.streets.json). A second-pass re-OCR can point this at <stem>.streets2.json
-    to avoid clobbering the first-pass results.
 
     Writes <stem>.boxes.json alongside the image whenever CRAFT is run (i.e.
     when reuse_boxes=False). The file records the image dimensions, a timestamp,
@@ -350,7 +345,7 @@ def detect_text(
         "command": filter_args(sys.argv[:], image_path),
         "streets": all_detections,
     }
-    with open(streets_path or _streets_path(image_path), "w") as f:
+    with open(_streets_path(image_path), "w") as f:
         json.dump(streets_doc, f, indent=2)
 
     return all_detections

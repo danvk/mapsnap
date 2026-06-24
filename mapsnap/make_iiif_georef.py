@@ -48,12 +48,7 @@ def georef_path_to_page_key(path: str) -> str | None:
     """Extract page key like 'p428__2' from a georef filename.
 
     Accepts filenames ending in '_p16s.georef.json', '_p16.georef.json', or
-    '_p16s.gcps.georef.json' (the '.gcps' infix is optional). Also accepts the
-    refined '.georef2.json' form; tossed/reject variants (e.g. '.georef-misscale.json',
-    '.georef2-reject.json') do not match and are ignored.
-
-    The suffix letter is lowercased (e.g. 'p10L' -> 'p10l') to match the lowercase
-    keys produced by _service_url_to_page_key from manifest canvas service URLs.
+    '_p16s.gcps.georef.json' (the '.gcps' infix is optional).
     """
     m = re.search(
         r"(?:\b|_)(p\d+)([snewlr]?)((?:__\d+)?)(?:\.[^.]+)?\.georef2?\.json$",
@@ -500,18 +495,6 @@ def _load_volume_items(
     if not georef_paths:
         print(f"Error: no files matched '{georef_glob_pattern}'.", file=sys.stderr)
         sys.exit(1)
-
-    # Prefer a refined '<stem>.georef2.json' over the original '<stem>.georef.json' for the
-    # same page, and ignore unparseable paths (tossed/reject variants). This lets a caller
-    # pass a broad glob like '*.georef*.json' and get the refined fit where one exists.
-    best_for_key: dict[str, str] = {}
-    for path in georef_paths:
-        key = georef_path_to_page_key(path)
-        if not key:
-            continue
-        if key not in best_for_key or ".georef2.json" in Path(path).name:
-            best_for_key[key] = path
-    georef_paths = sorted(best_for_key.values())
 
     if source_data.get("type") == "AnnotationPage":
         items_by_key = _load_oim_index(source_data)
