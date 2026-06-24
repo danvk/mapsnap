@@ -5,8 +5,20 @@ from mapsnap.streets import (
     _num_to_ordinal_word,
     canonical_street_match,
     canonical_street_matches,
+    is_bare_letter,
     normalize_street,
 )
+
+
+def test_is_bare_letter():
+    assert is_bare_letter("M")
+    assert is_bare_letter("W")
+    assert is_bare_letter(" M ")  # surrounding whitespace ignored
+    assert not is_bare_letter("M.")  # has punctuation -> not bare
+    assert not is_bare_letter("MAIN")
+    assert not is_bare_letter("5")  # a digit is not a letter
+    assert not is_bare_letter("")
+
 
 # --- _num_to_ordinal_word ---
 

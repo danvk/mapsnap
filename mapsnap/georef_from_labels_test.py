@@ -36,16 +36,23 @@ def _make_det(
     angle: int = 0,
     hint: bool = False,
 ) -> dict:
-    """Build a mock detection dict with a horizontal bounding polygon."""
-    half_long = long_side / 2.0
-    half_short = short_side / 2.0
+    """Build a mock detection whose polygon is oriented along ``dir_pix``.
+
+    The first edge (polygon[0] → polygon[1]) points in the reading direction (+dir_pix), as a
+    real detect_text polygon does, so reading_vector / the letter-ordering check behave as in
+    production.
+    """
+    ux, uy = math.cos(dir_pix), math.sin(dir_pix)  # reading (long-axis) direction
+    px, py = -uy, ux  # perpendicular
+    hl, hs = long_side / 2.0, short_side / 2.0
+    corners = [
+        (cx - hl * ux - hs * px, cy - hl * uy - hs * py),  # start, near edge
+        (cx + hl * ux - hs * px, cy + hl * uy - hs * py),  # end, near edge
+        (cx + hl * ux + hs * px, cy + hl * uy + hs * py),  # end, far edge
+        (cx - hl * ux + hs * px, cy - hl * uy + hs * py),  # start, far edge
+    ]
     return {
-        "polygon": [
-            [int(cx - half_long), int(cy - half_short)],
-            [int(cx + half_long), int(cy - half_short)],
-            [int(cx + half_long), int(cy + half_short)],
-            [int(cx - half_long), int(cy + half_short)],
-        ],
+        "polygon": [[round(x), round(y)] for x, y in corners],
         "text": text,
         "confidence": confidence,
         "angle": angle,
@@ -63,16 +70,18 @@ def _make_det(
 
 def test_promote_single_char_near_avenue_hint():
     # "X" in the same vertical column as an "AVENUE" hint → promoted with corrected dir_pix.
-    # Both share dir_pix=π/2 (vertical), as in the real p88 data where detect_text.py
-    # already computes dir_pix correctly from the CRAFT polygon even for square boxes.
+    # Both share dir_pix=π/2 (vertical, reading downward); for "AVENUE X" the AVENUE hint must
+    # precede the letter, so the hint is above (smaller cy) and "X" below.
     streets = {"AVENUE X", "X"}
     hints = [
         _make_det(
-            "AVENUE", cx=193, cy=1544, long_side=120, hint=True, dir_pix=math.pi / 2
+            "AVENUE", cx=193, cy=274, long_side=120, hint=True, dir_pix=math.pi / 2
         )
     ]
     dets = [
-        _make_det("X", cx=192, cy=274, long_side=24, short_side=24, dir_pix=math.pi / 2)
+        _make_det(
+            "X", cx=192, cy=1544, long_side=24, short_side=24, dir_pix=math.pi / 2
+        )
     ]
     result = promote_avenue_letters(hints, dets, streets)
     assert len(result) == 1
@@ -100,11 +109,13 @@ def test_promote_no_matching_street():
     streets = {"AVENUE X", "X"}
     hints = [
         _make_det(
-            "AVENUE", cx=193, cy=1544, long_side=120, hint=True, dir_pix=math.pi / 2
+            "AVENUE", cx=193, cy=274, long_side=120, hint=True, dir_pix=math.pi / 2
         )
     ]
     dets = [
-        _make_det("Q", cx=192, cy=274, long_side=24, short_side=24, dir_pix=math.pi / 2)
+        _make_det(
+            "Q", cx=192, cy=1544, long_side=24, short_side=24, dir_pix=math.pi / 2
+        )
     ]
     result = promote_avenue_letters(hints, dets, streets)
     assert result == []
@@ -158,15 +169,15 @@ def test_promote_correct_letter_wins_over_misread():
     streets = {"AVENUE W", "W", "AVENUE M", "M"}
     hints = [
         _make_det(
-            "AVENUE", cx=1164, cy=1566, long_side=120, hint=True, dir_pix=math.pi / 2
+            "AVENUE", cx=1164, cy=268, long_side=120, hint=True, dir_pix=math.pi / 2
         ),
     ]
     dets = [
         _make_det(
-            "W", cx=1163, cy=268, long_side=28, short_side=26, dir_pix=math.pi / 2
+            "W", cx=1163, cy=1566, long_side=28, short_side=26, dir_pix=math.pi / 2
         ),
         _make_det(
-            "M", cx=1162, cy=270, long_side=28, short_side=26, dir_pix=math.pi / 2
+            "M", cx=1162, cy=1568, long_side=28, short_side=26, dir_pix=math.pi / 2
         ),
     ]
     result = promote_avenue_letters(hints, dets, streets)
@@ -180,18 +191,52 @@ def test_promote_letter_in_column_with_avenue():
     streets = {"AVENUE W", "W"}
     hints = [
         _make_det(
-            "AVENUE", cx=193, cy=1544, long_side=120, hint=True, dir_pix=math.pi / 2
+            "AVENUE", cx=193, cy=274, long_side=120, hint=True, dir_pix=math.pi / 2
         ),
     ]
     dets = [
         _make_det(
-            "W", cx=192, cy=274, long_side=18, short_side=12, dir_pix=math.pi / 2
+            "W", cx=192, cy=1544, long_side=18, short_side=12, dir_pix=math.pi / 2
         ),
     ]
     result = promote_avenue_letters(hints, dets, streets)
     assert len(result) == 1
     assert result[0]["text"] == "W"
     assert result[0]["promoted"] is True
+
+
+def test_promote_street_letter_must_follow_hint():
+    # "K STREET": reading left→right, the "ST" hint must come AFTER the K. K left, ST right → OK.
+    streets = {"K STREET", "K"}
+    hints = [_make_det("ST", cx=200, cy=300, hint=True, dir_pix=0.0)]
+    dets = [_make_det("K", cx=100, cy=300, long_side=24, short_side=24, dir_pix=0.0)]
+    result = promote_avenue_letters(hints, dets, streets)
+    assert len(result) == 1 and result[0]["text"] == "K"
+
+
+def test_promote_street_letter_before_hint_rejected():
+    # K to the RIGHT of "ST" (reads "ST K") → wrong order for "K STREET" → not promoted.
+    streets = {"K STREET", "K"}
+    hints = [_make_det("ST", cx=100, cy=300, hint=True, dir_pix=0.0)]
+    dets = [_make_det("K", cx=200, cy=300, long_side=24, short_side=24, dir_pix=0.0)]
+    assert promote_avenue_letters(hints, dets, streets) == []
+
+
+def test_promote_avenue_letter_must_follow_hint():
+    # "AVENUE Q": the "AV" hint must come BEFORE the Q. AV left, Q right → OK.
+    streets = {"AVENUE Q", "Q"}
+    hints = [_make_det("AV", cx=100, cy=300, hint=True, dir_pix=0.0)]
+    dets = [_make_det("Q", cx=200, cy=300, long_side=24, short_side=24, dir_pix=0.0)]
+    result = promote_avenue_letters(hints, dets, streets)
+    assert len(result) == 1 and result[0]["text"] == "Q"
+
+
+def test_promote_avenue_letter_after_hint_rejected():
+    # Q to the LEFT of "AV" (reads "Q AV") → wrong order for "AVENUE Q" → not promoted.
+    streets = {"AVENUE Q", "Q"}
+    hints = [_make_det("AV", cx=200, cy=300, hint=True, dir_pix=0.0)]
+    dets = [_make_det("Q", cx=100, cy=300, long_side=24, short_side=24, dir_pix=0.0)]
+    assert promote_avenue_letters(hints, dets, streets) == []
 
 
 # ---------------------------------------------------------------------------

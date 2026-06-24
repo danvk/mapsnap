@@ -35,6 +35,8 @@ from mapsnap.streets import (
     build_block_index,
     canonical_street_matches,
     deduplicate_detections,
+    hint_type_word,
+    is_bare_letter,
     is_number_only,
     normalize_street,
 )
@@ -737,6 +739,16 @@ def _are_quadrant_siblings(matches: list[str]) -> bool:
     return len(bases) == 1
 
 
+def reading_vector(polygon: list[list[float]]) -> tuple[float, float]:
+    """Directed reading vector (top-left → top-right edge) of a text polygon.
+
+    detect_text builds polygons from EasyOCR's TL,TR,BR,BL corner order (preserved through the
+    90°/270° remaps), so the first edge points in the direction the text is read. This gives an
+    unambiguous before/after ordering of a letter and a type-word hint along the label.
+    """
+    return (polygon[1][0] - polygon[0][0], polygon[1][1] - polygon[0][1])
+
+
 def promote_avenue_letters(
     hint_detections: list[dict],
     all_detections: list[dict],
@@ -827,6 +839,20 @@ def promote_avenue_letters(
             det_perp = -det_cx * sin_d + det_cy * cos_d
             if abs(det_perp - hint_perp) > perp_tolerance_px:
                 continue
+
+            # Enforce the letter/type-word order along the reading direction: "<letter> STREET"
+            # (the ST hint must follow the letter) vs "AVENUE <letter>" (the AVE hint must
+            # precede it). proj is the letter's offset from the hint along the reading vector.
+            htype = hint_type_word(hint.get("text", ""))
+            if htype is not None:
+                rvx, rvy = reading_vector(hint_poly)
+                proj = (det_cx - hint_cx) * rvx + (det_cy - hint_cy) * rvy
+                # proj<0: letter precedes hint (… "K" before "STREET"); proj>0: letter follows
+                # hint ("AVENUE" before "Q" …). Reject the wrong order for each type.
+                if (htype == "STREET" and proj >= 0) or (
+                    htype == "AVENUE" and proj <= 0
+                ):
+                    continue
 
             matches = canonical_street_matches(text, normalized_streets)
             if len(matches) != 1:
@@ -1201,6 +1227,10 @@ def process_image(
                 and det.get("long_side", float("inf"))
                 >= min_aspect_ratio * det.get("short_side", 1.0)
                 and not is_number_only(det["text"])
+                # Bare single letters are accepted only via promotion (the is_promoted
+                # branch above); an unpromoted "M"/"W" is almost always a rotated misread of
+                # a quadrant/type box, so reject it here.
+                and not is_bare_letter(det["text"])
                 and (
                     normalize_street(det["text"]) not in DIRECTION_WORDS
                     or det["text"].upper().strip() in normalized_streets
@@ -1719,6 +1749,18 @@ def main() -> None:
         ),
     )
     args = parser.parse_args()
+
+    # A key-map index page (one with a sibling <stem>.keymap.json) has no streets to fit, so
+    # ignore it for georeferencing. Other images still require a <stem>.streets.json downstream.
+    kept_images = []
+    for image_path in args.images:
+        stem = image_stem(str(image_path))
+        keymap_path = os.path.join(os.path.dirname(image_path), f"{stem}.keymap.json")
+        if os.path.exists(keymap_path):
+            print(f"Skipping {image_path}: key-map page", file=sys.stderr)
+        else:
+            kept_images.append(image_path)
+    args.images = kept_images
 
     force_intersection: tuple[int, int] | None = None
     if args.force_intersection is not None:
