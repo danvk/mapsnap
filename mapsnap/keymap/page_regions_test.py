@@ -49,9 +49,11 @@ def test_clean_cluster_mask_severs_thin_sliver():
     mask[19:21, 25:35] = True  # thin sliver joining them
     from scipy import ndimage as ndi
 
-    assert ndi.label(mask)[1] == 1  # joined before cleaning
+    _, count_before = ndi.label(mask)  # type: ignore[misc]
+    assert count_before == 1  # joined before cleaning
     cleaned = clean_cluster_mask(mask, close_radius=0, open_radius=3)
-    assert ndi.label(cleaned)[1] == 2  # severed after
+    _, count_after = ndi.label(cleaned)  # type: ignore[misc]
+    assert count_after == 2  # severed after
     assert cleaned[20, 15] and cleaned[20, 45]  # both blocks survive
 
 

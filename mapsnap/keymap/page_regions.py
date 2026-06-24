@@ -32,6 +32,7 @@ from skimage.segmentation import watershed
 
 Point = tuple[float, float]
 Box = tuple[float, float, float, float]  # x0, y0, x1, y1 (full-res pixels)
+ScaledBox = tuple[int, int, int, int]  # col0, row0, col1, row1 in label-image pixels
 
 
 def polygon_bounds(polygon: list[list[float]]) -> Box:
@@ -134,8 +135,10 @@ def cluster_image(
         sample = flat
     cv2.setRNGSeed(seed)
     criteria = (cv2.TERM_CRITERIA_EPS + cv2.TERM_CRITERIA_MAX_ITER, 20, 1.0)
+    # bestLabels is an output here; pass an empty array (cv2's stub rejects None).
+    best_labels = np.empty((0,), dtype=np.int32)
     _, _, centers = cv2.kmeans(
-        sample, n_clusters, None, criteria, 3, cv2.KMEANS_PP_CENTERS
+        sample, n_clusters, best_labels, criteria, 3, cv2.KMEANS_PP_CENTERS
     )
     labels = np.zeros(len(flat), dtype=np.int32)
     best = np.full(len(flat), np.inf, dtype=np.float32)
@@ -291,7 +294,6 @@ def segment_page_regions(
     # in the same one. The seed's cluster is its box's pixel majority, except that near-tied
     # clusters (a block split across two similar colours) defer to whichever has the larger
     # component, so both numbers on such a block land in the same component and get split below.
-    ScaledBox = tuple[int, int, int, int]
     members_by_region: dict[tuple[int, int], list[tuple[int, ScaledBox]]] = defaultdict(
         list
     )
