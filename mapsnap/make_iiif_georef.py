@@ -51,9 +51,19 @@ def georef_path_to_page_key(path: str) -> str | None:
     '_p16s.gcps.georef.json' (the '.gcps' infix is optional). Also accepts the
     refined '.georef2.json' form; tossed/reject variants (e.g. '.georef-misscale.json',
     '.georef2-reject.json') do not match and are ignored.
+
+    The suffix letter is lowercased (e.g. 'p10L' -> 'p10l') to match the lowercase
+    keys produced by _service_url_to_page_key from manifest canvas service URLs.
     """
-    m = re.search(r"(?:\b|_)(p\d+[snew]?(?:__\d+)?)(?:\.[^.]+)?\.georef2?\.json$", path)
-    return m.group(1) if m else None
+    m = re.search(
+        r"(?:\b|_)(p\d+)([snewlr]?)((?:__\d+)?)(?:\.[^.]+)?\.georef2?\.json$",
+        path,
+        re.IGNORECASE,
+    )
+    if not m:
+        return None
+    page_num, suffix, split = m.groups()
+    return f"{page_num}{suffix.lower()}{split}"
 
 
 def _service_url_to_page_key(url: str) -> str | None:
