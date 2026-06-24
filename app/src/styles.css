@@ -85,6 +85,41 @@
   gap: 8px;
 }
 
+/*
+ * Panels mode: page-region boxes are tiny, so give the image the bulk of the width and let it
+ * scroll vertically with the page; the Index/Page/Area table needs only a narrow strip.
+ */
+.container-panels {
+  align-items: flex-start;
+}
+
+.container-panels .image-column {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.container-panels .image-wrapper {
+  display: block;
+  width: 100%;
+}
+
+.container-panels .image-wrapper img {
+  width: 100%;
+  max-width: none;
+  max-height: none;
+}
+
+.container-panels .map-column {
+  flex: 0 0 220px;
+  min-width: 0;
+}
+
+.container-panels #detections-panel {
+  height: auto;
+  position: sticky;
+  top: 16px;
+}
+
 #map {
   height: 90vh;
 }

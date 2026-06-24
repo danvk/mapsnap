@@ -2,6 +2,8 @@ import type { PanelPolygon } from '../types';
 
 interface PanelsOverlayProps {
   panels: PanelPolygon[];
+  /** Optional per-panel display label (e.g. page number); defaults to the 1-based index. */
+  labels?: string[];
   selectedIndices: Set<number>;
   /** Rendered image size in CSS pixels. */
   displayWidth: number;
@@ -23,6 +25,7 @@ export function panelColor(index: number): string {
 export function PanelsOverlay(props: PanelsOverlayProps) {
   const {
     panels,
+    labels,
     selectedIndices,
     displayWidth,
     displayHeight,
@@ -76,7 +79,7 @@ export function PanelsOverlay(props: PanelsOverlayProps) {
               strokeWidth={3}
               paintOrder="stroke"
             >
-              {i + 1}
+              {labels?.[i] ?? i + 1}
             </text>
           </g>
         );
