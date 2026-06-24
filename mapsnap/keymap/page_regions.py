@@ -81,7 +81,7 @@ class RegionParams:
     target_long_side: int = 3000
     n_clusters: int = 8
     cluster_seed: int = 0
-    line_smooth_frac: float = 0.04
+    line_smooth_frac: float = 0.08
     background_area_frac: float = 0.5
     cluster_close_radius: int = 2
     simplify_tolerance: float = 2.0
@@ -242,6 +242,7 @@ def segment_page_regions(
     # The line-smooth window tracks the map's drawing scale via the median seed spacing.
     spacing = nearest_neighbor_distance([box_center(box) for box in seeds]) * scale
     line_smooth_size = max(3, int(round(params.line_smooth_frac * spacing)) | 1)
+    print(f"line_smooth_frac={params.line_smooth_frac} {spacing=} {line_smooth_size=}")
     labels, _ = cluster_image(
         scaled_u8, params.n_clusters, line_smooth_size, params.cluster_seed
     )
