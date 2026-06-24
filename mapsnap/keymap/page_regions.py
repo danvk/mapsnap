@@ -5,14 +5,16 @@ its page number printed in black at the centre. Blocks are separated either by a
 boundary line or by a direct change of colour; thinner black street-grid lines run *inside* a
 block. The white/tan paper between blocks is unsaturated.
 
-Recovering one polygon per page is a colour-cluster flood fill. The (line-smoothed) image is
-k-means quantized into a handful of colours; a page block is then the connected component of its
-own cluster that the page number sits in. The streets/paper between blocks form the largest
-cluster(s) — the "background" — which both bounds the flood (a flood stops at the street rather
-than leaking into a neighbour, even one whose number was missed) and lets us drop a detection
-whose own pixel lands on background (a number printed on open paper, not a colour block). Interior
-holes (the black page number, an enclosed courtyard) are filled; edge concavities are kept, since
-some blocks are genuinely concave.
+Recovering one polygon per page is a colour-cluster segmentation. The (line-smoothed) image is
+k-means quantized into a handful of colours; the largest cluster(s) are the "background"
+(paper/streets) and the rest are blocks. Each remaining cluster's mask is morphologically closed
+then opened — the opening severs the hairline slivers along which one block would otherwise bleed
+into a neighbour — and split into connected components. Each page number is assigned to the
+component its box sits on (preferring the larger component when the box straddles two near-identical
+colours, i.e. a block whose colour k-means split across two clusters); when two page numbers land in
+one component it is split between them by a distance watershed. A number whose box lands on
+background paper (not a colour block) is dropped. Interior holes (the black page number, an enclosed
+courtyard) are filled; edge concavities are kept, since some blocks are genuinely concave.
 
     uv run python -m mapsnap.keymap.page_regions data/chicago_il_1950_vol_1/p0b.keymap.json
 """
@@ -244,6 +246,21 @@ def working_scale(image_shape: tuple[int, ...], target_long_side: int) -> float:
     return min(1.0, target_long_side / max(height, width))
 
 
+def working_geometry(
+    image_shape: tuple[int, ...], seeds: list[Box], params: RegionParams
+) -> tuple[float, int]:
+    """The downscale factor and median-blur window for an image and its seeds.
+
+    The blur window is derived from the median seed spacing (in scaled pixels) so it tracks the
+    map's drawing scale; returns it as an odd size of at least 3. Shared by the segmentation and
+    the debug-image outputs so they stay in lockstep.
+    """
+    scale = working_scale(image_shape, params.target_long_side)
+    spacing = nearest_neighbor_distance([box_center(box) for box in seeds]) * scale
+    line_smooth_size = max(3, int(round(params.line_smooth_frac * spacing)) | 1)
+    return scale, line_smooth_size
+
+
 def segment_page_regions(
     rgb: np.ndarray, seeds: list[Box], params: RegionParams
 ) -> dict[int, list[Point]]:
@@ -257,7 +274,7 @@ def segment_page_regions(
     watershed. A page number whose box lands on a background cluster (printed on open paper, not a
     block) is dropped. Returns a map from seed index to its block polygon, omitting dropped seeds.
     """
-    scale = working_scale(rgb.shape, params.target_long_side)
+    scale, line_smooth_size = working_geometry(rgb.shape, seeds, params)
     height, width = rgb.shape[:2]
     scaled_u8 = np.clip(
         cv2.resize(rgb, (max(1, round(width * scale)), max(1, round(height * scale))))
@@ -266,9 +283,6 @@ def segment_page_regions(
         255,
     ).astype(np.uint8)
 
-    # The line-smooth window tracks the map's drawing scale via the median seed spacing.
-    spacing = nearest_neighbor_distance([box_center(box) for box in seeds]) * scale
-    line_smooth_size = max(3, int(round(params.line_smooth_frac * spacing)) | 1)
     labels, _ = cluster_image(
         scaled_u8, params.n_clusters, line_smooth_size, params.cluster_seed
     )
@@ -453,12 +467,11 @@ def main() -> None:
         render_overlay(image_path, polygons, texts, args.overlay)
         print(f"Wrote {args.overlay}")
     if args.blur_debug or args.cluster_debug:
-        scale = working_scale(rgb.shape, params.target_long_side)
+        scale, line_smooth_size = working_geometry(rgb.shape, seeds, params)
         scaled = cv2.resize(
-            rgb, (round(rgb.shape[1] * scale), round(rgb.shape[0] * scale))
+            rgb,
+            (max(1, round(rgb.shape[1] * scale)), max(1, round(rgb.shape[0] * scale))),
         )
-        spacing = nearest_neighbor_distance([box_center(b) for b in seeds]) * scale
-        line_smooth_size = max(3, int(round(params.line_smooth_frac * spacing)) | 1)
         if args.blur_debug:
             Image.fromarray(cv2.medianBlur(scaled, line_smooth_size)).save(
                 args.blur_debug
