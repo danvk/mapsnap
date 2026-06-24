@@ -197,7 +197,9 @@ export function App() {
   }, [mode]);
 
   return (
-    <div className="container">
+    <div
+      className={mode === 'panels' ? 'container container-panels' : 'container'}
+    >
       <ImageColumn
         mode={mode}
         imageSrc={imageSrc}
