@@ -42,6 +42,10 @@ SUBCOMMANDS: dict[str, tuple[str, str]] = {
         "mapsnap.download_loc_iiif",
         "Fetch all images for a Sanborn volume from the Library of Congress (loc.gov)",
     ),
+    "download-raw": (
+        "mapsnap.download_raw",
+        "Download the full-resolution LOC image for a scaled-down page JPG",
+    ),
     "split-twopage": ("mapsnap.split_twopage", "Split two-page images in half"),
     "split": ("mapsnap.split", "Split map pages into individual panels"),
     "oim-split-truth": (
