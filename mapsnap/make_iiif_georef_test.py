@@ -248,6 +248,19 @@ def test_georef_path_with_direction_suffix():
     assert georef_path_to_page_key("data/vol/p16s.georef.json") == "p16s"
 
 
+def test_georef_path_with_left_right_suffix():
+    assert georef_path_to_page_key("data/vol/p10L.georef.json") == "p10l"
+    assert georef_path_to_page_key("data/vol/p10R.georef.json") == "p10r"
+
+
+def test_georef_path_left_right_suffix_zero():
+    assert georef_path_to_page_key("data/vol/p0L.georef.json") == "p0l"
+
+
+def test_georef_path_left_right_split_page():
+    assert georef_path_to_page_key("data/vol/p4L__2.georef.json") == "p4l__2"
+
+
 def test_georef_path_with_underscore_prefix():
     assert georef_path_to_page_key("data/vol/chicago_p428.georef.json") == "p428"
 
