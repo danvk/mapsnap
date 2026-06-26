@@ -547,42 +547,20 @@ def match_split_pairs(
     return pairs, unmatched
 
 
-def main() -> None:
-    parser = argparse.ArgumentParser(
-        description="Compare human-generated and computer-generated IIIF georeferencing."
-    )
-    parser.add_argument(
-        "truth", metavar="TRUTH_IIIF", help="Human-generated IIIF AnnotationPage"
-    )
-    parser.add_argument(
-        "generated", metavar="GEN_IIIF", help="Computer-generated IIIF AnnotationPage"
-    )
-    parser.add_argument(
-        "--omit-missing",
-        action="store_true",
-        help="Only print statistics for matched images.",
-    )
-    parser.add_argument(
-        "--csv", metavar="FILE", help="Also write per-page results to a CSV file"
-    )
-    parser.add_argument(
-        "--tabs",
-        action="store_true",
-        help="Output TSV to stdout instead of the fixed-width table (for spreadsheet paste)",
-    )
-    args = parser.parse_args()
+def compare_pages(
+    truth_path: Path, generated_path: Path
+) -> tuple[list[dict], list[dict]]:
+    """Compute per-page comparison rows for a truth/generated IIIF pair.
 
-    truth_by_source = annotations_by_source(Path(args.truth))
-    gen_by_source = annotations_by_source(Path(args.generated))
-    oim_dir = Path(args.truth).parent / "oim"
-    gen_dir = Path(args.generated).parent
-
-    n_truth_total = sum(len(items) for items in truth_by_source.values())
-    n_gen_total = sum(len(items) for items in gen_by_source.values())
-    print(
-        f"Truth: {n_truth_total} pages  |  Generated: {n_gen_total} pages",
-        file=sys.stderr,
-    )
+    Pairs truth and generated annotations by source id (and, for split pages, by
+    panel-polygon overlap). Returns (rows, missing): rows are pages present in both,
+    missing are truth pages with no matching generated fit. Used by the `compare` CLI
+    and by `mapsnap fit` to compute the metrics recorded in an experiment manifest.
+    """
+    truth_by_source = annotations_by_source(truth_path)
+    gen_by_source = annotations_by_source(generated_path)
+    oim_dir = truth_path.parent / "oim"
+    gen_dir = generated_path.parent
 
     rows: list[dict] = []
     missing: list[dict] = []
@@ -613,6 +591,44 @@ def main() -> None:
         )
         rows.extend(analyze_pair(t, g) for t, g in pairs)
         missing.extend(analyze_truth_only(t) for t in unmatched)
+    return rows, missing
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser(
+        description="Compare human-generated and computer-generated IIIF georeferencing."
+    )
+    parser.add_argument(
+        "truth", metavar="TRUTH_IIIF", help="Human-generated IIIF AnnotationPage"
+    )
+    parser.add_argument(
+        "generated", metavar="GEN_IIIF", help="Computer-generated IIIF AnnotationPage"
+    )
+    parser.add_argument(
+        "--omit-missing",
+        action="store_true",
+        help="Only print statistics for matched images.",
+    )
+    parser.add_argument(
+        "--csv", metavar="FILE", help="Also write per-page results to a CSV file"
+    )
+    parser.add_argument(
+        "--tabs",
+        action="store_true",
+        help="Output TSV to stdout instead of the fixed-width table (for spreadsheet paste)",
+    )
+    args = parser.parse_args()
+
+    truth_by_source = annotations_by_source(Path(args.truth))
+    gen_by_source = annotations_by_source(Path(args.generated))
+    n_truth_total = sum(len(items) for items in truth_by_source.values())
+    n_gen_total = sum(len(items) for items in gen_by_source.values())
+    print(
+        f"Truth: {n_truth_total} pages  |  Generated: {n_gen_total} pages",
+        file=sys.stderr,
+    )
+
+    rows, missing = compare_pages(Path(args.truth), Path(args.generated))
 
     if args.omit_missing:
         missing = []
