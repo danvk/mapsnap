@@ -148,6 +148,15 @@ def generate_vocab_strings(normalized_streets: set[str]) -> list[str]:
 
         base_name = " ".join(name_words)
 
+        # CRAFT often splits a multi-word name (e.g. "VAN BRUNT") into one box per word,
+        # especially on stretched or vertical labels. Add each individual name word so a
+        # split box decodes to itself instead of snapping to the nearest unrelated vocab
+        # word (e.g. "VAN" -> "IVAN", "DYKE" -> "DARE"); the split parts are recombined
+        # later by georef_from_labels.assemble_multiword_streets. Words shorter than 3
+        # characters are skipped to avoid adding ambiguous fragments.
+        if len(name_words) >= 2:
+            result.update(word for word in name_words if len(word) >= 3)
+
         # Also generate the numeric ordinal form so the CTC trie contains "S. 4TH ST"
         # alongside "S. FOURTH ST" — without this, the constrained decoder cannot
         # produce the abbreviated numeric label that appears on the map image.

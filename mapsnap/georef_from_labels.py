@@ -880,6 +880,119 @@ def promote_avenue_letters(
     return promoted
 
 
+def _assembled_detection(first: dict, second: dict, text: str) -> dict:
+    """One detection spanning two word-part detections, tagged ``assembled=True``.
+
+    The polygon is the oriented box containing both parts, expressed in the reading frame of
+    ``first`` (the earlier word along the reading direction) so its corner order and dir_pix
+    stay consistent with ordinary detections.
+    """
+    rvx, rvy = reading_vector(first["polygon"])
+    norm = math.hypot(rvx, rvy) or 1.0
+    rvx, rvy = rvx / norm, rvy / norm
+    pvx, pvy = -rvy, rvx  # perpendicular (across the text)
+    corners = first["polygon"] + second["polygon"]
+    along = [px * rvx + py * rvy for px, py in corners]
+    across = [px * pvx + py * pvy for px, py in corners]
+    r0, r1, p0, p1 = min(along), max(along), min(across), max(across)
+    box = [
+        (r0 * rvx + p0 * pvx, r0 * rvy + p0 * pvy),
+        (r1 * rvx + p0 * pvx, r1 * rvy + p0 * pvy),
+        (r1 * rvx + p1 * pvx, r1 * rvy + p1 * pvy),
+        (r0 * rvx + p1 * pvx, r0 * rvy + p1 * pvy),
+    ]
+    return {
+        "polygon": [[round(x), round(y)] for x, y in box],
+        "text": text,
+        "confidence": min(first.get("confidence", 0.0), second.get("confidence", 0.0)),
+        "angle": first.get("angle"),
+        "dir_pix": round(first.get("dir_pix", 0.0) % math.pi, 4),
+        "long_side": round(r1 - r0, 1),
+        "short_side": round(p1 - p0, 1),
+        "assembled": True,
+    }
+
+
+def assemble_multiword_streets(
+    detections: list[dict],
+    normalized_streets: set[str],
+    perp_tolerance_px: float = 20.0,
+    max_word_gap_frac: float = 0.7,
+    min_confidence: float = 0.5,
+) -> tuple[list[dict], list[dict]]:
+    """Combine adjacent single-word detections into a multi-word street name.
+
+    CRAFT often splits a label like "VAN BRUNT" into one box per word; once the parts are
+    recognized (the individual name words are in the OCR vocabulary), this pairs two collinear,
+    adjacent word detections whose concatenation is a known street name and emits one assembled
+    detection (text "VAN BRUNT", ``assembled=True``) spanning both, so the georeferencer sees
+    the whole street. This is the name-portion counterpart to promote_avenue_letters.
+
+    Two parts pair when they share an EasyOCR ``angle`` and dir_pix bucket, lie on the same
+    line (perpendicular offset ≤ perp_tolerance_px), and are adjacent along the reading
+    direction (gap between boxes ≤ max_word_gap_frac of the larger box's length). Both reading
+    orders are tried; the order whose concatenation matches a street wins. Returns
+    (assembled detections, the source parts that were consumed) so the caller can drop the
+    parts — a lone "VAN" is ambiguous on its own.
+    """
+    bucket_size = math.pi / 12.0
+    parts = [
+        d
+        for d in detections
+        if d.get("confidence", 0.0) >= min_confidence
+        and not d.get("assembled")
+        and (text := d.get("text", "").strip()).isalpha()
+        and len(text) >= 3
+    ]
+    parts.sort(key=lambda d: d.get("confidence", 0.0), reverse=True)
+
+    def center(poly: list[list[float]]) -> tuple[float, float]:
+        return sum(p[0] for p in poly) / 4.0, sum(p[1] for p in poly) / 4.0
+
+    assembled: list[dict] = []
+    consumed: list[dict] = []
+    used: set[int] = set()
+    for i, a in enumerate(parts):
+        if i in used:
+            continue
+        a_dir = a.get("dir_pix", 0.0)
+        a_bucket = int(round(a_dir / bucket_size)) % 12
+        cos_d, sin_d = math.cos(a_dir), math.sin(a_dir)
+        a_cx, a_cy = center(a["polygon"])
+        a_perp = -a_cx * sin_d + a_cy * cos_d
+        a_long = a.get("long_side", 0.0)
+        for j, b in enumerate(parts):
+            if j == i or j in used:
+                continue
+            b_dir = b.get("dir_pix", 0.0)
+            if int(round(b_dir / bucket_size)) % 12 != a_bucket:
+                continue
+            angle_a, angle_b = a.get("angle"), b.get("angle")
+            if angle_a is not None and angle_b is not None and angle_a != angle_b:
+                continue
+            b_cx, b_cy = center(b["polygon"])
+            if abs((-b_cx * sin_d + b_cy * cos_d) - a_perp) > perp_tolerance_px:
+                continue
+            b_long = b.get("long_side", 0.0)
+            edge_gap = math.hypot(b_cx - a_cx, b_cy - a_cy) - (a_long + b_long) / 2.0
+            if edge_gap > max_word_gap_frac * max(a_long, b_long):
+                continue
+            ordered = None
+            for first, second in ((a, b), (b, a)):
+                text = f"{first['text'].strip()} {second['text'].strip()}"
+                if canonical_street_matches(text, normalized_streets):
+                    ordered = (text, first, second)
+                    break
+            if ordered is None:
+                continue
+            text, first, second = ordered
+            assembled.append(_assembled_detection(first, second, text))
+            consumed.extend([a, b])
+            used.update([i, j])
+            break
+    return assembled, consumed
+
+
 def correct_square_feature_dirs(
     features: list[LabelFeature],
     hint_detections: list[dict],
@@ -1201,6 +1314,17 @@ def process_image(
             file=sys.stderr,
         )
         all_detections = promoted + all_detections
+    assembled, consumed = assemble_multiword_streets(all_detections, normalized_streets)
+    if assembled:
+        print(
+            f"Assembled multi-word detections ({len(assembled)}): "
+            + ", ".join(d["text"] for d in assembled),
+            file=sys.stderr,
+        )
+        consumed_ids = {id(d) for d in consumed}
+        all_detections = assembled + [
+            d for d in all_detections if id(d) not in consumed_ids
+        ]
     all_detections = deduplicate_detections(
         all_detections, normalized_streets=normalized_streets
     )

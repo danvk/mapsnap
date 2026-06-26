@@ -10,6 +10,7 @@ from mapsnap.georef_from_labels import (
     _angle_diff_abs,
     _cluster_geo_coords,
     _rotation_from_neighbors,
+    assemble_multiword_streets,
     compute_auto_min_short_side,
     confidence_relaxed_threshold,
     correct_square_feature_dirs,
@@ -61,6 +62,60 @@ def _make_det(
         "dir_pix": dir_pix,
         **({"hint": True} if hint else {}),
     }
+
+
+# ---------------------------------------------------------------------------
+# assemble_multiword_streets
+# ---------------------------------------------------------------------------
+
+_VAN_STREETS = {"VAN BRUNT STREET", "VAN BUREN STREET"}
+
+
+def test_assemble_adjacent_words_into_street():
+    # "VAN" and "BRUNT" detected as separate, collinear, adjacent boxes -> "VAN BRUNT".
+    van = _make_det("VAN", cx=700, cy=1000, long_side=50, short_side=22)
+    brunt = _make_det("BRUNT", cx=760, cy=1000, long_side=80, short_side=22)
+    assembled, consumed = assemble_multiword_streets([van, brunt], _VAN_STREETS)
+    assert len(assembled) == 1
+    assert assembled[0]["text"] == "VAN BRUNT"
+    assert assembled[0]["assembled"] is True
+    assert (
+        len(consumed) == 2
+    )  # both parts consumed so a lone ambiguous "VAN" doesn't remain
+
+
+def test_assemble_resolves_reading_order():
+    # Spatial order doesn't matter: only "VAN BRUNT" matches a street, not "BRUNT VAN".
+    brunt = _make_det("BRUNT", cx=700, cy=1000, long_side=80, short_side=22)
+    van = _make_det("VAN", cx=770, cy=1000, long_side=50, short_side=22)
+    assembled, _ = assemble_multiword_streets([brunt, van], _VAN_STREETS)
+    assert len(assembled) == 1
+    assert assembled[0]["text"] == "VAN BRUNT"
+
+
+def test_assemble_skips_far_apart_words():
+    van = _make_det("VAN", cx=700, cy=1000, long_side=50, short_side=22)
+    brunt = _make_det("BRUNT", cx=1300, cy=1000, long_side=80, short_side=22)
+    assembled, consumed = assemble_multiword_streets([van, brunt], _VAN_STREETS)
+    assert assembled == [] and consumed == []
+
+
+def test_assemble_skips_non_street_combination():
+    # Adjacent words whose concatenation is not a street are left alone.
+    van = _make_det("VAN", cx=700, cy=1000, long_side=50, short_side=22)
+    other = _make_det("PARK", cx=760, cy=1000, long_side=70, short_side=22)
+    assembled, _ = assemble_multiword_streets([van, other], _VAN_STREETS)
+    assert assembled == []
+
+
+def test_assemble_skips_different_orientation():
+    # Words on perpendicular lines (different dir_pix bucket) are not combined.
+    van = _make_det("VAN", cx=700, cy=1000, long_side=50, short_side=22, dir_pix=0.0)
+    brunt = _make_det(
+        "BRUNT", cx=760, cy=1000, long_side=80, short_side=22, dir_pix=math.pi / 2
+    )
+    assembled, _ = assemble_multiword_streets([van, brunt], _VAN_STREETS)
+    assert assembled == []
 
 
 # ---------------------------------------------------------------------------
