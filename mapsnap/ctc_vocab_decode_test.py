@@ -51,6 +51,22 @@ def test_generate_no_direction_bare_name_with_type():
     assert "MAGAZINE ST" in vocab
 
 
+def test_generate_includes_individual_words_of_multiword_name():
+    # CRAFT splits "VAN BRUNT" into separate boxes; each word must be recognizable on its
+    # own (not just the combined form) so a split box does not snap to an unrelated street.
+    vocab = generate_vocab_strings({"VAN BRUNT STREET", "VAN DYKE STREET"})
+    assert "VAN BRUNT" in vocab  # combined form still present
+    assert "VAN" in vocab
+    assert "BRUNT" in vocab
+    assert "DYKE" in vocab
+
+
+def test_generate_single_word_name_adds_no_fragments():
+    # A single-word base name has no parts to split, so nothing extra is added.
+    vocab = generate_vocab_strings({"MAGAZINE STREET"})
+    assert "MAGAZIN" not in vocab  # no spurious sub-word fragments
+
+
 def test_generate_saint_prefix():
     vocab = generate_vocab_strings({"SAINT CHARLES AVENUE"})
     assert "SAINT CHARLES" in vocab
