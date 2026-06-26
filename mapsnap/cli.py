@@ -17,6 +17,10 @@ SUBCOMMANDS: dict[str, tuple[str, str]] = {
         "mapsnap.fit",
         "Georeference, build IIIF, and optionally compare (fast pipeline)",
     ),
+    "experiments": (
+        "mapsnap.experiments",
+        "Compare archived fit runs (experiments diff <id-a> <id-b>)",
+    ),
     # Individual commands
     "ocr": ("mapsnap.detect_text", "Detect text regions in map images"),
     "georef": (

@@ -6,6 +6,7 @@ import subprocess
 import sys
 from pathlib import Path
 
+from mapsnap import experiments
 from mapsnap.utils import list_pages, run_cmd
 
 
@@ -40,6 +41,36 @@ def find_ref_iiif(dir_path: Path) -> Path | None:
     return Path(manifests[0]) if manifests else None
 
 
+def resolve_run_id(
+    dir_path: Path,
+    tag: str | None,
+    flag_tokens: list[str],
+    inputs: dict,
+    git: dict,
+) -> str:
+    """Return the run id for this fit: the explicit ``tag`` if given, else the computed id.
+
+    An explicit tag is an ad-hoc named run and is used verbatim. With no tag, the id is
+    ``<git-sha8>-<config-hash8>``, which requires a git repository with a clean working tree
+    (uncommitted changes to tracked files would make the git-sha provenance a lie); the
+    function exits with a message if that requirement isn't met.
+    """
+    if tag is not None:
+        return tag
+    if git["sha"] is None:
+        sys.exit(
+            f"{dir_path} is not in a git repository; pass an explicit TAG to name the run."
+        )
+    if not git["clean"]:
+        sys.exit(
+            "Working tree has uncommitted changes to tracked files. Commit them (even a "
+            "throwaway commit) so the run id pins a real revision, or pass an explicit TAG."
+        )
+    return experiments.auto_run_id(
+        git["sha"], experiments.compute_config_hash(flag_tokens, inputs)
+    )
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(
         description="Georeference images, build IIIF annotation page, and compare against reference."
@@ -48,23 +79,47 @@ def main() -> None:
         "dir", metavar="DIR", help="Directory containing images and data files"
     )
     parser.add_argument(
-        "tag", metavar="TAG", help="Tag for output files (e.g. 'init' or YYYY-MM-DD)"
+        "tag",
+        metavar="TAG",
+        nargs="?",
+        default=None,
+        help=(
+            "Optional tag for output files (e.g. 'init' or YYYY-MM-DD). If omitted, a run id "
+            "<git-sha8>-<config-hash8> is computed and the working tree must be clean."
+        ),
+    )
+    parser.add_argument(
+        "--label",
+        default=None,
+        metavar="NAME",
+        help="Human-readable name recorded alongside the run id in the manifest.",
     )
     args, georef_extra = parser.parse_known_args()
 
     dir_path = Path(args.dir)
     centerlines = find_centerlines(dir_path)
     images = find_input_images(dir_path)
+    ref_iiif = find_ref_iiif(dir_path)
+    if ref_iiif is None:
+        sys.exit(f"No reference IIIF found in {dir_path}")
+    truth = dir_path / "main.iiif.json"
+
+    git = experiments.git_head_info(dir_path)
+    inputs = experiments.gather_inputs(
+        dir_path, centerlines, truth if truth.exists() else None
+    )
+    run_id = resolve_run_id(dir_path, args.tag, georef_extra, inputs, git)
+
+    archive_dir = dir_path / experiments.ARTIFACTS_DIRNAME / run_id
+    if archive_dir.exists():
+        print(f"Run {run_id} already archived at {archive_dir}; skipping computation.")
+        return
 
     run_cmd(
         ["mapsnap", "georef", *images, "--centerlines", str(centerlines), *georef_extra]
     )
 
-    ref_iiif = find_ref_iiif(dir_path)
-    if ref_iiif is None:
-        sys.exit(f"No reference IIIF found in {dir_path}")
-
-    output_iiif = str(dir_path / f"{args.tag}.iiif.json")
+    output_iiif = dir_path / f"{run_id}.iiif.json"
     # Pass the georef glob as a literal string; make_iiif_georef does its own glob expansion.
     georef_glob = str(dir_path / "*.georef.json")
     run_cmd(
@@ -76,22 +131,38 @@ def main() -> None:
             "--centerlines",
             str(centerlines),
             "--output",
-            output_iiif,
+            str(output_iiif),
         ]
     )
 
     # Compare against OIM, if truth data is available.
-    main_iiif = dir_path / "main.iiif.json"
-    if main_iiif.exists():
-        cmd = ["mapsnap", "compare", str(main_iiif), output_iiif]
+    compare_txt: Path | None = None
+    if truth.exists():
+        cmd = ["mapsnap", "compare", str(truth), str(output_iiif)]
         print("+ " + " ".join(cmd), flush=True)
         result = subprocess.run(cmd, stdout=subprocess.PIPE, text=True)
         sys.stdout.write(result.stdout)
-        (dir_path / f"{args.tag}.txt").write_text(result.stdout)
+        compare_txt = dir_path / f"{run_id}.txt"
+        compare_txt.write_text(result.stdout)
         if result.returncode != 0:
             sys.exit(result.returncode)
     else:
         print(f"\nNo main.iiif.json in {dir_path}, skipping comparison step.\n")
+
+    command = [*sys.argv[0].split(), *sys.argv[1:]]
+    archived = experiments.archive_fit_run(
+        dir_path,
+        run_id,
+        georef_extra,
+        inputs,
+        git,
+        command,
+        truth if truth.exists() else None,
+        output_iiif,
+        compare_txt,
+        args.label,
+    )
+    print(f"\nArchived run {run_id} to {archived}")
 
 
 if __name__ == "__main__":
