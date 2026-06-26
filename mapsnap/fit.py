@@ -58,13 +58,11 @@ def resolve_run_id(
     if tag is not None:
         return tag
     if git["sha"] is None:
-        sys.exit(
-            f"{dir_path} is not in a git repository; pass an explicit TAG to name the run."
-        )
+        sys.exit(f"{dir_path} is not in a git repository; pass --tag to name the run.")
     if not git["clean"]:
         sys.exit(
             "Working tree has uncommitted changes to tracked files. Commit them (even a "
-            "throwaway commit) so the run id pins a real revision, or pass an explicit TAG."
+            "throwaway commit) so the run id pins a real revision, or pass --tag."
         )
     return experiments.auto_run_id(
         git["sha"], experiments.compute_config_hash(flag_tokens, inputs)
@@ -79,13 +77,14 @@ def main() -> None:
         "dir", metavar="DIR", help="Directory containing images and data files"
     )
     parser.add_argument(
-        "tag",
+        "--tag",
         metavar="TAG",
-        nargs="?",
         default=None,
         help=(
             "Optional tag for output files (e.g. 'init' or YYYY-MM-DD). If omitted, a run id "
-            "<git-sha8>-<config-hash8> is computed and the working tree must be clean."
+            "<git-sha8>-<config-hash8> is computed and the working tree must be clean. (A flag "
+            "rather than a positional so passthrough georef flags like --num-workers 2 aren't "
+            "mis-parsed.)"
         ),
     )
     parser.add_argument(

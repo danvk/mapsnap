@@ -14,7 +14,7 @@ The first step is the slowest but only ever needs to be run once. The second ste
 
 Once CRAFT and OCR have completed for a volume, you can run the georeferencing step, produce a IIIF file and compare against any truth data by running, for example:
 
-    uv run mapsnap fit data/brooklyn_ny_1939_vol_1 2026-06-24
+    uv run mapsnap fit data/brooklyn_ny_1939_vol_1 --tag 2026-06-24
 
 This updates all the georef.json files under data/brooklyn_ny_1939_vol_1, produces data/brooklyn_ny_1939_vol_1/2026-06-24.iiif.json and data/brooklyn_ny_1939_vol_1/2026-06-24.txt, which compares the IIIF file to the truth data. It can be run with `--num-workers 2` to speed things up.
 
@@ -43,7 +43,7 @@ The tag parameter becomes optional. When it is omitted, the run id is computed a
 
 If `data/<volume>/artifacts/<run-id>/` already exists, `mapsnap fit` skips the computation and prints the path to the existing archive. (It does not touch the live sidecar files; restoring an archived run to the live locations isn't needed yet.) Shared baselines — `main` vs `branchA` and `branchB` — therefore reuse the same baseline archive.
 
-An explicit positional tag (`mapsnap fit <volume> <tag>`) still works and overrides the computed id, for ad-hoc named runs.
+An explicit tag (`mapsnap fit <volume> --tag <tag>`) still overrides the computed id, for ad-hoc named runs. It's a flag rather than a positional so that passthrough georef flags (e.g. `--num-workers 2`) can't be mis-parsed as the tag.
 
 ### What gets archived
 
