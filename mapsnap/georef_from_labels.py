@@ -521,6 +521,80 @@ def find_intersection_gcps(
     return sorted(gcps, key=lambda g: g.pixel_dist)
 
 
+def _nearest_block(lon: float, lat: float, blocks: list[Block]) -> Block | None:
+    """Return the block (connected polyline) with the segment closest to (lon, lat)."""
+    q = np.array([lon, lat])
+    best_dist = float("inf")
+    best_block: Block | None = None
+    for block in blocks:
+        pts = block.coords
+        for k in range(len(pts) - 1):
+            p1, seg = pts[k], pts[k + 1] - pts[k]
+            seg_len_sq = float(np.dot(seg, seg))
+            if seg_len_sq < 1e-20:
+                continue
+            t = float(np.clip(np.dot(q - p1, seg) / seg_len_sq, 0.0, 1.0))
+            dist = float(np.linalg.norm(q - (p1 + t * seg)))
+            if dist < best_dist:
+                best_dist, best_block = dist, block
+    return best_block
+
+
+def _dominant_angle(block: Block) -> float | None:
+    """Length-weighted dominant tangent angle (mod π) of a block via its structure tensor.
+
+    Summing each segment's outer product weights long straight runs far more than short
+    ones, so a brief kink near a junction cannot swing the estimate from the street's true
+    bearing (see commit 9f03711, which introduced this for the key-map anchor path).
+    Returns None if the block has no usable segment.
+    """
+    pts = block.coords
+    tensor = np.zeros((2, 2))
+    for k in range(len(pts) - 1):
+        seg = pts[k + 1] - pts[k]
+        tensor += np.outer(seg, seg)
+    if not np.any(tensor):
+        return None
+    _, eigenvectors = np.linalg.eigh(tensor)
+    direction = eigenvectors[:, -1]
+    return float(np.arctan2(direction[1], direction[0])) % np.pi
+
+
+def is_rotation_outlier(
+    feat: LabelFeature,
+    block_index: dict[str, list[Block]],
+    affine: np.ndarray,
+    dir_threshold: float = np.pi / 6,
+) -> bool:
+    """Whether ``feat``'s mapped label direction disagrees with its street's bearing.
+
+    A position-independent rotation test: the label's mapped direction is compared against the
+    length-weighted dominant bearing of its nearest block (via :func:`_dominant_angle`), so a
+    kinked or truncated end-segment cannot masquerade as a mismatch the way the single nearest
+    segment can. Returns False when the feature has no matching street or no usable bearing.
+
+    Distinguishes a genuinely mis-oriented label (the model's rotation is wrong) from one that
+    merely lands off its centerline: a historical street that ran past where today's OSM line
+    ends leaves its label on the vanished stretch — right bearing, wrong position — and that is
+    not a rotation outlier. Used to gate the self-inconsistent-fit rejection in ransac_hybrid.
+    """
+    blocks = block_index.get(feat.text)
+    if not blocks:
+        return False
+    lon, lat = apply_affine(affine, *feat.center)
+    block = _nearest_block(lon, lat, blocks)
+    if block is None:
+        return False
+    dominant = _dominant_angle(block)
+    if dominant is None:
+        return False
+    d_pixel = np.array([np.cos(feat.dir_pix), np.sin(feat.dir_pix)])
+    d_geo = affine[:, :2] @ d_pixel
+    d_geo_norm = d_geo / (float(np.linalg.norm(d_geo)) + 1e-10)
+    tangent_vec = np.array([np.cos(dominant), np.sin(dominant)])
+    return bool(abs(float(np.dot(d_geo_norm, tangent_vec))) < math.cos(dir_threshold))
+
+
 def ransac_hybrid(
     gcps: list[IntersectionGCP],
     features: list[LabelFeature],
@@ -536,6 +610,11 @@ def ransac_hybrid(
     Generates candidate affines from all C(n, 2) pairs of intersection GCPs, solving for
     the 4-parameter similarity transform (equal metric scale + orthogonality) at each pair.
     Inlier counting uses point-to-polyline + direction for every label.
+
+    A candidate pair is disqualified when one of its own seed streets is a rotation outlier
+    under the model it defines — the fit's orientation contradicts a street it was built from
+    (see is_rotation_outlier and the in-loop comment). If no pair survives, returns
+    (None, [], None) so the caller records no fit for the page.
 
     A global rotation estimate R_est is derived from a histogram cross-correlation of label
     angles vs OSM tangents before the main loop. Each candidate is penalized by rot_penalty
@@ -573,6 +652,24 @@ def ransac_hybrid(
         inliers, err = label_inliers(
             features, block_index, A, pos_threshold, dir_threshold, debug=debug
         )
+
+        # Reject only fits whose own seed streets are *rotation* outliers: each seed GCP is
+        # built from two specific street labels, so if the model maps one of those labels to a
+        # bearing that disagrees with its street, the fit's orientation contradicts its own
+        # evidence (Detroit p28's COREY, mapped ~38° off its dominant bearing). A seed that
+        # matches in direction but lands off its centerline is NOT rejected: that is a
+        # position-only outlier, which is exactly what happens when a historical street ran
+        # past where today's OSM line ends and the label sits on the vanished stretch (Brooklyn
+        # p7's VAN BRUNT, ~3° off but ~115 ft beyond the truncated end). Seeds are the pair's
+        # four source features; is_rotation_outlier identifies each by its own center, so an
+        # ambiguous label's dropped canonical expansion (Detroit p94's KORTE) isn't faulted.
+        seed_feats = (a.feat_a, a.feat_b, b.feat_a, b.feat_b)
+        if any(
+            is_rotation_outlier(f, block_index, A, dir_threshold) for f in seed_feats
+        ):
+            if debug:
+                print(f"  {i1} {i2} REJECTED ({len(inliers)}) seed rotation outlier")
+            continue
 
         # Each inlier contributes (pos_threshold - pos_err) to the score; an inlier at
         # exactly the threshold boundary contributes 0, so a marginal extra inlier cannot

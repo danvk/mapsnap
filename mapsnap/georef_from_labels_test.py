@@ -14,9 +14,13 @@ from mapsnap.georef_from_labels import (
     compute_auto_min_short_side,
     confidence_relaxed_threshold,
     correct_square_feature_dirs,
+    IntersectionGCP,
+    is_rotation_outlier,
     label_features,
+    LabelFeature,
     promote_avenue_letters,
     project_to_polyline,
+    ransac_hybrid,
 )
 from mapsnap.streets import Block
 
@@ -716,3 +720,215 @@ def test_confidence_relaxed_threshold_disabled_when_floor_not_below_base():
         high_confidence_floor=18.0,
     )
     assert result == 18.0
+
+
+# ---------------------------------------------------------------------------
+# _kink_block (shared geometry helper)
+# ---------------------------------------------------------------------------
+
+
+def _kink_block() -> Block:
+    """A long east-west run ending in a short, steep kink segment."""
+    return Block(
+        street_name="MAIN",
+        coords=np.array(
+            [
+                [-89.991, 29.995],  # long horizontal run ...
+                [-89.989, 29.995],  # ... ~190 m of it
+                [-89.9889, 29.9952],  # short ~25 m kink, ~63° off horizontal
+            ]
+        ),
+    )
+
+
+# ---------------------------------------------------------------------------
+# ransac_hybrid: reject fits whose seed street is a *rotation* outlier (the model's
+# orientation contradicts a street it was built from), while keeping fits whose seed
+# is only a *position* outlier (right bearing, off a since-shortened centerline)
+# ---------------------------------------------------------------------------
+
+# Shared frame for the tests below: an orientation-reversing similarity at 1e-5 deg/px,
+# north-up, where px=500 maps to lon=-90.0 and py=200 to lat=30.0. Two GCPs at
+# (500, 200)->(-90, 30) and (500, 700)->(-90, 29.995) recover it exactly.
+_RH_COS_PHI = math.cos(math.radians(30.0))
+
+
+def _vertical_block(name: str, lon: float) -> Block:
+    """A north-south street segment at the given longitude."""
+    return Block(name, np.array([[lon, 29.99], [lon, 30.01]]))
+
+
+def _horizontal_block(name: str, lat: float) -> Block:
+    """An east-west street segment at the given latitude."""
+    return Block(name, np.array([[-90.02, lat], [-89.98, lat]]))
+
+
+def _rh_feat(text: str, center: tuple[float, float], dir_pix: float) -> LabelFeature:
+    """A label feature for the ransac_hybrid frame (sizes are immaterial here)."""
+    return LabelFeature(text, text, center, dir_pix, 100.0, 20.0)
+
+
+def test_ransac_hybrid_rejects_rotation_outlier_seed():
+    # Both GCPs are seeded by COREY (cf. Detroit p28). COREY's label maps to a bearing ~90°
+    # off its (vertical) street, so it is a rotation outlier: the model's orientation
+    # contradicts a street it was built from. The only candidate pair is disqualified and no
+    # model is returned.
+    kerch = _rh_feat("KERCH", (500.0, 200.0), 0.0)
+    jeff = _rh_feat("JEFF", (500.0, 700.0), 0.0)
+    corey = _rh_feat(
+        "COREY", (500.0, 450.0), 0.0
+    )  # horizontal label on a vertical street
+    features = [kerch, jeff, corey]
+    block_index = {
+        "KERCH": [_horizontal_block("KERCH", 30.0)],
+        "JEFF": [_horizontal_block("JEFF", 29.995)],
+        "COREY": [_vertical_block("COREY", -90.0)],
+    }
+    gcps = [
+        IntersectionGCP(
+            "KERCH", "COREY", (500.0, 200.0), (-90.0, 30.0), 0.0, kerch, corey
+        ),
+        IntersectionGCP(
+            "JEFF", "COREY", (500.0, 700.0), (-90.0, 29.995), 0.0, jeff, corey
+        ),
+    ]
+    model, inliers, pair = ransac_hybrid(gcps, features, block_index, _RH_COS_PHI)
+    assert model is None
+    assert inliers == []
+    assert pair is None
+
+
+def test_ransac_hybrid_keeps_position_only_outlier_seed():
+    # Same COREY-seeded frame, but COREY's label keeps its street's (vertical) bearing and is
+    # merely displaced ~4300 ft east of the centerline -- a position-only outlier, as when a
+    # historical street ran past where today's OSM line ends (cf. Brooklyn p7's VAN BRUNT).
+    # The pair is kept even though COREY is not a position inlier.
+    kerch = _rh_feat("KERCH", (500.0, 200.0), 0.0)
+    jeff = _rh_feat("JEFF", (500.0, 700.0), 0.0)
+    corey = _rh_feat(
+        "COREY", (1500.0, 450.0), math.pi / 2
+    )  # right bearing, off the line
+    features = [kerch, jeff, corey]
+    block_index = {
+        "KERCH": [_horizontal_block("KERCH", 30.0)],
+        "JEFF": [_horizontal_block("JEFF", 29.995)],
+        "COREY": [_vertical_block("COREY", -90.0)],
+    }
+    gcps = [
+        IntersectionGCP(
+            "KERCH", "COREY", (500.0, 200.0), (-90.0, 30.0), 0.0, kerch, corey
+        ),
+        IntersectionGCP(
+            "JEFF", "COREY", (500.0, 700.0), (-90.0, 29.995), 0.0, jeff, corey
+        ),
+    ]
+    model, inliers, pair = ransac_hybrid(gcps, features, block_index, _RH_COS_PHI)
+    assert model is not None
+    assert set(inliers) == {0, 1}  # COREY is a position outlier, but the pair survives
+    assert pair == (0, 1)
+
+
+def test_ransac_hybrid_keeps_fit_when_seed_labels_are_inliers():
+    # Same frame, but COREY's label now sits on its own centerline, so every seed label is an
+    # inlier and the pair is accepted.
+    kerch = _rh_feat("KERCH", (500.0, 200.0), 0.0)
+    jeff = _rh_feat("JEFF", (500.0, 700.0), 0.0)
+    corey = _rh_feat("COREY", (500.0, 450.0), math.pi / 2)  # on COREY's line -> inlier
+    features = [kerch, jeff, corey]
+    block_index = {
+        "KERCH": [_horizontal_block("KERCH", 30.0)],
+        "JEFF": [_horizontal_block("JEFF", 29.995)],
+        "COREY": [_vertical_block("COREY", -90.0)],
+    }
+    gcps = [
+        IntersectionGCP(
+            "KERCH", "COREY", (500.0, 200.0), (-90.0, 30.0), 0.0, kerch, corey
+        ),
+        IntersectionGCP(
+            "JEFF", "COREY", (500.0, 700.0), (-90.0, 29.995), 0.0, jeff, corey
+        ),
+    ]
+    model, inliers, pair = ransac_hybrid(gcps, features, block_index, _RH_COS_PHI)
+    assert model is not None
+    assert set(inliers) == {0, 1, 2}
+    assert pair == (0, 1)
+
+
+def test_ransac_hybrid_accepts_ambiguous_label_seeding_two_streets():
+    # A single physical "KORTE" label (one center) is ambiguous between KORTE STREET and
+    # KORTE AVENUE and legitimately seeds a GCP under each name (cf. Detroit p94). Only the
+    # real match, KORTE STREET, is an inlier; label_inliers dedups the center to it. Because
+    # the seed check is by center, the pair is accepted -- a name-based check would wrongly
+    # reject it, faulting the dropped KORTE AVENUE expansion as an outlier.
+    drexel = _rh_feat("DREXEL", (500.0, 200.0), 0.0)
+    piper = _rh_feat("PIPER", (500.0, 700.0), 0.0)
+    korte_center = (500.0, 450.0)
+    korte_st = _rh_feat("KORTE STREET", korte_center, math.pi / 2)  # on its line
+    korte_ave = _rh_feat("KORTE AVENUE", korte_center, math.pi / 2)  # wrong street
+    features = [drexel, piper, korte_st, korte_ave]
+    block_index = {
+        "DREXEL": [_horizontal_block("DREXEL", 30.0)],
+        "PIPER": [_horizontal_block("PIPER", 29.995)],
+        "KORTE STREET": [_vertical_block("KORTE STREET", -90.0)],
+        "KORTE AVENUE": [_vertical_block("KORTE AVENUE", -89.0)],
+    }
+    gcps = [
+        IntersectionGCP(
+            "DREXEL",
+            "KORTE AVENUE",
+            (500.0, 200.0),
+            (-90.0, 30.0),
+            0.0,
+            drexel,
+            korte_ave,
+        ),
+        IntersectionGCP(
+            "PIPER",
+            "KORTE STREET",
+            (500.0, 700.0),
+            (-90.0, 29.995),
+            0.0,
+            piper,
+            korte_st,
+        ),
+    ]
+    model, inliers, pair = ransac_hybrid(gcps, features, block_index, _RH_COS_PHI)
+    assert model is not None
+    assert set(inliers) == {0, 1, 2}  # korte_ave (idx 3) deduped out by center
+    assert pair == (0, 1)
+
+
+# is_rotation_outlier ------------------------------------------------------
+
+# Axis-aligned similarity: pixel (x, y) -> (lon, lat) = (-90 + 1e-5·x, 30 - 1e-5·y). A
+# horizontal pixel label (dir_pix=0) maps to an east-west bearing, a vertical one (π/2) to
+# north-south.
+_AXIS_AFFINE = np.array([[1e-5, 0.0, -90.0], [0.0, -1e-5, 30.0]])
+
+
+def test_is_rotation_outlier_true_when_perpendicular():
+    # A horizontal label on a vertical (north-south) street is ~90° off its bearing.
+    feat = _rh_feat("MAIN", (500.0, 500.0), 0.0)
+    block_index = {"MAIN": [_vertical_block("MAIN", -89.995)]}
+    assert is_rotation_outlier(feat, block_index, _AXIS_AFFINE)
+
+
+def test_is_rotation_outlier_false_when_aligned_even_if_off_position():
+    # A vertical label far (4300 ft) east of a vertical street: wrong position, right bearing.
+    feat = _rh_feat("MAIN", (1500.0, 500.0), math.pi / 2)
+    block_index = {"MAIN": [_vertical_block("MAIN", -89.995)]}
+    assert not is_rotation_outlier(feat, block_index, _AXIS_AFFINE)
+
+
+def test_is_rotation_outlier_false_when_no_street():
+    feat = _rh_feat("MISSING", (500.0, 500.0), 0.0)
+    assert not is_rotation_outlier(feat, {}, _AXIS_AFFINE)
+
+
+def test_is_rotation_outlier_uses_dominant_bearing_not_kink():
+    # The label runs along the street's long east-west body; the nearest segment is a short
+    # steep kink. The dominant bearing keeps it an inlier, so it is not a rotation outlier.
+    feat = LabelFeature("MAIN", "MAIN", (1110.0, 480.0), 0.0, 100.0, 20.0)
+    block_index = {"MAIN": [_kink_block()]}
+    affine = np.array([[1e-5, 0.0, -90.0], [0.0, -1e-5, 30.0]])
+    assert not is_rotation_outlier(feat, block_index, affine)
