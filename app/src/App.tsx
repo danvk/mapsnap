@@ -17,6 +17,18 @@ import { DetectionsTable } from './components/DetectionsTable';
 import { PanelsTable } from './components/PanelsTable';
 import { loadImage } from './loadImage';
 
+// Whether a URL/path points at an image we can load (matched by extension).
+function isImageUrl(url: string): boolean {
+  return /\.(jpe?g|png|webp|gif|tiff?)(\?.*)?$/i.test(url);
+}
+
+// Resolve a `?files=` entry to a fetchable URL, leaving absolute URLs/paths as
+// given and otherwise resolving relative to the app's base (e.g.
+// `data/streets.json` -> `/mapsnap/data/streets.json`, served by the dev server).
+function resolveDataUrl(file: string): string {
+  if (/^https?:\/\//.test(file) || file.startsWith('/')) return file;
+  return import.meta.env.BASE_URL.replace(/\/$/, '') + '/' + file;
+}
 /**
  * Debug API exposed on `window.mapsnap` so data can be injected without the UI
  * (e.g. from the browser console or automated tests). `loadJson` accepts either
@@ -138,6 +150,14 @@ export function App() {
     }
   }
 
+  // Point the viewer at a decoded image, updating its source and JSON dimensions.
+  function applyImage(el: HTMLImageElement, src: string): void {
+    setImageEl(el);
+    setImageSrc(src);
+    setJsonWidth(el.naturalWidth);
+    setJsonHeight(el.naturalHeight);
+  }
+
   // Handle files dropped onto the image column (image and/or JSON).
   async function handleFiles(files: File[]): Promise<void> {
     const imageFile = files.find((f) => f.type.startsWith('image/'));
@@ -153,12 +173,9 @@ export function App() {
       const url = URL.createObjectURL(imageFile);
       prevObjectUrlRef.current = url;
       const el = await loadImage(url);
-      setImageEl(el);
-      setImageSrc(url);
+      applyImage(el, url);
       fallbackWidth = el.naturalWidth;
       fallbackHeight = el.naturalHeight;
-      setJsonWidth(el.naturalWidth);
-      setJsonHeight(el.naturalHeight);
     }
 
     if (jsonFile) {
@@ -167,20 +184,62 @@ export function App() {
     }
   }
 
+  // Load image and/or JSON data from dev-server URLs (the `?files=` deep link).
+  // Mirrors handleFiles, but fetches served files instead of reading File blobs.
+  async function loadFromUrls(files: string[]): Promise<void> {
+    const imageFile = files.find(isImageUrl);
+    const jsonFile = files.find((f) => f.endsWith('.json'));
+
+    let fallbackWidth = jsonWidth;
+    let fallbackHeight = jsonHeight;
+
+    try {
+      if (imageFile) {
+        if (prevObjectUrlRef.current) {
+          URL.revokeObjectURL(prevObjectUrlRef.current);
+          prevObjectUrlRef.current = null;
+        }
+        const src = resolveDataUrl(imageFile);
+        const el = await loadImage(src);
+        applyImage(el, src);
+        fallbackWidth = el.naturalWidth;
+        fallbackHeight = el.naturalHeight;
+      }
+
+      if (jsonFile) {
+        const response = await fetch(resolveDataUrl(jsonFile));
+        if (!response.ok) {
+          throw new Error(`${jsonFile}: HTTP ${response.status}`);
+        }
+        processJson(await response.text(), fallbackWidth, fallbackHeight);
+      }
+    } catch (err) {
+      console.error('Failed to load files from URL:', err);
+    }
+  }
+
   // Expose a debug API on `window.mapsnap` for injecting data without the UI.
   // Re-registered each render so it always closes over the latest state.
   useEffect(() => {
     window.mapsnap = {
       loadJson: (text: string) => processJson(text, jsonWidth, jsonHeight),
-      setImage: async (url: string) => {
-        const el = await loadImage(url);
-        setImageEl(el);
-        setImageSrc(url);
-        setJsonWidth(el.naturalWidth);
-        setJsonHeight(el.naturalHeight);
-      },
+      setImage: async (url: string) => applyImage(await loadImage(url), url),
     };
   });
+
+  // On first load, honor a `?files=data/image.jpg,data/streets.json` deep link
+  // by fetching those files from the dev server and entering the matching view.
+  useEffect(() => {
+    const filesParam = new URLSearchParams(window.location.search).get('files');
+    if (!filesParam) return;
+    const files = filesParam
+      .split(',')
+      .map((s) => s.trim())
+      .filter(Boolean);
+    void loadFromUrls(files);
+    // Runs once on mount; loadFromUrls closes over the initial (empty) state.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // Cycle warped-image opacity through 0/50/100% on the 'p' key (georef mode).
   useEffect(() => {
