@@ -38,7 +38,7 @@ from shapely.geometry import mapping as geom_mapping
 
 from mapsnap.clip_masks import compute_all_clip_masks, geo_polygon_to_svg
 from mapsnap.split import panels_json_path, read_panels_json
-from mapsnap.utils import jpeg_dimensions
+from mapsnap.utils import default_centerlines, jpeg_dimensions
 
 # Page images are stored at 25% scale, so the full-resolution canvas is 4× larger.
 FULL_RES_FACTOR = 4
@@ -639,6 +639,8 @@ def main() -> None:
     result_id = ""
     label = ""
     n_georef_files = 0
+    # Glob patterns whose directory is used to locate a default centerlines.geojson.
+    georef_globs: list[str] = []
 
     if args.image_base_url:
         # Plain-image (S3) mode: no manifest needed.
@@ -652,6 +654,7 @@ def main() -> None:
                 )
             base = args.image_base_url.rstrip("/")
             for s3_glob, vol_suffix in args.volume:
+                georef_globs.append(s3_glob)
                 vol_base_url = base + "/" + vol_suffix.lstrip("/")
                 vol_items, vol_result_id, _ = _load_s3_items(
                     s3_glob, vol_base_url, args.image_source_type
@@ -670,6 +673,7 @@ def main() -> None:
                     "Provide a georef glob pattern as a positional argument "
                     "when using --image-base-url."
                 )
+            georef_globs.append(s3_glob)
             vol_items, result_id, label = _load_s3_items(
                 s3_glob, args.image_base_url, args.image_source_type
             )
@@ -694,6 +698,7 @@ def main() -> None:
             )
 
         for iiif_path, georef_glob in volume_specs:
+            georef_globs.append(georef_glob)
             vol_items, vol_result_id, vol_label = _load_volume_items(
                 iiif_path, georef_glob
             )
@@ -702,6 +707,14 @@ def main() -> None:
             if not result_id:
                 result_id = vol_result_id
                 label = vol_label
+
+    # Clipping masks are optional here, so fall back to a centerlines.geojson next to the
+    # georef files only if one exists; absence simply means no block-based clipping.
+    if args.centerlines is None and georef_globs:
+        centerlines = default_centerlines(Path(georef_globs[0]).parent)
+        if centerlines is not None:
+            args.centerlines = str(centerlines)
+            print(f"Using centerlines: {args.centerlines}", file=sys.stderr)
 
     # Compute block-based clipping masks when a centerlines file is provided.
     # All volumes' pages are passed together so blocks at volume boundaries are

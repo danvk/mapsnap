@@ -40,7 +40,7 @@ from mapsnap.streets import (
     is_number_only,
     normalize_street,
 )
-from mapsnap.utils import image_stem
+from mapsnap.utils import default_centerlines, image_stem
 
 
 @dataclass
@@ -1722,7 +1722,12 @@ def main() -> None:
         ),
     )
     parser.add_argument(
-        "--centerlines", required=True, metavar="FILE", help="centerlines.geojson"
+        "--centerlines",
+        metavar="FILE",
+        help=(
+            "centerlines.geojson (defaults to one next to the input images or their "
+            "parent directory)"
+        ),
     )
     parser.add_argument(
         "--min-confidence",
@@ -1873,6 +1878,16 @@ def main() -> None:
         ),
     )
     args = parser.parse_args()
+
+    if args.centerlines is None:
+        centerlines = default_centerlines(Path(args.images[0]).parent)
+        if centerlines is None:
+            sys.exit(
+                "No --centerlines given and no centerlines.geojson found next to the "
+                "input images."
+            )
+        args.centerlines = str(centerlines)
+        print(f"Using centerlines: {args.centerlines}", file=sys.stderr)
 
     # A key-map index page (one with a sibling <stem>.keymap.json) has no streets to fit, so
     # ignore it for georeferencing. Other images still require a <stem>.streets.json downstream.

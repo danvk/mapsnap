@@ -7,18 +7,15 @@ import sys
 from pathlib import Path
 
 from mapsnap import experiments
-from mapsnap.utils import list_pages, run_cmd
+from mapsnap.utils import default_centerlines, list_pages, run_cmd
 
 
 def find_centerlines(dir_path: Path) -> Path:
     """Return the centerlines GeoJSON, checking dir then parent dir."""
-    for candidate in (
-        dir_path / "centerlines.geojson",
-        dir_path.parent / "centerlines.geojson",
-    ):
-        if candidate.exists():
-            return candidate
-    sys.exit(f"centerlines.geojson not found in {dir_path} or {dir_path.parent}")
+    centerlines = default_centerlines(dir_path)
+    if centerlines is None:
+        sys.exit(f"centerlines.geojson not found in {dir_path} or {dir_path.parent}")
+    return centerlines
 
 
 def find_input_images(dir_path: Path) -> list[str]:
