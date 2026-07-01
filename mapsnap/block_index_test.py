@@ -205,7 +205,9 @@ def test_find_gcps_grand_x_peshtigo():
 
 def test_find_gcps_lake_shore_x_ohio():
     # North Lake Shore Drive (N-S) and East Ohio Street (E-W) share one node:
-    # (-87.6145965, 41.8926846).  Pixel crossing: (1883, 1591).
+    # (-87.6145965, 41.8926846).  Pixel crossing: (1883, 1591).  Lake Shore Drive curves
+    # only mildly here, so the straight-axis correction (~42 ft) stays below its floor and
+    # the raw shared node is kept.
     index = build_block_index(_load_p29n())
     feats = [
         _feat("NORTH LAKE SHORE DRIVE", 1883.0, 1969.0, NS),
@@ -228,6 +230,45 @@ def test_find_gcps_parallel_streets_produce_no_gcp():
         _feat("EAST OHIO STREET", 780.0, 1591.0, EW),
     ]
     assert find_intersection_gcps(feats, index) == []
+
+
+def test_curved_junction_straightening_skips_jogs(monkeypatch):
+    # A jog — the same street pair crossing twice — must not be straightened: the dominant-axis
+    # window would span both branches and fabricate a bogus shift (cf. Brooklyn p26, COURT
+    # jogging across BRYANT). straight_intersection_geo is called for the unique MAIN x SINGLE
+    # crossing but skipped for the two-node MAIN x JOG pair.
+    import mapsnap.georef_from_labels as module
+
+    calls: list[tuple[float, float]] = []
+    real = module.straight_intersection_geo
+
+    def spy(geo, blocks_a, blocks_b, **kwargs):
+        calls.append(geo)
+        return real(geo, blocks_a, blocks_b, **kwargs)
+
+    monkeypatch.setattr(module, "straight_intersection_geo", spy)
+
+    geojson = _make_geojson(
+        (
+            "MAIN STREET",
+            [[-90.002, 30.0], [-90.001, 30.0], [-90.0, 30.0], [-89.999, 30.0]],
+        ),
+        ("SINGLE STREET", [[-90.0, 30.0], [-90.0, 29.999]]),  # crosses MAIN once
+        # Touches MAIN at two nodes ~630 ft apart -> two clusters (a jog).
+        (
+            "JOG STREET",
+            [[-90.001, 30.0], [-90.001, 29.9995], [-89.999, 29.9995], [-89.999, 30.0]],
+        ),
+    )
+    index = build_block_index(geojson)
+    feats = [
+        _feat("MAIN STREET", 500.0, 500.0, EW),
+        _feat("SINGLE STREET", 700.0, 300.0, NS),
+        _feat("JOG STREET", 300.0, 300.0, NS),
+    ]
+    module.find_intersection_gcps(feats, index)
+    assert len(calls) == 1  # only the unique crossing was a straightening candidate
+    assert calls[0] == pytest.approx((-90.0, 30.0), abs=1e-6)
 
 
 def test_find_gcps_sorted_by_pixel_dist():

@@ -19,6 +19,7 @@ import multiprocessing
 import os
 import statistics
 import sys
+from collections import defaultdict, deque
 from dataclasses import dataclass
 from itertools import combinations
 from pathlib import Path
@@ -441,6 +442,188 @@ def _cluster_geo_coords(
     return clusters
 
 
+def street_segments_near_vertex(
+    geo: tuple[float, float],
+    blocks: list[Block],
+    radius_ft: float,
+) -> list[tuple[np.ndarray, np.ndarray]]:
+    """Street segments near ``geo`` in a local foot frame, not crossing the street's own forks.
+
+    Normally every centerline segment with an endpoint within ``radius_ft`` of ``geo``. But if
+    the street self-intersects within range — a node where three or more of its own segments
+    meet, e.g. where it forks into two parallel branches — the segments are instead walked
+    outward from the node nearest ``geo`` and the walk stops at each fork. That keeps a
+    forked-off branch from corrupting the street's bearing (Brooklyn p14: two COLUMBIA branches
+    meet at a real COLUMBIA x COLUMBIA node, and only the one leading into the curve should set
+    the direction). Segments are returned as (a, b) endpoint pairs in feet centred on ``geo``.
+    """
+    lon0, lat0 = geo
+    cos0 = math.cos(math.radians(lat0))
+
+    def to_ft(lon: float, lat: float) -> np.ndarray:
+        return np.array(
+            [(lon - lon0) * cos0 * _FT_PER_DEG_LAT, (lat - lat0) * _FT_PER_DEG_LAT]
+        )
+
+    def in_range(node: tuple[float, float]) -> bool:
+        return float(np.hypot(*to_ft(*node))) <= radius_ft
+
+    adjacency: dict[tuple[float, float], list[tuple[float, float]]] = defaultdict(list)
+    for block in blocks:
+        pts = block.coords
+        for k in range(len(pts) - 1):
+            a = (round(float(pts[k][0]), 7), round(float(pts[k][1]), 7))
+            b = (round(float(pts[k + 1][0]), 7), round(float(pts[k + 1][1]), 7))
+            if a != b:
+                adjacency[a].append(b)
+                adjacency[b].append(a)
+
+    def all_in_radius() -> list[tuple[np.ndarray, np.ndarray]]:
+        segments: list[tuple[np.ndarray, np.ndarray]] = []
+        for block in blocks:
+            pts = block.coords
+            for k in range(len(pts) - 1):
+                a = to_ft(float(pts[k][0]), float(pts[k][1]))
+                b = to_ft(float(pts[k + 1][0]), float(pts[k + 1][1]))
+                if float(np.hypot(*a)) <= radius_ft or float(np.hypot(*b)) <= radius_ft:
+                    segments.append((a, b))
+        return segments
+
+    forks = {n for n in adjacency if len(set(adjacency[n])) >= 3 and in_range(n)}
+    candidates = [n for n in adjacency if in_range(n)]
+    if not forks or not candidates:
+        return all_in_radius()
+
+    # Walk outward from the vertex, keeping the segment that reaches a fork but not crossing it.
+    start = min(candidates, key=lambda n: float(np.hypot(*to_ft(*n))))
+    kept: list[tuple[np.ndarray, np.ndarray]] = []
+    visited_edges: set[frozenset[tuple[float, float]]] = set()
+    seen = {start}
+    queue = deque([start])
+    while queue:
+        node = queue.popleft()
+        if node in forks and node != start:
+            continue
+        for neighbor in adjacency[node]:
+            edge = frozenset((node, neighbor))
+            if edge in visited_edges:
+                continue
+            a, b = to_ft(*node), to_ft(*neighbor)
+            if float(np.hypot(*a)) > radius_ft and float(np.hypot(*b)) > radius_ft:
+                continue
+            visited_edges.add(edge)
+            kept.append((a, b))
+            if neighbor not in seen:
+                seen.add(neighbor)
+                queue.append(neighbor)
+    return kept
+
+
+def dominant_axis_near(
+    geo: tuple[float, float],
+    blocks: list[Block],
+    radius_ft: float = 350.0,
+    align_tol: float = math.radians(25.0),
+) -> tuple[tuple[float, float], float] | None:
+    """A street's straight axis near ``geo`` as (anchor lon/lat, bearing radians), or None.
+
+    Considers the street's segments near ``geo`` (:func:`street_segments_near_vertex`, which
+    stops at the street's own forks), computes their length-weighted dominant bearing (structure
+    tensor, so a long straight run outweighs a short curved elbow), then keeps only the segments
+    whose own direction is within ``align_tol`` of that bearing — discarding the curved portion
+    near a junction. The anchor is the centroid of the kept segment endpoints. Returns None if
+    fewer than two aligned segment endpoints survive. Work is in a foot frame centred on ``geo``.
+    """
+    lon0, lat0 = geo
+    cos0 = math.cos(math.radians(lat0))
+
+    segments = street_segments_near_vertex(geo, blocks, radius_ft)
+    if not segments:
+        return None
+
+    tensor = np.zeros((2, 2))
+    for a, b in segments:
+        seg = b - a
+        tensor += np.outer(seg, seg)
+    if not np.any(tensor):
+        return None
+    _, eigenvectors = np.linalg.eigh(tensor)
+    dominant = eigenvectors[:, -1]
+
+    kept: list[np.ndarray] = []
+    for a, b in segments:
+        seg = b - a
+        length = float(np.linalg.norm(seg))
+        if length < 1e-9:
+            continue
+        if abs(float(np.dot(seg / length, dominant))) >= math.cos(align_tol):
+            kept.extend((a, b))
+    if len(kept) < 2:
+        return None
+    centroid = np.mean(kept, axis=0)
+    anchor = (
+        lon0 + float(centroid[0]) / (cos0 * _FT_PER_DEG_LAT),
+        lat0 + float(centroid[1]) / _FT_PER_DEG_LAT,
+    )
+    return anchor, math.atan2(float(dominant[1]), float(dominant[0]))
+
+
+def straight_intersection_geo(
+    geo: tuple[float, float],
+    blocks_a: list[Block],
+    blocks_b: list[Block],
+    radius_ft: float = 350.0,
+    align_tol: float = math.radians(25.0),
+    min_shift_ft: float = 120.0,
+    max_shift_ft: float = 250.0,
+) -> tuple[float, float] | None:
+    """Where two streets' straight axes cross near a shared vertex ``geo``, or None.
+
+    mapsnap places a GCP's pixel at the crossing of two *straight* label lines but pairs it with
+    the raw OSM shared vertex for the geo. When a street curves through that vertex (its tangent
+    there differs from its dominant bearing) the vertex sits off the straight axis the Sanborn
+    map draws, injecting a rotation error (New Orleans 1896 p161: JULIA meets the curving SOUTH
+    CLAIBORNE, tilting the fit ~22°). This returns the intersection of the two streets' straight
+    axes (:func:`dominant_axis_near`) so the geo matches how the pixel was derived.
+
+    Returns None — meaning keep the raw vertex — when either axis is unavailable, the axes are
+    within 10° of parallel (crossing ill-conditioned), or the correction is below ``min_shift_ft``
+    or above ``max_shift_ft``. The ``min_shift_ft`` floor is deliberately large: only a sharp
+    curve (the vertex sitting well off the straight-axis crossing) is corrected. Nudging the many
+    mild curves that fall below it just perturbs otherwise-good fits — across the truth volumes
+    those small corrections were net-neutral churn, while the sharp-curve cases (p161) are wins.
+    """
+    axis_a = dominant_axis_near(geo, blocks_a, radius_ft, align_tol)
+    axis_b = dominant_axis_near(geo, blocks_b, radius_ft, align_tol)
+    if axis_a is None or axis_b is None:
+        return None
+    lon0, lat0 = geo
+    cos0 = math.cos(math.radians(lat0))
+
+    def to_ft(lon: float, lat: float) -> np.ndarray:
+        return np.array(
+            [(lon - lon0) * cos0 * _FT_PER_DEG_LAT, (lat - lat0) * _FT_PER_DEG_LAT]
+        )
+
+    (anchor_a, bearing_a), (anchor_b, bearing_b) = axis_a, axis_b
+    ca, da = to_ft(*anchor_a), np.array([math.cos(bearing_a), math.sin(bearing_a)])
+    cb, db = to_ft(*anchor_b), np.array([math.cos(bearing_b), math.sin(bearing_b)])
+    if abs(float(da[0] * db[1] - da[1] * db[0])) < math.sin(math.radians(10.0)):
+        return None
+    try:
+        ts = np.linalg.solve(np.array([[da[0], -db[0]], [da[1], -db[1]]]), cb - ca)
+    except np.linalg.LinAlgError:
+        return None
+    point = ca + float(ts[0]) * da
+    shift = float(np.hypot(*point))
+    if shift < min_shift_ft or shift > max_shift_ft:
+        return None
+    return (
+        lon0 + float(point[0]) / (cos0 * _FT_PER_DEG_LAT),
+        lat0 + float(point[1]) / _FT_PER_DEG_LAT,
+    )
+
+
 def find_intersection_gcps(
     features: list[LabelFeature],
     block_index: dict[str, list[Block]],
@@ -457,6 +640,11 @@ def find_intersection_gcps(
     jogging streets (e.g. Newport St crosses East Jefferson Ave at two points 115ft apart)
     and divided highways (two carriageway crossings) — both yield two candidate GCPs that
     RANSAC can evaluate independently.
+
+    When a street curves through the shared vertex, the raw vertex is replaced by the crossing
+    of the two streets' straight axes (:func:`straight_intersection_geo`), matching how the
+    pixel side is computed from straight label lines. This applies only where the pair meets
+    once; a jog or divided road (multiple clusters) leaves every vertex unmodified.
 
     Returns GCPs sorted by pixel_dist ascending (closer labels = better pixel estimate).
     """
@@ -489,9 +677,24 @@ def find_intersection_gcps(
             if not shared:
                 continue
             geo_clusters = _cluster_geo_coords(sorted(shared))
+            # Only straighten a curved junction when the two streets meet exactly once. With
+            # multiple crossings (a street jogging across the other, or a divided road's two
+            # carriageways) the dominant-axis window spans several branches, so its "straight
+            # axis" is meaningless and would fabricate a large bogus shift (Brooklyn p26: COURT
+            # jogs across BRYANT, mistriggering a 175 ft move that breaks the fit).
+            unique_intersection = len(geo_clusters) == 1
             for cluster in geo_clusters:
                 cluster_pts = np.array(cluster)
                 geo = (float(cluster_pts[:, 0].mean()), float(cluster_pts[:, 1].mean()))
+                # If a street curves through the shared vertex, the vertex sits off the
+                # straight axis the map draws; use the straight-axis crossing instead so the
+                # geo matches the straight-line pixel crossing (no-op for straight junctions).
+                if unique_intersection:
+                    straightened = straight_intersection_geo(
+                        geo, block_index.get(text_a, []), block_index.get(text_b, [])
+                    )
+                    if straightened is not None:
+                        geo = straightened
                 # For each (text_a, text_b, cluster), keep only the best (fa, fb) pair
                 # by pixel_dist. All pairs share the same geo centroid, so extra pairs
                 # only add RANSAC iterations without adding independent intersection anchors.

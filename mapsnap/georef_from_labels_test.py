@@ -14,9 +14,12 @@ from mapsnap.georef_from_labels import (
     compute_auto_min_short_side,
     confidence_relaxed_threshold,
     correct_square_feature_dirs,
+    dominant_axis_near,
     label_features,
-    promote_avenue_letters,
     project_to_polyline,
+    promote_avenue_letters,
+    straight_intersection_geo,
+    street_segments_near_vertex,
 )
 from mapsnap.streets import Block
 
@@ -716,3 +719,119 @@ def test_confidence_relaxed_threshold_disabled_when_floor_not_below_base():
         high_confidence_floor=18.0,
     )
     assert result == 18.0
+
+
+# ---------------------------------------------------------------------------
+# straight-axis intersection correction (curved-junction GCPs)
+# ---------------------------------------------------------------------------
+
+
+def _ll_block(coords: list[tuple[float, float]]) -> Block:
+    """A Block from (lon, lat) tuples."""
+    return Block("S", np.array(coords, dtype=float))
+
+
+# A vertical (north-south) street through the shared vertex V = (-90, 30).
+_V = (-90.0, 30.0)
+_VERTICAL = _ll_block([(-90.0, 29.997), (-90.0, 30.0), (-90.0, 30.003)])
+# A street whose straight east-west axis runs ~110 ft north of V, dropping through a short
+# elbow to reach V at its east end (a miniature of New Orleans p161's curving S. Claiborne).
+_CURVED = [
+    _ll_block(
+        [
+            (-90.0009, 30.0003),
+            (-90.0007, 30.0003),
+            (-90.0005, 30.0003),
+            (-90.0003, 30.0003),
+            (-90.0001, 30.0003),
+        ]
+    ),
+    _ll_block([(-90.0001, 30.0003), (-90.00005, 30.00015), (-90.0, 30.0)]),
+]
+
+
+def test_dominant_axis_near_straight_street_returns_its_bearing():
+    horizontal = _ll_block([(-90.002, 30.0), (-90.0, 30.0), (-89.998, 30.0)])
+    anchor, bearing = dominant_axis_near(_V, [horizontal])
+    assert abs(bearing % math.pi) < math.radians(1)  # east-west
+    axis = dominant_axis_near(_V, [_VERTICAL])
+    assert abs(axis[1] % math.pi - math.pi / 2) < math.radians(1)  # north-south
+
+
+def test_dominant_axis_near_ignores_the_curved_elbow():
+    # The straight east-west run dominates; the short steep elbow is filtered out, so the
+    # bearing stays near horizontal despite the elbow dipping to V.
+    _, bearing = dominant_axis_near(_V, _CURVED)
+    off_horizontal = min(bearing % math.pi, math.pi - bearing % math.pi)
+    assert off_horizontal < math.radians(15)
+
+
+# A street that forks past node F=(-89.9994, 30.0): the main branch into V runs east-west,
+# but two arms beyond F bend northeast (a miniature of Brooklyn p14's two COLUMBIA branches).
+_FORK_MAIN = _ll_block([(-90.0, 30.0), (-89.9997, 30.0), (-89.9994, 30.0)])
+_FORK_ARMS = [
+    _ll_block([(-89.9994, 30.0), (-89.9992, 30.0004), (-89.999, 30.0008)]),
+    _ll_block([(-89.9994, 30.0), (-89.9993, 30.0003), (-89.9992, 30.0006)]),
+]
+
+
+def test_street_segments_near_vertex_stops_at_self_intersection():
+    # Walking from V stops at the fork F, keeping only the main branch (2 segments), not the
+    # forked-off arms — even though the arms have segments within radius.
+    blocks = [_FORK_MAIN, *_FORK_ARMS]
+    assert len(street_segments_near_vertex(_V, blocks, 350.0)) == 2
+
+
+def test_dominant_axis_near_ignores_forked_off_branch():
+    # With the arms excluded the bearing follows the main branch (~0 deg, east-west); including
+    # them would drag it toward the northeast arms (~64 deg).
+    _, bearing = dominant_axis_near(_V, [_FORK_MAIN, *_FORK_ARMS])
+    off_horizontal = min(bearing % math.pi, math.pi - bearing % math.pi)
+    assert off_horizontal < math.radians(5)
+
+
+def test_street_segments_near_vertex_no_fork_keeps_all_in_radius():
+    # Without a self-intersection every within-radius segment is kept (unchanged behavior).
+    straight = _ll_block([(-90.001, 30.0), (-90.0, 30.0), (-89.999, 30.0)])
+    assert len(street_segments_near_vertex(_V, [straight], 350.0)) == 2
+
+
+def test_straight_intersection_geo_none_for_straight_junction():
+    # Two straight streets crossing squarely at V: the straight-axis crossing is V itself, so
+    # the shift is below the deadband and no correction is made.
+    horizontal = _ll_block([(-90.001, 30.0), (-90.0, 30.0), (-89.999, 30.0)])
+    assert straight_intersection_geo(_V, [_VERTICAL], [horizontal]) is None
+
+
+def test_straight_intersection_geo_none_for_near_parallel():
+    almost_parallel = _ll_block([(-90.0002, 29.998), (-90.0002, 30.002)])
+    assert straight_intersection_geo(_V, [_VERTICAL], [almost_parallel]) is None
+
+
+def test_straight_intersection_geo_corrects_curved_junction():
+    # With a low floor the correction moves the vertex north toward the curved street's
+    # straight axis (~lat 30.0003), off the on-curve OSM vertex at lat 30.0.
+    corrected = straight_intersection_geo(_V, [_VERTICAL], _CURVED, min_shift_ft=20.0)
+    assert corrected is not None
+    lon, lat = corrected
+    assert abs(lon - (-90.0)) < 1e-4  # stays on the vertical street
+    assert 30.0001 < lat < 30.0004  # shifted north toward the straight axis
+
+
+def test_straight_intersection_geo_default_ignores_mild_curve():
+    # The synthetic junction's ~84 ft shift is below the default floor, so only sharp curves
+    # are corrected: with defaults it is left at the raw vertex.
+    assert straight_intersection_geo(_V, [_VERTICAL], _CURVED) is None
+
+
+def test_straight_intersection_geo_respects_shift_bounds():
+    # The curved junction is suppressed when its ~84 ft shift falls outside the given bounds.
+    assert (
+        straight_intersection_geo(
+            _V, [_VERTICAL], _CURVED, min_shift_ft=20.0, max_shift_ft=50.0
+        )
+        is None
+    )
+    assert (
+        straight_intersection_geo(_V, [_VERTICAL], _CURVED, min_shift_ft=100.0) is None
+    )
