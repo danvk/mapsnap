@@ -40,7 +40,7 @@ from mapsnap.streets import (
     is_number_only,
     normalize_street,
 )
-from mapsnap.utils import image_stem
+from mapsnap.utils import default_centerlines, image_stem
 
 
 @dataclass
@@ -595,6 +595,56 @@ def is_rotation_outlier(
     return bool(abs(float(np.dot(d_geo_norm, tangent_vec))) < math.cos(dir_threshold))
 
 
+# Above this many candidate GCPs, ransac_hybrid's exhaustive C(n, 2) pairing is too slow (a
+# key-map index page can yield hundreds of intersections). A fast robust affine RANSAC over the
+# GCP correspondences first discards gross outliers so the label-scored search runs only over
+# the consensus inliers.
+ROBUST_PREFILTER_MIN_GCPS = 100
+# Even after the pre-filter the consensus can be large, and each pair costs a full label scoring
+# (~tens of ms). The consensus is geometrically clean, so only a handful of well-separated pairs
+# are needed to recover the transform; pair just the best (lowest-pixel-distance) GCPs up to this
+# cap. Bounds a many-GCP page to C(cap, 2) label scorings (seconds) instead of minutes.
+MAX_PREFILTER_PAIRING_GCPS = 30
+_M_PER_DEG_LAT: float = 111_320.0
+
+
+def _robust_affine_inlier_indices(
+    gcps: list[IntersectionGCP], reproj_threshold_m: float = 30.0
+) -> list[int]:
+    """Indices of GCPs consistent with a robust 6-parameter affine (pixel → local metres).
+
+    Fits a full affine to the pixel↔geo correspondences with cv2.estimateAffine2D's RANSAC
+    (milliseconds even for hundreds of points) and returns its inlier set. Geo is projected to
+    a local equirectangular metre frame so the reprojection threshold is in metres. Used only
+    to prune gross outliers before the slower label-scored similarity search; returns all
+    indices if the robust fit fails to converge.
+    """
+    import cv2  # lazy: heavy import, only needed for many-GCP pages
+
+    pixels = np.array([g.pixel for g in gcps], dtype=np.float64)
+    geo = np.array([g.geo for g in gcps], dtype=np.float64)
+    lon0, lat0 = float(geo[:, 0].mean()), float(geo[:, 1].mean())
+    cos0 = math.cos(math.radians(lat0))
+    metres = np.stack(
+        [
+            (geo[:, 0] - lon0) * cos0 * _M_PER_DEG_LAT,
+            (geo[:, 1] - lat0) * _M_PER_DEG_LAT,
+        ],
+        axis=1,
+    )
+    _, mask = cv2.estimateAffine2D(
+        pixels.reshape(-1, 1, 2),
+        metres.reshape(-1, 1, 2),
+        method=cv2.RANSAC,
+        ransacReprojThreshold=reproj_threshold_m,
+        maxIters=5000,
+        confidence=0.999,
+    )
+    if mask is None:
+        return list(range(len(gcps)))
+    return [i for i, keep in enumerate(mask.ravel()) if keep]
+
+
 def ransac_hybrid(
     gcps: list[IntersectionGCP],
     features: list[LabelFeature],
@@ -629,6 +679,23 @@ def ransac_hybrid(
     if n < 2:
         return None, [], None
 
+    # For pages with very many candidate GCPs (key-map index pages), the exhaustive C(n, 2)
+    # pairing is prohibitively slow. Prune gross outliers with a fast robust affine first and
+    # search only over the consensus inliers; the final fit is still the label-scored similarity.
+    candidate_indices = list(range(n))
+    if n > ROBUST_PREFILTER_MIN_GCPS:
+        consensus = _robust_affine_inlier_indices(gcps)
+        if len(consensus) >= 2:
+            # gcps are sorted by pixel_dist ascending, so consensus[:cap] keeps the most
+            # reliable intersection estimates.
+            candidate_indices = consensus[:MAX_PREFILTER_PAIRING_GCPS]
+            kept = len(candidate_indices)
+            print(
+                f"Robust-affine pre-filter: {len(consensus)} / {n} GCP inliers; pairing the "
+                f"best {kept} ({kept * (kept - 1) // 2} pairs vs {n * (n - 1) // 2})",
+                file=sys.stderr,
+            )
+
     best_A: np.ndarray | None = None
     best_inliers: list[int] = []
     best_score = -float("inf")
@@ -638,7 +705,7 @@ def ransac_hybrid(
     for a in gcps:
         print(f"  {a.label_a} x {a.label_b}")
 
-    for pair_idx in combinations(range(n), 2):
+    for pair_idx in combinations(candidate_indices, 2):
         i1, i2 = pair_idx
         a, b = gcps[i1], gcps[i2]
         # Skip pairs that map to the same OSM intersection — singular by construction.
@@ -1819,7 +1886,12 @@ def main() -> None:
         ),
     )
     parser.add_argument(
-        "--centerlines", required=True, metavar="FILE", help="centerlines.geojson"
+        "--centerlines",
+        metavar="FILE",
+        help=(
+            "centerlines.geojson (defaults to one next to the input images or their "
+            "parent directory)"
+        ),
     )
     parser.add_argument(
         "--min-confidence",
@@ -1960,6 +2032,11 @@ def main() -> None:
         "--debug", action="store_true", help="Print additional debug information"
     )
     parser.add_argument(
+        "--geocode_keymaps",
+        action="store_true",
+        help="Geocode key maps in addition to regular pages.",
+    )
+    parser.add_argument(
         "--num-workers",
         type=int,
         default=1,
@@ -1971,14 +2048,27 @@ def main() -> None:
     )
     args = parser.parse_args()
 
+    if args.centerlines is None:
+        centerlines = default_centerlines(Path(args.images[0]).parent)
+        if centerlines is None:
+            sys.exit(
+                "No --centerlines given and no centerlines.geojson found next to the "
+                "input images."
+            )
+        args.centerlines = str(centerlines)
+        print(f"Using centerlines: {args.centerlines}", file=sys.stderr)
+
     # A key-map index page (one with a sibling <stem>.keymap.json) has no streets to fit, so
     # ignore it for georeferencing. Other images still require a <stem>.streets.json downstream.
     kept_images = []
     for image_path in args.images:
         stem = image_stem(str(image_path))
         keymap_path = os.path.join(os.path.dirname(image_path), f"{stem}.keymap.json")
-        if os.path.exists(keymap_path):
-            print(f"Skipping {image_path}: key-map page", file=sys.stderr)
+        if os.path.exists(keymap_path) and not args.geocode_keymaps:
+            print(
+                f"Skipping {image_path}: key-map page (pass --geocode_keymaps to geocode)",
+                file=sys.stderr,
+            )
         else:
             kept_images.append(image_path)
     args.images = kept_images
