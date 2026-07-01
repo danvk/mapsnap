@@ -1,6 +1,30 @@
 """Tests for mapsnap.utils."""
 
-from mapsnap.utils import image_stem, list_pages, source_id_to_page_key
+from mapsnap.utils import (
+    default_centerlines,
+    image_stem,
+    list_pages,
+    source_id_to_page_key,
+)
+
+
+def test_default_centerlines_in_same_dir(tmp_path):
+    centerlines = tmp_path / "centerlines.geojson"
+    centerlines.touch()
+    assert default_centerlines(tmp_path) == centerlines
+
+
+def test_default_centerlines_in_parent_dir(tmp_path):
+    # Split panels live in a subdirectory; the file sits in the volume (parent) dir.
+    centerlines = tmp_path / "centerlines.geojson"
+    centerlines.touch()
+    panels_dir = tmp_path / "panels"
+    panels_dir.mkdir()
+    assert default_centerlines(panels_dir) == centerlines
+
+
+def test_default_centerlines_missing_returns_none(tmp_path):
+    assert default_centerlines(tmp_path) is None
 
 
 def test_list_pages_splits_supersede_parent(tmp_path):

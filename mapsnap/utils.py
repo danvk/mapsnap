@@ -125,6 +125,22 @@ def image_stem(image_path: str) -> str:
     return Path(image_path).name.split(".")[0]
 
 
+def default_centerlines(dir_path: Path) -> Path | None:
+    """Return the ``centerlines.geojson`` next to the inputs, or None if absent.
+
+    Checks ``dir_path`` then its parent (so it is found whether commands are run on a
+    volume directory or on split panels in a subdirectory). Returns None rather than
+    exiting so callers can decide whether the file is required.
+    """
+    for candidate in (
+        dir_path / "centerlines.geojson",
+        dir_path.parent / "centerlines.geojson",
+    ):
+        if candidate.exists():
+            return candidate
+    return None
+
+
 def list_pages(dir_path: Path) -> list[Path]:
     """Return the effective page images in dir_path, splits superseding their parent.
 

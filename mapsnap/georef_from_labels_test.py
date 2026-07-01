@@ -10,14 +10,15 @@ from mapsnap.georef_from_labels import (
     _angle_diff_abs,
     _cluster_geo_coords,
     _distinct_pixel_gcps,
+    _robust_affine_inlier_indices,
     _rotation_from_neighbors,
     assemble_multiword_streets,
     compute_auto_min_short_side,
     confidence_relaxed_threshold,
     correct_square_feature_dirs,
     IntersectionGCP,
-    LabelFeature,
     label_features,
+    LabelFeature,
     promote_avenue_letters,
     project_to_polyline,
 )
@@ -756,3 +757,33 @@ def test_confidence_relaxed_threshold_disabled_when_floor_not_below_base():
         high_confidence_floor=18.0,
     )
     assert result == 18.0
+
+
+# ---------------------------------------------------------------------------
+# _robust_affine_inlier_indices — many-GCP pre-filter
+# ---------------------------------------------------------------------------
+
+
+def test_robust_affine_inlier_indices_drops_gross_outliers():
+    # 120 GCPs consistent with a known affine (pixel → lon/lat) plus 8 gross outliers.
+    # The robust affine RANSAC should keep the inliers and reject the outliers.
+    import numpy as np
+
+    rng = np.random.default_rng(0)
+    inliers = []
+    for _ in range(120):
+        px, py = rng.uniform(0, 4000), rng.uniform(0, 4000)
+        lon = -90.0 + 1e-4 * px
+        lat = 30.0 - 1e-4 * py
+        inliers.append(_make_gcp((px, py), (lon, lat)))
+    outliers = [
+        _make_gcp((rng.uniform(0, 4000), rng.uniform(0, 4000)), (-95.0, 35.0))
+        for _ in range(8)
+    ]
+    gcps = inliers + outliers
+    outlier_indices = set(range(120, 128))
+
+    kept = set(_robust_affine_inlier_indices(gcps))
+    # No gross outlier survives, and the large majority of true inliers are kept.
+    assert not (kept & outlier_indices)
+    assert len(kept & set(range(120))) >= 110
