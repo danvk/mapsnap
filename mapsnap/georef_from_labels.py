@@ -521,6 +521,61 @@ def find_intersection_gcps(
     return sorted(gcps, key=lambda g: g.pixel_dist)
 
 
+# GCPs whose pixel crossings fall within this many pixels are treated as one image
+# intersection with several world candidates (a jogging street's two crossings, or a
+# divided road's two carriageways), not as independent control points.
+SAME_PIXEL_TOL_PX = 5.0
+
+
+def _distinct_pixel_gcps(
+    gcps: list[IntersectionGCP],
+) -> list[list[IntersectionGCP]]:
+    """Group GCPs by near-coincident pixel crossing.
+
+    Each group is a set of GCPs sharing one image point, whose geo locations are therefore
+    alternatives (e.g. the two crossings of a jogging street). The number of groups is the
+    number of independent control points available to fit an affine.
+    """
+    groups: list[list[IntersectionGCP]] = []
+    for gcp in gcps:
+        for group in groups:
+            if (
+                math.hypot(
+                    gcp.pixel[0] - group[0].pixel[0], gcp.pixel[1] - group[0].pixel[1]
+                )
+                <= SAME_PIXEL_TOL_PX
+            ):
+                group.append(gcp)
+                break
+        else:
+            groups.append([gcp])
+    return groups
+
+
+def _inlier_residuals(
+    features: list[LabelFeature],
+    block_index: dict[str, list[Block]],
+    A: np.ndarray,
+    inlier_feat_indices: list[int],
+) -> list[float]:
+    """Per-inlier distance (degrees) from each mapped label to its nearest street polyline."""
+    residuals: list[float] = []
+    for i in inlier_feat_indices:
+        feat = features[i]
+        blocks = block_index.get(feat.text)
+        if not blocks:
+            continue
+        lon, lat = apply_affine(A, *feat.center)
+        snap = project_to_polyline(lon, lat, blocks)
+        if snap is None:
+            continue
+        nearest_lon, nearest_lat, _ = snap
+        residuals.append(
+            float(np.linalg.norm(np.array([lon - nearest_lon, lat - nearest_lat])))
+        )
+    return residuals
+
+
 def ransac_hybrid(
     gcps: list[IntersectionGCP],
     features: list[LabelFeature],
@@ -1402,16 +1457,27 @@ def process_image(
     if len(gcps) == 0:
         print("No intersection GCPs found.", file=sys.stderr)
         return ProcessResult(success=False)
-    if len(gcps) == 1:
+
+    # GCPs sharing one pixel are the same image intersection with alternative world
+    # locations (a jogging street crosses its cross-street twice a few metres apart, or a
+    # divided road has two carriageway crossings). They cannot pair with each other to fix
+    # an affine, so when every GCP collapses onto a single image point there is just one
+    # control point: defer to the median-scale 1-GCP fit, which tries each world candidate.
+    if len(_distinct_pixel_gcps(gcps)) == 1:
         ix = f"{gcps[0].feat_a.raw_text} x {gcps[0].feat_b.raw_text}"
+        descr = (
+            ix
+            if len(gcps) == 1
+            else f"{ix} ({len(gcps)} world candidates at one pixel)"
+        )
         if not one_gcp_fits:
             print(
-                f"Only 1 intersection GCP: {ix}; skipping (use --disable-one-gcp-fits to suppress).",
+                f"Only 1 distinct intersection: {descr}; skipping (use --disable-one-gcp-fits to suppress).",
                 file=sys.stderr,
             )
             return ProcessResult(success=False)
         print(
-            f"Only 1 intersection GCP: {ix}; deferring for median-scale processing.",
+            f"Only 1 distinct intersection: {descr}; deferring for median-scale processing.",
             file=sys.stderr,
         )
         return ProcessResult(
@@ -1440,20 +1506,7 @@ def process_image(
         file=sys.stderr,
     )
 
-    residuals: list[float] = []
-    for i in inlier_feat_indices:
-        feat = features[i]
-        blocks = block_index.get(feat.text)
-        if not blocks:
-            continue
-        lon, lat = apply_affine(A, *feat.center)
-        snap = project_to_polyline(lon, lat, blocks)
-        if snap is None:
-            continue
-        nearest_lon, nearest_lat, _ = snap
-        residuals.append(
-            float(np.linalg.norm(np.array([lon - nearest_lon, lat - nearest_lat])))
-        )
+    residuals = _inlier_residuals(features, block_index, A, inlier_feat_indices)
 
     scale, center = _finalize_georef(
         A,
@@ -1607,15 +1660,18 @@ def process_deferred_image(
     cos_phi: float,
     neighbor_rotations: list[tuple[tuple[float, float], float]],
 ) -> ProcessResult:
-    """Georeference an image that was deferred due to having only 1 intersection GCP.
+    """Georeference an image that was deferred for having a single distinct intersection.
 
     Uses the provided scale (deg/px) and estimates rotation from the two streets at the
-    single GCP. The undirected rotation is then validated against adjacent pages (already
+    GCP. The undirected rotation is then validated against adjacent pages (already
     successfully georeferenced): if ≥2 neighbours within 1.5× page dimensions agree with
     one of the two directed candidates (±180°), that candidate is used. When both are
-    equally supported, the 180° ambiguity is resolved by the north-up heuristic. Confirmed
-    fits (≥2 neighbours) are written to output_path (.georef.json); unconfirmed fits are
-    written to a .georef-1gcp.json sidecar instead and returned with success=False.
+    equally supported, the 180° ambiguity is resolved by the north-up heuristic.
+
+    When the intersection has several world candidates (a jogging street's two crossings),
+    each is fitted and the one with the most inlier labels — then the lowest total residual —
+    is kept. Confirmed fits (≥2 neighbours) are written to output_path (.georef.json);
+    unconfirmed fits are written to a .georef-1gcp.json sidecar and returned success=False.
     """
     image_path: str = deferred["image_path"]
     output_path: str = deferred["output_path"]
@@ -1626,51 +1682,65 @@ def process_deferred_image(
     img_w: int = deferred["img_w"]
     img_h: int = deferred["img_h"]
     parameters: dict | None = deferred["parameters"]
-    gcp = gcps[0]
-
-    undirected = _rotation_from_gcp_features(gcp, block_index)
-    if undirected is None:
-        print("Could not estimate rotation from GCP street angles.", file=sys.stderr)
-        return ProcessResult(success=False)
 
     page_dim_lat = scale_deg_per_px * img_h
     page_dim_lon = scale_deg_per_px * img_w / cos_phi
-    decision = _rotation_from_neighbors(
-        candidate=undirected,
-        approx_center=gcp.geo,
-        page_dim_deg=(page_dim_lon, page_dim_lat),
-        neighbor_rotations=neighbor_rotations,
-    )
-    rotation = decision.rotation
-
     pos_threshold = 0.001
-    A = build_affine_from_scale_rotation_gcp(scale_deg_per_px, rotation, gcp, cos_phi)
-    inlier_feat_indices, _ = label_inliers(
-        features, block_index, A, pos_threshold, extrapolate=True
-    )
 
-    if not inlier_feat_indices:
-        print("No inliers found for deferred image.", file=sys.stderr)
+    # Fit each world candidate for the single image point and keep the best by inlier count,
+    # then by total residual. With one candidate (the usual 1-GCP case) the loop runs once.
+    best: (
+        tuple[
+            tuple[int, float],
+            np.ndarray,
+            list[int],
+            list[float],
+            RotationDecision,
+            IntersectionGCP,
+        ]
+        | None
+    ) = None
+    for gcp in gcps:
+        undirected = _rotation_from_gcp_features(gcp, block_index)
+        if undirected is None:
+            continue
+        decision = _rotation_from_neighbors(
+            candidate=undirected,
+            approx_center=gcp.geo,
+            page_dim_deg=(page_dim_lon, page_dim_lat),
+            neighbor_rotations=neighbor_rotations,
+        )
+        A = build_affine_from_scale_rotation_gcp(
+            scale_deg_per_px, decision.rotation, gcp, cos_phi
+        )
+        inliers, _ = label_inliers(
+            features, block_index, A, pos_threshold, extrapolate=True
+        )
+        if not inliers:
+            continue
+        residuals = _inlier_residuals(features, block_index, A, inliers)
+        # Maximise inlier count, then minimise total residual (better-aligned jog side).
+        key = (len(inliers), -sum(residuals))
+        if best is None or key > best[0]:
+            best = (key, A, inliers, residuals, decision, gcp)
+
+    if best is None:
+        print(
+            "No usable deferred fit (no rotation estimate or no inliers).",
+            file=sys.stderr,
+        )
         return ProcessResult(success=False)
+
+    _, A, inlier_feat_indices, residuals, decision, gcp = best
+    if len(gcps) > 1:
+        print(
+            f"Deferred: picked 1 of {len(gcps)} world candidates at the shared pixel.",
+            file=sys.stderr,
+        )
     print(
         f"Deferred: {len(inlier_feat_indices)} / {len(features)} inlier labels",
         file=sys.stderr,
     )
-
-    residuals: list[float] = []
-    for i in inlier_feat_indices:
-        feat = features[i]
-        blocks = block_index.get(feat.text)
-        if not blocks:
-            continue
-        lon, lat = apply_affine(A, *feat.center)
-        snap = project_to_polyline(lon, lat, blocks)
-        if snap is None:
-            continue
-        nearest_lon, nearest_lat, _ = snap
-        residuals.append(
-            float(np.linalg.norm(np.array([lon - nearest_lon, lat - nearest_lat])))
-        )
 
     actual_output_path = (
         output_path
