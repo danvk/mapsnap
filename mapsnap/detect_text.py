@@ -15,7 +15,7 @@ from tqdm import tqdm
 
 from mapsnap.ctc_vocab_decode import HINT_STRINGS, generate_vocab_strings
 from mapsnap.streets import build_block_index, polygon_side_lengths
-from mapsnap.utils import image_stem
+from mapsnap.utils import default_centerlines, image_stem
 
 # Non-street text that appears on Sanborn maps and should be recognized but
 # excluded from georeferencing.
@@ -436,11 +436,11 @@ def main() -> None:
     parser.add_argument(
         "--centerlines",
         metavar="GEOJSON",
-        required=True,
         help=(
             "Centerlines GeoJSON file. Used to build a vocabulary of known street-name "
             "forms for prefix-constrained CTC decoding, which substantially improves "
-            "recall on abbreviated and direction-prefixed labels."
+            "recall on abbreviated and direction-prefixed labels. Defaults to a "
+            "centerlines.geojson next to the input images (or their parent directory)."
         ),
     )
     parser.add_argument(
@@ -506,6 +506,16 @@ def main() -> None:
         ),
     )
     args = parser.parse_args()
+
+    if args.centerlines is None:
+        centerlines = default_centerlines(Path(args.images[0]).parent)
+        if centerlines is None:
+            sys.exit(
+                "No --centerlines given and no centerlines.geojson found next to the "
+                "input images."
+            )
+        args.centerlines = str(centerlines)
+        print(f"Using centerlines: {args.centerlines}", file=sys.stderr)
 
     geojson = json.load(open(args.centerlines))
     block_index = build_block_index(geojson)
