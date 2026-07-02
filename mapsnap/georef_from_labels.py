@@ -724,6 +724,135 @@ def find_intersection_gcps(
     return sorted(gcps, key=lambda g: g.pixel_dist)
 
 
+def _nearest_block(lon: float, lat: float, blocks: list[Block]) -> Block | None:
+    """Return the block (connected polyline) with the segment closest to (lon, lat)."""
+    q = np.array([lon, lat])
+    best_dist = float("inf")
+    best_block: Block | None = None
+    for block in blocks:
+        pts = block.coords
+        for k in range(len(pts) - 1):
+            p1, seg = pts[k], pts[k + 1] - pts[k]
+            seg_len_sq = float(np.dot(seg, seg))
+            if seg_len_sq < 1e-20:
+                continue
+            t = float(np.clip(np.dot(q - p1, seg) / seg_len_sq, 0.0, 1.0))
+            dist = float(np.linalg.norm(q - (p1 + t * seg)))
+            if dist < best_dist:
+                best_dist, best_block = dist, block
+    return best_block
+
+
+def _dominant_angle(block: Block) -> float | None:
+    """Length-weighted dominant tangent angle (mod π) of a block via its structure tensor.
+
+    Summing each segment's outer product weights long straight runs far more than short
+    ones, so a brief kink near a junction cannot swing the estimate from the street's true
+    bearing (see commit 9f03711, which introduced this for the key-map anchor path).
+    Returns None if the block has no usable segment.
+    """
+    pts = block.coords
+    tensor = np.zeros((2, 2))
+    for k in range(len(pts) - 1):
+        seg = pts[k + 1] - pts[k]
+        tensor += np.outer(seg, seg)
+    if not np.any(tensor):
+        return None
+    _, eigenvectors = np.linalg.eigh(tensor)
+    direction = eigenvectors[:, -1]
+    return float(np.arctan2(direction[1], direction[0])) % np.pi
+
+
+def is_rotation_outlier(
+    feat: LabelFeature,
+    block_index: dict[str, list[Block]],
+    affine: np.ndarray,
+    dir_threshold: float = np.pi / 6,
+) -> bool:
+    """Whether ``feat``'s mapped label direction disagrees with its street's bearing.
+
+    A position-independent rotation test: the label's mapped direction is compared against the
+    length-weighted dominant bearing of its nearest block (via :func:`_dominant_angle`), so a
+    kinked or truncated end-segment cannot masquerade as a mismatch the way the single nearest
+    segment can. Returns False when the feature has no matching street or no usable bearing.
+
+    Distinguishes a genuinely mis-oriented label (the model's rotation is wrong) from one that
+    merely lands off its centerline: a historical street that ran past where today's OSM line
+    ends leaves its label on the vanished stretch — right bearing, wrong position — and that is
+    not a rotation outlier. Used to gate the self-inconsistent-fit rejection in ransac_hybrid.
+    """
+    blocks = block_index.get(feat.text)
+    if not blocks:
+        return False
+    lon, lat = apply_affine(affine, *feat.center)
+    block = _nearest_block(lon, lat, blocks)
+    if block is None:
+        return False
+    dominant = _dominant_angle(block)
+    if dominant is None:
+        return False
+    d_pixel = np.array([np.cos(feat.dir_pix), np.sin(feat.dir_pix)])
+    d_geo = affine[:, :2] @ d_pixel
+    d_geo_norm = d_geo / (float(np.linalg.norm(d_geo)) + 1e-10)
+    tangent_vec = np.array([np.cos(dominant), np.sin(dominant)])
+    return bool(abs(float(np.dot(d_geo_norm, tangent_vec))) < math.cos(dir_threshold))
+
+
+# GCPs whose pixel crossings fall within this many pixels are treated as one image
+# intersection with several world candidates (a jogging street's two crossings, or a
+# divided road's two carriageways), not as independent control points.
+SAME_PIXEL_TOL_PX = 5.0
+
+
+def _distinct_pixel_gcps(
+    gcps: list[IntersectionGCP],
+) -> list[list[IntersectionGCP]]:
+    """Group GCPs by near-coincident pixel crossing.
+
+    Each group is a set of GCPs sharing one image point, whose geo locations are therefore
+    alternatives (e.g. the two crossings of a jogging street). The number of groups is the
+    number of independent control points available to fit an affine.
+    """
+    groups: list[list[IntersectionGCP]] = []
+    for gcp in gcps:
+        for group in groups:
+            if (
+                math.hypot(
+                    gcp.pixel[0] - group[0].pixel[0], gcp.pixel[1] - group[0].pixel[1]
+                )
+                <= SAME_PIXEL_TOL_PX
+            ):
+                group.append(gcp)
+                break
+        else:
+            groups.append([gcp])
+    return groups
+
+
+def _inlier_residuals(
+    features: list[LabelFeature],
+    block_index: dict[str, list[Block]],
+    A: np.ndarray,
+    inlier_feat_indices: list[int],
+) -> list[float]:
+    """Per-inlier distance (degrees) from each mapped label to its nearest street polyline."""
+    residuals: list[float] = []
+    for i in inlier_feat_indices:
+        feat = features[i]
+        blocks = block_index.get(feat.text)
+        if not blocks:
+            continue
+        lon, lat = apply_affine(A, *feat.center)
+        snap = project_to_polyline(lon, lat, blocks)
+        if snap is None:
+            continue
+        nearest_lon, nearest_lat, _ = snap
+        residuals.append(
+            float(np.linalg.norm(np.array([lon - nearest_lon, lat - nearest_lat])))
+        )
+    return residuals
+
+
 # Above this many candidate GCPs, ransac_hybrid's exhaustive C(n, 2) pairing is too slow (a
 # key-map index page can yield hundreds of intersections). A fast robust affine RANSAC over the
 # GCP correspondences first discards gross outliers so the label-scored search runs only over
@@ -790,6 +919,11 @@ def ransac_hybrid(
     the 4-parameter similarity transform (equal metric scale + orthogonality) at each pair.
     Inlier counting uses point-to-polyline + direction for every label.
 
+    A candidate pair is disqualified when one of its own seed streets is a rotation outlier
+    under the model it defines — the fit's orientation contradicts a street it was built from
+    (see is_rotation_outlier and the in-loop comment). If no pair survives, returns
+    (None, [], None) so the caller records no fit for the page.
+
     A global rotation estimate R_est is derived from a histogram cross-correlation of label
     angles vs OSM tangents before the main loop. Each candidate is penalized by rot_penalty
     (inlier-equivalents per radian) for deviating from R_est, biasing selection toward
@@ -843,6 +977,24 @@ def ransac_hybrid(
         inliers, err = label_inliers(
             features, block_index, A, pos_threshold, dir_threshold, debug=debug
         )
+
+        # Reject only fits whose own seed streets are *rotation* outliers: each seed GCP is
+        # built from two specific street labels, so if the model maps one of those labels to a
+        # bearing that disagrees with its street, the fit's orientation contradicts its own
+        # evidence (Detroit p28's COREY, mapped ~38° off its dominant bearing). A seed that
+        # matches in direction but lands off its centerline is NOT rejected: that is a
+        # position-only outlier, which is exactly what happens when a historical street ran
+        # past where today's OSM line ends and the label sits on the vanished stretch (Brooklyn
+        # p7's VAN BRUNT, ~3° off but ~115 ft beyond the truncated end). Seeds are the pair's
+        # four source features; is_rotation_outlier identifies each by its own center, so an
+        # ambiguous label's dropped canonical expansion (Detroit p94's KORTE) isn't faulted.
+        seed_feats = (a.feat_a, a.feat_b, b.feat_a, b.feat_b)
+        if any(
+            is_rotation_outlier(f, block_index, A, dir_threshold) for f in seed_feats
+        ):
+            if debug:
+                print(f"  {i1} {i2} REJECTED ({len(inliers)}) seed rotation outlier")
+            continue
 
         # Each inlier contributes (pos_threshold - pos_err) to the score; an inlier at
         # exactly the threshold boundary contributes 0, so a marginal extra inlier cannot
@@ -1672,16 +1824,27 @@ def process_image(
     if len(gcps) == 0:
         print("No intersection GCPs found.", file=sys.stderr)
         return ProcessResult(success=False)
-    if len(gcps) == 1:
+
+    # GCPs sharing one pixel are the same image intersection with alternative world
+    # locations (a jogging street crosses its cross-street twice a few metres apart, or a
+    # divided road has two carriageway crossings). They cannot pair with each other to fix
+    # an affine, so when every GCP collapses onto a single image point there is just one
+    # control point: defer to the median-scale 1-GCP fit, which tries each world candidate.
+    if len(_distinct_pixel_gcps(gcps)) == 1:
         ix = f"{gcps[0].feat_a.raw_text} x {gcps[0].feat_b.raw_text}"
+        descr = (
+            ix
+            if len(gcps) == 1
+            else f"{ix} ({len(gcps)} world candidates at one pixel)"
+        )
         if not one_gcp_fits:
             print(
-                f"Only 1 intersection GCP: {ix}; skipping (use --disable-one-gcp-fits to suppress).",
+                f"Only 1 distinct intersection: {descr}; skipping (use --disable-one-gcp-fits to suppress).",
                 file=sys.stderr,
             )
             return ProcessResult(success=False)
         print(
-            f"Only 1 intersection GCP: {ix}; deferring for median-scale processing.",
+            f"Only 1 distinct intersection: {descr}; deferring for median-scale processing.",
             file=sys.stderr,
         )
         return ProcessResult(
@@ -1710,20 +1873,7 @@ def process_image(
         file=sys.stderr,
     )
 
-    residuals: list[float] = []
-    for i in inlier_feat_indices:
-        feat = features[i]
-        blocks = block_index.get(feat.text)
-        if not blocks:
-            continue
-        lon, lat = apply_affine(A, *feat.center)
-        snap = project_to_polyline(lon, lat, blocks)
-        if snap is None:
-            continue
-        nearest_lon, nearest_lat, _ = snap
-        residuals.append(
-            float(np.linalg.norm(np.array([lon - nearest_lon, lat - nearest_lat])))
-        )
+    residuals = _inlier_residuals(features, block_index, A, inlier_feat_indices)
 
     scale, center = _finalize_georef(
         A,
@@ -1877,15 +2027,18 @@ def process_deferred_image(
     cos_phi: float,
     neighbor_rotations: list[tuple[tuple[float, float], float]],
 ) -> ProcessResult:
-    """Georeference an image that was deferred due to having only 1 intersection GCP.
+    """Georeference an image that was deferred for having a single distinct intersection.
 
     Uses the provided scale (deg/px) and estimates rotation from the two streets at the
-    single GCP. The undirected rotation is then validated against adjacent pages (already
+    GCP. The undirected rotation is then validated against adjacent pages (already
     successfully georeferenced): if ≥2 neighbours within 1.5× page dimensions agree with
     one of the two directed candidates (±180°), that candidate is used. When both are
-    equally supported, the 180° ambiguity is resolved by the north-up heuristic. Confirmed
-    fits (≥2 neighbours) are written to output_path (.georef.json); unconfirmed fits are
-    written to a .georef-1gcp.json sidecar instead and returned with success=False.
+    equally supported, the 180° ambiguity is resolved by the north-up heuristic.
+
+    When the intersection has several world candidates (a jogging street's two crossings),
+    each is fitted and the one with the most inlier labels — then the lowest total residual —
+    is kept. Confirmed fits (≥2 neighbours) are written to output_path (.georef.json);
+    unconfirmed fits are written to a .georef-1gcp.json sidecar and returned success=False.
     """
     image_path: str = deferred["image_path"]
     output_path: str = deferred["output_path"]
@@ -1896,51 +2049,65 @@ def process_deferred_image(
     img_w: int = deferred["img_w"]
     img_h: int = deferred["img_h"]
     parameters: dict | None = deferred["parameters"]
-    gcp = gcps[0]
-
-    undirected = _rotation_from_gcp_features(gcp, block_index)
-    if undirected is None:
-        print("Could not estimate rotation from GCP street angles.", file=sys.stderr)
-        return ProcessResult(success=False)
 
     page_dim_lat = scale_deg_per_px * img_h
     page_dim_lon = scale_deg_per_px * img_w / cos_phi
-    decision = _rotation_from_neighbors(
-        candidate=undirected,
-        approx_center=gcp.geo,
-        page_dim_deg=(page_dim_lon, page_dim_lat),
-        neighbor_rotations=neighbor_rotations,
-    )
-    rotation = decision.rotation
-
     pos_threshold = 0.001
-    A = build_affine_from_scale_rotation_gcp(scale_deg_per_px, rotation, gcp, cos_phi)
-    inlier_feat_indices, _ = label_inliers(
-        features, block_index, A, pos_threshold, extrapolate=True
-    )
 
-    if not inlier_feat_indices:
-        print("No inliers found for deferred image.", file=sys.stderr)
+    # Fit each world candidate for the single image point and keep the best by inlier count,
+    # then by total residual. With one candidate (the usual 1-GCP case) the loop runs once.
+    best: (
+        tuple[
+            tuple[int, float],
+            np.ndarray,
+            list[int],
+            list[float],
+            RotationDecision,
+            IntersectionGCP,
+        ]
+        | None
+    ) = None
+    for gcp in gcps:
+        undirected = _rotation_from_gcp_features(gcp, block_index)
+        if undirected is None:
+            continue
+        decision = _rotation_from_neighbors(
+            candidate=undirected,
+            approx_center=gcp.geo,
+            page_dim_deg=(page_dim_lon, page_dim_lat),
+            neighbor_rotations=neighbor_rotations,
+        )
+        A = build_affine_from_scale_rotation_gcp(
+            scale_deg_per_px, decision.rotation, gcp, cos_phi
+        )
+        inliers, _ = label_inliers(
+            features, block_index, A, pos_threshold, extrapolate=True
+        )
+        if not inliers:
+            continue
+        residuals = _inlier_residuals(features, block_index, A, inliers)
+        # Maximise inlier count, then minimise total residual (better-aligned jog side).
+        key = (len(inliers), -sum(residuals))
+        if best is None or key > best[0]:
+            best = (key, A, inliers, residuals, decision, gcp)
+
+    if best is None:
+        print(
+            "No usable deferred fit (no rotation estimate or no inliers).",
+            file=sys.stderr,
+        )
         return ProcessResult(success=False)
+
+    _, A, inlier_feat_indices, residuals, decision, gcp = best
+    if len(gcps) > 1:
+        print(
+            f"Deferred: picked 1 of {len(gcps)} world candidates at the shared pixel.",
+            file=sys.stderr,
+        )
     print(
         f"Deferred: {len(inlier_feat_indices)} / {len(features)} inlier labels",
         file=sys.stderr,
     )
-
-    residuals: list[float] = []
-    for i in inlier_feat_indices:
-        feat = features[i]
-        blocks = block_index.get(feat.text)
-        if not blocks:
-            continue
-        lon, lat = apply_affine(A, *feat.center)
-        snap = project_to_polyline(lon, lat, blocks)
-        if snap is None:
-            continue
-        nearest_lon, nearest_lat, _ = snap
-        residuals.append(
-            float(np.linalg.norm(np.array([lon - nearest_lon, lat - nearest_lat])))
-        )
 
     actual_output_path = (
         output_path
