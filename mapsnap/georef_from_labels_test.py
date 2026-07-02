@@ -795,16 +795,21 @@ _CURVED = [
 
 def test_dominant_axis_near_straight_street_returns_its_bearing():
     horizontal = _ll_block([(-90.002, 30.0), (-90.0, 30.0), (-89.998, 30.0)])
-    anchor, bearing = dominant_axis_near(_V, [horizontal])
+    horizontal_axis = dominant_axis_near(_V, [horizontal])
+    assert horizontal_axis is not None
+    _, bearing = horizontal_axis
     assert abs(bearing % math.pi) < math.radians(1)  # east-west
     axis = dominant_axis_near(_V, [_VERTICAL])
+    assert axis is not None
     assert abs(axis[1] % math.pi - math.pi / 2) < math.radians(1)  # north-south
 
 
 def test_dominant_axis_near_ignores_the_curved_elbow():
     # The straight east-west run dominates; the short steep elbow is filtered out, so the
     # bearing stays near horizontal despite the elbow dipping to V.
-    _, bearing = dominant_axis_near(_V, _CURVED)
+    axis = dominant_axis_near(_V, _CURVED)
+    assert axis is not None
+    _, bearing = axis
     off_horizontal = min(bearing % math.pi, math.pi - bearing % math.pi)
     assert off_horizontal < math.radians(15)
 
@@ -828,7 +833,9 @@ def test_street_segments_near_vertex_stops_at_self_intersection():
 def test_dominant_axis_near_ignores_forked_off_branch():
     # With the arms excluded the bearing follows the main branch (~0 deg, east-west); including
     # them would drag it toward the northeast arms (~64 deg).
-    _, bearing = dominant_axis_near(_V, [_FORK_MAIN, *_FORK_ARMS])
+    axis = dominant_axis_near(_V, [_FORK_MAIN, *_FORK_ARMS])
+    assert axis is not None
+    _, bearing = axis
     off_horizontal = min(bearing % math.pi, math.pi - bearing % math.pi)
     assert off_horizontal < math.radians(5)
 
