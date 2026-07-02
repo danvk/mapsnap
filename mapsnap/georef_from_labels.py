@@ -35,7 +35,9 @@ from mapsnap.streets import (
     build_block_index,
     canonical_street_matches,
     deduplicate_detections,
+    city_ambiguous_words,
     hint_type_word,
+    is_ambiguous_word,
     is_bare_letter,
     is_number_only,
     normalize_street,
@@ -816,6 +818,47 @@ def reading_vector(polygon: list[list[float]]) -> tuple[float, float]:
     return (polygon[1][0] - polygon[0][0], polygon[1][1] - polygon[0][1])
 
 
+def has_type_hint_support(
+    det: dict,
+    type_hints: list[dict],
+    perp_tolerance_px: float = 20.0,
+    max_along_gap_frac: float = 1.5,
+) -> bool:
+    """Whether a STREET/AVENUE hint sits in the detection's column, just after it.
+
+    Mirrors the column test in promote_avenue_letters: the hint must share the detection's
+    direction bucket and lie within perp_tolerance_px perpendicular of it. It must also fall
+    *along* the reading direction within max_along_gap_frac × the detection's long side, so a
+    "CANAL" with a "ST" right after it counts but an unrelated "STREET" elsewhere does not.
+    Used to support ambiguous bare words like CANAL/BRIDGE (see is_ambiguous_word, issue #51).
+    """
+    bucket_size = math.pi / 12.0
+    det_dir = det.get("dir_pix", 0.0)
+    det_bucket = int(round(det_dir / bucket_size)) % 12
+    cos_d, sin_d = math.cos(det_dir), math.sin(det_dir)
+    dpoly = det["polygon"]
+    det_cx = sum(p[0] for p in dpoly) / 4.0
+    det_cy = sum(p[1] for p in dpoly) / 4.0
+    det_perp = -det_cx * sin_d + det_cy * cos_d
+    long_side = det.get("long_side", 0.0)
+    for hint in type_hints:
+        if hint_type_word(hint.get("text", "")) is None:
+            continue
+        if int(round(hint.get("dir_pix", 0.0) / bucket_size)) % 12 != det_bucket:
+            continue
+        hpoly = hint["polygon"]
+        hcx = sum(p[0] for p in hpoly) / 4.0
+        hcy = sum(p[1] for p in hpoly) / 4.0
+        if abs((-hcx * sin_d + hcy * cos_d) - det_perp) > perp_tolerance_px:
+            continue
+        # Adjacent along the column (gap between centres within ~1.5 word-lengths).
+        if math.hypot(hcx - det_cx, hcy - det_cy) <= max_along_gap_frac * max(
+            long_side, 1.0
+        ):
+            return True
+    return False
+
+
 def promote_avenue_letters(
     hint_detections: list[dict],
     all_detections: list[dict],
@@ -1371,6 +1414,12 @@ def process_image(
             file=sys.stderr,
         )
     normalized_streets = set(block_index.keys())
+    # STREET/AVENUE hints, used both to promote bare letters and to support ambiguous words.
+    street_type_hints = [
+        h for h in hint_detections if hint_type_word(h.get("text", "")) is not None
+    ]
+    # The volume's own city name (e.g. CHICAGO) is filtered like CANAL — see issue #51.
+    city_words = city_ambiguous_words(Path(image_path).parent.name)
     promoted = promote_avenue_letters(
         hint_detections, all_detections, normalized_streets
     )
@@ -1422,6 +1471,12 @@ def process_image(
                 # branch above); an unpromoted "M"/"W" is almost always a rotated misread of
                 # a quadrant/type box, so reject it here.
                 and not is_bare_letter(det["text"])
+                # Ambiguous words (CANAL, BRIDGE, PARK, …) usually label a feature, not a
+                # street, so trust a bare one only when a STREET/AVENUE hint supports it.
+                and not (
+                    is_ambiguous_word(det["text"], city_words)
+                    and not has_type_hint_support(det, street_type_hints)
+                )
                 and (
                     normalize_street(det["text"]) not in DIRECTION_WORDS
                     or det["text"].upper().strip() in normalized_streets

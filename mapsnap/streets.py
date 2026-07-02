@@ -248,6 +248,47 @@ def is_bare_letter(text: str) -> bool:
     return len(text.strip()) == 1 and text.strip().isalpha()
 
 
+# Common words that appear in street names but, on a Sanborn sheet, more often label a
+# physical feature (a bridge, a canal, a park, a river) or page furniture ("Sanborn", the
+# city name). Like a bare single letter, a bare one of these is trusted only when a nearby
+# type-word hint ("STREET"/"AVENUE") supports it: "CANAL STREET" is a street, a plain "CANAL"
+# is probably the waterway. See issue #51.
+AMBIGUOUS_STREET_WORDS: frozenset[str] = frozenset(
+    {"RIVER", "BRIDGE", "CANAL", "WATER", "PARK", "CONGRESS", "SANBORN"}
+)
+
+
+def is_ambiguous_word(text: str, extra: frozenset[str] = frozenset()) -> bool:
+    """Return True if the normalized text is exactly an ambiguous bare word (no type word).
+
+    "CANAL" → True, but "CANAL STREET" → False (normalize keeps the type word, so it is no
+    longer bare). ``extra`` adds volume-specific ambiguous words (the city name); see
+    AMBIGUOUS_STREET_WORDS, city_ambiguous_words, and issue #51.
+    """
+    normalized = normalize_street(text)
+    return normalized in AMBIGUOUS_STREET_WORDS or normalized in extra
+
+
+def city_ambiguous_words(volume_name: str) -> frozenset[str]:
+    """Derive the volume's city name (normalized) from its directory name, for issue-#51.
+
+    Directory names look like ``<city tokens>_<state>_<year>[_vol_<n>]`` (e.g.
+    ``detroit_mich_1929_vol_11`` → "DETROIT", ``new_orleans_la_1896_vol_2`` → "NEW ORLEANS").
+    The city is every token before the state, which is the token immediately before the
+    four-digit year. The city name is itself ambiguous on a Sanborn sheet ("Chicago River",
+    "City of Detroit"), so a bare one is filtered like CANAL unless a type hint supports it.
+    Returns an empty set if the directory name doesn't match the expected pattern.
+    """
+    tokens = volume_name.split("_")
+    year_index = next(
+        (i for i, t in enumerate(tokens) if len(t) == 4 and t.isdigit()), None
+    )
+    if year_index is None or year_index < 2:
+        return frozenset()
+    normalized = normalize_street(" ".join(tokens[: year_index - 1]))
+    return frozenset({normalized}) if normalized else frozenset()
+
+
 def _match_candidates(s: str) -> list[str]:
     """Return the candidate forms to compare against when prefix-matching street key s.
 

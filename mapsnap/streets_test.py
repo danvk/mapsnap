@@ -175,3 +175,41 @@ def test_canonical_street_match_direction_suffixed():
         "NORTH PLACE SOUTHEAST",
         "NORTH ROAD",
     }
+
+
+# ---------------------------------------------------------------------------
+# is_ambiguous_word (issue #51)
+# ---------------------------------------------------------------------------
+
+
+def test_is_ambiguous_word_bare_words():
+    from mapsnap.streets import is_ambiguous_word
+
+    assert is_ambiguous_word("CANAL")
+    assert is_ambiguous_word("Bridge")
+    assert is_ambiguous_word("river")
+    assert is_ambiguous_word("PARK")
+
+
+def test_is_ambiguous_word_with_type_word_is_not_bare():
+    from mapsnap.streets import is_ambiguous_word
+
+    # A type word makes it an unambiguous street name, so it is not flagged.
+    assert not is_ambiguous_word("CANAL STREET")
+    assert not is_ambiguous_word("BRIDGE AVE")
+    # Ordinary streets are never flagged.
+    assert not is_ambiguous_word("HENRY")
+    assert not is_ambiguous_word("MAGAZINE STREET")
+
+
+def test_city_ambiguous_words_from_volume_name():
+    from mapsnap.streets import city_ambiguous_words
+
+    assert city_ambiguous_words("detroit_mich_1929_vol_11") == frozenset({"DETROIT"})
+    assert city_ambiguous_words("champaign_ill_1915") == frozenset({"CHAMPAIGN"})
+    assert city_ambiguous_words("new_orleans_la_1896_vol_2") == frozenset(
+        {"NEW ORLEANS"}
+    )
+    assert city_ambiguous_words("brooklyn_ny_1939_vol_1") == frozenset({"BROOKLYN"})
+    # Unparseable names yield nothing rather than a wrong word.
+    assert city_ambiguous_words("scratch") == frozenset()

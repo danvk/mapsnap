@@ -755,3 +755,33 @@ def test_robust_affine_inlier_indices_drops_gross_outliers():
     # No gross outlier survives, and the large majority of true inliers are kept.
     assert not (kept & outlier_indices)
     assert len(kept & set(range(120))) >= 110
+
+
+# ---------------------------------------------------------------------------
+# has_type_hint_support — ambiguous-word support (issue #51)
+# ---------------------------------------------------------------------------
+
+
+def test_ambiguous_word_supported_by_adjacent_type_hint():
+    from mapsnap.georef_from_labels import has_type_hint_support
+
+    # "CANAL" with a "STREET" hint just after it in the same row -> supported.
+    canal = _make_det("CANAL", cx=500, cy=500, long_side=80, dir_pix=0.0)
+    st_hint = _make_det("STREET", cx=600, cy=500, long_side=60, dir_pix=0.0, hint=True)
+    assert has_type_hint_support(canal, [st_hint])
+
+
+def test_ambiguous_word_unsupported_without_hint():
+    from mapsnap.georef_from_labels import has_type_hint_support
+
+    canal = _make_det("CANAL", cx=500, cy=500, long_side=80, dir_pix=0.0)
+    # No hint at all.
+    assert not has_type_hint_support(canal, [])
+    # A hint far away (different row) does not support it.
+    far = _make_det("STREET", cx=600, cy=900, long_side=60, dir_pix=0.0, hint=True)
+    assert not has_type_hint_support(canal, [far])
+    # A hint in a perpendicular column does not support it.
+    perp = _make_det(
+        "STREET", cx=540, cy=560, long_side=60, dir_pix=math.pi / 2, hint=True
+    )
+    assert not has_type_hint_support(canal, [perp])
