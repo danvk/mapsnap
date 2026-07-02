@@ -4,7 +4,11 @@ import numpy as np
 
 from mapsnap.detect_text import (
     NON_STREET_TEXT,
+    _axis_starts,
     _erase_underlines,
+    _iou_xxyy,
+    _iter_tiles,
+    _nms_bboxes,
     filter_args,
     has_split_panels,
 )
@@ -316,3 +320,82 @@ def test_filter_args_single_image():
 def test_filter_args_no_jpgs():
     argv = ["detect_text.py", "--help"]
     assert filter_args(argv, "x.jpg") == argv
+
+
+# --- tiled detection helpers ---
+
+
+def test_axis_starts_smaller_than_tile():
+    # A frame no larger than the tile needs a single tile at the origin.
+    assert _axis_starts(2000, 2560, 2048) == [0]
+    assert _axis_starts(2560, 2560, 2048) == [0]
+
+
+def test_axis_starts_covers_end_flush():
+    # Last start is snapped to length-tile so the final tile reaches the edge.
+    starts = _axis_starts(8422, 2560, 2048)
+    assert starts[0] == 0
+    assert starts[-1] == 8422 - 2560
+    # every position is within [0, length-tile]
+    assert all(0 <= s <= 8422 - 2560 for s in starts)
+
+
+def test_iter_tiles_covers_whole_image():
+    # Union of tiles must cover every pixel of a large frame.
+    width, height, tile, overlap = 6091, 8422, 2560, 512
+    tiles = list(_iter_tiles(width, height, tile, overlap))
+    assert tiles, "expected at least one tile"
+    covered = np.zeros((height, width), dtype=bool)
+    for x0, y0, x1, y1 in tiles:
+        assert x1 - x0 <= tile and y1 - y0 <= tile
+        covered[y0:y1, x0:x1] = True
+    assert covered.all()
+
+
+def test_iter_tiles_single_tile_when_small():
+    tiles = list(_iter_tiles(2000, 1500, 2560, 512))
+    assert tiles == [(0, 0, 2000, 1500)]
+
+
+def test_iter_tiles_overlap_between_neighbors():
+    # Horizontally adjacent tiles should share the configured overlap.
+    tiles = list(_iter_tiles(6091, 2000, 2560, 512))
+    xs = sorted({(x0, x1) for x0, _, x1, _ in tiles})
+    first_end = xs[0][1]
+    second_start = xs[1][0]
+    assert first_end - second_start == 512  # overlap width = tile - stride
+
+
+def test_iou_identical_boxes():
+    assert _iou_xxyy([0, 10, 0, 10], [0, 10, 0, 10]) == 1.0
+
+
+def test_iou_disjoint_boxes():
+    assert _iou_xxyy([0, 10, 0, 10], [20, 30, 0, 10]) == 0.0
+
+
+def test_iou_half_overlap():
+    # Two 10x10 boxes overlapping in a 5x10 strip: inter=50, union=150.
+    assert _iou_xxyy([0, 10, 0, 10], [5, 15, 0, 10]) == 50 / 150
+
+
+def test_nms_drops_duplicate_keeps_larger():
+    # A duplicate and a clipped copy of one label plus a far-away box:
+    # NMS keeps the larger of the overlapping pair and the disjoint box.
+    boxes = [
+        [0.0, 100.0, 0.0, 20.0],  # full label
+        [0.0, 90.0, 0.0, 20.0],  # clipped copy (high IoU with the full one)
+        [500.0, 600.0, 0.0, 20.0],  # unrelated, disjoint
+    ]
+    kept = _nms_bboxes(boxes, 0.4)
+    assert 0 in kept  # larger box survives
+    assert 1 not in kept  # clipped duplicate suppressed
+    assert 2 in kept  # disjoint box kept
+
+
+def test_nms_keeps_distinct_low_overlap_boxes():
+    boxes = [
+        [0.0, 100.0, 0.0, 20.0],
+        [95.0, 195.0, 0.0, 20.0],
+    ]  # touch slightly, low IoU
+    assert sorted(_nms_bboxes(boxes, 0.4)) == [0, 1]
