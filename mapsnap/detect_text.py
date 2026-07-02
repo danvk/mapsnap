@@ -4,6 +4,7 @@ import argparse
 import json
 import multiprocessing
 import sys
+from collections.abc import Iterator
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -112,12 +113,152 @@ def has_split_panels(image_path: str) -> bool:
     return any(Path(image_path).parent.glob(f"{stem}__*.jpg"))
 
 
+def _axis_starts(length: int, tile: int, stride: int) -> list[int]:
+    """Tile-start offsets covering [0, length]; the final tile sits flush with the end."""
+    if length <= tile:
+        return [0]
+    starts = list(range(0, length - tile + 1, stride))
+    if starts[-1] != length - tile:
+        starts.append(length - tile)
+    return starts
+
+
+def _iter_tiles(
+    width: int, height: int, tile_size: int, overlap: int
+) -> Iterator[tuple[int, int, int, int]]:
+    """Yield (x0, y0, x1, y1) tiles of at most tile_size px, overlapping by ``overlap``."""
+    stride = max(1, tile_size - overlap)
+    for y0 in _axis_starts(height, tile_size, stride):
+        for x0 in _axis_starts(width, tile_size, stride):
+            yield x0, y0, min(x0 + tile_size, width), min(y0 + tile_size, height)
+
+
+def _iou_xxyy(a: list[float], b: list[float]) -> float:
+    """IoU of two [x_min, x_max, y_min, y_max] boxes."""
+    inter = max(0.0, min(a[1], b[1]) - max(a[0], b[0])) * max(
+        0.0, min(a[3], b[3]) - max(a[2], b[2])
+    )
+    if inter <= 0:
+        return 0.0
+    area_a = max(0.0, a[1] - a[0]) * max(0.0, a[3] - a[2])
+    area_b = max(0.0, b[1] - b[0]) * max(0.0, b[3] - b[2])
+    union = area_a + area_b - inter
+    return inter / union if union > 0 else 0.0
+
+
+def _nms_bboxes(bboxes: list[list[float]], iou_threshold: float) -> list[int]:
+    """Greedy NMS over [x_min,x_max,y_min,y_max] boxes; returns kept indices (larger first).
+
+    Used to drop near-duplicate detections produced where adjacent tiles overlap: the
+    larger (more complete) box wins over a copy clipped at a tile seam.
+    """
+    order = sorted(
+        range(len(bboxes)),
+        key=lambda i: (bboxes[i][1] - bboxes[i][0]) * (bboxes[i][3] - bboxes[i][2]),
+        reverse=True,
+    )
+    kept: list[int] = []
+    for i in order:
+        if all(_iou_xxyy(bboxes[i], bboxes[j]) <= iou_threshold for j in kept):
+            kept.append(i)
+    return kept
+
+
+def _detect_frame(
+    reader: easyocr.Reader,
+    array: np.ndarray,
+    min_size: int,
+    link_threshold: float,
+    craft_scale: float,
+    tile_size: int,
+) -> tuple[list, list]:
+    """Run CRAFT on one image frame, tiling frames larger than ``tile_size``.
+
+    EasyOCR caps the CRAFT input's long side at canvas_size (2560px), so a frame larger
+    than that is downscaled before detection — shrinking small labels below the
+    detector's resolution (an 8422px key map is seen at ~0.30×, turning a 40px label
+    into ~12px). When tile_size > 0 and the frame's long side exceeds it, the frame is
+    split into overlapping tiles detected at native resolution and their boxes merged
+    with NMS. Only detection is affected: recognition always crops from the full-
+    resolution image regardless of how boxes were found.
+
+    Returns (horizontal_list, free_list) in ``array`` coordinates. tile_size <= 0
+    disables tiling: the frame is detected in one pass, optionally downscaled by
+    craft_scale.
+    """
+    height, width = array.shape[:2]
+
+    if tile_size <= 0 or max(width, height) <= tile_size:
+        craft_min_size = max(1, int(min_size * craft_scale))
+        if craft_scale != 1.0:
+            detect_array = np.array(
+                Image.fromarray(array).resize(
+                    (
+                        max(1, int(width * craft_scale)),
+                        max(1, int(height * craft_scale)),
+                    ),
+                    Image.Resampling.LANCZOS,
+                )
+            )
+        else:
+            detect_array = array
+        horizontal_agg, free_agg = reader.detect(
+            detect_array, min_size=craft_min_size, link_threshold=link_threshold
+        )
+        inv = 1.0 / craft_scale
+        horizontal = [
+            [int(b[0] * inv), int(b[1] * inv), int(b[2] * inv), int(b[3] * inv)]
+            for b in horizontal_agg[0]
+        ]
+        free = [
+            [[int(c[0] * inv), int(c[1] * inv)] for c in poly] for poly in free_agg[0]
+        ]
+        return horizontal, free
+
+    # Tiled detection at native resolution: every tile is <= tile_size on its long side
+    # so reader.detect does not downscale it.
+    craft_min_size = max(1, min_size)
+    overlap = tile_size // 5
+    horizontal: list = []
+    free: list = []
+    tiles = [*_iter_tiles(width, height, tile_size, overlap)]
+    print(
+        f"Tiling large image ({width}x{height}) into {len(tiles)} tiles.",
+        file=sys.stderr,
+    )
+    for x0, y0, x1, y1 in tiles:
+        tile = array[y0:y1, x0:x1]
+        horizontal_agg, free_agg = reader.detect(
+            tile, min_size=craft_min_size, link_threshold=link_threshold
+        )
+        for b in horizontal_agg[0]:
+            horizontal.append(
+                [int(b[0]) + x0, int(b[1]) + x0, int(b[2]) + y0, int(b[3]) + y0]
+            )
+        for poly in free_agg[0]:
+            free.append([[int(c[0]) + x0, int(c[1]) + y0] for c in poly])
+
+    keep_h = _nms_bboxes(horizontal, 0.4)
+    free_bboxes = [
+        [
+            min(c[0] for c in p),
+            max(c[0] for c in p),
+            min(c[1] for c in p),
+            max(c[1] for c in p),
+        ]
+        for p in free
+    ]
+    keep_f = _nms_bboxes(free_bboxes, 0.4)
+    return [horizontal[i] for i in keep_h], [free[i] for i in keep_f]
+
+
 def _craft_detect_all_angles(
     img: Image.Image,
     reader: easyocr.Reader,
     min_size: int,
     link_threshold: float,
     craft_scale: float,
+    tile_size: int,
 ) -> list[dict]:
     """Run CRAFT detection at 0°, 90°, and 270° and return per-angle box data.
 
@@ -125,36 +266,17 @@ def _craft_detect_all_angles(
       - angle: rotation in degrees (0, 90, or 270)
       - horizontal_list: list of [x_min, x_max, y_min, y_max] in rotated-image coords
       - free_list: list of [[x, y], ...] polygon lists in rotated-image coords
+
+    Frames larger than tile_size are detected in overlapping native-resolution tiles
+    (see _detect_frame) so small labels survive canvas_size downscaling.
     """
-    craft_min_size = max(1, int(min_size * craft_scale))
     result = []
     for angle in (0, 90, 270):
         rotated = img.rotate(angle, expand=True) if angle != 0 else img
         rotated_array = np.array(rotated)
-        if craft_scale != 1.0:
-            rot_h, rot_w = rotated_array.shape[:2]
-            small_w = max(1, int(rot_w * craft_scale))
-            small_h = max(1, int(rot_h * craft_scale))
-            detect_array = np.array(
-                Image.fromarray(rotated_array).resize(
-                    (small_w, small_h), Image.Resampling.LANCZOS
-                )
-            )
-        else:
-            detect_array = rotated_array
-        horizontal_list_agg, free_list_agg = reader.detect(
-            detect_array, min_size=craft_min_size, link_threshold=link_threshold
+        horizontal_list, free_list = _detect_frame(
+            reader, rotated_array, min_size, link_threshold, craft_scale, tile_size
         )
-        horizontal_list = horizontal_list_agg[0]
-        free_list = free_list_agg[0]
-        inv = 1.0 / craft_scale
-        horizontal_list = [
-            [int(b[0] * inv), int(b[1] * inv), int(b[2] * inv), int(b[3] * inv)]
-            for b in horizontal_list
-        ]
-        free_list = [
-            [[int(c[0] * inv), int(c[1] * inv)] for c in box] for box in free_list
-        ]
         result.append(
             {
                 "angle": angle,
@@ -183,6 +305,7 @@ def detect_text(
     reader: easyocr.Reader | None = None,
     beam_width: int = 20,
     craft_scale: float = 1.0,
+    tile_size: int = 2560,
     reuse_boxes: bool = False,
 ) -> list[dict]:
     """Run CRAFT-based text detection at 0°, 90°, and 270° and return all results.
@@ -217,6 +340,13 @@ def detect_text(
     original coordinates before recognition, which always runs at full resolution.
     min_size is also scaled proportionally so the same physical text size threshold
     applies. Ignored when reuse_boxes=True.
+
+    tile_size splits images whose long side exceeds it into overlapping tiles that CRAFT
+    detects at native resolution, avoiding EasyOCR's canvas_size (2560px) downscaling
+    that shrinks small labels on oversized sheets (e.g. key maps). Only detection is
+    tiled; recognition is unchanged. Set to 0 to disable (single-pass detection, the
+    prior behavior). Default 2560 matches EasyOCR's canvas_size. Ignored when
+    reuse_boxes=True.
 
     reuse_boxes loads CRAFT bounding boxes from the existing <stem>.boxes.json
     file instead of re-running CRAFT. Useful for iterating on recognition
@@ -254,7 +384,7 @@ def detect_text(
             angle_boxes: list[dict] = json.load(f)["boxes"]
     else:
         angle_boxes = _craft_detect_all_angles(
-            img, reader, min_size, link_threshold, craft_scale
+            img, reader, min_size, link_threshold, craft_scale, tile_size
         )
         boxes_doc = {
             "width": orig_width,
@@ -363,6 +493,7 @@ def _worker_init(
     link_threshold: float,
     beam_width: int,
     craft_scale: float,
+    tile_size: int,
     reuse_boxes: bool,
     gpu: bool,
 ) -> None:
@@ -375,6 +506,7 @@ def _worker_init(
     _worker_state["link_threshold"] = link_threshold
     _worker_state["beam_width"] = beam_width
     _worker_state["craft_scale"] = craft_scale
+    _worker_state["tile_size"] = tile_size
     _worker_state["reuse_boxes"] = reuse_boxes
 
 
@@ -390,6 +522,7 @@ def _process_image(image_path: str) -> str:
         reader=_worker_state["reader"],
         beam_width=_worker_state["beam_width"],
         craft_scale=_worker_state["craft_scale"],
+        tile_size=_worker_state["tile_size"],
         reuse_boxes=_worker_state["reuse_boxes"],
     )
     return image_path
@@ -496,6 +629,18 @@ def main() -> None:
         ),
     )
     parser.add_argument(
+        "--tile-size",
+        type=int,
+        default=2560,
+        metavar="PX",
+        help=(
+            "Detect images larger than this in overlapping native-resolution tiles "
+            "(default: 2560, matching EasyOCR's canvas_size). This avoids downscaling "
+            "small labels on oversized sheets such as key maps. Only CRAFT detection is "
+            "tiled; recognition is unchanged. Set to 0 to disable (single-pass detection)."
+        ),
+    )
+    parser.add_argument(
         "--reuse-boxes",
         action="store_true",
         help=(
@@ -569,6 +714,7 @@ def main() -> None:
             args.link_threshold,
             args.beam_width,
             args.craft_scale,
+            args.tile_size,
             args.reuse_boxes,
             gpu,
         )
@@ -596,6 +742,7 @@ def main() -> None:
                 reader=reader,
                 beam_width=args.beam_width,
                 craft_scale=args.craft_scale,
+                tile_size=args.tile_size,
                 reuse_boxes=args.reuse_boxes,
             )
 
