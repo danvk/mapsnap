@@ -383,9 +383,9 @@ def test_nms_drops_duplicate_keeps_larger():
     # A duplicate and a clipped copy of one label plus a far-away box:
     # NMS keeps the larger of the overlapping pair and the disjoint box.
     boxes = [
-        [0, 100, 0, 20],  # full label
-        [0, 90, 0, 20],  # clipped copy (high IoU with the full one)
-        [500, 600, 0, 20],  # unrelated, disjoint
+        [0.0, 100.0, 0.0, 20.0],  # full label
+        [0.0, 90.0, 0.0, 20.0],  # clipped copy (high IoU with the full one)
+        [500.0, 600.0, 0.0, 20.0],  # unrelated, disjoint
     ]
     kept = _nms_bboxes(boxes, 0.4)
     assert 0 in kept  # larger box survives
@@ -394,5 +394,5 @@ def test_nms_drops_duplicate_keeps_larger():
 
 
 def test_nms_keeps_distinct_low_overlap_boxes():
-    boxes = [[0, 100, 0, 20], [95, 195, 0, 20]]  # touch slightly, low IoU
+    boxes = [[0.0, 100.0, 0.0, 20.0], [95.0, 195.0, 0.0, 20.0]]  # touch slightly, low IoU
     assert sorted(_nms_bboxes(boxes, 0.4)) == [0, 1]
