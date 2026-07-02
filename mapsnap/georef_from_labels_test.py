@@ -9,6 +9,7 @@ from mapsnap.georef_from_labels import (
     _FT_PER_DEG_LAT,
     _angle_diff_abs,
     _cluster_geo_coords,
+    _distinct_pixel_gcps,
     _robust_affine_inlier_indices,
     _rotation_from_neighbors,
     assemble_multiword_streets,
@@ -28,6 +29,37 @@ def _make_gcp(pixel: tuple[float, float], geo: tuple[float, float]) -> Intersect
     """Minimal IntersectionGCP for grouping tests (only pixel/geo matter)."""
     feat = LabelFeature("A", "A", (0.0, 0.0), 0.0, 1.0, 1.0)
     return IntersectionGCP("A", "B", pixel, geo, 0.0, feat, feat)
+
+
+def test_distinct_pixel_gcps_groups_coincident_pixels():
+    # Two GCPs at the same pixel (a jog: same image crossing, two world points) -> one group.
+    gcps = [
+        _make_gcp((100.0, 200.0), (-83.0, 42.0)),
+        _make_gcp((101.0, 201.0), (-83.0005, 42.0)),  # within 5px tolerance
+    ]
+    groups = _distinct_pixel_gcps(gcps)
+    assert len(groups) == 1
+    assert len(groups[0]) == 2
+
+
+def test_distinct_pixel_gcps_separates_distinct_pixels():
+    # Two GCPs at far-apart pixels are independent control points -> two groups.
+    gcps = [
+        _make_gcp((100.0, 200.0), (-83.0, 42.0)),
+        _make_gcp((900.0, 800.0), (-82.9, 42.1)),
+    ]
+    assert len(_distinct_pixel_gcps(gcps)) == 2
+
+
+def test_distinct_pixel_gcps_mixed():
+    # A jog pair at one pixel plus one distinct pixel -> two groups (RANSAC still has a pair).
+    gcps = [
+        _make_gcp((100.0, 200.0), (-83.0, 42.0)),
+        _make_gcp((102.0, 200.0), (-83.0005, 42.0)),
+        _make_gcp((900.0, 800.0), (-82.9, 42.1)),
+    ]
+    groups = _distinct_pixel_gcps(gcps)
+    assert sorted(len(g) for g in groups) == [1, 2]
 
 
 # ---------------------------------------------------------------------------
