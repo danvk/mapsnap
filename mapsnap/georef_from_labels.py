@@ -595,54 +595,69 @@ def is_rotation_outlier(
     return bool(abs(float(np.dot(d_geo_norm, tangent_vec))) < math.cos(dir_threshold))
 
 
-# Above this many candidate GCPs, ransac_hybrid's exhaustive C(n, 2) pairing is too slow (a
-# key-map index page can yield hundreds of intersections). A fast robust affine RANSAC over the
-# GCP correspondences first discards gross outliers so the label-scored search runs only over
-# the consensus inliers.
-ROBUST_PREFILTER_MIN_GCPS = 100
-# Even after the pre-filter the consensus can be large, and each pair costs a full label scoring
-# (~tens of ms). The consensus is geometrically clean, so only a handful of well-separated pairs
-# are needed to recover the transform; pair just the best (lowest-pixel-distance) GCPs up to this
-# cap. Bounds a many-GCP page to C(cap, 2) label scorings (seconds) instead of minutes.
-MAX_PREFILTER_PAIRING_GCPS = 30
-_M_PER_DEG_LAT: float = 111_320.0
+# The full per-label inlier scoring (~0.4s over hundreds of labels) is far too expensive to run
+# on every GCP pair when a key-map index page yields hundreds of intersections (C(n, 2) in the
+# hundreds of thousands). Instead every pair is cheaply ranked by a vectorized GCP-consensus
+# count and only this many top candidates get the full label scoring.
+STAGE2_MAX_CANDIDATES = 60
 
 
-def _robust_affine_inlier_indices(
-    gcps: list[IntersectionGCP], reproj_threshold_m: float = 30.0
-) -> list[int]:
-    """Indices of GCPs consistent with a robust 6-parameter affine (pixel → local metres).
+def _rank_pairs_by_consensus(
+    gcps: list["IntersectionGCP"],
+    cos_phi: float,
+    pos_threshold: float,
+    top_k: int,
+) -> list[tuple[int, int]]:
+    """Rank all C(n, 2) GCP seed pairs by GCP consensus and return the best ``top_k``.
 
-    Fits a full affine to the pixel↔geo correspondences with cv2.estimateAffine2D's RANSAC
-    (milliseconds even for hundreds of points) and returns its inlier set. Geo is projected to
-    a local equirectangular metre frame so the reprojection threshold is in metres. Used only
-    to prune gross outliers before the slower label-scored similarity search; returns all
-    indices if the robust fit fails to converge.
+    A pair's consensus is how many GCPs its 2-point similarity maps to within ``pos_threshold``
+    degrees of their own geo coordinate. The 2-point similarity has a closed form (the same
+    (α, β, tx, ty) that :func:`solve_similarity_2pts` solves per pair), so every pair's transform
+    is computed with array math and scored against all GCPs in chunks — cheap enough to run
+    exhaustively over hundreds of thousands of pairs, replacing any random sampling. Degenerate
+    pairs (coincident pixels or coincident geo) are excluded. Ties break by pair index so the
+    result is deterministic. Returns pairs as (i, j) with i < j, best consensus first.
     """
-    import cv2  # lazy: heavy import, only needed for many-GCP pages
+    n = len(gcps)
+    px = np.array([g.pixel[0] for g in gcps], dtype=float)
+    py = np.array([g.pixel[1] for g in gcps], dtype=float)
+    glon = np.array([g.geo[0] for g in gcps], dtype=float)
+    glat = np.array([g.geo[1] for g in gcps], dtype=float)
 
-    pixels = np.array([g.pixel for g in gcps], dtype=np.float64)
-    geo = np.array([g.geo for g in gcps], dtype=np.float64)
-    lon0, lat0 = float(geo[:, 0].mean()), float(geo[:, 1].mean())
-    cos0 = math.cos(math.radians(lat0))
-    metres = np.stack(
-        [
-            (geo[:, 0] - lon0) * cos0 * _M_PER_DEG_LAT,
-            (geo[:, 1] - lat0) * _M_PER_DEG_LAT,
-        ],
-        axis=1,
-    )
-    _, mask = cv2.estimateAffine2D(
-        pixels.reshape(-1, 1, 2),
-        metres.reshape(-1, 1, 2),
-        method=cv2.RANSAC,
-        ransacReprojThreshold=reproj_threshold_m,
-        maxIters=5000,
-        confidence=0.999,
-    )
-    if mask is None:
-        return list(range(len(gcps)))
-    return [i for i, keep in enumerate(mask.ravel()) if keep]
+    idx_i, idx_j = np.triu_indices(n, k=1)  # every i < j pair
+    dpx, dpy = px[idx_i] - px[idx_j], py[idx_i] - py[idx_j]
+    dlon, dlat = glon[idx_i] - glon[idx_j], glat[idx_i] - glat[idx_j]
+    det = dpx * dpx + dpy * dpy
+    # Closed form of solve_similarity_2pts: the 2×2 system [[dpx, dpy], [-dpy, dpx]] (α, β) =
+    # (cos_phi·dlon, dlat), then tx, ty back-substituted from GCP i.
+    with np.errstate(divide="ignore", invalid="ignore"):
+        u = cos_phi * dlon
+        alpha = (dpx * u - dpy * dlat) / det
+        beta = (dpy * u + dpx * dlat) / det
+    tx = glon[idx_i] - (alpha * px[idx_i] + beta * py[idx_i]) / cos_phi
+    ty = glat[idx_i] + alpha * py[idx_i] - beta * px[idx_i]
+    valid = (det > 1e-12) & ((dlon * dlon + dlat * dlat) > 1e-18)
+
+    thr_sq = pos_threshold * pos_threshold
+    counts = np.full(len(idx_i), -1, dtype=np.int64)
+    chunk = 4096
+    for start in range(0, len(idx_i), chunk):
+        end = min(start + chunk, len(idx_i))
+        mask = valid[start:end]
+        if not mask.any():
+            continue
+        a = alpha[start:end][mask][:, None]
+        b = beta[start:end][mask][:, None]
+        pred_lon = (a * px[None, :] + b * py[None, :]) / cos_phi + tx[start:end][mask][
+            :, None
+        ]
+        pred_lat = b * px[None, :] - a * py[None, :] + ty[start:end][mask][:, None]
+        d_sq = (pred_lon - glon[None, :]) ** 2 + (pred_lat - glat[None, :]) ** 2
+        counts[np.arange(start, end)[mask]] = (d_sq < thr_sq).sum(axis=1)
+
+    # Sort by consensus descending, breaking ties by pair index ascending (deterministic).
+    order = np.lexsort((np.arange(len(idx_i)), -counts))
+    return [(int(idx_i[k]), int(idx_j[k])) for k in order[:top_k] if counts[k] >= 0]
 
 
 def ransac_hybrid(
@@ -657,9 +672,12 @@ def ransac_hybrid(
 ) -> tuple[np.ndarray | None, list[int], tuple[int, int] | None]:
     """Find the best similarity affine using intersection GCPs as seeds, label-based inlier scoring.
 
-    Generates candidate affines from all C(n, 2) pairs of intersection GCPs, solving for
-    the 4-parameter similarity transform (equal metric scale + orthogonality) at each pair.
-    Inlier counting uses point-to-polyline + direction for every label.
+    Generates candidate affines from pairs of intersection GCPs, solving for the 4-parameter
+    similarity transform (equal metric scale + orthogonality) at each pair. When there are more
+    than STAGE2_MAX_CANDIDATES pairs, every pair is first ranked by a cheap vectorized GCP
+    consensus (see _rank_pairs_by_consensus) and only the top candidates get the expensive
+    per-label inlier scoring; otherwise all pairs are scored. Inlier counting uses
+    point-to-polyline + direction for every label. Fully deterministic — no random sampling.
 
     A candidate pair is disqualified when one of its own seed streets is a rotation outlier
     under the model it defines — the fit's orientation contradicts a street it was built from
@@ -679,22 +697,7 @@ def ransac_hybrid(
     if n < 2:
         return None, [], None
 
-    # For pages with very many candidate GCPs (key-map index pages), the exhaustive C(n, 2)
-    # pairing is prohibitively slow. Prune gross outliers with a fast robust affine first and
-    # search only over the consensus inliers; the final fit is still the label-scored similarity.
-    candidate_indices = list(range(n))
-    if n > ROBUST_PREFILTER_MIN_GCPS:
-        consensus = _robust_affine_inlier_indices(gcps)
-        if len(consensus) >= 2:
-            # gcps are sorted by pixel_dist ascending, so consensus[:cap] keeps the most
-            # reliable intersection estimates.
-            candidate_indices = consensus[:MAX_PREFILTER_PAIRING_GCPS]
-            kept = len(candidate_indices)
-            print(
-                f"Robust-affine pre-filter: {len(consensus)} / {n} GCP inliers; pairing the "
-                f"best {kept} ({kept * (kept - 1) // 2} pairs vs {n * (n - 1) // 2})",
-                file=sys.stderr,
-            )
+    total_pairs = n * (n - 1) // 2
 
     best_A: np.ndarray | None = None
     best_inliers: list[int] = []
@@ -705,17 +708,40 @@ def ransac_hybrid(
     for a in gcps:
         print(f"  {a.label_a} x {a.label_b}")
 
-    for pair_idx in combinations(candidate_indices, 2):
+    # Choose which GCP seed pairs get the expensive per-label scoring (~0.4s each). A key-map
+    # page has C(n, 2) in the hundreds of thousands, so above STAGE2_MAX_CANDIDATES pairs, rank
+    # ALL pairs by a cheap vectorized GCP-consensus count (deterministic and exhaustive — no
+    # random sampling) and keep only the top candidates. At or below the cap, score every pair,
+    # preserving small-page behavior exactly.
+    if total_pairs <= STAGE2_MAX_CANDIDATES:
+        pair_list = list(combinations(range(n), 2))
+    else:
+        pair_list = _rank_pairs_by_consensus(
+            gcps, cos_phi, pos_threshold, STAGE2_MAX_CANDIDATES
+        )
+        print(
+            f"GCP-consensus pre-rank: label-scoring top {len(pair_list)} of {total_pairs} pairs",
+            file=sys.stderr,
+        )
+
+    # Solve each retained pair's similarity (skipping degenerate pairs) for the scoring below.
+    candidates: list[tuple[tuple[int, int], np.ndarray]] = []
+    for pair_idx in pair_list:
         i1, i2 = pair_idx
         a, b = gcps[i1], gcps[i2]
         # Skip pairs that map to the same OSM intersection — singular by construction.
         if abs(a.geo[0] - b.geo[0]) < 1e-6 and abs(a.geo[1] - b.geo[1]) < 1e-6:
             continue
-        pairs = [(gcps[k].pixel, gcps[k].geo) for k in pair_idx]
         try:
-            A = solve_similarity_2pts(pairs, cos_phi)
+            A = solve_similarity_2pts([(a.pixel, a.geo), (b.pixel, b.geo)], cos_phi)
         except np.linalg.LinAlgError:
             continue
+        candidates.append((pair_idx, A))
+
+    # Full per-label inlier scoring on the retained candidates only.
+    for pair_idx, A in candidates:
+        i1, i2 = pair_idx
+        a, b = gcps[i1], gcps[i2]
         inliers, err = label_inliers(
             features, block_index, A, pos_threshold, dir_threshold, debug=debug
         )

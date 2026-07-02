@@ -9,7 +9,7 @@ from mapsnap.georef_from_labels import (
     _FT_PER_DEG_LAT,
     _angle_diff_abs,
     _cluster_geo_coords,
-    _robust_affine_inlier_indices,
+    _rank_pairs_by_consensus,
     _rotation_from_neighbors,
     assemble_multiword_streets,
     compute_auto_min_short_side,
@@ -942,30 +942,45 @@ def test_is_rotation_outlier_uses_dominant_bearing_not_kink():
 
 
 # ---------------------------------------------------------------------------
-# _robust_affine_inlier_indices — many-GCP pre-filter
+# _rank_pairs_by_consensus — cheap vectorized many-GCP pre-rank
 # ---------------------------------------------------------------------------
 
 
-def test_robust_affine_inlier_indices_drops_gross_outliers():
-    # 120 GCPs consistent with a known affine (pixel → lon/lat) plus 8 gross outliers.
-    # The robust affine RANSAC should keep the inliers and reject the outliers.
-    import numpy as np
+def test_rank_pairs_by_consensus_ranks_inlier_pairs_first():
+    # 25 GCPs consistent with a known rotated similarity (exercises the closed form with β≠0)
+    # plus 5 gross outliers. The top-ranked seed pairs must all be inlier×inlier pairs.
+    from mapsnap.georef_from_labels import solve_similarity_2pts
 
-    rng = np.random.default_rng(0)
-    inliers = []
-    for _ in range(120):
-        px, py = rng.uniform(0, 4000), rng.uniform(0, 4000)
-        lon = -90.0 + 1e-4 * px
-        lat = 30.0 - 1e-4 * py
-        inliers.append(_make_gcp((px, py), (lon, lat)))
-    outliers = [
-        _make_gcp((rng.uniform(0, 4000), rng.uniform(0, 4000)), (-95.0, 35.0))
-        for _ in range(8)
+    cos_phi = math.cos(math.radians(30.0))
+    known = solve_similarity_2pts(
+        [((0.0, 0.0), (-90.0, 30.0)), ((1000.0, 0.0), (-89.99, 30.005))], cos_phi
+    )
+
+    def apply(px: float, py: float) -> tuple[float, float]:
+        return (
+            float(known[0, 0] * px + known[0, 1] * py + known[0, 2]),
+            float(known[1, 0] * px + known[1, 1] * py + known[1, 2]),
+        )
+
+    rng = np.random.default_rng(1)
+    gcps = [
+        _make_gcp((px, py), apply(px, py))
+        for px, py in rng.uniform(0, 3000, size=(25, 2))
     ]
-    gcps = inliers + outliers
-    outlier_indices = set(range(120, 128))
+    n_inliers = len(gcps)
+    gcps += [_make_gcp(tuple(rng.uniform(0, 3000, 2)), (-80.0, 40.0)) for _ in range(5)]
 
-    kept = set(_robust_affine_inlier_indices(gcps))
-    # No gross outlier survives, and the large majority of true inliers are kept.
-    assert not (kept & outlier_indices)
-    assert len(kept & set(range(120))) >= 110
+    top = _rank_pairs_by_consensus(gcps, cos_phi, pos_threshold=1e-3, top_k=8)
+    assert len(top) == 8
+    assert all(i < n_inliers and j < n_inliers for i, j in top)
+    assert all(i < j for i, j in top)
+
+
+def test_rank_pairs_by_consensus_is_deterministic():
+    gcps = [
+        _make_gcp((px, py), (-90.0 + 1e-4 * px, 30.0 - 1e-4 * py))
+        for px, py in np.random.default_rng(3).uniform(0, 4000, size=(20, 2))
+    ]
+    a = _rank_pairs_by_consensus(gcps, 1.0, 1e-3, 10)
+    b = _rank_pairs_by_consensus(gcps, 1.0, 1e-3, 10)
+    assert a == b
