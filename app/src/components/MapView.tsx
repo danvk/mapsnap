@@ -7,7 +7,7 @@ import type {
   KeymapLocation,
   Street,
 } from '../types';
-import { circlePolygon, distanceMiles } from '../geometry';
+import { circlePolygon, crosshairLines, distanceMiles } from '../geometry';
 
 interface MapViewProps {
   streets: Street[];
@@ -371,7 +371,14 @@ export function MapView(props: MapViewProps) {
           },
           {
             type: 'Feature',
-            geometry: { type: 'Point', coordinates: [keymap.lon, keymap.lat] },
+            geometry: {
+              type: 'MultiLineString',
+              coordinates: crosshairLines(
+                keymap.lon,
+                keymap.lat,
+                keymap.radius_m * 0.18,
+              ),
+            },
             properties: { kind: 'center' },
           },
         ]
@@ -406,17 +413,14 @@ export function MapView(props: MapViewProps) {
           'line-dasharray': [2, 2],
         },
       });
+      // A crosshair (not a filled dot) marks the key-map's expected page center, so it
+      // reads as a target rather than a ground control point.
       map.addLayer({
         id: 'keymap-center',
-        type: 'circle',
+        type: 'line',
         source: 'keymap',
         filter: ['==', ['get', 'kind'], 'center'],
-        paint: {
-          'circle-radius': 6,
-          'circle-color': '#0d9488',
-          'circle-stroke-color': '#ffffff',
-          'circle-stroke-width': 2,
-        },
+        paint: { 'line-color': '#0d9488', 'line-width': 2.5 },
       });
     }
   }, [mapReady, keymap]);

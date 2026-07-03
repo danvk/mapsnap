@@ -137,3 +137,27 @@ export function circlePolygon(
   }
   return ring;
 }
+
+/**
+ * A plus-shaped crosshair centered at (lon, lat): two [lon, lat] line segments
+ * (horizontal and vertical) each `armMeters` long from the center. Used to mark
+ * the key-map's expected page center distinctly from a filled GCP dot.
+ */
+export function crosshairLines(
+  lon: number,
+  lat: number,
+  armMeters: number,
+): [number, number][][] {
+  const dLat = armMeters / 110540;
+  const dLon = armMeters / (111320 * Math.cos((lat * Math.PI) / 180));
+  return [
+    [
+      [lon - dLon, lat],
+      [lon + dLon, lat],
+    ],
+    [
+      [lon, lat - dLat],
+      [lon, lat + dLat],
+    ],
+  ];
+}
