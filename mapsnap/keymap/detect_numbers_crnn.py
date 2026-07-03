@@ -7,10 +7,14 @@ off), recall tracks the localizer and recognition is the learned CRNN — which 
 ornate / low-resolution fonts that defeated CRAFT+EasyOCR.
 
 Writes the same ``<stem>.keymap.json`` schema as the other detectors. ``--pages`` is
-optional: if given, each decode is snapped to the nearest valid page number within edit
-distance 1 (a light constraint); otherwise the raw CRNN output is kept.
+optional but recommended: if given, each decode is snapped to the nearest valid page number
+within edit distance 1, and the narrow-detection minimum-width re-read (which recovers a
+multi-digit number the wide strip squished to one digit) is enabled — the re-read only fires
+when it can validate the longer number against this page set, since ungated it hallucinates a
+second digit onto genuine single-digit pages. Without ``--pages`` the raw CRNN output is kept
+and no re-read is done.
 
-    uv run python -m mapsnap.keymap.detect_numbers_crnn data/keymaps/chicago-p0b.jpg
+    uv run python -m mapsnap.keymap.detect_numbers_crnn data/keymaps/chicago-p0b.jpg --pages 1-112
 """
 
 import argparse
@@ -158,8 +162,13 @@ def detect_and_read(
     threshold: float,
     nms_dist: float,
     pages: list[str],
+    disable_reread: bool = False,
 ) -> list[dict]:
-    """CNN-localize then CRNN-read one image; write <stem>.keymap.json."""
+    """CNN-localize then CRNN-read one image; write <stem>.keymap.json.
+
+    ``disable_reread`` turns off the narrow-detection minimum-width re-read (an ablation
+    switch for measuring that step's effect); it is on by default.
+    """
     image = np.asarray(Image.open(image_path).convert("RGB"))
     height, width = image.shape[:2]
     centers, factor = detect_candidate_centers(
@@ -188,8 +197,12 @@ def detect_and_read(
         polygon = locate_number(strip, group, len(path), crop_box)
         # A single-digit read is often a multi-digit number the wide strip squished until the
         # CRNN fired only its central digit (e.g. the "0" of "105", the "1" of "61"); re-read
-        # tighter, minimum-width crops and take the longest strictly-longer valid number.
-        if len(text) == 1:
+        # tighter, minimum-width crops and take the longest strictly-longer result that is a
+        # valid page. Requiring a known page set (and validity) is essential: without it a
+        # tighter crop hallucinates a second digit onto a genuine single-digit page (9->69,
+        # 8->75) — validated on hand-labeled keymaps, it nets +4 text errors ungated but 0 gated.
+        valid_pages = set(pages)
+        if len(text) == 1 and valid_pages and not disable_reread:
             longer = [
                 r
                 for hw in REREAD_HALF_WIDTHS_WORKING
@@ -197,6 +210,7 @@ def detect_and_read(
                     r := reread_narrow(image, crnn, device, (cx, cy), factor, pages, hw)
                 )
                 and len(r[1]) > len(text)
+                and r[1] in valid_pages
             ]
             if longer:
                 polygon, widened, confidence = max(longer, key=lambda r: len(r[1]))
@@ -258,6 +272,11 @@ def main() -> None:
     parser.add_argument("--stride", type=int, default=DEFAULT_STRIDE)
     parser.add_argument("--threshold", type=float, default=DEFAULT_THRESHOLD)
     parser.add_argument("--nms-dist", type=float, default=DEFAULT_NMS_DIST)
+    parser.add_argument(
+        "--disable-reread",
+        action="store_true",
+        help="Turn off the narrow-detection minimum-width re-read (ablation).",
+    )
     args = parser.parse_args()
 
     device = select_device()
@@ -279,6 +298,7 @@ def main() -> None:
             threshold=args.threshold,
             nms_dist=args.nms_dist,
             pages=pages,
+            disable_reread=args.disable_reread,
         )
 
 
