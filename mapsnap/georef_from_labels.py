@@ -1644,6 +1644,7 @@ def _init_worker(
     high_confidence_size_fraction: float,
     locator: KeymapLocator | None = None,
     geojson_features: list[dict] | None = None,
+    rectangle_index: tuple[dict[str, list[Block]], float] | None = None,
 ) -> None:
     """Populate _worker_state once per worker process (or once in the main process)."""
     _worker_state.update(
@@ -1662,6 +1663,7 @@ def _init_worker(
         high_confidence_size_fraction=high_confidence_size_fraction,
         locator=locator,
         geojson_features=geojson_features or [],
+        rectangle_index=rectangle_index,
     )
 
 
@@ -1684,25 +1686,11 @@ def _process_one_image(image_path: str) -> tuple[str, ProcessResult]:
         if os.path.exists(stale_path):
             os.remove(stale_path)
 
-    # With a georeferenced key map, match this page only against streets near its key-map
-    # location — the same restriction the OCR step used, and it drops far-away same-name
-    # streets that would otherwise produce spurious GCPs.
-    block_index = _worker_state["block_index"]
-    cos_phi = _worker_state["cos_phi"]
     locator: KeymapLocator | None = _worker_state["locator"]
-    if locator is not None:
-        restricted = locator.restricted_features(
-            page_number(image_stem(image_path)), _worker_state["geojson_features"]
-        )
-        if restricted:
-            block_index = build_block_index(
-                {"type": "FeatureCollection", "features": restricted}
-            )
-            cos_phi = compute_cos_phi(block_index)
+    rectangle_index = _worker_state["rectangle_index"]  # (block_index, cos_phi) | None
 
-    with _captured_page_log(log_path, _worker_state["debug"]):
-        print(f"--- {image_path} ---")
-        result = process_image(
+    def run(block_index: dict, cos_phi: float) -> ProcessResult:
+        return process_image(
             image_path=image_path,
             labels_path=labels_path,
             output_path=output_path,
@@ -1722,6 +1710,36 @@ def _process_one_image(image_path: str) -> tuple[str, ProcessResult]:
                 "high_confidence_size_fraction"
             ],
         )
+
+    with _captured_page_log(log_path, _worker_state["debug"]):
+        print(f"--- {image_path} ---")
+        result: ProcessResult | None = None
+        if locator is not None:
+            # Tier 1: match only against the page's own key-map neighborhood — tight and
+            # unambiguous, so far-away same-name streets can't produce spurious GCPs.
+            restricted = locator.restricted_features(
+                page_number(image_stem(image_path)), _worker_state["geojson_features"]
+            )
+            if restricted:
+                near = build_block_index(
+                    {"type": "FeatureCollection", "features": restricted}
+                )
+                result = run(near, compute_cos_phi(near))
+                # Tier 2: if the neighborhood starved the fit (e.g. the page's real streets
+                # fall just outside it), broaden to the whole key-map rectangle — but only
+                # trust a well-constrained multi-GCP fit. A lone-GCP rectangle fit is too
+                # easily a same-name street elsewhere in the volume (p53N's 6735 ft
+                # catastrophe), which the tight neighborhood correctly refused.
+                if not result.success and rectangle_index is not None:
+                    print("  neighborhood fit failed; broadening to key-map rectangle")
+                    broadened = run(*rectangle_index)
+                    if broadened.success:
+                        result = broadened
+            elif rectangle_index is not None:
+                # Unplaced page: the key-map rectangle is the tightest vocabulary available.
+                result = run(*rectangle_index)
+        if result is None:
+            result = run(_worker_state["block_index"], _worker_state["cos_phi"])
     if result.deferred is not None:
         result.deferred["log_path"] = log_path
     return image_path, result
@@ -2433,13 +2451,24 @@ def main() -> None:
         file=sys.stderr,
     )
 
-    # With a georeferenced key map, each placed page is matched only against nearby streets.
+    # With a georeferenced key map, each placed page is matched first against its own
+    # neighborhood and, if that starves the fit, against the whole key-map rectangle (a
+    # volume-wide box every page sits in — far smaller than the full centerlines).
     locator = None
+    rectangle_index: tuple[dict[str, list[Block]], float] | None = None
     if args.keymap is not None:
         locator = KeymapLocator.from_keymap(Path(args.keymap), args.keymap_radius)
+        rectangle = locator.rectangle_features(geojson["features"])
+        if rectangle:
+            rectangle_bi = build_block_index(
+                {"type": "FeatureCollection", "features": rectangle}
+            )
+            rectangle_index = (rectangle_bi, compute_cos_phi(rectangle_bi))
+        rect_streets = len(rectangle_index[0]) if rectangle_index else 0
         print(
-            f"Key map places {len(locator.located_numbers())} page numbers; restricting "
-            f"matching to streets within {locator.radius_m:.0f} m of each.",
+            f"Key map places {len(locator.located_numbers())} page numbers; matching within "
+            f"{locator.radius_m:.0f} m of each, then a {rect_streets}-street key-map-rectangle "
+            f"fallback (vs {len(block_index)} full).",
             file=sys.stderr,
         )
 
@@ -2517,6 +2546,7 @@ def main() -> None:
         args.high_confidence_size_fraction,
         locator,
         geojson["features"] if locator is not None else None,
+        rectangle_index,
     )
     if args.num_workers > 1:
         with multiprocessing.Pool(
