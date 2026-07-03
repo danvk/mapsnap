@@ -1689,6 +1689,7 @@ def _process_one_image(image_path: str) -> tuple[str, ProcessResult]:
         ".georef-misscale.json",
         ".georef-outlier.json",
         ".georef-1gcp.json",
+        ".georef-nofit.json",
     ):
         stale_path = output_path.replace(".georef.json", stale_suffix)
         if os.path.exists(stale_path):
@@ -1756,6 +1757,13 @@ def _process_one_image(image_path: str) -> tuple[str, ProcessResult]:
             result = run(_worker_state["block_index"], _worker_state["cos_phi"])
     if result.deferred is not None:
         result.deferred["log_path"] = log_path
+    # A key-map-placed page that produced neither a fit nor a deferred sidecar leaves no georef
+    # file at all. Write a minimal .georef-nofit.json holding just the neighborhood so the
+    # debugger can still show where the key map expected this page.
+    if keymap is not None and not result.success and result.deferred is None:
+        nofit_path = output_path.replace(".georef.json", ".georef-nofit.json")
+        with open(nofit_path, "w") as f:
+            json.dump({"keymap": keymap, "streets": [], "intersections": []}, f, indent=2)
     return image_path, result
 
 

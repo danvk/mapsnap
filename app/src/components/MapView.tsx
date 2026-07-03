@@ -423,7 +423,22 @@ export function MapView(props: MapViewProps) {
         paint: { 'line-color': '#0d9488', 'line-width': 2.5 },
       });
     }
-  }, [mapReady, keymap]);
+
+    // With no georeference (a .georef-nofit.json has a key-map location but no corners), frame
+    // the neighborhood circle so it is visible; when corners exist the image-fit already did.
+    if (keymap && !corners) {
+      const ring = circlePolygon(keymap.lon, keymap.lat, keymap.radius_m);
+      const lons = ring.map((c) => c[0]);
+      const lats = ring.map((c) => c[1]);
+      map.fitBounds(
+        [
+          [Math.min(...lons), Math.min(...lats)],
+          [Math.max(...lons), Math.max(...lats)],
+        ],
+        { padding: 60, maxZoom: 16 },
+      );
+    }
+  }, [mapReady, keymap, corners]);
 
   return <div id="map" ref={containerRef} />;
 }
