@@ -125,6 +125,21 @@ class KeymapLocator:
         """The page numbers the key map places."""
         return set(self.locations)
 
+    def page_keymap(self, number: int | None) -> dict | None:
+        """The georef.json ``keymap`` entry for a page: ``{lat, lon, radius_m}``, or None.
+
+        lat/lon is the mean of the page number's key-map detections; radius_m is the
+        neighborhood radius the page's OCR/fit was restricted to. None if unplaced.
+        """
+        centers = self.locations.get(number) if number is not None else None
+        if not centers:
+            return None
+        return {
+            "lat": round(sum(c[1] for c in centers) / len(centers), 7),
+            "lon": round(sum(c[0] for c in centers) / len(centers), 7),
+            "radius_m": round(self.radius_m, 1),
+        }
+
     def rectangle_features(self, features: list[dict]) -> list[dict] | None:
         """Features inside the whole key map's georeferenced rectangle (plus a radius margin).
 

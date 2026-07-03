@@ -69,6 +69,16 @@ def test_located_numbers_and_page_number():
     assert page_number("p61w") == 61 and page_number("p9n") == 9
 
 
+def test_page_keymap_entry():
+    # Two detections of page 61 -> the entry is their mean lon/lat plus the radius.
+    locator = KeymapLocator(
+        locations={61: [(-87.5, 41.9), (-87.6, 41.7)]}, radius_m=300.0
+    )
+    assert locator.page_keymap(61) == {"lat": 41.8, "lon": -87.55, "radius_m": 300.0}
+    assert locator.page_keymap(999) is None  # unplaced
+    assert locator.page_keymap(None) is None
+
+
 def test_rectangle_features_covers_whole_keymap_box():
     # Key map spanning lon 0..0.01, lat 0..0.01 (~1.1 km); tiny margin from radius_m.
     locator = KeymapLocator(

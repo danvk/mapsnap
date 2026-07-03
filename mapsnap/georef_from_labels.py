@@ -1076,6 +1076,7 @@ def _finalize_georef(
     initial_pair: tuple[int, int] | None = None,
     extra_fields: dict | None = None,
     parameters: dict | None = None,
+    keymap: dict | None = None,
 ) -> tuple[float, tuple[float, float]]:
     """Print fit stats, write georef JSON, and return (scale_deg_per_px, page_center)."""
 
@@ -1161,6 +1162,8 @@ def _finalize_georef(
         "streets": streets_out,
         "intersections": intersections_out,
     }
+    if keymap:
+        result["keymap"] = keymap
     if extra_fields:
         result.update(extra_fields)
     with open(output_path, "w") as f:
@@ -1693,6 +1696,11 @@ def _process_one_image(image_path: str) -> tuple[str, ProcessResult]:
 
     locator: KeymapLocator | None = _worker_state["locator"]
     rectangle_index = _worker_state["rectangle_index"]  # (block_index, cos_phi) | None
+    keymap = (
+        locator.page_keymap(page_number(image_stem(image_path)))
+        if locator is not None
+        else None
+    )
 
     def run(block_index: dict, cos_phi: float) -> ProcessResult:
         return process_image(
@@ -1714,6 +1722,7 @@ def _process_one_image(image_path: str) -> tuple[str, ProcessResult]:
             high_confidence_size_fraction=_worker_state[
                 "high_confidence_size_fraction"
             ],
+            keymap=keymap,
         )
 
     with _captured_page_log(log_path, _worker_state["debug"]):
@@ -1767,6 +1776,7 @@ def process_image(
     debug: bool = False,
     parameters: dict | None = None,
     high_confidence_size_fraction: float = 0.7,
+    keymap: dict | None = None,
 ) -> ProcessResult:
     """Fit a georeference model for one image and write GCPs to output_path.
 
@@ -1929,6 +1939,7 @@ def process_image(
                 "img_w": img_w,
                 "img_h": img_h,
                 "parameters": parameters,
+                "keymap": keymap,
             },
         )
 
@@ -1957,6 +1968,7 @@ def process_image(
         centerlines_path,
         initial_pair=seed_pair,
         parameters=parameters,
+        keymap=keymap,
     )
     rotation = math.atan2(float(A[1, 0]), float(-A[1, 1]))
     return ProcessResult(
@@ -2119,6 +2131,7 @@ def process_deferred_image(
     img_w: int = deferred["img_w"]
     img_h: int = deferred["img_h"]
     parameters: dict | None = deferred["parameters"]
+    keymap: dict | None = deferred.get("keymap")
 
     page_dim_lat = scale_deg_per_px * img_h
     page_dim_lon = scale_deg_per_px * img_w / cos_phi
@@ -2206,34 +2219,11 @@ def process_deferred_image(
         centerlines_path,
         extra_fields=one_gcp_extra,
         parameters=parameters,
+        keymap=keymap,
     )
     return ProcessResult(
         success=decision.confirmed, scale_deg_per_px=scale, center=center
     )
-
-
-def annotate_keymap_locations(images: list[str], locator: KeymapLocator) -> None:
-    """Add each placed page's key-map center + OCR/fit radius to its ``<stem>.georef.json``.
-
-    Written under a ``keymap`` key ``{lat, lon, radius_m}`` so the debugger app can draw the
-    neighborhood circle the page was restricted to and see how far its fit landed from it.
-    """
-    for image_path in images:
-        output_path = derive_paths(image_path)[1]
-        number = page_number(image_stem(str(image_path)))
-        centers = locator.locations.get(number) if number is not None else None
-        if not centers or not os.path.exists(output_path):
-            continue
-        lon = sum(c[0] for c in centers) / len(centers)
-        lat = sum(c[1] for c in centers) / len(centers)
-        doc = json.load(open(output_path))
-        doc["keymap"] = {
-            "lat": round(lat, 7),
-            "lon": round(lon, 7),
-            "radius_m": round(locator.radius_m, 1),
-        }
-        with open(output_path, "w") as f:
-            json.dump(doc, f, indent=2)
 
 
 def main() -> None:
@@ -2698,11 +2688,6 @@ def main() -> None:
                 )
         if n_dropped:
             print(f"Dropped {n_dropped} location outlier(s).", file=sys.stderr)
-
-    # Record each placed page's key-map center + radius in its georef.json so the debugger can
-    # draw the neighborhood the page was OCR'd/fit against (and how far the fit landed from it).
-    if locator is not None:
-        annotate_keymap_locations(args.images, locator)
 
     if len(args.images) > 1:
         print(f"\n{n_success}/{len(args.images)} images georeferenced", file=sys.stderr)
