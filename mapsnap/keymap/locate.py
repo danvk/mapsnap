@@ -101,7 +101,9 @@ class KeymapLocator:
         int, list[Point]
     ]  # page number -> world (lon, lat) of each detection
     radius_m: float
-    corners: list[Point] = field(default_factory=list)  # key-map image-corner lon/lats
+    # One image-corner quad (lon/lat) per key map; a volume can have several key maps whose
+    # rectangles together cover it (e.g. Brooklyn's p0 = SW half, p0b = NE half).
+    rectangles: list[list[Point]] = field(default_factory=list)
 
     @classmethod
     def from_keymap(
@@ -118,8 +120,32 @@ class KeymapLocator:
         return cls(
             locations,
             radius_m if radius_m is not None else estimate_radius(locations),
-            corners,
+            [corners],
         )
+
+    @classmethod
+    def from_keymaps(
+        cls, keymap_jsons: list[Path], radius_m: float | None = None
+    ) -> "KeymapLocator":
+        """Combine several key maps of one volume into a single locator.
+
+        A page number is placed by whichever key map(s) detect it (locations are unioned), and
+        the fallback rectangle is the union of all the key maps' rectangles. The radius is the
+        median of the per-key-map estimates unless overridden.
+        """
+        locators = [cls.from_keymap(path) for path in keymap_jsons]
+        locations: dict[int, list[Point]] = {}
+        rectangles: list[list[Point]] = []
+        for locator in locators:
+            for number, points in locator.locations.items():
+                locations.setdefault(number, []).extend(points)
+            rectangles.extend(locator.rectangles)
+        radius = (
+            radius_m
+            if radius_m is not None
+            else float(np.median([locator.radius_m for locator in locators]))
+        )
+        return cls(locations, radius, rectangles)
 
     def located_numbers(self) -> set[int]:
         """The page numbers the key map places."""
@@ -141,27 +167,36 @@ class KeymapLocator:
         }
 
     def rectangle_features(self, features: list[dict]) -> list[dict] | None:
-        """Features inside the whole key map's georeferenced rectangle (plus a radius margin).
+        """Features inside the union of the key maps' georeferenced rectangles (+ radius margin).
 
-        Every page sits *somewhere* on the key map, so this volume-wide box is a valid — and
-        often much tighter than the full centerlines — fallback vocabulary for a page whose own
-        neighborhood came up empty (or that the key map does not place at all). Returns None if
-        the key map's corners are unknown.
+        Every page sits *somewhere* on one of the key maps, so this volume-wide region is a valid
+        — and often much tighter than the full centerlines — fallback vocabulary for a page whose
+        own neighborhood came up empty (or that no key map places). Returns None if no key-map
+        rectangle is known.
         """
-        if not self.corners:
+        if not self.rectangles:
             return None
-        lons = [c[0] for c in self.corners]
-        lats = [c[1] for c in self.corners]
-        mid_lat = math.radians(sum(lats) / len(lats))
-        margin_lon = self.radius_m / (M_PER_DEG_LON_EQUATOR * math.cos(mid_lat))
-        margin_lat = self.radius_m / M_PER_DEG_LAT
-        min_lon, max_lon = min(lons) - margin_lon, max(lons) + margin_lon
-        min_lat, max_lat = min(lats) - margin_lat, max(lats) + margin_lat
+        boxes = []  # (min_lon, max_lon, min_lat, max_lat) per rectangle, with a radius margin
+        for corners in self.rectangles:
+            lons = [c[0] for c in corners]
+            lats = [c[1] for c in corners]
+            mid_lat = math.radians(sum(lats) / len(lats))
+            margin_lon = self.radius_m / (M_PER_DEG_LON_EQUATOR * math.cos(mid_lat))
+            margin_lat = self.radius_m / M_PER_DEG_LAT
+            boxes.append(
+                (
+                    min(lons) - margin_lon,
+                    max(lons) + margin_lon,
+                    min(lats) - margin_lat,
+                    max(lats) + margin_lat,
+                )
+            )
         return [
             feature
             for feature in features
             if any(
                 min_lon <= lon <= max_lon and min_lat <= lat <= max_lat
+                for (min_lon, max_lon, min_lat, max_lat) in boxes
                 for lon, lat in geometry_vertices(feature.get("geometry", {}))
             )
         ]

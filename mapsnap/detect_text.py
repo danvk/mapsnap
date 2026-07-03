@@ -647,13 +647,15 @@ def main() -> None:
     )
     parser.add_argument(
         "--keymap",
+        nargs="+",
         metavar="JSON",
         help=(
-            "Georeferenced key-map detections file (e.g. raw/p0.keymap.json, with a sibling "
-            "<stem>.georef.json). Each page it places is OCR'd with only the streets within "
+            "One or more georeferenced key-map detections files (e.g. raw/p0.keymap.json, each "
+            "with a sibling <stem>.georef.json); pass several for a volume with multiple key "
+            "maps. Each page a key map places is OCR'd with only the streets within "
             "--keymap-radius of that page's key-map location — a much smaller vocabulary that "
-            "raises recognizer confidence and drops far-away same-name streets. Pages the key "
-            "map does not place fall back to the full vocabulary."
+            "raises recognizer confidence and drops far-away same-name streets. Pages no key "
+            "map places fall back to the full vocabulary."
         ),
     )
     parser.add_argument(
@@ -766,7 +768,9 @@ def main() -> None:
     locator = None
     rectangle_vocab = vocab_strings
     if args.keymap is not None:
-        locator = KeymapLocator.from_keymap(Path(args.keymap), args.keymap_radius)
+        locator = KeymapLocator.from_keymaps(
+            [Path(k) for k in args.keymap], args.keymap_radius
+        )
         rectangle = locator.rectangle_features(geojson["features"])
         if rectangle:
             rectangle_index = build_block_index(

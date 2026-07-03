@@ -84,7 +84,7 @@ def test_rectangle_features_covers_whole_keymap_box():
     locator = KeymapLocator(
         locations={1: [(0.0, 0.0)]},
         radius_m=50.0,
-        corners=[(0.0, 0.01), (0.01, 0.01), (0.01, 0.0), (0.0, 0.0)],
+        rectangles=[[(0.0, 0.01), (0.01, 0.01), (0.01, 0.0), (0.0, 0.0)]],
     )
     features = [
         {"geometry": {"type": "Point", "coordinates": [0.005, 0.005]}, "id": "inside"},
@@ -92,7 +92,27 @@ def test_rectangle_features_covers_whole_keymap_box():
     ]
     kept = locator.rectangle_features(features)
     assert kept is not None and [f["id"] for f in kept] == ["inside"]
-    # No corners -> None (caller falls back to full vocab).
+    # No rectangles -> None (caller falls back to full vocab).
     assert (
         KeymapLocator(locations={}, radius_m=50.0).rectangle_features(features) is None
     )
+
+
+def test_rectangle_features_unions_multiple_keymaps():
+    # Two disjoint key-map rectangles (SW box near origin, NE box near lon/lat 1).
+    locator = KeymapLocator(
+        locations={},
+        radius_m=50.0,
+        rectangles=[
+            [(0.0, 0.01), (0.01, 0.01), (0.01, 0.0), (0.0, 0.0)],
+            [(1.0, 1.01), (1.01, 1.01), (1.01, 1.0), (1.0, 1.0)],
+        ],
+    )
+    features = [
+        {"geometry": {"type": "Point", "coordinates": [0.005, 0.005]}, "id": "in_a"},
+        {"geometry": {"type": "Point", "coordinates": [1.005, 1.005]}, "id": "in_b"},
+        {"geometry": {"type": "Point", "coordinates": [0.5, 0.5]}, "id": "between"},
+    ]
+    kept = locator.rectangle_features(features)
+    assert kept is not None
+    assert {f["id"] for f in kept} == {"in_a", "in_b"}  # union of both rectangles

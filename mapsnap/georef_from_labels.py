@@ -1763,7 +1763,9 @@ def _process_one_image(image_path: str) -> tuple[str, ProcessResult]:
     if keymap is not None and not result.success and result.deferred is None:
         nofit_path = output_path.replace(".georef.json", ".georef-nofit.json")
         with open(nofit_path, "w") as f:
-            json.dump({"keymap": keymap, "streets": [], "intersections": []}, f, indent=2)
+            json.dump(
+                {"keymap": keymap, "streets": [], "intersections": []}, f, indent=2
+            )
     return image_path, result
 
 
@@ -2403,10 +2405,12 @@ def main() -> None:
     )
     parser.add_argument(
         "--keymap",
+        nargs="+",
         metavar="JSON",
         help=(
-            "Georeferenced key-map detections file (e.g. raw/p0.keymap.json, with a sibling "
-            "<stem>.georef.json). Each page it places is matched only against streets within "
+            "One or more georeferenced key-map detections files (e.g. raw/p0.keymap.json, each "
+            "with a sibling <stem>.georef.json); pass several for a volume with multiple key "
+            "maps. Each page a key map places is matched first against streets within "
             "--keymap-radius of that page's key-map location, dropping far-away same-name "
             "streets that produce spurious GCPs. Unplaced pages use the full centerlines."
         ),
@@ -2484,7 +2488,9 @@ def main() -> None:
     locator = None
     rectangle_index: tuple[dict[str, list[Block]], float] | None = None
     if args.keymap is not None:
-        locator = KeymapLocator.from_keymap(Path(args.keymap), args.keymap_radius)
+        locator = KeymapLocator.from_keymaps(
+            [Path(k) for k in args.keymap], args.keymap_radius
+        )
         rectangle = locator.rectangle_features(geojson["features"])
         if rectangle:
             rectangle_bi = build_block_index(
