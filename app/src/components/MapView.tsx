@@ -23,23 +23,23 @@ interface MapViewProps {
   colorByInlier: boolean;
 }
 
-// Circle color expression for street labels, optionally split by inlier status.
-function streetCircleColor(
-  colorByInlier: boolean,
-): maplibregl.ExpressionSpecification | string {
-  return colorByInlier
-    ? ([
-        'case',
-        ['get', 'inlier'],
-        'orange',
-        '#888888',
-      ] as maplibregl.ExpressionSpecification)
-    : '#ff0000';
-}
+// Teal for streets read by the key-map rectangle fallback vocabulary (matching the neighborhood
+// circle and the table badge); otherwise orange/grey by inlier status, or a flat red.
+const FALLBACK_COLOR = '#0d9488';
 
-// Text/line color for street labels, optionally split by inlier status.
-function streetTextColor(colorByInlier: boolean): string {
-  return colorByInlier ? 'orange' : '#ff0000';
+// Color expression for street labels: key-map fallback reads first, then inlier status.
+function streetColor(
+  colorByInlier: boolean,
+): maplibregl.ExpressionSpecification {
+  const base = colorByInlier
+    ? ['case', ['get', 'inlier'], 'orange', '#888888']
+    : '#ff0000';
+  return [
+    'case',
+    ['get', 'fallback'],
+    FALLBACK_COLOR,
+    base,
+  ] as maplibregl.ExpressionSpecification;
 }
 
 /**
@@ -172,7 +172,11 @@ export function MapView(props: MapViewProps) {
       features: geo.map((s) => ({
         type: 'Feature' as const,
         geometry: { type: 'Point' as const, coordinates: [s.lon!, s.lat!] },
-        properties: { label: s.street, inlier: s.inlier ?? true },
+        properties: {
+          label: s.street,
+          inlier: s.inlier ?? true,
+          fallback: s.fallback ?? false,
+        },
       })),
     };
 
@@ -197,7 +201,7 @@ export function MapView(props: MapViewProps) {
               ],
             ],
           },
-          properties: {},
+          properties: { fallback: s.fallback ?? false },
         })),
     };
 
@@ -214,7 +218,7 @@ export function MapView(props: MapViewProps) {
         source: 'street-labels',
         paint: {
           'circle-radius': 5,
-          'circle-color': streetCircleColor(colorByInlier),
+          'circle-color': streetColor(colorByInlier),
           'circle-stroke-color': '#ffffff',
           'circle-stroke-width': 1.5,
         },
@@ -231,7 +235,7 @@ export function MapView(props: MapViewProps) {
           'text-anchor': 'top',
         },
         paint: {
-          'text-color': streetTextColor(colorByInlier),
+          'text-color': streetColor(colorByInlier),
           'text-halo-color': '#ffffff',
           'text-halo-width': 1.5,
         },
@@ -250,31 +254,21 @@ export function MapView(props: MapViewProps) {
         type: 'line',
         source: 'street-vectors',
         paint: {
-          'line-color': streetTextColor(colorByInlier),
+          'line-color': streetColor(colorByInlier),
           'line-width': 2,
           'line-opacity': 0.9,
         },
       });
     }
 
-    if (map.getLayer('street-labels-circle'))
-      map.setPaintProperty(
-        'street-labels-circle',
-        'circle-color',
-        streetCircleColor(colorByInlier),
-      );
-    if (map.getLayer('street-labels-text'))
-      map.setPaintProperty(
-        'street-labels-text',
-        'text-color',
-        streetTextColor(colorByInlier),
-      );
-    if (map.getLayer('street-vectors-line'))
-      map.setPaintProperty(
-        'street-vectors-line',
-        'line-color',
-        streetTextColor(colorByInlier),
-      );
+    for (const [id, prop] of [
+      ['street-labels-circle', 'circle-color'],
+      ['street-labels-text', 'text-color'],
+      ['street-vectors-line', 'line-color'],
+    ] as const) {
+      if (map.getLayer(id))
+        map.setPaintProperty(id, prop, streetColor(colorByInlier));
+    }
 
     const visible = showLabels ? 'visible' : 'none';
     for (const id of [
