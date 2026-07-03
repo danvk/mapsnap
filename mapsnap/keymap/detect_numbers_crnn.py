@@ -24,6 +24,7 @@ import numpy as np
 import torch
 from PIL import Image
 
+
 from mapsnap.keymap.crnn_model import (
     build_crnn,
     central_group,
@@ -106,6 +107,47 @@ def read_candidates(
     return results, strips
 
 
+# Half-widths (working px) for the narrow-detection re-read, tighter than the default
+# BOX_HALF_W_WORKING=55 so a squished multi-digit number resolves into separate digits.
+REREAD_HALF_WIDTHS_WORKING = [30.0, 38.0]
+
+
+@torch.no_grad()
+def reread_narrow(
+    image: np.ndarray,
+    crnn: torch.nn.Module,
+    device,
+    center: tuple[float, float],
+    factor: float,
+    pages: list[str],
+    half_w_working: float,
+) -> tuple[list[list[int]], str, float] | None:
+    """Re-read the central number around ``center`` from a tighter, minimum-width crop.
+
+    The default strip is wide enough that a multi-digit number is squished until the CRNN
+    fires only its central digit; a tighter crop resolves the full number. Returns the same
+    (polygon, text, confidence) triple as the main pass, or None if nothing decodes.
+    """
+    height, width = image.shape[:2]
+    cx, cy = center
+    strip = number_strip(image, cx, cy, factor, half_w_working=half_w_working)
+    tensor = cast(torch.Tensor, eval_transform()(strip)).unsqueeze(0).to(device)
+    log_probs = crnn(tensor)
+    path = greedy_paths(log_probs)[0]
+    confidence = float(log_probs.exp().max(dim=2).values.mean())
+    group = central_group(path)
+    if group is None:
+        return None
+    text = snap_to_pages(ctc_greedy_decode(path[group[0] : group[1] + 1]), pages)
+    if not text:
+        return None
+    crop_box = strip_crop_box(
+        width, height, cx, cy, factor, half_w_working=half_w_working
+    )
+    polygon = locate_number(strip, group, len(path), crop_box)
+    return polygon, text, confidence
+
+
 def detect_and_read(
     image_path: str,
     cnn: torch.nn.Module,
@@ -144,6 +186,25 @@ def detect_and_read(
             )
         crop_box = strip_crop_box(width, height, cx, cy, factor)
         polygon = locate_number(strip, group, len(path), crop_box)
+        # A single-digit read is often a multi-digit number the wide strip squished until the
+        # CRNN fired only its central digit (e.g. the "0" of "105", the "1" of "61"); re-read
+        # tighter, minimum-width crops and take the longest strictly-longer valid number.
+        if len(text) == 1:
+            longer = [
+                r
+                for hw in REREAD_HALF_WIDTHS_WORKING
+                if (
+                    r := reread_narrow(image, crnn, device, (cx, cy), factor, pages, hw)
+                )
+                and len(r[1]) > len(text)
+            ]
+            if longer:
+                polygon, widened, confidence = max(longer, key=lambda r: len(r[1]))
+                print(
+                    f"{Path(image_path).name}: re-read narrow {text!r} -> {widened!r}",
+                    file=sys.stderr,
+                )
+                text = widened
         found.append((polygon, text, confidence))
 
     # Trimming a between-two-numbers candidate can duplicate a neighbor's detection; keep the

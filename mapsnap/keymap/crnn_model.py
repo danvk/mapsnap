@@ -54,14 +54,21 @@ def ctc_greedy_decode(indices: list[int]) -> str:
 
 
 def strip_crop_box(
-    width: int, height: int, cx: float, cy: float, factor: float
+    width: int,
+    height: int,
+    cx: float,
+    cy: float,
+    factor: float,
+    *,
+    half_w_working: float = BOX_HALF_W_WORKING,
 ) -> tuple[int, int, int, int]:
     """Clamped (x0, y0, x1, y1) of the strip's source region around (cx, cy) in image coords.
 
     Box is sized in working-scale units and converted to the image's own scale with
-    ``factor`` (the localizer's working_scale), so a number fills a consistent fraction.
+    ``factor`` (the localizer's working_scale), so a number fills a consistent fraction. A
+    tighter ``half_w_working`` un-squishes a multi-digit number the default width would blur.
     """
-    half_w = round(BOX_HALF_W_WORKING / factor)
+    half_w = round(half_w_working / factor)
     half_h = round(BOX_HALF_H_WORKING / factor)
     x0 = max(0, round(cx) - half_w)
     y0 = max(0, round(cy) - half_h)
@@ -70,10 +77,19 @@ def strip_crop_box(
     return x0, y0, x1, y1
 
 
-def number_strip(image: np.ndarray, cx: float, cy: float, factor: float) -> np.ndarray:
+def number_strip(
+    image: np.ndarray,
+    cx: float,
+    cy: float,
+    factor: float,
+    *,
+    half_w_working: float = BOX_HALF_W_WORKING,
+) -> np.ndarray:
     """Grayscale CRNN_HEIGHT x CRNN_WIDTH crop centered on (cx, cy) in image coords."""
     height, width = image.shape[:2]
-    x0, y0, x1, y1 = strip_crop_box(width, height, cx, cy, factor)
+    x0, y0, x1, y1 = strip_crop_box(
+        width, height, cx, cy, factor, half_w_working=half_w_working
+    )
     crop = image[y0:y1, x0:x1]
     if crop.size == 0:
         return np.full((CRNN_HEIGHT, CRNN_WIDTH), 255, dtype=np.uint8)

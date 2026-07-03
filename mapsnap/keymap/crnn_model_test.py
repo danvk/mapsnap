@@ -14,6 +14,7 @@ from mapsnap.keymap.crnn_model import (
     ink_row_center,
     locate_number,
     number_strip,
+    strip_crop_box,
 )
 
 
@@ -45,6 +46,18 @@ def test_number_strip_handles_edge():
     img = np.full((400, 400, 3), 255, dtype=np.uint8)
     strip = number_strip(img, 0, 0, factor=1.0)  # corner, mostly off-image
     assert strip.shape == (CRNN_HEIGHT, CRNN_WIDTH)
+
+
+def test_strip_crop_box_tighter_half_width():
+    # A smaller half_w_working narrows the source box (un-squishing a multi-digit number)
+    # while leaving the height and center unchanged.
+    default = strip_crop_box(4000, 4000, 2000, 2000, factor=1.0)
+    tight = strip_crop_box(4000, 4000, 2000, 2000, factor=1.0, half_w_working=30)
+    default_w = default[2] - default[0]
+    tight_w = tight[2] - tight[0]
+    assert tight_w < default_w
+    assert default[1] == tight[1] and default[3] == tight[3]  # same height
+    assert (default[0] + default[2]) == (tight[0] + tight[2])  # same center x
 
 
 def test_crnn_forward_and_decode_shapes():
