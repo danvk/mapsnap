@@ -12,6 +12,7 @@ from mapsnap.georef_from_labels import (
     _distinct_pixel_gcps,
     _rank_pairs_by_consensus,
     _rotation_from_neighbors,
+    annotate_keymap_locations,
     assemble_multiword_streets,
     compute_auto_min_short_side,
     confidence_relaxed_threshold,
@@ -1142,3 +1143,37 @@ def test_rank_pairs_by_consensus_is_deterministic():
     a = _rank_pairs_by_consensus(gcps, 1.0, 1e-3, 10)
     b = _rank_pairs_by_consensus(gcps, 1.0, 1e-3, 10)
     assert a == b
+
+
+def test_label_features_carries_fallback_flag():
+    poly = [[0, 0], [40, 0], [40, 10], [0, 10]]
+    feats = label_features(
+        [
+            {"polygon": poly, "text": "MAIN ST"},
+            {"polygon": poly, "text": "CANAL ST", "fallback": True},
+        ]
+    )
+    assert feats[0].fallback is False
+    assert feats[1].fallback is True
+
+
+def test_annotate_keymap_locations_writes_center_and_radius(tmp_path):
+    import json
+
+    from mapsnap.keymap.locate import KeymapLocator
+
+    (tmp_path / "p61w.jpg").touch()
+    georef = tmp_path / "p61w.georef.json"
+    georef.write_text(json.dumps({"width": 100, "height": 100, "corners": []}))
+    # A page the key map does NOT place gets no image / georef change.
+    (tmp_path / "p9n.jpg").touch()
+    (tmp_path / "p9n.georef.json").write_text(json.dumps({"width": 1, "height": 1}))
+
+    locator = KeymapLocator(locations={61: [(-87.5, 41.9)]}, radius_m=300.0)
+    annotate_keymap_locations(
+        [str(tmp_path / "p61w.jpg"), str(tmp_path / "p9n.jpg")], locator
+    )
+
+    placed = json.loads(georef.read_text())
+    assert placed["keymap"] == {"lat": 41.9, "lon": -87.5, "radius_m": 300.0}
+    assert "keymap" not in json.loads((tmp_path / "p9n.georef.json").read_text())

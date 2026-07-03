@@ -56,6 +56,9 @@ class LabelFeature:
     long_side: float  # length of the longest polygon edge in pixels
     short_side: float  # length of the shortest polygon edge in pixels
     promoted: bool = False  # True for detections rescued by promote_avenue_letters
+    fallback: bool = (
+        False  # True if read by the key-map rectangle fallback, not the radius vocab
+    )
 
 
 @dataclass
@@ -111,6 +114,7 @@ def label_features(labels: list[dict]) -> list[LabelFeature]:
                 long_side=long_side,
                 short_side=short_side,
                 promoted=bool(label.get("promoted")),
+                fallback=bool(label.get("fallback")),
             )
         )
     return features
@@ -1108,20 +1112,21 @@ def _finalize_georef(
         d_pixel = np.array([np.cos(feat.dir_pix), np.sin(feat.dir_pix)])
         d_geo = A_linear @ d_pixel
         d_geo_norm = d_geo / np.linalg.norm(d_geo)
-        streets_out.append(
-            {
-                "street": feat.raw_text,
-                "x": round(feat.center[0]),
-                "y": round(feat.center[1]),
-                "lat": round(lat, 7),
-                "lon": round(lon, 7),
-                "dir_x": round(float(np.cos(feat.dir_pix)), 6),
-                "dir_y": round(float(np.sin(feat.dir_pix)), 6),
-                "dir_lon": round(float(d_geo_norm[0]), 6),
-                "dir_lat": round(float(d_geo_norm[1]), 6),
-                "inlier": i in inlier_feat_set,
-            }
-        )
+        street_out = {
+            "street": feat.raw_text,
+            "x": round(feat.center[0]),
+            "y": round(feat.center[1]),
+            "lat": round(lat, 7),
+            "lon": round(lon, 7),
+            "dir_x": round(float(np.cos(feat.dir_pix)), 6),
+            "dir_y": round(float(np.sin(feat.dir_pix)), 6),
+            "dir_lon": round(float(d_geo_norm[0]), 6),
+            "dir_lat": round(float(d_geo_norm[1]), 6),
+            "inlier": i in inlier_feat_set,
+        }
+        if feat.fallback:
+            street_out["fallback"] = True
+        streets_out.append(street_out)
 
     initial_set = set(initial_pair) if initial_pair is not None else set()
     intersections_out = [
@@ -2207,6 +2212,30 @@ def process_deferred_image(
     )
 
 
+def annotate_keymap_locations(images: list[str], locator: KeymapLocator) -> None:
+    """Add each placed page's key-map center + OCR/fit radius to its ``<stem>.georef.json``.
+
+    Written under a ``keymap`` key ``{lat, lon, radius_m}`` so the debugger app can draw the
+    neighborhood circle the page was restricted to and see how far its fit landed from it.
+    """
+    for image_path in images:
+        output_path = derive_paths(image_path)[1]
+        number = page_number(image_stem(str(image_path)))
+        centers = locator.locations.get(number) if number is not None else None
+        if not centers or not os.path.exists(output_path):
+            continue
+        lon = sum(c[0] for c in centers) / len(centers)
+        lat = sum(c[1] for c in centers) / len(centers)
+        doc = json.load(open(output_path))
+        doc["keymap"] = {
+            "lat": round(lat, 7),
+            "lon": round(lon, 7),
+            "radius_m": round(locator.radius_m, 1),
+        }
+        with open(output_path, "w") as f:
+            json.dump(doc, f, indent=2)
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(
         description=(
@@ -2669,6 +2698,11 @@ def main() -> None:
                 )
         if n_dropped:
             print(f"Dropped {n_dropped} location outlier(s).", file=sys.stderr)
+
+    # Record each placed page's key-map center + radius in its georef.json so the debugger can
+    # draw the neighborhood the page was OCR'd/fit against (and how far the fit landed from it).
+    if locator is not None:
+        annotate_keymap_locations(args.images, locator)
 
     if len(args.images) > 1:
         print(f"\n{n_success}/{len(args.images)} images georeferenced", file=sys.stderr)
