@@ -10,6 +10,8 @@ export interface Street {
   dir_lon?: number;
   dir_lat?: number;
   inlier?: boolean;
+  /** Read by the key-map rectangle fallback vocab rather than the tighter radius vocab. */
+  fallback?: boolean;
 }
 
 /** A street-crossing ground control point with image and geographic coordinates. */
@@ -34,6 +36,15 @@ export interface Detection {
   short_side: number;
   ignore?: boolean;
   hint?: boolean;
+  /** Read by the key-map rectangle fallback vocab rather than the tighter radius vocab. */
+  fallback?: boolean;
+}
+
+/** The key map's expected center and OCR/fit radius for a page (georef.json `keymap`). */
+export interface KeymapLocation {
+  lat: number;
+  lon: number;
+  radius_m: number;
 }
 
 /** Four image corners mapped to [lon, lat], in [nw, ne, se, sw] order. */
@@ -51,6 +62,7 @@ export interface GeorefData {
   corners?: Corners;
   streets?: Street[];
   intersections?: IntersectionPoint[];
+  keymap?: KeymapLocation;
 }
 
 /** New-format streets.json: detection list wrapped with image metadata. */

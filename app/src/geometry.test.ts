@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  circlePolygon,
   computeCorners,
   distanceMiles,
   pointInPolygon,
@@ -7,6 +8,21 @@ import {
   solveLinear3,
 } from './geometry';
 import type { Street } from './types';
+
+describe('circlePolygon', () => {
+  it('is a closed ring whose points are ~radiusMeters from the center', () => {
+    const [lon, lat, radius] = [-87.64, 41.89, 300];
+    const ring = circlePolygon(lon, lat, radius, 32);
+    expect(ring.length).toBe(33); // points + 1 (closed)
+    expect(ring[0]).toEqual(ring[ring.length - 1]);
+    // Every vertex is ~300 m from the center (allow a few % for the local approx).
+    for (const [plon, plat] of ring) {
+      const meters = distanceMiles(lon, lat, plon, plat) * 1609.34;
+      expect(meters).toBeGreaterThan(radius * 0.95);
+      expect(meters).toBeLessThan(radius * 1.05);
+    }
+  });
+});
 
 describe('solveLinear3', () => {
   it('solves a simple system', () => {

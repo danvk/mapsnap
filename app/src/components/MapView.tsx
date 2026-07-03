@@ -1,13 +1,20 @@
 import { useEffect, useRef, useState } from 'react';
 import maplibregl from 'maplibre-gl';
 import 'maplibre-gl/dist/maplibre-gl.css';
-import type { Corners, IntersectionPoint, Street } from '../types';
-import { distanceMiles } from '../geometry';
+import type {
+  Corners,
+  IntersectionPoint,
+  KeymapLocation,
+  Street,
+} from '../types';
+import { circlePolygon, distanceMiles } from '../geometry';
 
 interface MapViewProps {
   streets: Street[];
   intersections: IntersectionPoint[];
   corners: Corners | null;
+  /** The page's key-map neighborhood (center + OCR/fit radius), if placed. */
+  keymap: KeymapLocation | null;
   imageSrc: string;
   /** Warped-image opacity in [0, 1]. */
   opacity: number;
@@ -45,6 +52,7 @@ export function MapView(props: MapViewProps) {
     streets,
     intersections,
     corners,
+    keymap,
     imageSrc,
     opacity,
     showLabels,
@@ -348,6 +356,76 @@ export function MapView(props: MapViewProps) {
       if (map.getLayer(id)) map.setLayoutProperty(id, 'visibility', visible);
     }
   }, [mapReady, intersections, showIntersections]);
+
+  // Render the key-map neighborhood: the circle the page was OCR'd/fit against
+  // (center + radius) and its center point, so a fit that drifted off is visible.
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !mapReady) return;
+
+    const features: GeoJSON.Feature[] = keymap
+      ? [
+          {
+            type: 'Feature',
+            geometry: {
+              type: 'Polygon',
+              coordinates: [
+                circlePolygon(keymap.lon, keymap.lat, keymap.radius_m),
+              ],
+            },
+            properties: { kind: 'circle' },
+          },
+          {
+            type: 'Feature',
+            geometry: { type: 'Point', coordinates: [keymap.lon, keymap.lat] },
+            properties: { kind: 'center' },
+          },
+        ]
+      : [];
+    const geojson: GeoJSON.FeatureCollection = {
+      type: 'FeatureCollection',
+      features,
+    };
+
+    const existing = map.getSource('keymap') as
+      | maplibregl.GeoJSONSource
+      | undefined;
+    if (existing) {
+      existing.setData(geojson);
+    } else {
+      map.addSource('keymap', { type: 'geojson', data: geojson });
+      map.addLayer({
+        id: 'keymap-circle-fill',
+        type: 'fill',
+        source: 'keymap',
+        filter: ['==', ['get', 'kind'], 'circle'],
+        paint: { 'fill-color': '#0d9488', 'fill-opacity': 0.07 },
+      });
+      map.addLayer({
+        id: 'keymap-circle-line',
+        type: 'line',
+        source: 'keymap',
+        filter: ['==', ['get', 'kind'], 'circle'],
+        paint: {
+          'line-color': '#0d9488',
+          'line-width': 2,
+          'line-dasharray': [2, 2],
+        },
+      });
+      map.addLayer({
+        id: 'keymap-center',
+        type: 'circle',
+        source: 'keymap',
+        filter: ['==', ['get', 'kind'], 'center'],
+        paint: {
+          'circle-radius': 6,
+          'circle-color': '#0d9488',
+          'circle-stroke-color': '#ffffff',
+          'circle-stroke-width': 2,
+        },
+      });
+    }
+  }, [mapReady, keymap]);
 
   return <div id="map" ref={containerRef} />;
 }
