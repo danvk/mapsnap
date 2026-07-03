@@ -15,6 +15,7 @@ from PIL import Image
 from tqdm import tqdm
 
 from mapsnap.ctc_vocab_decode import HINT_STRINGS, generate_vocab_strings
+from mapsnap.keymap.locate import KeymapLocator, page_number
 from mapsnap.streets import build_block_index, polygon_side_lengths
 from mapsnap.utils import default_centerlines, image_stem
 
@@ -577,6 +578,27 @@ def main() -> None:
         ),
     )
     parser.add_argument(
+        "--keymap",
+        metavar="JSON",
+        help=(
+            "Georeferenced key-map detections file (e.g. raw/p0.keymap.json, with a sibling "
+            "<stem>.georef.json). Each page it places is OCR'd with only the streets within "
+            "--keymap-radius of that page's key-map location — a much smaller vocabulary that "
+            "raises recognizer confidence and drops far-away same-name streets. Pages the key "
+            "map does not place fall back to the full vocabulary."
+        ),
+    )
+    parser.add_argument(
+        "--keymap-radius",
+        type=float,
+        default=None,
+        metavar="M",
+        help=(
+            "Radius in metres around a page's key-map location for the restricted vocabulary "
+            "(default: auto, ~2x the key map's page-to-page spacing)."
+        ),
+    )
+    parser.add_argument(
         "--beam-width",
         type=int,
         default=20,
@@ -670,6 +692,28 @@ def main() -> None:
         file=sys.stderr,
     )
 
+    # With a georeferenced key map, restrict each placed page's vocabulary to nearby streets.
+    locator = None
+    if args.keymap is not None:
+        locator = KeymapLocator.from_keymap(Path(args.keymap), args.keymap_radius)
+        print(
+            f"Key map places {len(locator.located_numbers())} page numbers; restricting "
+            f"vocab to streets within {locator.radius_m:.0f} m of each.",
+            file=sys.stderr,
+        )
+
+    def page_vocab(image_path: str) -> list[str]:
+        """Streets near this page's key-map location, or the full vocab if it is unplaced."""
+        if locator is None:
+            return vocab_strings
+        restricted = locator.restricted_features(
+            page_number(image_stem(image_path)), geojson["features"]
+        )
+        if not restricted:
+            return vocab_strings
+        near = build_block_index({"type": "FeatureCollection", "features": restricted})
+        return generate_vocab_strings(set(near.keys())) or vocab_strings
+
     # Never OCR a page that has been split into panels; OCR its panels instead. This
     # mirrors mapsnap.utils.list_pages so the rule holds however ocr is invoked (pipeline
     # or a raw shell glob that happens to include the parent).
@@ -705,6 +749,13 @@ def main() -> None:
 
     gpu = not args.no_gpu
 
+    if locator is not None and args.num_workers > 1:
+        print(
+            "--keymap restricts the vocabulary per page; running with a single worker.",
+            file=sys.stderr,
+        )
+        args.num_workers = 1
+
     if args.num_workers > 1:
         initargs = (
             vocab_strings,
@@ -734,7 +785,7 @@ def main() -> None:
         for image_path in tqdm(images, smoothing=0):
             detect_text(
                 image_path,
-                vocab_strings=vocab_strings,
+                vocab_strings=page_vocab(image_path),
                 min_size=args.min_short_side,
                 min_long_side=args.min_long_side,
                 allowlist=args.allowlist,

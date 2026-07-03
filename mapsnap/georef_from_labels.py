@@ -29,6 +29,7 @@ import numpy as np
 from PIL import Image
 from tqdm import tqdm
 
+from mapsnap.keymap.locate import KeymapLocator, page_number
 from mapsnap.streets import (
     DIRECTION_WORDS,
     HINT_STRINGS,
@@ -1641,6 +1642,8 @@ def _init_worker(
     debug: bool,
     parameters: dict,
     high_confidence_size_fraction: float,
+    locator: KeymapLocator | None = None,
+    geojson_features: list[dict] | None = None,
 ) -> None:
     """Populate _worker_state once per worker process (or once in the main process)."""
     _worker_state.update(
@@ -1657,6 +1660,8 @@ def _init_worker(
         debug=debug,
         parameters=parameters,
         high_confidence_size_fraction=high_confidence_size_fraction,
+        locator=locator,
+        geojson_features=geojson_features or [],
     )
 
 
@@ -1679,14 +1684,30 @@ def _process_one_image(image_path: str) -> tuple[str, ProcessResult]:
         if os.path.exists(stale_path):
             os.remove(stale_path)
 
+    # With a georeferenced key map, match this page only against streets near its key-map
+    # location — the same restriction the OCR step used, and it drops far-away same-name
+    # streets that would otherwise produce spurious GCPs.
+    block_index = _worker_state["block_index"]
+    cos_phi = _worker_state["cos_phi"]
+    locator: KeymapLocator | None = _worker_state["locator"]
+    if locator is not None:
+        restricted = locator.restricted_features(
+            page_number(image_stem(image_path)), _worker_state["geojson_features"]
+        )
+        if restricted:
+            block_index = build_block_index(
+                {"type": "FeatureCollection", "features": restricted}
+            )
+            cos_phi = compute_cos_phi(block_index)
+
     with _captured_page_log(log_path, _worker_state["debug"]):
         print(f"--- {image_path} ---")
         result = process_image(
             image_path=image_path,
             labels_path=labels_path,
             output_path=output_path,
-            block_index=_worker_state["block_index"],
-            cos_phi=_worker_state["cos_phi"],
+            block_index=block_index,
+            cos_phi=cos_phi,
             centerlines_path=_worker_state["centerlines_path"],
             min_confidence=_worker_state["min_confidence"],
             min_long_side=_worker_state["min_long_side"],
@@ -2336,6 +2357,26 @@ def main() -> None:
         help="Geocode key maps in addition to regular pages.",
     )
     parser.add_argument(
+        "--keymap",
+        metavar="JSON",
+        help=(
+            "Georeferenced key-map detections file (e.g. raw/p0.keymap.json, with a sibling "
+            "<stem>.georef.json). Each page it places is matched only against streets within "
+            "--keymap-radius of that page's key-map location, dropping far-away same-name "
+            "streets that produce spurious GCPs. Unplaced pages use the full centerlines."
+        ),
+    )
+    parser.add_argument(
+        "--keymap-radius",
+        type=float,
+        default=None,
+        metavar="M",
+        help=(
+            "Radius in metres around a page's key-map location for restricted matching "
+            "(default: auto, ~2x the key map's page-to-page spacing)."
+        ),
+    )
+    parser.add_argument(
         "--num-workers",
         type=int,
         default=1,
@@ -2391,6 +2432,16 @@ def main() -> None:
         f"Block index: {n_blocks} segments across {len(block_index)} streets",
         file=sys.stderr,
     )
+
+    # With a georeferenced key map, each placed page is matched only against nearby streets.
+    locator = None
+    if args.keymap is not None:
+        locator = KeymapLocator.from_keymap(Path(args.keymap), args.keymap_radius)
+        print(
+            f"Key map places {len(locator.located_numbers())} page numbers; restricting "
+            f"matching to streets within {locator.radius_m:.0f} m of each.",
+            file=sys.stderr,
+        )
 
     auto_threshold_include_hints = not args.auto_threshold_exclude_hints
     if args.min_short_side is not None:
@@ -2464,6 +2515,8 @@ def main() -> None:
         args.debug,
         parameters,
         args.high_confidence_size_fraction,
+        locator,
+        geojson["features"] if locator is not None else None,
     )
     if args.num_workers > 1:
         with multiprocessing.Pool(

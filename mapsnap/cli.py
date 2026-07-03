@@ -27,10 +27,6 @@ SUBCOMMANDS: dict[str, tuple[str, str]] = {
         "mapsnap.georef_from_labels",
         "Georeference a map from detected street labels",
     ),
-    "refine-with-keymap": (
-        "mapsnap.refine_with_keymap",
-        "Recover un-fit pages by re-OCR/re-fit near their georeferenced key-map location",
-    ),
     "iiif": (
         "mapsnap.make_iiif_georef",
         "Combine georeferences into a IIIF AnnotationPage",
