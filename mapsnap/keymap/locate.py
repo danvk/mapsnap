@@ -10,7 +10,7 @@ recognizer confidence on the correct names.
 
 import json
 import math
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
 import numpy as np
@@ -101,6 +101,7 @@ class KeymapLocator:
         int, list[Point]
     ]  # page number -> world (lon, lat) of each detection
     radius_m: float
+    corners: list[Point] = field(default_factory=list)  # key-map image-corner lon/lats
 
     @classmethod
     def from_keymap(
@@ -115,12 +116,40 @@ class KeymapLocator:
             world = bilinear_pixel_to_world(corners, width, height, detection.pixel)
             locations.setdefault(detection.number, []).append(world)
         return cls(
-            locations, radius_m if radius_m is not None else estimate_radius(locations)
+            locations,
+            radius_m if radius_m is not None else estimate_radius(locations),
+            corners,
         )
 
     def located_numbers(self) -> set[int]:
         """The page numbers the key map places."""
         return set(self.locations)
+
+    def rectangle_features(self, features: list[dict]) -> list[dict] | None:
+        """Features inside the whole key map's georeferenced rectangle (plus a radius margin).
+
+        Every page sits *somewhere* on the key map, so this volume-wide box is a valid — and
+        often much tighter than the full centerlines — fallback vocabulary for a page whose own
+        neighborhood came up empty (or that the key map does not place at all). Returns None if
+        the key map's corners are unknown.
+        """
+        if not self.corners:
+            return None
+        lons = [c[0] for c in self.corners]
+        lats = [c[1] for c in self.corners]
+        mid_lat = math.radians(sum(lats) / len(lats))
+        margin_lon = self.radius_m / (M_PER_DEG_LON_EQUATOR * math.cos(mid_lat))
+        margin_lat = self.radius_m / M_PER_DEG_LAT
+        min_lon, max_lon = min(lons) - margin_lon, max(lons) + margin_lon
+        min_lat, max_lat = min(lats) - margin_lat, max(lats) + margin_lat
+        return [
+            feature
+            for feature in features
+            if any(
+                min_lon <= lon <= max_lon and min_lat <= lat <= max_lat
+                for lon, lat in geometry_vertices(feature.get("geometry", {}))
+            )
+        ]
 
     def restricted_features(
         self, number: int | None, features: list[dict]

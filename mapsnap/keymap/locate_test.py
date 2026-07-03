@@ -67,3 +67,22 @@ def test_located_numbers_and_page_number():
     )
     assert locator.located_numbers() == {1, 61}
     assert page_number("p61w") == 61 and page_number("p9n") == 9
+
+
+def test_rectangle_features_covers_whole_keymap_box():
+    # Key map spanning lon 0..0.01, lat 0..0.01 (~1.1 km); tiny margin from radius_m.
+    locator = KeymapLocator(
+        locations={1: [(0.0, 0.0)]},
+        radius_m=50.0,
+        corners=[(0.0, 0.01), (0.01, 0.01), (0.01, 0.0), (0.0, 0.0)],
+    )
+    features = [
+        {"geometry": {"type": "Point", "coordinates": [0.005, 0.005]}, "id": "inside"},
+        {"geometry": {"type": "Point", "coordinates": [0.5, 0.5]}, "id": "far_outside"},
+    ]
+    kept = locator.rectangle_features(features)
+    assert kept is not None and [f["id"] for f in kept] == ["inside"]
+    # No corners -> None (caller falls back to full vocab).
+    assert (
+        KeymapLocator(locations={}, radius_m=50.0).rectangle_features(features) is None
+    )
