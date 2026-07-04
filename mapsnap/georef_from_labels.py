@@ -29,7 +29,7 @@ import numpy as np
 from PIL import Image
 from tqdm import tqdm
 
-from mapsnap.keymap.locate import KeymapLocator, page_number
+from mapsnap.keymap.locate import KeymapLocator, page_number, region_scale_m_per_px
 from mapsnap.streets import (
     DIRECTION_WORDS,
     HINT_STRINGS,
@@ -206,6 +206,80 @@ def deg_per_px_to_px_per_ft(scale: float) -> float:
 def px_per_ft_to_deg_per_px(px_per_ft: float) -> float:
     """Convert scale from pixels-per-foot to degrees-per-pixel."""
     return 1.0 / (px_per_ft * _FT_PER_DEG_LAT)
+
+
+_FT_PER_M = 3.280839895
+
+# Key-map regions are drawn schematically, not area-faithfully, so a page's region-derived
+# scale prior carries a volume-wide bias (Chicago's regions imply 2.2x the true px/ft,
+# Detroit's 1.5x) plus ~±30% per-page noise. Absolute comparisons therefore get loose bounds
+# that only a catastrophic fit can violate (the spurious rectangle-tier fits this guards
+# against ran at 0.02-0.04x their page's prior; correct fits stay within ~0.3-1x).
+BROADENED_SCALE_MIN_RATIO = 0.1
+BROADENED_SCALE_MAX_RATIO = 6.0
+
+# Relative to the volume's *median* region prior the bias cancels, and Sanborn sheet scales
+# are quantized (50/100 ft-per-inch), so a genuinely half-scale sheet (Detroit p93/p50) shows
+# as a region ~2x the typical area: prior ratio ~sqrt(1/2). Segmentation failures (foxing,
+# frayed blocks) produce region *fragments* — smaller regions, larger ratios — essentially
+# never regions that are too big, so only the small-ratio side is trusted, and beyond 8x the
+# typical area the region is distrusted entirely.
+HALF_SCALE_MAX_RATIO = math.sqrt(0.5)
+HALF_SCALE_MIN_RATIO = math.sqrt(0.125)
+
+
+def region_prior_px_per_ft(
+    keymap: dict | None, width: float, height: float
+) -> float | None:
+    """Pixels-per-foot scale prior from the page's segmented key-map region, if any.
+
+    ``keymap`` is the page's georef.json keymap entry ({lat, lon, radius_m, regions?});
+    width/height are the page image's dimensions in pixels. Returns None when the key map
+    has no segmented region for this page (segmentation is not 100% reliable, e.g. on
+    heavily foxed paper), in which case callers should skip the check rather than guess.
+    Comparable across a volume's pages, but biased in absolute terms — see the constants
+    above.
+    """
+    rings = (keymap or {}).get("regions")
+    if not rings:
+        return None
+    m_per_px = region_scale_m_per_px(rings, width, height)
+    if m_per_px is None or m_per_px <= 0:
+        return None
+    return 1.0 / (m_per_px * _FT_PER_M)
+
+
+def broadened_scale_plausible(fitted_px_per_ft: float, prior_px_per_ft: float) -> bool:
+    """Whether a rectangle-tier fit's scale is plausible against the page's region prior.
+
+    Loose on purpose: the prior's volume bias and noise must pass (p8N's correct fit sits
+    at 0.40x its prior), while the spurious fits this rejects are 10x+ off (p61W's 16-GCP
+    fit at 0.02x).
+    """
+    ratio = fitted_px_per_ft / prior_px_per_ft
+    return BROADENED_SCALE_MIN_RATIO <= ratio <= BROADENED_SCALE_MAX_RATIO
+
+
+def region_relative_scale(
+    prior_px_per_ft: float, median_prior_px_per_ft: float
+) -> float:
+    """Scale multiplier (vs the volume median) suggested by a page's key-map region.
+
+    Returns 0.5 when the region is ~2x the volume's typical area (a half-scale sheet, e.g.
+    100 ft/in in a 50 ft/in volume) and 1.0 otherwise. Ratios beyond ~8x the typical area
+    are treated as segmentation failures and ignored; oversized-looking priors (fragments)
+    are never trusted to scale a page *up*.
+    """
+    ratio = prior_px_per_ft / median_prior_px_per_ft
+    if HALF_SCALE_MIN_RATIO <= ratio < HALF_SCALE_MAX_RATIO:
+        return 0.5
+    return 1.0
+
+
+def image_size(image_path: str) -> tuple[int, int]:
+    """(width, height) of an image in pixels, reading only its header."""
+    with Image.open(image_path) as pil_img:
+        return pil_img.size
 
 
 def build_affine_from_scale_rotation_gcp(
@@ -1748,7 +1822,28 @@ def _process_one_image(image_path: str) -> tuple[str, ProcessResult]:
                 if not result.success and rectangle_index is not None:
                     print("  neighborhood fit failed; broadening to key-map rectangle")
                     broadened = run(*rectangle_index)
-                    if broadened.success:
+                    # The rectangle vocabulary reintroduces same-name streets from across
+                    # the volume, which fallback-vocab labels can assemble into a spurious
+                    # multi-GCP fit (p61W: 16 GCPs at 0.04x the true scale). The page's
+                    # key-map region gives an independent per-page scale check.
+                    if broadened.success and broadened.scale_deg_per_px is not None:
+                        prior = region_prior_px_per_ft(keymap, *image_size(image_path))
+                        fitted = deg_per_px_to_px_per_ft(broadened.scale_deg_per_px)
+                        if prior is not None and not broadened_scale_plausible(
+                            fitted, prior
+                        ):
+                            print(
+                                f"  rejecting broadened fit: {fitted:.3f} px/ft is "
+                                f"{fitted / prior:.2f}x the key-map region prior "
+                                f"{prior:.3f} px/ft"
+                            )
+                            # process_image already wrote the fit; remove it so the
+                            # rejection isn't a no-op on disk.
+                            if os.path.exists(output_path):
+                                os.remove(output_path)
+                        else:
+                            result = broadened
+                    elif broadened.success:
                         result = broadened
             elif rectangle_index is not None:
                 # Unplaced page: the key-map rectangle is the tightest vocabulary available.
@@ -2505,6 +2600,26 @@ def main() -> None:
             file=sys.stderr,
         )
 
+    # The anchor for relative region-scale reasoning (region_relative_scale): the volume's
+    # median region-derived prior. Absolute priors carry a volume-wide bias, so a page's
+    # region is only meaningful compared to its volume's typical region.
+    median_region_prior: float | None = None
+    if locator is not None:
+        region_priors = []
+        for prior_image_path in args.images:
+            entry = locator.page_keymap(page_number(image_stem(prior_image_path)))
+            if entry is not None and entry.get("regions"):
+                prior = region_prior_px_per_ft(entry, *image_size(prior_image_path))
+                if prior is not None:
+                    region_priors.append(prior)
+        if len(region_priors) >= 5:
+            median_region_prior = float(np.median(region_priors))
+            print(
+                f"Median key-map region scale prior: {median_region_prior:.3f} px/ft "
+                f"({len(region_priors)} pages)",
+                file=sys.stderr,
+            )
+
     auto_threshold_include_hints = not args.auto_threshold_exclude_hints
     if args.min_short_side is not None:
         min_short_side = args.min_short_side
@@ -2642,9 +2757,32 @@ def main() -> None:
                 deferred_image_path: str = deferred["image_path"]
                 with _captured_page_log(deferred["log_path"], args.debug, append=True):
                     print(f"\n--- {deferred_image_path} (deferred) ---")
+                    # A sheet drawn at a different scale than the volume (Detroit's p93/p50
+                    # are half-scale) breaks the assigned-median-scale assumption, and no
+                    # internal check can catch it — the fitted scale IS the median. The
+                    # page's key-map region gives an independent prior, comparable only
+                    # *relative* to the volume's median region prior (regions are drawn
+                    # with a volume-wide area bias).
+                    page_scale_deg_per_px = scale_deg_per_px
+                    region_prior = region_prior_px_per_ft(
+                        deferred.get("keymap"), deferred["img_w"], deferred["img_h"]
+                    )
+                    if region_prior is not None and median_region_prior is not None:
+                        multiplier = region_relative_scale(
+                            region_prior, median_region_prior
+                        )
+                        if multiplier != 1.0:
+                            snapped = ref_scale_px_per_ft * multiplier
+                            page_scale_deg_per_px = px_per_ft_to_deg_per_px(snapped)
+                            print(
+                                f"  key-map region is "
+                                f"{median_region_prior / region_prior:.2f}x the "
+                                f"volume's typical area ratio; snapping to "
+                                f"{multiplier}x median scale = {snapped:.3f} px/ft"
+                            )
                     deferred_result = process_deferred_image(
                         deferred=deferred,
-                        scale_deg_per_px=scale_deg_per_px,
+                        scale_deg_per_px=page_scale_deg_per_px,
                         block_index=block_index,
                         cos_phi=cos_phi,
                         neighbor_rotations=neighbor_rotations,

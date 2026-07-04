@@ -107,6 +107,33 @@ def meters_between(a: Point, b: Point) -> float:
     return math.hypot(dx, dy)
 
 
+def ring_area_m2(ring: list[Point]) -> float:
+    """Shoelace area (m²) of a (lon, lat) ring, in a local equirectangular frame."""
+    mid_lat = math.radians(sum(p[1] for p in ring) / len(ring))
+    scale_x = M_PER_DEG_LON_EQUATOR * math.cos(mid_lat)
+    points = [(p[0] * scale_x, p[1] * M_PER_DEG_LAT) for p in ring]
+    area = 0.0
+    for (x0, y0), (x1, y1) in zip(points, points[1:] + points[:1]):
+        area += x0 * y1 - x1 * y0
+    return abs(area) / 2.0
+
+
+def region_scale_m_per_px(
+    rings: list[list[Point]], width_px: float, height_px: float
+) -> float | None:
+    """Approximate page scale (metres per pixel) from its key-map region footprint.
+
+    A page image of width x height px drawn at s m/px covers width*height*s² m² of
+    ground, so s = sqrt(region area / pixel area). Area-based, so the page's rotation
+    doesn't matter. Multiple rings for one number (a block split by watershed between
+    duplicate detections) sum back to the full block. Returns None for degenerate input.
+    """
+    total = sum(ring_area_m2(ring) for ring in rings if len(ring) >= 3)
+    if total <= 0 or width_px <= 0 or height_px <= 0:
+        return None
+    return math.sqrt(total / (width_px * height_px))
+
+
 def estimate_radius(locations: dict[int, list[Point]]) -> float:
     """A neighborhood radius (metres) ~2x the key map's page-to-page spacing.
 

@@ -93,6 +93,24 @@ def test_page_keymap_includes_regions_as_lon_lat_rings():
     assert entry8 is not None and "regions" not in entry8
 
 
+def test_region_scale_m_per_px():
+    from mapsnap.keymap.locate import region_scale_m_per_px
+
+    # A 0.001 x 0.001 deg square at the equator is ~110.5 x 111.3 m. On a 100 x 100 px
+    # page that's sqrt(110.54 * 111.32 / 1e4) ~ 1.109 m/px.
+    square = [(0.0, 0.0), (0.001, 0.0), (0.001, 0.001), (0.0, 0.001)]
+    scale = region_scale_m_per_px([square], 100, 100)
+    assert scale is not None and math.isclose(scale, 1.109, rel_tol=1e-2)
+    # Two half-squares sum back to the full block (watershed-split duplicate detections).
+    left = [(0.0, 0.0), (0.0005, 0.0), (0.0005, 0.001), (0.0, 0.001)]
+    right = [(0.0005, 0.0), (0.001, 0.0), (0.001, 0.001), (0.0005, 0.001)]
+    both = region_scale_m_per_px([left, right], 100, 100)
+    assert both is not None and math.isclose(both, scale, rel_tol=1e-6)
+    # Degenerate rings and empty input give None.
+    assert region_scale_m_per_px([], 100, 100) is None
+    assert region_scale_m_per_px([[(0, 0), (1, 1)]], 100, 100) is None
+
+
 def test_load_regions_maps_pixels_to_world(tmp_path):
     import json
 
