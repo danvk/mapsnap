@@ -238,6 +238,14 @@ HALF_SCALE_MIN_RATIO = math.sqrt(0.125)
 # agreement (Chicago p50n at 0.70x, Detroit p85 at 1.54x).
 MISSCALE_REGION_AGREEMENT = 1.3
 
+# When a key-map-placed page's strict neighborhood fit fails, retry with the size floor
+# scaled by this fraction: the radius-restricted vocabulary makes small confident labels
+# trustworthy (Brooklyn p28's essential cross streets "MILL"/"W. 9TH" are 14px against the
+# volume's 20px auto floor). Strict-first makes this no-regression-by-construction — a
+# strict success is never replaced — and the relaxed fit must still pass the region-scale
+# plausibility gate.
+KEYMAP_RETRY_SIZE_FRACTION = 0.6
+
 
 def region_prior_px_per_ft(
     keymap: dict | None, width: float, height: float
@@ -1799,7 +1807,9 @@ def _process_one_image(image_path: str) -> tuple[str, ProcessResult]:
         else None
     )
 
-    def run(block_index: dict, cos_phi: float) -> ProcessResult:
+    def run(
+        block_index: dict, cos_phi: float, size_fraction: float = 1.0
+    ) -> ProcessResult:
         return process_image(
             image_path=image_path,
             labels_path=labels_path,
@@ -1808,8 +1818,8 @@ def _process_one_image(image_path: str) -> tuple[str, ProcessResult]:
             cos_phi=cos_phi,
             centerlines_path=_worker_state["centerlines_path"],
             min_confidence=_worker_state["min_confidence"],
-            min_long_side=_worker_state["min_long_side"],
-            min_short_side=_worker_state["min_short_side"],
+            min_long_side=_worker_state["min_long_side"] * size_fraction,
+            min_short_side=_worker_state["min_short_side"] * size_fraction,
             min_aspect_ratio=_worker_state["min_aspect_ratio"],
             edge_margin=_worker_state["edge_margin"],
             force_intersection=_worker_state["force_intersection"],
@@ -1835,7 +1845,42 @@ def _process_one_image(image_path: str) -> tuple[str, ProcessResult]:
                 near = build_block_index(
                     {"type": "FeatureCollection", "features": restricted}
                 )
-                result = run(near, compute_cos_phi(near))
+                near_cos_phi = compute_cos_phi(near)
+                result = run(near, near_cos_phi)
+                # Strict-first, relaxed-retry: when the strict fit produces nothing at
+                # all, the volume-wide auto size floor may simply sit above this page's
+                # real (small) labels — Brooklyn p28's cross streets are 14px vs a 20px
+                # floor. Retry with a lower floor; within the radius vocabulary a small
+                # confident label is very unlikely to be noise, and the region-scale gate
+                # still applies. A strict *deferral* is kept in preference to a relaxed
+                # fit: the deferred pass carries stronger verification (region-snapped
+                # scale, neighbor-rotation confirmation), and a relaxed fit preempting it
+                # is how Detroit p93 briefly went from 246 ft to a dropped misscale.
+                if not result.success and result.deferred is None:
+                    relaxed = run(
+                        near, near_cos_phi, size_fraction=KEYMAP_RETRY_SIZE_FRACTION
+                    )
+                    if relaxed.success and relaxed.scale_deg_per_px is not None:
+                        prior = region_prior_px_per_ft(keymap, *image_size(image_path))
+                        fitted = deg_per_px_to_px_per_ft(relaxed.scale_deg_per_px)
+                        if prior is not None and not broadened_scale_plausible(
+                            fitted, prior
+                        ):
+                            print(
+                                f"  rejecting relaxed fit: {fitted:.3f} px/ft is "
+                                f"{fitted / prior:.2f}x the key-map region prior "
+                                f"{prior:.3f} px/ft"
+                            )
+                            if os.path.exists(output_path):
+                                os.remove(output_path)
+                        else:
+                            print(
+                                "  strict fit failed; accepting relaxed-size-floor fit "
+                                f"({KEYMAP_RETRY_SIZE_FRACTION}x)"
+                            )
+                            result = relaxed
+                    elif relaxed.success:
+                        result = relaxed
                 # Tier 2: if the neighborhood starved the fit (e.g. the page's real streets
                 # fall just outside it), broaden to the whole key-map rectangle — but only
                 # trust a well-constrained multi-GCP fit. A lone-GCP rectangle fit is too
