@@ -223,9 +223,20 @@ BROADENED_SCALE_MAX_RATIO = 6.0
 # as a region ~2x the typical area: prior ratio ~sqrt(1/2). Segmentation failures (foxing,
 # frayed blocks) produce region *fragments* — smaller regions, larger ratios — essentially
 # never regions that are too big, so only the small-ratio side is trusted, and beyond 8x the
-# typical area the region is distrusted entirely.
-HALF_SCALE_MAX_RATIO = math.sqrt(0.5)
+# typical area the region is distrusted entirely. The upper bound demands ~2.5x the typical
+# area rather than the 2x midpoint: flipping a page's scale by 2x on 51/49 evidence is how
+# Brooklyn p1 — a waterfront page whose key-map block is 2.2x typical only because the block
+# includes water — went from 29 to 1063 ft. A real half-scale sheet measures well inside
+# (Detroit p93: 2.8x the typical area).
+HALF_SCALE_MAX_RATIO = 0.63
 HALF_SCALE_MIN_RATIO = math.sqrt(0.125)
+
+# A fit dropped as a global scale outlier is spared when its region corroborates the scale:
+# the fitted scale-vs-median ratio must match the region's area-implied ratio within this
+# factor. 1.3 passes the region noise on real second-scale sheets (Champaign p19/p22 agree
+# within 0.94-1.19x of their regions) while staying below the smallest observed bad-fit
+# agreement (Chicago p50n at 0.70x, Detroit p85 at 1.54x).
+MISSCALE_REGION_AGREEMENT = 1.3
 
 
 def region_prior_px_per_ft(
@@ -274,6 +285,17 @@ def region_relative_scale(
     if HALF_SCALE_MIN_RATIO <= ratio < HALF_SCALE_MAX_RATIO:
         return 0.5
     return 1.0
+
+
+def region_corroborates_scale(fitted_ratio: float, region_ratio: float) -> bool:
+    """Whether a fit's scale-vs-median ratio matches its region's area-implied ratio.
+
+    Spares genuine second-scale sheets (Champaign p19-p23, half the volume scale) from
+    the global scale-outlier drop, which cannot tell them from bad fits. Both arguments
+    are ratios to the respective volume medians, so the regions' volume-wide bias cancels.
+    """
+    agreement = fitted_ratio / region_ratio
+    return 1.0 / MISSCALE_REGION_AGREEMENT <= agreement <= MISSCALE_REGION_AGREEMENT
 
 
 def image_size(image_path: str) -> tuple[int, int]:
@@ -2800,6 +2822,26 @@ def main() -> None:
         for img_path, px_per_ft in scale_records:
             ratio = px_per_ft / ref_scale_px_per_ft
             if abs(ratio - 1.0) > args.scale_outlier_threshold:
+                # A genuine second-scale sheet (Champaign p19-p23 at half the volume
+                # scale) is indistinguishable from a bad fit by the median check alone;
+                # its key-map region can vouch for it.
+                if locator is not None and median_region_prior is not None:
+                    entry = locator.page_keymap(page_number(image_stem(img_path)))
+                    prior = (
+                        region_prior_px_per_ft(entry, *image_size(img_path))
+                        if entry is not None
+                        else None
+                    )
+                    if prior is not None and region_corroborates_scale(
+                        ratio, prior / median_region_prior
+                    ):
+                        print(
+                            f"Keeping scale outlier {img_path}: {ratio:.2f}x the "
+                            f"median matches its key-map region "
+                            f"({prior / median_region_prior:.2f}x the typical region)",
+                            file=sys.stderr,
+                        )
+                        continue
                 _, out_path, _ = derive_paths(img_path)
                 misscale_path = out_path.replace(
                     ".georef.json", ".georef-misscale.json"

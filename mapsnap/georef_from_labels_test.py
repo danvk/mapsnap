@@ -1188,14 +1188,32 @@ def test_broadened_scale_plausible():
 def test_region_relative_scale():
     from mapsnap.georef_from_labels import region_relative_scale
 
-    # Detroit p93: region ~2x the typical area -> prior 0.60x the median -> half scale.
+    # Detroit p93: region ~2.8x the typical area -> prior 0.60x the median -> half scale.
     assert region_relative_scale(1.33, 2.23) == 0.5
     # Normal pages whose raw priors exceed the median fitted scale (Detroit p32/p5,
     # Chicago p61W/p46N) stay at the volume median.
     assert region_relative_scale(3.03, 2.23) == 1.0
     assert region_relative_scale(2.46, 2.23) == 1.0
     assert region_relative_scale(2.58, 3.33) == 1.0
+    # Brooklyn p1: a waterfront block 2.2x the typical area (prior ratio 0.68) is NOT
+    # half-scale evidence — the block includes water. Only >=2.5x the area snaps.
+    assert region_relative_scale(1.51, 2.23) == 1.0
     # A tiny region fragment (Detroit p100: 2.8x the median prior) is never trusted to
     # scale a page up, and an absurdly large region (>8x typical area) is distrusted.
     assert region_relative_scale(6.24, 2.23) == 1.0
     assert region_relative_scale(0.5, 2.23) == 1.0
+
+
+def test_region_corroborates_scale():
+    from mapsnap.georef_from_labels import region_corroborates_scale
+
+    # Champaign's half-scale sheets: fitted 0.515x the median, regions 0.43-0.55x the
+    # typical region -> kept.
+    assert region_corroborates_scale(0.515, 0.55)
+    assert region_corroborates_scale(0.515, 0.43)
+    # Split-page halves whose regions were watershed-halved disagree -> still dropped.
+    assert not region_corroborates_scale(0.515, 0.27)
+    # Genuine bad fits: Chicago p50n (0.53x fit, 0.76x region) and Detroit p85 (1.37x
+    # fit, 0.89x region) disagree with their regions -> still dropped.
+    assert not region_corroborates_scale(0.53, 0.76)
+    assert not region_corroborates_scale(1.37, 0.89)
