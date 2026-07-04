@@ -79,6 +79,49 @@ def test_page_keymap_entry():
     assert locator.page_keymap(None) is None
 
 
+def test_page_keymap_includes_regions_as_lon_lat_rings():
+    locator = KeymapLocator(
+        locations={7: [(0.5, 0.5)], 8: [(0.9, 0.9)]},
+        radius_m=100.0,
+        regions={7: [[(0.4, 0.6), (0.6, 0.6), (0.6, 0.4), (0.4, 0.4)]]},
+    )
+    entry = locator.page_keymap(7)
+    assert entry is not None
+    assert entry["regions"] == [[[0.4, 0.6], [0.6, 0.6], [0.6, 0.4], [0.4, 0.4]]]
+    # A placed page with no segmented region omits the key entirely.
+    entry8 = locator.page_keymap(8)
+    assert entry8 is not None and "regions" not in entry8
+
+
+def test_load_regions_maps_pixels_to_world(tmp_path):
+    import json
+
+    from mapsnap.keymap.locate import load_regions
+
+    # Regions computed at half resolution (500x250) of the 1000x500 georeferenced image;
+    # the pixel ring must be rescaled before the bilinear mapping. Non-numeric labels skipped.
+    regions_doc = {
+        "image": "km.jpg",
+        "width": 500,
+        "height": 250,
+        "panels": [
+            [[0, 0], [250, 0], [250, 125], [0, 125]],  # NW quarter of the key map
+            [[0, 0], [10, 0], [10, 10]],
+        ],
+        "labels": ["61", "?"],
+    }
+    keymap_json = tmp_path / "km.keymap.json"
+    (tmp_path / "km.regions.panels.json").write_text(json.dumps(regions_doc))
+    regions = load_regions(keymap_json, CORNERS, 1000, 500)
+    assert set(regions) == {61}
+    ring = regions[61][0]
+    assert ring[0] == (0.0, 3.0)  # top-left corner
+    lon, lat = ring[2]
+    assert math.isclose(lon, 0.5) and math.isclose(lat, 2.5)  # image center
+    # No sidecar -> empty dict.
+    assert load_regions(tmp_path / "other.keymap.json", CORNERS, 1000, 500) == {}
+
+
 def test_rectangle_features_covers_whole_keymap_box():
     # Key map spanning lon 0..0.01, lat 0..0.01 (~1.1 km); tiny margin from radius_m.
     locator = KeymapLocator(

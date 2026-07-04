@@ -45,6 +45,8 @@ export interface KeymapLocation {
   lat: number;
   lon: number;
   radius_m: number;
+  /** Segmented key-map block(s) for the page: world-space rings of [lon, lat] pairs. */
+  regions?: [number, number][][];
 }
 
 /** Four image corners mapped to [lon, lat], in [nw, ne, se, sw] order. */

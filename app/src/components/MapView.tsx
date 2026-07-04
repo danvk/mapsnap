@@ -381,6 +381,14 @@ export function MapView(props: MapViewProps) {
             },
             properties: { kind: 'center' },
           },
+          // The page's segmented key-map block(s): its approximate ground footprint.
+          ...(keymap.regions ?? []).map(
+            (ring): GeoJSON.Feature => ({
+              type: 'Feature',
+              geometry: { type: 'Polygon', coordinates: [ring] },
+              properties: { kind: 'region' },
+            }),
+          ),
         ]
       : [];
     const geojson: GeoJSON.FeatureCollection = {
@@ -421,6 +429,22 @@ export function MapView(props: MapViewProps) {
         source: 'keymap',
         filter: ['==', ['get', 'kind'], 'center'],
         paint: { 'line-color': '#0d9488', 'line-width': 2.5 },
+      });
+      // The segmented key-map region: violet, solid, to read as "the page's expected
+      // footprint" against the teal dashed search-radius circle.
+      map.addLayer({
+        id: 'keymap-region-fill',
+        type: 'fill',
+        source: 'keymap',
+        filter: ['==', ['get', 'kind'], 'region'],
+        paint: { 'fill-color': '#7c3aed', 'fill-opacity': 0.06 },
+      });
+      map.addLayer({
+        id: 'keymap-region-line',
+        type: 'line',
+        source: 'keymap',
+        filter: ['==', ['get', 'kind'], 'region'],
+        paint: { 'line-color': '#7c3aed', 'line-width': 1.8 },
       });
     }
 
