@@ -487,14 +487,19 @@ def rmse_vs_truth(
 
 
 def truth_by_stem(truth_path: Path) -> dict[str, dict]:
-    """Unsplit truth annotations keyed by page stem (pN); split panels are skipped."""
+    """Unsplit truth annotations keyed by lowercase page stem (pN, pNw, pNn...).
+
+    Split panels ("p73 [1]"-style labels) are skipped: their GCP pixels live in
+    full-sheet coordinates while the local image is a crop, so a resolution ratio
+    can't relate them (the official compare resolves this by polygon IOU).
+    """
     out: dict[str, dict] = {}
     for _, items in annotations_by_source(truth_path).items():
         for item in items:
             label = str(item.get("label", ""))
-            m = re.search(r"\bp(\d+)$", label.strip())
+            m = re.search(r"\bp(\d+[A-Za-z]?)$", label.strip())
             if m:
-                out[f"p{m.group(1)}"] = item
+                out[f"p{m.group(1).lower()}"] = item
     return out
 
 
@@ -552,6 +557,7 @@ def main() -> None:
         f"{'scale_r':>7s} {'verified':>8s}  {'proto_rmse':>10s} {'pipeline':>9s}  reason"
     )
     results = []
+    summary_rows: list[dict] = []
     for image_path in pages:
         stem = image_stem(image_path)
         if only and stem not in only:
@@ -639,7 +645,24 @@ def main() -> None:
             f"{scale_ratio:7.2f} {str(best.verified):>8s}  {proto_rmse:10.1f} {pipeline_rmse:9.1f}  {best.reason}"
         )
         results.append((stem, best.verified, proto_rmse, pipeline_rmse))
+        summary_rows.append(
+            {
+                "stem": stem,
+                "labels": len(labels),
+                "inliers": len(best.inliers),
+                "rms_ft": None if best.rms_ft != best.rms_ft else round(best.rms_ft, 1),
+                "verified": best.verified,
+                "reason": best.reason,
+                "proto_rmse": None
+                if proto_rmse != proto_rmse
+                else round(proto_rmse, 1),
+                "pipeline_rmse": None
+                if pipeline_rmse != pipeline_rmse
+                else round(pipeline_rmse, 1),
+            }
+        )
 
+    json.dump(summary_rows, open(args.out / "summary.json", "w"), indent=1)
     verified = [r for r in results if r[1]]
     print(f"\nVerified fits: {len(verified)}/{len(results)}")
     both = [(p, x) for _, v, p, x in results if v and p == p and x == x]
