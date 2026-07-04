@@ -42,9 +42,12 @@ export interface Detection {
 
 /** The key map's expected center and OCR/fit radius for a page (georef.json `keymap`). */
 export interface KeymapLocation {
+  /** Mean of the detections — misleading for split pages (blocks far apart); prefer centers. */
   lat: number;
   lon: number;
   radius_m: number;
+  /** Every key-map detection of the page number, as [lon, lat] (one per split panel). */
+  centers?: [number, number][];
   /** Segmented key-map block(s) for the page: world-space rings of [lon, lat] pairs. */
   regions?: [number, number][][];
 }

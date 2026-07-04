@@ -1211,9 +1211,45 @@ def test_region_corroborates_scale():
     # typical region -> kept.
     assert region_corroborates_scale(0.515, 0.55)
     assert region_corroborates_scale(0.515, 0.43)
-    # Split-page halves whose regions were watershed-halved disagree -> still dropped.
+    # A split half whose prior was computed from the wrong panel's block (or, before
+    # the split_page fix, from both blocks summed) disagrees -> still dropped.
     assert not region_corroborates_scale(0.515, 0.27)
     # Genuine bad fits: Chicago p50n (0.53x fit, 0.76x region) and Detroit p85 (1.37x
     # fit, 0.89x region) disagree with their regions -> still dropped.
     assert not region_corroborates_scale(0.53, 0.76)
     assert not region_corroborates_scale(1.37, 0.89)
+
+
+def test_is_split_page():
+    from mapsnap.georef_from_labels import is_split_page
+
+    assert is_split_page("p21__1")
+    assert is_split_page("p16n__2")
+    assert not is_split_page("p21")
+    assert not is_split_page("p0b")
+    assert not is_split_page("p61w")
+
+
+def test_region_prior_px_per_ft_split_page_uses_mean_ring_area():
+    from mapsnap.georef_from_labels import region_prior_px_per_ft
+
+    # Two identical ~110.5 x 111.3 m blocks (a split sheet's two panels). For an unsplit
+    # page the rings sum (duplicate detections of one watershed-split block); for a split
+    # panel each ring is one panel's footprint, so the mean applies: prior x sqrt(2).
+    ring_a = [[0.0, 0.0], [0.001, 0.0], [0.001, 0.001], [0.0, 0.001]]
+    ring_b = [[0.01, 0.0], [0.011, 0.0], [0.011, 0.001], [0.01, 0.001]]
+    keymap = {
+        "lat": 0.0005,
+        "lon": 0.0055,
+        "radius_m": 300.0,
+        "regions": [ring_a, ring_b],
+    }
+    summed = region_prior_px_per_ft(keymap, 500, 500)
+    mean = region_prior_px_per_ft(keymap, 500, 500, split_page=True)
+    assert summed is not None and mean is not None
+    assert math.isclose(mean, summed * math.sqrt(2), rel_tol=1e-9)
+    # With one ring, split makes no difference.
+    one = {"lat": 0.0005, "lon": 0.0005, "radius_m": 300.0, "regions": [ring_a]}
+    assert region_prior_px_per_ft(one, 500, 500) == region_prior_px_per_ft(
+        one, 500, 500, split_page=True
+    )

@@ -17,6 +17,7 @@ import json
 import math
 import multiprocessing
 import os
+import re
 import statistics
 import sys
 from collections import defaultdict, deque
@@ -247,8 +248,13 @@ MISSCALE_REGION_AGREEMENT = 1.3
 KEYMAP_RETRY_SIZE_FRACTION = 0.6
 
 
+def is_split_page(stem: str) -> bool:
+    """Whether an image stem names one panel of a split sheet (p21__1-style suffix)."""
+    return re.search(r"__\d+$", stem) is not None
+
+
 def region_prior_px_per_ft(
-    keymap: dict | None, width: float, height: float
+    keymap: dict | None, width: float, height: float, split_page: bool = False
 ) -> float | None:
     """Pixels-per-foot scale prior from the page's segmented key-map region, if any.
 
@@ -258,6 +264,12 @@ def region_prior_px_per_ft(
     heavily foxed paper), in which case callers should skip the check rather than guess.
     Comparable across a volume's pages, but biased in absolute terms — see the constants
     above.
+
+    ``split_page`` marks one panel of a split sheet. Its page number appears once per
+    panel on the key map, so the number's rings are separate panel footprints; which ring
+    is which panel is unknown, so the *mean* ring area stands in for this panel's. For an
+    unsplit page, multiple rings are duplicate detections within one block (watershed-
+    split), and their *sum* reconstructs the block.
     """
     rings = (keymap or {}).get("regions")
     if not rings:
@@ -265,6 +277,9 @@ def region_prior_px_per_ft(
     m_per_px = region_scale_m_per_px(rings, width, height)
     if m_per_px is None or m_per_px <= 0:
         return None
+    if split_page and len(rings) > 1:
+        # Summed area -> mean area divides the area by len(rings), the scale by its sqrt.
+        m_per_px /= math.sqrt(len(rings))
     return 1.0 / (m_per_px * _FT_PER_M)
 
 
@@ -1861,7 +1876,11 @@ def _process_one_image(image_path: str) -> tuple[str, ProcessResult]:
                         near, near_cos_phi, size_fraction=KEYMAP_RETRY_SIZE_FRACTION
                     )
                     if relaxed.success and relaxed.scale_deg_per_px is not None:
-                        prior = region_prior_px_per_ft(keymap, *image_size(image_path))
+                        prior = region_prior_px_per_ft(
+                            keymap,
+                            *image_size(image_path),
+                            split_page=is_split_page(image_stem(image_path)),
+                        )
                         fitted = deg_per_px_to_px_per_ft(relaxed.scale_deg_per_px)
                         if prior is not None and not broadened_scale_plausible(
                             fitted, prior
@@ -1894,7 +1913,11 @@ def _process_one_image(image_path: str) -> tuple[str, ProcessResult]:
                     # multi-GCP fit (p61W: 16 GCPs at 0.04x the true scale). The page's
                     # key-map region gives an independent per-page scale check.
                     if broadened.success and broadened.scale_deg_per_px is not None:
-                        prior = region_prior_px_per_ft(keymap, *image_size(image_path))
+                        prior = region_prior_px_per_ft(
+                            keymap,
+                            *image_size(image_path),
+                            split_page=is_split_page(image_stem(image_path)),
+                        )
                         fitted = deg_per_px_to_px_per_ft(broadened.scale_deg_per_px)
                         if prior is not None and not broadened_scale_plausible(
                             fitted, prior
@@ -2676,7 +2699,11 @@ def main() -> None:
         for prior_image_path in args.images:
             entry = locator.page_keymap(page_number(image_stem(prior_image_path)))
             if entry is not None and entry.get("regions"):
-                prior = region_prior_px_per_ft(entry, *image_size(prior_image_path))
+                prior = region_prior_px_per_ft(
+                    entry,
+                    *image_size(prior_image_path),
+                    split_page=is_split_page(image_stem(prior_image_path)),
+                )
                 if prior is not None:
                     region_priors.append(prior)
         if len(region_priors) >= 5:
@@ -2832,7 +2859,10 @@ def main() -> None:
                     # with a volume-wide area bias).
                     page_scale_deg_per_px = scale_deg_per_px
                     region_prior = region_prior_px_per_ft(
-                        deferred.get("keymap"), deferred["img_w"], deferred["img_h"]
+                        deferred.get("keymap"),
+                        deferred["img_w"],
+                        deferred["img_h"],
+                        split_page=is_split_page(image_stem(deferred["image_path"])),
                     )
                     if region_prior is not None and median_region_prior is not None:
                         multiplier = region_relative_scale(
@@ -2873,7 +2903,11 @@ def main() -> None:
                 if locator is not None and median_region_prior is not None:
                     entry = locator.page_keymap(page_number(image_stem(img_path)))
                     prior = (
-                        region_prior_px_per_ft(entry, *image_size(img_path))
+                        region_prior_px_per_ft(
+                            entry,
+                            *image_size(img_path),
+                            split_page=is_split_page(image_stem(img_path)),
+                        )
                         if entry is not None
                         else None
                     )

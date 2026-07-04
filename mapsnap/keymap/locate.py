@@ -220,12 +220,16 @@ class KeymapLocator:
         return set(self.locations)
 
     def page_keymap(self, number: int | None) -> dict | None:
-        """The georef.json ``keymap`` entry for a page: ``{lat, lon, radius_m[, regions]}``.
+        """The georef.json ``keymap`` entry: ``{lat, lon, radius_m, centers[, regions]}``.
 
-        lat/lon is the mean of the page number's key-map detections; radius_m is the
-        neighborhood radius the page's OCR/fit was restricted to. ``regions`` (when the key
-        map has a regions sidecar) is the page's segmented key-map block(s) as world-space
-        rings of [lon, lat] pairs, GeoJSON-style. None if unplaced.
+        ``centers`` holds every key-map detection of the page number as [lon, lat] —
+        authoritative for display and matching. A number can legitimately appear twice
+        (a split sheet has one block per panel), and the blocks can be far apart, so
+        lat/lon — their mean, kept for compatibility — can land between them, inside
+        neither; prefer ``centers``. radius_m is the neighborhood radius the page's
+        OCR/fit was restricted to. ``regions`` (when the key map has a regions sidecar)
+        is the page's segmented block(s) as world-space rings of [lon, lat] pairs,
+        GeoJSON-style. None if unplaced.
         """
         centers = self.locations.get(number) if number is not None else None
         if not centers:
@@ -234,6 +238,7 @@ class KeymapLocator:
             "lat": round(sum(c[1] for c in centers) / len(centers), 7),
             "lon": round(sum(c[0] for c in centers) / len(centers), 7),
             "radius_m": round(self.radius_m, 1),
+            "centers": [[round(c[0], 7), round(c[1], 7)] for c in centers],
         }
         rings = self.regions.get(number) if number is not None else None
         if rings:

@@ -70,11 +70,17 @@ def test_located_numbers_and_page_number():
 
 
 def test_page_keymap_entry():
-    # Two detections of page 61 -> the entry is their mean lon/lat plus the radius.
+    # Two detections of page 61 (e.g. a split sheet, one block per panel): lat/lon is
+    # their mean (compatibility), centers carries each detection.
     locator = KeymapLocator(
         locations={61: [(-87.5, 41.9), (-87.6, 41.7)]}, radius_m=300.0
     )
-    assert locator.page_keymap(61) == {"lat": 41.8, "lon": -87.55, "radius_m": 300.0}
+    assert locator.page_keymap(61) == {
+        "lat": 41.8,
+        "lon": -87.55,
+        "radius_m": 300.0,
+        "centers": [[-87.5, 41.9], [-87.6, 41.7]],
+    }
     assert locator.page_keymap(999) is None  # unplaced
     assert locator.page_keymap(None) is None
 

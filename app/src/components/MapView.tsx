@@ -357,30 +357,34 @@ export function MapView(props: MapViewProps) {
     const map = mapRef.current;
     if (!map || !mapReady) return;
 
+    // One circle + crosshair per key-map detection: a split page's number appears once
+    // per panel and the blocks can be far apart, so the mean lat/lon may sit inside
+    // neither neighborhood.
+    const centers: [number, number][] = keymap
+      ? (keymap.centers ?? [[keymap.lon, keymap.lat]])
+      : [];
     const features: GeoJSON.Feature[] = keymap
       ? [
-          {
-            type: 'Feature',
-            geometry: {
-              type: 'Polygon',
-              coordinates: [
-                circlePolygon(keymap.lon, keymap.lat, keymap.radius_m),
-              ],
-            },
-            properties: { kind: 'circle' },
-          },
-          {
-            type: 'Feature',
-            geometry: {
-              type: 'MultiLineString',
-              coordinates: crosshairLines(
-                keymap.lon,
-                keymap.lat,
-                keymap.radius_m * 0.18,
-              ),
-            },
-            properties: { kind: 'center' },
-          },
+          ...centers.map(
+            ([lon, lat]): GeoJSON.Feature => ({
+              type: 'Feature',
+              geometry: {
+                type: 'Polygon',
+                coordinates: [circlePolygon(lon, lat, keymap.radius_m)],
+              },
+              properties: { kind: 'circle' },
+            }),
+          ),
+          ...centers.map(
+            ([lon, lat]): GeoJSON.Feature => ({
+              type: 'Feature',
+              geometry: {
+                type: 'MultiLineString',
+                coordinates: crosshairLines(lon, lat, keymap.radius_m * 0.18),
+              },
+              properties: { kind: 'center' },
+            }),
+          ),
           // The page's segmented key-map block(s): its approximate ground footprint.
           ...(keymap.regions ?? []).map(
             (ring): GeoJSON.Feature => ({
@@ -449,11 +453,13 @@ export function MapView(props: MapViewProps) {
     }
 
     // With no georeference (a .georef-nofit.json has a key-map location but no corners), frame
-    // the neighborhood circle so it is visible; when corners exist the image-fit already did.
-    if (keymap && !corners) {
-      const ring = circlePolygon(keymap.lon, keymap.lat, keymap.radius_m);
-      const lons = ring.map((c) => c[0]);
-      const lats = ring.map((c) => c[1]);
+    // the neighborhood circle(s) so they are visible; when corners exist the image-fit already did.
+    if (keymap && !corners && centers.length) {
+      const rings = centers.flatMap(([lon, lat]) =>
+        circlePolygon(lon, lat, keymap.radius_m),
+      );
+      const lons = rings.map((c) => c[0]);
+      const lats = rings.map((c) => c[1]);
       map.fitBounds(
         [
           [Math.min(...lons), Math.min(...lats)],
