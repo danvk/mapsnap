@@ -56,6 +56,7 @@ export function App() {
   const [streets, setStreets] = useState<Street[]>([]);
   const [intersections, setIntersections] = useState<IntersectionPoint[]>([]);
   const [keymap, setKeymap] = useState<KeymapLocation | null>(null);
+  const [truth, setTruth] = useState<[number, number][][] | null>(null);
   const [precomputedCorners, setPrecomputedCorners] = useState<Corners | null>(
     null,
   );
@@ -80,6 +81,7 @@ export function App() {
   const [colorByInlier, setColorByInlier] = useState(true);
   const [showLabels, setShowLabels] = useState(true);
   const [showIntersections, setShowIntersections] = useState(true);
+  const [showTruth, setShowTruth] = useState(false);
   const [filters, setFilters] = useState<DetectionFilters>({
     minConfidence: 0.15,
     minShortSide: 20,
@@ -109,6 +111,7 @@ export function App() {
     setStreets((data.streets ?? []).map((s) => ({ ...s })));
     setIntersections((data.intersections ?? []).map((ix) => ({ ...ix })));
     setKeymap(data.keymap ?? null);
+    setTruth(data.truth ?? null);
     setPrecomputedCorners(data.corners ?? null);
     if (data.width && data.height) {
       setJsonWidth(data.width);
@@ -292,6 +295,7 @@ export function App() {
               intersections={intersections}
               corners={corners}
               keymap={keymap}
+              truth={showTruth ? truth : null}
               imageSrc={imageSrc}
               opacity={opacity / 100}
               showLabels={showLabels}
@@ -328,6 +332,19 @@ export function App() {
               />
               <label htmlFor="show-intersections">
                 Show intersection GCPs on map
+              </label>
+            </div>
+            <div className="opacity-control">
+              <input
+                type="checkbox"
+                id="show-truth"
+                checked={showTruth}
+                disabled={!truth}
+                onChange={(e) => setShowTruth(e.target.checked)}
+              />
+              <label htmlFor="show-truth">
+                Show truth data on map
+                {!truth && ' (none available)'}
               </label>
             </div>
           </>

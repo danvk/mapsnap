@@ -68,6 +68,8 @@ export interface GeorefData {
   streets?: Street[];
   intersections?: IntersectionPoint[];
   keymap?: KeymapLocation;
+  /** This page's human (OIM truth) footprint(s): world-space [lon, lat] rings, one per split. */
+  truth?: [number, number][][];
 }
 
 /** New-format streets.json: detection list wrapped with image metadata. */

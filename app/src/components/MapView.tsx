@@ -15,6 +15,8 @@ interface MapViewProps {
   corners: Corners | null;
   /** The page's key-map neighborhood (center + OCR/fit radius), if placed. */
   keymap: KeymapLocation | null;
+  /** This page's human (OIM truth) footprint(s) to overlay, or null to hide them. */
+  truth: [number, number][][] | null;
   imageSrc: string;
   /** Warped-image opacity in [0, 1]. */
   opacity: number;
@@ -76,6 +78,7 @@ export function MapView(props: MapViewProps) {
     intersections,
     corners,
     keymap,
+    truth,
     imageSrc,
     opacity,
     showLabels,
@@ -504,6 +507,44 @@ export function MapView(props: MapViewProps) {
       );
     }
   }, [mapReady, keymap, corners]);
+
+  // Render this page's human (OIM truth) footprint(s) in green, so the human georeferencing
+  // shows alongside the computed fit. A split page carries all footprints sharing its page
+  // number. Null hides them.
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !mapReady) return;
+
+    const geojson: GeoJSON.FeatureCollection = {
+      type: 'FeatureCollection',
+      features: (truth ?? []).map((ring) => ({
+        type: 'Feature',
+        geometry: { type: 'Polygon', coordinates: [ring] },
+        properties: {},
+      })),
+    };
+
+    const existing = map.getSource('truth') as
+      | maplibregl.GeoJSONSource
+      | undefined;
+    if (existing) {
+      existing.setData(geojson);
+    } else {
+      map.addSource('truth', { type: 'geojson', data: geojson });
+      map.addLayer({
+        id: 'truth-fill',
+        type: 'fill',
+        source: 'truth',
+        paint: { 'fill-color': '#16a34a', 'fill-opacity': 0.08 },
+      });
+      map.addLayer({
+        id: 'truth-line',
+        type: 'line',
+        source: 'truth',
+        paint: { 'line-color': '#16a34a', 'line-width': 1.5 },
+      });
+    }
+  }, [mapReady, truth]);
 
   return <div id="map" ref={containerRef} />;
 }

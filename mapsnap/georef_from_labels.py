@@ -30,6 +30,7 @@ import numpy as np
 from PIL import Image
 from tqdm import tqdm
 
+from mapsnap.compare_iiif_georef import truth_polygons_by_page
 from mapsnap.keymap.locate import KeymapLocator, page_number, region_scale_m_per_px
 from mapsnap.streets import (
     DIRECTION_WORDS,
@@ -1196,6 +1197,7 @@ def _finalize_georef(
     extra_fields: dict | None = None,
     parameters: dict | None = None,
     keymap: dict | None = None,
+    truth_polygons: list[list[list[float]]] | None = None,
 ) -> tuple[float, tuple[float, float]]:
     """Print fit stats, write georef JSON, and return (scale_deg_per_px, page_center)."""
 
@@ -1283,6 +1285,8 @@ def _finalize_georef(
     }
     if keymap:
         result["keymap"] = keymap
+    if truth_polygons:
+        result["truth"] = truth_polygons
     if extra_fields:
         result.update(extra_fields)
     with open(output_path, "w") as f:
@@ -1772,6 +1776,7 @@ def _init_worker(
     locator: KeymapLocator | None = None,
     geojson_features: list[dict] | None = None,
     rectangle_index: tuple[dict[str, list[Block]], float] | None = None,
+    truth_by_page: dict[int, list[list[list[float]]]] | None = None,
 ) -> None:
     """Populate _worker_state once per worker process (or once in the main process)."""
     _worker_state.update(
@@ -1791,6 +1796,7 @@ def _init_worker(
         locator=locator,
         geojson_features=geojson_features or [],
         rectangle_index=rectangle_index,
+        truth_by_page=truth_by_page or None,
     )
 
 
@@ -1816,11 +1822,13 @@ def _process_one_image(image_path: str) -> tuple[str, ProcessResult]:
 
     locator: KeymapLocator | None = _worker_state["locator"]
     rectangle_index = _worker_state["rectangle_index"]  # (block_index, cos_phi) | None
-    keymap = (
-        locator.page_keymap(page_number(image_stem(image_path)))
-        if locator is not None
-        else None
+    number = page_number(image_stem(image_path))
+    # This page's truth footprint(s), matched by page number (all splits of the number).
+    truth_by_page = _worker_state["truth_by_page"]
+    truth_polygons = (
+        truth_by_page.get(number) if truth_by_page and number is not None else None
     )
+    keymap = locator.page_keymap(number) if locator is not None else None
 
     def run(
         block_index: dict, cos_phi: float, size_fraction: float = 1.0
@@ -1845,6 +1853,7 @@ def _process_one_image(image_path: str) -> tuple[str, ProcessResult]:
                 "high_confidence_size_fraction"
             ],
             keymap=keymap,
+            truth_polygons=truth_polygons,
         )
 
     with _captured_page_log(log_path, _worker_state["debug"]):
@@ -1947,10 +1956,11 @@ def _process_one_image(image_path: str) -> tuple[str, ProcessResult]:
     # debugger can still show where the key map expected this page.
     if keymap is not None and not result.success and result.deferred is None:
         nofit_path = output_path.replace(".georef.json", ".georef-nofit.json")
+        nofit: dict = {"keymap": keymap, "streets": [], "intersections": []}
+        if truth_polygons:
+            nofit["truth"] = truth_polygons
         with open(nofit_path, "w") as f:
-            json.dump(
-                {"keymap": keymap, "streets": [], "intersections": []}, f, indent=2
-            )
+            json.dump(nofit, f, indent=2)
     return image_path, result
 
 
@@ -1972,6 +1982,7 @@ def process_image(
     parameters: dict | None = None,
     high_confidence_size_fraction: float = 0.7,
     keymap: dict | None = None,
+    truth_polygons: list[list[list[float]]] | None = None,
 ) -> ProcessResult:
     """Fit a georeference model for one image and write GCPs to output_path.
 
@@ -2135,6 +2146,7 @@ def process_image(
                 "img_h": img_h,
                 "parameters": parameters,
                 "keymap": keymap,
+                "truth_polygons": truth_polygons,
             },
         )
 
@@ -2164,6 +2176,7 @@ def process_image(
         initial_pair=seed_pair,
         parameters=parameters,
         keymap=keymap,
+        truth_polygons=truth_polygons,
     )
     rotation = math.atan2(float(A[1, 0]), float(-A[1, 1]))
     return ProcessResult(
@@ -2327,6 +2340,7 @@ def process_deferred_image(
     img_h: int = deferred["img_h"]
     parameters: dict | None = deferred["parameters"]
     keymap: dict | None = deferred.get("keymap")
+    truth_polygons: list[list[list[float]]] | None = deferred.get("truth_polygons")
 
     page_dim_lat = scale_deg_per_px * img_h
     page_dim_lon = scale_deg_per_px * img_w / cos_phi
@@ -2415,6 +2429,7 @@ def process_deferred_image(
         extra_fields=one_gcp_extra,
         parameters=parameters,
         keymap=keymap,
+        truth_polygons=truth_polygons,
     )
     return ProcessResult(
         success=decision.confirmed, scale_deg_per_px=scale, center=center
@@ -2667,6 +2682,21 @@ def main() -> None:
         file=sys.stderr,
     )
 
+    # If OIM truth (main.iiif.json) sits next to the centerlines, copy each page's truth
+    # footprint(s) (world coordinates) into that page's georef file so the debugger can
+    # overlay the human georeferencing. Matched by page number, so a split page gets all of
+    # its number's truth footprints (split index is not matched).
+    truth_by_page: dict[int, list[list[list[float]]]] | None = None
+    truth_iiif = Path(args.centerlines).parent / "main.iiif.json"
+    if truth_iiif.exists():
+        truth_by_page = truth_polygons_by_page(truth_iiif)
+        n_footprints = sum(len(v) for v in truth_by_page.values())
+        print(
+            f"Truth overlay: {n_footprints} footprints across {len(truth_by_page)} "
+            f"pages from {truth_iiif}",
+            file=sys.stderr,
+        )
+
     # With a georeferenced key map, each placed page is matched first against its own
     # neighborhood and, if that starves the fit, against the whole key-map rectangle (a
     # volume-wide box every page sits in — far smaller than the full centerlines).
@@ -2789,6 +2819,7 @@ def main() -> None:
         locator,
         geojson["features"] if locator is not None else None,
         rectangle_index,
+        truth_by_page,
     )
     if args.num_workers > 1:
         with multiprocessing.Pool(
