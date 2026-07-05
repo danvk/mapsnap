@@ -94,6 +94,8 @@ export interface GeorefData {
   truth?: [number, number][][];
   /** Per-seed-pair fits for interactive RANSAC exploration (present only with `--debug`). */
   gcp_pairs?: GcpPairResult[];
+  /** True for a `.georef-nofit.json`: the pipeline georeferenced no fit for this page. */
+  nofit?: boolean;
 }
 
 /** New-format streets.json: detection list wrapped with image metadata. */

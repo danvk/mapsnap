@@ -85,6 +85,7 @@ class ProcessResult:
     center: tuple[float, float] | None = None  # (lon, lat) page center, set on success
     rotation: float | None = None  # directed rotation in radians, set on success
     deferred: dict | None = None  # set when deferred (exactly 1 GCP, needs scale)
+    nofit_written: bool = False  # process_image already wrote a --debug nofit sidecar
 
 
 def label_features(labels: list[dict]) -> list[LabelFeature]:
@@ -2019,8 +2020,14 @@ def _process_one_image(image_path: str) -> tuple[str, ProcessResult]:
         result.deferred["log_path"] = log_path
     # A key-map-placed page that produced neither a fit nor a deferred sidecar leaves no georef
     # file at all. Write a minimal .georef-nofit.json holding just the neighborhood so the
-    # debugger can still show where the key map expected this page.
-    if keymap is not None and not result.success and result.deferred is None:
+    # debugger can still show where the key map expected this page. Skip this when process_image
+    # already wrote a richer --debug nofit sidecar (with seed-pair fits) to the same path.
+    if (
+        keymap is not None
+        and not result.success
+        and result.deferred is None
+        and not result.nofit_written
+    ):
         nofit_path = output_path.replace(".georef.json", ".georef-nofit.json")
         nofit: dict = {"keymap": keymap, "streets": [], "intersections": []}
         if truth_polygons:
@@ -2230,6 +2237,42 @@ def process_image(
     )
     if A is None:
         print("RANSAC failed: no valid affine found.", file=sys.stderr)
+        # Under --debug the pipeline still scored every seed pair before rejecting them all.
+        # Surface those fits in a .georef-nofit.json so the debugger's interactive explorer
+        # can show why the page failed and let the user try each candidate. Frame the map on
+        # the best-scoring (still-rejected) pair; mark none as `initial`, since the pipeline
+        # selected no pair.
+        scored_pairs = [rec for rec in (pair_records or []) if "affine" in rec]
+        if scored_pairs:
+            best = max(scored_pairs, key=lambda rec: rec["score"])
+            best_A = np.array(best["affine"])
+            best_residuals = _inlier_residuals(
+                features, block_index, best_A, best["inlier_streets"]
+            )
+            nofit_path = output_path.replace(".georef.json", ".georef-nofit.json")
+            print(
+                f"Writing {len(scored_pairs)} rejected seed-pair fits to {nofit_path} "
+                "for the interactive debugger.",
+                file=sys.stderr,
+            )
+            _finalize_georef(
+                best_A,
+                features,
+                gcps,
+                best["inlier_streets"],
+                best_residuals,
+                image_path,
+                nofit_path,
+                labels_path,
+                centerlines_path,
+                initial_pair=None,
+                extra_fields={"nofit": True},
+                parameters=parameters,
+                keymap=keymap,
+                truth_polygons=truth_polygons,
+                gcp_pair_records=pair_records,
+            )
+            return ProcessResult(success=False, nofit_written=True)
         return ProcessResult(success=False)
     print(
         f"RANSAC: {len(inlier_feat_indices)} / {len(features)} inlier labels",

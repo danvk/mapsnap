@@ -229,6 +229,11 @@
   font-weight: bold;
 }
 
+.gcp-nofit-note {
+  color: #b26a00;
+  font-size: 12px;
+}
+
 .gcp-select-row {
   display: flex;
   align-items: center;

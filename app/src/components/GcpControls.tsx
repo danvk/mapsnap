@@ -46,6 +46,12 @@ export function GcpControls(props: GcpControlsProps) {
   return (
     <div className="gcp-controls">
       <div className="gcp-controls-title">Seed GCP pair</div>
+      {defaultPair === null && (
+        <div className="gcp-nofit-note">
+          Page not georeferenced — the pipeline accepted no pair. Showing the
+          best-scoring candidate; explore the others below.
+        </div>
+      )}
       <div className="gcp-select-row">
         <label htmlFor="gcp-a">A</label>
         <select

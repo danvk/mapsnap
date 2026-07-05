@@ -34,6 +34,19 @@ function initialPairFrom(
   return idx.length === 2 ? [idx[0], idx[1]] : null;
 }
 
+// The highest-scoring non-degenerate seed pair, used as the default view for a nofit debug
+// file where the pipeline selected no pair. Picks the max of precomputed scores (no re-scoring);
+// returns null when there are no scored pairs.
+function bestPairFrom(pairs: GcpPairResult[] | null): [number, number] | null {
+  if (!pairs) return null;
+  let best: GcpPairResult | null = null;
+  for (const pair of pairs) {
+    if (pair.degenerate || pair.score === undefined) continue;
+    if (best === null || pair.score > best.score!) best = pair;
+  }
+  return best ? [best.a, best.b] : null;
+}
+
 // Find the recorded fit for an unordered seed pair, or null if it wasn't scored.
 function findPairRecord(
   pairs: GcpPairResult[] | null,
@@ -239,9 +252,13 @@ export function App() {
     setKeymap(data.keymap ?? null);
     setTruth(data.truth ?? null);
     setGcpPairs(data.gcp_pairs ?? null);
-    const pair = data.gcp_pairs ? initialPairFrom(newIntersections) : null;
-    setDefaultPair(pair);
-    setSelectedPair(pair);
+    // The pipeline's chosen pair drives the reset button; it is absent in a nofit debug file,
+    // where we instead open on the best-scoring (still-rejected) pair so the explorer renders.
+    const pipelinePair = data.gcp_pairs
+      ? initialPairFrom(newIntersections)
+      : null;
+    setDefaultPair(pipelinePair);
+    setSelectedPair(pipelinePair ?? bestPairFrom(data.gcp_pairs ?? null));
     setPrecomputedCorners(data.corners ?? null);
     if (data.width && data.height) {
       setJsonWidth(data.width);
