@@ -7,7 +7,7 @@ import type {
   KeymapLocation,
   Street,
 } from '../types';
-import { circlePolygon, crosshairLines, distanceMiles } from '../geometry';
+import { circlePolygon, crosshairLines, distanceKm } from '../geometry';
 
 interface MapViewProps {
   streets: Street[];
@@ -26,6 +26,29 @@ interface MapViewProps {
 // Teal for streets read by the key-map rectangle fallback vocabulary (matching the neighborhood
 // circle and the table badge); otherwise orange/grey by inlier status, or a flat red.
 const FALLBACK_COLOR = '#0d9488';
+
+// Fixed physical size for the key-map center crosshair (not a fraction of the search radius,
+// which varies wildly by volume — e.g. ~270m in Chicago vs ~1585m in Detroit — and would make
+// the crosshair unreadably tiny or huge depending on the volume).
+const CROSSHAIR_ARM_METERS = 61; // ~200 ft
+
+// A view change closer than this is animated (a smooth fly-to reads as "the view nudged");
+// anything farther jumps instantly (an animated pan across a continent is just a multi-second
+// wait). Applies to both the main image-corners fit and the key-map-circle fit below.
+const MAX_ANIMATE_DISTANCE_KM = 10;
+
+// Whether a view change from the map's current center to (lon, lat) is close enough to
+// animate smoothly, vs. jumping instantly (see MAX_ANIMATE_DISTANCE_KM).
+function shouldAnimateTo(
+  map: maplibregl.Map,
+  lon: number,
+  lat: number,
+): boolean {
+  const current = map.getCenter();
+  return (
+    distanceKm(current.lng, current.lat, lon, lat) <= MAX_ANIMATE_DISTANCE_KM
+  );
+}
 
 // Color expression for street labels: key-map fallback reads first, then inlier status.
 function streetColor(
@@ -87,6 +110,15 @@ export function MapView(props: MapViewProps) {
     });
     mapRef.current = map;
     map.on('load', () => setMapReady(true));
+    map.addControl(
+      new maplibregl.ScaleControl({ unit: 'imperial' }),
+      'bottom-left',
+    );
+    map.addControl(
+      new maplibregl.NavigationControl({ visualizePitch: false }),
+      'top-left',
+    );
+
     return () => {
       map.remove();
       mapRef.current = null;
@@ -133,19 +165,16 @@ export function MapView(props: MapViewProps) {
       const maxLat = Math.max(...lats);
       const newCenterLon = (minLon + maxLon) / 2;
       const newCenterLat = (minLat + maxLat) / 2;
-      const currentCenter = map.getCenter();
-      const dist = distanceMiles(
-        currentCenter.lng,
-        currentCenter.lat,
-        newCenterLon,
-        newCenterLat,
-      );
       map.fitBounds(
         [
           [minLon, minLat],
           [maxLon, maxLat],
         ],
-        { padding: 40, maxZoom: 17, animate: dist <= 10 },
+        {
+          padding: 40,
+          maxZoom: 17,
+          animate: shouldAnimateTo(map, newCenterLon, newCenterLat),
+        },
       );
     }
   }, [mapReady, corners, imageSrc, opacity]);
@@ -380,7 +409,7 @@ export function MapView(props: MapViewProps) {
               type: 'Feature',
               geometry: {
                 type: 'MultiLineString',
-                coordinates: crosshairLines(lon, lat, keymap.radius_m * 0.18),
+                coordinates: crosshairLines(lon, lat, CROSSHAIR_ARM_METERS),
               },
               properties: { kind: 'center' },
             }),
@@ -460,12 +489,18 @@ export function MapView(props: MapViewProps) {
       );
       const lons = rings.map((c) => c[0]);
       const lats = rings.map((c) => c[1]);
+      const targetLon = (Math.min(...lons) + Math.max(...lons)) / 2;
+      const targetLat = (Math.min(...lats) + Math.max(...lats)) / 2;
       map.fitBounds(
         [
           [Math.min(...lons), Math.min(...lats)],
           [Math.max(...lons), Math.max(...lats)],
         ],
-        { padding: 60, maxZoom: 16 },
+        {
+          padding: 60,
+          maxZoom: 16,
+          animate: shouldAnimateTo(map, targetLon, targetLat),
+        },
       );
     }
   }, [mapReady, keymap, corners]);

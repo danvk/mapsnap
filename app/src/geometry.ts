@@ -70,6 +70,16 @@ export function distanceMiles(
   return R * 2 * Math.asin(Math.sqrt(a));
 }
 
+/** Haversine distance in kilometers between two lon/lat points. */
+export function distanceKm(
+  lon1: number,
+  lat1: number,
+  lon2: number,
+  lat2: number,
+): number {
+  return distanceMiles(lon1, lat1, lon2, lat2) * 1.60934;
+}
+
 /**
  * Fit affine transform lon = a0 + a1*x + a2*y (and lat) from GCPs with lat/lon,
  * then map the 4 image corners to geographic coordinates.
