@@ -55,6 +55,10 @@ def _feat(text: str, cx: float, cy: float, dir_pix: float) -> LabelFeature:
 EW = 0.0  # dir_pix for an east-west label (horizontal)
 NS = math.pi / 2  # dir_pix for a north-south label (vertical)
 
+# Image size for the p29n-scale fixtures (labels span ~2400 px). At the 5% diagonal tolerance,
+# crossings within ~177 px merge; the synthetic fixtures keep divergent crossings much farther.
+IMG_SIZE = (2500, 2500)
+
 
 # ---------------------------------------------------------------------------
 # build_block_index — basic construction
@@ -176,14 +180,14 @@ def test_build_index_multilinestring():
 
 
 def test_find_gcps_empty_features():
-    assert find_intersection_gcps([], build_block_index(_load_p29n())) == []
+    assert find_intersection_gcps([], build_block_index(_load_p29n()), IMG_SIZE) == []
 
 
 def test_find_gcps_no_matching_streets():
     # Features whose text doesn't match any block_index key produce no GCPs.
     index = build_block_index(_load_p29n())
     feats = [_feat("NONEXISTENT STREET", 500.0, 500.0, EW)]
-    assert find_intersection_gcps(feats, index) == []
+    assert find_intersection_gcps(feats, index, IMG_SIZE) == []
 
 
 def test_find_gcps_grand_x_peshtigo():
@@ -195,7 +199,7 @@ def test_find_gcps_grand_x_peshtigo():
         _feat("EAST GRAND AVENUE", 802.0, 2215.0, EW),
         _feat("NORTH PESHTIGO COURT", 1354.0, 2372.0, NS),
     ]
-    gcps = find_intersection_gcps(feats, index)
+    gcps = find_intersection_gcps(feats, index, IMG_SIZE)
     assert len(gcps) == 1
     gcp = gcps[0]
     assert {gcp.label_a, gcp.label_b} == {"EAST GRAND AVENUE", "NORTH PESHTIGO COURT"}
@@ -213,7 +217,7 @@ def test_find_gcps_lake_shore_x_ohio():
         _feat("NORTH LAKE SHORE DRIVE", 1883.0, 1969.0, NS),
         _feat("EAST OHIO STREET", 780.0, 1591.0, EW),
     ]
-    gcps = find_intersection_gcps(feats, index)
+    gcps = find_intersection_gcps(feats, index, IMG_SIZE)
     assert len(gcps) == 1
     gcp = gcps[0]
     assert {gcp.label_a, gcp.label_b} == {"NORTH LAKE SHORE DRIVE", "EAST OHIO STREET"}
@@ -229,7 +233,7 @@ def test_find_gcps_parallel_streets_produce_no_gcp():
         _feat("EAST GRAND AVENUE", 802.0, 2215.0, EW),
         _feat("EAST OHIO STREET", 780.0, 1591.0, EW),
     ]
-    assert find_intersection_gcps(feats, index) == []
+    assert find_intersection_gcps(feats, index, IMG_SIZE) == []
 
 
 def test_curved_junction_straightening_skips_jogs(monkeypatch):
@@ -266,7 +270,7 @@ def test_curved_junction_straightening_skips_jogs(monkeypatch):
         _feat("SINGLE STREET", 700.0, 300.0, NS),
         _feat("JOG STREET", 300.0, 300.0, NS),
     ]
-    module.find_intersection_gcps(feats, index)
+    module.find_intersection_gcps(feats, index, IMG_SIZE)
     assert len(calls) == 1  # only the unique crossing was a straightening candidate
     assert calls[0] == pytest.approx((-90.0, 30.0), abs=1e-6)
 
@@ -280,7 +284,7 @@ def test_find_gcps_sorted_by_pixel_dist():
         _feat("NORTH LAKE SHORE DRIVE", 1883.0, 1969.0, NS),
         _feat("EAST OHIO STREET", 780.0, 1591.0, EW),
     ]
-    gcps = find_intersection_gcps(feats, index)
+    gcps = find_intersection_gcps(feats, index, IMG_SIZE)
     assert len(gcps) == 2
     assert gcps[0].pixel_dist < gcps[1].pixel_dist
     assert {gcps[0].label_a, gcps[0].label_b} == {
@@ -290,43 +294,63 @@ def test_find_gcps_sorted_by_pixel_dist():
 
 
 # ---------------------------------------------------------------------------
-# find_intersection_gcps — one GCP per (label_a, label_b, cluster)
+# find_intersection_gcps — merge coincident crossings, keep divergent ones
 # ---------------------------------------------------------------------------
 
 
-def test_find_gcps_three_lake_instances_one_gcp():
-    # Three detections of "NORTH LAKE SHORE DRIVE" at different pixel positions.
-    # Combined with one EAST OHIO STREET, exactly one GCP must be returned —
-    # the (fa, fb) pair with the smallest pixel_dist.
-    #
-    #   (1883, 1969) × (780, 1591)  pixel_dist ≈ 1166
-    #   (1606,  613) × (780, 1591)  pixel_dist ≈ 1280
-    #   (1186, 1775) × (780, 1591)  pixel_dist ≈  446  ← selected
+def test_find_gcps_collinear_duplicates_collapse_to_one():
+    # Three collinear "NORTH LAKE SHORE DRIVE" labels (same N-S street line, x≈1883) crossing one
+    # EAST OHIO STREET all land at the same crossing (1883, 1591), so they collapse to a single
+    # GCP — the closest-labels (smallest pixel_dist) instance. This is the PR #30 win preserved.
     index = build_block_index(_load_p29n())
     feats = [
-        _feat("NORTH LAKE SHORE DRIVE", 1883.0, 1969.0, NS),
-        _feat("NORTH LAKE SHORE DRIVE", 1606.0, 613.0, NS),
-        _feat("NORTH LAKE SHORE DRIVE", 1186.0, 1775.0, NS),
+        _feat("NORTH LAKE SHORE DRIVE", 1883.0, 1969.0, NS),  # pixel_dist ≈ 1166
+        _feat(
+            "NORTH LAKE SHORE DRIVE", 1883.0, 1400.0, NS
+        ),  # pixel_dist ≈ 1119 ← selected
+        _feat("NORTH LAKE SHORE DRIVE", 1883.0, 700.0, NS),  # pixel_dist ≈ 1418
         _feat("EAST OHIO STREET", 780.0, 1591.0, EW),
     ]
-    gcps = find_intersection_gcps(feats, index)
+    gcps = find_intersection_gcps(feats, index, IMG_SIZE)
     assert len(gcps) == 1
     gcp = gcps[0]
     assert {gcp.label_a, gcp.label_b} == {"NORTH LAKE SHORE DRIVE", "EAST OHIO STREET"}
-    # Best crossing: N-S line through (1186, 1775) × E-W line through (780, 1591).
-    assert gcp.pixel == pytest.approx((1186.0, 1591.0), abs=1e-6)
-    assert gcp.pixel_dist == pytest.approx(445.7, abs=1.0)
+    assert gcp.pixel == pytest.approx((1883.0, 1591.0), abs=1e-6)
+    assert gcp.pixel_dist == pytest.approx(1119.0, abs=1.0)
+
+
+def test_find_gcps_divergent_crossings_kept_separate():
+    # Two "NORTH LAKE SHORE DRIVE" instances whose crossings with EAST OHIO land far apart —
+    # (1883, 1591) and (1186, 1591), ~697 px > the ~177 px tolerance — as when one label is a
+    # mislabel. Both survive as competing GCPs (same world node, different pixels) so RANSAC can
+    # pick the one consistent with the rest of the page (New Orleans p153's S Liberty × Julia).
+    index = build_block_index(_load_p29n())
+    feats = [
+        _feat("NORTH LAKE SHORE DRIVE", 1883.0, 1969.0, NS),
+        _feat("NORTH LAKE SHORE DRIVE", 1186.0, 1969.0, NS),
+        _feat("EAST OHIO STREET", 780.0, 1591.0, EW),
+    ]
+    gcps = find_intersection_gcps(feats, index, IMG_SIZE)
+    assert len(gcps) == 2
+    assert all(
+        {g.label_a, g.label_b} == {"NORTH LAKE SHORE DRIVE", "EAST OHIO STREET"}
+        for g in gcps
+    )
+    assert {round(g.pixel[0]) for g in gcps} == {1186, 1883}
+    # Both share the one world node, so they are singular as a seed pair (RANSAC skips that pair).
+    assert gcps[0].geo == pytest.approx(gcps[1].geo, abs=1e-9)
 
 
 def test_find_gcps_two_instances_selects_closer_pair():
-    # Two Peshtigo labels: the one closer to the Grand label wins.
+    # Two collinear Peshtigo labels (x=1354) cross Grand at the same point (1354, 2215); they
+    # collapse to one GCP, keeping the instance closer to the Grand label.
     index = build_block_index(_load_p29n())
     feats = [
         _feat("NORTH PESHTIGO COURT", 1354.0, 2372.0, NS),  # pixel_dist ≈  574
         _feat("NORTH PESHTIGO COURT", 1354.0, 500.0, NS),  # pixel_dist ≈ 1716
         _feat("EAST GRAND AVENUE", 802.0, 2215.0, EW),
     ]
-    gcps = find_intersection_gcps(feats, index)
+    gcps = find_intersection_gcps(feats, index, IMG_SIZE)
     assert len(gcps) == 1
     assert gcps[0].pixel == pytest.approx((1354.0, 2215.0), abs=1e-6)
     assert gcps[0].pixel_dist < 600.0
