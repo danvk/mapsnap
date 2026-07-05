@@ -60,6 +60,28 @@ export type Corners = [
   [number, number],
 ];
 
+/**
+ * One seed-GCP-pair fit, precomputed by the Python fitter under `--debug`.
+ *
+ * `a`/`b` index into `intersections`. Everything the debugger needs to show this pair's
+ * fit is precomputed here — image `corners`, which labels/intersections are inliers, the
+ * score and error — so the frontend never re-runs any fit or scoring logic. `degenerate`
+ * pairs (coincident/singular) carry only a/b.
+ */
+export interface GcpPairResult {
+  a: number;
+  b: number;
+  corners?: Corners;
+  score?: number;
+  /** Indices into `streets` that are inliers under this pair's fit. */
+  inlier_streets?: number[];
+  /** Indices into `intersections` that are inliers under this pair's fit. */
+  inlier_intersections?: number[];
+  mean_error_m?: number | null;
+  max_error_m?: number | null;
+  degenerate?: boolean;
+}
+
 /** Georef-format JSON: streets, intersections, and optional precomputed corners. */
 export interface GeorefData {
   width?: number;
@@ -70,6 +92,8 @@ export interface GeorefData {
   keymap?: KeymapLocation;
   /** This page's human (OIM truth) footprint(s): world-space [lon, lat] rings, one per split. */
   truth?: [number, number][][];
+  /** Per-seed-pair fits for interactive RANSAC exploration (present only with `--debug`). */
+  gcp_pairs?: GcpPairResult[];
 }
 
 /** New-format streets.json: detection list wrapped with image metadata. */

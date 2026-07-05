@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import './styles.css';
 import type {
   Corners,
+  GcpPairResult,
   GeorefData,
   IntersectionPoint,
   KeymapLocation,
@@ -9,14 +10,42 @@ import type {
   Street,
   Detection,
 } from './types';
-import { computeCorners } from './geometry';
+import {
+  computeCorners,
+  directionThroughCorners,
+  projectThroughCorners,
+} from './geometry';
 import { filterDetections, type DetectionFilters } from './detections';
 import { parseDroppedJson } from './fileLoading';
 import { ImageColumn, type Mode } from './components/ImageColumn';
 import { MapView } from './components/MapView';
+import { GcpControls, type GcpFitStats } from './components/GcpControls';
 import { DetectionsTable } from './components/DetectionsTable';
 import { PanelsTable } from './components/PanelsTable';
 import { loadImage } from './loadImage';
+
+// The seed pair the pipeline chose: the two intersections flagged `initial`.
+function initialPairFrom(
+  intersections: IntersectionPoint[],
+): [number, number] | null {
+  const idx = intersections
+    .map((ix, i) => (ix.initial ? i : -1))
+    .filter((i) => i >= 0);
+  return idx.length === 2 ? [idx[0], idx[1]] : null;
+}
+
+// Find the recorded fit for an unordered seed pair, or null if it wasn't scored.
+function findPairRecord(
+  pairs: GcpPairResult[] | null,
+  pair: [number, number] | null,
+): GcpPairResult | null {
+  if (!pairs || !pair) return null;
+  const [a, b] = pair;
+  return (
+    pairs.find((p) => (p.a === a && p.b === b) || (p.a === b && p.b === a)) ??
+    null
+  );
+}
 
 // Whether a URL/path points at an image we can load (matched by extension).
 function isImageUrl(url: string): boolean {
@@ -57,6 +86,11 @@ export function App() {
   const [intersections, setIntersections] = useState<IntersectionPoint[]>([]);
   const [keymap, setKeymap] = useState<KeymapLocation | null>(null);
   const [truth, setTruth] = useState<[number, number][][] | null>(null);
+  const [gcpPairs, setGcpPairs] = useState<GcpPairResult[] | null>(null);
+  const [selectedPair, setSelectedPair] = useState<[number, number] | null>(
+    null,
+  );
+  const [defaultPair, setDefaultPair] = useState<[number, number] | null>(null);
   const [precomputedCorners, setPrecomputedCorners] = useState<Corners | null>(
     null,
   );
@@ -91,10 +125,99 @@ export function App() {
 
   const prevObjectUrlRef = useRef<string | null>(null);
 
-  const corners = useMemo(
-    () => precomputedCorners ?? computeCorners(streets, jsonWidth, jsonHeight),
-    [precomputedCorners, streets, jsonWidth, jsonHeight],
+  // Interactive seed-pair exploration (only when the georef was written with --debug and
+  // carries `gcp_pairs`). The active pair's fit is looked up — never recomputed — and its
+  // precomputed corners drive label repositioning/recolouring below.
+  const activePair = useMemo(
+    () => findPairRecord(gcpPairs, selectedPair),
+    [gcpPairs, selectedPair],
   );
+  const overrideCorners =
+    activePair && !activePair.degenerate ? (activePair.corners ?? null) : null;
+
+  // Streets/intersections shown on the map: for a non-default pair, reposition labels through
+  // the pair's corners and recolour by its inlier sets (pure rendering — no fit/scoring here).
+  const displayStreets = useMemo<Street[]>(() => {
+    if (!overrideCorners || !activePair) return streets;
+    const inliers = new Set(activePair.inlier_streets ?? []);
+    return streets.map((s, i) => {
+      const [lon, lat] = projectThroughCorners(
+        overrideCorners,
+        jsonWidth,
+        jsonHeight,
+        s.x,
+        s.y,
+      );
+      const [dLon, dLat] =
+        s.dir_x !== undefined && s.dir_y !== undefined
+          ? directionThroughCorners(
+              overrideCorners,
+              jsonWidth,
+              jsonHeight,
+              s.dir_x,
+              s.dir_y,
+            )
+          : [s.dir_lon, s.dir_lat];
+      return {
+        ...s,
+        lon,
+        lat,
+        dir_lon: dLon,
+        dir_lat: dLat,
+        inlier: inliers.has(i),
+      };
+    });
+  }, [overrideCorners, activePair, streets, jsonWidth, jsonHeight]);
+
+  const displayIntersections = useMemo<IntersectionPoint[]>(() => {
+    if (!activePair) return intersections;
+    const inliers = new Set(activePair.inlier_intersections ?? []);
+    return intersections.map((ix, i) => ({
+      ...ix,
+      inlier: inliers.has(i),
+      initial: i === activePair.a || i === activePair.b,
+    }));
+  }, [activePair, intersections]);
+
+  const corners = useMemo(
+    () =>
+      overrideCorners ??
+      precomputedCorners ??
+      computeCorners(displayStreets, jsonWidth, jsonHeight),
+    [
+      overrideCorners,
+      precomputedCorners,
+      displayStreets,
+      jsonWidth,
+      jsonHeight,
+    ],
+  );
+
+  // Precomputed stats for the GcpControls readout of the active pair.
+  const gcpStats = useMemo<GcpFitStats | null>(() => {
+    if (!selectedPair) return null;
+    if (!activePair) return null;
+    if (activePair.degenerate) {
+      return {
+        degenerate: true,
+        numInliers: 0,
+        numOutliers: 0,
+        score: -Infinity,
+        meanErrorM: null,
+        maxErrorM: null,
+      };
+    }
+    const numInliers = activePair.inlier_streets?.length ?? 0;
+    return {
+      degenerate: false,
+      numInliers,
+      numOutliers: streets.length - numInliers,
+      score: activePair.score ?? 0,
+      meanErrorM: activePair.mean_error_m ?? null,
+      maxErrorM: activePair.max_error_m ?? null,
+    };
+  }, [selectedPair, activePair, streets.length]);
+
   const filteredDetections = useMemo(
     () => filterDetections(detections, filters),
     [detections, filters],
@@ -108,10 +231,17 @@ export function App() {
     } catch {
       return; // not valid JSON, skip update
     }
+    const newIntersections = (data.intersections ?? []).map((ix) => ({
+      ...ix,
+    }));
     setStreets((data.streets ?? []).map((s) => ({ ...s })));
-    setIntersections((data.intersections ?? []).map((ix) => ({ ...ix })));
+    setIntersections(newIntersections);
     setKeymap(data.keymap ?? null);
     setTruth(data.truth ?? null);
+    setGcpPairs(data.gcp_pairs ?? null);
+    const pair = data.gcp_pairs ? initialPairFrom(newIntersections) : null;
+    setDefaultPair(pair);
+    setSelectedPair(pair);
     setPrecomputedCorners(data.corners ?? null);
     if (data.width && data.height) {
       setJsonWidth(data.width);
@@ -291,8 +421,8 @@ export function App() {
         {mode === 'georef' && (
           <>
             <MapView
-              streets={streets}
-              intersections={intersections}
+              streets={displayStreets}
+              intersections={displayIntersections}
               corners={corners}
               keymap={keymap}
               truth={showTruth ? truth : null}
@@ -302,6 +432,15 @@ export function App() {
               showIntersections={showIntersections}
               colorByInlier={colorByInlier}
             />
+            {gcpPairs && selectedPair && intersections.length >= 2 && (
+              <GcpControls
+                intersections={intersections}
+                selectedPair={selectedPair}
+                onChange={setSelectedPair}
+                defaultPair={defaultPair}
+                result={gcpStats}
+              />
+            )}
             <div className="opacity-control">
               <label htmlFor="opacity-slider">Opacity</label>
               <input

@@ -128,6 +128,47 @@ export function computeCorners(
 }
 
 /**
+ * Map an image pixel (x, y) to [lon, lat] through the affine implied by a corner quad.
+ *
+ * `corners` are [nw, ne, se, sw] = the images of (0,0), (w,0), (w,h), (0,h), so the affine's
+ * columns are the per-pixel geo deltas. Pure rendering math — lets the debugger reposition
+ * labels for an arbitrary seed-pair fit (whose corners the Python fitter precomputed) without
+ * re-deriving or re-scoring the fit.
+ */
+export function projectThroughCorners(
+  corners: Corners,
+  width: number,
+  height: number,
+  x: number,
+  y: number,
+): [number, number] {
+  const [nw, ne, , sw] = corners;
+  const ux = (ne[0] - nw[0]) / width;
+  const uy = (ne[1] - nw[1]) / width;
+  const vx = (sw[0] - nw[0]) / height;
+  const vy = (sw[1] - nw[1]) / height;
+  return [nw[0] + x * ux + y * vx, nw[1] + x * uy + y * vy];
+}
+
+/**
+ * Map an image-space direction (dx, dy) to a unit [lon, lat] direction through the same
+ * corner-quad affine (linear part only, then normalized).
+ */
+export function directionThroughCorners(
+  corners: Corners,
+  width: number,
+  height: number,
+  dx: number,
+  dy: number,
+): [number, number] {
+  const [nw, ne, , sw] = corners;
+  const gx = (dx * (ne[0] - nw[0])) / width + (dy * (sw[0] - nw[0])) / height;
+  const gy = (dx * (ne[1] - nw[1])) / width + (dy * (sw[1] - nw[1])) / height;
+  const norm = Math.hypot(gx, gy) || 1;
+  return [gx / norm, gy / norm];
+}
+
+/**
  * A closed ring of [lon, lat] points approximating a circle of `radiusMeters`
  * around (lon, lat), using an equirectangular local approximation. Suitable for
  * drawing the key-map neighborhood on a web map at city scale.

@@ -1063,6 +1063,56 @@ def test_ransac_hybrid_accepts_ambiguous_label_seeding_two_streets():
     assert pair == (0, 1)
 
 
+def test_ransac_hybrid_collects_pair_records():
+    # A collector passed to ransac_hybrid gets one record per scored seed pair (for the
+    # interactive debugger). Same COREY-seeded frame as the position-only test: one valid pair.
+    kerch = _rh_feat("KERCH", (500.0, 200.0), 0.0)
+    jeff = _rh_feat("JEFF", (500.0, 700.0), 0.0)
+    corey = _rh_feat("COREY", (1500.0, 450.0), math.pi / 2)
+    features = [kerch, jeff, corey]
+    block_index = {
+        "KERCH": [_horizontal_block("KERCH", 30.0)],
+        "JEFF": [_horizontal_block("JEFF", 29.995)],
+        "COREY": [_vertical_block("COREY", -90.0)],
+    }
+    gcps = [
+        IntersectionGCP(
+            "KERCH", "COREY", (500.0, 200.0), (-90.0, 30.0), 0.0, kerch, corey
+        ),
+        IntersectionGCP(
+            "JEFF", "COREY", (500.0, 700.0), (-90.0, 29.995), 0.0, jeff, corey
+        ),
+    ]
+    records: list[dict] = []
+    ransac_hybrid(gcps, features, block_index, _RH_COS_PHI, pair_records=records)
+    assert len(records) == 1  # C(2, 2) == 1 pair, non-degenerate
+    rec = records[0]
+    assert {rec["a"], rec["b"]} == {0, 1}
+    assert np.array(rec["affine"]).shape == (2, 3)
+    assert set(rec["inlier_streets"]) == {
+        0,
+        1,
+    }  # KERCH, JEFF (COREY is a position outlier)
+    assert rec["mean_error_m"] is not None and rec["max_error_m"] is not None
+    assert "degenerate" not in rec
+
+    # No collector -> no records gathered, return value unchanged.
+    model, _, _ = ransac_hybrid(gcps, features, block_index, _RH_COS_PHI)
+    assert model is not None
+
+
+def test_ransac_hybrid_pair_records_flags_degenerate():
+    # Two GCPs at the same world point are singular; the collector records them as degenerate.
+    feat = _rh_feat("A", (100.0, 100.0), 0.0)
+    gcps = [
+        IntersectionGCP("A", "B", (100.0, 100.0), (-90.0, 30.0), 0.0, feat, feat),
+        IntersectionGCP("A", "B", (200.0, 200.0), (-90.0, 30.0), 0.0, feat, feat),
+    ]
+    records: list[dict] = []
+    ransac_hybrid([*gcps], [feat], {}, _RH_COS_PHI, pair_records=records)
+    assert records == [{"a": 0, "b": 1, "degenerate": True}]
+
+
 # is_rotation_outlier ------------------------------------------------------
 
 # Axis-aligned similarity: pixel (x, y) -> (lon, lat) = (-90 + 1e-5·x, 30 - 1e-5·y). A

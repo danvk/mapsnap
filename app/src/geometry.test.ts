@@ -3,13 +3,15 @@ import {
   circlePolygon,
   computeCorners,
   crosshairLines,
+  directionThroughCorners,
   distanceKm,
   distanceMiles,
   pointInPolygon,
   polygonArea,
+  projectThroughCorners,
   solveLinear3,
 } from './geometry';
-import type { Street } from './types';
+import type { Corners, Street } from './types';
 
 describe('crosshairLines', () => {
   it('is a horizontal and a vertical segment centered on the point', () => {
@@ -181,5 +183,36 @@ describe('computeCorners', () => {
     expect(ne[0]).toBeCloseTo(-64);
     expect(se[1]).toBeCloseTo(30);
     expect(sw[0]).toBeCloseTo(-74);
+  });
+});
+
+describe('projectThroughCorners / directionThroughCorners', () => {
+  // A 100x50 image mapped so nw=(10,20), ne=(12,20), se=(12,25), sw=(10,25):
+  // one pixel-x = 0.02 lon, one pixel-y = 0.1 lat.
+  const corners: Corners = [
+    [10, 20],
+    [12, 20],
+    [12, 25],
+    [10, 25],
+  ];
+
+  it('maps the four image corners back to the quad', () => {
+    expect(projectThroughCorners(corners, 100, 50, 0, 0)).toEqual([10, 20]);
+    expect(projectThroughCorners(corners, 100, 50, 100, 0)).toEqual([12, 20]);
+    expect(projectThroughCorners(corners, 100, 50, 100, 50)).toEqual([12, 25]);
+    expect(projectThroughCorners(corners, 100, 50, 0, 50)).toEqual([10, 25]);
+  });
+
+  it('maps an interior pixel by the per-pixel deltas', () => {
+    const [lon, lat] = projectThroughCorners(corners, 100, 50, 50, 25);
+    expect(lon).toBeCloseTo(11);
+    expect(lat).toBeCloseTo(22.5);
+  });
+
+  it('returns a unit geo direction from an image direction', () => {
+    const [dlon, dlat] = directionThroughCorners(corners, 100, 50, 1, 0);
+    expect(Math.hypot(dlon, dlat)).toBeCloseTo(1);
+    expect(dlat).toBeCloseTo(0); // +x maps to +lon, no lat component here
+    expect(dlon).toBeGreaterThan(0);
   });
 });
