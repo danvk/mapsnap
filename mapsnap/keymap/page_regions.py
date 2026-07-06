@@ -411,7 +411,9 @@ def regions_panels_doc(
     panels: list[list[list[float]]] = []
     labels: list[str] = []
     for index, polygon in polygons.items():
-        panels.append([[round(x, 1), round(y, 1)] for x, y in polygon])
+        ring = [[round(x, 1), round(y, 1)] for x, y in polygon]
+        ring.append(ring[0])  # GeoJSON-style rings are explicitly closed
+        panels.append(ring)
         labels.append(texts[index])
     return {
         "image": image_name,
