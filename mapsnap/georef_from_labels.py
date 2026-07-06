@@ -85,6 +85,7 @@ class ProcessResult:
     center: tuple[float, float] | None = None  # (lon, lat) page center, set on success
     rotation: float | None = None  # directed rotation in radians, set on success
     deferred: dict | None = None  # set when deferred (exactly 1 GCP, needs scale)
+    nofit_written: bool = False  # process_image already wrote a --debug nofit sidecar
 
 
 def label_features(labels: list[dict]) -> list[LabelFeature]:
@@ -1100,6 +1101,7 @@ def ransac_hybrid(
     dir_threshold: float = np.pi / 6,
     force_pair: tuple[int, int] | None = None,
     debug: bool = False,
+    pair_records: list[dict] | None = None,
 ) -> tuple[np.ndarray | None, list[int], tuple[int, int] | None]:
     """Find the best similarity affine using intersection GCPs as seeds, label-based inlier scoring.
 
@@ -1162,10 +1164,14 @@ def ransac_hybrid(
         a, b = gcps[i1], gcps[i2]
         # Skip pairs that map to the same OSM intersection — singular by construction.
         if abs(a.geo[0] - b.geo[0]) < 1e-6 and abs(a.geo[1] - b.geo[1]) < 1e-6:
+            if pair_records is not None:
+                pair_records.append({"a": i1, "b": i2, "degenerate": True})
             continue
         try:
             A = solve_similarity_2pts([(a.pixel, a.geo), (b.pixel, b.geo)], cos_phi)
         except np.linalg.LinAlgError:
+            if pair_records is not None:
+                pair_records.append({"a": i1, "b": i2, "degenerate": True})
             continue
         candidates.append((pair_idx, A))
 
@@ -1176,6 +1182,40 @@ def ransac_hybrid(
         inliers, err = label_inliers(
             features, block_index, A, pos_threshold, dir_threshold, debug=debug
         )
+
+        # Record this pair's fit for the interactive debugger (only when --debug supplies a
+        # collector). Recorded before the rotation-outlier reject below so even pairs the
+        # pipeline discards remain explorable. The affine is turned into image corners by the
+        # caller (which has the image dimensions).
+        if pair_records is not None:
+            residuals_m = [
+                r * 111_000
+                for r in _inlier_residuals(features, block_index, A, inliers)
+            ]
+            inlier_intersections = [
+                j
+                for j, g in enumerate(gcps)
+                if float(
+                    np.linalg.norm(
+                        np.array(apply_affine(A, *g.pixel)) - np.array(g.geo)
+                    )
+                )
+                <= pos_threshold
+            ]
+            pair_records.append(
+                {
+                    "a": i1,
+                    "b": i2,
+                    "affine": A.tolist(),
+                    "score": float(len(inliers)) * pos_threshold - err,
+                    "inlier_streets": list(inliers),
+                    "inlier_intersections": inlier_intersections,
+                    "mean_error_m": round(sum(residuals_m) / len(residuals_m), 2)
+                    if residuals_m
+                    else None,
+                    "max_error_m": round(max(residuals_m), 2) if residuals_m else None,
+                }
+            )
 
         # Reject only fits whose own seed streets are *rotation* outliers: each seed GCP is
         # built from two specific street labels, so if the model maps one of those labels to a
@@ -1246,6 +1286,7 @@ def _finalize_georef(
     parameters: dict | None = None,
     keymap: dict | None = None,
     truth_polygons: list[list[list[float]]] | None = None,
+    gcp_pair_records: list[dict] | None = None,
 ) -> tuple[float, tuple[float, float]]:
     """Print fit stats, write georef JSON, and return (scale_deg_per_px, page_center)."""
 
@@ -1335,6 +1376,32 @@ def _finalize_georef(
         result["keymap"] = keymap
     if truth_polygons:
         result["truth"] = truth_polygons
+    if gcp_pair_records is not None:
+        # Turn each recorded pair's affine into image corners here (the fitter has no image
+        # dimensions); the debugger reconstructs the affine from these corners to reposition
+        # and recolour labels without re-running any fit/scoring logic.
+        pairs_out = []
+        for rec in gcp_pair_records:
+            if rec.get("degenerate"):
+                pairs_out.append({"a": rec["a"], "b": rec["b"], "degenerate": True})
+                continue
+            M = np.array(rec["affine"])
+            pairs_out.append(
+                {
+                    "a": rec["a"],
+                    "b": rec["b"],
+                    "corners": [
+                        [round(float(x), 7) for x in apply_affine(M, u, v)]
+                        for u, v in ((0, 0), (width, 0), (width, height), (0, height))
+                    ],
+                    "score": rec["score"],
+                    "inlier_streets": rec["inlier_streets"],
+                    "inlier_intersections": rec["inlier_intersections"],
+                    "mean_error_m": rec["mean_error_m"],
+                    "max_error_m": rec["max_error_m"],
+                }
+            )
+        result["gcp_pairs"] = pairs_out
     if extra_fields:
         result.update(extra_fields)
     with open(output_path, "w") as f:
@@ -2001,8 +2068,14 @@ def _process_one_image(image_path: str) -> tuple[str, ProcessResult]:
         result.deferred["log_path"] = log_path
     # A key-map-placed page that produced neither a fit nor a deferred sidecar leaves no georef
     # file at all. Write a minimal .georef-nofit.json holding just the neighborhood so the
-    # debugger can still show where the key map expected this page.
-    if keymap is not None and not result.success and result.deferred is None:
+    # debugger can still show where the key map expected this page. Skip this when process_image
+    # already wrote a richer --debug nofit sidecar (with seed-pair fits) to the same path.
+    if (
+        keymap is not None
+        and not result.success
+        and result.deferred is None
+        and not result.nofit_written
+    ):
         nofit_path = output_path.replace(".georef.json", ".georef-nofit.json")
         nofit: dict = {"keymap": keymap, "streets": [], "intersections": []}
         if truth_polygons:
@@ -2198,11 +2271,56 @@ def process_image(
             },
         )
 
+    # Under --debug, collect every scored seed pair's fit so the debugger can offer
+    # interactive seed-pair exploration (see _finalize_georef's gcp_pairs output).
+    pair_records: list[dict] | None = [] if debug else None
     A, inlier_feat_indices, seed_pair = ransac_hybrid(
-        gcps, features, block_index, cos_phi, force_pair=force_intersection, debug=debug
+        gcps,
+        features,
+        block_index,
+        cos_phi,
+        force_pair=force_intersection,
+        debug=debug,
+        pair_records=pair_records,
     )
     if A is None:
         print("RANSAC failed: no valid affine found.", file=sys.stderr)
+        # Under --debug the pipeline still scored every seed pair before rejecting them all.
+        # Surface those fits in a .georef-nofit.json so the debugger's interactive explorer
+        # can show why the page failed and let the user try each candidate. Frame the map on
+        # the best-scoring (still-rejected) pair; mark none as `initial`, since the pipeline
+        # selected no pair.
+        scored_pairs = [rec for rec in (pair_records or []) if "affine" in rec]
+        if scored_pairs:
+            best = max(scored_pairs, key=lambda rec: rec["score"])
+            best_A = np.array(best["affine"])
+            best_residuals = _inlier_residuals(
+                features, block_index, best_A, best["inlier_streets"]
+            )
+            nofit_path = output_path.replace(".georef.json", ".georef-nofit.json")
+            print(
+                f"Writing {len(scored_pairs)} rejected seed-pair fits to {nofit_path} "
+                "for the interactive debugger.",
+                file=sys.stderr,
+            )
+            _finalize_georef(
+                best_A,
+                features,
+                gcps,
+                best["inlier_streets"],
+                best_residuals,
+                image_path,
+                nofit_path,
+                labels_path,
+                centerlines_path,
+                initial_pair=None,
+                extra_fields={"nofit": True},
+                parameters=parameters,
+                keymap=keymap,
+                truth_polygons=truth_polygons,
+                gcp_pair_records=pair_records,
+            )
+            return ProcessResult(success=False, nofit_written=True)
         return ProcessResult(success=False)
     print(
         f"RANSAC: {len(inlier_feat_indices)} / {len(features)} inlier labels",
@@ -2222,6 +2340,7 @@ def process_image(
         labels_path,
         centerlines_path,
         initial_pair=seed_pair,
+        gcp_pair_records=pair_records,
         parameters=parameters,
         keymap=keymap,
         truth_polygons=truth_polygons,

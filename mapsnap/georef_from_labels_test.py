@@ -1063,6 +1063,114 @@ def test_ransac_hybrid_accepts_ambiguous_label_seeding_two_streets():
     assert pair == (0, 1)
 
 
+def test_ransac_hybrid_collects_pair_records():
+    # A collector passed to ransac_hybrid gets one record per scored seed pair (for the
+    # interactive debugger). Same COREY-seeded frame as the position-only test: one valid pair.
+    kerch = _rh_feat("KERCH", (500.0, 200.0), 0.0)
+    jeff = _rh_feat("JEFF", (500.0, 700.0), 0.0)
+    corey = _rh_feat("COREY", (1500.0, 450.0), math.pi / 2)
+    features = [kerch, jeff, corey]
+    block_index = {
+        "KERCH": [_horizontal_block("KERCH", 30.0)],
+        "JEFF": [_horizontal_block("JEFF", 29.995)],
+        "COREY": [_vertical_block("COREY", -90.0)],
+    }
+    gcps = [
+        IntersectionGCP(
+            "KERCH", "COREY", (500.0, 200.0), (-90.0, 30.0), 0.0, kerch, corey
+        ),
+        IntersectionGCP(
+            "JEFF", "COREY", (500.0, 700.0), (-90.0, 29.995), 0.0, jeff, corey
+        ),
+    ]
+    records: list[dict] = []
+    ransac_hybrid(gcps, features, block_index, _RH_COS_PHI, pair_records=records)
+    assert len(records) == 1  # C(2, 2) == 1 pair, non-degenerate
+    rec = records[0]
+    assert {rec["a"], rec["b"]} == {0, 1}
+    assert np.array(rec["affine"]).shape == (2, 3)
+    assert set(rec["inlier_streets"]) == {
+        0,
+        1,
+    }  # KERCH, JEFF (COREY is a position outlier)
+    assert rec["mean_error_m"] is not None and rec["max_error_m"] is not None
+    assert "degenerate" not in rec
+
+    # No collector -> no records gathered, return value unchanged.
+    model, _, _ = ransac_hybrid(gcps, features, block_index, _RH_COS_PHI)
+    assert model is not None
+
+
+def test_ransac_hybrid_pair_records_flags_degenerate():
+    # Two GCPs at the same world point are singular; the collector records them as degenerate.
+    feat = _rh_feat("A", (100.0, 100.0), 0.0)
+    gcps = [
+        IntersectionGCP("A", "B", (100.0, 100.0), (-90.0, 30.0), 0.0, feat, feat),
+        IntersectionGCP("A", "B", (200.0, 200.0), (-90.0, 30.0), 0.0, feat, feat),
+    ]
+    records: list[dict] = []
+    ransac_hybrid([*gcps], [feat], {}, _RH_COS_PHI, pair_records=records)
+    assert records == [{"a": 0, "b": 1, "degenerate": True}]
+
+
+def test_finalize_georef_nofit_has_marker_and_no_initial_pair(tmp_path):
+    # When the pipeline accepts no seed pair, process_image frames a .georef-nofit.json on the
+    # best rejected pair via _finalize_georef(initial_pair=None, extra_fields={"nofit": True}).
+    # The written file must carry the nofit marker, flag no intersection `initial` (the pipeline
+    # chose none), and keep the seed-pair fits so the debugger's explorer can still render.
+    from PIL import Image
+
+    from mapsnap.georef_from_labels import _finalize_georef
+
+    image_path = tmp_path / "p1.jpg"
+    Image.new("RGB", (400, 300)).save(image_path)
+
+    A = np.array([[1e-5, 0.0, -90.0], [0.0, -1e-5, 30.0]])
+    kerch = _rh_feat("KERCH", (100.0, 100.0), 0.0)
+    jeff = _rh_feat("JEFF", (100.0, 200.0), 0.0)
+    gcps = [
+        IntersectionGCP(
+            "KERCH", "COREY", (100.0, 100.0), (-89.999, 29.999), 0.0, kerch, kerch
+        ),
+        IntersectionGCP(
+            "JEFF", "COREY", (100.0, 200.0), (-89.999, 29.998), 0.0, jeff, jeff
+        ),
+    ]
+    pair_records = [
+        {
+            "a": 0,
+            "b": 1,
+            "affine": A.tolist(),
+            "score": 0.001,
+            "inlier_streets": [0, 1],
+            "inlier_intersections": [0, 1],
+            "mean_error_m": 3.2,
+            "max_error_m": 5.1,
+        }
+    ]
+    out_path = tmp_path / "p1.georef-nofit.json"
+    _finalize_georef(
+        A,
+        [kerch, jeff],
+        gcps,
+        [0, 1],
+        [1e-5],
+        str(image_path),
+        str(out_path),
+        "labels.json",
+        "centerlines.geojson",
+        initial_pair=None,
+        extra_fields={"nofit": True},
+        gcp_pair_records=pair_records,
+    )
+    data = json.loads(out_path.read_text())
+    assert data["nofit"] is True
+    assert not any(ix["initial"] for ix in data["intersections"])
+    assert len(data["gcp_pairs"]) == 1
+    assert data["gcp_pairs"][0]["inlier_streets"] == [0, 1]
+    assert "corners" in data
+
+
 # is_rotation_outlier ------------------------------------------------------
 
 # Axis-aligned similarity: pixel (x, y) -> (lon, lat) = (-90 + 1e-5·x, 30 - 1e-5·y). A

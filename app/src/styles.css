@@ -214,3 +214,50 @@
   font-size: 0.7em;
   vertical-align: middle;
 }
+
+.gcp-controls {
+  border: 1px solid #ccc;
+  border-radius: 4px;
+  padding: 8px 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 13px;
+}
+
+.gcp-controls-title {
+  font-weight: bold;
+}
+
+.gcp-nofit-note {
+  color: #b26a00;
+  font-size: 12px;
+}
+
+.gcp-select-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.gcp-select-row label {
+  width: 12px;
+  font-weight: bold;
+}
+
+.gcp-select-row select {
+  flex: 1;
+  min-width: 0;
+}
+
+.gcp-stats {
+  border-top: 1px solid #eee;
+  padding-top: 6px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.gcp-stats-warning {
+  color: #b00;
+}
