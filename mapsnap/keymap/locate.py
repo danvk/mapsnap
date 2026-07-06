@@ -99,12 +99,59 @@ def geometry_vertices(geometry: dict) -> list[Point]:
     return []
 
 
+def geometry_segments(geometry: dict) -> list[tuple[Point, Point]]:
+    """A GeoJSON geometry's edges as (start, end) (lon, lat) pairs, per line/ring.
+
+    Consecutive vertices within each LineString / MultiLineString line / Polygon ring, so a long
+    street segment that crosses a neighborhood without a vertex inside it is still testable (see
+    :func:`KeymapLocator.restricted_features`). A Point yields one degenerate (p, p) segment so
+    isolated points still register.
+    """
+    kind = geometry.get("type")
+    coords = geometry.get("coordinates", [])
+    if kind == "Point":
+        return [((coords[0], coords[1]), (coords[0], coords[1]))]
+    lines: list[list] = []
+    if kind == "LineString":
+        lines = [coords]
+    elif kind == "MultiLineString":
+        lines = list(coords)
+    elif kind == "Polygon":
+        lines = list(coords)
+    segments: list[tuple[Point, Point]] = []
+    for line in lines:
+        for a, b in zip(line, line[1:]):
+            segments.append(((a[0], a[1]), (b[0], b[1])))
+    return segments
+
+
 def meters_between(a: Point, b: Point) -> float:
     """Approximate distance in metres between two (lon, lat) points (equirectangular)."""
     mid_lat = math.radians((a[1] + b[1]) / 2)
     dx = (a[0] - b[0]) * M_PER_DEG_LON_EQUATOR * math.cos(mid_lat)
     dy = (a[1] - b[1]) * M_PER_DEG_LAT
     return math.hypot(dx, dy)
+
+
+def segment_point_distance_m(segment: tuple[Point, Point], point: Point) -> float:
+    """Distance in metres from ``point`` to a (lon, lat) segment, equirectangular local frame.
+
+    Uses a frame anchored at ``point`` (so the point is the origin), scaling degrees to metres
+    at the point's latitude, then the standard distance from the origin to the segment. Exact
+    regardless of how far apart the segment's endpoints are, so a street crossing a neighborhood
+    with no vertex inside still measures within range.
+    """
+    scale_x = M_PER_DEG_LON_EQUATOR * math.cos(math.radians(point[1]))
+    ax = (segment[0][0] - point[0]) * scale_x
+    ay = (segment[0][1] - point[1]) * M_PER_DEG_LAT
+    bx = (segment[1][0] - point[0]) * scale_x
+    by = (segment[1][1] - point[1]) * M_PER_DEG_LAT
+    dx, dy = bx - ax, by - ay
+    seg_len_sq = dx * dx + dy * dy
+    if seg_len_sq == 0:
+        return math.hypot(ax, ay)
+    t = max(0.0, min(1.0, -(ax * dx + ay * dy) / seg_len_sq))
+    return math.hypot(ax + t * dx, ay + t * dy)
 
 
 def ring_area_m2(ring: list[Point]) -> float:
@@ -295,11 +342,11 @@ class KeymapLocator:
             return None
         kept = []
         for feature in features:
-            vertices = geometry_vertices(feature.get("geometry", {}))
+            segments = geometry_segments(feature.get("geometry", {}))
             if any(
-                meters_between(center, vertex) <= self.radius_m
+                segment_point_distance_m(segment, center) <= self.radius_m
                 for center in centers
-                for vertex in vertices
+                for segment in segments
             ):
                 kept.append(feature)
         return kept

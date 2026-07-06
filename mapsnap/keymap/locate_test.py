@@ -4,6 +4,7 @@ from mapsnap.keymap.locate import (
     KeymapLocator,
     bilinear_pixel_to_world,
     estimate_radius,
+    geometry_segments,
     geometry_vertices,
     meters_between,
     page_number,
@@ -33,6 +34,21 @@ def test_geometry_vertices_line_and_multiline():
     assert geometry_vertices({"type": "GeometryCollection"}) == []
 
 
+def test_geometry_segments_line_multiline_and_point():
+    assert geometry_segments(
+        {"type": "LineString", "coordinates": [[0, 0], [1, 0], [2, 0]]}
+    ) == [((0, 0), (1, 0)), ((1, 0), (2, 0))]
+    multi = {
+        "type": "MultiLineString",
+        "coordinates": [[[0, 0], [1, 1]], [[5, 5], [6, 6]]],
+    }
+    assert geometry_segments(multi) == [((0, 0), (1, 1)), ((5, 5), (6, 6))]
+    # A Point yields one degenerate segment so isolated points still register.
+    assert geometry_segments({"type": "Point", "coordinates": [3, 4]}) == [
+        ((3, 4), (3, 4))
+    ]
+
+
 def test_meters_between_is_symmetric_and_scaled():
     # ~0.001 deg latitude is ~111 m; longitude is shorter by cos(lat).
     assert math.isclose(meters_between((0.0, 0.0), (0.0, 0.001)), 110.54, rel_tol=1e-3)
@@ -59,6 +75,27 @@ def test_restricted_features_none_when_unplaced_else_nearby():
     assert locator.restricted_features(999, features) is None  # unplaced page
     kept = locator.restricted_features(61, features)
     assert kept is not None and [f["id"] for f in kept] == ["near"]
+
+
+def test_restricted_features_keeps_through_street_with_no_vertex_inside():
+    # A street whose endpoints (~222 m away) both fall outside the 150 m radius but whose
+    # segment crosses the page center: segment distance keeps it; a vertex test would drop it.
+    locator = KeymapLocator(locations={61: [(0.0, 0.0)]}, radius_m=150.0)
+    features = [
+        {
+            "geometry": {
+                "type": "LineString",
+                "coordinates": [[-0.002, 0.0], [0.002, 0.0]],
+            },
+            "id": "through",
+        },
+    ]
+    assert all(
+        meters_between((0.0, 0.0), v) > 150.0
+        for v in geometry_vertices(features[0]["geometry"])
+    )  # both endpoints are outside the radius
+    kept = locator.restricted_features(61, features)
+    assert kept is not None and [f["id"] for f in kept] == ["through"]
 
 
 def test_located_numbers_and_page_number():

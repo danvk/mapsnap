@@ -152,6 +152,36 @@ def reread_narrow(
     return polygon, text, confidence
 
 
+# A tight-crop re-read result: (polygon, text, confidence), matching reread_narrow's return.
+RereadResult = tuple[list[list[int]], str, float]
+
+
+def choose_reread(
+    text: str, rereads: list[RereadResult | None], valid_pages: set[str]
+) -> RereadResult | None:
+    """Pick a longer page number that every tight-crop re-read agrees on, else None (keep text).
+
+    A single-digit read is often a multi-digit number the wide strip squished until the CRNN
+    fired only its central digit (e.g. the "0" of "105", the "1" of "61"). Re-reading from
+    minimum-width crops resolves it — but only when the crops *agree*: a genuine multi-digit
+    label reads the same from every tight crop, whereas a hallucinated second digit on a real
+    single-digit page is unstable across crop widths ("9" -> "69" at one width, "61" at
+    another). So a longer page is accepted only when every re-read is a strictly-longer valid
+    page and they all decode the same text; a lone width or any disagreement keeps the original
+    single digit. Requiring agreement (rather than a confidence threshold, which is not
+    comparable across crop widths) guards against upgrading a real single-digit page to a
+    valid-but-wrong multi-digit one. Returns the highest-confidence instance of the agreed page.
+    """
+    longer = [
+        r
+        for r in rereads
+        if r is not None and len(r[1]) > len(text) and r[1] in valid_pages
+    ]
+    if len(longer) != len(rereads) or len({r[1] for r in longer}) != 1:
+        return None
+    return max(longer, key=lambda r: r[2])
+
+
 def detect_and_read(
     image_path: str,
     cnn: torch.nn.Module,
@@ -178,6 +208,7 @@ def detect_and_read(
 
     # Decode and box only the central number of each crop, dropping a neighbor caught in the
     # wide window.
+    valid_pages = set(pages)
     found: list[tuple[list[list[int]], str, float]] = []
     for (cx, cy), (confidence, path), strip in zip(centers, reads, strips):
         group = central_group(path)
@@ -195,25 +226,18 @@ def detect_and_read(
             )
         crop_box = strip_crop_box(width, height, cx, cy, factor)
         polygon = locate_number(strip, group, len(path), crop_box)
-        # A single-digit read is often a multi-digit number the wide strip squished until the
-        # CRNN fired only its central digit (e.g. the "0" of "105", the "1" of "61"); re-read
-        # tighter, minimum-width crops and take the longest strictly-longer result that is a
-        # valid page. Requiring a known page set (and validity) is essential: without it a
-        # tighter crop hallucinates a second digit onto a genuine single-digit page (9->69,
-        # 8->75) — validated on hand-labeled keymaps, it nets +4 text errors ungated but 0 gated.
-        valid_pages = set(pages)
+        # A single-digit read is often a multi-digit number the wide strip squished to one
+        # digit; re-read from minimum-width crops and accept a longer valid page only when the
+        # crops agree (see choose_reread — the agreement gate guards against upgrading a genuine
+        # single-digit page to a valid-but-wrong multi-digit one).
         if len(text) == 1 and valid_pages and not disable_reread:
-            longer = [
-                r
+            rereads = [
+                reread_narrow(image, crnn, device, (cx, cy), factor, pages, hw)
                 for hw in REREAD_HALF_WIDTHS_WORKING
-                if (
-                    r := reread_narrow(image, crnn, device, (cx, cy), factor, pages, hw)
-                )
-                and len(r[1]) > len(text)
-                and r[1] in valid_pages
             ]
-            if longer:
-                polygon, widened, confidence = max(longer, key=lambda r: len(r[1]))
+            chosen = choose_reread(text, rereads, valid_pages)
+            if chosen is not None:
+                polygon, widened, confidence = chosen
                 print(
                     f"{Path(image_path).name}: re-read narrow {text!r} -> {widened!r}",
                     file=sys.stderr,

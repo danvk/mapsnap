@@ -200,6 +200,10 @@
   color: #0284c7;
 }
 
+#detections-table tr.fallback td {
+  color: #0d9488;
+}
+
 .fallback-badge {
   display: inline-block;
   margin-left: 4px;

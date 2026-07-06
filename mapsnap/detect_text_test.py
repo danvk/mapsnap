@@ -12,12 +12,51 @@ from mapsnap.detect_text import (
     _nms_bboxes,
     filter_args,
     has_split_panels,
+    page_vocabs,
 )
+from mapsnap.keymap.locate import KeymapLocator
 from mapsnap.streets import (
     canonical_street_match,
     matches_any_street,
     normalize_street,
 )
+
+
+def _street_feature(name: str, coords: list[list[float]]) -> dict:
+    """A minimal GeoJSON street feature for page_vocabs tests."""
+    return {
+        "type": "Feature",
+        "properties": {"street_name": name},
+        "geometry": {"type": "LineString", "coordinates": coords},
+    }
+
+
+def test_page_vocabs_no_keymap_returns_full_vocab():
+    # No locator: the full volume vocabulary, no fallback pass.
+    assert page_vocabs("p5.jpg", None, [], ["FULL"], ["RECT"]) == (["FULL"], None)
+
+
+def test_page_vocabs_placed_page_uses_neighborhood_with_rectangle_fallback():
+    # Page 61 sits at (0, 0). MAIN runs through the neighborhood; FAR is across the volume.
+    locator = KeymapLocator(locations={61: [(0.0, 0.0)]}, radius_m=150.0)
+    features = [
+        _street_feature("MAIN STREET", [[0.0, 0.0], [0.001, 0.0]]),
+        _street_feature("FAR STREET", [[10.0, 10.0], [10.001, 10.0]]),
+    ]
+    primary, fallback = page_vocabs("p61.jpg", locator, features, ["FULL"], ["RECT"])
+    assert "MAIN" in primary  # neighborhood vocab includes the nearby street
+    assert not any("FAR" in form for form in primary)  # the distant street is excluded
+    assert fallback == ["RECT"]  # rectangle vocab drives the fallback pass
+
+
+def test_page_vocabs_unplaced_page_uses_rectangle_only():
+    # Page 999 is not placed by the key map: rectangle vocab alone, no fallback pass.
+    locator = KeymapLocator(locations={61: [(0.0, 0.0)]}, radius_m=150.0)
+    features = [_street_feature("MAIN STREET", [[0.0, 0.0], [0.001, 0.0]])]
+    assert page_vocabs("p999.jpg", locator, features, ["FULL"], ["RECT"]) == (
+        ["RECT"],
+        None,
+    )
 
 
 def test_has_split_panels(tmp_path):

@@ -597,6 +597,34 @@ def _process_image(image_path: str) -> str:
     return image_path
 
 
+def page_vocabs(
+    image_path: str,
+    locator: KeymapLocator | None,
+    geojson_features: list[dict],
+    vocab_strings: list[str],
+    rectangle_vocab: list[str],
+) -> tuple[list[str], list[str] | None]:
+    """(primary, fallback) vocab for one page: neighborhood + rectangle if placed, else rectangle.
+
+    With no key map (``locator is None``) returns the full ``vocab_strings`` and no fallback.
+    For a page the key map places, the primary vocab is its key-map neighborhood — falling back
+    to the whole key-map ``rectangle_vocab`` when the neighborhood holds no street names — and the
+    fallback pass uses the rectangle vocab. An unplaced or empty-neighborhood page uses the
+    rectangle vocab alone (no second pass).
+    """
+    if locator is None:
+        return vocab_strings, None
+    restricted = locator.restricted_features(
+        page_number(image_stem(image_path)), geojson_features
+    )
+    if not restricted:
+        # Unplaced (None) or placed with no nearby features ([]): rectangle is the tightest.
+        return rectangle_vocab, None
+    near = build_block_index({"type": "FeatureCollection", "features": restricted})
+    primary = generate_vocab_strings(set(near.keys())) or rectangle_vocab
+    return primary, rectangle_vocab
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(
         description="Detect text regions in insurance map images using EasyOCR (CRAFT)."
@@ -787,22 +815,6 @@ def main() -> None:
             file=sys.stderr,
         )
 
-    def page_vocabs(image_path: str) -> tuple[list[str], list[str] | None]:
-        """(primary, fallback) vocab: neighborhood + rectangle if placed, else rectangle only."""
-        if locator is None:
-            return vocab_strings, None
-        restricted = locator.restricted_features(
-            page_number(image_stem(image_path)), geojson["features"]
-        )
-        if not restricted:
-            return (
-                rectangle_vocab,
-                None,
-            )  # unplaced: rectangle is the tightest we can do
-        near = build_block_index({"type": "FeatureCollection", "features": restricted})
-        primary = generate_vocab_strings(set(near.keys())) or rectangle_vocab
-        return primary, rectangle_vocab
-
     # Never OCR a page that has been split into panels; OCR its panels instead. This
     # mirrors mapsnap.utils.list_pages so the rule holds however ocr is invoked (pipeline
     # or a raw shell glob that happens to include the parent).
@@ -872,7 +884,9 @@ def main() -> None:
     else:
         reader = easyocr.Reader(["en"], gpu=gpu, verbose=False)
         for image_path in tqdm(images, smoothing=0):
-            primary_vocab, fallback_vocab = page_vocabs(image_path)
+            primary_vocab, fallback_vocab = page_vocabs(
+                image_path, locator, geojson["features"], vocab_strings, rectangle_vocab
+            )
             detect_text(
                 image_path,
                 vocab_strings=primary_vocab,
