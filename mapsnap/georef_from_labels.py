@@ -528,6 +528,44 @@ def label_inliers(
 
 _CLUSTER_THRESHOLD_FT: float = 60.0
 
+# Candidate pixel crossings for one (street_a, street_b) world intersection are merged when they
+# land within this fraction of the image diagonal of each other. Genuine duplicate labels of a
+# straight street are collinear, so their crossings against the cross-street coincide (to within
+# detection noise) and collapse to a single GCP — this is what keeps the RANSAC seed-pair count
+# bounded (PR #30). Crossings that diverge further are kept as competing GCPs: a building legend
+# read as a street (New Orleans p153's "LIBERTY IRON WORKS" mis-read as S Liberty St, whose
+# diagonal box throws its crossing ~1200 px off the real street's) yields two genuinely different
+# image points for one world node, and only by keeping both can RANSAC pick the consistent one.
+DUP_CROSSING_TOL_FRACTION: float = 0.05
+
+
+def _dedupe_crossings_by_pixel(
+    candidates: list["IntersectionGCP"], tol_px: float
+) -> list["IntersectionGCP"]:
+    """Collapse candidate crossings that land at the same image point; keep divergent ones.
+
+    Single-linkage clusters ``candidates`` (all sharing one world intersection) by pixel-crossing
+    proximity, then returns the smallest-``pixel_dist`` (closest-labels, most reliable) member of
+    each cluster. Coincident crossings from genuine duplicate labels become one GCP; crossings
+    more than ``tol_px`` apart survive as separate GCPs for RANSAC to choose between.
+    """
+    clusters: list[list["IntersectionGCP"]] = []
+    for candidate in candidates:
+        for cluster in clusters:
+            if any(
+                math.hypot(
+                    candidate.pixel[0] - member.pixel[0],
+                    candidate.pixel[1] - member.pixel[1],
+                )
+                < tol_px
+                for member in cluster
+            ):
+                cluster.append(candidate)
+                break
+        else:
+            clusters.append([candidate])
+    return [min(cluster, key=lambda g: g.pixel_dist) for cluster in clusters]
+
 
 def _cluster_geo_coords(
     coords: list[tuple[float, float]],
@@ -751,6 +789,7 @@ def straight_intersection_geo(
 def find_intersection_gcps(
     features: list[LabelFeature],
     block_index: dict[str, list[Block]],
+    image_size: tuple[int, int],
 ) -> list[IntersectionGCP]:
     """Find GCPs from pairs of detected labels whose streets share a GeoJSON coordinate.
 
@@ -770,8 +809,16 @@ def find_intersection_gcps(
     pixel side is computed from straight label lines. This applies only where the pair meets
     once; a jog or divided road (multiple clusters) leaves every vertex unmodified.
 
+    When a street is detected several times, each instance produces one candidate pixel crossing
+    against the cross-street. Those that land at the same image point (genuine duplicate labels)
+    collapse to a single GCP — keeping the closest-labels one — so the RANSAC seed-pair count
+    stays bounded; those that diverge (a mislabel throwing its crossing far off) are kept as
+    competing GCPs. ``image_size`` (width, height) sets the merge tolerance via
+    :data:`DUP_CROSSING_TOL_FRACTION` of the diagonal.
+
     Returns GCPs sorted by pixel_dist ascending (closer labels = better pixel estimate).
     """
+    tol_px = DUP_CROSSING_TOL_FRACTION * math.hypot(image_size[0], image_size[1])
     street_coords: dict[str, set[tuple[float, float]]] = {}
     for feat in features:
         blocks = block_index.get(feat.text, [])
@@ -819,10 +866,11 @@ def find_intersection_gcps(
                     )
                     if straightened is not None:
                         geo = straightened
-                # For each (text_a, text_b, cluster), keep only the best (fa, fb) pair
-                # by pixel_dist. All pairs share the same geo centroid, so extra pairs
-                # only add RANSAC iterations without adding independent intersection anchors.
-                best: IntersectionGCP | None = None
+                # Each (fa, fb) instance pair gives one candidate crossing for this world node.
+                # Crossings that coincide (genuine duplicate labels) later collapse to one GCP;
+                # divergent ones (a mislabel like p153's "LIBERTY IRON WORKS") are kept apart so
+                # RANSAC can choose. See _dedupe_crossings_by_pixel / DUP_CROSSING_TOL_FRACTION.
+                candidates: list[IntersectionGCP] = []
                 for fa in feats_by_text[text_a]:
                     for fb in feats_by_text[text_b]:
                         ca, cb = np.array(fa.center), np.array(fb.center)
@@ -832,8 +880,8 @@ def find_intersection_gcps(
                         )
                         if crossing is None:
                             continue
-                        if best is None or pixel_dist < best.pixel_dist:
-                            best = IntersectionGCP(
+                        candidates.append(
+                            IntersectionGCP(
                                 label_a=text_a,
                                 label_b=text_b,
                                 pixel=crossing,
@@ -842,8 +890,8 @@ def find_intersection_gcps(
                                 feat_a=fa,
                                 feat_b=fb,
                             )
-                if best is not None:
-                    gcps.append(best)
+                        )
+                gcps.extend(_dedupe_crossings_by_pixel(candidates, tol_px))
 
     return sorted(gcps, key=lambda g: g.pixel_dist)
 
@@ -2094,7 +2142,7 @@ def process_image(
         file=sys.stderr,
     )
 
-    gcps = find_intersection_gcps(features, block_index)
+    gcps = find_intersection_gcps(features, block_index, (img_w, img_h))
     print(f"Intersection GCPs: {len(gcps)}", file=sys.stderr)
     if len(gcps) == 0:
         print("No intersection GCPs found.", file=sys.stderr)
