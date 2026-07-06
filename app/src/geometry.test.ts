@@ -3,6 +3,7 @@ import {
   circlePolygon,
   computeCorners,
   crosshairLines,
+  distanceKm,
   distanceMiles,
   pointInPolygon,
   polygonArea,
@@ -142,6 +143,17 @@ describe('distanceMiles', () => {
   it('computes a known distance (~1 degree latitude ≈ 69 miles)', () => {
     expect(distanceMiles(0, 40, 0, 41)).toBeGreaterThan(68);
     expect(distanceMiles(0, 40, 0, 41)).toBeLessThan(70);
+  });
+});
+
+describe('distanceKm', () => {
+  it('is zero for identical points', () => {
+    expect(distanceKm(-73.99, 40.7, -73.99, 40.7)).toBeCloseTo(0);
+  });
+
+  it('computes a known distance (~1 degree latitude ≈ 111 km)', () => {
+    expect(distanceKm(0, 40, 0, 41)).toBeGreaterThan(110);
+    expect(distanceKm(0, 40, 0, 41)).toBeLessThan(112);
   });
 });
 

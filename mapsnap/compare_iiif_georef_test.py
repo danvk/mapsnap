@@ -9,8 +9,13 @@ from mapsnap.compare_iiif_georef import (
     load_split_polygons,
     match_split_pairs,
     page_label,
+    parse_svg_polygon,
     polygon_iou,
     split_numbers_disagree,
+    truth_page_number,
+    truth_polygon_world,
+    truth_polygons_by_page,
+    truth_polygons_world,
 )
 
 
@@ -145,3 +150,95 @@ def test_match_split_pairs_picks_best_overlap_not_file_order():
     assert truth["label"] == "P [1]"
     assert gen["id"] == "http://x/p__1/georef"
     assert {t["label"] for t in unmatched} == {"P [2]", "P [3]"}
+
+
+def test_parse_svg_polygon():
+    value = '<svg><polygon points="10,20 30.5,40 50,60.25" /></svg>'
+    assert parse_svg_polygon(value) == [(10.0, 20.0), (30.5, 40.0), (50.0, 60.25)]
+    assert parse_svg_polygon("<svg></svg>") == []
+
+
+def _identity_georef_item(polygon: list[tuple[float, float]]) -> dict:
+    # An annotation whose GCPs make pixel==world (affine = identity), so the world ring
+    # equals the input polygon; four GCPs so the polynomial fit is well-determined.
+    points = " ".join(f"{x},{y}" for x, y in polygon)
+    return {
+        "target": {
+            "selector": {
+                "type": "SvgSelector",
+                "value": f'<svg><polygon points="{points}" /></svg>',
+            },
+        },
+        "body": {
+            "features": [
+                {
+                    "properties": {"resourceCoords": [px, py]},
+                    "geometry": {"coordinates": [px, py]},
+                }
+                for px, py in [(0, 0), (100, 0), (100, 100), (0, 100)]
+            ],
+        },
+    }
+
+
+def test_truth_polygon_world_applies_annotation_transform():
+    poly = [(10.0, 20.0), (30.0, 20.0), (30.0, 40.0), (10.0, 40.0)]
+    ring = truth_polygon_world(_identity_georef_item(poly))
+    assert ring == [[10.0, 20.0], [30.0, 20.0], [30.0, 40.0], [10.0, 40.0]]
+
+
+def test_truth_polygon_world_none_without_selector_or_gcps():
+    # No SvgSelector.
+    assert truth_polygon_world({"target": {"selector": {"type": "Other"}}}) is None
+    # Fewer than three GCPs.
+    item = _identity_georef_item([(0, 0), (1, 0), (1, 1)])
+    item["body"]["features"] = item["body"]["features"][:2]
+    assert truth_polygon_world(item) is None
+
+
+def test_truth_polygons_world_reads_all_items(tmp_path):
+    poly = [(0.0, 0.0), (10.0, 0.0), (10.0, 10.0)]
+    doc = {
+        "items": [
+            _identity_georef_item(poly),
+            {"target": {"selector": {"type": "Other"}}},  # skipped: no polygon
+            _identity_georef_item(poly),
+        ]
+    }
+    path = tmp_path / "main.iiif.json"
+    path.write_text(json.dumps(doc))
+    rings = truth_polygons_world(path)
+    assert len(rings) == 2  # two usable annotations, one skipped
+    assert rings[0] == [[0.0, 0.0], [10.0, 0.0], [10.0, 10.0]]
+
+
+def test_truth_page_number():
+    assert truth_page_number({"label": "New Orleans | 1896 | Vol. 2 p156"}) == 156
+    assert truth_page_number({"label": "New Orleans | 1896 | Vol. 2 p73 [1]"}) == 73
+    assert truth_page_number({"label": "no page here"}) is None
+
+
+def test_truth_polygons_by_page_groups_splits(tmp_path):
+    def labeled(label: str, poly: list[tuple[float, float]]) -> dict:
+        item = _identity_georef_item(poly)
+        item["label"] = label
+        return item
+
+    a = [(0.0, 0.0), (10.0, 0.0), (10.0, 10.0)]
+    b = [(20.0, 0.0), (30.0, 0.0), (30.0, 10.0)]
+    c = [(0.0, 20.0), (10.0, 20.0), (10.0, 30.0)]
+    doc = {
+        "items": [
+            labeled("Vol p73 [1]", a),
+            labeled("Vol p73 [2]", b),  # same page 73, second split
+            labeled("Vol p90", c),
+            {"target": {"selector": {"type": "Other"}}, "label": "Vol p99"},  # skipped
+        ]
+    }
+    path = tmp_path / "main.iiif.json"
+    path.write_text(json.dumps(doc))
+    by_page = truth_polygons_by_page(path)
+    assert set(by_page) == {73, 90}  # p99 skipped (no polygon)
+    assert len(by_page[73]) == 2  # both splits of page 73
+    assert by_page[73][0] == [[0.0, 0.0], [10.0, 0.0], [10.0, 10.0]]
+    assert len(by_page[90]) == 1

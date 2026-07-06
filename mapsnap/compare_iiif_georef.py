@@ -123,6 +123,86 @@ def annotation_transform_type(item: dict) -> str:
     return item.get("body", {}).get("transformation", {}).get("type", "polynomial")
 
 
+def parse_svg_polygon(svg_value: str) -> list[tuple[float, float]]:
+    """Parse the ``points`` of an ``<svg><polygon points="x,y x,y ..."/>`` selector.
+
+    Returns the vertices as (x, y) in the annotation's source-pixel frame — the same
+    frame as the GCP resourceCoords — or an empty list if no points are found.
+    """
+    match = re.search(r'points="([^"]*)"', svg_value)
+    if not match:
+        return []
+    points: list[tuple[float, float]] = []
+    for token in match.group(1).split():
+        x_str, _, y_str = token.partition(",")
+        try:
+            points.append((float(x_str), float(y_str)))
+        except ValueError:
+            continue
+    return points
+
+
+def truth_polygon_world(item: dict) -> list[list[float]] | None:
+    """World-space [lon, lat] ring of a truth annotation's page footprint, or None.
+
+    Fits the annotation's own transform from its GCPs and applies it to the SvgSelector
+    polygon (both live in source-pixel coordinates). Returns None when the annotation
+    lacks a usable selector or enough GCPs to fit.
+    """
+    selector = item.get("target", {}).get("selector", {})
+    if selector.get("type") != "SvgSelector":
+        return None
+    polygon = parse_svg_polygon(selector.get("value", ""))
+    gcps = extract_gcps(item)
+    if len(polygon) < 3 or len(gcps) < 3:
+        return None
+    A = fit_transform(gcps, annotation_transform_type(item))
+    ring = []
+    for px, py in polygon:
+        lon, lat = A @ np.array([px, py, 1.0])
+        ring.append([round(float(lon), 7), round(float(lat), 7)])
+    return ring
+
+
+def truth_polygons_world(iiif_path: Path) -> list[list[list[float]]]:
+    """Every truth annotation's page footprint in world space, from a IIIF file.
+
+    One [lon, lat] ring per annotation (split pages contribute several). Annotations
+    without a usable selector/fit are skipped. Order follows file order.
+    """
+    data: dict = json.loads(iiif_path.read_text())
+    rings = []
+    for item in data.get("items", []):
+        ring = truth_polygon_world(item)
+        if ring is not None:
+            rings.append(ring)
+    return rings
+
+
+def truth_page_number(item: dict) -> int | None:
+    """Page number N from a truth annotation label like '... p156' or '... p73 [1]'."""
+    match = re.search(r"\bp(\d+)", str(item.get("label", "")))
+    return int(match.group(1)) if match else None
+
+
+def truth_polygons_by_page(iiif_path: Path) -> dict[int, list[list[list[float]]]]:
+    """Truth page footprints grouped by page number.
+
+    A page's entry holds every truth annotation sharing its number — so a split page
+    (p73__1, p73__2, …) maps to all of page 73's footprints. Annotations without a
+    usable page number, selector, or fit are skipped.
+    """
+    data: dict = json.loads(iiif_path.read_text())
+    by_page: dict[int, list[list[list[float]]]] = {}
+    for item in data.get("items", []):
+        number = truth_page_number(item)
+        ring = truth_polygon_world(item)
+        if number is None or ring is None:
+            continue
+        by_page.setdefault(number, []).append(ring)
+    return by_page
+
+
 def north_angle(A: np.ndarray) -> float:
     """Return north direction in degrees from a 2×3 affine matrix.
 
