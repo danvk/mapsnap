@@ -32,6 +32,7 @@ const FALLBACK_COLOR = '#0d9488';
 // Fixed physical size for the key-map center crosshair (not a fraction of the search radius,
 // which varies wildly by volume — e.g. ~270m in Chicago vs ~1585m in Detroit — and would make
 // the crosshair unreadably tiny or huge depending on the volume).
+// This is center-to-tip distance: like a radius, not a diameter.
 const CROSSHAIR_ARM_METERS = 61; // ~200 ft
 
 // A view change closer than this is animated (a smooth fly-to reads as "the view nudged");

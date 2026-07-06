@@ -85,10 +85,14 @@ def test_regions_panels_doc():
     doc = regions_panels_doc("p0b.jpg", (100, 200), polygons, ["55", "1", "2"])
     assert doc["image"] == "p0b.jpg"
     assert doc["width"] == 100 and doc["height"] == 200
+    # Rings are explicitly closed (first vertex repeated at the end), matching the
+    # panels.json convention elsewhere (e.g. split.py's Shapely-derived rings).
     assert doc["panels"] == [
-        [[1.0, 2.0], [3.0, 2.0], [3.0, 4.0]],
-        [[5.0, 6.0], [7.0, 6.0], [7.0, 8.0]],
+        [[1.0, 2.0], [3.0, 2.0], [3.0, 4.0], [1.0, 2.0]],
+        [[5.0, 6.0], [7.0, 6.0], [7.0, 8.0], [5.0, 6.0]],
     ]
+    for ring in doc["panels"]:
+        assert ring[0] == ring[-1]
     # labels are parallel to panels and indexed by seed, so polygon 2 -> texts[2] == "2".
     assert doc["labels"] == ["55", "2"]
 
