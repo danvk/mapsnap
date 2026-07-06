@@ -8,15 +8,55 @@ from mapsnap.detect_text import (
     _erase_underlines,
     _iou_xxyy,
     _iter_tiles,
+    _merge_vocab_passes,
     _nms_bboxes,
     filter_args,
     has_split_panels,
+    page_vocabs,
 )
+from mapsnap.keymap.locate import KeymapLocator
 from mapsnap.streets import (
     canonical_street_match,
     matches_any_street,
     normalize_street,
 )
+
+
+def _street_feature(name: str, coords: list[list[float]]) -> dict:
+    """A minimal GeoJSON street feature for page_vocabs tests."""
+    return {
+        "type": "Feature",
+        "properties": {"street_name": name},
+        "geometry": {"type": "LineString", "coordinates": coords},
+    }
+
+
+def test_page_vocabs_no_keymap_returns_full_vocab():
+    # No locator: the full volume vocabulary, no fallback pass.
+    assert page_vocabs("p5.jpg", None, [], ["FULL"], ["RECT"]) == (["FULL"], None)
+
+
+def test_page_vocabs_placed_page_uses_neighborhood_with_rectangle_fallback():
+    # Page 61 sits at (0, 0). MAIN runs through the neighborhood; FAR is across the volume.
+    locator = KeymapLocator(locations={61: [(0.0, 0.0)]}, radius_m=150.0)
+    features = [
+        _street_feature("MAIN STREET", [[0.0, 0.0], [0.001, 0.0]]),
+        _street_feature("FAR STREET", [[10.0, 10.0], [10.001, 10.0]]),
+    ]
+    primary, fallback = page_vocabs("p61.jpg", locator, features, ["FULL"], ["RECT"])
+    assert "MAIN" in primary  # neighborhood vocab includes the nearby street
+    assert not any("FAR" in form for form in primary)  # the distant street is excluded
+    assert fallback == ["RECT"]  # rectangle vocab drives the fallback pass
+
+
+def test_page_vocabs_unplaced_page_uses_rectangle_only():
+    # Page 999 is not placed by the key map: rectangle vocab alone, no fallback pass.
+    locator = KeymapLocator(locations={61: [(0.0, 0.0)]}, radius_m=150.0)
+    features = [_street_feature("MAIN STREET", [[0.0, 0.0], [0.001, 0.0]])]
+    assert page_vocabs("p999.jpg", locator, features, ["FULL"], ["RECT"]) == (
+        ["RECT"],
+        None,
+    )
 
 
 def test_has_split_panels(tmp_path):
@@ -399,3 +439,36 @@ def test_nms_keeps_distinct_low_overlap_boxes():
         [95.0, 195.0, 0.0, 20.0],
     ]  # touch slightly, low IoU
     assert sorted(_nms_bboxes(boxes, 0.4)) == [0, 1]
+
+
+def _det(poly, text, conf):
+    return {"polygon": poly, "text": text, "confidence": conf, "angle": 0}
+
+
+def test_merge_vocab_passes_flags_only_fallback_wins():
+    box_a = [[0, 0], [10, 0], [10, 5], [0, 5]]  # primary confident -> keep, no flag
+    box_b = [[0, 20], [10, 20], [10, 25], [0, 25]]  # fallback wins w/ new text -> flag
+    box_c = [
+        [0, 40],
+        [10, 40],
+        [10, 45],
+        [0, 45],
+    ]  # fallback higher but SAME text -> no flag
+    primary = [
+        _det(box_a, "MAIN", 0.9),
+        _det(box_b, "WRONG", 0.3),
+        _det(box_c, "OAK", 0.4),
+    ]
+    fallback = [
+        _det(box_a, "MAIN", 0.5),
+        _det(box_b, "CANAL", 0.8),
+        _det(box_c, "OAK", 0.9),
+    ]
+    merged = _merge_vocab_passes(primary, fallback)
+    by_text = {d["text"]: d for d in merged}
+    assert set(by_text) == {"MAIN", "CANAL", "OAK"}
+    assert "fallback" not in by_text["MAIN"]  # primary was more confident
+    assert by_text["CANAL"]["fallback"] is True  # fallback won with a different street
+    assert (
+        "fallback" not in by_text["OAK"]
+    )  # agreed on text, so not a fallback-only read

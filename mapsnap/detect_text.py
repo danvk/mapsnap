@@ -15,6 +15,7 @@ from PIL import Image
 from tqdm import tqdm
 
 from mapsnap.ctc_vocab_decode import HINT_STRINGS, generate_vocab_strings
+from mapsnap.keymap.locate import KeymapLocator, page_number
 from mapsnap.streets import build_block_index, polygon_side_lengths
 from mapsnap.utils import default_centerlines, image_stem
 
@@ -295,6 +296,115 @@ def filter_args(argv: list[str], image: str) -> list[str]:
     return [arg for arg in argv if not arg.endswith(".jpg") or arg == image]
 
 
+def _recognize_pass(
+    reader: easyocr.Reader,
+    img: Image.Image,
+    angle_boxes: list[dict],
+    *,
+    vocab: list[str],
+    beam_width: int,
+    allowlist: str | None,
+    min_long_side: int,
+    orig_width: int,
+    orig_height: int,
+) -> list[dict]:
+    """Recognize the cached CRAFT boxes at all angles with one vocabulary.
+
+    Returns one {polygon, text, confidence, angle} detection per surviving box (mapped back to
+    original-image coordinates). The vocabulary is applied via the prefix-constrained decoder,
+    so a smaller vocabulary yields more confident, less ambiguous reads.
+    """
+    from mapsnap.ctc_vocab_decode import patch_easyocr_reader
+
+    # Include non-street labels in the trie so they decode correctly rather than being forced
+    # to a random street name.
+    patch_easyocr_reader(reader, sorted(set(vocab) | NON_STREET_TEXT), beam_width)
+    recognize_kwargs: dict = {
+        "paragraph": False,
+        "decoder": "wordbeamsearch",
+        "beamWidth": beam_width,
+    }
+    if allowlist is not None:
+        recognize_kwargs["allowlist"] = allowlist
+
+    detections: list[dict] = []
+    for angle_data in angle_boxes:
+        angle = angle_data["angle"]
+        horizontal_list = list(angle_data["horizontal_list"])
+        free_list = list(angle_data["free_list"])
+
+        rotated = img.rotate(angle, expand=True) if angle != 0 else img
+        rotated_array = np.array(rotated)
+
+        if min_long_side > 0:
+            horizontal_list = [
+                b for b in horizontal_list if (b[1] - b[0]) >= min_long_side
+            ]
+            free_list = [
+                b
+                for b in free_list
+                if max(
+                    max(c[0] for c in b) - min(c[0] for c in b),
+                    max(c[1] for c in b) - min(c[1] for c in b),
+                )
+                >= min_long_side
+            ]
+        rotated_clean = _erase_underlines(rotated_array, horizontal_list)
+        results = reader.recognize(
+            rotated_clean, horizontal_list, free_list, **recognize_kwargs
+        )
+        for bbox, text, confidence in results:
+            # Reject boxes that are taller than wide in rotated-image coordinates.
+            # Valid text is always wider than tall in the rotated image; a tall box
+            # means the detection is at the wrong angle (e.g. MONTCLAIR at angle=0
+            # instead of 270, or RIVER at angle=90 instead of 0).
+            xs = [float(p[0]) for p in bbox]
+            ys = [float(p[1]) for p in bbox]
+            if (max(ys) - min(ys)) > (max(xs) - min(xs)):
+                continue
+            polygon = [[int(x), int(y)] for x, y in bbox]
+            if angle == 90:
+                # PIL rotate(90) is CCW; inverse: (rx, ry) -> (W-1-ry, rx)
+                polygon = [[orig_width - 1 - y, x] for x, y in polygon]
+            elif angle == 270:
+                # PIL rotate(270) is CW; inverse: (rx, ry) -> (ry, H-1-rx)
+                polygon = [[y, orig_height - 1 - x] for x, y in polygon]
+            detections.append(
+                {
+                    "polygon": polygon,
+                    "text": text,
+                    "confidence": round(float(confidence), 4),
+                    "angle": angle,
+                }
+            )
+    return detections
+
+
+def _merge_vocab_passes(primary: list[dict], fallback: list[dict]) -> list[dict]:
+    """Merge a restricted-vocab pass with a broader fallback pass, box by box.
+
+    Both passes recognize the same CRAFT boxes, so they align by polygon. For each box the
+    higher-confidence read wins; when the broader fallback vocabulary wins with a *different*
+    text, that street lies outside the page's own neighborhood, so the detection is marked
+    ``fallback: True`` (a lower-location-confidence label for downstream georeferencing).
+    """
+    fallback_by_polygon = {
+        tuple(tuple(point) for point in d["polygon"]): d for d in fallback
+    }
+    merged: list[dict] = []
+    for detection in primary:
+        alt = fallback_by_polygon.get(tuple(tuple(p) for p in detection["polygon"]))
+        if (
+            alt is not None
+            and alt["confidence"] > detection["confidence"]
+            and alt["text"] != detection["text"]
+        ):
+            merged.append({**alt, "fallback": True})
+        else:
+            merged.append(detection)
+    return merged
+
+
 def detect_text(
     image_path: str,
     vocab_strings: list[str],
@@ -307,6 +417,7 @@ def detect_text(
     craft_scale: float = 1.0,
     tile_size: int = 2560,
     reuse_boxes: bool = False,
+    fallback_vocab: list[str] | None = None,
 ) -> list[dict]:
     """Run CRAFT-based text detection at 0°, 90°, and 270° and return all results.
 
@@ -357,6 +468,12 @@ def detect_text(
     when reuse_boxes=False). The file records the image dimensions, a timestamp,
     the command line, and the per-angle box data.
 
+    fallback_vocab, if given, recognizes each box a second time with a broader vocabulary and
+    keeps, per box, the higher-confidence read. When the fallback vocabulary wins with a
+    different text (a street outside the page's own restricted neighborhood), the detection is
+    marked ``fallback: True``. Used with a key-map-restricted vocab_strings so a page whose real
+    streets fell outside its neighborhood still gets read, tagged for downstream to trust less.
+
     Each returned detection is a dict with:
       - polygon: list of 4 [x, y] corners in original image coordinates
       - text: recognized text string
@@ -365,16 +482,10 @@ def detect_text(
       - long_side: length of the longer pair of polygon sides (pixels)
       - short_side: length of the shorter pair of polygon sides (pixels)
       - ignore: True if the text matches a NON_STREET_TEXT pattern (absent otherwise)
+      - fallback: True if the read came from fallback_vocab, not vocab_strings (absent otherwise)
     """
     if reader is None:
         reader = easyocr.Reader(["en"], gpu=True, verbose=False)
-
-    from mapsnap.ctc_vocab_decode import patch_easyocr_reader
-
-    # Include non-street labels in the trie so they decode correctly rather
-    # than being forced to a random street name.
-    all_vocab = sorted(set(vocab_strings) | NON_STREET_TEXT)
-    patch_easyocr_reader(reader, all_vocab, beam_width)
 
     img = Image.open(image_path).convert("RGB")
     orig_width, orig_height = img.size
@@ -396,64 +507,22 @@ def detect_text(
         with open(_boxes_path(image_path), "w") as f:
             json.dump(boxes_doc, f, indent=2)
 
-    all_detections: list[dict] = []
-    recognize_kwargs: dict = {
-        "paragraph": False,
-        "decoder": "wordbeamsearch",
-        "beamWidth": beam_width,
-    }
-    if allowlist is not None:
-        recognize_kwargs["allowlist"] = allowlist
-
-    for angle_data in angle_boxes:
-        angle = angle_data["angle"]
-        horizontal_list = list(angle_data["horizontal_list"])
-        free_list = list(angle_data["free_list"])
-
-        rotated = img.rotate(angle, expand=True) if angle != 0 else img
-        rotated_array = np.array(rotated)
-
-        if min_long_side > 0:
-            horizontal_list = [
-                b for b in horizontal_list if (b[1] - b[0]) >= min_long_side
-            ]
-            free_list = [
-                b
-                for b in free_list
-                if max(
-                    max(c[0] for c in b) - min(c[0] for c in b),
-                    max(c[1] for c in b) - min(c[1] for c in b),
-                )
-                >= min_long_side
-            ]
-        rotated_clean = _erase_underlines(rotated_array, horizontal_list)
-        results = reader.recognize(
-            rotated_clean, horizontal_list, free_list, **recognize_kwargs
+    def recognize(vocab: list[str]) -> list[dict]:
+        return _recognize_pass(
+            reader,
+            img,
+            angle_boxes,
+            vocab=vocab,
+            beam_width=beam_width,
+            allowlist=allowlist,
+            min_long_side=min_long_side,
+            orig_width=orig_width,
+            orig_height=orig_height,
         )
-        for bbox, text, confidence in results:
-            # Reject boxes that are taller than wide in rotated-image coordinates.
-            # Valid text is always wider than tall in the rotated image; a tall box
-            # means the detection is at the wrong angle (e.g. MONTCLAIR at angle=0
-            # instead of 270, or RIVER at angle=90 instead of 0).
-            xs = [float(p[0]) for p in bbox]
-            ys = [float(p[1]) for p in bbox]
-            if (max(ys) - min(ys)) > (max(xs) - min(xs)):
-                continue
-            polygon = [[int(x), int(y)] for x, y in bbox]
-            if angle == 90:
-                # PIL rotate(90) is CCW; inverse: (rx, ry) -> (W-1-ry, rx)
-                polygon = [[orig_width - 1 - y, x] for x, y in polygon]
-            elif angle == 270:
-                # PIL rotate(270) is CW; inverse: (rx, ry) -> (ry, H-1-rx)
-                polygon = [[y, orig_height - 1 - x] for x, y in polygon]
-            all_detections.append(
-                {
-                    "polygon": polygon,
-                    "text": text,
-                    "confidence": round(float(confidence), 4),
-                    "angle": angle,
-                }
-            )
+
+    all_detections = recognize(vocab_strings)
+    if fallback_vocab is not None:
+        all_detections = _merge_vocab_passes(all_detections, recognize(fallback_vocab))
 
     for det in all_detections:
         pts = np.array(det["polygon"], dtype=float)
@@ -528,6 +597,34 @@ def _process_image(image_path: str) -> str:
     return image_path
 
 
+def page_vocabs(
+    image_path: str,
+    locator: KeymapLocator | None,
+    geojson_features: list[dict],
+    vocab_strings: list[str],
+    rectangle_vocab: list[str],
+) -> tuple[list[str], list[str] | None]:
+    """(primary, fallback) vocab for one page: neighborhood + rectangle if placed, else rectangle.
+
+    With no key map (``locator is None``) returns the full ``vocab_strings`` and no fallback.
+    For a page the key map places, the primary vocab is its key-map neighborhood — falling back
+    to the whole key-map ``rectangle_vocab`` when the neighborhood holds no street names — and the
+    fallback pass uses the rectangle vocab. An unplaced or empty-neighborhood page uses the
+    rectangle vocab alone (no second pass).
+    """
+    if locator is None:
+        return vocab_strings, None
+    restricted = locator.restricted_features(
+        page_number(image_stem(image_path)), geojson_features
+    )
+    if not restricted:
+        # Unplaced (None) or placed with no nearby features ([]): rectangle is the tightest.
+        return rectangle_vocab, None
+    near = build_block_index({"type": "FeatureCollection", "features": restricted})
+    primary = generate_vocab_strings(set(near.keys())) or rectangle_vocab
+    return primary, rectangle_vocab
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(
         description="Detect text regions in insurance map images using EasyOCR (CRAFT)."
@@ -574,6 +671,29 @@ def main() -> None:
             "forms for prefix-constrained CTC decoding, which substantially improves "
             "recall on abbreviated and direction-prefixed labels. Defaults to a "
             "centerlines.geojson next to the input images (or their parent directory)."
+        ),
+    )
+    parser.add_argument(
+        "--keymap",
+        nargs="+",
+        metavar="JSON",
+        help=(
+            "One or more georeferenced key-map detections files (e.g. raw/p0.keymap.json, each "
+            "with a sibling <stem>.georef.json); pass several for a volume with multiple key "
+            "maps. Each page a key map places is OCR'd with only the streets within "
+            "--keymap-radius of that page's key-map location — a much smaller vocabulary that "
+            "raises recognizer confidence and drops far-away same-name streets. Pages no key "
+            "map places fall back to the full vocabulary."
+        ),
+    )
+    parser.add_argument(
+        "--keymap-radius",
+        type=float,
+        default=None,
+        metavar="M",
+        help=(
+            "Radius in metres around a page's key-map location for the restricted vocabulary "
+            "(default: auto, ~2x the key map's page-to-page spacing)."
         ),
     )
     parser.add_argument(
@@ -670,6 +790,31 @@ def main() -> None:
         file=sys.stderr,
     )
 
+    # With a georeferenced key map, restrict each placed page's vocabulary to nearby streets,
+    # falling back to the streets within the whole key map's rectangle (a volume-wide box every
+    # page sits inside) for pages the neighborhood misses or the key map does not place.
+    locator = None
+    rectangle_vocab = vocab_strings
+    if args.keymap is not None:
+        locator = KeymapLocator.from_keymaps(
+            [Path(k) for k in args.keymap], args.keymap_radius
+        )
+        rectangle = locator.rectangle_features(geojson["features"])
+        if rectangle:
+            rectangle_index = build_block_index(
+                {"type": "FeatureCollection", "features": rectangle}
+            )
+            rectangle_vocab = (
+                generate_vocab_strings(set(rectangle_index.keys())) or vocab_strings
+            )
+        print(
+            f"Key map places {len(locator.located_numbers())} page numbers; restricting vocab "
+            f"to streets within {locator.radius_m:.0f} m of each, with a "
+            f"{len(rectangle_vocab)}-form key-map-rectangle fallback (vs {len(vocab_strings)} "
+            "full).",
+            file=sys.stderr,
+        )
+
     # Never OCR a page that has been split into panels; OCR its panels instead. This
     # mirrors mapsnap.utils.list_pages so the rule holds however ocr is invoked (pipeline
     # or a raw shell glob that happens to include the parent).
@@ -705,6 +850,13 @@ def main() -> None:
 
     gpu = not args.no_gpu
 
+    if locator is not None and args.num_workers > 1:
+        print(
+            "--keymap restricts the vocabulary per page; running with a single worker.",
+            file=sys.stderr,
+        )
+        args.num_workers = 1
+
     if args.num_workers > 1:
         initargs = (
             vocab_strings,
@@ -732,9 +884,12 @@ def main() -> None:
     else:
         reader = easyocr.Reader(["en"], gpu=gpu, verbose=False)
         for image_path in tqdm(images, smoothing=0):
+            primary_vocab, fallback_vocab = page_vocabs(
+                image_path, locator, geojson["features"], vocab_strings, rectangle_vocab
+            )
             detect_text(
                 image_path,
-                vocab_strings=vocab_strings,
+                vocab_strings=primary_vocab,
                 min_size=args.min_short_side,
                 min_long_side=args.min_long_side,
                 allowlist=args.allowlist,
@@ -744,6 +899,7 @@ def main() -> None:
                 craft_scale=args.craft_scale,
                 tile_size=args.tile_size,
                 reuse_boxes=args.reuse_boxes,
+                fallback_vocab=fallback_vocab,
             )
 
 

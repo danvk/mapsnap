@@ -51,6 +51,7 @@ export function DetectionsTable(props: DetectionsTableProps) {
               selectedIndices.has(i) ? 'selected' : '',
               det.ignore ? 'ignored' : '',
               det.hint ? 'hint' : '',
+              det.fallback ? 'fallback' : '',
             ]
               .filter(Boolean)
               .join(' ');
@@ -65,7 +66,17 @@ export function DetectionsTable(props: DetectionsTableProps) {
                 <td>{det.long_side}</td>
                 <td>{det.short_side}</td>
                 <td>{det.confidence.toFixed(3)}</td>
-                <td>{type}</td>
+                <td>
+                  {type}
+                  {det.fallback && (
+                    <span
+                      className="fallback-badge"
+                      title="Read by the key-map rectangle fallback vocabulary, not the tighter page-neighborhood radius vocabulary"
+                    >
+                      fallback
+                    </span>
+                  )}
+                </td>
                 <td>{det.text}</td>
                 <td>
                   {rowIdx < NUM_PREVIEW_IMAGES && (

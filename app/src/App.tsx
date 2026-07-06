@@ -4,6 +4,7 @@ import type {
   Corners,
   GeorefData,
   IntersectionPoint,
+  KeymapLocation,
   PanelPolygon,
   Street,
   Detection,
@@ -54,6 +55,7 @@ export function App() {
   const [mode, setMode] = useState<Mode>('georef');
   const [streets, setStreets] = useState<Street[]>([]);
   const [intersections, setIntersections] = useState<IntersectionPoint[]>([]);
+  const [keymap, setKeymap] = useState<KeymapLocation | null>(null);
   const [precomputedCorners, setPrecomputedCorners] = useState<Corners | null>(
     null,
   );
@@ -106,6 +108,7 @@ export function App() {
     }
     setStreets((data.streets ?? []).map((s) => ({ ...s })));
     setIntersections((data.intersections ?? []).map((ix) => ({ ...ix })));
+    setKeymap(data.keymap ?? null);
     setPrecomputedCorners(data.corners ?? null);
     if (data.width && data.height) {
       setJsonWidth(data.width);
@@ -288,6 +291,7 @@ export function App() {
               streets={streets}
               intersections={intersections}
               corners={corners}
+              keymap={keymap}
               imageSrc={imageSrc}
               opacity={opacity / 100}
               showLabels={showLabels}

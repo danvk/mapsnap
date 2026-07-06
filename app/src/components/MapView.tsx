@@ -1,13 +1,20 @@
 import { useEffect, useRef, useState } from 'react';
 import maplibregl from 'maplibre-gl';
 import 'maplibre-gl/dist/maplibre-gl.css';
-import type { Corners, IntersectionPoint, Street } from '../types';
-import { distanceMiles } from '../geometry';
+import type {
+  Corners,
+  IntersectionPoint,
+  KeymapLocation,
+  Street,
+} from '../types';
+import { circlePolygon, crosshairLines, distanceMiles } from '../geometry';
 
 interface MapViewProps {
   streets: Street[];
   intersections: IntersectionPoint[];
   corners: Corners | null;
+  /** The page's key-map neighborhood (center + OCR/fit radius), if placed. */
+  keymap: KeymapLocation | null;
   imageSrc: string;
   /** Warped-image opacity in [0, 1]. */
   opacity: number;
@@ -16,23 +23,23 @@ interface MapViewProps {
   colorByInlier: boolean;
 }
 
-// Circle color expression for street labels, optionally split by inlier status.
-function streetCircleColor(
-  colorByInlier: boolean,
-): maplibregl.ExpressionSpecification | string {
-  return colorByInlier
-    ? ([
-        'case',
-        ['get', 'inlier'],
-        'orange',
-        '#888888',
-      ] as maplibregl.ExpressionSpecification)
-    : '#ff0000';
-}
+// Teal for streets read by the key-map rectangle fallback vocabulary (matching the neighborhood
+// circle and the table badge); otherwise orange/grey by inlier status, or a flat red.
+const FALLBACK_COLOR = '#0d9488';
 
-// Text/line color for street labels, optionally split by inlier status.
-function streetTextColor(colorByInlier: boolean): string {
-  return colorByInlier ? 'orange' : '#ff0000';
+// Color expression for street labels: key-map fallback reads first, then inlier status.
+function streetColor(
+  colorByInlier: boolean,
+): maplibregl.ExpressionSpecification {
+  const base = colorByInlier
+    ? ['case', ['get', 'inlier'], 'orange', '#888888']
+    : '#ff0000';
+  return [
+    'case',
+    ['get', 'fallback'],
+    FALLBACK_COLOR,
+    base,
+  ] as maplibregl.ExpressionSpecification;
 }
 
 /**
@@ -45,6 +52,7 @@ export function MapView(props: MapViewProps) {
     streets,
     intersections,
     corners,
+    keymap,
     imageSrc,
     opacity,
     showLabels,
@@ -164,7 +172,11 @@ export function MapView(props: MapViewProps) {
       features: geo.map((s) => ({
         type: 'Feature' as const,
         geometry: { type: 'Point' as const, coordinates: [s.lon!, s.lat!] },
-        properties: { label: s.street, inlier: s.inlier ?? true },
+        properties: {
+          label: s.street,
+          inlier: s.inlier ?? true,
+          fallback: s.fallback ?? false,
+        },
       })),
     };
 
@@ -189,7 +201,7 @@ export function MapView(props: MapViewProps) {
               ],
             ],
           },
-          properties: {},
+          properties: { fallback: s.fallback ?? false },
         })),
     };
 
@@ -206,7 +218,7 @@ export function MapView(props: MapViewProps) {
         source: 'street-labels',
         paint: {
           'circle-radius': 5,
-          'circle-color': streetCircleColor(colorByInlier),
+          'circle-color': streetColor(colorByInlier),
           'circle-stroke-color': '#ffffff',
           'circle-stroke-width': 1.5,
         },
@@ -223,7 +235,7 @@ export function MapView(props: MapViewProps) {
           'text-anchor': 'top',
         },
         paint: {
-          'text-color': streetTextColor(colorByInlier),
+          'text-color': streetColor(colorByInlier),
           'text-halo-color': '#ffffff',
           'text-halo-width': 1.5,
         },
@@ -242,31 +254,21 @@ export function MapView(props: MapViewProps) {
         type: 'line',
         source: 'street-vectors',
         paint: {
-          'line-color': streetTextColor(colorByInlier),
+          'line-color': streetColor(colorByInlier),
           'line-width': 2,
           'line-opacity': 0.9,
         },
       });
     }
 
-    if (map.getLayer('street-labels-circle'))
-      map.setPaintProperty(
-        'street-labels-circle',
-        'circle-color',
-        streetCircleColor(colorByInlier),
-      );
-    if (map.getLayer('street-labels-text'))
-      map.setPaintProperty(
-        'street-labels-text',
-        'text-color',
-        streetTextColor(colorByInlier),
-      );
-    if (map.getLayer('street-vectors-line'))
-      map.setPaintProperty(
-        'street-vectors-line',
-        'line-color',
-        streetTextColor(colorByInlier),
-      );
+    for (const [id, prop] of [
+      ['street-labels-circle', 'circle-color'],
+      ['street-labels-text', 'text-color'],
+      ['street-vectors-line', 'line-color'],
+    ] as const) {
+      if (map.getLayer(id))
+        map.setPaintProperty(id, prop, streetColor(colorByInlier));
+    }
 
     const visible = showLabels ? 'visible' : 'none';
     for (const id of [
@@ -348,6 +350,125 @@ export function MapView(props: MapViewProps) {
       if (map.getLayer(id)) map.setLayoutProperty(id, 'visibility', visible);
     }
   }, [mapReady, intersections, showIntersections]);
+
+  // Render the key-map neighborhood: the circle the page was OCR'd/fit against
+  // (center + radius) and its center point, so a fit that drifted off is visible.
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !mapReady) return;
+
+    // One circle + crosshair per key-map detection: a split page's number appears once
+    // per panel and the blocks can be far apart, so the mean lat/lon may sit inside
+    // neither neighborhood.
+    const centers: [number, number][] = keymap
+      ? (keymap.centers ?? [[keymap.lon, keymap.lat]])
+      : [];
+    const features: GeoJSON.Feature[] = keymap
+      ? [
+          ...centers.map(
+            ([lon, lat]): GeoJSON.Feature => ({
+              type: 'Feature',
+              geometry: {
+                type: 'Polygon',
+                coordinates: [circlePolygon(lon, lat, keymap.radius_m)],
+              },
+              properties: { kind: 'circle' },
+            }),
+          ),
+          ...centers.map(
+            ([lon, lat]): GeoJSON.Feature => ({
+              type: 'Feature',
+              geometry: {
+                type: 'MultiLineString',
+                coordinates: crosshairLines(lon, lat, keymap.radius_m * 0.18),
+              },
+              properties: { kind: 'center' },
+            }),
+          ),
+          // The page's segmented key-map block(s): its approximate ground footprint.
+          ...(keymap.regions ?? []).map(
+            (ring): GeoJSON.Feature => ({
+              type: 'Feature',
+              geometry: { type: 'Polygon', coordinates: [ring] },
+              properties: { kind: 'region' },
+            }),
+          ),
+        ]
+      : [];
+    const geojson: GeoJSON.FeatureCollection = {
+      type: 'FeatureCollection',
+      features,
+    };
+
+    const existing = map.getSource('keymap') as
+      | maplibregl.GeoJSONSource
+      | undefined;
+    if (existing) {
+      existing.setData(geojson);
+    } else {
+      map.addSource('keymap', { type: 'geojson', data: geojson });
+      map.addLayer({
+        id: 'keymap-circle-fill',
+        type: 'fill',
+        source: 'keymap',
+        filter: ['==', ['get', 'kind'], 'circle'],
+        paint: { 'fill-color': '#0d9488', 'fill-opacity': 0.07 },
+      });
+      map.addLayer({
+        id: 'keymap-circle-line',
+        type: 'line',
+        source: 'keymap',
+        filter: ['==', ['get', 'kind'], 'circle'],
+        paint: {
+          'line-color': '#0d9488',
+          'line-width': 2,
+          'line-dasharray': [2, 2],
+        },
+      });
+      // A crosshair (not a filled dot) marks the key-map's expected page center, so it
+      // reads as a target rather than a ground control point.
+      map.addLayer({
+        id: 'keymap-center',
+        type: 'line',
+        source: 'keymap',
+        filter: ['==', ['get', 'kind'], 'center'],
+        paint: { 'line-color': '#0d9488', 'line-width': 2.5 },
+      });
+      // The segmented key-map region: violet, solid, to read as "the page's expected
+      // footprint" against the teal dashed search-radius circle.
+      map.addLayer({
+        id: 'keymap-region-fill',
+        type: 'fill',
+        source: 'keymap',
+        filter: ['==', ['get', 'kind'], 'region'],
+        paint: { 'fill-color': '#7c3aed', 'fill-opacity': 0.06 },
+      });
+      map.addLayer({
+        id: 'keymap-region-line',
+        type: 'line',
+        source: 'keymap',
+        filter: ['==', ['get', 'kind'], 'region'],
+        paint: { 'line-color': '#7c3aed', 'line-width': 1.8 },
+      });
+    }
+
+    // With no georeference (a .georef-nofit.json has a key-map location but no corners), frame
+    // the neighborhood circle(s) so they are visible; when corners exist the image-fit already did.
+    if (keymap && !corners && centers.length) {
+      const rings = centers.flatMap(([lon, lat]) =>
+        circlePolygon(lon, lat, keymap.radius_m),
+      );
+      const lons = rings.map((c) => c[0]);
+      const lats = rings.map((c) => c[1]);
+      map.fitBounds(
+        [
+          [Math.min(...lons), Math.min(...lats)],
+          [Math.max(...lons), Math.max(...lats)],
+        ],
+        { padding: 60, maxZoom: 16 },
+      );
+    }
+  }, [mapReady, keymap, corners]);
 
   return <div id="map" ref={containerRef} />;
 }

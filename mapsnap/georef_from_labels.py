@@ -17,6 +17,7 @@ import json
 import math
 import multiprocessing
 import os
+import re
 import statistics
 import sys
 from collections import defaultdict, deque
@@ -29,6 +30,7 @@ import numpy as np
 from PIL import Image
 from tqdm import tqdm
 
+from mapsnap.keymap.locate import KeymapLocator, page_number, region_scale_m_per_px
 from mapsnap.streets import (
     DIRECTION_WORDS,
     HINT_STRINGS,
@@ -55,6 +57,9 @@ class LabelFeature:
     long_side: float  # length of the longest polygon edge in pixels
     short_side: float  # length of the shortest polygon edge in pixels
     promoted: bool = False  # True for detections rescued by promote_avenue_letters
+    fallback: bool = (
+        False  # True if read by the key-map rectangle fallback, not the radius vocab
+    )
 
 
 @dataclass
@@ -110,6 +115,7 @@ def label_features(labels: list[dict]) -> list[LabelFeature]:
                 long_side=long_side,
                 short_side=short_side,
                 promoted=bool(label.get("promoted")),
+                fallback=bool(label.get("fallback")),
             )
         )
     return features
@@ -201,6 +207,124 @@ def deg_per_px_to_px_per_ft(scale: float) -> float:
 def px_per_ft_to_deg_per_px(px_per_ft: float) -> float:
     """Convert scale from pixels-per-foot to degrees-per-pixel."""
     return 1.0 / (px_per_ft * _FT_PER_DEG_LAT)
+
+
+_FT_PER_M = 3.280839895
+
+# Key-map regions are drawn schematically, not area-faithfully, so a page's region-derived
+# scale prior carries a volume-wide bias (Chicago's regions imply 2.2x the true px/ft,
+# Detroit's 1.5x) plus ~±30% per-page noise. Absolute comparisons therefore get loose bounds
+# that only a catastrophic fit can violate (the spurious rectangle-tier fits this guards
+# against ran at 0.02-0.04x their page's prior; correct fits stay within ~0.3-1x).
+BROADENED_SCALE_MIN_RATIO = 0.1
+BROADENED_SCALE_MAX_RATIO = 6.0
+
+# Relative to the volume's *median* region prior the bias cancels, and Sanborn sheet scales
+# are quantized (50/100 ft-per-inch), so a genuinely half-scale sheet (Detroit p93/p50) shows
+# as a region ~2x the typical area: prior ratio ~sqrt(1/2). Segmentation failures (foxing,
+# frayed blocks) produce region *fragments* — smaller regions, larger ratios — essentially
+# never regions that are too big, so only the small-ratio side is trusted, and beyond 8x the
+# typical area the region is distrusted entirely. The upper bound demands ~2.5x the typical
+# area rather than the 2x midpoint: flipping a page's scale by 2x on 51/49 evidence is how
+# Brooklyn p1 — a waterfront page whose key-map block is 2.2x typical only because the block
+# includes water — went from 29 to 1063 ft. A real half-scale sheet measures well inside
+# (Detroit p93: 2.8x the typical area).
+HALF_SCALE_MAX_RATIO = 0.63
+HALF_SCALE_MIN_RATIO = math.sqrt(0.125)
+
+# A fit dropped as a global scale outlier is spared when its region corroborates the scale:
+# the fitted scale-vs-median ratio must match the region's area-implied ratio within this
+# factor. 1.3 passes the region noise on real second-scale sheets (Champaign p19/p22 agree
+# within 0.94-1.19x of their regions) while staying below the smallest observed bad-fit
+# agreement (Chicago p50n at 0.70x, Detroit p85 at 1.54x).
+MISSCALE_REGION_AGREEMENT = 1.3
+
+# When a key-map-placed page's strict neighborhood fit fails, retry with the size floor
+# scaled by this fraction: the radius-restricted vocabulary makes small confident labels
+# trustworthy (Brooklyn p28's essential cross streets "MILL"/"W. 9TH" are 14px against the
+# volume's 20px auto floor). Strict-first makes this no-regression-by-construction — a
+# strict success is never replaced — and the relaxed fit must still pass the region-scale
+# plausibility gate.
+KEYMAP_RETRY_SIZE_FRACTION = 0.6
+
+
+def is_split_page(stem: str) -> bool:
+    """Whether an image stem names one panel of a split sheet (p21__1-style suffix)."""
+    return re.search(r"__\d+$", stem) is not None
+
+
+def region_prior_px_per_ft(
+    keymap: dict | None, width: float, height: float, split_page: bool = False
+) -> float | None:
+    """Pixels-per-foot scale prior from the page's segmented key-map region, if any.
+
+    ``keymap`` is the page's georef.json keymap entry ({lat, lon, radius_m, regions?});
+    width/height are the page image's dimensions in pixels. Returns None when the key map
+    has no segmented region for this page (segmentation is not 100% reliable, e.g. on
+    heavily foxed paper), in which case callers should skip the check rather than guess.
+    Comparable across a volume's pages, but biased in absolute terms — see the constants
+    above.
+
+    ``split_page`` marks one panel of a split sheet. Its page number appears once per
+    panel on the key map, so the number's rings are separate panel footprints; which ring
+    is which panel is unknown, so the *mean* ring area stands in for this panel's. For an
+    unsplit page, multiple rings are duplicate detections within one block (watershed-
+    split), and their *sum* reconstructs the block.
+    """
+    rings = (keymap or {}).get("regions")
+    if not rings:
+        return None
+    m_per_px = region_scale_m_per_px(rings, width, height)
+    if m_per_px is None or m_per_px <= 0:
+        return None
+    if split_page and len(rings) > 1:
+        # Summed area -> mean area divides the area by len(rings), the scale by its sqrt.
+        m_per_px /= math.sqrt(len(rings))
+    return 1.0 / (m_per_px * _FT_PER_M)
+
+
+def broadened_scale_plausible(fitted_px_per_ft: float, prior_px_per_ft: float) -> bool:
+    """Whether a rectangle-tier fit's scale is plausible against the page's region prior.
+
+    Loose on purpose: the prior's volume bias and noise must pass (p8N's correct fit sits
+    at 0.40x its prior), while the spurious fits this rejects are 10x+ off (p61W's 16-GCP
+    fit at 0.02x).
+    """
+    ratio = fitted_px_per_ft / prior_px_per_ft
+    return BROADENED_SCALE_MIN_RATIO <= ratio <= BROADENED_SCALE_MAX_RATIO
+
+
+def region_relative_scale(
+    prior_px_per_ft: float, median_prior_px_per_ft: float
+) -> float:
+    """Scale multiplier (vs the volume median) suggested by a page's key-map region.
+
+    Returns 0.5 when the region is ~2x the volume's typical area (a half-scale sheet, e.g.
+    100 ft/in in a 50 ft/in volume) and 1.0 otherwise. Ratios beyond ~8x the typical area
+    are treated as segmentation failures and ignored; oversized-looking priors (fragments)
+    are never trusted to scale a page *up*.
+    """
+    ratio = prior_px_per_ft / median_prior_px_per_ft
+    if HALF_SCALE_MIN_RATIO <= ratio < HALF_SCALE_MAX_RATIO:
+        return 0.5
+    return 1.0
+
+
+def region_corroborates_scale(fitted_ratio: float, region_ratio: float) -> bool:
+    """Whether a fit's scale-vs-median ratio matches its region's area-implied ratio.
+
+    Spares genuine second-scale sheets (Champaign p19-p23, half the volume scale) from
+    the global scale-outlier drop, which cannot tell them from bad fits. Both arguments
+    are ratios to the respective volume medians, so the regions' volume-wide bias cancels.
+    """
+    agreement = fitted_ratio / region_ratio
+    return 1.0 / MISSCALE_REGION_AGREEMENT <= agreement <= MISSCALE_REGION_AGREEMENT
+
+
+def image_size(image_path: str) -> tuple[int, int]:
+    """(width, height) of an image in pixels, reading only its header."""
+    with Image.open(image_path) as pil_img:
+        return pil_img.size
 
 
 def build_affine_from_scale_rotation_gcp(
@@ -1071,6 +1195,7 @@ def _finalize_georef(
     initial_pair: tuple[int, int] | None = None,
     extra_fields: dict | None = None,
     parameters: dict | None = None,
+    keymap: dict | None = None,
 ) -> tuple[float, tuple[float, float]]:
     """Print fit stats, write georef JSON, and return (scale_deg_per_px, page_center)."""
 
@@ -1107,20 +1232,21 @@ def _finalize_georef(
         d_pixel = np.array([np.cos(feat.dir_pix), np.sin(feat.dir_pix)])
         d_geo = A_linear @ d_pixel
         d_geo_norm = d_geo / np.linalg.norm(d_geo)
-        streets_out.append(
-            {
-                "street": feat.raw_text,
-                "x": round(feat.center[0]),
-                "y": round(feat.center[1]),
-                "lat": round(lat, 7),
-                "lon": round(lon, 7),
-                "dir_x": round(float(np.cos(feat.dir_pix)), 6),
-                "dir_y": round(float(np.sin(feat.dir_pix)), 6),
-                "dir_lon": round(float(d_geo_norm[0]), 6),
-                "dir_lat": round(float(d_geo_norm[1]), 6),
-                "inlier": i in inlier_feat_set,
-            }
-        )
+        street_out = {
+            "street": feat.raw_text,
+            "x": round(feat.center[0]),
+            "y": round(feat.center[1]),
+            "lat": round(lat, 7),
+            "lon": round(lon, 7),
+            "dir_x": round(float(np.cos(feat.dir_pix)), 6),
+            "dir_y": round(float(np.sin(feat.dir_pix)), 6),
+            "dir_lon": round(float(d_geo_norm[0]), 6),
+            "dir_lat": round(float(d_geo_norm[1]), 6),
+            "inlier": i in inlier_feat_set,
+        }
+        if feat.fallback:
+            street_out["fallback"] = True
+        streets_out.append(street_out)
 
     initial_set = set(initial_pair) if initial_pair is not None else set()
     intersections_out = [
@@ -1155,6 +1281,8 @@ def _finalize_georef(
         "streets": streets_out,
         "intersections": intersections_out,
     }
+    if keymap:
+        result["keymap"] = keymap
     if extra_fields:
         result.update(extra_fields)
     with open(output_path, "w") as f:
@@ -1641,6 +1769,9 @@ def _init_worker(
     debug: bool,
     parameters: dict,
     high_confidence_size_fraction: float,
+    locator: KeymapLocator | None = None,
+    geojson_features: list[dict] | None = None,
+    rectangle_index: tuple[dict[str, list[Block]], float] | None = None,
 ) -> None:
     """Populate _worker_state once per worker process (or once in the main process)."""
     _worker_state.update(
@@ -1657,6 +1788,9 @@ def _init_worker(
         debug=debug,
         parameters=parameters,
         high_confidence_size_fraction=high_confidence_size_fraction,
+        locator=locator,
+        geojson_features=geojson_features or [],
+        rectangle_index=rectangle_index,
     )
 
 
@@ -1674,23 +1808,33 @@ def _process_one_image(image_path: str) -> tuple[str, ProcessResult]:
         ".georef-misscale.json",
         ".georef-outlier.json",
         ".georef-1gcp.json",
+        ".georef-nofit.json",
     ):
         stale_path = output_path.replace(".georef.json", stale_suffix)
         if os.path.exists(stale_path):
             os.remove(stale_path)
 
-    with _captured_page_log(log_path, _worker_state["debug"]):
-        print(f"--- {image_path} ---")
-        result = process_image(
+    locator: KeymapLocator | None = _worker_state["locator"]
+    rectangle_index = _worker_state["rectangle_index"]  # (block_index, cos_phi) | None
+    keymap = (
+        locator.page_keymap(page_number(image_stem(image_path)))
+        if locator is not None
+        else None
+    )
+
+    def run(
+        block_index: dict, cos_phi: float, size_fraction: float = 1.0
+    ) -> ProcessResult:
+        return process_image(
             image_path=image_path,
             labels_path=labels_path,
             output_path=output_path,
-            block_index=_worker_state["block_index"],
-            cos_phi=_worker_state["cos_phi"],
+            block_index=block_index,
+            cos_phi=cos_phi,
             centerlines_path=_worker_state["centerlines_path"],
             min_confidence=_worker_state["min_confidence"],
-            min_long_side=_worker_state["min_long_side"],
-            min_short_side=_worker_state["min_short_side"],
+            min_long_side=_worker_state["min_long_side"] * size_fraction,
+            min_short_side=_worker_state["min_short_side"] * size_fraction,
             min_aspect_ratio=_worker_state["min_aspect_ratio"],
             edge_margin=_worker_state["edge_margin"],
             force_intersection=_worker_state["force_intersection"],
@@ -1700,9 +1844,113 @@ def _process_one_image(image_path: str) -> tuple[str, ProcessResult]:
             high_confidence_size_fraction=_worker_state[
                 "high_confidence_size_fraction"
             ],
+            keymap=keymap,
         )
+
+    with _captured_page_log(log_path, _worker_state["debug"]):
+        print(f"--- {image_path} ---")
+        result: ProcessResult | None = None
+        if locator is not None:
+            # Tier 1: match only against the page's own key-map neighborhood — tight and
+            # unambiguous, so far-away same-name streets can't produce spurious GCPs.
+            restricted = locator.restricted_features(
+                page_number(image_stem(image_path)), _worker_state["geojson_features"]
+            )
+            if restricted:
+                near = build_block_index(
+                    {"type": "FeatureCollection", "features": restricted}
+                )
+                near_cos_phi = compute_cos_phi(near)
+                result = run(near, near_cos_phi)
+                # Strict-first, relaxed-retry: when the strict fit produces nothing at
+                # all, the volume-wide auto size floor may simply sit above this page's
+                # real (small) labels — Brooklyn p28's cross streets are 14px vs a 20px
+                # floor. Retry with a lower floor; within the radius vocabulary a small
+                # confident label is very unlikely to be noise, and the region-scale gate
+                # still applies. A strict *deferral* is kept in preference to a relaxed
+                # fit: the deferred pass carries stronger verification (region-snapped
+                # scale, neighbor-rotation confirmation), and a relaxed fit preempting it
+                # is how Detroit p93 briefly went from 246 ft to a dropped misscale.
+                if not result.success and result.deferred is None:
+                    relaxed = run(
+                        near, near_cos_phi, size_fraction=KEYMAP_RETRY_SIZE_FRACTION
+                    )
+                    if relaxed.success and relaxed.scale_deg_per_px is not None:
+                        prior = region_prior_px_per_ft(
+                            keymap,
+                            *image_size(image_path),
+                            split_page=is_split_page(image_stem(image_path)),
+                        )
+                        fitted = deg_per_px_to_px_per_ft(relaxed.scale_deg_per_px)
+                        if prior is not None and not broadened_scale_plausible(
+                            fitted, prior
+                        ):
+                            print(
+                                f"  rejecting relaxed fit: {fitted:.3f} px/ft is "
+                                f"{fitted / prior:.2f}x the key-map region prior "
+                                f"{prior:.3f} px/ft"
+                            )
+                            if os.path.exists(output_path):
+                                os.remove(output_path)
+                        else:
+                            print(
+                                "  strict fit failed; accepting relaxed-size-floor fit "
+                                f"({KEYMAP_RETRY_SIZE_FRACTION}x)"
+                            )
+                            result = relaxed
+                    elif relaxed.success:
+                        result = relaxed
+                # Tier 2: if the neighborhood starved the fit (e.g. the page's real streets
+                # fall just outside it), broaden to the whole key-map rectangle — but only
+                # trust a well-constrained multi-GCP fit. A lone-GCP rectangle fit is too
+                # easily a same-name street elsewhere in the volume (p53N's 6735 ft
+                # catastrophe), which the tight neighborhood correctly refused.
+                if not result.success and rectangle_index is not None:
+                    print("  neighborhood fit failed; broadening to key-map rectangle")
+                    broadened = run(*rectangle_index)
+                    # The rectangle vocabulary reintroduces same-name streets from across
+                    # the volume, which fallback-vocab labels can assemble into a spurious
+                    # multi-GCP fit (p61W: 16 GCPs at 0.04x the true scale). The page's
+                    # key-map region gives an independent per-page scale check.
+                    if broadened.success and broadened.scale_deg_per_px is not None:
+                        prior = region_prior_px_per_ft(
+                            keymap,
+                            *image_size(image_path),
+                            split_page=is_split_page(image_stem(image_path)),
+                        )
+                        fitted = deg_per_px_to_px_per_ft(broadened.scale_deg_per_px)
+                        if prior is not None and not broadened_scale_plausible(
+                            fitted, prior
+                        ):
+                            print(
+                                f"  rejecting broadened fit: {fitted:.3f} px/ft is "
+                                f"{fitted / prior:.2f}x the key-map region prior "
+                                f"{prior:.3f} px/ft"
+                            )
+                            # process_image already wrote the fit; remove it so the
+                            # rejection isn't a no-op on disk.
+                            if os.path.exists(output_path):
+                                os.remove(output_path)
+                        else:
+                            result = broadened
+                    elif broadened.success:
+                        result = broadened
+            elif rectangle_index is not None:
+                # Unplaced page: the key-map rectangle is the tightest vocabulary available.
+                result = run(*rectangle_index)
+        if result is None:
+            result = run(_worker_state["block_index"], _worker_state["cos_phi"])
     if result.deferred is not None:
         result.deferred["log_path"] = log_path
+    # A key-map-placed page that produced neither a fit nor a deferred sidecar leaves no georef
+    # file at all. Write a minimal .georef-nofit.json holding just the neighborhood so the
+    # debugger can still show where the key map expected this page.
+    if keymap is not None and not result.success and result.deferred is None:
+        nofit_path = output_path.replace(".georef.json", ".georef-nofit.json")
+        with open(nofit_path, "w") as f:
+            json.dump(
+                {"keymap": keymap, "streets": [], "intersections": []}, f, indent=2
+            )
     return image_path, result
 
 
@@ -1723,6 +1971,7 @@ def process_image(
     debug: bool = False,
     parameters: dict | None = None,
     high_confidence_size_fraction: float = 0.7,
+    keymap: dict | None = None,
 ) -> ProcessResult:
     """Fit a georeference model for one image and write GCPs to output_path.
 
@@ -1885,6 +2134,7 @@ def process_image(
                 "img_w": img_w,
                 "img_h": img_h,
                 "parameters": parameters,
+                "keymap": keymap,
             },
         )
 
@@ -1913,6 +2163,7 @@ def process_image(
         centerlines_path,
         initial_pair=seed_pair,
         parameters=parameters,
+        keymap=keymap,
     )
     rotation = math.atan2(float(A[1, 0]), float(-A[1, 1]))
     return ProcessResult(
@@ -2075,6 +2326,7 @@ def process_deferred_image(
     img_w: int = deferred["img_w"]
     img_h: int = deferred["img_h"]
     parameters: dict | None = deferred["parameters"]
+    keymap: dict | None = deferred.get("keymap")
 
     page_dim_lat = scale_deg_per_px * img_h
     page_dim_lon = scale_deg_per_px * img_w / cos_phi
@@ -2162,6 +2414,7 @@ def process_deferred_image(
         centerlines_path,
         extra_fields=one_gcp_extra,
         parameters=parameters,
+        keymap=keymap,
     )
     return ProcessResult(
         success=decision.confirmed, scale_deg_per_px=scale, center=center
@@ -2336,6 +2589,28 @@ def main() -> None:
         help="Geocode key maps in addition to regular pages.",
     )
     parser.add_argument(
+        "--keymap",
+        nargs="+",
+        metavar="JSON",
+        help=(
+            "One or more georeferenced key-map detections files (e.g. raw/p0.keymap.json, each "
+            "with a sibling <stem>.georef.json); pass several for a volume with multiple key "
+            "maps. Each page a key map places is matched first against streets within "
+            "--keymap-radius of that page's key-map location, dropping far-away same-name "
+            "streets that produce spurious GCPs. Unplaced pages use the full centerlines."
+        ),
+    )
+    parser.add_argument(
+        "--keymap-radius",
+        type=float,
+        default=None,
+        metavar="M",
+        help=(
+            "Radius in metres around a page's key-map location for restricted matching "
+            "(default: auto, ~2x the key map's page-to-page spacing)."
+        ),
+    )
+    parser.add_argument(
         "--num-workers",
         type=int,
         default=1,
@@ -2391,6 +2666,53 @@ def main() -> None:
         f"Block index: {n_blocks} segments across {len(block_index)} streets",
         file=sys.stderr,
     )
+
+    # With a georeferenced key map, each placed page is matched first against its own
+    # neighborhood and, if that starves the fit, against the whole key-map rectangle (a
+    # volume-wide box every page sits in — far smaller than the full centerlines).
+    locator = None
+    rectangle_index: tuple[dict[str, list[Block]], float] | None = None
+    if args.keymap is not None:
+        locator = KeymapLocator.from_keymaps(
+            [Path(k) for k in args.keymap], args.keymap_radius
+        )
+        rectangle = locator.rectangle_features(geojson["features"])
+        if rectangle:
+            rectangle_bi = build_block_index(
+                {"type": "FeatureCollection", "features": rectangle}
+            )
+            rectangle_index = (rectangle_bi, compute_cos_phi(rectangle_bi))
+        rect_streets = len(rectangle_index[0]) if rectangle_index else 0
+        print(
+            f"Key map places {len(locator.located_numbers())} page numbers; matching within "
+            f"{locator.radius_m:.0f} m of each, then a {rect_streets}-street key-map-rectangle "
+            f"fallback (vs {len(block_index)} full).",
+            file=sys.stderr,
+        )
+
+    # The anchor for relative region-scale reasoning (region_relative_scale): the volume's
+    # median region-derived prior. Absolute priors carry a volume-wide bias, so a page's
+    # region is only meaningful compared to its volume's typical region.
+    median_region_prior: float | None = None
+    if locator is not None:
+        region_priors = []
+        for prior_image_path in args.images:
+            entry = locator.page_keymap(page_number(image_stem(prior_image_path)))
+            if entry is not None and entry.get("regions"):
+                prior = region_prior_px_per_ft(
+                    entry,
+                    *image_size(prior_image_path),
+                    split_page=is_split_page(image_stem(prior_image_path)),
+                )
+                if prior is not None:
+                    region_priors.append(prior)
+        if len(region_priors) >= 5:
+            median_region_prior = float(np.median(region_priors))
+            print(
+                f"Median key-map region scale prior: {median_region_prior:.3f} px/ft "
+                f"({len(region_priors)} pages)",
+                file=sys.stderr,
+            )
 
     auto_threshold_include_hints = not args.auto_threshold_exclude_hints
     if args.min_short_side is not None:
@@ -2464,6 +2786,9 @@ def main() -> None:
         args.debug,
         parameters,
         args.high_confidence_size_fraction,
+        locator,
+        geojson["features"] if locator is not None else None,
+        rectangle_index,
     )
     if args.num_workers > 1:
         with multiprocessing.Pool(
@@ -2526,9 +2851,35 @@ def main() -> None:
                 deferred_image_path: str = deferred["image_path"]
                 with _captured_page_log(deferred["log_path"], args.debug, append=True):
                     print(f"\n--- {deferred_image_path} (deferred) ---")
+                    # A sheet drawn at a different scale than the volume (Detroit's p93/p50
+                    # are half-scale) breaks the assigned-median-scale assumption, and no
+                    # internal check can catch it — the fitted scale IS the median. The
+                    # page's key-map region gives an independent prior, comparable only
+                    # *relative* to the volume's median region prior (regions are drawn
+                    # with a volume-wide area bias).
+                    page_scale_deg_per_px = scale_deg_per_px
+                    region_prior = region_prior_px_per_ft(
+                        deferred.get("keymap"),
+                        deferred["img_w"],
+                        deferred["img_h"],
+                        split_page=is_split_page(image_stem(deferred["image_path"])),
+                    )
+                    if region_prior is not None and median_region_prior is not None:
+                        multiplier = region_relative_scale(
+                            region_prior, median_region_prior
+                        )
+                        if multiplier != 1.0:
+                            snapped = ref_scale_px_per_ft * multiplier
+                            page_scale_deg_per_px = px_per_ft_to_deg_per_px(snapped)
+                            print(
+                                f"  key-map region is "
+                                f"{median_region_prior / region_prior:.2f}x the "
+                                f"volume's typical area ratio; snapping to "
+                                f"{multiplier}x median scale = {snapped:.3f} px/ft"
+                            )
                     deferred_result = process_deferred_image(
                         deferred=deferred,
-                        scale_deg_per_px=scale_deg_per_px,
+                        scale_deg_per_px=page_scale_deg_per_px,
                         block_index=block_index,
                         cos_phi=cos_phi,
                         neighbor_rotations=neighbor_rotations,
@@ -2546,6 +2897,30 @@ def main() -> None:
         for img_path, px_per_ft in scale_records:
             ratio = px_per_ft / ref_scale_px_per_ft
             if abs(ratio - 1.0) > args.scale_outlier_threshold:
+                # A genuine second-scale sheet (Champaign p19-p23 at half the volume
+                # scale) is indistinguishable from a bad fit by the median check alone;
+                # its key-map region can vouch for it.
+                if locator is not None and median_region_prior is not None:
+                    entry = locator.page_keymap(page_number(image_stem(img_path)))
+                    prior = (
+                        region_prior_px_per_ft(
+                            entry,
+                            *image_size(img_path),
+                            split_page=is_split_page(image_stem(img_path)),
+                        )
+                        if entry is not None
+                        else None
+                    )
+                    if prior is not None and region_corroborates_scale(
+                        ratio, prior / median_region_prior
+                    ):
+                        print(
+                            f"Keeping scale outlier {img_path}: {ratio:.2f}x the "
+                            f"median matches its key-map region "
+                            f"({prior / median_region_prior:.2f}x the typical region)",
+                            file=sys.stderr,
+                        )
+                        continue
                 _, out_path, _ = derive_paths(img_path)
                 misscale_path = out_path.replace(
                     ".georef.json", ".georef-misscale.json"

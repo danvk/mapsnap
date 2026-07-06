@@ -1142,3 +1142,114 @@ def test_rank_pairs_by_consensus_is_deterministic():
     a = _rank_pairs_by_consensus(gcps, 1.0, 1e-3, 10)
     b = _rank_pairs_by_consensus(gcps, 1.0, 1e-3, 10)
     assert a == b
+
+
+def test_label_features_carries_fallback_flag():
+    poly = [[0, 0], [40, 0], [40, 10], [0, 10]]
+    feats = label_features(
+        [
+            {"polygon": poly, "text": "MAIN ST"},
+            {"polygon": poly, "text": "CANAL ST", "fallback": True},
+        ]
+    )
+    assert feats[0].fallback is False
+    assert feats[1].fallback is True
+
+
+def test_region_prior_px_per_ft():
+    from mapsnap.georef_from_labels import region_prior_px_per_ft
+
+    # A ~110.5 x 111.3 m region on a 500 x 500 px page: ~0.2218 m/px = 0.7278 ft/px,
+    # so ~1.374 px/ft.
+    keymap = {
+        "lat": 0.0005,
+        "lon": 0.0005,
+        "radius_m": 300.0,
+        "regions": [[[0.0, 0.0], [0.001, 0.0], [0.001, 0.001], [0.0, 0.001]]],
+    }
+    prior = region_prior_px_per_ft(keymap, 500, 500)
+    assert prior is not None and math.isclose(prior, 1.374, rel_tol=1e-2)
+    # No keymap entry, or an entry with no segmented region, gives no prior.
+    assert region_prior_px_per_ft(None, 500, 500) is None
+    assert region_prior_px_per_ft({"lat": 0, "lon": 0, "radius_m": 1}, 500, 500) is None
+
+
+def test_broadened_scale_plausible():
+    from mapsnap.georef_from_labels import broadened_scale_plausible
+
+    # Correct fits pass despite the volume-wide region bias (Chicago p8N: 1.545 px/ft
+    # against a 3.898 prior = 0.40x); the spurious rectangle-tier fits are 10x+ off.
+    assert broadened_scale_plausible(1.545, 3.898)  # p8N — correct, biased prior
+    assert broadened_scale_plausible(1.5, 1.5)
+    assert not broadened_scale_plausible(0.056, 2.578)  # p61W's 0.02x garbage fit
+    assert not broadened_scale_plausible(0.178, 4.401)  # p46N's 0.04x garbage fit
+
+
+def test_region_relative_scale():
+    from mapsnap.georef_from_labels import region_relative_scale
+
+    # Detroit p93: region ~2.8x the typical area -> prior 0.60x the median -> half scale.
+    assert region_relative_scale(1.33, 2.23) == 0.5
+    # Normal pages whose raw priors exceed the median fitted scale (Detroit p32/p5,
+    # Chicago p61W/p46N) stay at the volume median.
+    assert region_relative_scale(3.03, 2.23) == 1.0
+    assert region_relative_scale(2.46, 2.23) == 1.0
+    assert region_relative_scale(2.58, 3.33) == 1.0
+    # Brooklyn p1: a waterfront block 2.2x the typical area (prior ratio 0.68) is NOT
+    # half-scale evidence — the block includes water. Only >=2.5x the area snaps.
+    assert region_relative_scale(1.51, 2.23) == 1.0
+    # A tiny region fragment (Detroit p100: 2.8x the median prior) is never trusted to
+    # scale a page up, and an absurdly large region (>8x typical area) is distrusted.
+    assert region_relative_scale(6.24, 2.23) == 1.0
+    assert region_relative_scale(0.5, 2.23) == 1.0
+
+
+def test_region_corroborates_scale():
+    from mapsnap.georef_from_labels import region_corroborates_scale
+
+    # Champaign's half-scale sheets: fitted 0.515x the median, regions 0.43-0.55x the
+    # typical region -> kept.
+    assert region_corroborates_scale(0.515, 0.55)
+    assert region_corroborates_scale(0.515, 0.43)
+    # A split half whose prior was computed from the wrong panel's block (or, before
+    # the split_page fix, from both blocks summed) disagrees -> still dropped.
+    assert not region_corroborates_scale(0.515, 0.27)
+    # Genuine bad fits: Chicago p50n (0.53x fit, 0.76x region) and Detroit p85 (1.37x
+    # fit, 0.89x region) disagree with their regions -> still dropped.
+    assert not region_corroborates_scale(0.53, 0.76)
+    assert not region_corroborates_scale(1.37, 0.89)
+
+
+def test_is_split_page():
+    from mapsnap.georef_from_labels import is_split_page
+
+    assert is_split_page("p21__1")
+    assert is_split_page("p16n__2")
+    assert not is_split_page("p21")
+    assert not is_split_page("p0b")
+    assert not is_split_page("p61w")
+
+
+def test_region_prior_px_per_ft_split_page_uses_mean_ring_area():
+    from mapsnap.georef_from_labels import region_prior_px_per_ft
+
+    # Two identical ~110.5 x 111.3 m blocks (a split sheet's two panels). For an unsplit
+    # page the rings sum (duplicate detections of one watershed-split block); for a split
+    # panel each ring is one panel's footprint, so the mean applies: prior x sqrt(2).
+    ring_a = [[0.0, 0.0], [0.001, 0.0], [0.001, 0.001], [0.0, 0.001]]
+    ring_b = [[0.01, 0.0], [0.011, 0.0], [0.011, 0.001], [0.01, 0.001]]
+    keymap = {
+        "lat": 0.0005,
+        "lon": 0.0055,
+        "radius_m": 300.0,
+        "regions": [ring_a, ring_b],
+    }
+    summed = region_prior_px_per_ft(keymap, 500, 500)
+    mean = region_prior_px_per_ft(keymap, 500, 500, split_page=True)
+    assert summed is not None and mean is not None
+    assert math.isclose(mean, summed * math.sqrt(2), rel_tol=1e-9)
+    # With one ring, split makes no difference.
+    one = {"lat": 0.0005, "lon": 0.0005, "radius_m": 300.0, "regions": [ring_a]}
+    assert region_prior_px_per_ft(one, 500, 500) == region_prior_px_per_ft(
+        one, 500, 500, split_page=True
+    )

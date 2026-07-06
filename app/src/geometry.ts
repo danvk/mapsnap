@@ -116,3 +116,48 @@ export function computeCorners(
     transform(0, height),
   ];
 }
+
+/**
+ * A closed ring of [lon, lat] points approximating a circle of `radiusMeters`
+ * around (lon, lat), using an equirectangular local approximation. Suitable for
+ * drawing the key-map neighborhood on a web map at city scale.
+ */
+export function circlePolygon(
+  lon: number,
+  lat: number,
+  radiusMeters: number,
+  points = 64,
+): [number, number][] {
+  const dLat = radiusMeters / 110540;
+  const dLon = radiusMeters / (111320 * Math.cos((lat * Math.PI) / 180));
+  const ring: [number, number][] = [];
+  for (let i = 0; i <= points; i++) {
+    const theta = (i / points) * 2 * Math.PI;
+    ring.push([lon + dLon * Math.cos(theta), lat + dLat * Math.sin(theta)]);
+  }
+  return ring;
+}
+
+/**
+ * A plus-shaped crosshair centered at (lon, lat): two [lon, lat] line segments
+ * (horizontal and vertical) each `armMeters` long from the center. Used to mark
+ * the key-map's expected page center distinctly from a filled GCP dot.
+ */
+export function crosshairLines(
+  lon: number,
+  lat: number,
+  armMeters: number,
+): [number, number][][] {
+  const dLat = armMeters / 110540;
+  const dLon = armMeters / (111320 * Math.cos((lat * Math.PI) / 180));
+  return [
+    [
+      [lon - dLon, lat],
+      [lon + dLon, lat],
+    ],
+    [
+      [lon, lat - dLat],
+      [lon, lat + dLat],
+    ],
+  ];
+}

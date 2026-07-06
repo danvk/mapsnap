@@ -7,10 +7,14 @@ off), recall tracks the localizer and recognition is the learned CRNN — which 
 ornate / low-resolution fonts that defeated CRAFT+EasyOCR.
 
 Writes the same ``<stem>.keymap.json`` schema as the other detectors. ``--pages`` is
-optional: if given, each decode is snapped to the nearest valid page number within edit
-distance 1 (a light constraint); otherwise the raw CRNN output is kept.
+optional but recommended: if given, each decode is snapped to the nearest valid page number
+within edit distance 1, and the narrow-detection minimum-width re-read (which recovers a
+multi-digit number the wide strip squished to one digit) is enabled — the re-read only fires
+when it can validate the longer number against this page set, since ungated it hallucinates a
+second digit onto genuine single-digit pages. Without ``--pages`` the raw CRNN output is kept
+and no re-read is done.
 
-    uv run python -m mapsnap.keymap.detect_numbers_crnn data/keymaps/chicago-p0b.jpg
+    uv run python -m mapsnap.keymap.detect_numbers_crnn data/keymaps/chicago-p0b.jpg --pages 1-112
 """
 
 import argparse
@@ -23,6 +27,7 @@ from typing import cast
 import numpy as np
 import torch
 from PIL import Image
+
 
 from mapsnap.keymap.crnn_model import (
     build_crnn,
@@ -106,6 +111,77 @@ def read_candidates(
     return results, strips
 
 
+# Half-widths (working px) for the narrow-detection re-read, tighter than the default
+# BOX_HALF_W_WORKING=55 so a squished multi-digit number resolves into separate digits.
+REREAD_HALF_WIDTHS_WORKING = [30.0, 38.0]
+
+
+@torch.no_grad()
+def reread_narrow(
+    image: np.ndarray,
+    crnn: torch.nn.Module,
+    device,
+    center: tuple[float, float],
+    factor: float,
+    pages: list[str],
+    half_w_working: float,
+) -> tuple[list[list[int]], str, float] | None:
+    """Re-read the central number around ``center`` from a tighter, minimum-width crop.
+
+    The default strip is wide enough that a multi-digit number is squished until the CRNN
+    fires only its central digit; a tighter crop resolves the full number. Returns the same
+    (polygon, text, confidence) triple as the main pass, or None if nothing decodes.
+    """
+    height, width = image.shape[:2]
+    cx, cy = center
+    strip = number_strip(image, cx, cy, factor, half_w_working=half_w_working)
+    tensor = cast(torch.Tensor, eval_transform()(strip)).unsqueeze(0).to(device)
+    log_probs = crnn(tensor)
+    path = greedy_paths(log_probs)[0]
+    confidence = float(log_probs.exp().max(dim=2).values.mean())
+    group = central_group(path)
+    if group is None:
+        return None
+    text = snap_to_pages(ctc_greedy_decode(path[group[0] : group[1] + 1]), pages)
+    if not text:
+        return None
+    crop_box = strip_crop_box(
+        width, height, cx, cy, factor, half_w_working=half_w_working
+    )
+    polygon = locate_number(strip, group, len(path), crop_box)
+    return polygon, text, confidence
+
+
+# A tight-crop re-read result: (polygon, text, confidence), matching reread_narrow's return.
+RereadResult = tuple[list[list[int]], str, float]
+
+
+def choose_reread(
+    text: str, rereads: list[RereadResult | None], valid_pages: set[str]
+) -> RereadResult | None:
+    """Pick a longer page number that every tight-crop re-read agrees on, else None (keep text).
+
+    A single-digit read is often a multi-digit number the wide strip squished until the CRNN
+    fired only its central digit (e.g. the "0" of "105", the "1" of "61"). Re-reading from
+    minimum-width crops resolves it — but only when the crops *agree*: a genuine multi-digit
+    label reads the same from every tight crop, whereas a hallucinated second digit on a real
+    single-digit page is unstable across crop widths ("9" -> "69" at one width, "61" at
+    another). So a longer page is accepted only when every re-read is a strictly-longer valid
+    page and they all decode the same text; a lone width or any disagreement keeps the original
+    single digit. Requiring agreement (rather than a confidence threshold, which is not
+    comparable across crop widths) guards against upgrading a real single-digit page to a
+    valid-but-wrong multi-digit one. Returns the highest-confidence instance of the agreed page.
+    """
+    longer = [
+        r
+        for r in rereads
+        if r is not None and len(r[1]) > len(text) and r[1] in valid_pages
+    ]
+    if len(longer) != len(rereads) or len({r[1] for r in longer}) != 1:
+        return None
+    return max(longer, key=lambda r: r[2])
+
+
 def detect_and_read(
     image_path: str,
     cnn: torch.nn.Module,
@@ -116,8 +192,13 @@ def detect_and_read(
     threshold: float,
     nms_dist: float,
     pages: list[str],
+    disable_reread: bool = False,
 ) -> list[dict]:
-    """CNN-localize then CRNN-read one image; write <stem>.keymap.json."""
+    """CNN-localize then CRNN-read one image; write <stem>.keymap.json.
+
+    ``disable_reread`` turns off the narrow-detection minimum-width re-read (an ablation
+    switch for measuring that step's effect); it is on by default.
+    """
     image = np.asarray(Image.open(image_path).convert("RGB"))
     height, width = image.shape[:2]
     centers, factor = detect_candidate_centers(
@@ -127,6 +208,7 @@ def detect_and_read(
 
     # Decode and box only the central number of each crop, dropping a neighbor caught in the
     # wide window.
+    valid_pages = set(pages)
     found: list[tuple[list[list[int]], str, float]] = []
     for (cx, cy), (confidence, path), strip in zip(centers, reads, strips):
         group = central_group(path)
@@ -144,6 +226,23 @@ def detect_and_read(
             )
         crop_box = strip_crop_box(width, height, cx, cy, factor)
         polygon = locate_number(strip, group, len(path), crop_box)
+        # A single-digit read is often a multi-digit number the wide strip squished to one
+        # digit; re-read from minimum-width crops and accept a longer valid page only when the
+        # crops agree (see choose_reread — the agreement gate guards against upgrading a genuine
+        # single-digit page to a valid-but-wrong multi-digit one).
+        if len(text) == 1 and valid_pages and not disable_reread:
+            rereads = [
+                reread_narrow(image, crnn, device, (cx, cy), factor, pages, hw)
+                for hw in REREAD_HALF_WIDTHS_WORKING
+            ]
+            chosen = choose_reread(text, rereads, valid_pages)
+            if chosen is not None:
+                polygon, widened, confidence = chosen
+                print(
+                    f"{Path(image_path).name}: re-read narrow {text!r} -> {widened!r}",
+                    file=sys.stderr,
+                )
+                text = widened
         found.append((polygon, text, confidence))
 
     # Trimming a between-two-numbers candidate can duplicate a neighbor's detection; keep the
@@ -197,6 +296,11 @@ def main() -> None:
     parser.add_argument("--stride", type=int, default=DEFAULT_STRIDE)
     parser.add_argument("--threshold", type=float, default=DEFAULT_THRESHOLD)
     parser.add_argument("--nms-dist", type=float, default=DEFAULT_NMS_DIST)
+    parser.add_argument(
+        "--disable-reread",
+        action="store_true",
+        help="Turn off the narrow-detection minimum-width re-read (ablation).",
+    )
     args = parser.parse_args()
 
     device = select_device()
@@ -218,6 +322,7 @@ def main() -> None:
             threshold=args.threshold,
             nms_dist=args.nms_dist,
             pages=pages,
+            disable_reread=args.disable_reread,
         )
 
 
