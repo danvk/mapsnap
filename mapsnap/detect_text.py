@@ -15,7 +15,7 @@ from PIL import Image
 from tqdm import tqdm
 
 from mapsnap.ctc_vocab_decode import HINT_STRINGS, generate_vocab_strings
-from mapsnap.keymap.locate import KeymapLocator, page_number
+from mapsnap.keymap.locate import KeymapLocator, page_number, resolve_keymaps
 from mapsnap.streets import build_block_index, polygon_side_lengths
 from mapsnap.utils import default_centerlines, image_stem
 
@@ -697,6 +697,15 @@ def main() -> None:
         ),
     )
     parser.add_argument(
+        "--ignore-keymap",
+        action="store_true",
+        help=(
+            "Do not use key maps. By default, when --keymap is not given, key-map detections "
+            "files (<stem>.keymap.json with a sibling .georef.json) next to the images or under "
+            "raw/ are discovered and used automatically; this flag turns that off."
+        ),
+    )
+    parser.add_argument(
         "--beam-width",
         type=int,
         default=20,
@@ -793,12 +802,15 @@ def main() -> None:
     # With a georeferenced key map, restrict each placed page's vocabulary to nearby streets,
     # falling back to the streets within the whole key map's rectangle (a volume-wide box every
     # page sits inside) for pages the neighborhood misses or the key map does not place.
+    keymap_files = resolve_keymaps(args.keymap, args.ignore_keymap, args.images)
     locator = None
     rectangle_vocab = vocab_strings
-    if args.keymap is not None:
-        locator = KeymapLocator.from_keymaps(
-            [Path(k) for k in args.keymap], args.keymap_radius
+    if keymap_files:
+        print(
+            "Using key map(s): " + ", ".join(str(path) for path in keymap_files),
+            file=sys.stderr,
         )
+        locator = KeymapLocator.from_keymaps(keymap_files, args.keymap_radius)
         rectangle = locator.rectangle_features(geojson["features"])
         if rectangle:
             rectangle_index = build_block_index(

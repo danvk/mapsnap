@@ -1,13 +1,16 @@
 import math
+from pathlib import Path
 
 from mapsnap.keymap.locate import (
     KeymapLocator,
     bilinear_pixel_to_world,
+    discover_keymaps,
     estimate_radius,
     geometry_segments,
     geometry_vertices,
     meters_between,
     page_number,
+    resolve_keymaps,
 )
 
 # A key map georeferenced to an axis-aligned box: 1000x500 px over lon 0..1, lat 2..3
@@ -220,3 +223,59 @@ def test_rectangle_features_unions_multiple_keymaps():
     kept = locator.rectangle_features(features)
     assert kept is not None
     assert {f["id"] for f in kept} == {"in_a", "in_b"}  # union of both rectangles
+
+
+def make_keymap(directory: Path, stem: str, *, with_georef: bool = True) -> Path:
+    """Create a <stem>.keymap.json (and optionally its .georef.json sibling) in directory."""
+    directory.mkdir(parents=True, exist_ok=True)
+    keymap = directory / f"{stem}.keymap.json"
+    keymap.write_text("{}")
+    if with_georef:
+        (directory / f"{stem}.georef.json").write_text("{}")
+    return keymap
+
+
+def test_discover_keymaps_finds_under_raw(tmp_path: Path):
+    # ocr/georef run on top-level pages; the key map's sidecars live under raw/.
+    raw = tmp_path / "raw"
+    make_keymap(raw, "p0")
+    found = discover_keymaps([str(tmp_path / "p5.jpg"), str(tmp_path / "p6.jpg")])
+    assert found == [raw / "p0.keymap.json"]
+
+
+def test_discover_keymaps_finds_in_same_directory(tmp_path: Path):
+    make_keymap(tmp_path, "p1b")
+    assert discover_keymaps([str(tmp_path / "p1b.jpg")]) == [
+        tmp_path / "p1b.keymap.json"
+    ]
+
+
+def test_discover_keymaps_skips_keymap_without_georef(tmp_path: Path):
+    # A key map whose georeferencing failed has no .georef.json; a locator can't use it.
+    make_keymap(tmp_path / "raw", "p0", with_georef=False)
+    assert discover_keymaps([str(tmp_path / "p5.jpg")]) == []
+
+
+def test_discover_keymaps_dedups_across_images(tmp_path: Path):
+    make_keymap(tmp_path / "raw", "p0")
+    images = [str(tmp_path / "p5.jpg"), str(tmp_path / "p6.jpg")]
+    assert discover_keymaps(images) == [tmp_path / "raw" / "p0.keymap.json"]
+
+
+def test_resolve_keymaps_ignore_beats_everything(tmp_path: Path):
+    make_keymap(tmp_path / "raw", "p0")
+    assert (
+        resolve_keymaps(["explicit.keymap.json"], True, [str(tmp_path / "p5.jpg")])
+        == []
+    )
+
+
+def test_resolve_keymaps_explicit_wins_over_discovery(tmp_path: Path):
+    make_keymap(tmp_path / "raw", "p0")
+    resolved = resolve_keymaps(["given.keymap.json"], False, [str(tmp_path / "p5.jpg")])
+    assert resolved == [Path("given.keymap.json")]
+
+
+def test_resolve_keymaps_falls_back_to_discovery(tmp_path: Path):
+    keymap = make_keymap(tmp_path / "raw", "p0")
+    assert resolve_keymaps(None, False, [str(tmp_path / "p5.jpg")]) == [keymap]

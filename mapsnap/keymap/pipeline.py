@@ -140,10 +140,12 @@ def main() -> None:
     #    downstream --keymap flag has a <stem>.georef.json to read. OCR runs at a key-map-
     #    appropriate detector floor and (by default) tiles the oversized sheet at native
     #    resolution; georef must be told to geocode key maps, which it skips by default once a
-    #    <stem>.keymap.json sibling exists.
+    #    <stem>.keymap.json sibling exists. Both pass --ignore-keymap so that on a re-run they do
+    #    not auto-discover the key map's own .keymap.json and try to locate it against itself.
     ocr_cmd = [
         "mapsnap",
         "ocr",
+        "--ignore-keymap",
         "--centerlines",
         centerlines,
         "--min-short-side",
@@ -156,6 +158,7 @@ def main() -> None:
         [
             "mapsnap",
             "georef",
+            "--ignore-keymap",
             "--centerlines",
             centerlines,
             "--geocode_keymaps",

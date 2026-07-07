@@ -31,7 +31,12 @@ from PIL import Image
 from tqdm import tqdm
 
 from mapsnap.compare_iiif_georef import truth_polygons_by_page
-from mapsnap.keymap.locate import KeymapLocator, page_number, region_scale_m_per_px
+from mapsnap.keymap.locate import (
+    KeymapLocator,
+    page_number,
+    region_scale_m_per_px,
+    resolve_keymaps,
+)
 from mapsnap.streets import (
     DIRECTION_WORDS,
     HINT_STRINGS,
@@ -2793,6 +2798,15 @@ def main() -> None:
         ),
     )
     parser.add_argument(
+        "--ignore-keymap",
+        action="store_true",
+        help=(
+            "Do not use key maps. By default, when --keymap is not given, key-map detections "
+            "files (<stem>.keymap.json with a sibling .georef.json) next to the images or under "
+            "raw/ are discovered and used automatically; this flag turns that off."
+        ),
+    )
+    parser.add_argument(
         "--num-workers",
         type=int,
         default=1,
@@ -2867,12 +2881,15 @@ def main() -> None:
     # With a georeferenced key map, each placed page is matched first against its own
     # neighborhood and, if that starves the fit, against the whole key-map rectangle (a
     # volume-wide box every page sits in — far smaller than the full centerlines).
+    keymap_files = resolve_keymaps(args.keymap, args.ignore_keymap, args.images)
     locator = None
     rectangle_index: tuple[dict[str, list[Block]], float] | None = None
-    if args.keymap is not None:
-        locator = KeymapLocator.from_keymaps(
-            [Path(k) for k in args.keymap], args.keymap_radius
+    if keymap_files:
+        print(
+            "Using key map(s): " + ", ".join(str(path) for path in keymap_files),
+            file=sys.stderr,
         )
+        locator = KeymapLocator.from_keymaps(keymap_files, args.keymap_radius)
         rectangle = locator.rectangle_features(geojson["features"])
         if rectangle:
             rectangle_bi = build_block_index(

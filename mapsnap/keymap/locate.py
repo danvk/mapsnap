@@ -22,7 +22,7 @@ Point = tuple[float, float]
 M_PER_DEG_LAT = 110540.0
 M_PER_DEG_LON_EQUATOR = 111320.0
 
-__all__ = ["KeymapLocator", "page_number"]
+__all__ = ["KeymapLocator", "page_number", "discover_keymaps", "resolve_keymaps"]
 
 
 def keymap_georef_path(keymap_json: Path) -> Path:
@@ -30,6 +30,44 @@ def keymap_georef_path(keymap_json: Path) -> Path:
     return keymap_json.with_name(
         keymap_json.name.replace(".keymap.json", ".georef.json")
     )
+
+
+def discover_keymaps(image_paths: list[str]) -> list[Path]:
+    """Usable ``<stem>.keymap.json`` files near the input images, for default key-map use.
+
+    Searches each image's own directory and its ``raw/`` subdirectory (where ``mapsnap keymap``
+    writes them) and keeps only detections files that have the sibling ``<stem>.georef.json`` a
+    locator needs — a bare ``.keymap.json`` from a key map whose georeferencing failed is skipped.
+    Returns them de-duplicated in directory-then-name order; empty when none are found.
+    """
+    directories: list[Path] = []
+    for image_path in image_paths:
+        parent = Path(image_path).parent
+        for directory in (parent, parent / "raw"):
+            if directory.is_dir() and directory not in directories:
+                directories.append(directory)
+    found: list[Path] = []
+    for directory in directories:
+        for keymap_json in sorted(directory.glob("*.keymap.json")):
+            if keymap_georef_path(keymap_json).exists() and keymap_json not in found:
+                found.append(keymap_json)
+    return found
+
+
+def resolve_keymaps(
+    explicit: list[str] | None, ignore: bool, image_paths: list[str]
+) -> list[Path]:
+    """The key-map files ``ocr``/``georef`` should use, applying the shared flag precedence.
+
+    ``--ignore-keymap`` (``ignore``) turns the feature off; otherwise an explicit ``--keymap``
+    list wins, and with neither the key maps are auto-discovered next to the images (see
+    :func:`discover_keymaps`). Centralized so both commands resolve key maps identically.
+    """
+    if ignore:
+        return []
+    if explicit:
+        return [Path(path) for path in explicit]
+    return discover_keymaps(image_paths)
 
 
 def keymap_regions_path(keymap_json: Path) -> Path:
