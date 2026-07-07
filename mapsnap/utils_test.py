@@ -1,10 +1,17 @@
 """Tests for mapsnap.utils."""
 
+from pathlib import Path
+
+import pytest
+
 from mapsnap.utils import (
+    Step,
     default_centerlines,
     image_stem,
     list_pages,
+    mark_step_done,
     source_id_to_page_key,
+    step_done,
 )
 
 
@@ -136,3 +143,47 @@ def test_source_id_chicago_non_sheet():
     assert source_id_to_page_key(f"{_CHI}:01790_01N_1950-covr", "") == "covr"
     assert source_id_to_page_key(f"{_CHI}:01790_01N_1950-titl", "") == "titl"
     assert source_id_to_page_key(f"{_CHI}:01790_01N_1950-ind1", "") == "ind1"
+
+
+def test_step_done_and_mark(tmp_path: Path):
+    assert not step_done(tmp_path, "scale")
+    mark_step_done(tmp_path, "scale")
+    assert step_done(tmp_path, "scale")
+    assert not step_done(tmp_path, "split")  # independent of other steps
+
+
+def test_step_runs_body_and_stamps(tmp_path: Path):
+    step = Step(tmp_path)
+    ran = []
+    with step("osm"):
+        ran.append(1)
+    assert ran == [1]  # body ran
+    assert step_done(tmp_path, "osm")  # and was stamped
+
+
+def test_step_skips_completed_body(tmp_path: Path):
+    mark_step_done(tmp_path, "osm")
+    step = Step(tmp_path)
+    ran = []
+    with step("osm"):
+        ran.append(1)  # must not execute
+    assert ran == []  # whole body was skipped
+    line_after_block = True  # code after the block still runs normally
+    assert line_after_block
+
+
+def test_step_force_reruns_completed(tmp_path: Path):
+    mark_step_done(tmp_path, "osm")
+    step = Step(tmp_path, force=True)
+    ran = []
+    with step("osm"):
+        ran.append(1)
+    assert ran == [1]
+
+
+def test_step_leaves_no_stamp_when_body_raises(tmp_path: Path):
+    step = Step(tmp_path)
+    with pytest.raises(ValueError):
+        with step("osm"):
+            raise ValueError("boom")
+    assert not step_done(tmp_path, "osm")  # interrupted step re-runs next time

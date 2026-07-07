@@ -7,6 +7,7 @@ import subprocess
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
+from types import FrameType
 
 
 def run_cmd(cmd: list[str]) -> None:
@@ -15,6 +16,93 @@ def run_cmd(cmd: list[str]) -> None:
     result = subprocess.run(cmd)
     if result.returncode != 0:
         sys.exit(result.returncode)
+
+
+def step_stamp(dir_path: Path, name: str) -> Path:
+    """Path of the completion marker for pipeline step ``name`` under ``dir_path``."""
+    return dir_path / ".pipeline" / f"{name}.done"
+
+
+def step_done(dir_path: Path, name: str) -> bool:
+    """Whether pipeline step ``name`` has already completed for ``dir_path``."""
+    return step_stamp(dir_path, name).exists()
+
+
+def mark_step_done(dir_path: Path, name: str) -> None:
+    """Record that pipeline step ``name`` completed, so a resumed run skips it."""
+    stamp = step_stamp(dir_path, name)
+    stamp.parent.mkdir(parents=True, exist_ok=True)
+    stamp.write_text("")
+
+
+class _StepSkipped(Exception):
+    """Internal signal raised to skip an already-completed step's ``with``-block body."""
+
+
+class Step:
+    """Factory for resumable pipeline steps sharing one directory and ``force`` flag.
+
+    Construct once per pipeline run, then wrap each stage in ``with step("name"):``::
+
+        step = Step(dir_path, force=args.force)
+        with step("scale"):
+            run_cmd([...])
+
+    The block runs to completion the first time and records an empty
+    ``<dir>/.pipeline/<name>.done`` stamp; on a later (resumed) run the block is skipped
+    entirely — its body never executes — unless ``force`` is set. The stamp is written only if
+    the body exits without raising, so an interrupted step re-runs next time. Steps whose own
+    subcommand also skips finished work (``download-oim``, ``ocr --resume``) still do so on the
+    re-run that follows an interruption partway through a step.
+    """
+
+    def __init__(self, dir_path: Path, *, force: bool = False) -> None:
+        self.dir_path = dir_path
+        self.force = force
+
+    def __call__(self, name: str) -> "_StepContext":
+        return _StepContext(self.dir_path, name, force=self.force)
+
+
+class _StepContext:
+    """One ``with step(name):`` block; created by :class:`Step`.
+
+    Python has no built-in way to skip a ``with`` body, so an already-completed step installs a
+    line trace on the calling frame that raises the instant the body starts and swallows that
+    signal in ``__exit__`` (the standard ``sys.settrace`` idiom; CPython only). The trace is only
+    touched on the skip path, and the prior trace is restored so an outer coverage/debug tracer
+    keeps working.
+    """
+
+    def __init__(self, dir_path: Path, name: str, *, force: bool) -> None:
+        self.dir_path = dir_path
+        self.name = name
+        self.skip = not force and step_done(dir_path, name)
+        self.saved_trace = sys.gettrace()
+        self.frame: FrameType | None = None
+
+    def __enter__(self) -> "_StepContext":
+        if not self.skip:
+            return self
+        print(f"+ [skip {self.name}: already completed]", flush=True)
+        self.saved_trace = sys.gettrace()
+        self.frame = sys._getframe(1)
+        sys.settrace(lambda *_: None)
+        self.frame.f_trace = self._skip_body
+        return self
+
+    def _skip_body(self, frame: FrameType, event: str, arg: object) -> None:
+        raise _StepSkipped
+
+    def __exit__(self, exc_type, exc, traceback) -> bool:
+        if self.skip:
+            if self.frame is not None:
+                self.frame.f_trace = None
+            sys.settrace(self.saved_trace)
+            return exc_type is not None and issubclass(exc_type, _StepSkipped)
+        if exc_type is None:
+            mark_step_done(self.dir_path, self.name)
+        return False
 
 
 def write_run_record(dir_path: Path, source: str, params: dict[str, str]) -> None:
