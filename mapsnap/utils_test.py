@@ -1,10 +1,15 @@
 """Tests for mapsnap.utils."""
 
+from pathlib import Path
+
 from mapsnap.utils import (
     default_centerlines,
     image_stem,
     list_pages,
+    mark_step_done,
+    run_step,
     source_id_to_page_key,
+    step_done,
 )
 
 
@@ -136,3 +141,32 @@ def test_source_id_chicago_non_sheet():
     assert source_id_to_page_key(f"{_CHI}:01790_01N_1950-covr", "") == "covr"
     assert source_id_to_page_key(f"{_CHI}:01790_01N_1950-titl", "") == "titl"
     assert source_id_to_page_key(f"{_CHI}:01790_01N_1950-ind1", "") == "ind1"
+
+
+def test_step_done_and_mark(tmp_path: Path):
+    assert not step_done(tmp_path, "scale")
+    mark_step_done(tmp_path, "scale")
+    assert step_done(tmp_path, "scale")
+    assert not step_done(tmp_path, "split")  # independent of other steps
+
+
+def test_run_step_runs_and_stamps(tmp_path: Path):
+    marker = tmp_path / "ran.txt"
+    run_step(tmp_path, "osm", ["touch", str(marker)], force=False)
+    assert marker.exists()  # command ran
+    assert step_done(tmp_path, "osm")  # and was stamped
+
+
+def test_run_step_skips_when_already_done(tmp_path: Path):
+    mark_step_done(tmp_path, "osm")
+    marker = tmp_path / "ran.txt"
+    # A failing command would sys.exit if run; being skipped means it never runs.
+    run_step(tmp_path, "osm", ["touch", str(marker)], force=False)
+    assert not marker.exists()
+
+
+def test_run_step_force_reruns_completed_step(tmp_path: Path):
+    mark_step_done(tmp_path, "osm")
+    marker = tmp_path / "ran.txt"
+    run_step(tmp_path, "osm", ["touch", str(marker)], force=True)
+    assert marker.exists()

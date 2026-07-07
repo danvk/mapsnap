@@ -17,6 +17,39 @@ def run_cmd(cmd: list[str]) -> None:
         sys.exit(result.returncode)
 
 
+def step_stamp(dir_path: Path, name: str) -> Path:
+    """Path of the completion marker for pipeline step ``name`` under ``dir_path``."""
+    return dir_path / ".pipeline" / f"{name}.done"
+
+
+def step_done(dir_path: Path, name: str) -> bool:
+    """Whether pipeline step ``name`` has already completed for ``dir_path``."""
+    return step_stamp(dir_path, name).exists()
+
+
+def mark_step_done(dir_path: Path, name: str) -> None:
+    """Record that pipeline step ``name`` completed, so a resumed run skips it."""
+    stamp = step_stamp(dir_path, name)
+    stamp.parent.mkdir(parents=True, exist_ok=True)
+    stamp.write_text("")
+
+
+def run_step(dir_path: Path, name: str, cmd: list[str], *, force: bool = False) -> None:
+    """Run one pipeline subcommand, skipping it on a resumed run once it has completed.
+
+    Records completion as an empty ``<dir>/.pipeline/<name>.done`` stamp only after ``cmd``
+    succeeds — :func:`run_cmd` exits the process on failure, so an interrupted step leaves no
+    stamp and re-runs next time. ``force`` re-runs regardless of the stamp. The step is the unit
+    of skipping; a subcommand that additionally skips finished work internally (``download-oim``,
+    ``ocr --resume``) still does so on the re-run that follows an interruption partway through.
+    """
+    if not force and step_done(dir_path, name):
+        print(f"+ [skip {name}: already completed]", flush=True)
+        return
+    run_cmd(cmd)
+    mark_step_done(dir_path, name)
+
+
 def write_run_record(dir_path: Path, source: str, params: dict[str, str]) -> None:
     """Record the pipeline invocation in dir_path/mapsnap.json for reproducibility.
 

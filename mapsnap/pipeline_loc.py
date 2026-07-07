@@ -87,7 +87,7 @@ def main() -> None:
         ]
     )
 
-    run_cmd(["mapsnap", "fit", str(dir_path), "mapsnap"])
+    run_cmd(["mapsnap", "fit", str(dir_path), "--tag", "mapsnap"])
 
 
 if __name__ == "__main__":
