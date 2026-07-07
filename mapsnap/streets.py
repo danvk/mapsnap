@@ -333,6 +333,17 @@ def canonical_street_match(
     return None
 
 
+def _collapsed_word_prefixes(name: str) -> set[str]:
+    """Whole-word prefixes of a normalized name, each with its spaces removed.
+
+    "WEST SIDE AVENUE" -> {"WEST", "WESTSIDE", "WESTSIDEAVENUE"}. Lets a single-word map label
+    ("WESTSIDE") match a multi-word street ("WEST SIDE AVENUE") that differs only in spacing,
+    while the word boundaries prevent matching mid-word substrings.
+    """
+    words = name.split()
+    return {"".join(words[:i]) for i in range(1, len(words) + 1)}
+
+
 def canonical_street_matches(
     text: str,
     normalized_streets: set[str],
@@ -372,6 +383,7 @@ def canonical_street_matches(
                 matches.append(s)
         return matches
     matches: list[str] = []
+    normalized_collapsed = normalized.replace(" ", "")
     for s in normalized_streets:
         for candidate in _match_candidates(s):
             if (
@@ -381,6 +393,19 @@ def canonical_street_matches(
                     and normalized.startswith(candidate + " ")
                 )
                 or candidate.startswith(normalized + " ")
+                # Space-insensitive: a map label rendered as one word ("WESTSIDE") should match
+                # an OSM street that differs only in internal spacing ("WEST SIDE AVENUE"), so
+                # its intersections aren't lost to a space. Match when the label equals a
+                # whole-word prefix of the candidate with spaces removed, or vice versa — a
+                # word-boundary test, so no mid-word substrings match. The vice-versa direction
+                # keeps the multi-word guard of the spaced prefix rule above, so a bare
+                # single-letter key ("K") does not swallow a longer label ("K STREET").
+                or normalized_collapsed in _collapsed_word_prefixes(candidate)
+                or (
+                    len(candidate.split()) >= 2
+                    and candidate.replace(" ", "")
+                    in _collapsed_word_prefixes(normalized)
+                )
             ):
                 matches.append(s)
                 break  # count each key at most once

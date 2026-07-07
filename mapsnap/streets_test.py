@@ -175,3 +175,29 @@ def test_canonical_street_match_direction_suffixed():
         "NORTH PLACE SOUTHEAST",
         "NORTH ROAD",
     }
+
+
+# --- canonical_street_matches: space-insensitive matching (WESTSIDE ↔ WEST SIDE AVENUE) ---
+
+
+def test_space_insensitive_matches_multiword_street():
+    # A one-word map label matches the OSM street that differs only by an internal space, so
+    # its intersections aren't lost (Hudson Co.: "WESTSIDE" on the map vs "WEST SIDE" in OSM).
+    streets = {"WEST SIDE AVENUE", "WESTSIDE AVENUE"}
+    matches = canonical_street_matches("WESTSIDE", streets)
+    assert "WEST SIDE AVENUE" in matches  # the space-variant, recovered
+    assert "WESTSIDE AVENUE" in matches  # the exact-prefix match still works
+
+
+def test_space_insensitive_matches_are_symmetric():
+    # A label that keeps the type word ("WESTSIDE AVENUE") still finds the spaced OSM key.
+    streets = {"WEST SIDE AVENUE"}
+    assert canonical_street_matches("WESTSIDE AVENUE", streets) == ["WEST SIDE AVENUE"]
+
+
+def test_space_insensitive_does_not_match_different_words():
+    # Collapsing spaces must not merge genuinely different names: "OAK" is not "OAKLAND", and a
+    # shared leading substring that is not a whole-word prefix must not match.
+    streets = {"OAKLAND AVENUE", "CARBON PLACE"}
+    assert canonical_street_matches("OAK", streets) == []
+    assert canonical_street_matches("CAR", streets) == []
