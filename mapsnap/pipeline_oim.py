@@ -6,12 +6,10 @@ import urllib.request
 from pathlib import Path
 
 from mapsnap.utils import (
+    Step,
     image_stem,
     list_pages,
-    mark_step_done,
     run_cmd,
-    run_step,
-    step_done,
     write_run_record,
 )
 
@@ -95,20 +93,19 @@ def main() -> None:
         },
     )
 
+    step = Step(dir_path, force=args.force)
+
     base_url = f"https://oldinsurancemaps.net/iiif/mosaic/{args.sanborn_slug}"
-    if args.force or not step_done(dir_path, "manifests"):
+    with step("manifests"):
         download_file(
             f"{base_url}/main-content/?trim=true", dir_path / "main.iiif.json"
         )
         download_file(f"{base_url}/key-map/?trim=true", dir_path / "key.iiif.json")
-        mark_step_done(dir_path, "manifests")
-    else:
-        print("+ [skip manifests: already completed]", flush=True)
 
     # Download the full-resolution pages. The key map lives only in key.iiif.json (never in
     # main.iiif.json), so download both into raw/ and let it be treated as just another page —
     # the key-map detector then finds it by content, without the pipeline knowing its origin.
-    if args.force or not step_done(dir_path, "download-images"):
+    with step("download-images"):
         for iiif_name in ("main.iiif.json", "key.iiif.json"):
             run_cmd(
                 [
@@ -119,54 +116,44 @@ def main() -> None:
                     args.oim_prefix,
                 ]
             )
-        mark_step_done(dir_path, "download-images")
-    else:
-        print("+ [skip download-images: already completed]", flush=True)
 
     # Downscale the full-resolution raw/ pages to 25% top-level pN.jpg images.
     raw_images = sorted(glob.glob(str(dir_path / "raw" / "*.jpg")))
-    run_step(
-        dir_path,
-        "scale",
-        ["mapsnap", "scale", *raw_images, "--output-dir", str(dir_path)],
-        force=args.force,
-    )
+    with step("scale"):
+        run_cmd(["mapsnap", "scale", *raw_images, "--output-dir", str(dir_path)])
 
     # Detect and write split panels (pN__i.jpg + pN.panels.json) for pages that split.
     page_images = sorted(glob.glob(str(dir_path / "p*.jpg")))
-    run_step(dir_path, "split", ["mapsnap", "split", *page_images], force=args.force)
+    with step("split"):
+        run_cmd(["mapsnap", "split", *page_images])
 
-    run_step(
-        dir_path,
-        "download-osm",
-        [
-            "mapsnap",
-            "download-osm",
-            args.relation,
-            "--output",
-            str(dir_path / "streets.osm.json"),
-        ],
-        force=args.force,
-    )
+    with step("download-osm"):
+        run_cmd(
+            [
+                "mapsnap",
+                "download-osm",
+                args.relation,
+                "--output",
+                str(dir_path / "streets.osm.json"),
+            ]
+        )
 
-    run_step(
-        dir_path,
-        "osm-to-geojson",
-        [
-            "mapsnap",
-            "osm-to-geojson",
-            str(dir_path / "streets.osm.json"),
-            "--output",
-            str(dir_path / "centerlines.geojson"),
-        ],
-        force=args.force,
-    )
+    with step("osm-to-geojson"):
+        run_cmd(
+            [
+                "mapsnap",
+                "osm-to-geojson",
+                str(dir_path / "streets.osm.json"),
+                "--output",
+                str(dir_path / "centerlines.geojson"),
+            ]
+        )
 
     # Identify the key map(s) from the 25%-scale pages, keep only those at full resolution (the
     # other raw pages duplicate the 25% pN.jpg — delete them unless --keep_raw), and build their
     # sidecars. The subsequent ocr/fit steps then auto-discover raw/*.keymap.json and restrict
     # each page to its key-map neighborhood.
-    if args.force or not step_done(dir_path, "keymap"):
+    with step("keymap"):
         from mapsnap.keymap.identify import identify_keymaps
 
         keymap_keys = identify_keymaps(dir_path)
@@ -178,33 +165,24 @@ def main() -> None:
             run_cmd(["mapsnap", "keymap", *raw_keymaps])
         else:
             print("No key map identified; continuing without one.", flush=True)
-        mark_step_done(dir_path, "keymap")
-    else:
-        print("+ [skip keymap: already completed]", flush=True)
 
     # --resume so an OCR interrupted partway resumes per page on the re-run that follows.
     ocr_images = [str(p) for p in list_pages(dir_path)]
-    run_step(
-        dir_path,
-        "ocr",
-        [
-            "mapsnap",
-            "ocr",
-            "--resume",
-            "--centerlines",
-            str(dir_path / "centerlines.geojson"),
-            *ocr_images,
-        ],
-        force=args.force,
-    )
+    with step("ocr"):
+        run_cmd(
+            [
+                "mapsnap",
+                "ocr",
+                "--resume",
+                "--centerlines",
+                str(dir_path / "centerlines.geojson"),
+                *ocr_images,
+            ]
+        )
 
     # Locate OIM's manual split regions on the canvas (ground truth for compare).
-    run_step(
-        dir_path,
-        "oim-split-truth",
-        ["mapsnap", "oim-split-truth", str(dir_path / "main.iiif.json")],
-        force=args.force,
-    )
+    with step("oim-split-truth"):
+        run_cmd(["mapsnap", "oim-split-truth", str(dir_path / "main.iiif.json")])
 
     run_cmd(["mapsnap", "fit", str(dir_path), "--tag", "mapsnap"])
 
