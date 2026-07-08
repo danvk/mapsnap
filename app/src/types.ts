@@ -38,6 +38,11 @@ export interface Detection {
   hint?: boolean;
   /** Read by the key-map rectangle fallback vocab rather than the tighter radius vocab. */
   fallback?: boolean;
+  /**
+   * Adjacency-claim reciprocity (adjacency mode only): true renders blue (a mutual
+   * neighbor), false amber (an unreciprocated claim); absent for non-claims.
+   */
+  mutual?: boolean;
 }
 
 /** The key map's expected center and OCR/fit radius for a page (georef.json `keymap`). */
@@ -105,6 +110,37 @@ export interface StreetsJsonData {
   timestamp: string;
   command: string[];
   streets: Detection[];
+}
+
+/** One digit read from page_adjacency.py (a valid page number found on a page). */
+export interface AdjacencyDetection {
+  number: number;
+  text: string;
+  confidence: number;
+  polygon: [number, number][];
+  height: number;
+  x_frac: number;
+  y_frac: number;
+  /** Page edge the detection is near ("N"/"E"/"S"/"W"), a compass corner ("NE"), or "center". */
+  edge: string;
+  /** Passed the adjacency-claim filters (edge band, min height, not the page's own number). */
+  claim: boolean;
+}
+
+/** One page's entry in adjacency.json. */
+export interface AdjacencyPage {
+  number: number | null;
+  /** Dimensions of the scanned image, for rescaling polygons to the loaded image. */
+  width?: number;
+  height?: number;
+  detections: AdjacencyDetection[];
+}
+
+/** adjacency.json: per-page sheet-number detections plus the mutual-edge adjacency graph. */
+export interface AdjacencyData {
+  pages: Record<string, AdjacencyPage>;
+  /** Reciprocated adjacency edges as [stemA, stemB] pairs. */
+  adjacency: [string, string][];
 }
 
 /** A single panel polygon ring (one [x, y] vertex per point, in pixel space). */

@@ -64,16 +64,19 @@ def volume_page_images(volume: Path) -> list[Path]:
 
 
 def classify_edge(x_frac: float, y_frac: float, band: float = EDGE_BAND) -> str:
-    """Which page edge(s) a point (as fractions of width/height) is near, e.g. "E", "WN", "center"."""
+    """Which page edge(s) a point (as fractions of width/height) is near: "E", "NW", "center"...
+
+    Corners use the conventional compass spelling (vertical first): "NE", "NW", "SE", "SW".
+    """
     edges = ""
-    if x_frac < band:
-        edges += "W"
-    if x_frac > 1 - band:
-        edges += "E"
     if y_frac < band:
         edges += "N"
     if y_frac > 1 - band:
         edges += "S"
+    if x_frac < band:
+        edges += "W"
+    if x_frac > 1 - band:
+        edges += "E"
     return edges or "center"
 
 
@@ -212,7 +215,15 @@ def main() -> None:
                 min_confidence=args.min_confidence,
             )
         claims = {d["number"] for d in detections if d["claim"]}
-        pages[stem] = {"number": own_number, "detections": detections}
+        # Record the scanned image's dimensions so a viewer can rescale detection
+        # polygons when it loads the page at a different resolution.
+        width, height = Image.open(image).size
+        pages[stem] = {
+            "number": own_number,
+            "width": width,
+            "height": height,
+            "detections": detections,
+        }
         claims_by_page[stem] = claims
 
     edges = mutual_edges(claims_by_page)

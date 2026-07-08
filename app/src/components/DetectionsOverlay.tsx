@@ -45,13 +45,19 @@ export function DetectionsOverlay(props: DetectionsOverlayProps) {
         const isSelected = selectedIndices.has(i);
         const isIgnored = det.ignore === true;
         const isHint = det.hint === true;
+        // Adjacency claims carry `mutual`: reciprocated neighbors render blue, the
+        // rest of the claims amber; other modes never set the field.
         const color = isSelected
           ? '#ff6600'
-          : isIgnored
-            ? '#999'
-            : isHint
-              ? '#7c3aed'
-              : confidenceColor(det.confidence);
+          : det.mutual === true
+            ? '#2563eb'
+            : det.mutual === false
+              ? '#d97706'
+              : isIgnored
+                ? '#999'
+                : isHint
+                  ? '#7c3aed'
+                  : confidenceColor(det.confidence);
         const points = det.polygon
           .map(([x, y]) => toDisplay(x, y))
           .map(([dx, dy]) => `${dx},${dy}`)

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { parseDroppedJson } from './fileLoading';
+import { pageStem, parseDroppedJson } from './fileLoading';
 
 const fallback = { width: 800, height: 600 };
 
@@ -145,5 +145,30 @@ describe('parseDroppedJson', () => {
     });
     const result = parseDroppedJson(text, fallback);
     expect(result).toEqual({ kind: 'georef', text });
+  });
+
+  it('classifies adjacency.json by its pages + adjacency keys', () => {
+    const data = {
+      pages: { p49: { number: 49, detections: [] } },
+      adjacency: [['p49', 'p50']],
+    };
+    const result = parseDroppedJson(JSON.stringify(data), fallback);
+    expect(result.kind).toBe('adjacency');
+    if (result.kind === 'adjacency') {
+      expect(result.data.pages.p49.number).toBe(49);
+      expect(result.data.adjacency).toEqual([['p49', 'p50']]);
+    }
+  });
+});
+
+describe('pageStem', () => {
+  it('strips directories and all extensions', () => {
+    expect(pageStem('p49.jpg')).toBe('p49');
+    expect(pageStem('data/vol/p50n.2048px.jpg')).toBe('p50n');
+    expect(pageStem('/abs/path/p1b.jpg')).toBe('p1b');
+  });
+
+  it('matches split-panel stems', () => {
+    expect(pageStem('p86__2.jpg')).toBe('p86__2');
   });
 });

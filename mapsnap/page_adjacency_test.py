@@ -20,7 +20,11 @@ def test_classify_edge_bands():
     assert classify_edge(0.9, 0.5) == "E"
     assert classify_edge(0.5, 0.1) == "N"
     assert classify_edge(0.5, 0.9) == "S"
-    assert classify_edge(0.05, 0.05) == "WN"  # corner is both
+    # Corners use conventional compass spelling: vertical first.
+    assert classify_edge(0.05, 0.05) == "NW"
+    assert classify_edge(0.95, 0.05) == "NE"
+    assert classify_edge(0.05, 0.95) == "SW"
+    assert classify_edge(0.95, 0.95) == "SE"
 
 
 def test_is_claim_accepts_large_edge_number():

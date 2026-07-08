@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   confidenceColor,
+  detectionFromAdjacency,
   filterDetections,
   previewOrientation,
 } from './detections';
@@ -141,5 +142,62 @@ describe('filterDetections', () => {
       showIgnored: false,
     });
     expect(hidden.map((r) => r.i)).toEqual([0, 1]);
+  });
+});
+
+describe('detectionFromAdjacency', () => {
+  const read50 = {
+    number: 50,
+    text: '50',
+    confidence: 0.98,
+    polygon: [
+      [100, 200],
+      [140, 200],
+      [140, 245],
+      [100, 245],
+    ] as [number, number][],
+    height: 45,
+    x_frac: 0.9,
+    y_frac: 0.5,
+    edge: 'E',
+    claim: true,
+  };
+
+  it('converts a digit read to Detection shape with bbox sides', () => {
+    const det = detectionFromAdjacency(read50, new Set([50]));
+    expect(det.text).toBe('50');
+    expect(det.confidence).toBe(0.98);
+    expect(det.long_side).toBe(45);
+    expect(det.short_side).toBe(40);
+    expect(det.ignore).toBe(false);
+  });
+
+  it('marks a claim of a reciprocated neighbor as mutual', () => {
+    expect(detectionFromAdjacency(read50, new Set([50])).mutual).toBe(true);
+    expect(detectionFromAdjacency(read50, new Set([51])).mutual).toBe(false);
+  });
+
+  it('marks non-claims as ignored, with no mutual flag', () => {
+    const det = detectionFromAdjacency(
+      {
+        number: 2,
+        text: '2',
+        confidence: 0.9,
+        polygon: [
+          [0, 0],
+          [10, 0],
+          [10, 10],
+          [0, 10],
+        ],
+        height: 10,
+        x_frac: 0.5,
+        y_frac: 0.5,
+        edge: 'center',
+        claim: false,
+      },
+      new Set([2]),
+    );
+    expect(det.ignore).toBe(true);
+    expect(det.mutual).toBeUndefined();
   });
 });
