@@ -6,11 +6,16 @@ sheet continues. Reading these gives page adjacency that is independent of the k
 detected neighbor's edge (top/left/bottom/right of the image) pins the page's orientation.
 
 Raw digit reads are noisy (house/block/dimension numbers collide with valid page numbers), so a
-detection only becomes a *claim* when it is a valid page number, near the page edge, and printed
-large; and a claim only becomes an adjacency *edge* when it is reciprocated — page A claims B
-AND page B claims A. Measured on Hudson County: directed claims are ~72% precise, mutual edges
-~98%, covering ~76% of georeferenced-overlap adjacencies and reaching 30/33 pages that street
-matching failed to georeference.
+detection only becomes a *claim* when it is a valid page number, near the page edge, printed
+large, and axis-aligned; and a claim only becomes an adjacency *edge* when it is reciprocated —
+page A claims B AND page B claims A. Reciprocity alone is not proof: junk claims of small
+numbers are common enough to reciprocate by chance (and page numbering correlates with
+adjacency, so such accidents are often "correct"), so single-digit claims — where any tall
+narrow ink can read as a "1" — additionally face a high confidence floor and a height band
+calibrated from the volume's own confirmed multi-digit references (their printed size is very
+consistent: Hudson County median 46 px with p10-p90 of 42-48). Measured on Hudson County the
+result is 167 mutual edges with no known-false edge, reaching 30/33 pages that street matching
+failed to georeference.
 
 This is a whole-volume step: it scans every non-split page image (skipping key-map sheets,
 whose faces are covered in page numbers) and writes a single ``<volume>/adjacency.json`` with
@@ -21,6 +26,7 @@ each page's number detections and the mutual-edge adjacency graph.
 
 import argparse
 import json
+import math
 import sys
 from collections import defaultdict
 from datetime import datetime, timezone
@@ -40,6 +46,18 @@ from mapsnap.utils import image_stem
 EDGE_BAND = 0.25
 MIN_HEIGHT = 28.0
 MIN_CONF = 0.05
+
+# A rotated detection quad is never a sheet reference: every rotated candidate inspected on
+# Hudson County (52 of them) was a misread street name ("WESTSIDE", "Mc ADOO") or pipe
+# annotation ('10" W Pipe'). References are printed upright, so reject quads off-axis by more
+# than this tolerance.
+ROTATION_TOLERANCE_DEG = 5.0
+
+# Single-digit reads are held to a stricter standard than reciprocity alone can provide:
+# a hard confidence floor, and a height band of these fractions around the median height of
+# the volume's multi-digit mutual claims (see single_digit_height_band).
+SINGLE_DIGIT_MIN_CONF = 0.9
+SIZE_BAND_FRACTION = (0.65, 1.4)
 
 
 def volume_page_images(volume: Path) -> list[Path]:
@@ -115,20 +133,69 @@ def digit_detections(image_path: Path, reader, valid_numbers: set[int]) -> list[
     return detections
 
 
+def polygon_rotation_deg(polygon: list[list[float]]) -> float:
+    """Rotation of a detection quad off the image axes, in degrees folded to [0, 45].
+
+    EasyOCR returns an axis-aligned box for upright text and a rotated quad otherwise; this is
+    the angle of the quad's top edge, folded so 0 means axis-aligned in either orientation.
+    """
+    (x0, y0), (x1, y1) = polygon[0], polygon[1]
+    angle = abs(math.degrees(math.atan2(y1 - y0, x1 - x0))) % 90.0
+    return min(angle, 90.0 - angle)
+
+
+def single_digit_height_band(
+    confirmed_heights: list[float],
+) -> tuple[float, float] | None:
+    """Height band for single-digit claims, calibrated from confirmed reference heights.
+
+    ``confirmed_heights`` are the heights of multi-digit claims that ended up in mutual edges —
+    numerals long enough that a junk read is unlikely. Their printed size is very consistent
+    (Hudson County: median 46 px, p10-p90 of 42-48), so a single-digit read far from the median
+    is junk: frame rules and stray strokes read as tall "1"s, house numbers as short ones.
+    Returns None when there are no confirmed heights (e.g. a volume with only one-digit pages).
+    """
+    if not confirmed_heights:
+        return None
+    ordered = sorted(confirmed_heights)
+    median = ordered[len(ordered) // 2]
+    return (SIZE_BAND_FRACTION[0] * median, SIZE_BAND_FRACTION[1] * median)
+
+
 def is_claim(
     detection: dict,
     own_number: int | None,
     *,
     min_height: float = MIN_HEIGHT,
     min_confidence: float = MIN_CONF,
+    single_digit_min_confidence: float = SINGLE_DIGIT_MIN_CONF,
+    height_band: tuple[float, float] | None = None,
 ) -> bool:
-    """Whether a detection qualifies as an adjacency claim (edge-band, large, not the page itself)."""
-    return (
-        detection["number"] != own_number
-        and detection["edge"] != "center"
-        and detection["height"] >= min_height
-        and detection["confidence"] >= min_confidence
-    )
+    """Whether a detection qualifies as an adjacency claim.
+
+    Every claim must be a valid page number other than the page's own, near a page edge, tall
+    enough, confident enough, and axis-aligned (rotated quads are always misread street names
+    or pipe annotations). Single-digit numbers face two stricter tests — the high
+    ``single_digit_min_confidence`` floor and, when known, the ``height_band`` around the
+    volume's printed-reference size — because junk single-digit claims are common enough to
+    reciprocate by coincidence, so reciprocity alone cannot vouch for them.
+    """
+    if (
+        detection["number"] == own_number
+        or detection["edge"] == "center"
+        or detection["height"] < min_height
+        or detection["confidence"] < min_confidence
+        or polygon_rotation_deg(detection["polygon"]) > ROTATION_TOLERANCE_DEG
+    ):
+        return False
+    if detection["number"] < 10:
+        if detection["confidence"] < single_digit_min_confidence:
+            return False
+        if height_band is not None and not (
+            height_band[0] <= detection["height"] <= height_band[1]
+        ):
+            return False
+    return True
 
 
 def mutual_edges(claims_by_page: dict[str, set[int]]) -> list[tuple[str, str]]:
@@ -183,6 +250,16 @@ def main() -> None:
         help="Minimum OCR confidence for a claim (default: %(default)s).",
     )
     parser.add_argument(
+        "--single-digit-min-confidence",
+        type=float,
+        default=SINGLE_DIGIT_MIN_CONF,
+        metavar="C",
+        help=(
+            "Stricter confidence floor for single-digit claims (default: %(default)s); "
+            "junk single-digit reads are common enough to reciprocate by coincidence."
+        ),
+    )
+    parser.add_argument(
         "--no-gpu", action="store_true", help="Disable GPU acceleration for EasyOCR."
     )
     args = parser.parse_args()
@@ -204,29 +281,83 @@ def main() -> None:
     reader = easyocr.Reader(["en"], gpu=not args.no_gpu, verbose=False)
 
     pages: dict[str, dict] = {}
-    claims_by_page: dict[str, set[int]] = {}
     for image in tqdm(images, smoothing=0):
         stem = image_stem(str(image))
-        own_number = page_number(stem)
-        detections = digit_detections(image, reader, valid_numbers)
-        for detection in detections:
-            detection["claim"] = is_claim(
-                detection,
-                own_number,
-                min_height=args.min_height,
-                min_confidence=args.min_confidence,
-            )
-        claims = {d["number"] for d in detections if d["claim"]}
         # Record the scanned image's dimensions so a viewer can rescale detection
         # polygons when it loads the page at a different resolution.
         width, height = Image.open(image).size
         pages[stem] = {
-            "number": own_number,
+            "number": page_number(stem),
             "width": width,
             "height": height,
-            "detections": detections,
+            "detections": digit_detections(image, reader, valid_numbers),
         }
-        claims_by_page[stem] = claims
+
+    def compute_claims(
+        height_band: tuple[float, float] | None,
+    ) -> dict[str, set[int]]:
+        return {
+            stem: {
+                d["number"]
+                for d in page["detections"]
+                if is_claim(
+                    d,
+                    page["number"],
+                    min_height=args.min_height,
+                    min_confidence=args.min_confidence,
+                    single_digit_min_confidence=args.single_digit_min_confidence,
+                    height_band=height_band,
+                )
+            }
+            for stem, page in pages.items()
+        }
+
+    # Two passes: provisional mutual edges (no height band) calibrate the printed-reference
+    # height from their multi-digit claims; single-digit claims are then re-filtered against
+    # that band and the graph rebuilt.
+    provisional_edges = mutual_edges(compute_claims(None))
+    mutual_numbers: dict[str, set[int]] = defaultdict(set)
+    for first, second in provisional_edges:
+        mutual_numbers[first].add(pages[second]["number"])
+        mutual_numbers[second].add(pages[first]["number"])
+    confirmed_heights = [
+        d["height"]
+        for stem, page in pages.items()
+        for d in page["detections"]
+        if d["number"] >= 10
+        and d["number"] in mutual_numbers[stem]
+        and is_claim(
+            d,
+            page["number"],
+            min_height=args.min_height,
+            min_confidence=args.min_confidence,
+            single_digit_min_confidence=args.single_digit_min_confidence,
+        )
+    ]
+    height_band = single_digit_height_band(confirmed_heights)
+    if height_band:
+        print(
+            f"Single-digit height band: [{height_band[0]:.0f}, {height_band[1]:.0f}]px "
+            f"from {len(confirmed_heights)} confirmed multi-digit reference(s).",
+            file=sys.stderr,
+        )
+    else:
+        print(
+            "No confirmed multi-digit references; single-digit height band disabled.",
+            file=sys.stderr,
+        )
+
+    claims_by_page = compute_claims(height_band)
+    for stem, page in pages.items():
+        for detection in page["detections"]:
+            detection["claim"] = is_claim(
+                detection,
+                page["number"],
+                min_height=args.min_height,
+                min_confidence=args.min_confidence,
+                single_digit_min_confidence=args.single_digit_min_confidence,
+                height_band=height_band,
+            )
 
     edges = mutual_edges(claims_by_page)
     doc = {
@@ -235,6 +366,8 @@ def main() -> None:
         "edge_band": EDGE_BAND,
         "min_height": args.min_height,
         "min_confidence": args.min_confidence,
+        "single_digit_min_confidence": args.single_digit_min_confidence,
+        "single_digit_height_band": list(height_band) if height_band else None,
         "pages": pages,
         "adjacency": [list(edge) for edge in edges],
     }
