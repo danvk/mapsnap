@@ -2,6 +2,7 @@ import math
 from pathlib import Path
 
 from mapsnap.page_adjacency import (
+    bbox_gap,
     classify_edge,
     is_claim,
     mutual_edges,
@@ -27,6 +28,7 @@ def make_detection(
     height: float = 45.0,
     confidence: float = 0.95,
     polygon: list[list[float]] | None = None,
+    nearest_box: float | None = 100.0,
 ) -> dict:
     return {
         "number": number,
@@ -34,6 +36,7 @@ def make_detection(
         "height": height,
         "confidence": confidence,
         "polygon": polygon if polygon is not None else axis_polygon(),
+        "nearest_box": nearest_box,
     }
 
 
@@ -93,6 +96,28 @@ def test_is_claim_single_digit_height_band():
     assert is_claim(make_detection(50, height=130.0), own_number=49, height_band=band)
     # Without a band (no confirmed references), single digits pass on confidence alone.
     assert is_claim(make_detection(1, height=130.0), own_number=49, height_band=None)
+
+
+def test_bbox_gap():
+    a = [[0.0, 0.0], [10.0, 0.0], [10.0, 10.0], [0.0, 10.0]]
+    touching = [[10.0, 0.0], [20.0, 0.0], [20.0, 10.0], [10.0, 10.0]]
+    apart = [[40.0, 0.0], [50.0, 0.0], [50.0, 10.0], [40.0, 10.0]]
+    diagonal = [[13.0, 14.0], [23.0, 14.0], [23.0, 24.0], [13.0, 24.0]]
+    assert bbox_gap(a, touching) == 0.0
+    assert bbox_gap(a, apart) == 30.0
+    assert bbox_gap(a, diagonal) == 5.0  # 3-4-5 triangle from the corner
+
+
+def test_is_claim_single_digit_isolation():
+    # A perfect-glyph, right-sized single digit that touches another box is a fragment
+    # of a larger number (p10's "8" torn off a block number), not a sheet reference.
+    fragment = make_detection(8, confidence=1.0, nearest_box=0.0)
+    assert not is_claim(fragment, own_number=10, min_gap=14.0)
+    isolated = make_detection(8, confidence=1.0, nearest_box=21.6)
+    assert is_claim(isolated, own_number=10, min_gap=14.0)
+    # Multi-digit claims are exempt; missing gap data (only box on the page) passes.
+    assert is_claim(make_detection(50, nearest_box=0.0), own_number=10, min_gap=14.0)
+    assert is_claim(make_detection(8, nearest_box=None), own_number=10, min_gap=14.0)
 
 
 def test_single_digit_height_band_from_median():

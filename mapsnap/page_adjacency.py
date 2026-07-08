@@ -54,10 +54,14 @@ MIN_CONF = 0.05
 ROTATION_TOLERANCE_DEG = 5.0
 
 # Single-digit reads are held to a stricter standard than reciprocity alone can provide:
-# a hard confidence floor, and a height band of these fractions around the median height of
-# the volume's multi-digit mutual claims (see single_digit_height_band).
+# a hard confidence floor, a height band of these fractions around the median height of the
+# volume's multi-digit mutual claims (see single_digit_height_band), and an isolation floor —
+# a genuine reference is printed in open whitespace, while a junk single digit is typically a
+# fragment of a block/house number whose sibling box it touches (gap ~0), so require clear
+# space of at least this fraction of the same median height around it.
 SINGLE_DIGIT_MIN_CONF = 0.9
 SIZE_BAND_FRACTION = (0.65, 1.4)
+SINGLE_DIGIT_MIN_GAP_FRACTION = 0.3
 
 
 def volume_page_images(volume: Path) -> list[Path]:
@@ -100,24 +104,46 @@ def classify_edge(x_frac: float, y_frac: float, band: float = EDGE_BAND) -> str:
     return edges or "center"
 
 
+def bbox_gap(a: list[list[float]], b: list[list[float]]) -> float:
+    """Gap in pixels between two boxes' axis-aligned bounds (0 when they touch/overlap)."""
+    ax0, ax1 = min(p[0] for p in a), max(p[0] for p in a)
+    ay0, ay1 = min(p[1] for p in a), max(p[1] for p in a)
+    bx0, bx1 = min(p[0] for p in b), max(p[0] for p in b)
+    by0, by1 = min(p[1] for p in b), max(p[1] for p in b)
+    dx = max(0.0, max(ax0, bx0) - min(ax1, bx1))
+    dy = max(0.0, max(ay0, by0) - min(ay1, by1))
+    return math.hypot(dx, dy)
+
+
 def digit_detections(image_path: Path, reader, valid_numbers: set[int]) -> list[dict]:
     """All digit reads on one page that parse to a valid volume page number.
 
     Each detection records the parsed ``number``, the raw OCR ``text``, EasyOCR's polygon and
-    confidence, the glyph ``height`` in pixels, position as width/height fractions, and the
-    ``edge`` classification. Filtering into claims is left to the caller so the JSON keeps the
-    full picture.
+    confidence, the glyph ``height`` in pixels, position as width/height fractions, the
+    ``edge`` classification, and ``nearest_box`` — the gap to the nearest other OCR box, since
+    a genuine sheet reference is printed in open whitespace while a junk single digit is
+    usually a fragment of a larger number with sibling text right beside it. Filtering into
+    claims is left to the caller so the JSON keeps the full picture.
     """
     image = np.asarray(Image.open(image_path).convert("RGB"))
     height, width = image.shape[:2]
+    results = reader.readtext(image, allowlist="0123456789")
     detections = []
-    for bbox, text, confidence in reader.readtext(image, allowlist="0123456789"):
+    for index, (bbox, text, confidence) in enumerate(results):
         digits = "".join(c for c in text if c.isdigit())
         if not digits or int(digits) not in valid_numbers:
             continue
         x_frac = sum(p[0] for p in bbox) / 4 / width
         y_frac = sum(p[1] for p in bbox) / 4 / height
         glyph_height = float(max(p[1] for p in bbox) - min(p[1] for p in bbox))
+        nearest_box = min(
+            (
+                bbox_gap(bbox, other_bbox)
+                for other_index, (other_bbox, _, _) in enumerate(results)
+                if other_index != index
+            ),
+            default=math.inf,
+        )
         detections.append(
             {
                 "number": int(digits),
@@ -128,6 +154,9 @@ def digit_detections(image_path: Path, reader, valid_numbers: set[int]) -> list[
                 "x_frac": round(x_frac, 4),
                 "y_frac": round(y_frac, 4),
                 "edge": classify_edge(x_frac, y_frac),
+                "nearest_box": round(nearest_box, 1)
+                if nearest_box != math.inf
+                else None,
             }
         )
     return detections
@@ -170,15 +199,18 @@ def is_claim(
     min_confidence: float = MIN_CONF,
     single_digit_min_confidence: float = SINGLE_DIGIT_MIN_CONF,
     height_band: tuple[float, float] | None = None,
+    min_gap: float | None = None,
 ) -> bool:
     """Whether a detection qualifies as an adjacency claim.
 
     Every claim must be a valid page number other than the page's own, near a page edge, tall
     enough, confident enough, and axis-aligned (rotated quads are always misread street names
-    or pipe annotations). Single-digit numbers face two stricter tests — the high
-    ``single_digit_min_confidence`` floor and, when known, the ``height_band`` around the
-    volume's printed-reference size — because junk single-digit claims are common enough to
-    reciprocate by coincidence, so reciprocity alone cannot vouch for them.
+    or pipe annotations). Single-digit numbers face three stricter tests — the high
+    ``single_digit_min_confidence`` floor, the ``height_band`` around the volume's
+    printed-reference size, and the ``min_gap`` isolation floor (a digit torn off a larger
+    number touches its sibling box, so it can be a perfect glyph at the right size and still
+    be junk) — because junk single-digit claims are common enough to reciprocate by
+    coincidence, so reciprocity alone cannot vouch for them.
     """
     if (
         detection["number"] == own_number
@@ -194,6 +226,9 @@ def is_claim(
         if height_band is not None and not (
             height_band[0] <= detection["height"] <= height_band[1]
         ):
+            return False
+        nearest_box = detection.get("nearest_box")
+        if min_gap is not None and nearest_box is not None and nearest_box < min_gap:
             return False
     return True
 
@@ -295,6 +330,7 @@ def main() -> None:
 
     def compute_claims(
         height_band: tuple[float, float] | None,
+        min_gap: float | None,
     ) -> dict[str, set[int]]:
         return {
             stem: {
@@ -307,15 +343,16 @@ def main() -> None:
                     min_confidence=args.min_confidence,
                     single_digit_min_confidence=args.single_digit_min_confidence,
                     height_band=height_band,
+                    min_gap=min_gap,
                 )
             }
             for stem, page in pages.items()
         }
 
-    # Two passes: provisional mutual edges (no height band) calibrate the printed-reference
-    # height from their multi-digit claims; single-digit claims are then re-filtered against
-    # that band and the graph rebuilt.
-    provisional_edges = mutual_edges(compute_claims(None))
+    # Two passes: provisional mutual edges (no height band or isolation floor) calibrate the
+    # printed-reference height from their multi-digit claims; single-digit claims are then
+    # re-filtered against the derived band and isolation floor and the graph rebuilt.
+    provisional_edges = mutual_edges(compute_claims(None, None))
     mutual_numbers: dict[str, set[int]] = defaultdict(set)
     for first, second in provisional_edges:
         mutual_numbers[first].add(pages[second]["number"])
@@ -335,19 +372,25 @@ def main() -> None:
         )
     ]
     height_band = single_digit_height_band(confirmed_heights)
-    if height_band:
+    min_gap = None
+    if height_band and confirmed_heights:
+        ordered = sorted(confirmed_heights)
+        median_height = ordered[len(ordered) // 2]
+        min_gap = SINGLE_DIGIT_MIN_GAP_FRACTION * median_height
         print(
-            f"Single-digit height band: [{height_band[0]:.0f}, {height_band[1]:.0f}]px "
-            f"from {len(confirmed_heights)} confirmed multi-digit reference(s).",
+            f"Single-digit height band: [{height_band[0]:.0f}, {height_band[1]:.0f}]px, "
+            f"isolation floor: {min_gap:.0f}px "
+            f"(from {len(confirmed_heights)} confirmed multi-digit references).",
             file=sys.stderr,
         )
     else:
         print(
-            "No confirmed multi-digit references; single-digit height band disabled.",
+            "No confirmed multi-digit references; single-digit height band and "
+            "isolation floor disabled.",
             file=sys.stderr,
         )
 
-    claims_by_page = compute_claims(height_band)
+    claims_by_page = compute_claims(height_band, min_gap)
     for stem, page in pages.items():
         for detection in page["detections"]:
             detection["claim"] = is_claim(
@@ -357,6 +400,7 @@ def main() -> None:
                 min_confidence=args.min_confidence,
                 single_digit_min_confidence=args.single_digit_min_confidence,
                 height_band=height_band,
+                min_gap=min_gap,
             )
 
     edges = mutual_edges(claims_by_page)
@@ -368,6 +412,7 @@ def main() -> None:
         "min_confidence": args.min_confidence,
         "single_digit_min_confidence": args.single_digit_min_confidence,
         "single_digit_height_band": list(height_band) if height_band else None,
+        "single_digit_min_gap": round(min_gap, 1) if min_gap is not None else None,
         "pages": pages,
         "adjacency": [list(edge) for edge in edges],
     }
