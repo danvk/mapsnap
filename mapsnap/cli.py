@@ -35,6 +35,10 @@ SUBCOMMANDS: dict[str, tuple[str, str]] = {
         "mapsnap.keymap.identify",
         "Identify which page(s) of a volume are key maps (from 25%-scale images)",
     ),
+    "adjacency": (
+        "mapsnap.page_adjacency",
+        "Detect printed adjacent-sheet numbers and build a volume adjacency graph",
+    ),
     "iiif": (
         "mapsnap.make_iiif_georef",
         "Combine georeferences into a IIIF AnnotationPage",
