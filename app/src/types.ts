@@ -121,7 +121,11 @@ export interface AdjacencyDetection {
   height: number;
   x_frac: number;
   y_frac: number;
-  /** Page edge the detection is near ("N"/"E"/"S"/"W"), a compass corner ("NE"), or "center". */
+  /**
+   * Image-relative edge the detection is near — "T"op/"B"ottom/"L"eft/"R"ight, a corner
+   * ("TL"/"TR"/"BL"/"BR"), or "center". Not compass directions: the page's world
+   * orientation is unknown at this stage.
+   */
   edge: string;
   /** Passed the adjacency-claim filters (edge band, min height, not the page's own number). */
   claim: boolean;

@@ -3,7 +3,7 @@
 Sanborn sheets print the neighboring sheet's number on the margin (the key legend calls it a
 "reference to adjoining sheet"): a big numeral across the shared boundary road on the side that
 sheet continues. Reading these gives page adjacency that is independent of the key map — and a
-detected neighbor's edge (N/E/S/W) pins the page's orientation.
+detected neighbor's edge (top/left/bottom/right of the image) pins the page's orientation.
 
 Raw digit reads are noisy (house/block/dimension numbers collide with valid page numbers), so a
 detection only becomes a *claim* when it is a valid page number, near the page edge, and printed
@@ -64,19 +64,21 @@ def volume_page_images(volume: Path) -> list[Path]:
 
 
 def classify_edge(x_frac: float, y_frac: float, band: float = EDGE_BAND) -> str:
-    """Which page edge(s) a point (as fractions of width/height) is near: "E", "NW", "center"...
+    """Which page edge(s) a point (as fractions of width/height) is near: "T", "BL", "center"...
 
-    Corners use the conventional compass spelling (vertical first): "NE", "NW", "SE", "SW".
+    Sides are image-relative — "T"op, "B"ottom, "L"eft, "R"ight, with corners "TL", "TR",
+    "BL", "BR" — not compass directions: the page's orientation in the world is unknown at
+    this stage (finding it is what adjacency is *for*).
     """
     edges = ""
     if y_frac < band:
-        edges += "N"
+        edges += "T"
     if y_frac > 1 - band:
-        edges += "S"
+        edges += "B"
     if x_frac < band:
-        edges += "W"
+        edges += "L"
     if x_frac > 1 - band:
-        edges += "E"
+        edges += "R"
     return edges or "center"
 
 

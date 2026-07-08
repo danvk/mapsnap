@@ -159,7 +159,7 @@ describe('detectionFromAdjacency', () => {
     height: 45,
     x_frac: 0.9,
     y_frac: 0.5,
-    edge: 'E',
+    edge: 'R',
     claim: true,
   };
 

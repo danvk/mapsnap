@@ -9,22 +9,22 @@ from mapsnap.page_adjacency import (
 
 
 def make_detection(
-    number: int, edge: str = "E", height: float = 45.0, confidence: float = 0.9
+    number: int, edge: str = "R", height: float = 45.0, confidence: float = 0.9
 ) -> dict:
     return {"number": number, "edge": edge, "height": height, "confidence": confidence}
 
 
 def test_classify_edge_bands():
+    # Image-relative sides (page orientation is unknown at this stage): T/B/L/R.
     assert classify_edge(0.5, 0.5) == "center"
-    assert classify_edge(0.1, 0.5) == "W"
-    assert classify_edge(0.9, 0.5) == "E"
-    assert classify_edge(0.5, 0.1) == "N"
-    assert classify_edge(0.5, 0.9) == "S"
-    # Corners use conventional compass spelling: vertical first.
-    assert classify_edge(0.05, 0.05) == "NW"
-    assert classify_edge(0.95, 0.05) == "NE"
-    assert classify_edge(0.05, 0.95) == "SW"
-    assert classify_edge(0.95, 0.95) == "SE"
+    assert classify_edge(0.1, 0.5) == "L"
+    assert classify_edge(0.9, 0.5) == "R"
+    assert classify_edge(0.5, 0.1) == "T"
+    assert classify_edge(0.5, 0.9) == "B"
+    assert classify_edge(0.05, 0.05) == "TL"
+    assert classify_edge(0.95, 0.05) == "TR"
+    assert classify_edge(0.05, 0.95) == "BL"
+    assert classify_edge(0.95, 0.95) == "BR"
 
 
 def test_is_claim_accepts_large_edge_number():
