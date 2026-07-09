@@ -41,11 +41,13 @@ from mapsnap.utils import image_stem
 
 # A detection only counts as an adjacency claim when it sits in the outer EDGE_BAND of the
 # page, is at least MIN_HEIGHT px tall (the printed sheet references are large numerals; this
-# excludes house/dimension numbers), and clears a permissive confidence floor (true references
-# read at high confidence, but a partly-degraded one is still rescued by reciprocity).
+# excludes house/dimension numbers), and clears a confidence floor. Measured on Hudson and
+# Brooklyn: 0.3 loses no true edge on either volume while killing junk a permissive floor
+# admits (a forced-transcription street name reads at ~0.1; genuine degraded references read
+# above 0.3); 0.5 would kill a further junk edge but costs Hudson four real ones.
 EDGE_BAND = 0.25
 MIN_HEIGHT = 28.0
-MIN_CONF = 0.05
+MIN_CONF = 0.3
 
 # A rotated detection quad is never a sheet reference: every rotated candidate inspected on
 # Hudson County (52 of them) was a misread street name ("WESTSIDE", "Mc ADOO") or pipe
@@ -155,11 +157,23 @@ def digit_detections(image_path: Path, reader, valid_numbers: set[int]) -> list[
     usually a fragment of a larger number with sibling text right beside it. Filtering into
     claims is left to the caller so the JSON keeps the full picture.
     """
+    from easyocr.utils import reformat_input
+
     image = np.asarray(Image.open(image_path).convert("RGB"))
     height, width = image.shape[:2]
-    results = reader.readtext(image, allowlist="0123456789")
-    letter_results = reader.readtext(
-        image, allowlist="0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ"
+    # Detect once, recognize twice: CRAFT detection dominates the cost and is
+    # allowlist-independent, so the two passes share its boxes (readtext = detect +
+    # recognize with these same defaults).
+    img, img_grey = reformat_input(image)
+    horizontal_lists, free_lists = reader.detect(img)
+    results = reader.recognize(
+        img_grey, horizontal_lists[0], free_lists[0], allowlist="0123456789"
+    )
+    letter_results = reader.recognize(
+        img_grey,
+        horizontal_lists[0],
+        free_lists[0],
+        allowlist="0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ",
     )
     letter_centers = [box_center(bbox) for bbox, _, _ in letter_results]
     detections = []
