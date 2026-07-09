@@ -1,4 +1,5 @@
 import type {
+  AdjacencyData,
   Detection,
   PanelPolygon,
   PanelsJsonData,
@@ -23,7 +24,19 @@ export type ParsedJson =
       labels?: string[];
       width: number;
       height: number;
-    };
+    }
+  | { kind: 'adjacency'; data: AdjacencyData };
+
+/**
+ * Page stem from an image file name or URL: the basename with every extension
+ * stripped, so "data/vol/p50n.2048px.jpg" -> "p50n". Mirrors Python's
+ * `image_stem`, letting a dropped page image identify its page in a
+ * volume-level file like adjacency.json.
+ */
+export function pageStem(fileName: string): string {
+  const base = fileName.split(/[\\/]/).pop() ?? fileName;
+  return base.split('.')[0];
+}
 
 /** Fallback image dimensions used when an old-format streets.json omits them. */
 export interface FallbackDimensions {
@@ -53,15 +66,28 @@ function isPanelsFormat(parsed: unknown): parsed is PanelsJsonData {
   );
 }
 
+// Whether a parsed object is a volume adjacency.json (per-page detections + edge list).
+function isAdjacencyFormat(parsed: unknown): parsed is AdjacencyData {
+  return (
+    typeof parsed === 'object' &&
+    parsed !== null &&
+    'pages' in parsed &&
+    'adjacency' in parsed &&
+    typeof (parsed as AdjacencyData).pages === 'object' &&
+    Array.isArray((parsed as AdjacencyData).adjacency)
+  );
+}
+
 /**
- * Classify dropped JSON text as a streets detection list, panels sidecar, or
- * georef data.
+ * Classify dropped JSON text as a streets detection list, panels sidecar,
+ * volume adjacency data, or georef data.
  *
  * streets.json comes either as a bare array of detections (old format) or as an
  * object with a `streets` array plus image metadata (new format). panels.json is
- * an object with a `panels` array of polygon rings plus image metadata. Anything
- * else is treated as georef data. Returns `{ kind: 'invalid' }` if the text is
- * not JSON.
+ * an object with a `panels` array of polygon rings plus image metadata.
+ * adjacency.json is an object with `pages` and `adjacency` keys. Anything else
+ * is treated as georef data. Returns `{ kind: 'invalid' }` if the text is not
+ * JSON.
  */
 export function parseDroppedJson(
   text: string,
@@ -72,6 +98,10 @@ export function parseDroppedJson(
     parsed = JSON.parse(text);
   } catch {
     return { kind: 'invalid' };
+  }
+
+  if (!Array.isArray(parsed) && isAdjacencyFormat(parsed)) {
+    return { kind: 'adjacency', data: parsed };
   }
 
   if (!Array.isArray(parsed) && isPanelsFormat(parsed)) {

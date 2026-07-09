@@ -1,4 +1,4 @@
-import type { Detection } from './types';
+import type { AdjacencyDetection, Detection } from './types';
 
 /** Filter sliders/toggles that control which detections are shown. */
 export interface DetectionFilters {
@@ -18,6 +18,37 @@ export interface IndexedDetection {
 export function confidenceColor(confidence: number): string {
   const hue = Math.round(confidence * 120); // 0 = red, 120 = green
   return `hsl(${hue}, 90%, 45%)`;
+}
+
+/**
+ * Convert an adjacency.json digit read to the Detection shape the overlay,
+ * table, and preview canvas render. Side lengths come from the polygon's
+ * bounding box; the printed sheet numbers are upright, so angle is 0.
+ *
+ * `mutualNumbers` holds the page numbers of this page's reciprocated
+ * neighbors: a claim of one of those renders blue (`mutual: true`), any other
+ * claim amber (`mutual: false`), and non-claims grey (`ignore`, no `mutual`).
+ */
+export function detectionFromAdjacency(
+  adjacencyDetection: AdjacencyDetection,
+  mutualNumbers: Set<number>,
+): Detection {
+  const xs = adjacencyDetection.polygon.map(([x]) => x);
+  const ys = adjacencyDetection.polygon.map(([, y]) => y);
+  const width = Math.max(...xs) - Math.min(...xs);
+  const height = Math.max(...ys) - Math.min(...ys);
+  return {
+    polygon: adjacencyDetection.polygon,
+    text: String(adjacencyDetection.number),
+    confidence: adjacencyDetection.confidence,
+    angle: 0,
+    long_side: Math.max(width, height),
+    short_side: Math.min(width, height),
+    ignore: !adjacencyDetection.claim,
+    ...(adjacencyDetection.claim
+      ? { mutual: mutualNumbers.has(adjacencyDetection.number) }
+      : {}),
+  };
 }
 
 /** Return detections passing the given filters, paired with their original indices. */

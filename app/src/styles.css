@@ -215,6 +215,23 @@
   vertical-align: middle;
 }
 
+.adjacency-summary {
+  padding: 6px 8px;
+  border-bottom: 2px solid #bbb;
+  font-size: 13px;
+}
+
+.adjacency-edge {
+  color: #2563eb;
+  font-weight: bold;
+}
+
+/* A reciprocated adjacency claim — the mutual-neighbor evidence this view highlights. */
+#detections-table tr.mutual td {
+  color: #2563eb;
+  font-weight: bold;
+}
+
 .gcp-controls {
   border: 1px solid #ccc;
   border-radius: 4px;

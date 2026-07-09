@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import './styles.css';
 import type {
+  AdjacencyData,
   Corners,
   GcpPairResult,
   GeorefData,
@@ -15,11 +16,17 @@ import {
   directionThroughCorners,
   projectThroughCorners,
 } from './geometry';
-import { filterDetections, type DetectionFilters } from './detections';
-import { parseDroppedJson } from './fileLoading';
+import {
+  detectionFromAdjacency,
+  filterDetections,
+  type DetectionFilters,
+  type IndexedDetection,
+} from './detections';
+import { pageStem, parseDroppedJson } from './fileLoading';
 import { ImageColumn, type Mode } from './components/ImageColumn';
 import { MapView } from './components/MapView';
 import { GcpControls, type GcpFitStats } from './components/GcpControls';
+import { AdjacencyTable } from './components/AdjacencyTable';
 import { DetectionsTable } from './components/DetectionsTable';
 import { PanelsTable } from './components/PanelsTable';
 import { loadImage } from './loadImage';
@@ -116,6 +123,12 @@ export function App() {
   const [panelLabels, setPanelLabels] = useState<string[] | undefined>(
     undefined,
   );
+  const [adjacencyData, setAdjacencyData] = useState<AdjacencyData | null>(
+    null,
+  );
+  // Stem of the loaded image's filename (e.g. "p49"), which identifies the page
+  // in volume-level files like adjacency.json.
+  const [imageStem, setImageStem] = useState<string | null>(null);
   const [selectedIndices, setSelectedIndices] = useState<Set<number>>(
     new Set(),
   );
@@ -236,6 +249,31 @@ export function App() {
     [detections, filters],
   );
 
+  // Adjacency mode: the loaded image's page entry (identified by filename stem)
+  // and its digit reads converted to the Detection shape the overlay renders.
+  const adjacencyPage =
+    mode === 'adjacency' && adjacencyData && imageStem
+      ? (adjacencyData.pages[imageStem] ?? null)
+      : null;
+  const adjacencyDetections = useMemo<IndexedDetection[]>(() => {
+    if (!adjacencyPage || !adjacencyData || !imageStem) return [];
+    // Page numbers of this page's reciprocated neighbors; claims of these render blue.
+    const mutualNumbers = new Set<number>();
+    for (const [a, b] of adjacencyData.adjacency) {
+      const other = a === imageStem ? b : b === imageStem ? a : null;
+      const number = other ? adjacencyData.pages[other]?.number : null;
+      if (number != null) mutualNumbers.add(number);
+    }
+    return adjacencyPage.detections.map((d, i) => ({
+      det: detectionFromAdjacency(d, mutualNumbers),
+      i,
+    }));
+  }, [adjacencyPage, adjacencyData, imageStem]);
+  // Polygon coordinates live in the scanned image's pixel space; prefer its
+  // recorded dimensions so a different-resolution image still lines up.
+  const overlayWidth = adjacencyPage?.width ?? jsonWidth;
+  const overlayHeight = adjacencyPage?.height ?? jsonHeight;
+
   // Parse georef JSON text and update streets/intersections/corners/dimensions.
   function applyGeorefJson(text: string): void {
     let data: GeorefData;
@@ -293,6 +331,13 @@ export function App() {
       setDetections([]);
       setJsonWidth(result.width);
       setJsonHeight(result.height);
+    } else if (result.kind === 'adjacency') {
+      setMode('adjacency');
+      setSelectedIndices(new Set());
+      setAdjacencyData(result.data);
+      setDetections([]);
+      setPanels([]);
+      setPanelLabels(undefined);
     } else {
       setMode('georef');
       setSelectedIndices(new Set());
@@ -327,6 +372,7 @@ export function App() {
       prevObjectUrlRef.current = url;
       const el = await loadImage(url);
       applyImage(el, url);
+      setImageStem(pageStem(imageFile.name));
       fallbackWidth = el.naturalWidth;
       fallbackHeight = el.naturalHeight;
     }
@@ -355,6 +401,7 @@ export function App() {
         const src = resolveDataUrl(imageFile);
         const el = await loadImage(src);
         applyImage(el, src);
+        setImageStem(pageStem(imageFile));
         fallbackWidth = el.naturalWidth;
         fallbackHeight = el.naturalHeight;
       }
@@ -415,11 +462,13 @@ export function App() {
       <ImageColumn
         mode={mode}
         imageSrc={imageSrc}
-        jsonWidth={jsonWidth}
-        jsonHeight={jsonHeight}
+        jsonWidth={overlayWidth}
+        jsonHeight={overlayHeight}
         streets={streets}
         intersections={intersections}
-        filteredDetections={filteredDetections}
+        filteredDetections={
+          mode === 'adjacency' ? adjacencyDetections : filteredDetections
+        }
         panels={panels}
         panelLabels={panelLabels}
         selectedIndices={selectedIndices}
@@ -523,6 +572,18 @@ export function App() {
             onSelect={(index) => setSelectedIndices(new Set([index]))}
             jsonWidth={jsonWidth}
             jsonHeight={jsonHeight}
+          />
+        )}
+        {mode === 'adjacency' && adjacencyData && (
+          <AdjacencyTable
+            adjacency={adjacencyData}
+            imageStem={imageStem}
+            detections={adjacencyDetections}
+            selectedIndices={selectedIndices}
+            onSelect={(index) => setSelectedIndices(new Set([index]))}
+            image={imageEl}
+            jsonWidth={overlayWidth}
+            jsonHeight={overlayHeight}
           />
         )}
       </div>

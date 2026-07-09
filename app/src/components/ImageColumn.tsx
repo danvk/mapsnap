@@ -7,7 +7,7 @@ import { DetectionsOverlay } from './DetectionsOverlay';
 import { GeorefOverlay } from './GeorefOverlay';
 import { PanelsOverlay } from './PanelsOverlay';
 
-export type Mode = 'georef' | 'streets' | 'panels';
+export type Mode = 'georef' | 'streets' | 'panels' | 'adjacency';
 
 interface ImageColumnProps {
   mode: Mode;
@@ -67,6 +67,8 @@ export function ImageColumn(props: ImageColumnProps) {
   const streetsMode = mode === 'streets';
   const panelsMode = mode === 'panels';
   const georefMode = mode === 'georef';
+  // Adjacency mode renders detections just like streets mode (overlay + click select).
+  const detectionsMode = streetsMode || mode === 'adjacency';
 
   // In streets/panels mode, select the shapes under the click point. The wrapper
   // (currentTarget) tightly wraps the image, so its rect matches the image's.
@@ -120,7 +122,7 @@ export function ImageColumn(props: ImageColumnProps) {
             src={imageSrc}
             style={{ aspectRatio: `${jsonWidth} / ${jsonHeight}` }}
           />
-          {streetsMode && (
+          {detectionsMode && (
             <DetectionsOverlay
               detections={filteredDetections}
               selectedIndices={selectedIndices}
