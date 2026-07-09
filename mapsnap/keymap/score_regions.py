@@ -23,6 +23,18 @@ from shapely.geometry.base import BaseGeometry
 from shapely.validation import make_valid
 
 
+def default_truth_path(regions: Path) -> Path:
+    """The truth file for a predictions file: ``<page-stem>.truth.regions.panels.json``.
+
+    Derived from the page stem (the file name up to the first dot), so it works for any
+    sidecar naming (``p0.regions.panels.json``, ``p0.kmeans2.panels.json``, ...) — a naive
+    suffix replace silently yields the predictions path itself for unconventional names,
+    and scoring a file against itself reports a perfect 1.000.
+    """
+    stem = regions.name.split(".")[0]
+    return regions.with_name(stem + ".truth.regions.panels.json")
+
+
 def panel_polygons(doc: dict) -> list[tuple[str, BaseGeometry]]:
     """(label, polygon) pairs from a panels.json document, repaired and non-degenerate.
 
@@ -144,9 +156,12 @@ def main() -> None:
     )
     args = parser.parse_args()
 
-    truth_path = args.truth or Path(
-        str(args.regions).replace(".regions.panels.json", ".truth.regions.panels.json")
-    )
+    truth_path = args.truth or default_truth_path(args.regions)
+    if truth_path.resolve() == args.regions.resolve():
+        sys.exit(
+            f"Truth file {truth_path} IS the predictions file; scoring a file against "
+            "itself is always a perfect 1.000. Pass the predictions sidecar, not the truth."
+        )
     if not truth_path.exists():
         sys.exit(f"Not found: {truth_path} (run mapsnap.keymap.truth_regions first).")
     truth_doc = json.load(open(truth_path))

@@ -219,6 +219,19 @@ def test_merge_cluster_families_keeps_bordering_light_dark_fills():
     assert merged[50, 30] != merged[50, 70]  # contact too low -> stay distinct
 
 
+def test_merge_cluster_families_excludes_ink():
+    # Black line-work (L=13) is low-chroma like a pale tint, and its lattice interleaves
+    # with everything — but merging it would connect the whole map into one region.
+    centers = np.array([[60, 5, 10], [13, 2, 4], [85, 0, 0]], dtype=np.float32)
+    labels = np.full((100, 100), 2, dtype=np.int32)
+    rows, cols = np.mgrid[0:40, 0:40]
+    labels[10:50, 10:50] = np.where(
+        (rows + cols) % 2 == 0, 0, 1
+    )  # tint + ink interleaved
+    merged, _, count = merge_cluster_families(labels, {2}, centers, RegionParams())
+    assert merged[10, 10] != merged[10, 11]  # ink stays its own cluster
+
+
 def test_merge_cluster_families_never_merges_across_hue():
     centers, background = _family_setup()
     labels = np.full((100, 100), 3, dtype=np.int32)

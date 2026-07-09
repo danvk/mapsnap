@@ -110,6 +110,13 @@ class RegionParams:
         cluster). The contact gate is what separates mottle (interleaved within blocks) from a
         palette's genuine light/dark variants of one hue (distinct fills that only touch along
         block borders). See merge_cluster_families.
+    family_min_lightness: clusters whose centre L is below this never join a family. The
+        black line-work is a low-chroma cluster too, so pure-chroma matching would merge it
+        into any pale-tint family — and the ink lattice connects the whole map, ballooning
+        one region to the full sheet (Hudson p44, 99.8% of the key map).
+    max_region_area_factor: a region whose mask exceeds this multiple of the median seed
+        spacing squared is dropped as a runaway (mirrors sam_regions' area sanity; leaves
+        room for giant waterfront sheets at ~9% of a key map).
     """
 
     target_long_side: int = 3000
@@ -127,6 +134,8 @@ class RegionParams:
     palette_paper_distance: float = 3.0
     family_chroma_distance: float = 12.0
     family_contact_frac: float = 0.10
+    family_min_lightness: float = 30.0
+    max_region_area_factor: float = 60.0
 
 
 def nearest_neighbor_distance(points: list[Point]) -> float:
@@ -327,10 +336,14 @@ def merge_cluster_families(
     whereas a palette's genuine light/dark variants of one hue are separate blocks that only
     touch along borders. Clusters are therefore unioned when their centres are close in
     (a, b) AND either's pixels lie within a few pixels of at least
-    ``params.family_contact_frac`` of the smaller one. Background clusters never merge.
+    ``params.family_contact_frac`` of the smaller one. Background clusters never merge,
+    and neither do near-black ones (below ``params.family_min_lightness``): the ink
+    line-work is itself a low-chroma cluster whose lattice touches everything, and a
+    family containing it becomes one component spanning the whole map.
     """
     fg_ids = [c for c in range(len(centers)) if c not in background]
-    parent = {c: c for c in fg_ids}
+    mergeable = [c for c in fg_ids if centers[c][0] >= params.family_min_lightness]
+    parent = {c: c for c in mergeable}
 
     def find(c: int) -> int:
         while parent[c] != c:
@@ -339,10 +352,10 @@ def merge_cluster_families(
         return c
 
     kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (7, 7))
-    dilated = {c: cv2.dilate((labels == c).astype(np.uint8), kernel) for c in fg_ids}
-    areas = {c: int((labels == c).sum()) for c in fg_ids}
-    for i, a in enumerate(fg_ids):
-        for b in fg_ids[i + 1 :]:
+    dilated = {c: cv2.dilate((labels == c).astype(np.uint8), kernel) for c in mergeable}
+    areas = {c: int((labels == c).sum()) for c in mergeable}
+    for i, a in enumerate(mergeable):
+        for b in mergeable[i + 1 :]:
             chroma = float(np.linalg.norm(centers[a][1:] - centers[b][1:]))
             if chroma >= params.family_chroma_distance:
                 continue
@@ -357,17 +370,54 @@ def merge_cluster_families(
                 continue
             parent[find(a)] = find(b)
 
-    roots = sorted({find(c) for c in fg_ids})
+    roots = sorted({find(c) for c in mergeable})
     mapping = np.zeros(len(centers), dtype=np.int32)
-    for c in fg_ids:
+    for c in mergeable:
         mapping[c] = roots.index(find(c))
-    new_background: set[int] = set()
     next_id = len(roots)
+    for c in fg_ids:  # too-dark clusters stay foreground, each its own singleton
+        if c not in parent:
+            mapping[c] = next_id
+            next_id += 1
+    new_background: set[int] = set()
     for c in sorted(background):
         mapping[c] = next_id
         new_background.add(next_id)
         next_id += 1
     return mapping[labels], new_background, next_id
+
+
+def single_seed_region(
+    labels: np.ndarray,
+    background: set[int],
+    scaled_box: ScaledBox,
+    params: RegionParams,
+) -> np.ndarray | None:
+    """Best-effort region for one seed from a label image: its majority cluster's component.
+
+    Used as the fallback when a seed's family region blows past the area sanity cap (a
+    family can absorb a map-spanning pale tint); the unmerged cluster is what the seed
+    would have gotten before family merging.
+    """
+    col0, row0, col1, row1 = scaled_box
+    patch = labels[row0 : row1 + 1, col0 : col1 + 1]
+    if patch.size == 0:
+        return None
+    counts = np.bincount(patch.ravel())
+    for cluster in background:
+        if cluster < len(counts):
+            counts[cluster] = 0
+    if counts.max() == 0:
+        return None
+    cluster = int(counts.argmax())
+    cleaned = clean_cluster_mask(
+        labels == cluster, params.cluster_close_radius, params.cluster_open_radius
+    )
+    components, _ = ndi.label(cleaned)  # type: ignore[misc]
+    component = box_component(components, scaled_box)
+    if component is None:
+        return None
+    return components == component
 
 
 def scale_boxes(
@@ -482,10 +532,12 @@ def segment_page_regions(
         if params.use_global_kmeans or not seeds
         else cluster_image_seeded(scaled_u8, scaled_boxes, line_smooth_size, params)
     )
+    unmerged: tuple[np.ndarray, set[int]] | None = None
     if seeded is not None:
-        labels, background, centers = seeded
+        raw_labels, raw_background, centers = seeded
+        unmerged = (raw_labels, raw_background)
         labels, background, n_clusters = merge_cluster_families(
-            labels, background, centers, params
+            raw_labels, raw_background, centers, params
         )
     else:
         labels, _ = cluster_image(
@@ -553,8 +605,21 @@ def segment_page_regions(
             ):
                 region_masks[index] = piece
 
+    spacing = nearest_neighbor_distance([box_center(box) for box in seeds]) * scale
+    max_region_area = params.max_region_area_factor * spacing**2
     polygons: dict[int, list[Point]] = {}
     for index, mask in region_masks.items():
+        if spacing > 0 and int(mask.sum()) > max_region_area:
+            # Runaway region (a family that swallowed a map-spanning tint): retry with
+            # this seed's unmerged cluster, and drop the seed only if that is huge too.
+            fallback = (
+                single_seed_region(*unmerged, scaled_boxes[index], params)
+                if unmerged is not None
+                else None
+            )
+            if fallback is None or int(fallback.sum()) > max_region_area:
+                continue
+            mask = fallback
         filled: np.ndarray = ndi.binary_fill_holes(mask)  # type: ignore[assignment]
         polygon = mask_to_polygon(filled, params.simplify_tolerance)
         if len(polygon) >= 3:

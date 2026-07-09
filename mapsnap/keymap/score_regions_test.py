@@ -1,4 +1,7 @@
+from pathlib import Path
+
 from mapsnap.keymap.score_regions import (
+    default_truth_path,
     greedy_match,
     panel_polygons,
     scale_to,
@@ -78,6 +81,19 @@ def test_scale_to_rescales_coordinates():
     big = doc([], [], size=1000)
     scale_to(small, big)
     assert small["panels"][0][1] == [100.0, 0.0]
+
+
+def test_default_truth_path_from_page_stem():
+    # Conventional and unconventional sidecar names both resolve to the page's truth file.
+    assert default_truth_path(Path("raw/p0.regions.panels.json")) == Path(
+        "raw/p0.truth.regions.panels.json"
+    )
+    assert default_truth_path(Path("raw/p0.kmeans2.panels.json")) == Path(
+        "raw/p0.truth.regions.panels.json"
+    )
+    # The truth file maps to itself, which main() rejects as self-comparison.
+    truth = Path("raw/p0.truth.regions.panels.json")
+    assert default_truth_path(truth) == truth
 
 
 def test_panel_polygons_repairs_self_intersections():
