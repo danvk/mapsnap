@@ -165,6 +165,9 @@ def main() -> None:
         f"     >=0.5: {sum(1 for v in values if v >= 0.5)}/{n}   "
         f"missed (IoU 0): {sum(1 for v in values if v == 0.0)}"
     )
+    missed_pages = sorted({int(label) for label, iou in score.ious if iou == 0.0})
+    if missed_pages:
+        print(f"missed pages: {', '.join(str(page) for page in missed_pages)}")
     print(f"spurious predicted regions: {score.spurious}")
     print(f"predicted-region self-overlap: {score.predicted_overlap:.1%} of area")
     if args.per_page:

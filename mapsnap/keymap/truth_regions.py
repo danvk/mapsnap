@@ -6,7 +6,9 @@ key-map pixels. Projecting every footprint gives a ``<stem>.truth.regions.panels
 sidecar in the same schema as the detected regions — ground truth for scoring a
 segmentation (mapsnap.keymap.score_regions). The footprints won't exactly match the blocks
 drawn on the key map (OIM clips to the page's unique area; the key map's blocks are its own
-stylization), but they are close enough to rank segmentations.
+stylization), but they are close enough to rank segmentations. Footprints that fall outside
+the key map image are dropped, so in a volume with several key maps (e.g. Brooklyn) each
+page only contributes truth to the key map(s) that show it.
 
     uv run python -m mapsnap.keymap.truth_regions data/hudson_co_nj_1950_vol_9
 """
@@ -17,6 +19,8 @@ import sys
 from pathlib import Path
 
 import numpy as np
+from shapely.geometry import Polygon, box
+from shapely.validation import make_valid
 
 from mapsnap.compare_iiif_georef import truth_polygons_by_page
 from mapsnap.keymap.locate import keymap_georef_path, resolve_keymaps
@@ -40,17 +44,23 @@ def world_to_pixel_affine(georef: dict) -> np.ndarray:
     return coefficients.T
 
 
+# Keep a footprint only if at least this fraction of its area is on the key map image.
+MIN_INSIDE_FRACTION = 0.5
+
+
 def project_truth_regions(
     georef: dict, truth_by_page: dict[int, list[list[list[float]]]]
 ) -> tuple[dict[int, list[tuple[float, float]]], list[str]]:
     """Truth footprints in key-map pixel space, as (polygons-by-index, labels) for panels.
 
     Every footprint of every page becomes one panel labeled with its page number (a split
-    page contributes several panels sharing a label). Footprints that project entirely
-    outside the key map (with a one-page margin) are skipped.
+    page contributes several panels sharing a label). Footprints with less than
+    MIN_INSIDE_FRACTION of their area inside the image are skipped: in a volume with
+    several key maps, a page belongs only to the key map(s) that show it, and scoring it
+    against the others would count as misses pages the segmenter cannot possibly find.
     """
     affine = world_to_pixel_affine(georef)
-    width, height = georef["width"], georef["height"]
+    image_box = box(0, 0, georef["width"], georef["height"])
     polygons: dict[int, list[tuple[float, float]]] = {}
     labels: list[str] = []
     for number in sorted(truth_by_page):
@@ -59,11 +69,12 @@ def project_truth_regions(
                 [np.asarray(footprint, dtype=np.float64), np.ones((len(footprint), 1))]
             )
             pixels = points @ affine.T
+            polygon = make_valid(Polygon((float(x), float(y)) for x, y in pixels))
+            if polygon.area <= 0:
+                continue
             if (
-                pixels[:, 0].max() < -width * 0.5
-                or pixels[:, 0].min() > width * 1.5
-                or pixels[:, 1].max() < -height * 0.5
-                or pixels[:, 1].min() > height * 1.5
+                polygon.intersection(image_box).area
+                < MIN_INSIDE_FRACTION * polygon.area
             ):
                 continue
             polygons[len(labels)] = [(float(x), float(y)) for x, y in pixels]
