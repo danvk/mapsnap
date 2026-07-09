@@ -220,3 +220,4 @@ __marimo__/
 data
 backup-data
 .claude/settings.local.json
+models/*.pth
