@@ -103,6 +103,13 @@ class RegionParams:
         dropped (the palette entry owns those pixels).
     palette_paper_distance: a seed colour this close to the dominant (paper) centre is a number
         printed on open paper; it is excluded so it cannot drag the paper into the foreground.
+    family_chroma_distance / family_contact_frac: after quantization, two foreground clusters
+        are merged into one "family" mask when their centres are within family_chroma_distance
+        in Lab (a, b) — aging mottle and stains shift a fill's lightness, not its hue — AND
+        their pixels interleave (mutual contact at least family_contact_frac of the smaller
+        cluster). The contact gate is what separates mottle (interleaved within blocks) from a
+        palette's genuine light/dark variants of one hue (distinct fills that only touch along
+        block borders). See merge_cluster_families.
     """
 
     target_long_side: int = 3000
@@ -118,6 +125,8 @@ class RegionParams:
     palette_dedup_distance: float = 16.0
     palette_global_min_distance: float = 8.0
     palette_paper_distance: float = 3.0
+    family_chroma_distance: float = 12.0
+    family_contact_frac: float = 0.10
 
 
 def nearest_neighbor_distance(points: list[Point]) -> float:
@@ -304,6 +313,63 @@ def clean_cluster_mask(
     return mask.astype(bool)
 
 
+def merge_cluster_families(
+    labels: np.ndarray,
+    background: set[int],
+    centers: np.ndarray,
+    params: RegionParams,
+) -> tuple[np.ndarray, set[int], int]:
+    """Merge interleaved same-hue foreground clusters; return (labels, background, count).
+
+    On an aged map one block's fill drifts in lightness (mottle, stains, fading), so its
+    pixels split across several quantization clusters and the block's region is clipped to
+    the seed's share. Such phases share a hue — Lab (a, b) — and interleave spatially,
+    whereas a palette's genuine light/dark variants of one hue are separate blocks that only
+    touch along borders. Clusters are therefore unioned when their centres are close in
+    (a, b) AND either's pixels lie within a few pixels of at least
+    ``params.family_contact_frac`` of the smaller one. Background clusters never merge.
+    """
+    fg_ids = [c for c in range(len(centers)) if c not in background]
+    parent = {c: c for c in fg_ids}
+
+    def find(c: int) -> int:
+        while parent[c] != c:
+            parent[c] = parent[parent[c]]
+            c = parent[c]
+        return c
+
+    kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (7, 7))
+    dilated = {c: cv2.dilate((labels == c).astype(np.uint8), kernel) for c in fg_ids}
+    areas = {c: int((labels == c).sum()) for c in fg_ids}
+    for i, a in enumerate(fg_ids):
+        for b in fg_ids[i + 1 :]:
+            chroma = float(np.linalg.norm(centers[a][1:] - centers[b][1:]))
+            if chroma >= params.family_chroma_distance:
+                continue
+            smaller = min(areas[a], areas[b])
+            if smaller == 0:
+                continue
+            contact = max(
+                int((dilated[a].astype(bool) & (labels == b)).sum()),
+                int((dilated[b].astype(bool) & (labels == a)).sum()),
+            )
+            if contact / smaller < params.family_contact_frac:
+                continue
+            parent[find(a)] = find(b)
+
+    roots = sorted({find(c) for c in fg_ids})
+    mapping = np.zeros(len(centers), dtype=np.int32)
+    for c in fg_ids:
+        mapping[c] = roots.index(find(c))
+    new_background: set[int] = set()
+    next_id = len(roots)
+    for c in sorted(background):
+        mapping[c] = next_id
+        new_background.add(next_id)
+        next_id += 1
+    return mapping[labels], new_background, next_id
+
+
 def scale_boxes(
     seeds: list[Box], scale: float, shape: tuple[int, ...]
 ) -> list[ScaledBox]:
@@ -418,7 +484,9 @@ def segment_page_regions(
     )
     if seeded is not None:
         labels, background, centers = seeded
-        n_clusters = len(centers)
+        labels, background, n_clusters = merge_cluster_families(
+            labels, background, centers, params
+        )
     else:
         labels, _ = cluster_image(
             scaled_u8, params.n_clusters, line_smooth_size, params.cluster_seed

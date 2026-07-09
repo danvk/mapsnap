@@ -10,6 +10,7 @@ from mapsnap.keymap.page_regions import (
     cluster_image_seeded,
     dedup_palette,
     mask_to_polygon,
+    merge_cluster_families,
     nearest_neighbor_distance,
     polygon_bounds,
     regions_panels_doc,
@@ -185,6 +186,48 @@ def test_seed_palette_reads_block_color():
     lab[10:30, 10:30] = [60.0, 30.0, 10.0]  # block
     palette = seed_palette(lab, [(15, 15, 25, 25)])
     assert np.allclose(palette[0], [60.0, 30.0, 10.0])
+
+
+def _family_setup():
+    # Centers: two rose lightness variants (same a,b within chroma 12), one yellow, one paper.
+    centers = np.array(
+        [[60, 25, 8], [40, 27, 9], [70, -5, 40], [85, 0, 0]], dtype=np.float32
+    )
+    return centers, {3}
+
+
+def test_merge_cluster_families_merges_interleaved_mottle():
+    centers, background = _family_setup()
+    labels = np.full((100, 100), 3, dtype=np.int32)
+    rows, cols = np.mgrid[0:40, 0:40]
+    labels[10:50, 10:50] = np.where((rows + cols) % 2 == 0, 0, 1)  # interleaved phases
+    merged, new_background, count = merge_cluster_families(
+        labels, background, centers, RegionParams()
+    )
+    assert count == 3  # rose family + yellow + paper
+    assert len(np.unique(merged[10:50, 10:50])) == 1  # the two phases are one family
+
+
+def test_merge_cluster_families_keeps_bordering_light_dark_fills():
+    centers, background = _family_setup()
+    labels = np.full((100, 100), 3, dtype=np.int32)
+    labels[10:90, 10:50] = 0  # light rose block
+    labels[10:90, 50:90] = 1  # dark rose block, touching along one border
+    merged, new_background, count = merge_cluster_families(
+        labels, background, centers, RegionParams()
+    )
+    assert merged[50, 30] != merged[50, 70]  # contact too low -> stay distinct
+
+
+def test_merge_cluster_families_never_merges_across_hue():
+    centers, background = _family_setup()
+    labels = np.full((100, 100), 3, dtype=np.int32)
+    rows, cols = np.mgrid[0:40, 0:40]
+    labels[10:50, 10:50] = np.where((rows + cols) % 2 == 0, 0, 2)  # rose + yellow mix
+    merged, new_background, count = merge_cluster_families(
+        labels, background, centers, RegionParams()
+    )
+    assert merged[10, 10] != merged[10, 11]  # different hue: not a family
 
 
 def test_cluster_image_seeded_falls_back_when_all_seeds_on_paper():
