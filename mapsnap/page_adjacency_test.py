@@ -157,3 +157,16 @@ def test_volume_page_images_skips_splits_and_keymaps(tmp_path: Path):
     names = [p.name for p in volume_page_images(tmp_path)]
     # p2 itself stays (the parent sheet carries the margin references); panels are skipped.
     assert names == ["p1.jpg", "p2.jpg"]
+
+
+def test_is_text_veto():
+    from mapsnap.page_adjacency import is_text_veto
+
+    # A veto needs a textual reveal AND the recognizer preferring the letters reading.
+    assert is_text_veto("SMITH", 0.9, 0.1)  # street name reveals itself
+    assert is_text_veto("AV", 0.9, 0.2)  # letter-dominated
+    assert not is_text_veto("70", 0.9, 0.5)  # clean number
+    assert not is_text_veto("7O", 0.9, 0.5)  # one look-alike letter: keep
+    assert not is_text_veto("31NJ", 0.9, 0.5)  # number + short annotation: keep
+    assert not is_text_veto("AL", 0.88, 0.95)  # genuine "41": digits read wins
+    assert not is_text_veto("", 0.9, 0.1)

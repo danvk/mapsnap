@@ -115,8 +115,38 @@ def bbox_gap(a: list[list[float]], b: list[list[float]]) -> float:
     return math.hypot(dx, dy)
 
 
+def is_text_veto(
+    letter_text: str, letter_confidence: float, digit_confidence: float
+) -> bool:
+    """Whether a letters-allowlist read reveals the box to be text rather than a number.
+
+    Under the digits-only allowlist the recognizer is *forced* to transcribe street names as
+    numbers ("SMITH" came out as a confident "55" on Brooklyn p56); re-reading the same box
+    with letters available lets such text identify itself. A veto needs both a clear textual
+    reveal — three or more letters, or a letter-dominated read — and the recognizer to
+    *prefer* that reading over the digit one: a genuine "41" also comes back letter-dominated
+    ("AL", look-alike glyphs) but at lower confidence than its digit reading, while SMITH
+    reads as text far more confidently than as "55".
+    """
+    compact = letter_text.replace(" ", "")
+    if not compact or letter_confidence <= digit_confidence:
+        return False
+    letters = sum(1 for c in compact if c.isalpha())
+    return letters >= 3 or letters / len(compact) >= 0.7
+
+
+def box_center(bbox: list[list[float]]) -> tuple[float, float]:
+    """Center of an OCR quad."""
+    return (sum(p[0] for p in bbox) / 4, sum(p[1] for p in bbox) / 4)
+
+
 def digit_detections(image_path: Path, reader, valid_numbers: set[int]) -> list[dict]:
     """All digit reads on one page that parse to a valid volume page number.
+
+    Two recognition passes over the same image: the digits-only pass supplies the
+    transcription (immune to look-alike substitutions like 0 -> O), and a letters-allowed
+    pass over the same boxes vetoes the ones that are actually street names or other text
+    (see is_text_veto).
 
     Each detection records the parsed ``number``, the raw OCR ``text``, EasyOCR's polygon and
     confidence, the glyph ``height`` in pixels, position as width/height fractions, the
@@ -128,11 +158,30 @@ def digit_detections(image_path: Path, reader, valid_numbers: set[int]) -> list[
     image = np.asarray(Image.open(image_path).convert("RGB"))
     height, width = image.shape[:2]
     results = reader.readtext(image, allowlist="0123456789")
+    letter_results = reader.readtext(
+        image, allowlist="0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ"
+    )
+    letter_centers = [box_center(bbox) for bbox, _, _ in letter_results]
     detections = []
     for index, (bbox, text, confidence) in enumerate(results):
         digits = "".join(c for c in text if c.isdigit())
         if not digits or int(digits) not in valid_numbers:
             continue
+        # Veto boxes whose letters-pass read reveals text. Pair by box center; the two
+        # passes share the same detector so boxes normally coincide.
+        cx, cy = box_center(bbox)
+        box_height = max(p[1] for p in bbox) - min(p[1] for p in bbox)
+        nearest_letter = min(
+            (
+                (math.hypot(lx - cx, ly - cy), i)
+                for i, (lx, ly) in enumerate(letter_centers)
+            ),
+            default=(math.inf, -1),
+        )
+        if nearest_letter[0] < box_height:
+            letter_read = letter_results[nearest_letter[1]]
+            if is_text_veto(letter_read[1], float(letter_read[2]), float(confidence)):
+                continue
         x_frac = sum(p[0] for p in bbox) / 4 / width
         y_frac = sum(p[1] for p in bbox) / 4 / height
         glyph_height = float(max(p[1] for p in bbox) - min(p[1] for p in bbox))
