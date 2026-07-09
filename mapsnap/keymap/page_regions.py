@@ -6,8 +6,13 @@ boundary line or by a direct change of colour; thinner black street-grid lines r
 block. The white/tan paper between blocks is unsaturated.
 
 Recovering one polygon per page is a colour-cluster segmentation. The (line-smoothed) image is
-k-means quantized into a handful of colours; the largest cluster(s) are the "background"
-(paper/streets) and the rest are blocks. Each remaining cluster's mask is morphologically closed
+quantized into a handful of colours; the largest cluster(s) are the "background"
+(paper/streets) and the rest are blocks. By default the quantization palette is *seeded*: the
+median colour around each page number gives the block fills actually in use (deduped to the
+few distinct ones), and global k-means centres fill in the rest — so on a pale, aged map a
+block fill that plain k-means would merge with the paper still gets its own cluster, and a
+seed-palette cluster is never flagged as background (``--global-kmeans`` restores plain
+k-means). Each remaining cluster's mask is morphologically closed
 then opened — the opening severs the hairline slivers along which one block would otherwise bleed
 into a neighbour — and split into connected components. Each page number is assigned to the
 component its box sits on (preferring the larger component when the box straddles two near-identical
@@ -88,6 +93,16 @@ class RegionParams:
         colours, so the seed is assigned to whichever candidate has the larger connected component
         (its real block) rather than the pixel-majority fragment.
     simplify_tolerance: Douglas-Peucker tolerance (in scaled pixels) for the output polygon.
+    use_global_kmeans: skip the seed-colour palette and quantize with plain k-means (the
+        pre-palette behaviour; an ablation/debugging switch).
+    palette_dedup_distance: seed colours closer than this (CIELAB) are one palette entry. Sweeping
+        4-20 against truth IoU: coarse (16) wins — the palette collapses to the handful of fills
+        actually printed, while finer spacing splits one fill across near-identical centres and
+        fragments its blocks.
+    palette_global_min_distance: global k-means centres closer than this to a palette colour are
+        dropped (the palette entry owns those pixels).
+    palette_paper_distance: a seed colour this close to the dominant (paper) centre is a number
+        printed on open paper; it is excluded so it cannot drag the paper into the foreground.
     """
 
     target_long_side: int = 3000
@@ -99,6 +114,10 @@ class RegionParams:
     cluster_open_radius: int = 3
     cluster_tie_frac: float = 0.7
     simplify_tolerance: float = 4.0
+    use_global_kmeans: bool = False
+    palette_dedup_distance: float = 16.0
+    palette_global_min_distance: float = 8.0
+    palette_paper_distance: float = 3.0
 
 
 def nearest_neighbor_distance(points: list[Point]) -> float:
@@ -130,6 +149,12 @@ def cluster_image(
     """
     lab = rgb2lab(cv2.medianBlur(rgb_u8, line_smooth_size) / 255.0)
     flat = lab.reshape(-1, 3).astype(np.float32)
+    centers = kmeans_centers(flat, n_clusters, seed)
+    return assign_to_centers(flat, centers).reshape(rgb_u8.shape[:2]), centers
+
+
+def kmeans_centers(flat: np.ndarray, n_clusters: int, seed: int) -> np.ndarray:
+    """k-means centres of (a 40k subsample of) flattened CIELAB pixels."""
     generator = np.random.default_rng(seed)
     if len(flat) > 40000:
         sample = flat[generator.choice(len(flat), size=40000, replace=False)]
@@ -142,6 +167,11 @@ def cluster_image(
     _, _, centers = cv2.kmeans(
         sample, n_clusters, best_labels, criteria, 3, cv2.KMEANS_PP_CENTERS
     )
+    return centers
+
+
+def assign_to_centers(flat: np.ndarray, centers: np.ndarray) -> np.ndarray:
+    """Index of the nearest centre for every flattened pixel."""
     labels = np.zeros(len(flat), dtype=np.int32)
     best = np.full(len(flat), np.inf, dtype=np.float32)
     for index, center in enumerate(centers):
@@ -149,7 +179,86 @@ def cluster_image(
         closer = distance < best
         best[closer] = distance[closer]
         labels[closer] = index
-    return labels.reshape(rgb_u8.shape[:2]), centers
+    return labels
+
+
+def seed_palette(
+    blurred_lab: np.ndarray, scaled_boxes: list["ScaledBox"]
+) -> np.ndarray:
+    """Median CIELAB colour in a 1.5x-expanded window around each seed box.
+
+    The page number is printed on its block, so after the line-smoothing blur the window
+    is dominated by the block's fill colour.
+    """
+    height, width = blurred_lab.shape[:2]
+    colors = []
+    for col0, row0, col1, row1 in scaled_boxes:
+        half_w = max(2, (col1 - col0) // 2)
+        half_h = max(2, (row1 - row0) // 2)
+        c0, c1 = max(0, col0 - half_w), min(width, col1 + half_w + 1)
+        r0, r1 = max(0, row0 - half_h), min(height, row1 + half_h + 1)
+        patch = blurred_lab[r0:r1, c0:c1].reshape(-1, 3)
+        colors.append(np.median(patch, axis=0))
+    return np.asarray(colors, dtype=np.float32)
+
+
+def dedup_palette(colors: np.ndarray, min_distance: float) -> np.ndarray:
+    """Greedy dedup: keep a colour only if no already-kept colour is within min_distance."""
+    kept: list[np.ndarray] = []
+    for color in colors:
+        if all(np.linalg.norm(color - k) >= min_distance for k in kept):
+            kept.append(color)
+    return np.asarray(kept, dtype=np.float32)
+
+
+def cluster_image_seeded(
+    rgb_u8: np.ndarray,
+    scaled_boxes: list["ScaledBox"],
+    line_smooth_size: int,
+    params: "RegionParams",
+) -> tuple[np.ndarray, set[int], np.ndarray] | None:
+    """Quantize with a seed-colour palette plus filtered global k-means centres.
+
+    The palette entries are the block fills actually in use, so a pale fill that global
+    k-means would merge with the paper keeps its own cluster, and palette clusters are
+    never flagged background — the area rule applies to the global centres only. Returns
+    (label image, background cluster ids, all centres), or None when no usable palette
+    colour survives (every seed sits on paper), in which case the caller should fall back
+    to plain k-means.
+    """
+    lab = rgb2lab(cv2.medianBlur(rgb_u8, line_smooth_size) / 255.0)
+    flat = lab.reshape(-1, 3).astype(np.float32)
+    global_centers = kmeans_centers(flat, params.n_clusters, params.cluster_seed)
+    counts = np.bincount(
+        assign_to_centers(flat, global_centers), minlength=params.n_clusters
+    )
+    paper = global_centers[counts.argmax()]
+
+    palette = seed_palette(lab, scaled_boxes)
+    palette = palette[
+        np.linalg.norm(palette - paper, axis=1) >= params.palette_paper_distance
+    ]
+    palette = dedup_palette(palette, params.palette_dedup_distance)
+    if not len(palette):
+        return None
+
+    kept_global = [
+        center
+        for center in global_centers
+        if np.linalg.norm(palette - center, axis=1).min()
+        >= params.palette_global_min_distance
+    ]
+    centers = np.vstack([palette, *kept_global]).astype(np.float32)
+    labels = assign_to_centers(flat, centers).reshape(rgb_u8.shape[:2])
+
+    cluster_counts = np.bincount(labels.ravel(), minlength=len(centers))
+    threshold = params.background_area_frac * cluster_counts.max()
+    background = {
+        cluster
+        for cluster in range(len(palette), len(centers))
+        if cluster_counts[cluster] >= threshold
+    }
+    return labels, background, centers
 
 
 def background_clusters(
@@ -193,6 +302,22 @@ def clean_cluster_mask(
             cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (size, size)),
         )
     return mask.astype(bool)
+
+
+def scale_boxes(
+    seeds: list[Box], scale: float, shape: tuple[int, ...]
+) -> list[ScaledBox]:
+    """Seed boxes in label-image (scaled) pixels, clamped to the image."""
+    height, width = shape[:2]
+    return [
+        (
+            max(0, int(round(box[0] * scale))),
+            max(0, int(round(box[1] * scale))),
+            min(width - 1, int(round(box[2] * scale))),
+            min(height - 1, int(round(box[3] * scale))),
+        )
+        for box in seeds
+    ]
 
 
 def box_component(components: np.ndarray, box: tuple[int, int, int, int]) -> int | None:
@@ -267,7 +392,9 @@ def segment_page_regions(
     """Polygon (full-res pixels) of the colored block around each seeded page number.
 
     rgb is a float image in [0, 1] (H x W x 3). ``seeds`` are page-number bounding boxes in
-    full-resolution coordinates. The image is k-means colour-clustered; each cluster mask is cleaned
+    full-resolution coordinates. The image is colour-clustered — seed-palette quantization by
+    default, plain k-means with ``params.use_global_kmeans`` (or as the fallback when no
+    palette colour survives the paper filter); each cluster mask is cleaned
     (closed then opened, so hairline slivers between blocks are severed) and split into connected
     components. Each page number's block is the component its box sits in; if two page numbers land
     in the same component their blocks abut, so the component is split between them by a distance
@@ -283,18 +410,28 @@ def segment_page_regions(
         255,
     ).astype(np.uint8)
 
-    labels, _ = cluster_image(
-        scaled_u8, params.n_clusters, line_smooth_size, params.cluster_seed
+    scaled_boxes = scale_boxes(seeds, scale, scaled_u8.shape)
+    seeded = (
+        None
+        if params.use_global_kmeans or not seeds
+        else cluster_image_seeded(scaled_u8, scaled_boxes, line_smooth_size, params)
     )
-    background = background_clusters(
-        labels, params.n_clusters, params.background_area_frac
-    )
-    label_height, label_width = labels.shape
+    if seeded is not None:
+        labels, background, centers = seeded
+        n_clusters = len(centers)
+    else:
+        labels, _ = cluster_image(
+            scaled_u8, params.n_clusters, line_smooth_size, params.cluster_seed
+        )
+        background = background_clusters(
+            labels, params.n_clusters, params.background_area_frac
+        )
+        n_clusters = params.n_clusters
 
     # Clean (close then open) and connected-component each non-background cluster's mask once.
     components: dict[int, np.ndarray] = {}
     component_sizes: dict[int, np.ndarray] = {}
-    for cluster in range(params.n_clusters):
+    for cluster in range(n_clusters):
         if cluster in background:
             continue
         mask = clean_cluster_mask(
@@ -311,18 +448,12 @@ def segment_page_regions(
     members_by_region: dict[tuple[int, int], list[tuple[int, ScaledBox]]] = defaultdict(
         list
     )
-    for index, box in enumerate(seeds):
-        scaled_box: ScaledBox = (
-            max(0, int(round(box[0] * scale))),
-            max(0, int(round(box[1] * scale))),
-            min(label_width - 1, int(round(box[2] * scale))),
-            min(label_height - 1, int(round(box[3] * scale))),
-        )
+    for index, scaled_box in enumerate(scaled_boxes):
         col0, row0, col1, row1 = scaled_box
         patch = labels[row0 : row1 + 1, col0 : col1 + 1]
         if patch.size == 0:
             continue
-        counts = np.bincount(patch.ravel(), minlength=params.n_clusters)
+        counts = np.bincount(patch.ravel(), minlength=n_clusters)
         for cluster in background:
             counts[cluster] = 0  # the page number sits on paper, not a colour block
         if counts.max() == 0:
@@ -448,7 +579,12 @@ def main() -> None:
     parser.add_argument(
         "--cluster-debug",
         type=Path,
-        help="Also write the k-means colour-quantized image (the elevation's basis) to this path.",
+        help="Also write the colour-quantized image (the elevation's basis) to this path.",
+    )
+    parser.add_argument(
+        "--global-kmeans",
+        action="store_true",
+        help="Quantize with plain k-means instead of the seed-colour palette (ablation).",
     )
     args = parser.parse_args()
 
@@ -457,7 +593,7 @@ def main() -> None:
         image_path.stem + ".regions.panels.json"
     )
 
-    params = RegionParams()
+    params = RegionParams(use_global_kmeans=args.global_kmeans)
     seeds, texts = load_seeds(args.keymap)
     image = Image.open(image_path).convert("RGB")
     rgb = np.asarray(image)
@@ -480,9 +616,22 @@ def main() -> None:
             )
             print(f"Wrote {args.blur_debug}")
         if args.cluster_debug:
-            labels, centers = cluster_image(
-                scaled, params.n_clusters, line_smooth_size, params.cluster_seed
+            seeded = (
+                None
+                if params.use_global_kmeans or not seeds
+                else cluster_image_seeded(
+                    scaled,
+                    scale_boxes(seeds, scale, scaled.shape),
+                    line_smooth_size,
+                    params,
+                )
             )
+            if seeded is not None:
+                labels, _, centers = seeded
+            else:
+                labels, centers = cluster_image(
+                    scaled, params.n_clusters, line_smooth_size, params.cluster_seed
+                )
             quant_rgb = (np.clip(lab2rgb(centers[labels]), 0, 1) * 255).astype(np.uint8)
             Image.fromarray(quant_rgb).save(args.cluster_debug)
             print(f"Wrote {args.cluster_debug}")
