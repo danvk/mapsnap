@@ -1,4 +1,5 @@
 from mapsnap.keymap.detect_numbers_crnn import (
+    choose_duplicate_reread,
     choose_reread,
     levenshtein,
     snap_to_pages,
@@ -67,3 +68,46 @@ def test_choose_reread_rejects_non_valid_page():
 def test_choose_reread_rejects_when_not_longer():
     # Re-reads that are not strictly longer than the original never upgrade it.
     assert choose_reread("5", [_reread("5"), _reread("5")], VALID) is None
+
+
+# choose_duplicate_reread — the duplicate-label relabeling gate ------------------------------
+
+
+def test_duplicate_reread_relabels_agreed_missing_page():
+    # Two seeds read "6"; this one's tight crops both resolve to the missing "62".
+    chosen = choose_duplicate_reread(
+        "6", [_reread("62", 0.7), _reread("62", 0.9)], {"62", "63"}
+    )
+    assert chosen is not None
+    assert chosen[1] == "62"
+    assert chosen[2] == 0.9
+
+
+def test_duplicate_reread_keeps_genuine_split_page():
+    # A split page's label is printed on both blocks (Champaign); tight crops re-read the
+    # same text, which is never "missing", so the duplicate is kept.
+    assert choose_duplicate_reread("23", [_reread("23"), _reread("23")], {"9"}) is None
+
+
+def test_duplicate_reread_rejects_disagreement():
+    assert (
+        choose_duplicate_reread("6", [_reread("62"), _reread("63")], {"62", "63"})
+        is None
+    )
+
+
+def test_duplicate_reread_rejects_already_found_page():
+    # Relabeling to a page already in the detected set would just move the duplicate.
+    assert choose_duplicate_reread("30", [_reread("38"), _reread("38")], {"80"}) is None
+
+
+def test_duplicate_reread_rejects_lone_width():
+    assert choose_duplicate_reread("6", [_reread("62"), None], {"62"}) is None
+
+
+def test_duplicate_reread_allows_same_length_relabel():
+    # 80 misread as "30" is a same-length substitution; the gate is about agreement and
+    # missingness, not length.
+    chosen = choose_duplicate_reread("30", [_reread("80"), _reread("80")], {"80"})
+    assert chosen is not None
+    assert chosen[1] == "80"
