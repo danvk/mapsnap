@@ -7,10 +7,15 @@ from mapsnap.keymap.page_regions import (
     box_component,
     clean_cluster_mask,
     cluster_image,
+    cluster_image_seeded,
+    dedup_palette,
     mask_to_polygon,
+    merge_cluster_families,
     nearest_neighbor_distance,
     polygon_bounds,
     regions_panels_doc,
+    scale_boxes,
+    seed_palette,
     segment_page_regions,
     split_component,
     working_scale,
@@ -159,3 +164,103 @@ def test_segment_page_regions_splits_shared_block():
     assert max(x for x, _ in polygons[0]) < min(
         x for x, _ in polygons[1]
     )  # split, disjoint
+
+
+def test_scale_boxes_scales_and_clamps():
+    boxes = scale_boxes(
+        [(10.0, 20.0, 30.0, 40.0), (0.0, 0.0, 300.0, 300.0)], 0.5, (100, 80)
+    )
+    assert boxes[0] == (5, 10, 15, 20)
+    assert boxes[1] == (0, 0, 79, 99)  # clamped to (width-1, height-1)
+
+
+def test_dedup_palette_merges_near_colors():
+    colors = np.array([[50, 10, 10], [52, 10, 10], [50, 40, 10]], dtype=np.float32)
+    kept = dedup_palette(colors, min_distance=6.0)
+    assert len(kept) == 2  # the 2-apart twin merges; the 30-apart colour stays
+
+
+def test_seed_palette_reads_block_color():
+    lab = np.zeros((40, 40, 3), dtype=np.float64)
+    lab[...] = [80.0, 0.0, 0.0]  # paper
+    lab[10:30, 10:30] = [60.0, 30.0, 10.0]  # block
+    palette = seed_palette(lab, [(15, 15, 25, 25)])
+    assert np.allclose(palette[0], [60.0, 30.0, 10.0])
+
+
+def _family_setup():
+    # Centers: two rose lightness variants (same a,b within chroma 12), one yellow, one paper.
+    centers = np.array(
+        [[60, 25, 8], [40, 27, 9], [70, -5, 40], [85, 0, 0]], dtype=np.float32
+    )
+    return centers, {3}
+
+
+def test_merge_cluster_families_merges_interleaved_mottle():
+    centers, background = _family_setup()
+    labels = np.full((100, 100), 3, dtype=np.int32)
+    rows, cols = np.mgrid[0:40, 0:40]
+    labels[10:50, 10:50] = np.where((rows + cols) % 2 == 0, 0, 1)  # interleaved phases
+    merged, new_background, count = merge_cluster_families(
+        labels, background, centers, RegionParams()
+    )
+    assert count == 3  # rose family + yellow + paper
+    assert len(np.unique(merged[10:50, 10:50])) == 1  # the two phases are one family
+
+
+def test_merge_cluster_families_keeps_bordering_light_dark_fills():
+    centers, background = _family_setup()
+    labels = np.full((100, 100), 3, dtype=np.int32)
+    labels[10:90, 10:50] = 0  # light rose block
+    labels[10:90, 50:90] = 1  # dark rose block, touching along one border
+    merged, new_background, count = merge_cluster_families(
+        labels, background, centers, RegionParams()
+    )
+    assert merged[50, 30] != merged[50, 70]  # contact too low -> stay distinct
+
+
+def test_merge_cluster_families_excludes_ink():
+    # Black line-work (L=13) is low-chroma like a pale tint, and its lattice interleaves
+    # with everything — but merging it would connect the whole map into one region.
+    centers = np.array([[60, 5, 10], [13, 2, 4], [85, 0, 0]], dtype=np.float32)
+    labels = np.full((100, 100), 2, dtype=np.int32)
+    rows, cols = np.mgrid[0:40, 0:40]
+    labels[10:50, 10:50] = np.where(
+        (rows + cols) % 2 == 0, 0, 1
+    )  # tint + ink interleaved
+    merged, _, count = merge_cluster_families(labels, {2}, centers, RegionParams())
+    assert merged[10, 10] != merged[10, 11]  # ink stays its own cluster
+
+
+def test_merge_cluster_families_never_merges_across_hue():
+    centers, background = _family_setup()
+    labels = np.full((100, 100), 3, dtype=np.int32)
+    rows, cols = np.mgrid[0:40, 0:40]
+    labels[10:50, 10:50] = np.where((rows + cols) % 2 == 0, 0, 2)  # rose + yellow mix
+    merged, new_background, count = merge_cluster_families(
+        labels, background, centers, RegionParams()
+    )
+    assert merged[10, 10] != merged[10, 11]  # different hue: not a family
+
+
+def test_cluster_image_seeded_falls_back_when_all_seeds_on_paper():
+    # A uniform image: every seed colour is within the paper distance -> None (use k-means).
+    rgb = np.full((40, 40, 3), 220, dtype=np.uint8)
+    result = cluster_image_seeded(rgb, [(5, 5, 12, 12)], 3, RegionParams(n_clusters=2))
+    assert result is None
+
+
+def test_segment_page_regions_pale_block_near_paper():
+    # A pale block whose colour plain k-means (k=2 here) merges into the paper cluster: the
+    # seeded palette must still give it its own region instead of dropping the seed.
+    rgb = np.full((80, 80, 3), 0.85, dtype=np.float64)
+    rgb[30:50, 20:40] = [0.80, 0.78, 0.72]  # pale tan block, close to the 0.85 paper
+    rgb[30:50, 55:75] = [0.1, 0.1, 0.8]  # one saturated block (so k-means has a job)
+    seeds = [(25.0, 35.0, 34.0, 45.0), (60.0, 35.0, 69.0, 45.0)]
+    params = RegionParams(n_clusters=2, palette_dedup_distance=4.0)
+    seeded = segment_page_regions(rgb, seeds, params)
+    assert set(seeded) == {0, 1}  # the pale block is found
+    globally = segment_page_regions(
+        rgb, seeds, RegionParams(n_clusters=2, use_global_kmeans=True)
+    )
+    assert 0 not in globally  # plain k=2 merges the pale block into paper and drops it

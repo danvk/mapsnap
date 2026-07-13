@@ -20,6 +20,7 @@ and no re-read is done.
 import argparse
 import json
 import sys
+from collections import Counter
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import cast
@@ -182,6 +183,66 @@ def choose_reread(
     return max(longer, key=lambda r: r[2])
 
 
+def choose_duplicate_reread(
+    text: str, rereads: list[RereadResult | None], missing_pages: set[str]
+) -> RereadResult | None:
+    """Pick a missing page that every tight-crop re-read of a duplicated label agrees on.
+
+    A label appearing twice is either a genuine split page (its number is printed on both
+    blocks — Champaign) or a misread of a similar number (62 and 63 both squished to "6";
+    80 misread as the already-found 30). The genuine case re-reads as the same text from
+    the tight crops, so it is left alone. A relabel is accepted only when every re-read
+    decodes the same different page that is *missing* from the detected set — filling a
+    hole in the page coverage rather than shuffling labels — mirroring choose_reread's
+    agreement gate.
+    """
+    different = [
+        r for r in rereads if r is not None and r[1] != text and r[1] in missing_pages
+    ]
+    if len(different) != len(rereads) or len({r[1] for r in different}) != 1:
+        return None
+    return max(different, key=lambda r: r[2])
+
+
+def resolve_duplicate_labels(
+    image: np.ndarray,
+    crnn: torch.nn.Module,
+    device,
+    found: list[tuple[list[list[int]], str, float]],
+    *,
+    factor: float,
+    pages: list[str],
+    image_name: str,
+) -> list[tuple[list[list[int]], str, float]]:
+    """Re-read every detection whose label appears more than once, relabeling misreads.
+
+    Runs after the main pass, so the set of still-missing page numbers is known; a
+    duplicate is relabeled only under choose_duplicate_reread's agreement-on-a-missing-page
+    gate, which leaves genuine split-page duplicates untouched.
+    """
+    counts = Counter(text for _, text, _ in found)
+    missing = set(pages) - set(counts)
+    resolved: list[tuple[list[list[int]], str, float]] = []
+    for polygon, text, confidence in found:
+        if counts[text] >= 2 and missing:
+            cx = sum(point[0] for point in polygon) / len(polygon)
+            cy = sum(point[1] for point in polygon) / len(polygon)
+            rereads = [
+                reread_narrow(image, crnn, device, (cx, cy), factor, pages, hw)
+                for hw in REREAD_HALF_WIDTHS_WORKING
+            ]
+            chosen = choose_duplicate_reread(text, rereads, missing)
+            if chosen is not None:
+                print(
+                    f"{image_name}: duplicate {text!r} re-read -> {chosen[1]!r}",
+                    file=sys.stderr,
+                )
+                polygon, text, confidence = chosen
+                missing.discard(text)
+        resolved.append((polygon, text, confidence))
+    return resolved
+
+
 def detect_and_read(
     image_path: str,
     cnn: torch.nn.Module,
@@ -196,8 +257,9 @@ def detect_and_read(
 ) -> list[dict]:
     """CNN-localize then CRNN-read one image; write <stem>.keymap.json.
 
-    ``disable_reread`` turns off the narrow-detection minimum-width re-read (an ablation
-    switch for measuring that step's effect); it is on by default.
+    ``disable_reread`` turns off the tight-crop re-reads (the narrow-detection
+    minimum-width re-read and the duplicate-label re-read; an ablation switch for
+    measuring those steps' effect); they are on by default.
     """
     image = np.asarray(Image.open(image_path).convert("RGB"))
     height, width = image.shape[:2]
@@ -256,6 +318,19 @@ def detect_and_read(
         keep = nms_peaks(box_centers, scores, round(DEDUP_WORKING / factor))
         found = [found[k] for k in keep]
 
+    # A label appearing twice may be a misread of a similar still-missing number; re-read
+    # duplicates from tight crops (genuine split-page duplicates re-read unchanged).
+    if valid_pages and not disable_reread:
+        found = resolve_duplicate_labels(
+            image,
+            crnn,
+            device,
+            found,
+            factor=factor,
+            pages=pages,
+            image_name=Path(image_path).name,
+        )
+
     detections = [
         detection_record(cast(list, polygon), text, confidence)
         for polygon, text, confidence in found
@@ -299,7 +374,7 @@ def main() -> None:
     parser.add_argument(
         "--disable-reread",
         action="store_true",
-        help="Turn off the narrow-detection minimum-width re-read (ablation).",
+        help="Turn off the narrow-detection and duplicate-label re-reads (ablation).",
     )
     args = parser.parse_args()
 
