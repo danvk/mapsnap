@@ -1,6 +1,6 @@
 """Score a key-map page-region segmentation against projected-truth footprints (IoU).
 
-Compares a ``<stem>.regions.panels.json`` (from page_regions' k-means or sam_regions) with
+Compares a ``<stem>.regions.panels.json`` (from page_regions) with
 the ``<stem>.truth.regions.panels.json`` written by mapsnap.keymap.truth_regions. Panels are
 matched by page-number label; when a page has several footprints/blocks (splits), pairs are
 associated greedily by greatest intersection. Truth footprints with no matching prediction
@@ -141,7 +141,7 @@ def main() -> None:
     parser.add_argument(
         "regions",
         type=Path,
-        help="Predicted <stem>.regions.panels.json (k-means or SAM output).",
+        help="Predicted <stem>.regions.panels.json (page_regions output).",
     )
     parser.add_argument(
         "--truth",

@@ -115,8 +115,8 @@ class RegionParams:
         into any pale-tint family — and the ink lattice connects the whole map, ballooning
         one region to the full sheet (Hudson p44, 99.8% of the key map).
     max_region_area_factor: a region whose mask exceeds this multiple of the median seed
-        spacing squared is dropped as a runaway (mirrors sam_regions' area sanity; leaves
-        room for giant waterfront sheets at ~9% of a key map).
+        spacing squared is dropped as a runaway (leaves room for giant waterfront sheets at
+        ~9% of a key map).
     """
 
     target_long_side: int = 3000

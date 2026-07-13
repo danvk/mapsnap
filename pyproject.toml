@@ -13,7 +13,6 @@ dependencies = [
     "numpy>=2.0",
     "opencv-python>=4.13.0.92",
     "pillow>=12.2.0",
-    "segment-anything>=1.0",
     "shapely>=2.0",
     "torchvision>=0.27",
     "tqdm>=4.67.1",
