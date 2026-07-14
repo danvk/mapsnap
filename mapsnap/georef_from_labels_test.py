@@ -1328,6 +1328,59 @@ def test_region_corroborates_scale():
     assert not region_corroborates_scale(1.37, 0.89)
 
 
+def test_is_scale_outlier():
+    from mapsnap.georef_from_labels import is_scale_outlier
+
+    # Within the median band (default threshold 0.25) -> kept.
+    assert not is_scale_outlier(1.0, 0.25)
+    assert not is_scale_outlier(1.24, 0.25)
+    assert not is_scale_outlier(0.76, 0.25)
+    # Between the median band and the half/double bands -> outlier.
+    assert is_scale_outlier(0.7, 0.25)
+    assert is_scale_outlier(1.4, 0.25)
+    assert is_scale_outlier(3.0, 0.25)
+    # Half-scale band [0.4, 0.6] and double-scale band [1.8, 2.2] -> kept (differently-scaled).
+    assert not is_scale_outlier(0.5, 0.25)
+    assert not is_scale_outlier(0.4, 0.25)
+    assert not is_scale_outlier(0.6, 0.25)
+    assert not is_scale_outlier(2.0, 0.25)
+    assert not is_scale_outlier(1.8, 0.25)
+    assert not is_scale_outlier(2.2, 0.25)
+    # Just outside the half/double bands -> outlier.
+    assert is_scale_outlier(0.65, 0.25)
+    assert is_scale_outlier(0.35, 0.25)
+    assert is_scale_outlier(1.7, 0.25)
+    assert is_scale_outlier(2.3, 0.25)
+
+
+def test_consensus_scale_picks_middle_of_ladder():
+    from mapsnap.georef_from_labels import consensus_scale
+
+    # 1x/2x/4x ladder: only the middle (2.0) rung is within a band of all three rungs.
+    scales = [1.0, 1.0, 2.0, 2.0, 4.0, 4.0]
+    assert consensus_scale(scales, 0.25) == 2.0
+
+
+def test_consensus_scale_ignores_intermediate_bad_cluster():
+    from mapsnap.georef_from_labels import consensus_scale
+
+    # Two real scales 2x apart (2.0, 4.0) plus a bad-fit cluster at 2.8 (not 2x-related).
+    # Anchoring on 2.0 keeps the 2.0 (1x) and 4.0 (2x) families and drops 2.8; anchoring on
+    # 2.8 keeps only itself. The consensus is the dominant family's scale, not the median.
+    scales = [2.0] * 10 + [4.0] * 8 + [2.8] * 3
+    assert (
+        sorted(scales)[len(scales) // 2] == 2.8
+    )  # positional median is the bad cluster
+    assert consensus_scale(scales, 0.25) == 2.0
+
+
+def test_consensus_scale_returns_an_actual_page_scale():
+    from mapsnap.georef_from_labels import consensus_scale
+
+    scales = [1.03, 0.97, 1.0, 1.02, 0.99]
+    assert consensus_scale(scales, 0.25) in scales
+
+
 def test_is_split_page():
     from mapsnap.georef_from_labels import is_split_page
 
