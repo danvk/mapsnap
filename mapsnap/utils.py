@@ -145,7 +145,7 @@ def jpeg_dimensions(path: Path) -> tuple[int, int]:
     raise ValueError(f"No SOF marker found in {path}")
 
 
-def source_id_to_page_key(source_id: str, label: str) -> str:
+def source_id_to_page_key(source_id: str | None, label: str) -> str:
     """Extract a short page key like 'p425' from a LOC IIIF image service URL.
 
     Leading zeros in the page number are stripped and a 'p' prefix is added:
@@ -156,6 +156,10 @@ def source_id_to_page_key(source_id: str, label: str) -> str:
     Labels ending with "[N]" produce a split suffix:
       "https://...1950-0156/info.json",  "... [2]"   → "p156__2"
 
+    A null/empty ``source_id`` (some OIM volumes carry no linked image service, e.g.
+    Grand Rapids 1953 vol 7) falls back to the page key parsed from the ``label``;
+    returns "" if the label has no page identifier either.
+
     The sb-format encodes the page number as 5 zero-padded digits followed by
     one character: '0' means no suffix, a letter is used directly as a suffix.
     """
@@ -164,6 +168,9 @@ def source_id_to_page_key(source_id: str, label: str) -> str:
         m = re.search(r"\[(\d+)\]$", label)
         assert m
         split_suffix = f"__{m.group(1)}"
+
+    if not source_id:
+        return label_to_page_key(label) or ""
 
     # Sanborn sb-format: service:...:sb{5-digit page}{suffix char}
     m = re.search(r":sb(\d{5})([a-z0-9])$", source_id, re.IGNORECASE)

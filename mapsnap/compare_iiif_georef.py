@@ -295,10 +295,10 @@ def analyze_pair(truth_item: dict, gen_item: dict) -> dict:
     numbering; gen_page_key uses the matched generated split's numbering (they can differ
     when OIM and our splitter number panels differently).
     """
-    source_id: str = truth_item["target"]["source"]["id"]
+    source_id = truth_item["target"]["source"].get("id")
     page_key = source_id_to_page_key(source_id, truth_item["label"])
     gen_index = annotation_split_index(gen_item)
-    base_key = source_id_to_page_key(source_id, "")
+    base_key = page_key.split("__")[0]
     gen_page_key = f"{base_key}__{gen_index}" if gen_index is not None else base_key
 
     truth_gcps = extract_gcps(truth_item)
@@ -380,7 +380,7 @@ def analyze_truth_only(truth_item: dict) -> dict:
 
     Returns a dict with keys: page_key, n_truth, skew_deg, aniso.
     """
-    source_id: str = truth_item["target"]["source"]["id"]
+    source_id = truth_item["target"]["source"].get("id")
     page_key = source_id_to_page_key(source_id, truth_item["label"])
     truth_gcps = extract_gcps(truth_item)
     A_truth = fit_transform(truth_gcps, annotation_transform_type(truth_item))
@@ -508,15 +508,24 @@ def print_tsv(rows: list[dict], missing: list[dict]) -> None:
 
 
 def annotations_by_source(path: Path) -> dict[str, list[dict]]:
-    """Load a IIIF AnnotationPage, grouping items by target.source.id.
+    """Load a IIIF AnnotationPage, grouping items by parent page key.
 
-    Split pages produce several items per source id (they share the parent canvas);
-    full pages produce one. Group order follows file order.
+    Split pages produce several items that share a parent canvas; full pages produce one.
+    The key is the page key (splits collapsed to the parent), derived from the annotation's
+    ``target.source.id`` URL or, when that is null (some OIM volumes carry no linked image
+    service), from the item ``label``. Items with no derivable key are skipped. Group order
+    follows file order.
     """
     data: dict = json.loads(path.read_text())
     groups: dict[str, list[dict]] = defaultdict(list)
     for item in data.get("items", []):
-        groups[item["target"]["source"]["id"]].append(item)
+        source_id = item["target"]["source"].get("id")
+        parent_key = source_id_to_page_key(source_id, item.get("label", "")).split(
+            "__"
+        )[0]
+        if not parent_key:
+            continue
+        groups[parent_key].append(item)
     return dict(groups)
 
 
@@ -644,8 +653,8 @@ def compare_pages(
 
     rows: list[dict] = []
     missing: list[dict] = []
-    for source_id, truth_items in sorted(truth_by_source.items()):
-        gen_items = gen_by_source.get(source_id, [])
+    for page_key, truth_items in sorted(truth_by_source.items()):
+        gen_items = gen_by_source.get(page_key, [])
         truth_splits = [t for t in truth_items if label_split_index(t) is not None]
         if not truth_splits:
             # Full page: pair the single truth and generated annotations directly.
@@ -656,7 +665,7 @@ def compare_pages(
                 rows.append(analyze_pair(truth_items[0], gen_item))
             continue
         # Split page: associate by panel-polygon overlap (numbering may differ).
-        page_key = source_id_to_page_key(source_id, "")
+        # page_key is the parent key from the group; splits share the parent panels.json.
         source = truth_items[0]["target"]["source"]
         source_dims = (float(source["width"]), float(source["height"]))
         truth_polygons = load_split_polygons(oim_dir / f"{page_key}.panels.json")
