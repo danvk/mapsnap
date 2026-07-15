@@ -2233,20 +2233,50 @@ def drop_labels_on_fill(
     return kept, on_fill
 
 
+def needs_size_relaxation(
+    det: dict, min_short_side: float, min_long_side: float
+) -> bool:
+    """Whether a detection clears the size gate only on the strength of its confidence.
+
+    ``confidence_relaxed_threshold`` admits a detection below the volume's base size floor when
+    it is proportionally more confident than ``min_confidence``. One at or above the base floor
+    is admitted on its own evidence and needs no such discount; one below it is present only
+    because the discount was granted. Promoted avenue letters bypass the size gate altogether,
+    so they are never relaxed admissions.
+    """
+    if det.get("promoted"):
+        return False
+    return (
+        det.get("short_side", float("inf")) < min_short_side
+        or det.get("long_side", float("inf")) < min_long_side
+    )
+
+
 def drop_collinear_dominated(
     detections: list[dict],
     normalized_streets: set[str],
+    *,
+    min_short_side: float,
+    min_long_side: float,
     perp_tolerance_px: float = COLLINEAR_PERP_TOLERANCE_PX,
 ) -> tuple[list[dict], list[dict]]:
     """Split detections into (kept, dominated) by the collinear-dominance rule.
 
-    A straight run of roadway carries one name, so two collinear labels naming *different*
-    streets cannot both be right. When one is strictly worse — smaller **and** less confident —
-    it is noise riding on the better one's line, and accepting it fabricates an intersection
-    (Nashville p9: a 16px/0.319 "3RD" on the same vertical as a 24px/0.952 "7TH" produced the
-    page's only, and wrong, GCP). Only street-matching detections are compared, since only they
-    can become GCPs. Collinearity is judged on ``dir_pix`` (mod pi, so a 90 vs 270 reading
-    direction is the same line) plus perpendicular offset within ``perp_tolerance_px``.
+    A straight run of roadway usually carries one name, so a *relaxed* label collinear with a
+    strictly better one naming a different street is likely noise riding on the better one's
+    line, and accepting it fabricates an intersection (Nashville p9: a 16px/0.319 "3RD" on the
+    same vertical as a 24px/0.952 "7TH" produced the page's only, and wrong, GCP). Only
+    street-matching detections are compared, since only they can become GCPs. Collinearity is
+    judged on ``dir_pix`` (mod pi, so a 90 vs 270 reading direction is the same line) plus
+    perpendicular offset within ``perp_tolerance_px``.
+
+    Only a detection that needed ``confidence_relaxed_threshold`` to clear the size gate can be
+    dropped (``needs_size_relaxation``). This rule exists to withhold that discount from a label
+    a collinear neighbour dominates — not to overrule the gate. A label big and confident enough
+    to stand on its own is admitted whatever sits on its line, because collinear labels naming
+    different streets are legitimately common: a street can change name mid-run, a compound label
+    can name two streets at once (Nashville p9's "CAPITOL DR. OR 6TH AV N."), and a page can be
+    an undetected split whose two halves share a page line while being far apart on the ground.
     """
     bucket_size = math.pi / 12.0
     matchable = [
@@ -2270,6 +2300,8 @@ def drop_collinear_dominated(
         )
     dominated_ids: set[int] = set()
     for i, (bucket_a, perp_a, short_a, conf_a, text_a) in enumerate(info):
+        if not needs_size_relaxation(matchable[i], min_short_side, min_long_side):
+            continue
         for j, (bucket_b, perp_b, short_b, conf_b, text_b) in enumerate(info):
             if i == j or bucket_a != bucket_b or text_a == text_b:
                 continue
@@ -2374,10 +2406,14 @@ def prepare_label_features(
                 file=sys.stderr,
             )
 
-    # A worse label collinear with a better one naming another street is noise on its line.
+    # A relaxed label collinear with a better one naming another street is noise on its line.
     if collinear_perp_tolerance_px > 0:
         all_detections, dominated = drop_collinear_dominated(
-            all_detections, normalized_streets, collinear_perp_tolerance_px
+            all_detections,
+            normalized_streets,
+            min_short_side=min_short_side,
+            min_long_side=min_long_side,
+            perp_tolerance_px=collinear_perp_tolerance_px,
         )
         if dominated:
             print(
@@ -3059,9 +3095,11 @@ def main() -> None:
         default=COLLINEAR_PERP_TOLERANCE_PX,
         metavar="PX",
         help=(
-            "Drop a detection that is collinear (within this perpendicular offset, in page "
-            "pixels) with a strictly larger and more confident detection naming a different "
-            "street (default: %(default)s). Set to 0 to disable."
+            "Drop a size-relaxed detection that is collinear (within this perpendicular offset, "
+            "in page pixels) with a strictly larger and more confident detection naming a "
+            "different street (default: %(default)s). Only labels that needed a confidence "
+            "discount to clear --min-short-side are eligible; one that clears it on its own is "
+            "always kept. Set to 0 to disable."
         ),
     )
     parser.add_argument(
