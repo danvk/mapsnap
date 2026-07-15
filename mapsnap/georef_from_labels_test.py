@@ -1397,6 +1397,70 @@ def test_consensus_scale_returns_an_actual_page_scale():
     assert consensus_scale(scales) in scales
 
 
+def _vertical_label(text: str, cx: float, cy: float, short: float, conf: float) -> dict:
+    """A vertical (dir_pix=pi/2) detection centered at (cx, cy)."""
+    return {
+        "text": text,
+        "confidence": conf,
+        "short_side": short,
+        "dir_pix": math.pi / 2,
+        "polygon": [
+            [cx - short / 2, cy - 22],
+            [cx + short / 2, cy - 22],
+            [cx + short / 2, cy + 22],
+            [cx - short / 2, cy + 22],
+        ],
+    }
+
+
+_COLLINEAR_STREETS = {"MAIN STREET", "OAK STREET"}
+
+
+def test_drop_collinear_dominated_drops_worse_collinear_label():
+    from mapsnap.georef_from_labels import drop_collinear_dominated
+
+    # Nashville p9 shape: a small/low-confidence OAK sits on the same vertical line as a
+    # larger/confident MAIN. One straight run of road carries one name -> OAK is noise.
+    good = _vertical_label("MAIN", 238, 1002, 24.0, 0.95)
+    bad = _vertical_label("OAK", 242, 529, 16.0, 0.32)
+    kept, dropped = drop_collinear_dominated([good, bad], _COLLINEAR_STREETS)
+    assert [d["text"] for d in dropped] == ["OAK"]
+    assert [d["text"] for d in kept] == ["MAIN"]
+
+
+def test_drop_collinear_dominated_keeps_same_street_labelled_twice():
+    from mapsnap.georef_from_labels import drop_collinear_dominated
+
+    # The same street named twice along its length is normal -> keep both.
+    a = _vertical_label("MAIN", 238, 1002, 24.0, 0.95)
+    b = _vertical_label("MAIN", 242, 529, 16.0, 0.32)
+    kept, dropped = drop_collinear_dominated([a, b], _COLLINEAR_STREETS)
+    assert dropped == []
+    assert len(kept) == 2
+
+
+def test_drop_collinear_dominated_keeps_parallel_streets():
+    from mapsnap.georef_from_labels import drop_collinear_dominated
+
+    # A block apart (perp offset 200px) they are genuinely parallel streets -> keep both.
+    good = _vertical_label("MAIN", 238, 1002, 24.0, 0.95)
+    other = _vertical_label("OAK", 438, 529, 16.0, 0.32)
+    kept, dropped = drop_collinear_dominated([good, other], _COLLINEAR_STREETS)
+    assert dropped == []
+    assert len(kept) == 2
+
+
+def test_drop_collinear_dominated_keeps_when_not_strictly_worse():
+    from mapsnap.georef_from_labels import drop_collinear_dominated
+
+    # Smaller but *more* confident is not strictly worse -> keep (needs both to dominate).
+    good = _vertical_label("MAIN", 238, 1002, 24.0, 0.95)
+    small_but_sure = _vertical_label("OAK", 242, 529, 16.0, 0.99)
+    kept, dropped = drop_collinear_dominated([good, small_but_sure], _COLLINEAR_STREETS)
+    assert dropped == []
+    assert len(kept) == 2
+
+
 def _on(text: str, hue: float, chroma: float = 12.0) -> dict:
     """A detection OCR marked as sitting on a fill of the given hue."""
     return {

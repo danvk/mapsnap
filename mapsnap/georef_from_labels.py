@@ -317,6 +317,11 @@ DOUBLE_SCALE_BAND = (1.8, 2.2)
 # treated as buildings. Brown is a dark yellow/orange and shares the band.
 FILL_YELLOW_HUE_BAND = (40.0, 110.0)
 
+# Perpendicular offset (page px) within which two same-bearing labels count as sitting on one
+# line for drop_collinear_dominated. 20 px admits Nashville p9's 4 px 3RD/7TH offset while
+# keeping genuinely parallel streets (a block apart) separate.
+COLLINEAR_PERP_TOLERANCE_PX = 20.0
+
 
 def is_split_page(stem: str) -> bool:
     """Whether an image stem names one panel of a split sheet (p21__1-style suffix)."""
@@ -1990,10 +1995,12 @@ def _init_worker(
     rectangle_index: tuple[dict[str, list[Block]], float] | None = None,
     truth_by_page: dict[int, list[list[list[float]]]] | None = None,
     keep_labels_on_fill: bool = False,
+    collinear_perp_tolerance_px: float = COLLINEAR_PERP_TOLERANCE_PX,
 ) -> None:
     """Populate _worker_state once per worker process (or once in the main process)."""
     _worker_state.update(
         keep_labels_on_fill=keep_labels_on_fill,
+        collinear_perp_tolerance_px=collinear_perp_tolerance_px,
         block_index=block_index,
         cos_phi=cos_phi,
         centerlines_path=centerlines_path,
@@ -2069,6 +2076,7 @@ def _process_one_image(image_path: str) -> tuple[str, ProcessResult]:
             keymap=keymap,
             truth_polygons=truth_polygons,
             keep_labels_on_fill=_worker_state["keep_labels_on_fill"],
+            collinear_perp_tolerance_px=_worker_state["collinear_perp_tolerance_px"],
         )
 
     with _captured_page_log(log_path, _worker_state["debug"]):
@@ -2225,6 +2233,58 @@ def drop_labels_on_fill(
     return kept, on_fill
 
 
+def drop_collinear_dominated(
+    detections: list[dict],
+    normalized_streets: set[str],
+    perp_tolerance_px: float = COLLINEAR_PERP_TOLERANCE_PX,
+) -> tuple[list[dict], list[dict]]:
+    """Split detections into (kept, dominated) by the collinear-dominance rule.
+
+    A straight run of roadway carries one name, so two collinear labels naming *different*
+    streets cannot both be right. When one is strictly worse — smaller **and** less confident —
+    it is noise riding on the better one's line, and accepting it fabricates an intersection
+    (Nashville p9: a 16px/0.319 "3RD" on the same vertical as a 24px/0.952 "7TH" produced the
+    page's only, and wrong, GCP). Only street-matching detections are compared, since only they
+    can become GCPs. Collinearity is judged on ``dir_pix`` (mod pi, so a 90 vs 270 reading
+    direction is the same line) plus perpendicular offset within ``perp_tolerance_px``.
+    """
+    bucket_size = math.pi / 12.0
+    matchable = [
+        det
+        for det in detections
+        if canonical_street_match(det.get("text", ""), normalized_streets)
+    ]
+    info = []
+    for det in matchable:
+        pts = np.asarray(det["polygon"], dtype=float)
+        cx, cy = float(pts[:, 0].mean()), float(pts[:, 1].mean())
+        dir_pix = float(det.get("dir_pix", 0.0))
+        info.append(
+            (
+                int(round(dir_pix / bucket_size)) % 12,
+                -cx * math.sin(dir_pix) + cy * math.cos(dir_pix),
+                float(det.get("short_side", 0.0)),
+                float(det.get("confidence", 0.0)),
+                normalize_street(det.get("text", "")),
+            )
+        )
+    dominated_ids: set[int] = set()
+    for i, (bucket_a, perp_a, short_a, conf_a, text_a) in enumerate(info):
+        for j, (bucket_b, perp_b, short_b, conf_b, text_b) in enumerate(info):
+            if i == j or bucket_a != bucket_b or text_a == text_b:
+                continue
+            if abs(perp_a - perp_b) > perp_tolerance_px:
+                continue
+            if short_a < short_b and conf_a < conf_b:
+                dominated_ids.add(id(matchable[i]))
+                break
+    if not dominated_ids:
+        return detections, []
+    kept = [det for det in detections if id(det) not in dominated_ids]
+    dominated = [det for det in detections if id(det) in dominated_ids]
+    return kept, dominated
+
+
 def prepare_label_features(
     labels_path: str,
     block_index: dict[str, list[Block]],
@@ -2237,6 +2297,7 @@ def prepare_label_features(
     edge_margin: float = 0.02,
     high_confidence_size_fraction: float = 0.7,
     keep_labels_on_fill: bool = False,
+    collinear_perp_tolerance_px: float = COLLINEAR_PERP_TOLERANCE_PX,
 ) -> list[LabelFeature]:
     """Load, promote, assemble, dedupe, filter, and canonicalize street reads into features.
 
@@ -2313,6 +2374,20 @@ def prepare_label_features(
                 file=sys.stderr,
             )
 
+    # A worse label collinear with a better one naming another street is noise on its line.
+    if collinear_perp_tolerance_px > 0:
+        all_detections, dominated = drop_collinear_dominated(
+            all_detections, normalized_streets, collinear_perp_tolerance_px
+        )
+        if dominated:
+            print(
+                f"Dropped {len(dominated)} collinear-dominated detection(s): "
+                + ", ".join(
+                    f"{d['text']}({d.get('short_side', 0):.0f}px,{d.get('confidence', 0):.2f})"
+                    for d in dominated
+                ),
+                file=sys.stderr,
+            )
     labels_data = []
     for det in all_detections:
         is_promoted = det.get("promoted")
@@ -2403,6 +2478,7 @@ def process_image(
     keymap: dict | None = None,
     truth_polygons: list[list[list[float]]] | None = None,
     keep_labels_on_fill: bool = False,
+    collinear_perp_tolerance_px: float = COLLINEAR_PERP_TOLERANCE_PX,
 ) -> ProcessResult:
     """Fit a georeference model for one image and write GCPs to output_path.
 
@@ -2435,6 +2511,7 @@ def process_image(
         edge_margin=edge_margin,
         high_confidence_size_fraction=high_confidence_size_fraction,
         keep_labels_on_fill=keep_labels_on_fill or is_keymap_page,
+        collinear_perp_tolerance_px=collinear_perp_tolerance_px,
     )
 
     gcps = find_intersection_gcps(features, block_index, (img_w, img_h))
@@ -2977,6 +3054,17 @@ def main() -> None:
         ),
     )
     parser.add_argument(
+        "--collinear-perp-tolerance",
+        type=float,
+        default=COLLINEAR_PERP_TOLERANCE_PX,
+        metavar="PX",
+        help=(
+            "Drop a detection that is collinear (within this perpendicular offset, in page "
+            "pixels) with a strictly larger and more confident detection naming a different "
+            "street (default: %(default)s). Set to 0 to disable."
+        ),
+    )
+    parser.add_argument(
         "--disable-scale-outlier-check",
         action="store_true",
         help=(
@@ -3243,6 +3331,7 @@ def main() -> None:
         rectangle_index,
         truth_by_page,
         args.keep_labels_on_fill,
+        args.collinear_perp_tolerance,
     )
     if args.num_workers > 1:
         with multiprocessing.Pool(
