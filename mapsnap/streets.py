@@ -62,7 +62,9 @@ STRIPPABLE_PREFIXES: frozenset[str] = DIRECTION_WORDS | {"SAINT"}
 # label naming only the street ("PRINTERS" for PRINTERS ALLEY, "SEWARD" for SEWARD SQUARE) match.
 # Only unambiguous road types belong here: PARK, RIDGE, HILL, VIEW, CREEK, COVE and friends also
 # end street names, but there they are part of the *name* ("PROSPECT PARK", "BROAD BRANCH"), so
-# treating them as types would alias away the very word that identifies the street.
+# treating them as types would alias away the very word that identifies the street. CRESCENT was
+# tried and removed for exactly that reason: Detroit's CRESCENT AVENUE is named *Crescent*, so
+# listing CRESCENT aliased it to a bare "AVENUE" that a 1.000-confidence "AV" label then matched.
 _UNABBREVIATED_STREET_TYPES: frozenset[str] = frozenset(
     {
         "WAY",
@@ -77,7 +79,6 @@ _UNABBREVIATED_STREET_TYPES: frozenset[str] = frozenset(
         "WALK",
         "CROSSING",
         "TRACE",
-        "CRESCENT",
         "PASS",
     }
 )
