@@ -2090,38 +2090,29 @@ def _process_one_image(image_path: str) -> tuple[str, ProcessResult]:
     return image_path, result
 
 
-def process_image(
-    image_path: str,
+def prepare_label_features(
     labels_path: str,
-    output_path: str,
     block_index: dict[str, list[Block]],
-    cos_phi: float,
-    centerlines_path: str,
+    image_size: tuple[int, int],
+    *,
     min_confidence: float = 0.5,
     min_long_side: float = 250.0,
     min_short_side: float = 60.0,
     min_aspect_ratio: float = 2.0,
     edge_margin: float = 0.02,
-    force_intersection: tuple[int, int] | None = None,
-    one_gcp_fits: bool = False,
-    debug: bool = False,
-    parameters: dict | None = None,
     high_confidence_size_fraction: float = 0.7,
-    keymap: dict | None = None,
-    truth_polygons: list[list[list[float]]] | None = None,
-) -> ProcessResult:
-    """Fit a georeference model for one image and write GCPs to output_path.
+) -> list[LabelFeature]:
+    """Load, promote, assemble, dedupe, filter, and canonicalize street reads into features.
 
-    Returns a ProcessResult with success=True and scale_deg_per_px set on success.
-    Returns success=False otherwise. When one_gcp_fits=True and exactly 1 intersection
-    GCP is found, returns success=False with deferred data set (for later median-scale
-    processing). With the default one_gcp_fits=False, 1-GCP pages return success=False
-    with no deferred data and are skipped entirely.
+    The front half of georeferencing: everything between reading a ``<stem>.streets.json``
+    and having matchable :class:`LabelFeature`s — hint promotion (``promote_avenue_letters``),
+    multi-word assembly (``assemble_multiword_streets``), deduplication, the
+    confidence/size/aspect/edge gates, and canonical street-name expansion against ``block_index``
+    (one feature per distinct candidate street). Split out of :func:`process_image` so that which
+    reads are accepted is separable from how they are fitted, and so any future consumer can
+    accept exactly the same reads.
     """
-
-    with Image.open(image_path) as pil_img:
-        img_w, img_h = pil_img.size
-
+    img_w, img_h = image_size
     all_detections = load_detections(labels_path)
 
     print(f"All detections: {len(all_detections)}")
@@ -2229,6 +2220,52 @@ def process_image(
     print(
         f"Labels ({len(features)}): {', '.join(f.text for f in features)}",
         file=sys.stderr,
+    )
+    return features
+
+
+def process_image(
+    image_path: str,
+    labels_path: str,
+    output_path: str,
+    block_index: dict[str, list[Block]],
+    cos_phi: float,
+    centerlines_path: str,
+    min_confidence: float = 0.5,
+    min_long_side: float = 250.0,
+    min_short_side: float = 60.0,
+    min_aspect_ratio: float = 2.0,
+    edge_margin: float = 0.02,
+    force_intersection: tuple[int, int] | None = None,
+    one_gcp_fits: bool = False,
+    debug: bool = False,
+    parameters: dict | None = None,
+    high_confidence_size_fraction: float = 0.7,
+    keymap: dict | None = None,
+    truth_polygons: list[list[list[float]]] | None = None,
+) -> ProcessResult:
+    """Fit a georeference model for one image and write GCPs to output_path.
+
+    Returns a ProcessResult with success=True and scale_deg_per_px set on success.
+    Returns success=False otherwise. When one_gcp_fits=True and exactly 1 intersection
+    GCP is found, returns success=False with deferred data set (for later median-scale
+    processing). With the default one_gcp_fits=False, 1-GCP pages return success=False
+    with no deferred data and are skipped entirely.
+    """
+
+    with Image.open(image_path) as pil_img:
+        img_w, img_h = pil_img.size
+
+    features = prepare_label_features(
+        labels_path,
+        block_index,
+        (img_w, img_h),
+        min_confidence=min_confidence,
+        min_long_side=min_long_side,
+        min_short_side=min_short_side,
+        min_aspect_ratio=min_aspect_ratio,
+        edge_margin=edge_margin,
+        high_confidence_size_fraction=high_confidence_size_fraction,
     )
 
     gcps = find_intersection_gcps(features, block_index, (img_w, img_h))
