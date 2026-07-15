@@ -5,6 +5,10 @@ printed inside, drawn over an overview of the city's major streets. Downstream, 
 and ``mapsnap georef`` take ``--keymap`` files to restrict each page's vocabulary/matching to
 its key-map neighborhood; that needs three sidecars next to the (raw) key-map image:
 
+  * ``<stem>.keymap.json`` — the pixel location of every page number, from the CNN localizer +
+    CRNN recognizer (``mapsnap.keymap.detect_numbers_crnn``). ``--pages`` is derived from the
+    volume's page images so decodes snap to valid page numbers and the narrow-detection re-read
+    (which recovers a squished multi-digit number) is enabled.
   * ``<stem>.georef.json`` — the key map georeferenced in the world, so a page number's pixel
     location maps to a world location. Produced by OCR'ing the key map's own street labels and
     fitting a transform, exactly like a regular page (``mapsnap ocr`` then ``mapsnap georef``).
@@ -12,12 +16,13 @@ its key-map neighborhood; that needs three sidecars next to the (raw) key-map im
     raw sheet is ~4x the linear resolution of the 25%-scale volume pages, so its text is ~4x
     larger and a larger detector floor is right. OCR tiles the oversized sheet at native
     resolution by default, which is what makes the key map's small labels detectable.
-  * ``<stem>.keymap.json`` — the pixel location of every page number, from the CNN localizer +
-    CRNN recognizer (``mapsnap.keymap.detect_numbers_crnn``). ``--pages`` is derived from the
-    volume's page images so decodes snap to valid page numbers and the narrow-detection re-read
-    (which recovers a squished multi-digit number) is enabled.
   * ``<stem>.regions.panels.json`` — the colored block polygon around each page number
     (``mapsnap.keymap.page_regions``), so a page's key-map neighborhood is its own block.
+
+They are built in that order for a reason: ``<stem>.keymap.json`` is what identifies a page as a
+key map, and the georef step reads it to decide whether to refit the corners with a full 6-DOF
+affine. Detecting the page numbers after georeferencing would leave a first run with the plain
+4-parameter similarity.
 
     uv run mapsnap keymap data/chicago_il_1950_vol_1/raw/p0b.jpg
 """
@@ -136,12 +141,31 @@ def main() -> None:
 
     image_args = [str(image) for image in images]
 
-    # 1. Georeference each key map from its own street labels, exactly like a regular page, so the
+    # 1. Locate every page number with the CNN localizer + CRNN recognizer. Passing --pages both
+    #    snaps decodes to valid page numbers and enables the narrow-detection re-read.
+    #
+    #    This runs first, before the georef, even though it needs nothing the georef produces:
+    #    <stem>.keymap.json is what marks a page as a key map, and georef refits a key map's
+    #    corners with a full 6-DOF affine. Detecting the numbers afterwards would leave the file
+    #    absent at georef time, so a first run would silently get the 4-parameter similarity and
+    #    only a *second* run would pick up the affine.
+    run_cmd(
+        [
+            sys.executable,
+            "-m",
+            "mapsnap.keymap.detect_numbers_crnn",
+            "--pages",
+            pages,
+            *image_args,
+        ]
+    )
+
+    # 2. Georeference each key map from its own street labels, exactly like a regular page, so the
     #    downstream --keymap flag has a <stem>.georef.json to read. OCR runs at a key-map-
     #    appropriate detector floor and (by default) tiles the oversized sheet at native
-    #    resolution; georef must be told to geocode key maps, which it skips by default once a
-    #    <stem>.keymap.json sibling exists. Both pass --ignore-keymap so that on a re-run they do
-    #    not auto-discover the key map's own .keymap.json and try to locate it against itself.
+    #    resolution; georef must be told to geocode key maps, which it skips by default for a page
+    #    with a <stem>.keymap.json sibling. Both pass --ignore-keymap so they do not auto-discover
+    #    the key map's own .keymap.json and try to locate it against itself.
     ocr_cmd = [
         "mapsnap",
         "ocr",
@@ -162,19 +186,6 @@ def main() -> None:
             "--centerlines",
             centerlines,
             "--geocode_keymaps",
-            *image_args,
-        ]
-    )
-
-    # 2. Locate every page number with the CNN localizer + CRNN recognizer. Passing --pages both
-    #    snaps decodes to valid page numbers and enables the narrow-detection re-read.
-    run_cmd(
-        [
-            sys.executable,
-            "-m",
-            "mapsnap.keymap.detect_numbers_crnn",
-            "--pages",
-            pages,
             *image_args,
         ]
     )

@@ -30,7 +30,7 @@ import numpy as np
 from PIL import Image
 from tqdm import tqdm
 
-from mapsnap.compare_iiif_georef import truth_polygons_by_page
+from mapsnap.compare_iiif_georef import truth_distortion, truth_polygons_by_page
 from mapsnap.keymap.locate import (
     KeymapLocator,
     page_number,
@@ -2386,16 +2386,21 @@ def process_image(
 
     # A key-map index page (one with a sibling <stem>.keymap.json) is refit with a full 6-DOF
     # affine on its own inlier GCPs, so the georef.json corners capture the scale anisotropy and
-    # skew a 4-parameter similarity cannot — read straight off by the key-map locator and the
-    # region-shape placer (no separate refit there).
+    # skew a 4-parameter similarity cannot — read straight off by the key-map locator, with no
+    # separate refit downstream.
     keymap_json = os.path.join(
         os.path.dirname(image_path), f"{image_stem(image_path)}.keymap.json"
     )
     if os.path.exists(keymap_json):
         affine = fit_keymap_affine(A, gcps, cos_phi)
         if affine is not None:
+            # Report what the extra two degrees of freedom actually bought. A similarity is
+            # anisotropy 1.0 / skew 0° by construction, so these are exactly the distortion it
+            # could not have represented.
+            skew_deg, aniso = truth_distortion(affine)
             print(
-                "Key map: refitting corners with a 6-DOF affine on its GCPs.",
+                "Key map: refitting corners with a 6-DOF affine on its GCPs "
+                f"(anisotropy {aniso:.4f}, skew {skew_deg:+.3f}°).",
                 file=sys.stderr,
             )
             A = affine
