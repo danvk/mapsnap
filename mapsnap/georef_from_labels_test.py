@@ -1397,29 +1397,77 @@ def test_consensus_scale_returns_an_actual_page_scale():
     assert consensus_scale(scales) in scales
 
 
-def test_drop_labels_on_fill_splits_paper_from_building():
+def _paper_ab(shape=(100, 100)) -> tuple[np.ndarray, np.ndarray]:
+    """Faintly yellow paper (chroma 2 at hue 90), the usual Sanborn background."""
+    return np.zeros(shape), np.full(shape, 2.0)
+
+
+def _paint(lab_a, lab_b, box, chroma: float, hue_deg: float) -> None:
+    """Paint a rectangle a given chroma/hue, in place."""
+    y0, y1, x0, x1 = box
+    lab_a[y0:y1, x0:x1] = chroma * math.cos(math.radians(hue_deg))
+    lab_b[y0:y1, x0:x1] = chroma * math.sin(math.radians(hue_deg))
+
+
+def test_drop_labels_on_fill_drops_a_label_on_a_red_building():
     from mapsnap.georef_from_labels import drop_labels_on_fill
 
-    # Paper at chroma 2 with one coloured building block at chroma 12.
-    chroma = np.full((100, 100), 2.0)
-    chroma[50:70, 50:70] = 12.0
+    a, b = _paper_ab()
+    _paint(a, b, (50, 70, 50, 70), chroma=12.0, hue_deg=5.0)  # red brick
     on_paper = {"text": "MAIN", "polygon": [[10, 10], [30, 10], [30, 20], [10, 20]]}
     on_fill = {"text": "REP", "polygon": [[55, 55], [65, 55], [65, 65], [55, 65]]}
-    kept, fill = drop_labels_on_fill([on_paper, on_fill], chroma, 4.0)
+    kept, fill = drop_labels_on_fill([on_paper, on_fill], a, b, 4.0)
     assert [d["text"] for d in kept] == ["MAIN"]
     assert [d["text"] for d in fill] == ["REP"]
 
 
-def test_detection_fill_chroma_reports_box_background():
-    from mapsnap.georef_from_labels import detection_fill_chroma
+def test_drop_labels_on_fill_drops_a_label_on_a_blue_building():
+    from mapsnap.georef_from_labels import drop_labels_on_fill
 
-    chroma = np.full((50, 50), 3.0)
-    chroma[10:20, 10:20] = 15.0
-    assert math.isclose(
-        detection_fill_chroma(chroma, [[10, 10], [19, 10], [19, 19], [10, 19]]), 15.0
+    a, b = _paper_ab()
+    _paint(a, b, (50, 70, 50, 70), chroma=12.0, hue_deg=250.0)  # blue stone
+    on_fill = {"text": "REP", "polygon": [[55, 55], [65, 55], [65, 65], [55, 65]]}
+    kept, fill = drop_labels_on_fill([on_fill], a, b, 4.0)
+    assert kept == [] and [d["text"] for d in fill] == ["REP"]
+
+
+def test_drop_labels_on_fill_spares_a_yellow_background():
+    from mapsnap.georef_from_labels import drop_labels_on_fill
+
+    # A street name on a yellowed tape patch: well above the paper's chroma, but the same hue.
+    # Chicago's HALSTED and New Orleans' TCHOUPITOULAS are exactly this and must survive.
+    a, b = _paper_ab()
+    _paint(a, b, (50, 70, 50, 70), chroma=19.0, hue_deg=93.0)
+    taped = {"text": "HALSTED", "polygon": [[55, 55], [65, 55], [65, 65], [55, 65]]}
+    kept, fill = drop_labels_on_fill([taped], a, b, 4.0)
+    assert [d["text"] for d in kept] == ["HALSTED"] and fill == []
+
+
+def test_drop_labels_on_fill_spares_faint_colour_within_the_margin():
+    from mapsnap.georef_from_labels import drop_labels_on_fill
+
+    a, b = _paper_ab()
+    _paint(
+        a, b, (50, 70, 50, 70), chroma=5.0, hue_deg=5.0
+    )  # red but barely above paper
+    det = {"text": "MAIN", "polygon": [[55, 55], [65, 55], [65, 65], [55, 65]]}
+    kept, fill = drop_labels_on_fill([det], a, b, 4.0)
+    assert [d["text"] for d in kept] == ["MAIN"] and fill == []
+
+
+def test_detection_fill_color_reports_box_background():
+    from mapsnap.georef_from_labels import detection_fill_color
+
+    a, b = _paper_ab((50, 50))
+    _paint(a, b, (10, 20, 10, 20), chroma=15.0, hue_deg=0.0)  # pure red patch
+    chroma, hue = detection_fill_color(a, b, [[10, 10], [19, 10], [19, 19], [10, 19]])
+    assert math.isclose(chroma, 15.0, rel_tol=1e-6) and math.isclose(
+        hue, 0.0, abs_tol=1e-6
     )
-    assert math.isclose(
-        detection_fill_chroma(chroma, [[30, 30], [40, 30], [40, 40], [30, 40]]), 3.0
+    # Off the patch we see the paper: chroma 2 at hue 90.
+    chroma, hue = detection_fill_color(a, b, [[30, 30], [40, 30], [40, 40], [30, 40]])
+    assert math.isclose(chroma, 2.0, rel_tol=1e-6) and math.isclose(
+        hue, 90.0, abs_tol=1e-6
     )
 
 

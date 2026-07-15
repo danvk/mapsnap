@@ -316,6 +316,13 @@ DOUBLE_SCALE_BAND = (1.8, 2.2)
 # building labels (p51 "REP" 9-14 chroma over 2.2 paper) from its street labels (1.0-3.6).
 LABEL_FILL_CHROMA_MARGIN = 4.0
 
+# CIELAB hue range (degrees, 0 = +a = red, 90 = +b = yellow) that drop_labels_on_fill refuses to
+# read as a building fill. Aged paper, the tape patches later pasted over renamed streets, and
+# brown ink all land here, so a label on a yellow/brown background is ambiguous and is kept. Only
+# fills outside the band — the red/pink brick and blue stone of the Sanborn colour code — are
+# treated as buildings. Brown is a dark yellow/orange and shares the band.
+FILL_YELLOW_HUE_BAND = (40.0, 110.0)
+
 
 def is_split_page(stem: str) -> bool:
     """Whether an image stem names one panel of a split sheet (p21__1-style suffix)."""
@@ -2184,52 +2191,80 @@ def _process_one_image(image_path: str) -> tuple[str, ProcessResult]:
     return image_path, result
 
 
-def page_chroma_map(image_path: str) -> np.ndarray | None:
-    """CIELAB chroma per pixel of a page image, or None if it cannot be read.
+def page_lab_ab(image_path: str) -> tuple[np.ndarray, np.ndarray] | None:
+    """CIELAB a/b channels of a page image, centered at 0, or None if it cannot be read.
 
-    Uses cv2's Lab (a/b centered at 128); skimage's rgb2lab segfaults after scipy MINPACK
+    Uses cv2's Lab (a/b stored centered at 128); skimage's rgb2lab segfaults after scipy MINPACK
     runs in-process, so cv2 is the only safe converter here.
     """
     bgr = cv2.imread(image_path)
     if bgr is None:
         return None
     lab = cv2.cvtColor(bgr, cv2.COLOR_BGR2Lab).astype(np.float64)
-    return np.hypot(lab[:, :, 1] - 128.0, lab[:, :, 2] - 128.0)
+    return lab[:, :, 1] - 128.0, lab[:, :, 2] - 128.0
 
 
-def detection_fill_chroma(chroma: np.ndarray, polygon: list) -> float:
-    """Median CIELAB chroma under a detection's bounding box.
+def detection_fill_color(
+    lab_a: np.ndarray, lab_b: np.ndarray, polygon: list
+) -> tuple[float, float]:
+    """(chroma, hue in degrees) of the median colour under a detection's bounding box.
 
-    The box holds the glyphs (near-neutral ink, low chroma) plus whatever they sit on, so the
-    median reports the *background*: paper for a street label, the fill colour for a label
-    printed inside a building.
+    The box holds the glyphs (near-neutral ink) plus whatever they sit on, so the median reports
+    the *background*: paper for a street label, the fill colour for a label printed on a building.
+    ``a`` and ``b`` are medianed separately and combined afterwards, because hue is a circular
+    quantity whose median is not meaningful.
     """
     pts = np.asarray(polygon, dtype=float)
     x0, x1 = max(0, int(pts[:, 0].min())), int(pts[:, 0].max())
     y0, y1 = max(0, int(pts[:, 1].min())), int(pts[:, 1].max())
-    region = chroma[y0 : y1 + 1, x0 : x1 + 1]
-    return float(np.median(region)) if region.size else 0.0
+    region_a = lab_a[y0 : y1 + 1, x0 : x1 + 1]
+    region_b = lab_b[y0 : y1 + 1, x0 : x1 + 1]
+    if not region_a.size:
+        return 0.0, 0.0
+    a = float(np.median(region_a))
+    b = float(np.median(region_b))
+    return math.hypot(a, b), math.degrees(math.atan2(b, a)) % 360.0
 
 
 def drop_labels_on_fill(
     detections: list[dict],
-    chroma: np.ndarray,
+    lab_a: np.ndarray,
+    lab_b: np.ndarray,
     margin: float = LABEL_FILL_CHROMA_MARGIN,
+    yellow_band: tuple[float, float] = FILL_YELLOW_HUE_BAND,
 ) -> tuple[list[dict], list[dict]]:
     """Split detections into (kept, on-fill) by whether each sits on a coloured building fill.
 
     Sanborn sheets print street names on the paper background; text inside a coloured block is a
     *building* label, which can still prefix-match a street name and fabricate GCPs (Nashville's
     "REP" -> "REP JOHN LEWIS WAY", "SEARS", "SERVICE" -> "SERVICE ROAD"). A detection is on-fill
-    when its box's median chroma exceeds the page's own paper chroma by ``margin``. The reference
-    is per page because paper varies (Nashville p9 1.0, p51 2.2, p2 5.1 chroma). Key-map pages
-    must skip this — their street names sit on the coloured region blocks by design.
+    when its box's median chroma exceeds the page's own paper chroma by ``margin`` *and* its hue
+    lies outside ``yellow_band``. The chroma reference is per page because paper varies a lot
+    (Nashville p9 1.0, p51 2.2, p2 5.1 chroma).
+
+    The hue test is what makes the chroma test usable across volumes. Chroma alone asks only "is
+    this more saturated than the paper", which on a yellowed scan is answered "yes" by an ordinary
+    street label: Chicago's and New Orleans' paper is itself chroma 13-20 at hue ~90-95, and a
+    street name taped on later (aged to brown-on-yellow) sits only 4-6 chroma above it — enough to
+    trip a bare chroma test, which cost Chicago its HALSTED and KINZIE labels and New Orleans its
+    TCHOUPITOULAS. Those all sit at hue 90-95: the same hue as the paper they are printed on.
+    Sparing the yellow/brown band keeps them, while still dropping the red and blue fills that
+    carry the real building labels (all 18 of Nashville's "REP" reads are hue 0-6 or 240-257).
+
+    The cost is deliberate: Sanborn's colour code also paints *frame* buildings yellow, so a label
+    on one is spared too (Brooklyn p57's "CARROLL TRUCKING CORP." is yellow, not red). Hue cannot
+    separate a yellow frame building from yellowed paper, and sparing both is the safer error.
+
+    Key-map pages must skip this entirely — their street names sit on the coloured region blocks
+    by design.
     """
-    paper = float(np.median(chroma))
+    paper = float(np.median(np.hypot(lab_a, lab_b)))
+    low, high = yellow_band
     kept: list[dict] = []
     on_fill: list[dict] = []
     for det in detections:
-        if detection_fill_chroma(chroma, det["polygon"]) > paper + margin:
+        chroma, hue = detection_fill_color(lab_a, lab_b, det["polygon"])
+        if chroma > paper + margin and not (low <= hue <= high):
             on_fill.append(det)
         else:
             kept.append(det)
@@ -2306,10 +2341,10 @@ def prepare_label_features(
     # Street names are printed on paper; text on a coloured building fill is a building label
     # that can still prefix-match a street name and fabricate GCPs.
     if image_path is not None and fill_chroma_margin > 0:
-        chroma = page_chroma_map(image_path)
-        if chroma is not None:
+        lab = page_lab_ab(image_path)
+        if lab is not None:
             all_detections, on_fill = drop_labels_on_fill(
-                all_detections, chroma, fill_chroma_margin
+                all_detections, lab[0], lab[1], fill_chroma_margin
             )
             if on_fill:
                 named = sorted(
