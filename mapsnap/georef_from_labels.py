@@ -42,6 +42,7 @@ from mapsnap.streets import (
     HINT_STRINGS,
     Block,
     build_block_index,
+    canonical_street_match,
     canonical_street_matches,
     deduplicate_detections,
     hint_type_word,
@@ -308,6 +309,13 @@ KEYMAP_RETRY_SIZE_FRACTION = 0.6
 SAME_SCALE_BAND = (0.75, 1.25)
 HALF_SCALE_BAND = (0.4, 0.6)
 DOUBLE_SCALE_BAND = (1.8, 2.2)
+
+# CIELAB hue range (degrees, 0 = +a = red, 90 = +b = yellow) that drop_labels_on_fill refuses to
+# read as a building fill. Aged paper, the tape patches later pasted over renamed streets, and
+# brown ink all land here, so a label on a yellow/brown background is ambiguous and is kept. Only
+# fills outside the band — the red/pink brick and blue stone of the Sanborn colour code — are
+# treated as buildings. Brown is a dark yellow/orange and shares the band.
+FILL_YELLOW_HUE_BAND = (40.0, 110.0)
 
 
 def is_split_page(stem: str) -> bool:
@@ -1981,9 +1989,11 @@ def _init_worker(
     geojson_features: list[dict] | None = None,
     rectangle_index: tuple[dict[str, list[Block]], float] | None = None,
     truth_by_page: dict[int, list[list[list[float]]]] | None = None,
+    keep_labels_on_fill: bool = False,
 ) -> None:
     """Populate _worker_state once per worker process (or once in the main process)."""
     _worker_state.update(
+        keep_labels_on_fill=keep_labels_on_fill,
         block_index=block_index,
         cos_phi=cos_phi,
         centerlines_path=centerlines_path,
@@ -2058,6 +2068,7 @@ def _process_one_image(image_path: str) -> tuple[str, ProcessResult]:
             ],
             keymap=keymap,
             truth_polygons=truth_polygons,
+            keep_labels_on_fill=_worker_state["keep_labels_on_fill"],
         )
 
     with _captured_page_log(log_path, _worker_state["debug"]):
@@ -2174,6 +2185,46 @@ def _process_one_image(image_path: str) -> tuple[str, ProcessResult]:
     return image_path, result
 
 
+def drop_labels_on_fill(
+    detections: list[dict],
+    yellow_band: tuple[float, float] = FILL_YELLOW_HUE_BAND,
+) -> tuple[list[dict], list[dict]]:
+    """Split detections into (kept, on-fill) by the ``background`` colour OCR recorded for each.
+
+    Sanborn sheets print street names on the paper background; text inside a coloured block is a
+    *building* label, which can still prefix-match a street name and fabricate GCPs (Nashville's
+    "REP" -> "REP JOHN LEWIS WAY", "SEARS", "SERVICE" -> "SERVICE ROAD"). ``detect_text`` records a
+    ``background`` on exactly the detections that sit on something more saturated than the page's
+    own paper; this decides which of those colours actually disqualify a label.
+
+    Only hue outside ``yellow_band`` does. Being on *some* colour is not enough, because on a
+    yellowed scan an ordinary street label is more saturated than the paper: Chicago's and New
+    Orleans' paper is itself chroma 13-20 at hue ~90-95, and a street name taped on later (aged to
+    brown-on-yellow) sits only 4-6 chroma above it. Dropping those cost Chicago its HALSTED and
+    KINZIE labels and New Orleans its TCHOUPITOULAS — all at hue 90-95, the same hue as the paper
+    they are printed on. Sparing the yellow/brown band keeps them while still dropping the red and
+    blue fills that carry the real building labels (all 18 of Nashville's "REP" reads are hue 0-6
+    or 240-257).
+
+    The cost is deliberate: Sanborn's colour code also paints *frame* buildings yellow, so a label
+    on one is spared too (Brooklyn p57's "CARROLL TRUCKING CORP." is yellow, not red). Hue cannot
+    separate a yellow frame building from yellowed paper, and sparing both is the safer error.
+
+    Key-map pages must skip this entirely — their street names sit on the coloured region blocks
+    by design.
+    """
+    low, high = yellow_band
+    kept: list[dict] = []
+    on_fill: list[dict] = []
+    for det in detections:
+        background = det.get("background")
+        if background is not None and not (low <= background["hue"] <= high):
+            on_fill.append(det)
+        else:
+            kept.append(det)
+    return kept, on_fill
+
+
 def prepare_label_features(
     labels_path: str,
     block_index: dict[str, list[Block]],
@@ -2185,6 +2236,7 @@ def prepare_label_features(
     min_aspect_ratio: float = 2.0,
     edge_margin: float = 0.02,
     high_confidence_size_fraction: float = 0.7,
+    keep_labels_on_fill: bool = False,
 ) -> list[LabelFeature]:
     """Load, promote, assemble, dedupe, filter, and canonicalize street reads into features.
 
@@ -2195,6 +2247,10 @@ def prepare_label_features(
     (one feature per distinct candidate street). Split out of :func:`process_image` so that which
     reads are accepted is separable from how they are fitted, and so any future consumer can
     accept exactly the same reads.
+
+    keep_labels_on_fill retains labels printed on a coloured building fill, which are normally
+    dropped (``drop_labels_on_fill``). Key-map pages need it: their street names sit on the
+    coloured region blocks by design.
     """
     img_w, img_h = image_size
     all_detections = load_detections(labels_path)
@@ -2238,6 +2294,25 @@ def prepare_label_features(
         all_detections, normalized_streets=normalized_streets
     )
     print(f"Deduped detections: {len(all_detections)}")
+
+    # Street names are printed on paper; text on a coloured building fill is a building label
+    # that can still prefix-match a street name and fabricate GCPs.
+    if not keep_labels_on_fill:
+        all_detections, on_fill = drop_labels_on_fill(all_detections)
+        if on_fill:
+            named = sorted(
+                {
+                    d["text"]
+                    for d in on_fill
+                    if canonical_street_match(d.get("text", ""), normalized_streets)
+                }
+            )
+            print(
+                f"Dropped {len(on_fill)} detection(s) on coloured fill"
+                + (f"; street-matching: {', '.join(named)}" if named else ""),
+                file=sys.stderr,
+            )
+
     labels_data = []
     for det in all_detections:
         is_promoted = det.get("promoted")
@@ -2327,6 +2402,7 @@ def process_image(
     high_confidence_size_fraction: float = 0.7,
     keymap: dict | None = None,
     truth_polygons: list[list[list[float]]] | None = None,
+    keep_labels_on_fill: bool = False,
 ) -> ProcessResult:
     """Fit a georeference model for one image and write GCPs to output_path.
 
@@ -2340,6 +2416,14 @@ def process_image(
     with Image.open(image_path) as pil_img:
         img_w, img_h = pil_img.size
 
+    # A key map prints its street names *on* the coloured region blocks, so the on-fill filter
+    # would reject exactly the labels that georeference it; exempt those pages.
+    is_keymap_page = os.path.exists(
+        os.path.join(
+            os.path.dirname(image_path), f"{image_stem(image_path)}.keymap.json"
+        )
+    )
+
     features = prepare_label_features(
         labels_path,
         block_index,
@@ -2350,6 +2434,7 @@ def process_image(
         min_aspect_ratio=min_aspect_ratio,
         edge_margin=edge_margin,
         high_confidence_size_fraction=high_confidence_size_fraction,
+        keep_labels_on_fill=keep_labels_on_fill or is_keymap_page,
     )
 
     gcps = find_intersection_gcps(features, block_index, (img_w, img_h))
@@ -2881,6 +2966,17 @@ def main() -> None:
         ),
     )
     parser.add_argument(
+        "--keep-labels-on-fill",
+        action="store_true",
+        help=(
+            "Keep detections that OCR recorded as printed on a coloured building fill (a red or "
+            "blue Sanborn block) rather than on the paper. These are building labels, not street "
+            "names, and are dropped by default because they can still prefix-match a street and "
+            "fabricate GCPs. Key-map pages are always exempt, since their street names sit on the "
+            "coloured region blocks by design."
+        ),
+    )
+    parser.add_argument(
         "--disable-scale-outlier-check",
         action="store_true",
         help=(
@@ -3146,6 +3242,7 @@ def main() -> None:
         geojson["features"] if locator is not None else None,
         rectangle_index,
         truth_by_page,
+        args.keep_labels_on_fill,
     )
     if args.num_workers > 1:
         with multiprocessing.Pool(

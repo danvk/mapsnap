@@ -21,6 +21,28 @@ export function confidenceColor(confidence: number): string {
 }
 
 /**
+ * Hue range georeferencing refuses to read as a building fill.
+ *
+ * Mirrors `FILL_YELLOW_HUE_BAND` in mapsnap/georef_from_labels.py — keep the two in step.
+ * Aged paper, the tape patches pasted over renamed streets, and brown ink all land in this
+ * band, so a label on a yellow/brown background is ambiguous and is kept.
+ */
+export const FILL_YELLOW_HUE_BAND: [number, number] = [40, 110];
+
+/**
+ * True if georeferencing will discard this detection as a building label.
+ *
+ * A detection carries a `background` when it sits on something more saturated than the page's
+ * paper, but only one outside the yellow/brown band — the red brick and blue stone of the
+ * Sanborn colour code — is treated as a building.
+ */
+export function isOnBuildingFill(det: Detection): boolean {
+  if (!det.background) return false;
+  const [low, high] = FILL_YELLOW_HUE_BAND;
+  return det.background.hue < low || det.background.hue > high;
+}
+
+/**
  * Convert an adjacency.json digit read to the Detection shape the overlay,
  * table, and preview canvas render. Side lengths come from the polygon's
  * bounding box; the printed sheet numbers are upright, so angle is 0.

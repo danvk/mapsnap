@@ -2,6 +2,7 @@
 
 import argparse
 import json
+import math
 import multiprocessing
 import sys
 from collections.abc import Iterator
@@ -9,6 +10,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+import cv2
 import easyocr
 import numpy as np
 from PIL import Image
@@ -54,6 +56,114 @@ NON_STREET_TEXT: frozenset[str] = frozenset(
     # vertical text: '6' → 'S', '"' dropped; W → W / M
     | {"SM PIPE", "S W PIPE", "S W. PIPE"}
 )
+
+# How much a detection's box must exceed the page's own paper chroma (CIELAB) before its
+# background colour is recorded rather than treated as paper. 4.0 separates Nashville's building
+# labels (p51 "REP" at 9-14 chroma over 2.2 paper) from its street labels (1.0-3.6).
+BACKGROUND_CHROMA_MARGIN = 4.0
+
+
+def page_lab(rgb: np.ndarray) -> np.ndarray:
+    """CIELAB image from an RGB array, with a/b re-centered on 0.
+
+    cv2 stores 8-bit Lab with a/b offset by 128; this subtracts that so hue and chroma are
+    ordinary polar coordinates of (a, b). skimage's rgb2lab is not an option here: it segfaults
+    once scipy's MINPACK has run in-process, which it has by the time georeferencing calls back.
+    """
+    lab = cv2.cvtColor(rgb, cv2.COLOR_RGB2Lab).astype(np.float64)
+    lab[:, :, 1] -= 128.0
+    lab[:, :, 2] -= 128.0
+    return lab
+
+
+def lab_to_hex(lightness: float, a: float, b: float) -> str:
+    """sRGB hex string ('#rrggbb') for a single CIELAB colour with a/b centered on 0."""
+    values = np.clip([lightness, a + 128.0, b + 128.0], 0, 255)
+    pixel = np.array([[values]], dtype=np.uint8)
+    red, green, blue = cv2.cvtColor(pixel, cv2.COLOR_Lab2RGB)[0, 0]
+    return f"#{red:02x}{green:02x}{blue:02x}"
+
+
+def region_color(lab: np.ndarray, polygon: list) -> dict:
+    """The median colour under a polygon's bounding box, as {color, hue, chroma}.
+
+    A detection's box holds the glyphs (near-neutral ink) plus whatever they sit on, so the
+    median reports the *background*: paper for a street label, the fill colour for a label
+    printed on a building. ``a`` and ``b`` are medianed separately and combined afterwards,
+    because hue is circular and a median over it is not meaningful.
+    """
+    pts = np.asarray(polygon, dtype=float)
+    x0, x1 = max(0, int(pts[:, 0].min())), int(pts[:, 0].max())
+    y0, y1 = max(0, int(pts[:, 1].min())), int(pts[:, 1].max())
+    region = lab[y0 : y1 + 1, x0 : x1 + 1]
+    if not region.size:
+        return {"color": "#000000", "hue": 0.0, "chroma": 0.0}
+    lightness = float(np.median(region[:, :, 0]))
+    a = float(np.median(region[:, :, 1]))
+    b = float(np.median(region[:, :, 2]))
+    return {
+        "color": lab_to_hex(lightness, a, b),
+        "hue": round(math.degrees(math.atan2(b, a)) % 360.0, 1),
+        "chroma": round(math.hypot(a, b), 1),
+    }
+
+
+def annotate_backgrounds(
+    detections: list[dict],
+    rgb: np.ndarray,
+    margin: float = BACKGROUND_CHROMA_MARGIN,
+) -> dict:
+    """Record each detection's background colour when it differs from the page's paper.
+
+    Sanborn sheets print street names on the paper background, so text sitting inside a coloured
+    block is a *building* label. Sets ``background`` ({color, hue, chroma}) on every detection
+    whose box is more saturated than the paper by more than ``margin``, and leaves it unset
+    otherwise — the property's presence alone means "this label is not on paper". Deciding which
+    of those colours disqualify a label is left to the reader of the file (see
+    ``georef_from_labels.drop_labels_on_fill``), so re-OCR is not needed to change that policy.
+
+    The chroma reference is the page's own because paper varies enormously between volumes:
+    near-white in Nashville (chroma 1-5), heavily yellowed in Chicago and New Orleans (13-20).
+
+    Returns the paper colour itself, for the caller to record alongside the detections.
+    """
+    lab = page_lab(rgb)
+    lab_a, lab_b = lab[:, :, 1], lab[:, :, 2]
+    # Chroma is medianed per pixel (the typical saturation), while the paper's displayed colour
+    # comes from the median a/b — the right reduction for each, so they differ slightly.
+    paper_chroma = float(np.median(np.hypot(lab_a, lab_b)))
+    paper_a, paper_b = float(np.median(lab_a)), float(np.median(lab_b))
+    for det in detections:
+        background = region_color(lab, det["polygon"])
+        if background["chroma"] > paper_chroma + margin:
+            det["background"] = background
+    return {
+        "color": lab_to_hex(float(np.median(lab[:, :, 0])), paper_a, paper_b),
+        "hue": round(math.degrees(math.atan2(paper_b, paper_a)) % 360.0, 1),
+        "chroma": round(paper_chroma, 1),
+    }
+
+
+def backfill_backgrounds(image_path: str) -> int:
+    """Add ``background`` to an existing <stem>.streets.json in place, without re-running OCR.
+
+    Background colour is a pure function of the image and the detection boxes, so a file OCR'd
+    before the property existed can be brought up to date far more cheaply than by re-reading the
+    page. Returns the number of detections found to be on a coloured fill.
+    """
+    path = _streets_path(image_path)
+    with open(path) as f:
+        streets_doc = json.load(f)
+    detections = streets_doc["streets"]
+    for det in detections:
+        det.pop("background", None)
+    with Image.open(image_path) as img:
+        streets_doc["paper"] = annotate_backgrounds(
+            detections, np.array(img.convert("RGB"))
+        )
+    with open(path, "w") as f:
+        json.dump(streets_doc, f, indent=2)
+    return sum(1 for det in detections if "background" in det)
 
 
 def _erase_underlines(
@@ -483,6 +593,12 @@ def detect_text(
       - short_side: length of the shorter pair of polygon sides (pixels)
       - ignore: True if the text matches a NON_STREET_TEXT pattern (absent otherwise)
       - fallback: True if the read came from fallback_vocab, not vocab_strings (absent otherwise)
+      - background: {color, hue, chroma} of the box's background when it is more saturated than
+        the page's paper, i.e. the label is printed on a coloured building fill (absent when the
+        label sits on paper, which is where street names belong)
+
+    The written <stem>.streets.json also records the page's own ``paper`` colour in the same
+    {color, hue, chroma} form, which is the reference the ``background`` property is relative to.
     """
     if reader is None:
         reader = easyocr.Reader(["en"], gpu=True, verbose=False)
@@ -537,11 +653,14 @@ def detect_text(
         elif det["text"].upper() in HINT_STRINGS:
             det["hint"] = True
 
+    paper = annotate_backgrounds(all_detections, np.array(img))
+
     streets_doc = {
         "width": orig_width,
         "height": orig_height,
         "timestamp": datetime.now(timezone.utc).isoformat(),
         "command": filter_args(sys.argv[:], image_path),
+        "paper": paper,
         "streets": all_detections,
     }
     with open(_streets_path(image_path), "w") as f:
@@ -718,6 +837,15 @@ def main() -> None:
         help="Skip images that already have a .streets.json output file.",
     )
     parser.add_argument(
+        "--backfill-background",
+        action="store_true",
+        help=(
+            "Do not run OCR. Instead, add the 'background' colour property to the detections in "
+            "each image's existing <stem>.streets.json, which is all that pages OCR'd before that "
+            "property existed need. Images with no .streets.json are skipped."
+        ),
+    )
+    parser.add_argument(
         "--num-workers",
         type=int,
         default=1,
@@ -780,6 +908,22 @@ def main() -> None:
         ),
     )
     args = parser.parse_args()
+
+    if args.backfill_background:
+        pending = [p for p in args.images if Path(_streets_path(p)).exists()]
+        print(
+            f"Backfilling background colour for {len(pending)}/{len(args.images)} image(s) with "
+            "existing detections.",
+            file=sys.stderr,
+        )
+        on_fill = 0
+        for image_path in tqdm(pending, smoothing=0):
+            on_fill += backfill_backgrounds(image_path)
+        print(
+            f"Marked {on_fill} detection(s) as sitting on a coloured fill.",
+            file=sys.stderr,
+        )
+        return
 
     if args.centerlines is None:
         centerlines = default_centerlines(Path(args.images[0]).parent)

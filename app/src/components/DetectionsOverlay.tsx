@@ -1,4 +1,8 @@
-import { confidenceColor, type IndexedDetection } from '../detections';
+import {
+  confidenceColor,
+  isOnBuildingFill,
+  type IndexedDetection,
+} from '../detections';
 
 interface DetectionsOverlayProps {
   detections: IndexedDetection[];
@@ -45,6 +49,9 @@ export function DetectionsOverlay(props: DetectionsOverlayProps) {
         const isSelected = selectedIndices.has(i);
         const isIgnored = det.ignore === true;
         const isHint = det.hint === true;
+        // A label on a red/blue building fill is dropped before georeferencing, so draw it
+        // like the other discarded reads rather than by its confidence.
+        const isOnFill = isOnBuildingFill(det);
         // Adjacency claims carry `mutual`: reciprocated neighbors render blue, the
         // rest of the claims amber; other modes never set the field.
         const color = isSelected
@@ -57,12 +64,20 @@ export function DetectionsOverlay(props: DetectionsOverlayProps) {
                 ? '#999'
                 : isHint
                   ? '#7c3aed'
-                  : confidenceColor(det.confidence);
+                  : isOnFill
+                    ? '#be123c'
+                    : confidenceColor(det.confidence);
         const points = det.polygon
           .map(([x, y]) => toDisplay(x, y))
           .map(([dx, dy]) => `${dx},${dy}`)
           .join(' ');
-        const dashArray = isIgnored ? '4 3' : isHint ? '3 2' : undefined;
+        const dashArray = isIgnored
+          ? '4 3'
+          : isHint
+            ? '3 2'
+            : isOnFill
+              ? '5 3'
+              : undefined;
 
         const [lx, ly] = toDisplay(det.polygon[0][0], det.polygon[0][1]);
 

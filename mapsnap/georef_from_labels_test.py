@@ -1397,6 +1397,58 @@ def test_consensus_scale_returns_an_actual_page_scale():
     assert consensus_scale(scales) in scales
 
 
+def _on(text: str, hue: float, chroma: float = 12.0) -> dict:
+    """A detection OCR marked as sitting on a fill of the given hue."""
+    return {
+        "text": text,
+        "background": {"color": "#888888", "hue": hue, "chroma": chroma},
+    }
+
+
+def test_drop_labels_on_fill_drops_labels_on_red_and_blue_buildings():
+    from mapsnap.georef_from_labels import drop_labels_on_fill
+
+    # The Sanborn colour code: red/pink = brick, blue = stone. Both carry building labels.
+    kept, fill = drop_labels_on_fill(
+        [_on("REP", hue=5.0), _on("SEARS", hue=250.0), {"text": "MAIN"}]
+    )
+    assert [d["text"] for d in kept] == ["MAIN"]
+    assert [d["text"] for d in fill] == ["REP", "SEARS"]
+
+
+def test_drop_labels_on_fill_spares_a_yellow_background():
+    # A street name on a yellowed tape patch is saturated enough that OCR records a background,
+    # but its hue matches the paper. Chicago's HALSTED and New Orleans' TCHOUPITOULAS are exactly
+    # this and must survive; so must a label on a yellow *frame* building (Brooklyn's CARROLL),
+    # which hue cannot tell apart.
+    from mapsnap.georef_from_labels import drop_labels_on_fill
+
+    kept, fill = drop_labels_on_fill(
+        [_on("HALSTED", hue=93.0, chroma=19.0), _on("CARROLL", hue=102.7)]
+    )
+    assert [d["text"] for d in kept] == ["HALSTED", "CARROLL"] and fill == []
+
+
+def test_drop_labels_on_fill_keeps_detections_with_no_background():
+    # No `background` means OCR found the label no more saturated than the paper — a street name
+    # printed where street names belong.
+    from mapsnap.georef_from_labels import drop_labels_on_fill
+
+    kept, fill = drop_labels_on_fill([{"text": "MAIN"}, {"text": "BROADWAY"}])
+    assert [d["text"] for d in kept] == ["MAIN", "BROADWAY"] and fill == []
+
+
+def test_drop_labels_on_fill_band_edges_are_inclusive():
+    from mapsnap.georef_from_labels import FILL_YELLOW_HUE_BAND, drop_labels_on_fill
+
+    low, high = FILL_YELLOW_HUE_BAND
+    kept, fill = drop_labels_on_fill(
+        [_on("LOW", hue=low), _on("HIGH", hue=high), _on("BELOW", hue=low - 0.1)]
+    )
+    assert [d["text"] for d in kept] == ["LOW", "HIGH"]
+    assert [d["text"] for d in fill] == ["BELOW"]
+
+
 def test_is_split_page():
     from mapsnap.georef_from_labels import is_split_page
 

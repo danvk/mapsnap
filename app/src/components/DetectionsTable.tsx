@@ -1,4 +1,5 @@
 import type { IndexedDetection } from '../detections';
+import { isOnBuildingFill } from '../detections';
 import { DetectionCanvas } from './DetectionCanvas';
 
 interface DetectionsTableProps {
@@ -47,11 +48,13 @@ export function DetectionsTable(props: DetectionsTableProps) {
         </thead>
         <tbody>
           {visible.map(({ det, i }, rowIdx) => {
+            const onFill = isOnBuildingFill(det);
             const classes = [
               selectedIndices.has(i) ? 'selected' : '',
               det.ignore ? 'ignored' : '',
               det.hint ? 'hint' : '',
               det.fallback ? 'fallback' : '',
+              onFill ? 'on-fill' : '',
             ]
               .filter(Boolean)
               .join(' ');
@@ -74,6 +77,28 @@ export function DetectionsTable(props: DetectionsTableProps) {
                       title="Read by the key-map rectangle fallback vocabulary, not the tighter page-neighborhood radius vocabulary"
                     >
                       fallback
+                    </span>
+                  )}
+                  {det.background && (
+                    <span
+                      className={
+                        onFill ? 'fill-badge dropped' : 'fill-badge spared'
+                      }
+                      title={
+                        `Background ${det.background.color} — hue ${det.background.hue}°, ` +
+                        `chroma ${det.background.chroma}. ` +
+                        (onFill
+                          ? 'Outside the yellow/brown band, so georeferencing treats this as a ' +
+                            'label on a coloured building and drops it.'
+                          : 'Yellow/brown is ambiguous (aged paper, a taped-on patch, or a ' +
+                            'frame building), so georeferencing keeps this.')
+                      }
+                    >
+                      <span
+                        className="fill-swatch"
+                        style={{ background: det.background.color }}
+                      />
+                      {onFill ? 'on fill' : 'on yellow'}
                     </span>
                   )}
                 </td>

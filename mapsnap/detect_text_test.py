@@ -10,6 +10,10 @@ from mapsnap.detect_text import (
     _iter_tiles,
     _merge_vocab_passes,
     _nms_bboxes,
+    annotate_backgrounds,
+    lab_to_hex,
+    page_lab,
+    region_color,
     filter_args,
     has_split_panels,
     page_vocabs,
@@ -472,3 +476,66 @@ def test_merge_vocab_passes_flags_only_fallback_wins():
     assert (
         "fallback" not in by_text["OAK"]
     )  # agreed on text, so not a fallback-only read
+
+
+def _rgb_page(shape=(100, 100)) -> np.ndarray:
+    """A faintly yellowed paper page, the usual Sanborn background."""
+    page = np.full((*shape, 3), 250, dtype=np.uint8)
+    page[:, :, 2] = 235  # slightly less blue => yellowish
+    return page
+
+
+def _box(x0: int, y0: int, x1: int, y1: int) -> list[list[int]]:
+    return [[x0, y0], [x1, y0], [x1, y1], [x0, y1]]
+
+
+def test_region_color_reports_the_box_background_not_the_ink():
+    # Dark glyphs on a red block: the median under the box must report the red, since the ink
+    # covers well under half the pixels.
+    page = _rgb_page((50, 50))
+    page[10:30, 10:30] = (200, 40, 40)
+    page[18:22, 12:28] = (20, 20, 20)  # a line of "text"
+    lab = page_lab(page)
+    background = region_color(lab, _box(10, 10, 29, 29))
+    assert 340 <= background["hue"] or background["hue"] <= 40  # red
+    assert background["chroma"] > 40
+
+
+def test_annotate_backgrounds_marks_only_labels_off_the_paper():
+    page = _rgb_page()
+    page[50:70, 50:70] = (200, 40, 40)  # a red brick building
+    on_paper = {"text": "MAIN", "polygon": _box(10, 10, 30, 20)}
+    on_fill = {"text": "REP", "polygon": _box(55, 55, 65, 65)}
+    paper = annotate_backgrounds([on_paper, on_fill], page)
+
+    assert "background" not in on_paper  # street names sit on paper: nothing to record
+    assert on_fill["background"]["chroma"] > paper["chroma"] + 4.0
+    assert on_fill["background"]["color"].startswith("#")
+    assert 340 <= on_fill["background"]["hue"] or on_fill["background"]["hue"] <= 40
+
+
+def test_annotate_backgrounds_uses_the_pages_own_paper_as_the_reference():
+    # A heavily yellowed page (Chicago, New Orleans): an ordinary label on that paper must not
+    # be marked, even though the paper itself is far from neutral in absolute terms.
+    page = np.full((100, 100, 3), 210, dtype=np.uint8)
+    page[:, :, 2] = 150  # strongly yellow paper
+    det = {"text": "HALSTED", "polygon": _box(10, 10, 30, 20)}
+    paper = annotate_backgrounds([det], page)
+    assert paper["chroma"] > 10  # the paper really is saturated...
+    assert (
+        "background" not in det
+    )  # ...but the label matches it, so nothing is recorded
+
+
+def test_lab_to_hex_renders_a_swatch_of_the_lab_colour():
+    # Zero chroma is grey; +a is red; +b is yellow (red and green, little blue).
+    grey = lab_to_hex(128.0, 0.0, 0.0)
+    assert grey[1:3] == grey[3:5] == grey[5:7]
+    red, green, blue = _hex_channels(lab_to_hex(128.0, 60.0, 40.0))
+    assert red > green and red > blue
+    red, green, blue = _hex_channels(lab_to_hex(200.0, 0.0, 60.0))
+    assert red > blue and green > blue
+
+
+def _hex_channels(value: str) -> tuple[int, int, int]:
+    return int(value[1:3], 16), int(value[3:5], 16), int(value[5:7], 16)

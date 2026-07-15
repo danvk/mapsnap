@@ -2,7 +2,9 @@ import { describe, expect, it } from 'vitest';
 import {
   confidenceColor,
   detectionFromAdjacency,
+  FILL_YELLOW_HUE_BAND,
   filterDetections,
+  isOnBuildingFill,
   previewOrientation,
 } from './detections';
 import type { Detection } from './types';
@@ -199,5 +201,44 @@ describe('detectionFromAdjacency', () => {
     );
     expect(det.ignore).toBe(true);
     expect(det.mutual).toBeUndefined();
+  });
+});
+
+describe('isOnBuildingFill', () => {
+  const withBackground = (hue: number): Detection => ({
+    polygon: [
+      [0, 0],
+      [10, 0],
+      [10, 5],
+      [0, 5],
+    ],
+    text: 'REP',
+    confidence: 1,
+    angle: 0,
+    long_side: 10,
+    short_side: 5,
+    background: { color: '#c04040', hue, chroma: 12 },
+  });
+
+  it('is false when OCR recorded no background (the label is on paper)', () => {
+    const { background: _background, ...onPaper } = withBackground(0);
+    expect(isOnBuildingFill(onPaper)).toBe(false);
+  });
+
+  it('is true for the red brick and blue stone of the Sanborn colour code', () => {
+    expect(isOnBuildingFill(withBackground(5))).toBe(true);
+    expect(isOnBuildingFill(withBackground(250))).toBe(true);
+  });
+
+  it('is false inside the yellow/brown band, which paper and tape share', () => {
+    expect(isOnBuildingFill(withBackground(93))).toBe(false);
+    expect(isOnBuildingFill(withBackground(102.7))).toBe(false);
+  });
+
+  it('treats the band edges as spared', () => {
+    const [low, high] = FILL_YELLOW_HUE_BAND;
+    expect(isOnBuildingFill(withBackground(low))).toBe(false);
+    expect(isOnBuildingFill(withBackground(high))).toBe(false);
+    expect(isOnBuildingFill(withBackground(low - 0.1))).toBe(true);
   });
 });
