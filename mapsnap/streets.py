@@ -56,8 +56,36 @@ DIRECTION_WORDS: frozenset[str] = frozenset(DIRECTION_ABBREVS.values())
 # (e.g. the label "CHARLES" should still match "SAINT CHARLES AVENUE").
 STRIPPABLE_PREFIXES: frozenset[str] = DIRECTION_WORDS | {"SAINT"}
 
+# Street-type words that appear in centerline names but have no abbreviation worth expanding
+# (they are already short, or their abbreviation collides with something else). They still have
+# to be *recognised* as types so build_block_index can form the bare-name alias that lets a map
+# label naming only the street ("PRINTERS" for PRINTERS ALLEY, "SEWARD" for SEWARD SQUARE) match.
+# Only unambiguous road types belong here: PARK, RIDGE, HILL, VIEW, CREEK, COVE and friends also
+# end street names, but there they are part of the *name* ("PROSPECT PARK", "BROAD BRANCH"), so
+# treating them as types would alias away the very word that identifies the street.
+_UNABBREVIATED_STREET_TYPES: frozenset[str] = frozenset(
+    {
+        "WAY",
+        "TRAIL",
+        "ALLEY",
+        "SQUARE",
+        "PLAZA",
+        "PIKE",
+        "TURNPIKE",
+        "LOOP",
+        "ROW",
+        "WALK",
+        "CROSSING",
+        "TRACE",
+        "CRESCENT",
+        "PASS",
+    }
+)
+
 # Full street-type words (STREET, AVENUE, …); used to identify bare-name aliases in build_block_index.
-STREET_TYPES: frozenset[str] = frozenset(STREET_ABBREVS.values())
+STREET_TYPES: frozenset[str] = (
+    frozenset(STREET_ABBREVS.values()) | _UNABBREVIATED_STREET_TYPES
+)
 
 # Abbreviations of AVENUE and STREET (the two types used as "hints" in Sanborn maps).
 _LETTERED_TYPE_ABBREVS: frozenset[str] = frozenset(
@@ -260,12 +288,35 @@ def _match_candidates(s: str) -> list[str]:
     return [s]
 
 
+def _covers_whole_name(normalized: str, candidate: str) -> bool:
+    """Whether a label that is a prefix of ``candidate`` names the *whole* street.
+
+    A label may omit the street type and quadrant ("MAGAZINE" for MAGAZINE STREET,
+    "PRINTERS" for PRINTERS ALLEY), so a prefix match is only sound when everything left
+    over is type and/or direction words. One word of a multi-word *name* is not a match: a
+    lone "VAN" would otherwise claim all eight of Brooklyn's VAN* streets (VAN BRUNT, VAN
+    BUREN, VAN DAM, VAN DYKE, …), and a lone "REP" would claim REP JOHN LEWIS WAY — a street
+    a 1957 Nashville sheet cannot be labelling — fabricating GCPs from a building
+    abbreviation. Such fragments earn a match only by pairing with their sibling word
+    (georef_from_labels.assemble_multiword_streets: "VAN" + "BRUNT" -> "VAN BRUNT"), which is
+    what the per-word OCR vocabulary exists for.
+
+    Note this is deliberately *not* an ambiguity test. "REP" is wrong because it is half a
+    name, whether the volume holds one REP* street or eight.
+    """
+    if not candidate.startswith(normalized + " "):
+        return False
+    remainder = candidate[len(normalized) + 1 :].split()
+    return all(word in STREET_TYPES or word in DIRECTION_WORDS for word in remainder)
+
+
 def matches_any_street(text: str, normalized_streets: set[str]) -> bool:
     """Return True if text is a prefix-compatible match with any known street name.
 
     Handles labels that omit or include the street-type suffix ("COLUMBIA" matches
     "COLUMBIA PLACE"), omit a direction prefix ("LIBERTY" matches "SOUTH LIBERTY
-    STREET"), or omit a SAINT prefix ("CHARLES" matches "SAINT CHARLES AVENUE").
+    STREET"), or omit a SAINT prefix ("CHARLES" matches "SAINT CHARLES AVENUE"). A label
+    naming only part of a multi-word name does not match (see _covers_whole_name).
     """
     normalized = normalize_street(text)
     for s in normalized_streets:
@@ -276,7 +327,7 @@ def matches_any_street(text: str, normalized_streets: set[str]) -> bool:
                     len(candidate.split()) >= 2
                     and normalized.startswith(candidate + " ")
                 )
-                or candidate.startswith(normalized + " ")
+                or _covers_whole_name(normalized, candidate)
             ):
                 return True
     return False
@@ -327,7 +378,7 @@ def canonical_street_match(
                     len(candidate.split()) >= 2
                     and normalized.startswith(candidate + " ")
                 )
-                or candidate.startswith(normalized + " ")
+                or _covers_whole_name(normalized, candidate)
             ):
                 return s
     return None
@@ -380,7 +431,7 @@ def canonical_street_matches(
                     len(candidate.split()) >= 2
                     and normalized.startswith(candidate + " ")
                 )
-                or candidate.startswith(normalized + " ")
+                or _covers_whole_name(normalized, candidate)
             ):
                 matches.append(s)
                 break  # count each key at most once

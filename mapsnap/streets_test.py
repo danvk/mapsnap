@@ -6,6 +6,7 @@ from mapsnap.streets import (
     canonical_street_match,
     canonical_street_matches,
     is_bare_letter,
+    matches_any_street,
     normalize_street,
 )
 
@@ -161,6 +162,46 @@ def test_direction_word_does_not_match_east_grand_avenue():
     matches = canonical_street_matches("E", _DC_STREETS)
     assert "EAST GRAND AVENUE" not in matches
     assert "EAST STREET NORTHEAST" in matches
+
+
+# --- a bare label must name the whole street, not one word of a multi-word name ---
+
+_VAN_STREETS = {
+    "VAN BRUNT STREET",
+    "VAN BUREN STREET",
+    "VAN DYKE STREET",
+    "MAGAZINE STREET",
+    "PRINTERS ALLEY",
+    "REP JOHN LEWIS WAY SOUTH",
+}
+
+
+def test_bare_label_omitting_only_the_type_still_matches():
+    # The prefix rule's purpose: a label may leave off the street type.
+    assert canonical_street_matches("MAGAZINE", _VAN_STREETS) == ["MAGAZINE STREET"]
+
+
+def test_bare_label_omitting_an_unabbreviated_type_still_matches():
+    # ALLEY is a type too (it just has no abbreviation we expand).
+    assert canonical_street_matches("PRINTERS", _VAN_STREETS) == ["PRINTERS ALLEY"]
+
+
+def test_one_word_of_a_multi_word_name_matches_nothing():
+    # A lone "VAN" would otherwise claim VAN BRUNT, VAN BUREN and VAN DYKE alike; it must
+    # earn a match by assembling with its sibling word instead.
+    assert canonical_street_matches("VAN", _VAN_STREETS) == []
+    assert canonical_street_match("VAN", _VAN_STREETS) is None
+    assert not matches_any_street("VAN", _VAN_STREETS)
+
+
+def test_assembled_multi_word_name_matches():
+    assert canonical_street_matches("VAN BRUNT", _VAN_STREETS) == ["VAN BRUNT STREET"]
+
+
+def test_name_fragment_is_rejected_even_when_unambiguous():
+    # Only one REP* street exists here, yet "REP" is still only half a name: a building
+    # abbreviation must not claim the street. This is not an ambiguity test.
+    assert canonical_street_matches("REP", _VAN_STREETS) == []
 
 
 def test_canonical_street_match_direction_suffixed():
