@@ -278,3 +278,37 @@
 .gcp-stats-warning {
   color: #b00;
 }
+
+/* Background colour recorded by OCR for a label that is not on paper. */
+.fill-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  margin-left: 4px;
+  padding: 0 5px;
+  border-radius: 8px;
+  color: #fff;
+  font-size: 0.7em;
+  vertical-align: middle;
+}
+
+/* Red: georeferencing drops these as building labels. Grey: kept, hue too ambiguous to judge. */
+.fill-badge.dropped {
+  background: #be123c;
+}
+
+.fill-badge.spared {
+  background: #6b7280;
+}
+
+.fill-swatch {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border: 1px solid rgba(255, 255, 255, 0.7);
+  border-radius: 2px;
+}
+
+tr.on-fill td {
+  opacity: 0.75;
+}

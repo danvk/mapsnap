@@ -27,6 +27,16 @@ export interface IntersectionPoint {
 }
 
 /** A single OCR text detection from detect_text.py. */
+/** A measured CIELAB colour, as recorded by `detect_text.region_color`. */
+export interface LabColor {
+  /** sRGB hex ('#rrggbb'), for display. */
+  color: string;
+  /** Degrees: 0 = red, 90 = yellow, 180 = green, 270 = blue. */
+  hue: number;
+  /** Distance from neutral grey; 0 is unsaturated. */
+  chroma: number;
+}
+
 export interface Detection {
   polygon: [number, number][];
   text: string;
@@ -38,6 +48,12 @@ export interface Detection {
   hint?: boolean;
   /** Read by the key-map rectangle fallback vocab rather than the tighter radius vocab. */
   fallback?: boolean;
+  /**
+   * The background under this detection, set only when it is more saturated than the page's
+   * paper — i.e. the label is printed on a coloured building fill rather than on the paper
+   * where street names belong. Absent for the ordinary on-paper case.
+   */
+  background?: LabColor;
   /**
    * Adjacency-claim reciprocity (adjacency mode only): true renders blue (a mutual
    * neighbor), false amber (an unreciprocated claim); absent for non-claims.
