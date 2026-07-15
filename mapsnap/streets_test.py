@@ -216,3 +216,45 @@ def test_canonical_street_match_direction_suffixed():
         "NORTH PLACE SOUTHEAST",
         "NORTH ROAD",
     }
+
+
+def test_covers_whole_name_rejects_short_fragments():
+    # A short fragment is an abbreviation or particle: it recurs city-wide and attaches to
+    # anything, so it may not claim a street whose name continues past it.
+    streets = {"VAN BRUNT STREET", "VAN DYKE STREET", "REP JOHN LEWIS WAY", "PIER C"}
+    assert not matches_any_street("VAN", streets)
+    assert not matches_any_street("REP", streets)
+    assert not matches_any_street("PIER", streets)
+
+
+def test_covers_whole_name_admits_a_long_distinctive_fragment():
+    # Detroit's sheet prints "HARBOR" for what OSM now calls Harbor Island Street, and Grand
+    # Rapids' prints "CLYDE" for Clyde Park Avenue. Neither has a sibling word to assemble with.
+    assert matches_any_street("HARBOR", {"HARBOR ISLAND STREET"})
+    assert matches_any_street("CLYDE", {"CLYDE PARK AVENUE SOUTHWEST"})
+
+
+def test_covers_whole_name_measures_the_printed_label_not_the_expansion():
+    # "ST" is two letters on the sheet even though it normalizes to SAINT, and "AV" two even
+    # though it normalizes to AVENUE. Counting the expansion would hand the length allowance to
+    # exactly the abbreviations this rule exists to stop.
+    assert not matches_any_street("ST", {"SAINT CLAIR HEIGHTS DRIVE"})
+    assert not matches_any_street("ST.", {"SAINT CLAIR HEIGHTS DRIVE"})
+    assert not matches_any_street("AV", {"AVENUE EBERLY DRIVE"})
+    # The type-only remainder path is unaffected: ST. CLAIR still names SAINT CLAIR DRIVE.
+    assert matches_any_street("ST. CLAIR", {"SAINT CLAIR DRIVE"})
+
+
+def test_covers_whole_name_still_allows_a_type_only_remainder_at_any_length():
+    # Length only gates the *fragment* path; omitting the type and quadrant is always sound.
+    assert matches_any_street("OAK", {"OAK STREET"})
+    assert matches_any_street("ELM", {"NORTH ELM AVENUE SOUTHWEST"})
+
+
+def test_printed_letters_ignores_punctuation_and_spaces():
+    from mapsnap.streets import printed_letters
+
+    assert printed_letters("ST.") == 2
+    assert printed_letters("CLYDE") == 5
+    assert printed_letters("VAN BRUNT") == 8
+    assert printed_letters("3RD") == 3
