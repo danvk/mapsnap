@@ -6,6 +6,7 @@ from shapely.geometry import Polygon as ShapelyPolygon
 
 from mapsnap.compare_iiif_georef import (
     annotation_split_index,
+    annotations_by_source,
     load_split_polygons,
     match_split_pairs,
     page_label,
@@ -17,6 +18,32 @@ from mapsnap.compare_iiif_georef import (
     truth_polygons_by_page,
     truth_polygons_world,
 )
+
+
+def test_annotations_by_source_null_ids_key_by_label(tmp_path):
+    # OIM volumes with null source.id must group by the label's page (not collapse to one
+    # None key), with splits of a page sharing the parent entry.
+    doc = {
+        "items": [
+            {
+                "label": "Grand Rapids, Mich. | 1953 | Vol. 7 p714",
+                "target": {"source": {"id": None}},
+            },
+            {
+                "label": "Grand Rapids, Mich. | 1953 | Vol. 7 p721 [1]",
+                "target": {"source": {"id": None}},
+            },
+            {
+                "label": "Grand Rapids, Mich. | 1953 | Vol. 7 p721 [2]",
+                "target": {"source": {"id": None}},
+            },
+        ]
+    }
+    path = tmp_path / "main.iiif.json"
+    path.write_text(json.dumps(doc))
+    groups = annotations_by_source(path)
+    assert sorted(groups) == ["p714", "p721"]
+    assert len(groups["p721"]) == 2  # both splits share the parent entry
 
 
 def test_split_numbering_annotations():

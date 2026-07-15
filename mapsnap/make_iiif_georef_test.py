@@ -321,6 +321,45 @@ def test_load_oim_index_splits_share_one_parent_entry():
     assert list(index.keys()) == ["p6n"]
 
 
+def test_load_oim_index_null_source_id_falls_back_to_label():
+    # Some OIM volumes (e.g. Grand Rapids 1953 vol 7) carry a null source.id; the page key
+    # must then come from the label's trailing "pNNN" token.
+    data = {
+        "items": [
+            {
+                "label": "Grand Rapids, Mich. | 1953 | Vol. 7 p714",
+                "target": {"source": {"id": None, "width": 6660, "height": 8070}},
+            }
+        ]
+    }
+    index = _load_oim_index(data)
+    assert list(index.keys()) == ["p714"]
+
+
+def test_load_oim_index_null_source_id_splits_key_by_parent():
+    # Null-source split labels collapse to one parent-keyed entry, matching URL-keyed behavior.
+    data = {
+        "items": [
+            {
+                "label": "Grand Rapids, Mich. | 1953 | Vol. 7 p721 [1]",
+                "target": {"source": {"id": None}},
+            },
+            {
+                "label": "Grand Rapids, Mich. | 1953 | Vol. 7 p721 [2]",
+                "target": {"source": {"id": None}},
+            },
+        ]
+    }
+    index = _load_oim_index(data)
+    assert list(index.keys()) == ["p721"]
+
+
+def test_load_oim_index_skips_item_with_no_key():
+    # No source id and an unparseable label -> item is skipped, not a crash.
+    data = {"items": [{"label": "cover", "target": {"source": {"id": None}}}]}
+    assert _load_oim_index(data) == {}
+
+
 def _metadata_value(annotation: dict, label: str) -> str | None:
     for entry in annotation["metadata"]:
         if entry["label"] == label:
@@ -366,6 +405,30 @@ def test_make_annotation_split_uses_panels_json(tmp_path):
         40.0,
         80.0,
     ]
+
+
+def test_make_annotation_null_source_id_uses_item_id(tmp_path):
+    # A null source.id (OIM annotation with no linked image service): the canvas id falls
+    # back to the item's own id (trailing slash trimmed) so annotation ids stay unique.
+    item = {
+        "id": "https://oldinsurancemaps.net/iiif/resource/54270/",
+        "label": "Grand Rapids, Mich. | 1953 | Vol. 7 p703",
+        "target": {
+            "id": "https://oldinsurancemaps.net/iiif/selector/54270/",
+            "source": {
+                "id": None,
+                "type": "ImageService2",
+                "width": 800,
+                "height": 1600,
+            },
+        },
+    }
+    georef = make_georef(width=50, height=100, intersections=[])
+    annotation = make_annotation(
+        item, georef, "p703", tmp_path / "p703.jpg", "http://x", "now"
+    )
+    assert annotation["id"] == "https://oldinsurancemaps.net/iiif/resource/54270/georef"
+    assert annotation["target"]["source"]["id"] is None
 
 
 def test_make_annotation_split_missing_panels_raises(tmp_path):

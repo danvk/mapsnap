@@ -116,6 +116,23 @@ def test_source_id_split_label():
     )
 
 
+def test_source_id_null_falls_back_to_label():
+    # OIM volumes with no linked image service (null source.id) key off the label.
+    assert (
+        source_id_to_page_key(None, "Grand Rapids, Mich. | 1953 | Vol. 7 p714")
+        == "p714"
+    )
+    assert (
+        source_id_to_page_key(None, "Grand Rapids, Mich. | 1953 | Vol. 7 p721 [1]")
+        == "p721__1"
+    )
+
+
+def test_source_id_null_unparseable_label_is_empty():
+    assert source_id_to_page_key(None, "cover") == ""
+    assert source_id_to_page_key("", "") == ""
+
+
 # source_id_to_page_key — sb format (e.g. Washington DC 1916)
 
 _DC = "https://tile.loc.gov/image-services/iiif/service:gmd:gmd385m:g3851m:g3851gm:g01227003"

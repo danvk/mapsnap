@@ -38,7 +38,7 @@ from shapely.geometry import mapping as geom_mapping
 
 from mapsnap.clip_masks import compute_all_clip_masks, geo_polygon_to_svg
 from mapsnap.split import panels_json_path, read_panels_json
-from mapsnap.utils import default_centerlines, jpeg_dimensions
+from mapsnap.utils import default_centerlines, jpeg_dimensions, label_to_page_key
 
 # Page images are stored at 25% scale, so the full-resolution canvas is 4× larger.
 FULL_RES_FACTOR = 4
@@ -61,7 +61,7 @@ def georef_path_to_page_key(path: str) -> str | None:
     return f"{page_num}{suffix.lower()}{split}"
 
 
-def _service_url_to_page_key(url: str) -> str | None:
+def _service_url_to_page_key(url: str | None) -> str | None:
     """Extract the page key from a LOC IIIF service URL (OIM or LOC manifest format).
 
     The page key is the trailing segment after the last "-", with leading zeros
@@ -75,8 +75,11 @@ def _service_url_to_page_key(url: str) -> str | None:
       "...:sb00154s"                        → "p154s"
 
     Non-sheet URLs (covers, indexes: "...-covr", "...-titl", etc.) start with a
-    letter after the "-" and return None.
+    letter after the "-" and return None. A missing/empty URL (e.g. an OIM
+    annotation whose ``source.id`` is null) also returns None.
     """
+    if not url:
+        return None
     url = url.removesuffix("/info.json")
     # Sanborn sb-format: service:...:sb{5-digit page}{suffix char}
     m = re.search(r":sb(\d{5})([a-z0-9])$", url, re.IGNORECASE)
@@ -91,6 +94,20 @@ def _service_url_to_page_key(url: str) -> str | None:
     return f"p{m.group(1)}{m.group(2).lower()}"
 
 
+def _label_parent_page_key(label: str) -> str | None:
+    """Parent page key from an OIM item label, dropping any "[N]" split marker, or None.
+
+    Used when the annotation's ``source.id`` is null (some OIM volumes, e.g. Grand Rapids
+    1953 vol 7) so the service URL cannot supply the key. Reuses ``utils.label_to_page_key``
+    (which returns a split key like "p721__1") and collapses splits to the parent, matching
+    the URL-keyed behavior where all splits of a page share one canvas entry:
+      "Grand Rapids, Mich. | 1953 | Vol. 7 p714"     → "p714"
+      "Grand Rapids, Mich. | 1953 | Vol. 7 p721 [1]" → "p721"
+    """
+    key = label_to_page_key(label)
+    return key.split("__")[0] if key else None
+
+
 def _load_oim_index(data: dict) -> dict[str, dict]:
     """Build parent-page_key → item dict from an OIM IIIF AnnotationPage.
 
@@ -99,11 +116,17 @@ def _load_oim_index(data: dict) -> dict[str, dict]:
     canvas (all splits of a page share the same source id and width/height), so a single
     full-canvas item per page is all make_annotation needs; our own splits are placed
     within it via panels.json.
+
+    The key normally comes from the annotation's image ``source.id`` URL; when that is null
+    (some volumes carry no linked image service) it falls back to the item ``label``.
     """
     index: dict[str, dict] = {}
     for item in data.get("items", []):
-        source_id: str = item.get("target", {}).get("source", {}).get("id", "")
-        page_key = _service_url_to_page_key(source_id)
+        source = (item.get("target") or {}).get("source") or {}
+        source_id = source.get("id") if isinstance(source, dict) else None
+        page_key = _service_url_to_page_key(source_id) or _label_parent_page_key(
+            item.get("label", "")
+        )
         if page_key is None:
             continue
         index[page_key] = item
@@ -272,7 +295,7 @@ def make_annotation(
     as the SvgSelector clipping polygon. Falls back to the full-page rectangle if None.
     """
     source = item["target"]["source"]
-    source_id: str = source["id"]
+    source_id: str | None = source["id"]
     source_type: str = source.get("type", "ImageService2")
     source_width: int = source["width"]
     source_height: int = source["height"]
@@ -283,7 +306,12 @@ def make_annotation(
     georef_height = georef["height"]
 
     # Derive a unique canvas ID from the source URL; append split number if present.
-    canvas_id = source_id.removesuffix("/info.json")
+    # When the annotation carries no image service (source.id null, as in some OIM volumes)
+    # fall back to the item's own id so the emitted annotation ids stay unique per page.
+    canvas_base = source_id or item.get("id") or item["target"].get("id")
+    if not canvas_base:
+        raise ValueError(f"item for {page_key} has no source id, item id, or target id")
+    canvas_id = canvas_base.removesuffix("/info.json").rstrip("/")
     split_index: int | None = None
     if "__" in page_key:
         split_index = int(page_key.split("__")[1])
