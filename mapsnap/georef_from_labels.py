@@ -26,7 +26,6 @@ from itertools import combinations
 from pathlib import Path
 from typing import Any
 
-import cv2
 import numpy as np
 from PIL import Image
 from tqdm import tqdm
@@ -310,11 +309,6 @@ KEYMAP_RETRY_SIZE_FRACTION = 0.6
 SAME_SCALE_BAND = (0.75, 1.25)
 HALF_SCALE_BAND = (0.4, 0.6)
 DOUBLE_SCALE_BAND = (1.8, 2.2)
-
-# CIELAB chroma a detection's box must exceed the page's own paper chroma by before it counts
-# as printed on a coloured building fill (drop_labels_on_fill). 4.0 separates Nashville's
-# building labels (p51 "REP" 9-14 chroma over 2.2 paper) from its street labels (1.0-3.6).
-LABEL_FILL_CHROMA_MARGIN = 4.0
 
 # CIELAB hue range (degrees, 0 = +a = red, 90 = +b = yellow) that drop_labels_on_fill refuses to
 # read as a building fill. Aged paper, the tape patches later pasted over renamed streets, and
@@ -1995,11 +1989,11 @@ def _init_worker(
     geojson_features: list[dict] | None = None,
     rectangle_index: tuple[dict[str, list[Block]], float] | None = None,
     truth_by_page: dict[int, list[list[list[float]]]] | None = None,
-    fill_chroma_margin: float = LABEL_FILL_CHROMA_MARGIN,
+    keep_labels_on_fill: bool = False,
 ) -> None:
     """Populate _worker_state once per worker process (or once in the main process)."""
     _worker_state.update(
-        fill_chroma_margin=fill_chroma_margin,
+        keep_labels_on_fill=keep_labels_on_fill,
         block_index=block_index,
         cos_phi=cos_phi,
         centerlines_path=centerlines_path,
@@ -2074,7 +2068,7 @@ def _process_one_image(image_path: str) -> tuple[str, ProcessResult]:
             ],
             keymap=keymap,
             truth_polygons=truth_polygons,
-            fill_chroma_margin=_worker_state["fill_chroma_margin"],
+            keep_labels_on_fill=_worker_state["keep_labels_on_fill"],
         )
 
     with _captured_page_log(log_path, _worker_state["debug"]):
@@ -2191,65 +2185,26 @@ def _process_one_image(image_path: str) -> tuple[str, ProcessResult]:
     return image_path, result
 
 
-def page_lab_ab(image_path: str) -> tuple[np.ndarray, np.ndarray] | None:
-    """CIELAB a/b channels of a page image, centered at 0, or None if it cannot be read.
-
-    Uses cv2's Lab (a/b stored centered at 128); skimage's rgb2lab segfaults after scipy MINPACK
-    runs in-process, so cv2 is the only safe converter here.
-    """
-    bgr = cv2.imread(image_path)
-    if bgr is None:
-        return None
-    lab = cv2.cvtColor(bgr, cv2.COLOR_BGR2Lab).astype(np.float64)
-    return lab[:, :, 1] - 128.0, lab[:, :, 2] - 128.0
-
-
-def detection_fill_color(
-    lab_a: np.ndarray, lab_b: np.ndarray, polygon: list
-) -> tuple[float, float]:
-    """(chroma, hue in degrees) of the median colour under a detection's bounding box.
-
-    The box holds the glyphs (near-neutral ink) plus whatever they sit on, so the median reports
-    the *background*: paper for a street label, the fill colour for a label printed on a building.
-    ``a`` and ``b`` are medianed separately and combined afterwards, because hue is a circular
-    quantity whose median is not meaningful.
-    """
-    pts = np.asarray(polygon, dtype=float)
-    x0, x1 = max(0, int(pts[:, 0].min())), int(pts[:, 0].max())
-    y0, y1 = max(0, int(pts[:, 1].min())), int(pts[:, 1].max())
-    region_a = lab_a[y0 : y1 + 1, x0 : x1 + 1]
-    region_b = lab_b[y0 : y1 + 1, x0 : x1 + 1]
-    if not region_a.size:
-        return 0.0, 0.0
-    a = float(np.median(region_a))
-    b = float(np.median(region_b))
-    return math.hypot(a, b), math.degrees(math.atan2(b, a)) % 360.0
-
-
 def drop_labels_on_fill(
     detections: list[dict],
-    lab_a: np.ndarray,
-    lab_b: np.ndarray,
-    margin: float = LABEL_FILL_CHROMA_MARGIN,
     yellow_band: tuple[float, float] = FILL_YELLOW_HUE_BAND,
 ) -> tuple[list[dict], list[dict]]:
-    """Split detections into (kept, on-fill) by whether each sits on a coloured building fill.
+    """Split detections into (kept, on-fill) by the ``background`` colour OCR recorded for each.
 
     Sanborn sheets print street names on the paper background; text inside a coloured block is a
     *building* label, which can still prefix-match a street name and fabricate GCPs (Nashville's
-    "REP" -> "REP JOHN LEWIS WAY", "SEARS", "SERVICE" -> "SERVICE ROAD"). A detection is on-fill
-    when its box's median chroma exceeds the page's own paper chroma by ``margin`` *and* its hue
-    lies outside ``yellow_band``. The chroma reference is per page because paper varies a lot
-    (Nashville p9 1.0, p51 2.2, p2 5.1 chroma).
+    "REP" -> "REP JOHN LEWIS WAY", "SEARS", "SERVICE" -> "SERVICE ROAD"). ``detect_text`` records a
+    ``background`` on exactly the detections that sit on something more saturated than the page's
+    own paper; this decides which of those colours actually disqualify a label.
 
-    The hue test is what makes the chroma test usable across volumes. Chroma alone asks only "is
-    this more saturated than the paper", which on a yellowed scan is answered "yes" by an ordinary
-    street label: Chicago's and New Orleans' paper is itself chroma 13-20 at hue ~90-95, and a
-    street name taped on later (aged to brown-on-yellow) sits only 4-6 chroma above it — enough to
-    trip a bare chroma test, which cost Chicago its HALSTED and KINZIE labels and New Orleans its
-    TCHOUPITOULAS. Those all sit at hue 90-95: the same hue as the paper they are printed on.
-    Sparing the yellow/brown band keeps them, while still dropping the red and blue fills that
-    carry the real building labels (all 18 of Nashville's "REP" reads are hue 0-6 or 240-257).
+    Only hue outside ``yellow_band`` does. Being on *some* colour is not enough, because on a
+    yellowed scan an ordinary street label is more saturated than the paper: Chicago's and New
+    Orleans' paper is itself chroma 13-20 at hue ~90-95, and a street name taped on later (aged to
+    brown-on-yellow) sits only 4-6 chroma above it. Dropping those cost Chicago its HALSTED and
+    KINZIE labels and New Orleans its TCHOUPITOULAS — all at hue 90-95, the same hue as the paper
+    they are printed on. Sparing the yellow/brown band keeps them while still dropping the red and
+    blue fills that carry the real building labels (all 18 of Nashville's "REP" reads are hue 0-6
+    or 240-257).
 
     The cost is deliberate: Sanborn's colour code also paints *frame* buildings yellow, so a label
     on one is spared too (Brooklyn p57's "CARROLL TRUCKING CORP." is yellow, not red). Hue cannot
@@ -2258,13 +2213,12 @@ def drop_labels_on_fill(
     Key-map pages must skip this entirely — their street names sit on the coloured region blocks
     by design.
     """
-    paper = float(np.median(np.hypot(lab_a, lab_b)))
     low, high = yellow_band
     kept: list[dict] = []
     on_fill: list[dict] = []
     for det in detections:
-        chroma, hue = detection_fill_color(lab_a, lab_b, det["polygon"])
-        if chroma > paper + margin and not (low <= hue <= high):
+        background = det.get("background")
+        if background is not None and not (low <= background["hue"] <= high):
             on_fill.append(det)
         else:
             kept.append(det)
@@ -2282,8 +2236,7 @@ def prepare_label_features(
     min_aspect_ratio: float = 2.0,
     edge_margin: float = 0.02,
     high_confidence_size_fraction: float = 0.7,
-    image_path: str | None = None,
-    fill_chroma_margin: float = LABEL_FILL_CHROMA_MARGIN,
+    keep_labels_on_fill: bool = False,
 ) -> list[LabelFeature]:
     """Load, promote, assemble, dedupe, filter, and canonicalize street reads into features.
 
@@ -2294,6 +2247,10 @@ def prepare_label_features(
     (one feature per distinct candidate street). Split out of :func:`process_image` so that which
     reads are accepted is separable from how they are fitted, and so any future consumer can
     accept exactly the same reads.
+
+    keep_labels_on_fill retains labels printed on a coloured building fill, which are normally
+    dropped (``drop_labels_on_fill``). Key-map pages need it: their street names sit on the
+    coloured region blocks by design.
     """
     img_w, img_h = image_size
     all_detections = load_detections(labels_path)
@@ -2340,25 +2297,21 @@ def prepare_label_features(
 
     # Street names are printed on paper; text on a coloured building fill is a building label
     # that can still prefix-match a street name and fabricate GCPs.
-    if image_path is not None and fill_chroma_margin > 0:
-        lab = page_lab_ab(image_path)
-        if lab is not None:
-            all_detections, on_fill = drop_labels_on_fill(
-                all_detections, lab[0], lab[1], fill_chroma_margin
+    if not keep_labels_on_fill:
+        all_detections, on_fill = drop_labels_on_fill(all_detections)
+        if on_fill:
+            named = sorted(
+                {
+                    d["text"]
+                    for d in on_fill
+                    if canonical_street_match(d.get("text", ""), normalized_streets)
+                }
             )
-            if on_fill:
-                named = sorted(
-                    {
-                        d["text"]
-                        for d in on_fill
-                        if canonical_street_match(d.get("text", ""), normalized_streets)
-                    }
-                )
-                print(
-                    f"Dropped {len(on_fill)} detection(s) on coloured fill"
-                    + (f"; street-matching: {', '.join(named)}" if named else ""),
-                    file=sys.stderr,
-                )
+            print(
+                f"Dropped {len(on_fill)} detection(s) on coloured fill"
+                + (f"; street-matching: {', '.join(named)}" if named else ""),
+                file=sys.stderr,
+            )
 
     labels_data = []
     for det in all_detections:
@@ -2449,7 +2402,7 @@ def process_image(
     high_confidence_size_fraction: float = 0.7,
     keymap: dict | None = None,
     truth_polygons: list[list[list[float]]] | None = None,
-    fill_chroma_margin: float = LABEL_FILL_CHROMA_MARGIN,
+    keep_labels_on_fill: bool = False,
 ) -> ProcessResult:
     """Fit a georeference model for one image and write GCPs to output_path.
 
@@ -2481,8 +2434,7 @@ def process_image(
         min_aspect_ratio=min_aspect_ratio,
         edge_margin=edge_margin,
         high_confidence_size_fraction=high_confidence_size_fraction,
-        image_path=image_path,
-        fill_chroma_margin=0.0 if is_keymap_page else fill_chroma_margin,
+        keep_labels_on_fill=keep_labels_on_fill or is_keymap_page,
     )
 
     gcps = find_intersection_gcps(features, block_index, (img_w, img_h))
@@ -3014,15 +2966,14 @@ def main() -> None:
         ),
     )
     parser.add_argument(
-        "--label-fill-chroma-margin",
-        type=float,
-        default=LABEL_FILL_CHROMA_MARGIN,
-        metavar="CHROMA",
+        "--keep-labels-on-fill",
+        action="store_true",
         help=(
-            "Reject detections whose box's median CIELAB chroma exceeds the page's paper "
-            "chroma by more than this, as labels printed on a coloured building fill rather "
-            "than on the street background (default: %(default)s). Set to 0 to disable. "
-            "Key-map pages are always exempt."
+            "Keep detections that OCR recorded as printed on a coloured building fill (a red or "
+            "blue Sanborn block) rather than on the paper. These are building labels, not street "
+            "names, and are dropped by default because they can still prefix-match a street and "
+            "fabricate GCPs. Key-map pages are always exempt, since their street names sit on the "
+            "coloured region blocks by design."
         ),
     )
     parser.add_argument(
@@ -3291,7 +3242,7 @@ def main() -> None:
         geojson["features"] if locator is not None else None,
         rectangle_index,
         truth_by_page,
-        args.label_fill_chroma_margin,
+        args.keep_labels_on_fill,
     )
     if args.num_workers > 1:
         with multiprocessing.Pool(

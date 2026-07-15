@@ -1397,78 +1397,56 @@ def test_consensus_scale_returns_an_actual_page_scale():
     assert consensus_scale(scales) in scales
 
 
-def _paper_ab(shape=(100, 100)) -> tuple[np.ndarray, np.ndarray]:
-    """Faintly yellow paper (chroma 2 at hue 90), the usual Sanborn background."""
-    return np.zeros(shape), np.full(shape, 2.0)
+def _on(text: str, hue: float, chroma: float = 12.0) -> dict:
+    """A detection OCR marked as sitting on a fill of the given hue."""
+    return {
+        "text": text,
+        "background": {"color": "#888888", "hue": hue, "chroma": chroma},
+    }
 
 
-def _paint(lab_a, lab_b, box, chroma: float, hue_deg: float) -> None:
-    """Paint a rectangle a given chroma/hue, in place."""
-    y0, y1, x0, x1 = box
-    lab_a[y0:y1, x0:x1] = chroma * math.cos(math.radians(hue_deg))
-    lab_b[y0:y1, x0:x1] = chroma * math.sin(math.radians(hue_deg))
-
-
-def test_drop_labels_on_fill_drops_a_label_on_a_red_building():
+def test_drop_labels_on_fill_drops_labels_on_red_and_blue_buildings():
     from mapsnap.georef_from_labels import drop_labels_on_fill
 
-    a, b = _paper_ab()
-    _paint(a, b, (50, 70, 50, 70), chroma=12.0, hue_deg=5.0)  # red brick
-    on_paper = {"text": "MAIN", "polygon": [[10, 10], [30, 10], [30, 20], [10, 20]]}
-    on_fill = {"text": "REP", "polygon": [[55, 55], [65, 55], [65, 65], [55, 65]]}
-    kept, fill = drop_labels_on_fill([on_paper, on_fill], a, b, 4.0)
+    # The Sanborn colour code: red/pink = brick, blue = stone. Both carry building labels.
+    kept, fill = drop_labels_on_fill(
+        [_on("REP", hue=5.0), _on("SEARS", hue=250.0), {"text": "MAIN"}]
+    )
     assert [d["text"] for d in kept] == ["MAIN"]
-    assert [d["text"] for d in fill] == ["REP"]
-
-
-def test_drop_labels_on_fill_drops_a_label_on_a_blue_building():
-    from mapsnap.georef_from_labels import drop_labels_on_fill
-
-    a, b = _paper_ab()
-    _paint(a, b, (50, 70, 50, 70), chroma=12.0, hue_deg=250.0)  # blue stone
-    on_fill = {"text": "REP", "polygon": [[55, 55], [65, 55], [65, 65], [55, 65]]}
-    kept, fill = drop_labels_on_fill([on_fill], a, b, 4.0)
-    assert kept == [] and [d["text"] for d in fill] == ["REP"]
+    assert [d["text"] for d in fill] == ["REP", "SEARS"]
 
 
 def test_drop_labels_on_fill_spares_a_yellow_background():
+    # A street name on a yellowed tape patch is saturated enough that OCR records a background,
+    # but its hue matches the paper. Chicago's HALSTED and New Orleans' TCHOUPITOULAS are exactly
+    # this and must survive; so must a label on a yellow *frame* building (Brooklyn's CARROLL),
+    # which hue cannot tell apart.
     from mapsnap.georef_from_labels import drop_labels_on_fill
 
-    # A street name on a yellowed tape patch: well above the paper's chroma, but the same hue.
-    # Chicago's HALSTED and New Orleans' TCHOUPITOULAS are exactly this and must survive.
-    a, b = _paper_ab()
-    _paint(a, b, (50, 70, 50, 70), chroma=19.0, hue_deg=93.0)
-    taped = {"text": "HALSTED", "polygon": [[55, 55], [65, 55], [65, 65], [55, 65]]}
-    kept, fill = drop_labels_on_fill([taped], a, b, 4.0)
-    assert [d["text"] for d in kept] == ["HALSTED"] and fill == []
+    kept, fill = drop_labels_on_fill(
+        [_on("HALSTED", hue=93.0, chroma=19.0), _on("CARROLL", hue=102.7)]
+    )
+    assert [d["text"] for d in kept] == ["HALSTED", "CARROLL"] and fill == []
 
 
-def test_drop_labels_on_fill_spares_faint_colour_within_the_margin():
+def test_drop_labels_on_fill_keeps_detections_with_no_background():
+    # No `background` means OCR found the label no more saturated than the paper — a street name
+    # printed where street names belong.
     from mapsnap.georef_from_labels import drop_labels_on_fill
 
-    a, b = _paper_ab()
-    _paint(
-        a, b, (50, 70, 50, 70), chroma=5.0, hue_deg=5.0
-    )  # red but barely above paper
-    det = {"text": "MAIN", "polygon": [[55, 55], [65, 55], [65, 65], [55, 65]]}
-    kept, fill = drop_labels_on_fill([det], a, b, 4.0)
-    assert [d["text"] for d in kept] == ["MAIN"] and fill == []
+    kept, fill = drop_labels_on_fill([{"text": "MAIN"}, {"text": "BROADWAY"}])
+    assert [d["text"] for d in kept] == ["MAIN", "BROADWAY"] and fill == []
 
 
-def test_detection_fill_color_reports_box_background():
-    from mapsnap.georef_from_labels import detection_fill_color
+def test_drop_labels_on_fill_band_edges_are_inclusive():
+    from mapsnap.georef_from_labels import FILL_YELLOW_HUE_BAND, drop_labels_on_fill
 
-    a, b = _paper_ab((50, 50))
-    _paint(a, b, (10, 20, 10, 20), chroma=15.0, hue_deg=0.0)  # pure red patch
-    chroma, hue = detection_fill_color(a, b, [[10, 10], [19, 10], [19, 19], [10, 19]])
-    assert math.isclose(chroma, 15.0, rel_tol=1e-6) and math.isclose(
-        hue, 0.0, abs_tol=1e-6
+    low, high = FILL_YELLOW_HUE_BAND
+    kept, fill = drop_labels_on_fill(
+        [_on("LOW", hue=low), _on("HIGH", hue=high), _on("BELOW", hue=low - 0.1)]
     )
-    # Off the patch we see the paper: chroma 2 at hue 90.
-    chroma, hue = detection_fill_color(a, b, [[30, 30], [40, 30], [40, 40], [30, 40]])
-    assert math.isclose(chroma, 2.0, rel_tol=1e-6) and math.isclose(
-        hue, 90.0, abs_tol=1e-6
-    )
+    assert [d["text"] for d in kept] == ["LOW", "HIGH"]
+    assert [d["text"] for d in fill] == ["BELOW"]
 
 
 def test_is_split_page():
