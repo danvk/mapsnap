@@ -317,6 +317,13 @@ DOUBLE_SCALE_BAND = (1.8, 2.2)
 # treated as buildings. Brown is a dark yellow/orange and shares the band.
 FILL_YELLOW_HUE_BAND = (40.0, 110.0)
 
+# Confidence floor for the *weaker* half of an assembled multi-word street. A part this weak is
+# never trusted alone; it is admitted only when its partner clears min_confidence and the two
+# concatenate into a real street name (assemble_multiword_streets). 0.05 reaches Brooklyn p19's
+# 0.096 "DYKE" — collinear with a 1.000 "VAN", and "VAN DYKE" is a street — while staying above
+# the 0.00-0.03 noise floor that fills these pages.
+WEAK_PARTNER_CONFIDENCE = 0.05
+
 # Perpendicular offset (page px) within which two same-bearing labels count as sitting on one
 # line for drop_collinear_dominated. 20 px admits Nashville p9's 4 px 3RD/7TH offset while
 # keeping genuinely parallel streets (a block apart) separate.
@@ -1701,7 +1708,12 @@ def _assembled_detection(first: dict, second: dict, text: str) -> dict:
     return {
         "polygon": [[round(x), round(y)] for x, y in box],
         "text": text,
-        "confidence": min(first.get("confidence", 0.0), second.get("confidence", 0.0)),
+        # The assembly is a joint hypothesis corroborated by three independent signals: a
+        # confident anchor word, collinear/adjacent geometry, and an exact vocabulary hit. Its
+        # strength is therefore its best part, not its weakest — taking the min would throw away
+        # exactly the evidence that justifies trusting a faint partner (Brooklyn p19's 0.096
+        # "DYKE" beside a 1.000 "VAN": min() would re-sink "VAN DYKE" below the accept gate).
+        "confidence": max(first.get("confidence", 0.0), second.get("confidence", 0.0)),
         "angle": first.get("angle"),
         "dir_pix": round(first.get("dir_pix", 0.0) % math.pi, 4),
         "long_side": round(r1 - r0, 1),
@@ -1716,6 +1728,7 @@ def assemble_multiword_streets(
     perp_tolerance_px: float = 20.0,
     max_word_gap_frac: float = 0.7,
     min_confidence: float = 0.5,
+    weak_partner_confidence: float = WEAK_PARTNER_CONFIDENCE,
 ) -> tuple[list[dict], list[dict]]:
     """Combine adjacent single-word detections into a multi-word street name.
 
@@ -1731,12 +1744,21 @@ def assemble_multiword_streets(
     orders are tried; the order whose concatenation matches a street wins. Returns
     (assembled detections, the source parts that were consumed) so the caller can drop the
     parts — a lone "VAN" is ambiguous on its own.
+
+    One part of a pair may fall below ``min_confidence``, down to ``weak_partner_confidence``,
+    provided its partner clears ``min_confidence``: a read too weak to trust on its own becomes
+    trustworthy when a confident word sits collinear and adjacent to it *and* the concatenation
+    names a real street. Brooklyn p19's "DYKE" scores 0.096 — unusable alone — but sits 1 px off
+    collinear from a 1.000 "VAN", and "VAN DYKE" is a street: assembling the two both recovers
+    Van Dyke Street and consumes the lone "VAN" that would otherwise claim all eight VAN* streets
+    by prefix. Both parts weak is still rejected, so the confident anchor is what buys the
+    context.
     """
     bucket_size = math.pi / 12.0
     parts = [
         d
         for d in detections
-        if d.get("confidence", 0.0) >= min_confidence
+        if d.get("confidence", 0.0) >= min(weak_partner_confidence, min_confidence)
         and not d.get("assembled")
         and (text := d.get("text", "").strip()).isalpha()
         and len(text) >= 3
@@ -1773,6 +1795,9 @@ def assemble_multiword_streets(
             b_long = b.get("long_side", 0.0)
             edge_gap = math.hypot(b_cx - a_cx, b_cy - a_cy) - (a_long + b_long) / 2.0
             if edge_gap > max_word_gap_frac * max(a_long, b_long):
+                continue
+            # At least one part must stand on its own; two weak reads never vouch for each other.
+            if max(a.get("confidence", 0.0), b.get("confidence", 0.0)) < min_confidence:
                 continue
             ordered = None
             for first, second in ((a, b), (b, a)):
