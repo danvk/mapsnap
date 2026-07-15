@@ -254,14 +254,17 @@ MISSCALE_REGION_AGREEMENT = 1.3
 # plausibility gate.
 KEYMAP_RETRY_SIZE_FRACTION = 0.6
 
-# Scale-outlier bands: a fit whose scale-vs-reference ratio lands near an exact 0.5x or 2x
-# multiple is kept as a genuine differently-scaled sheet, not dropped as a misfit. Many
-# volumes (Nashville, Grand Rapids, Champaign) mix 50 ft/in and 100 ft/in pages, which land
-# almost exactly at half or double the reference; a clean multiple is the signature of a good
-# fit on a differently-scaled page rather than the scatter a bad fit produces.
+# Scale-outlier bands: the three ratios-to-the-reference a fit may land on and still be kept.
+# SAME_SCALE_BAND is the tolerance around the reference itself; a fit near an exact 0.5x or 2x
+# multiple is kept as a genuine differently-scaled sheet rather than dropped as a misfit, because
+# many volumes (Nashville, Grand Rapids, Champaign) mix 50 ft/in and 100 ft/in pages, and a clean
+# multiple is the signature of a good fit on a differently-scaled page rather than the scatter a
+# bad fit produces. All three are fixed: they describe how Sanborn sheet scales actually relate
+# (1x / 2x / 4x rungs, plus fitting noise), not a preference to tune per volume. Use
+# --disable-scale-outlier-check to switch the whole check off.
+SAME_SCALE_BAND = (0.75, 1.25)
 HALF_SCALE_BAND = (0.4, 0.6)
 DOUBLE_SCALE_BAND = (1.8, 2.2)
-DEFAULT_SCALE_OUTLIER_THRESHOLD = 0.25
 
 
 def is_split_page(stem: str) -> bool:
@@ -337,26 +340,23 @@ def region_corroborates_scale(fitted_ratio: float, region_ratio: float) -> bool:
     return 1.0 / MISSCALE_REGION_AGREEMENT <= agreement <= MISSCALE_REGION_AGREEMENT
 
 
-def is_scale_outlier(ratio: float, threshold: float) -> bool:
+def is_scale_outlier(ratio: float) -> bool:
     """Whether a fitted-scale / reference-scale ratio should be dropped as a scale outlier.
 
-    A page is kept (not an outlier) when its ratio is within ``threshold`` of the median
-    (``|ratio - 1| <= threshold``) or lands in the half-scale (~0.5x, :data:`HALF_SCALE_BAND`)
-    or double-scale (~2x, :data:`DOUBLE_SCALE_BAND`) band. The half/double bands admit genuine
-    differently-scaled sheets — a page drawn at 50 vs 100 ft/in relative to the volume median
-    lands almost exactly at 0.5x or 2x — whose clean multiple distinguishes them from the
-    scattered ratios a bad fit produces.
+    A page is kept (not an outlier) when its ratio lands in the band around the reference itself
+    (:data:`SAME_SCALE_BAND`), or in the half-scale (~0.5x, :data:`HALF_SCALE_BAND`) or
+    double-scale (~2x, :data:`DOUBLE_SCALE_BAND`) band. The half/double bands admit genuine
+    differently-scaled sheets — a page drawn at 50 vs 100 ft/in relative to the reference lands
+    almost exactly at 0.5x or 2x — whose clean multiple distinguishes them from the scattered
+    ratios a bad fit produces.
     """
-    if abs(ratio - 1.0) <= threshold:
-        return False
-    if HALF_SCALE_BAND[0] <= ratio <= HALF_SCALE_BAND[1]:
-        return False
-    if DOUBLE_SCALE_BAND[0] <= ratio <= DOUBLE_SCALE_BAND[1]:
-        return False
-    return True
+    return not any(
+        low <= ratio <= high
+        for low, high in (SAME_SCALE_BAND, HALF_SCALE_BAND, DOUBLE_SCALE_BAND)
+    )
 
 
-def consensus_scale(scales: list[float], threshold: float) -> float:
+def consensus_scale(scales: list[float]) -> float:
     """The page scale that keeps the most pages within the scale-outlier bands.
 
     Anchors the scale-outlier check (and the deferred 1-GCP scale prior) on the scale shared —
@@ -375,9 +375,7 @@ def consensus_scale(scales: list[float], threshold: float) -> float:
     """
 
     def kept(reference: float) -> int:
-        return sum(
-            not is_scale_outlier(scale / reference, threshold) for scale in scales
-        )
+        return sum(not is_scale_outlier(scale / reference) for scale in scales)
 
     return max(sorted(scales), key=kept)
 
@@ -2792,15 +2790,13 @@ def main() -> None:
         ),
     )
     parser.add_argument(
-        "--scale-outlier-threshold",
-        type=float,
-        default=DEFAULT_SCALE_OUTLIER_THRESHOLD,
-        metavar="FRAC",
+        "--disable-scale-outlier-check",
+        action="store_true",
         help=(
-            "Delete georef output files whose fitted scale deviates from the reference "
-            "scale by more than this fraction (default: 0.25 = 25%%). Pages fitted at "
-            "~0.5x or ~2x the reference (differently-scaled sheets) are kept regardless. "
-            "Set to 0 to disable. Reference is --scale if given, else the median."
+            "Keep every fit regardless of its scale. By default a georef output file is "
+            "deleted when its fitted scale is not near the reference scale, nor at a clean "
+            "~0.5x or ~2x multiple of it (a differently-scaled sheet). Reference is --scale "
+            "if given, else the volume's consensus scale."
         ),
     )
     parser.add_argument(
@@ -3101,10 +3097,7 @@ def main() -> None:
     if args.scale is not None:
         ref_scale_px_per_ft: float | None = args.scale
     elif scales:
-        anchor_threshold = (
-            args.scale_outlier_threshold or DEFAULT_SCALE_OUTLIER_THRESHOLD
-        )
-        ref_scale_px_per_ft = consensus_scale(scales, anchor_threshold)
+        ref_scale_px_per_ft = consensus_scale(scales)
     else:
         ref_scale_px_per_ft = None
 
@@ -3170,11 +3163,11 @@ def main() -> None:
                         )
 
     # Drop georef files whose fitted scale is a major outlier vs the reference.
-    if ref_scale_px_per_ft is not None and args.scale_outlier_threshold > 0:
+    if ref_scale_px_per_ft is not None and not args.disable_scale_outlier_check:
         n_dropped = 0
         for img_path, px_per_ft in scale_records:
             ratio = px_per_ft / ref_scale_px_per_ft
-            if is_scale_outlier(ratio, args.scale_outlier_threshold):
+            if is_scale_outlier(ratio):
                 # A genuine second-scale sheet (Champaign p19-p23 at half the volume
                 # scale) is indistinguishable from a bad fit by the median check alone;
                 # its key-map region can vouch for it. (A near-exact 0.5x/2x multiple is
