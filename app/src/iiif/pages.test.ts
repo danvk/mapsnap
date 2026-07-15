@@ -86,11 +86,21 @@ describe('pagesFromAnnotation', () => {
       gcpFeature(0, 0, offset(0, 0)),
       gcpFeature(1000, 0, offset(2000, 0)),
     ]);
+    annotation.items[0]!.body!.transformation = { type: 'helmert' };
     const pages = pagesFromAnnotation(annotation);
     expect(pages).toHaveLength(1);
     const page = pages[0]!;
     expect(page.pageKey).toBe('p7');
     expect(page.itemIndex).toBe(0);
+    expect(page.gcps).toHaveLength(2);
+    expect(page.gcps[0]).toEqual({
+      x: 0,
+      y: 0,
+      lon: LON0,
+      lat: LAT0,
+      type: 'gcp',
+    });
+    expect(page.transformationType).toBe('helmert');
     const [nw, ne, se, sw] = page.corners;
     expect(nw[0]).toBeCloseTo(LON0, 6);
     expect(nw[1]).toBeCloseTo(LAT0, 6);
@@ -134,6 +144,8 @@ describe('pagesFromAnnotation', () => {
     const page = pagesFromAnnotation(annotation)[0]!;
     expect(page.rotationDegrees).toBeCloseTo(0, 3);
     expect(page.scalePixelsPerFoot).toBeCloseTo(0.3048, 4);
+    expect(page.gcps).toHaveLength(4);
+    expect(page.transformationType).toBe('polynomial');
     expect(page.rectRing).toHaveLength(5);
     expect(page.rectRing[0]).toEqual(page.rectRing[4]);
     expect(page.clipRing).toHaveLength(5);

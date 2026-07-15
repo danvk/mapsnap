@@ -19,6 +19,16 @@ const FEET_PER_METER = 3.28084;
 const METERS_PER_DEGREE_LAT = 110574;
 const METERS_PER_DEGREE_LON_AT_EQUATOR = 111320;
 
+/** One of a page's GCPs: image pixel position, geo position, and kind. */
+export interface PageGcp {
+  x: number;
+  y: number;
+  lon: number;
+  lat: number;
+  /** The annotation's GCP kind: "gcp" (real) or "corner" (fallback). */
+  type: string;
+}
+
 /** A page's derived geometry and stats, ready for map display and the info panel. */
 export interface PageGeo {
   /** Index of this page's item in the annotation's items array; selection id. */
@@ -35,6 +45,9 @@ export interface PageGeo {
   scalePixelsPerFoot: number;
   /** Rotation from north-up in degrees, positive clockwise. */
   rotationDegrees: number;
+  gcps: PageGcp[];
+  /** The annotation's transformation type, e.g. "polynomial" or "helmert". */
+  transformationType: string;
 }
 
 /** Parse the vertex list out of an SvgSelector's polygon value. */
@@ -72,9 +85,6 @@ export function bearingDegrees(
   return (Math.atan2(eastMeters, northMeters) * 180) / Math.PI;
 }
 
-// GCPs as {x, y, lon, lat}, extracted from an item's feature collection.
-type GcpPoint = { x: number; y: number; lon: number; lat: number };
-
 /**
  * Exact similarity (helmert) fit through two GCPs, mapping image pixels
  * (y down) to geo coordinates; returns the images of the four page corners.
@@ -84,7 +94,7 @@ type GcpPoint = { x: number; y: number; lon: number; lat: number };
  * (E = c·x + d·y, N = d·x − c·y) absorbs the image's y-down handedness.
  */
 function helmertCorners(
-  points: [GcpPoint, GcpPoint],
+  points: [PageGcp, PageGcp],
   width: number,
   height: number,
 ): Corners | null {
@@ -122,8 +132,8 @@ function helmertCorners(
 }
 
 // Extract usable GCPs (image pixel + geo coordinates) from an item's features.
-function gcpPoints(features: GcpFeature[]): GcpPoint[] {
-  const points: GcpPoint[] = [];
+function gcpPoints(features: GcpFeature[]): PageGcp[] {
+  const points: PageGcp[] = [];
   for (const feature of features) {
     const resourceCoords = feature.properties?.resourceCoords;
     const geoCoords = (
@@ -140,6 +150,7 @@ function gcpPoints(features: GcpFeature[]): GcpPoint[] {
         y: resourceCoords[1] ?? 0,
         lon: geoCoords[0] ?? 0,
         lat: geoCoords[1] ?? 0,
+        type: String(feature.properties?.type ?? 'gcp'),
       });
     }
   }
@@ -205,6 +216,9 @@ export function pagesFromAnnotation(
     const bearing = bearingDegrees(nw, ne);
     const rotationDegrees = ((bearing - 90 + 540) % 360) - 180;
 
+    const transformation = item.body?.transformation as
+      | { type?: string }
+      | undefined;
     pages.push({
       itemIndex,
       pageKey,
@@ -215,6 +229,8 @@ export function pagesFromAnnotation(
       clipRing,
       scalePixelsPerFoot,
       rotationDegrees,
+      gcps: points,
+      transformationType: transformation?.type ?? 'polynomial',
     });
   });
   return pages;

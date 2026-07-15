@@ -6,7 +6,7 @@ import type {
 } from '../../server/iiifAnnotations';
 import { fetchRewrittenAnnotation, fetchVolumes } from '../iiif/api';
 import { pagesFromAnnotation } from '../iiif/pages';
-import { PageInfoPanel } from './PageInfoPanel';
+import { InfoPanel } from './InfoPanel';
 import { VolumeMap } from './VolumeMap';
 
 // Split a repo-root-relative annotation path like
@@ -156,13 +156,14 @@ export function VolumeViewer() {
           opacity={opacity / 100}
           onLoadResult={setLoadResult}
         />
-        {selectedPage && (
-          <PageInfoPanel
-            page={selectedPage}
-            volume={selection?.volume ?? ''}
-            onClose={() => setSelectedItemIndex(null)}
-          />
-        )}
+        <InfoPanel
+          pages={pages}
+          skipped={skipped}
+          annotationName={selection?.file ?? null}
+          selectedPage={selectedPage}
+          volume={selection?.volume ?? ''}
+          onClose={() => setSelectedItemIndex(null)}
+        />
       </div>
     </div>
   );

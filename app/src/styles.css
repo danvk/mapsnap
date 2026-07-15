@@ -211,6 +211,11 @@
   gap: 4px;
 }
 
+.page-info-hint {
+  color: #777;
+  font-size: 13px;
+}
+
 .view-nav {
   position: fixed;
   top: 8px;

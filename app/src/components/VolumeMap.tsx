@@ -26,8 +26,8 @@ const EMPTY_FEATURES: FeatureCollection = {
   features: [],
 };
 
-// Outline features for a selected page: the full image rectangle (solid) and
-// the clipping polygon (dashed), distinguished by the `kind` property.
+// Overlay features for a selected page: the full image rectangle (solid), the
+// clipping polygon (dashed), and its GCPs (circles), distinguished by `kind`.
 function selectionFeatures(page: PageGeo): FeatureCollection {
   return {
     type: 'FeatureCollection',
@@ -42,6 +42,11 @@ function selectionFeatures(page: PageGeo): FeatureCollection {
         properties: { kind: 'clip' },
         geometry: { type: 'LineString', coordinates: page.clipRing },
       },
+      ...page.gcps.map((gcp): FeatureCollection['features'][0] => ({
+        type: 'Feature',
+        properties: { kind: 'gcp', gcpType: gcp.type },
+        geometry: { type: 'Point', coordinates: [gcp.lon, gcp.lat] },
+      })),
     ],
   };
 }
@@ -70,16 +75,21 @@ export function VolumeMap(props: VolumeMapProps) {
   // Latest props for the click/hover handlers, which are installed once.
   const pagesRef = useRef(pages);
   const onSelectPageRef = useRef(onSelectPage);
+  const selectedRef = useRef(selectedItemIndex);
   useEffect(() => {
     pagesRef.current = pages;
     onSelectPageRef.current = onSelectPage;
-  }, [pages, onSelectPage]);
+    selectedRef.current = selectedItemIndex;
+  }, [pages, onSelectPage, selectedItemIndex]);
 
   // Allmaps map IDs indexed by annotation itemIndex, and the itemIndexes
   // brought to front so far (most recent last) so hit-testing can pick the
   // page that is visually on top of an overlap.
   const mapIdsRef = useRef<(string | null)[]>([]);
   const frontOrderRef = useRef<number[]>([]);
+
+  // The map currently rendered without its clip mask (the selected page).
+  const unmaskedMapIdRef = useRef<string | null>(null);
 
   // Keep the latest callback out of the annotation effect's dependencies so a
   // re-rendered parent doesn't re-add the annotation.
@@ -147,14 +157,41 @@ export function VolumeMap(props: VolumeMapProps) {
           'line-dasharray': [2, 2],
         },
       });
+      // GCP circles, colored like the georef view's intersection markers:
+      // orange for real GCPs, grey for corner fallbacks.
+      map.addLayer({
+        id: 'selected-page-gcps',
+        type: 'circle',
+        source: 'selected-page',
+        filter: ['==', ['get', 'kind'], 'gcp'],
+        paint: {
+          'circle-radius': 4,
+          'circle-color': [
+            'case',
+            ['==', ['get', 'gcpType'], 'corner'],
+            '#888888',
+            'orange',
+          ],
+          'circle-stroke-color': '#ffffff',
+          'circle-stroke-width': 1.5,
+        },
+      });
       layerRef.current = layer;
       setMapReady(true);
     });
 
     // The top-most page whose clipping polygon contains the point, or null.
-    // Most-recently-selected wins an overlap; otherwise the later-added page
-    // (Allmaps renders later additions on top).
+    // The selected page renders unclipped, so its full rectangle counts as a
+    // hit while it is selected. Otherwise the most-recently-selected page wins
+    // an overlap, then the later-added page (Allmaps renders later additions
+    // on top).
     function pageAtPoint(lng: number, lat: number): number | null {
+      const selected = pagesRef.current.find(
+        (p) => p.itemIndex === selectedRef.current,
+      );
+      if (selected && pointInPolygon(lng, lat, selected.rectRing)) {
+        return selected.itemIndex;
+      }
       let best: number | null = null;
       let bestScore = -Infinity;
       for (const page of pagesRef.current) {
@@ -193,6 +230,7 @@ export function VolumeMap(props: VolumeMapProps) {
     layer.clear();
     mapIdsRef.current = [];
     frontOrderRef.current = [];
+    unmaskedMapIdRef.current = null;
     if (!annotation) return;
     const results = layer.addGeoreferenceAnnotation(annotation);
     mapIdsRef.current = results.map((r) => (typeof r === 'string' ? r : null));
@@ -202,11 +240,19 @@ export function VolumeMap(props: VolumeMapProps) {
     if (bounds) map.fitBounds(bounds, { padding: 40, animate: false });
   }, [annotation, mapReady]);
 
-  // Outline the selected page and bring it to the front of the stack.
+  // Outline the selected page, bring it to the front of the stack, and remove
+  // its clip mask so the whole sheet (margins and all) is visible.
   useEffect(() => {
     const map = mapRef.current;
     const layer = layerRef.current;
     if (!map || !layer || !mapReady) return;
+    const previousUnmasked = unmaskedMapIdRef.current;
+    if (previousUnmasked) {
+      layer.resetMapsOptions([previousUnmasked], ['applyMask'], {
+        animate: false,
+      });
+      unmaskedMapIdRef.current = null;
+    }
     const source = map.getSource<maplibregl.GeoJSONSource>('selected-page');
     const page =
       selectedItemIndex === null
@@ -220,6 +266,8 @@ export function VolumeMap(props: VolumeMapProps) {
     const mapId = mapIdsRef.current[page.itemIndex];
     if (mapId) {
       layer.bringMapsToFront([mapId]);
+      layer.setMapsOptions([mapId], { applyMask: false }, { animate: false });
+      unmaskedMapIdRef.current = mapId;
       frontOrderRef.current.push(page.itemIndex);
     }
   }, [selectedItemIndex, pages, mapReady]);
