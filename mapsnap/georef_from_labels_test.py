@@ -1397,6 +1397,32 @@ def test_consensus_scale_returns_an_actual_page_scale():
     assert consensus_scale(scales) in scales
 
 
+def test_drop_labels_on_fill_splits_paper_from_building():
+    from mapsnap.georef_from_labels import drop_labels_on_fill
+
+    # Paper at chroma 2 with one coloured building block at chroma 12.
+    chroma = np.full((100, 100), 2.0)
+    chroma[50:70, 50:70] = 12.0
+    on_paper = {"text": "MAIN", "polygon": [[10, 10], [30, 10], [30, 20], [10, 20]]}
+    on_fill = {"text": "REP", "polygon": [[55, 55], [65, 55], [65, 65], [55, 65]]}
+    kept, fill = drop_labels_on_fill([on_paper, on_fill], chroma, 4.0)
+    assert [d["text"] for d in kept] == ["MAIN"]
+    assert [d["text"] for d in fill] == ["REP"]
+
+
+def test_detection_fill_chroma_reports_box_background():
+    from mapsnap.georef_from_labels import detection_fill_chroma
+
+    chroma = np.full((50, 50), 3.0)
+    chroma[10:20, 10:20] = 15.0
+    assert math.isclose(
+        detection_fill_chroma(chroma, [[10, 10], [19, 10], [19, 19], [10, 19]]), 15.0
+    )
+    assert math.isclose(
+        detection_fill_chroma(chroma, [[30, 30], [40, 30], [40, 40], [30, 40]]), 3.0
+    )
+
+
 def test_is_split_page():
     from mapsnap.georef_from_labels import is_split_page
 

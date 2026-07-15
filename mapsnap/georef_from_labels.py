@@ -26,6 +26,7 @@ from itertools import combinations
 from pathlib import Path
 from typing import Any
 
+import cv2
 import numpy as np
 from PIL import Image
 from tqdm import tqdm
@@ -42,6 +43,7 @@ from mapsnap.streets import (
     HINT_STRINGS,
     Block,
     build_block_index,
+    canonical_street_match,
     canonical_street_matches,
     deduplicate_detections,
     hint_type_word,
@@ -308,6 +310,11 @@ KEYMAP_RETRY_SIZE_FRACTION = 0.6
 SAME_SCALE_BAND = (0.75, 1.25)
 HALF_SCALE_BAND = (0.4, 0.6)
 DOUBLE_SCALE_BAND = (1.8, 2.2)
+
+# CIELAB chroma a detection's box must exceed the page's own paper chroma by before it counts
+# as printed on a coloured building fill (drop_labels_on_fill). 4.0 separates Nashville's
+# building labels (p51 "REP" 9-14 chroma over 2.2 paper) from its street labels (1.0-3.6).
+LABEL_FILL_CHROMA_MARGIN = 4.0
 
 
 def is_split_page(stem: str) -> bool:
@@ -1981,9 +1988,11 @@ def _init_worker(
     geojson_features: list[dict] | None = None,
     rectangle_index: tuple[dict[str, list[Block]], float] | None = None,
     truth_by_page: dict[int, list[list[list[float]]]] | None = None,
+    fill_chroma_margin: float = LABEL_FILL_CHROMA_MARGIN,
 ) -> None:
     """Populate _worker_state once per worker process (or once in the main process)."""
     _worker_state.update(
+        fill_chroma_margin=fill_chroma_margin,
         block_index=block_index,
         cos_phi=cos_phi,
         centerlines_path=centerlines_path,
@@ -2058,6 +2067,7 @@ def _process_one_image(image_path: str) -> tuple[str, ProcessResult]:
             ],
             keymap=keymap,
             truth_polygons=truth_polygons,
+            fill_chroma_margin=_worker_state["fill_chroma_margin"],
         )
 
     with _captured_page_log(log_path, _worker_state["debug"]):
@@ -2174,6 +2184,58 @@ def _process_one_image(image_path: str) -> tuple[str, ProcessResult]:
     return image_path, result
 
 
+def page_chroma_map(image_path: str) -> np.ndarray | None:
+    """CIELAB chroma per pixel of a page image, or None if it cannot be read.
+
+    Uses cv2's Lab (a/b centered at 128); skimage's rgb2lab segfaults after scipy MINPACK
+    runs in-process, so cv2 is the only safe converter here.
+    """
+    bgr = cv2.imread(image_path)
+    if bgr is None:
+        return None
+    lab = cv2.cvtColor(bgr, cv2.COLOR_BGR2Lab).astype(np.float64)
+    return np.hypot(lab[:, :, 1] - 128.0, lab[:, :, 2] - 128.0)
+
+
+def detection_fill_chroma(chroma: np.ndarray, polygon: list) -> float:
+    """Median CIELAB chroma under a detection's bounding box.
+
+    The box holds the glyphs (near-neutral ink, low chroma) plus whatever they sit on, so the
+    median reports the *background*: paper for a street label, the fill colour for a label
+    printed inside a building.
+    """
+    pts = np.asarray(polygon, dtype=float)
+    x0, x1 = max(0, int(pts[:, 0].min())), int(pts[:, 0].max())
+    y0, y1 = max(0, int(pts[:, 1].min())), int(pts[:, 1].max())
+    region = chroma[y0 : y1 + 1, x0 : x1 + 1]
+    return float(np.median(region)) if region.size else 0.0
+
+
+def drop_labels_on_fill(
+    detections: list[dict],
+    chroma: np.ndarray,
+    margin: float = LABEL_FILL_CHROMA_MARGIN,
+) -> tuple[list[dict], list[dict]]:
+    """Split detections into (kept, on-fill) by whether each sits on a coloured building fill.
+
+    Sanborn sheets print street names on the paper background; text inside a coloured block is a
+    *building* label, which can still prefix-match a street name and fabricate GCPs (Nashville's
+    "REP" -> "REP JOHN LEWIS WAY", "SEARS", "SERVICE" -> "SERVICE ROAD"). A detection is on-fill
+    when its box's median chroma exceeds the page's own paper chroma by ``margin``. The reference
+    is per page because paper varies (Nashville p9 1.0, p51 2.2, p2 5.1 chroma). Key-map pages
+    must skip this — their street names sit on the coloured region blocks by design.
+    """
+    paper = float(np.median(chroma))
+    kept: list[dict] = []
+    on_fill: list[dict] = []
+    for det in detections:
+        if detection_fill_chroma(chroma, det["polygon"]) > paper + margin:
+            on_fill.append(det)
+        else:
+            kept.append(det)
+    return kept, on_fill
+
+
 def prepare_label_features(
     labels_path: str,
     block_index: dict[str, list[Block]],
@@ -2185,6 +2247,8 @@ def prepare_label_features(
     min_aspect_ratio: float = 2.0,
     edge_margin: float = 0.02,
     high_confidence_size_fraction: float = 0.7,
+    image_path: str | None = None,
+    fill_chroma_margin: float = LABEL_FILL_CHROMA_MARGIN,
 ) -> list[LabelFeature]:
     """Load, promote, assemble, dedupe, filter, and canonicalize street reads into features.
 
@@ -2238,6 +2302,29 @@ def prepare_label_features(
         all_detections, normalized_streets=normalized_streets
     )
     print(f"Deduped detections: {len(all_detections)}")
+
+    # Street names are printed on paper; text on a coloured building fill is a building label
+    # that can still prefix-match a street name and fabricate GCPs.
+    if image_path is not None and fill_chroma_margin > 0:
+        chroma = page_chroma_map(image_path)
+        if chroma is not None:
+            all_detections, on_fill = drop_labels_on_fill(
+                all_detections, chroma, fill_chroma_margin
+            )
+            if on_fill:
+                named = sorted(
+                    {
+                        d["text"]
+                        for d in on_fill
+                        if canonical_street_match(d.get("text", ""), normalized_streets)
+                    }
+                )
+                print(
+                    f"Dropped {len(on_fill)} detection(s) on coloured fill"
+                    + (f"; street-matching: {', '.join(named)}" if named else ""),
+                    file=sys.stderr,
+                )
+
     labels_data = []
     for det in all_detections:
         is_promoted = det.get("promoted")
@@ -2327,6 +2414,7 @@ def process_image(
     high_confidence_size_fraction: float = 0.7,
     keymap: dict | None = None,
     truth_polygons: list[list[list[float]]] | None = None,
+    fill_chroma_margin: float = LABEL_FILL_CHROMA_MARGIN,
 ) -> ProcessResult:
     """Fit a georeference model for one image and write GCPs to output_path.
 
@@ -2340,6 +2428,14 @@ def process_image(
     with Image.open(image_path) as pil_img:
         img_w, img_h = pil_img.size
 
+    # A key map prints its street names *on* the coloured region blocks, so the on-fill filter
+    # would reject exactly the labels that georeference it; exempt those pages.
+    is_keymap_page = os.path.exists(
+        os.path.join(
+            os.path.dirname(image_path), f"{image_stem(image_path)}.keymap.json"
+        )
+    )
+
     features = prepare_label_features(
         labels_path,
         block_index,
@@ -2350,6 +2446,8 @@ def process_image(
         min_aspect_ratio=min_aspect_ratio,
         edge_margin=edge_margin,
         high_confidence_size_fraction=high_confidence_size_fraction,
+        image_path=image_path,
+        fill_chroma_margin=0.0 if is_keymap_page else fill_chroma_margin,
     )
 
     gcps = find_intersection_gcps(features, block_index, (img_w, img_h))
@@ -2881,6 +2979,18 @@ def main() -> None:
         ),
     )
     parser.add_argument(
+        "--label-fill-chroma-margin",
+        type=float,
+        default=LABEL_FILL_CHROMA_MARGIN,
+        metavar="CHROMA",
+        help=(
+            "Reject detections whose box's median CIELAB chroma exceeds the page's paper "
+            "chroma by more than this, as labels printed on a coloured building fill rather "
+            "than on the street background (default: %(default)s). Set to 0 to disable. "
+            "Key-map pages are always exempt."
+        ),
+    )
+    parser.add_argument(
         "--disable-scale-outlier-check",
         action="store_true",
         help=(
@@ -3146,6 +3256,7 @@ def main() -> None:
         geojson["features"] if locator is not None else None,
         rectangle_index,
         truth_by_page,
+        args.label_fill_chroma_margin,
     )
     if args.num_workers > 1:
         with multiprocessing.Pool(
