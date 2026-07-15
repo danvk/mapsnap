@@ -1397,6 +1397,77 @@ def test_consensus_scale_returns_an_actual_page_scale():
     assert consensus_scale(scales) in scales
 
 
+def _vertical_label(text: str, cx: float, cy: float, short: float, conf: float) -> dict:
+    """A vertical (dir_pix=pi/2) detection centered at (cx, cy)."""
+    return {
+        "text": text,
+        "confidence": conf,
+        "short_side": short,
+        "long_side": 44.0,
+        "dir_pix": math.pi / 2,
+        "polygon": [
+            [cx - short / 2, cy - 22],
+            [cx + short / 2, cy - 22],
+            [cx + short / 2, cy + 22],
+            [cx - short / 2, cy + 22],
+        ],
+    }
+
+
+_COLLINEAR_STREETS = {"MAIN STREET", "OAK STREET"}
+
+# Nashville's derived gate. A label under 18px short / 36px long only clears it via the
+# confidence discount, so only such a label is eligible to be dropped as collinear.
+_GATE = {"min_short_side": 18.0, "min_long_side": 36.0}
+
+
+def test_drop_collinear_dominated_drops_worse_collinear_label():
+    from mapsnap.georef_from_labels import drop_collinear_dominated
+
+    # Nashville p9 shape: a small/low-confidence OAK sits on the same vertical line as a
+    # larger/confident MAIN. One straight run of road carries one name -> OAK is noise.
+    good = _vertical_label("MAIN", 238, 1002, 24.0, 0.95)
+    bad = _vertical_label("OAK", 242, 529, 16.0, 0.32)
+    kept, dropped = drop_collinear_dominated([good, bad], _COLLINEAR_STREETS, **_GATE)
+    assert [d["text"] for d in dropped] == ["OAK"]
+    assert [d["text"] for d in kept] == ["MAIN"]
+
+
+def test_drop_collinear_dominated_keeps_same_street_labelled_twice():
+    from mapsnap.georef_from_labels import drop_collinear_dominated
+
+    # The same street named twice along its length is normal -> keep both.
+    a = _vertical_label("MAIN", 238, 1002, 24.0, 0.95)
+    b = _vertical_label("MAIN", 242, 529, 16.0, 0.32)
+    kept, dropped = drop_collinear_dominated([a, b], _COLLINEAR_STREETS, **_GATE)
+    assert dropped == []
+    assert len(kept) == 2
+
+
+def test_drop_collinear_dominated_keeps_parallel_streets():
+    from mapsnap.georef_from_labels import drop_collinear_dominated
+
+    # A block apart (perp offset 200px) they are genuinely parallel streets -> keep both.
+    good = _vertical_label("MAIN", 238, 1002, 24.0, 0.95)
+    other = _vertical_label("OAK", 438, 529, 16.0, 0.32)
+    kept, dropped = drop_collinear_dominated([good, other], _COLLINEAR_STREETS, **_GATE)
+    assert dropped == []
+    assert len(kept) == 2
+
+
+def test_drop_collinear_dominated_keeps_when_not_strictly_worse():
+    from mapsnap.georef_from_labels import drop_collinear_dominated
+
+    # Smaller but *more* confident is not strictly worse -> keep (needs both to dominate).
+    good = _vertical_label("MAIN", 238, 1002, 24.0, 0.95)
+    small_but_sure = _vertical_label("OAK", 242, 529, 16.0, 0.99)
+    kept, dropped = drop_collinear_dominated(
+        [good, small_but_sure], _COLLINEAR_STREETS, **_GATE
+    )
+    assert dropped == []
+    assert len(kept) == 2
+
+
 def _on(text: str, hue: float, chroma: float = 12.0) -> dict:
     """A detection OCR marked as sitting on a fill of the given hue."""
     return {
@@ -1481,4 +1552,51 @@ def test_region_prior_px_per_ft_split_page_uses_mean_ring_area():
     one = {"lat": 0.0005, "lon": 0.0005, "radius_m": 300.0, "regions": [ring_a]}
     assert region_prior_px_per_ft(one, 500, 500) == region_prior_px_per_ft(
         one, 500, 500, split_page=True
+    )
+
+
+def test_drop_collinear_dominated_spares_a_label_that_clears_the_gate_alone():
+    from mapsnap.georef_from_labels import drop_collinear_dominated
+
+    # Nashville p9's "6TH" (20px, 0.896) is dominated by "7TH" (24px, 0.952) on its line, but
+    # clears the 18px gate on its own evidence, so the collinear rule must not touch it. The
+    # label really reads "CAPITOL DR. OR 6TH AV N." — one compound label naming two streets,
+    # which is exactly the case the collinear premise does not cover.
+    better = _vertical_label("MAIN", 238, 1002, 24.0, 0.952)
+    stands_alone = _vertical_label("OAK", 242, 529, 20.0, 0.896)
+    kept, dropped = drop_collinear_dominated(
+        [better, stands_alone], _COLLINEAR_STREETS, **_GATE
+    )
+    assert dropped == []
+    assert len(kept) == 2
+
+
+def test_drop_collinear_dominated_spares_a_promoted_label():
+    from mapsnap.georef_from_labels import drop_collinear_dominated
+
+    # Promoted avenue letters bypass the size gate entirely, so they are never a relaxed
+    # admission and the collinear rule has no discount to withhold.
+    better = _vertical_label("MAIN", 238, 1002, 24.0, 0.95)
+    promoted = _vertical_label("OAK", 242, 529, 8.0, 0.32)
+    promoted["promoted"] = True
+    kept, dropped = drop_collinear_dominated(
+        [better, promoted], _COLLINEAR_STREETS, **_GATE
+    )
+    assert dropped == []
+    assert len(kept) == 2
+
+
+def test_needs_size_relaxation_tracks_the_base_gate():
+    from mapsnap.georef_from_labels import needs_size_relaxation
+
+    assert needs_size_relaxation({"short_side": 16.0, "long_side": 44.0}, 18.0, 36.0)
+    assert needs_size_relaxation({"short_side": 20.0, "long_side": 30.0}, 18.0, 36.0)
+    assert not needs_size_relaxation(
+        {"short_side": 20.0, "long_side": 44.0}, 18.0, 36.0
+    )
+    assert not needs_size_relaxation(
+        {"short_side": 18.0, "long_side": 36.0}, 18.0, 36.0
+    )
+    assert not needs_size_relaxation(
+        {"short_side": 4.0, "long_side": 4.0, "promoted": True}, 18.0, 36.0
     )
