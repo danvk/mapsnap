@@ -55,10 +55,9 @@ def test_combined_sha256_changes_with_content(tmp_path):
 
 
 def test_normalize_flags_drops_num_workers():
-    flags = ["--scale-outlier-threshold", "0", "--num-workers", "2", "--debug"]
+    flags = ["--disable-scale-outlier-check", "--num-workers", "2", "--debug"]
     assert normalize_flags_for_hash(flags) == [
-        "--scale-outlier-threshold",
-        "0",
+        "--disable-scale-outlier-check",
         "--debug",
     ]
 
@@ -73,7 +72,7 @@ def test_config_hash_ignores_num_workers():
 def test_config_hash_changes_with_flags():
     inputs = {"streets": {"combined_sha": "sha256:x"}}
     a = compute_config_hash([], inputs)
-    b = compute_config_hash(["--scale-outlier-threshold", "0"], inputs)
+    b = compute_config_hash(["--disable-scale-outlier-check"], inputs)
     assert a != b
     assert len(a) == 8
 

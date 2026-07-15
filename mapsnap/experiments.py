@@ -104,7 +104,7 @@ def normalize_flags_for_hash(flag_tokens: list[str]) -> list[str]:
     """Drop output-irrelevant flags (e.g. ``--num-workers N``) from a passthrough token list.
 
     The remaining tokens are returned in their original order; they're folded into the config
-    hash so that, e.g., ``--scale-outlier-threshold 0`` archives separately from the default.
+    hash so that, e.g., ``--disable-scale-outlier-check`` archives separately from the default.
     """
     result: list[str] = []
     i = 0

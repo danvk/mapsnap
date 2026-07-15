@@ -1344,20 +1344,57 @@ def test_region_relative_scale():
     assert region_relative_scale(0.5, 2.23) == 1.0
 
 
-def test_region_corroborates_scale():
-    from mapsnap.georef_from_labels import region_corroborates_scale
+def test_is_scale_outlier():
+    from mapsnap.georef_from_labels import is_scale_outlier
 
-    # Champaign's half-scale sheets: fitted 0.515x the median, regions 0.43-0.55x the
-    # typical region -> kept.
-    assert region_corroborates_scale(0.515, 0.55)
-    assert region_corroborates_scale(0.515, 0.43)
-    # A split half whose prior was computed from the wrong panel's block (or, before
-    # the split_page fix, from both blocks summed) disagrees -> still dropped.
-    assert not region_corroborates_scale(0.515, 0.27)
-    # Genuine bad fits: Chicago p50n (0.53x fit, 0.76x region) and Detroit p85 (1.37x
-    # fit, 0.89x region) disagree with their regions -> still dropped.
-    assert not region_corroborates_scale(0.53, 0.76)
-    assert not region_corroborates_scale(1.37, 0.89)
+    # Within the band around the reference itself -> kept.
+    assert not is_scale_outlier(1.0)
+    assert not is_scale_outlier(1.24)
+    assert not is_scale_outlier(0.76)
+    # Between the median band and the half/double bands -> outlier.
+    assert is_scale_outlier(0.7)
+    assert is_scale_outlier(1.4)
+    assert is_scale_outlier(3.0)
+    # Half-scale band [0.4, 0.6] and double-scale band [1.8, 2.2] -> kept (differently-scaled).
+    assert not is_scale_outlier(0.5)
+    assert not is_scale_outlier(0.4)
+    assert not is_scale_outlier(0.6)
+    assert not is_scale_outlier(2.0)
+    assert not is_scale_outlier(1.8)
+    assert not is_scale_outlier(2.2)
+    # Just outside the half/double bands -> outlier.
+    assert is_scale_outlier(0.65)
+    assert is_scale_outlier(0.35)
+    assert is_scale_outlier(1.7)
+    assert is_scale_outlier(2.3)
+
+
+def test_consensus_scale_picks_middle_of_ladder():
+    from mapsnap.georef_from_labels import consensus_scale
+
+    # 1x/2x/4x ladder: only the middle (2.0) rung is within a band of all three rungs.
+    scales = [1.0, 1.0, 2.0, 2.0, 4.0, 4.0]
+    assert consensus_scale(scales) == 2.0
+
+
+def test_consensus_scale_ignores_intermediate_bad_cluster():
+    from mapsnap.georef_from_labels import consensus_scale
+
+    # Two real scales 2x apart (2.0, 4.0) plus a bad-fit cluster at 2.8 (not 2x-related).
+    # Anchoring on 2.0 keeps the 2.0 (1x) and 4.0 (2x) families and drops 2.8; anchoring on
+    # 2.8 keeps only itself. The consensus is the dominant family's scale, not the median.
+    scales = [2.0] * 10 + [4.0] * 8 + [2.8] * 3
+    assert (
+        sorted(scales)[len(scales) // 2] == 2.8
+    )  # positional median is the bad cluster
+    assert consensus_scale(scales) == 2.0
+
+
+def test_consensus_scale_returns_an_actual_page_scale():
+    from mapsnap.georef_from_labels import consensus_scale
+
+    scales = [1.03, 0.97, 1.0, 1.02, 0.99]
+    assert consensus_scale(scales) in scales
 
 
 def test_is_split_page():

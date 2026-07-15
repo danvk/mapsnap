@@ -289,13 +289,6 @@ BROADENED_SCALE_MAX_RATIO = 6.0
 HALF_SCALE_MAX_RATIO = 0.63
 HALF_SCALE_MIN_RATIO = math.sqrt(0.125)
 
-# A fit dropped as a global scale outlier is spared when its region corroborates the scale:
-# the fitted scale-vs-median ratio must match the region's area-implied ratio within this
-# factor. 1.3 passes the region noise on real second-scale sheets (Champaign p19/p22 agree
-# within 0.94-1.19x of their regions) while staying below the smallest observed bad-fit
-# agreement (Chicago p50n at 0.70x, Detroit p85 at 1.54x).
-MISSCALE_REGION_AGREEMENT = 1.3
-
 # When a key-map-placed page's strict neighborhood fit fails, retry with the size floor
 # scaled by this fraction: the radius-restricted vocabulary makes small confident labels
 # trustworthy (Brooklyn p28's essential cross streets "MILL"/"W. 9TH" are 14px against the
@@ -303,6 +296,18 @@ MISSCALE_REGION_AGREEMENT = 1.3
 # strict success is never replaced — and the relaxed fit must still pass the region-scale
 # plausibility gate.
 KEYMAP_RETRY_SIZE_FRACTION = 0.6
+
+# Scale-outlier bands: the three ratios-to-the-reference a fit may land on and still be kept.
+# SAME_SCALE_BAND is the tolerance around the reference itself; a fit near an exact 0.5x or 2x
+# multiple is kept as a genuine differently-scaled sheet rather than dropped as a misfit, because
+# many volumes (Nashville, Grand Rapids, Champaign) mix 50 ft/in and 100 ft/in pages, and a clean
+# multiple is the signature of a good fit on a differently-scaled page rather than the scatter a
+# bad fit produces. All three are fixed: they describe how Sanborn sheet scales actually relate
+# (1x / 2x / 4x rungs, plus fitting noise), not a preference to tune per volume. Use
+# --disable-scale-outlier-check to switch the whole check off.
+SAME_SCALE_BAND = (0.75, 1.25)
+HALF_SCALE_BAND = (0.4, 0.6)
+DOUBLE_SCALE_BAND = (1.8, 2.2)
 
 
 def is_split_page(stem: str) -> bool:
@@ -367,15 +372,44 @@ def region_relative_scale(
     return 1.0
 
 
-def region_corroborates_scale(fitted_ratio: float, region_ratio: float) -> bool:
-    """Whether a fit's scale-vs-median ratio matches its region's area-implied ratio.
+def is_scale_outlier(ratio: float) -> bool:
+    """Whether a fitted-scale / reference-scale ratio should be dropped as a scale outlier.
 
-    Spares genuine second-scale sheets (Champaign p19-p23, half the volume scale) from
-    the global scale-outlier drop, which cannot tell them from bad fits. Both arguments
-    are ratios to the respective volume medians, so the regions' volume-wide bias cancels.
+    A page is kept (not an outlier) when its ratio lands in the band around the reference itself
+    (:data:`SAME_SCALE_BAND`), or in the half-scale (~0.5x, :data:`HALF_SCALE_BAND`) or
+    double-scale (~2x, :data:`DOUBLE_SCALE_BAND`) band. The half/double bands admit genuine
+    differently-scaled sheets — a page drawn at 50 vs 100 ft/in relative to the reference lands
+    almost exactly at 0.5x or 2x — whose clean multiple distinguishes them from the scattered
+    ratios a bad fit produces.
     """
-    agreement = fitted_ratio / region_ratio
-    return 1.0 / MISSCALE_REGION_AGREEMENT <= agreement <= MISSCALE_REGION_AGREEMENT
+    return not any(
+        low <= ratio <= high
+        for low, high in (SAME_SCALE_BAND, HALF_SCALE_BAND, DOUBLE_SCALE_BAND)
+    )
+
+
+def consensus_scale(scales: list[float]) -> float:
+    """The page scale that keeps the most pages within the scale-outlier bands.
+
+    Anchors the scale-outlier check (and the deferred 1-GCP scale prior) on the scale shared —
+    directly or at a clean 0.5x/2x multiple (:func:`is_scale_outlier`) — by the most pages,
+    rather than the positional median. This has two properties the median lacks:
+
+    * On a 1x/2x/4x scale ladder it selects the middle (2x) rung, the only anchor under which
+      every rung lands in a band.
+    * It is robust to a cluster of consistent *bad* fits at an intermediate, non-2x-related
+      scale capturing the median — Nashville's ~2.14 px/ft misfit cluster holds the positional
+      median (keeping 13/59 pages), where the consensus 2.78 keeps 58/59 and still drops the
+      lone wild outlier.
+
+    Always returns an actual page's scale (it never averages two values). ``scales`` must be
+    non-empty; ties are broken toward the smaller scale for determinism.
+    """
+
+    def kept(reference: float) -> int:
+        return sum(not is_scale_outlier(scale / reference) for scale in scales)
+
+    return max(sorted(scales), key=kept)
 
 
 def image_size(image_path: str) -> tuple[int, int]:
@@ -2810,14 +2844,13 @@ def main() -> None:
         ),
     )
     parser.add_argument(
-        "--scale-outlier-threshold",
-        type=float,
-        default=0.25,
-        metavar="FRAC",
+        "--disable-scale-outlier-check",
+        action="store_true",
         help=(
-            "Delete georef output files whose fitted scale deviates from the reference "
-            "scale by more than this fraction (default: 0.25 = 25%%). "
-            "Set to 0 to disable. Reference is --scale if given, else the median."
+            "Keep every fit regardless of its scale. By default a georef output file is "
+            "deleted when its fitted scale is not near the reference scale, nor at a clean "
+            "~0.5x or ~2x multiple of it (a differently-scaled sheet). Reference is --scale "
+            "if given, else the volume's consensus scale."
         ),
     )
     parser.add_argument(
@@ -3109,18 +3142,23 @@ def main() -> None:
         elif result.deferred is not None:
             deferred_list.append(result.deferred)
 
-    # Determine reference scale: explicit override takes priority, then median.
+    # Determine reference scale: explicit override takes priority, then the volume's
+    # consensus scale (consensus_scale) — the actual page scale that keeps the most pages
+    # within the outlier bands. The positional median fails when a bimodal or trimodal volume
+    # puts the middle page between the real scale clusters (Nashville: 3 clusters ~1.43/2.14/
+    # 2.9, median lands on the bad-fit ~2.14 middle and drops the two real families); the
+    # consensus anchors on the dominant 0.5x/1x/2x scale family instead.
     if args.scale is not None:
         ref_scale_px_per_ft: float | None = args.scale
     elif scales:
-        ref_scale_px_per_ft = float(np.median(scales))
+        ref_scale_px_per_ft = consensus_scale(scales)
     else:
         ref_scale_px_per_ft = None
 
-    # Print median scale whenever multiple images were processed.
-    if scales and len(args.images) > 1:
+    # Print reference scale whenever multiple images were processed.
+    if scales and len(args.images) > 1 and ref_scale_px_per_ft is not None:
         print(
-            f"\nMedian scale: {float(np.median(scales)):.4f} px/ft ({len(scales)} images)",
+            f"\nReference scale: {ref_scale_px_per_ft:.4f} px/ft ({len(scales)} images)",
             file=sys.stderr,
         )
 
@@ -3179,35 +3217,11 @@ def main() -> None:
                         )
 
     # Drop georef files whose fitted scale is a major outlier vs the reference.
-    if ref_scale_px_per_ft is not None and args.scale_outlier_threshold > 0:
+    if ref_scale_px_per_ft is not None and not args.disable_scale_outlier_check:
         n_dropped = 0
         for img_path, px_per_ft in scale_records:
             ratio = px_per_ft / ref_scale_px_per_ft
-            if abs(ratio - 1.0) > args.scale_outlier_threshold:
-                # A genuine second-scale sheet (Champaign p19-p23 at half the volume
-                # scale) is indistinguishable from a bad fit by the median check alone;
-                # its key-map region can vouch for it.
-                if locator is not None and median_region_prior is not None:
-                    entry = locator.page_keymap(page_number(image_stem(img_path)))
-                    prior = (
-                        region_prior_px_per_ft(
-                            entry,
-                            *image_size(img_path),
-                            split_page=is_split_page(image_stem(img_path)),
-                        )
-                        if entry is not None
-                        else None
-                    )
-                    if prior is not None and region_corroborates_scale(
-                        ratio, prior / median_region_prior
-                    ):
-                        print(
-                            f"Keeping scale outlier {img_path}: {ratio:.2f}x the "
-                            f"median matches its key-map region "
-                            f"({prior / median_region_prior:.2f}x the typical region)",
-                            file=sys.stderr,
-                        )
-                        continue
+            if is_scale_outlier(ratio):
                 _, out_path, _ = derive_paths(img_path)
                 misscale_path = out_path.replace(
                     ".georef.json", ".georef-misscale.json"
