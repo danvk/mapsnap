@@ -1,6 +1,12 @@
-import { useEffect, useState } from 'react';
-import type { SkippedItem, VolumeInfo } from '../../server/iiifAnnotations';
+import { useEffect, useMemo, useState } from 'react';
+import type {
+  GeorefAnnotationPage,
+  SkippedItem,
+  VolumeInfo,
+} from '../../server/iiifAnnotations';
 import { fetchRewrittenAnnotation, fetchVolumes } from '../iiif/api';
+import { pagesFromAnnotation } from '../iiif/pages';
+import { PageInfoPanel } from './PageInfoPanel';
 import { VolumeMap } from './VolumeMap';
 
 // Split a repo-root-relative annotation path like
@@ -30,6 +36,9 @@ export function VolumeViewer() {
   } | null>(null);
   const [opacity, setOpacity] = useState(100);
   const [error, setError] = useState<string | null>(null);
+  const [selectedItemIndex, setSelectedItemIndex] = useState<number | null>(
+    null,
+  );
 
   useEffect(() => {
     fetchVolumes()
@@ -43,6 +52,7 @@ export function VolumeViewer() {
     let cancelled = false;
     setError(null);
     setLoadResult(null);
+    setSelectedItemIndex(null);
     fetchRewrittenAnnotation(selectedPath)
       .then((resp) => {
         if (cancelled) return;
@@ -63,6 +73,16 @@ export function VolumeViewer() {
 
   const selection = parseAnnotationPath(selectedPath);
   const selectedVolume = volumes?.find((v) => v.name === selection?.volume);
+
+  const pages = useMemo(
+    () =>
+      annotation ? pagesFromAnnotation(annotation as GeorefAnnotationPage) : [],
+    [annotation],
+  );
+  const selectedPage =
+    selectedItemIndex === null
+      ? null
+      : (pages.find((p) => p.itemIndex === selectedItemIndex) ?? null);
 
   function selectVolume(name: string): void {
     const volume = volumes?.find((v) => v.name === name);
@@ -127,11 +147,23 @@ export function VolumeViewer() {
         </div>
         <span className="iiif-status">{status}</span>
       </div>
-      <VolumeMap
-        annotation={annotation}
-        opacity={opacity / 100}
-        onLoadResult={setLoadResult}
-      />
+      <div className="volume-viewer-body">
+        <VolumeMap
+          annotation={annotation}
+          pages={pages}
+          selectedItemIndex={selectedItemIndex}
+          onSelectPage={setSelectedItemIndex}
+          opacity={opacity / 100}
+          onLoadResult={setLoadResult}
+        />
+        {selectedPage && (
+          <PageInfoPanel
+            page={selectedPage}
+            volume={selection?.volume ?? ''}
+            onClose={() => setSelectedItemIndex(null)}
+          />
+        )}
+      </div>
     </div>
   );
 }

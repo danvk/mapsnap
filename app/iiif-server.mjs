@@ -162,6 +162,12 @@ app.get('/iiif-api/annotation', async (req, res) => {
   }
 });
 
+// Serve the image directory under the app base so `?files=data/...` deep
+// links (e.g. the volume viewer's per-page streets/georef links) work when
+// the production build is served from this server rather than the Vite dev
+// server (whose serveDataDir plugin fills this role in development).
+app.use('/mapsnap/data', express.static(imageDir));
+
 // Serve a production build, if one exists, under the app's base path.
 app.use('/mapsnap', express.static(resolve('dist')));
 
