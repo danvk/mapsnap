@@ -130,6 +130,43 @@ def test_assemble_adjacent_words_into_street():
     )  # both parts consumed so a lone ambiguous "VAN" doesn't remain
 
 
+def test_assemble_admits_weak_partner_beside_confident_anchor():
+    # Brooklyn p19: a 1.000 "VAN" beside a 0.096 "BRUNT". The faint word is unusable alone but
+    # the confident anchor + collinear geometry + the vocabulary hit vouch for it.
+    van = _make_det("VAN", cx=700, cy=1000, long_side=50, short_side=22, confidence=1.0)
+    brunt = _make_det(
+        "BRUNT", cx=760, cy=1000, long_side=80, short_side=22, confidence=0.096
+    )
+    assembled, consumed = assemble_multiword_streets([van, brunt], _VAN_STREETS)
+    assert len(assembled) == 1
+    assert assembled[0]["text"] == "VAN BRUNT"
+    # The joint hypothesis takes the anchor's strength; min() would re-sink it below the gate.
+    assert assembled[0]["confidence"] == 1.0
+    assert (
+        len(consumed) == 2
+    )  # the lone "VAN" is consumed, so it cannot fan out by prefix
+
+
+def test_assemble_rejects_two_weak_parts():
+    # Neither word stands on its own -> nothing vouches for the pair.
+    van = _make_det("VAN", cx=700, cy=1000, long_side=50, short_side=22, confidence=0.2)
+    brunt = _make_det(
+        "BRUNT", cx=760, cy=1000, long_side=80, short_side=22, confidence=0.096
+    )
+    assembled, consumed = assemble_multiword_streets([van, brunt], _VAN_STREETS)
+    assert assembled == [] and consumed == []
+
+
+def test_assemble_ignores_partner_below_the_noise_floor():
+    # Below weak_partner_confidence the partner is noise, not a faint read.
+    van = _make_det("VAN", cx=700, cy=1000, long_side=50, short_side=22, confidence=1.0)
+    brunt = _make_det(
+        "BRUNT", cx=760, cy=1000, long_side=80, short_side=22, confidence=0.01
+    )
+    assembled, _ = assemble_multiword_streets([van, brunt], _VAN_STREETS)
+    assert assembled == []
+
+
 def test_assemble_resolves_reading_order():
     # Spatial order doesn't matter: only "VAN BRUNT" matches a street, not "BRUNT VAN".
     brunt = _make_det("BRUNT", cx=700, cy=1000, long_side=80, short_side=22)
