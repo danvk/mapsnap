@@ -22,12 +22,12 @@ Test data comes from hand-geocoding by volunteers on OldInsuranceMaps.net:
 
 Volume | Pages | Num Fit | Median RMSE | Within 15ft | Within 25ft | Allmaps
 ------ | ----- | ------- | ----------- | ----------- | ----------- | -------
-[New Orleans 1951 Vol 5][nola5] | 109 | 101 (93%) | 12ft | 70% | 85% | [view][nola5-iiif]
-[New Orleans 1896 Vol 2][nola2] | 91 | 82 (90%) | 26ft | 38% | 48% | [view][nola2-iiif]
-[Detroit 1929 Vol 11][detroit] | 103 | 84 (82%) | 13ft | 58% | 75% | [view][detroit-iiif]
-[Chicago 1950 Vol 1][chicago] | 111 | 100 (90%) | 10ft | 72% | 88% | [view][chicago-iiif]
-[Champaign, Ill. 1915][champaign] | 33 | 26 (79%)[^1] | 11ft | 85% | 100% | [view][champaign-iiif]
-[Brooklyn 1939 Vol 1][brooklyn1] | 62 | 50 (81%) | 8ft | 78% | 84% | [view][brooklyn1-iiif]
+[New Orleans 1951 Vol 5][nola5] | 109 | 103 (94%) | 12ft | 68% | 85% | [view][nola5-iiif]
+[New Orleans 1896 Vol 2][nola2] | 91 | 82 (90%) | 27ft | 32% | 46% | [view][nola2-iiif]
+[Detroit 1929 Vol 11][detroit] | 103 | 83 (81%) | 15ft | 51% | 67% | [view][detroit-iiif]
+[Chicago 1950 Vol 1][chicago] | 111 | 100 (90%) | 10ft | 69% | 83% | [view][chicago-iiif]
+[Champaign, Ill. 1915][champaign] | 33 | 27 (82%) | 10ft | 85% | 96% | [view][champaign-iiif]
+[Brooklyn 1939 Vol 1][brooklyn1] | 62 | 55 (89%) | 10ft | 73% | 75% | [view][brooklyn1-iiif]
 
 RMSE was measured across 49 equally-spaced points on each image. You can view the fits on Allmaps or get the IIIF files from the `gallery` directory. For notes on poor fits, see [test data notes].
 
@@ -45,8 +45,6 @@ RMSE was measured across 49 equally-spaced points on each image. You can view th
 [champaign-iiif]: https://dev.viewer.allmaps.org/?url=https%3A%2F%2Fraw.githubusercontent.com%2Fdanvk%2Fmapsnap%2Frefs%2Fheads%2Fmain%2Fgallery%2Fchampaign_ill_1915.iiif.json
 [brooklyn1-iiif]: https://dev.viewer.allmaps.org/?url=https%3A%2F%2Fraw.githubusercontent.com%2Fdanvk%2Fmapsnap%2Frefs%2Fheads%2Fmain%2Fgallery%2Fbrooklyn_ny_1939_vol_1.iiif.json
 [test data notes]: https://github.com/danvk/mapsnap/wiki/Test-data-notes
-
-[^1]: Requires running with `--scale-outlier-threshold 0` since this volume contains maps using two different scales.
 
 ## How it Works
 
