@@ -29,6 +29,7 @@ import { GcpControls, type GcpFitStats } from './components/GcpControls';
 import { AdjacencyTable } from './components/AdjacencyTable';
 import { DetectionsTable } from './components/DetectionsTable';
 import { PanelsTable } from './components/PanelsTable';
+import { VolumeViewer } from './components/VolumeViewer';
 import { loadImage } from './loadImage';
 
 // The seed pair the pipeline chose: the two intersections flagged `initial`.
@@ -101,7 +102,11 @@ declare global {
  * (text detections), and panels (page-split polygons).
  */
 export function App() {
-  const [mode, setMode] = useState<Mode>('georef');
+  const [mode, setMode] = useState<Mode>(() =>
+    new URLSearchParams(window.location.search).get('view') === 'iiif'
+      ? 'iiif'
+      : 'georef',
+  );
   const [streets, setStreets] = useState<Street[]>([]);
   const [intersections, setIntersections] = useState<IntersectionPoint[]>([]);
   const [keymap, setKeymap] = useState<KeymapLocation | null>(null);
@@ -455,10 +460,21 @@ export function App() {
     return () => window.removeEventListener('keydown', onKeydown);
   }, [mode]);
 
+  if (mode === 'iiif') {
+    return (
+      <div className="container container-iiif">
+        <VolumeViewer />
+      </div>
+    );
+  }
+
   return (
     <div
       className={mode === 'panels' ? 'container container-panels' : 'container'}
     >
+      <nav className="view-nav">
+        <a href="?view=iiif">volume viewer</a>
+      </nav>
       <ImageColumn
         mode={mode}
         imageSrc={imageSrc}

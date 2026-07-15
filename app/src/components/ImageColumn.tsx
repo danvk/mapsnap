@@ -7,7 +7,7 @@ import { DetectionsOverlay } from './DetectionsOverlay';
 import { GeorefOverlay } from './GeorefOverlay';
 import { PanelsOverlay } from './PanelsOverlay';
 
-export type Mode = 'georef' | 'streets' | 'panels' | 'adjacency';
+export type Mode = 'georef' | 'streets' | 'panels' | 'adjacency' | 'iiif';
 
 interface ImageColumnProps {
   mode: Mode;
