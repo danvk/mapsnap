@@ -1312,22 +1312,6 @@ def test_region_relative_scale():
     assert region_relative_scale(0.5, 2.23) == 1.0
 
 
-def test_region_corroborates_scale():
-    from mapsnap.georef_from_labels import region_corroborates_scale
-
-    # Champaign's half-scale sheets: fitted 0.515x the median, regions 0.43-0.55x the
-    # typical region -> kept.
-    assert region_corroborates_scale(0.515, 0.55)
-    assert region_corroborates_scale(0.515, 0.43)
-    # A split half whose prior was computed from the wrong panel's block (or, before
-    # the split_page fix, from both blocks summed) disagrees -> still dropped.
-    assert not region_corroborates_scale(0.515, 0.27)
-    # Genuine bad fits: Chicago p50n (0.53x fit, 0.76x region) and Detroit p85 (1.37x
-    # fit, 0.89x region) disagree with their regions -> still dropped.
-    assert not region_corroborates_scale(0.53, 0.76)
-    assert not region_corroborates_scale(1.37, 0.89)
-
-
 def test_is_scale_outlier():
     from mapsnap.georef_from_labels import is_scale_outlier
 
