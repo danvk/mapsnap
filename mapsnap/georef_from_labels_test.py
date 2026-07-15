@@ -1252,6 +1252,38 @@ def test_rank_pairs_by_consensus_is_deterministic():
     assert a == b
 
 
+def test_fit_keymap_affine_recovers_a_skewed_affine():
+    # A 6-DOF affine with skew (off-diagonal terms) that a 4-parameter similarity cannot
+    # represent; fitting the key map's own GCPs must recover it exactly.
+    from mapsnap.georef_from_labels import apply_affine, fit_keymap_affine
+
+    truth = np.array([[1e-5, 2e-6, -74.0], [-1e-6, -1e-5, 40.7]])
+    cos_phi = math.cos(math.radians(40.7))
+    rng = np.random.default_rng(0)
+    gcps = [
+        _make_gcp((float(px), float(py)), apply_affine(truth, px, py))
+        for px, py in rng.uniform(0, 2000, size=(12, 2))
+    ]
+    # Passing the truth affine as the "similarity" accepts every GCP as an inlier.
+    affine = fit_keymap_affine(truth, gcps, cos_phi)
+    assert affine is not None
+    for px, py in [(0.0, 0.0), (2000.0, 1500.0), (500.0, 900.0)]:
+        got = apply_affine(affine, px, py)
+        want = apply_affine(truth, px, py)
+        assert math.isclose(got[0], want[0], abs_tol=1e-9)
+        assert math.isclose(got[1], want[1], abs_tol=1e-9)
+
+
+def test_fit_keymap_affine_none_without_enough_inliers():
+    from mapsnap.georef_from_labels import apply_affine, fit_keymap_affine
+
+    truth = np.array([[1e-5, 0.0, -74.0], [0.0, -1e-5, 40.7]])
+    gcps = [
+        _make_gcp((float(i), float(i)), apply_affine(truth, i, i)) for i in range(3)
+    ]
+    assert fit_keymap_affine(truth, gcps, 1.0) is None
+
+
 def test_label_features_carries_fallback_flag():
     poly = [[0, 0], [40, 0], [40, 10], [0, 10]]
     feats = label_features(

@@ -30,7 +30,7 @@ import numpy as np
 from PIL import Image
 from tqdm import tqdm
 
-from mapsnap.compare_iiif_georef import truth_polygons_by_page
+from mapsnap.compare_iiif_georef import truth_distortion, truth_polygons_by_page
 from mapsnap.keymap.locate import (
     KeymapLocator,
     page_number,
@@ -188,6 +188,56 @@ def solve_similarity_2pts(
     x = np.linalg.solve(M, b)
     alpha, beta, tx, ty = x
     return np.array([[alpha / cos_phi, beta / cos_phi, tx], [beta, -alpha, ty]])
+
+
+def fit_keymap_affine(
+    similarity: np.ndarray,
+    gcps: list["IntersectionGCP"],
+    cos_phi: float,
+    min_gcps: int = 8,
+    pos_threshold: float = 0.001,
+    trim: float = 2.5,
+    rounds: int = 3,
+) -> np.ndarray | None:
+    """Robust 6-DOF affine (pixel → lon/lat) fit to a key map's own inlier intersection GCPs.
+
+    A key map's own georeference is fit from many street-intersection GCPs; a full **affine**
+    captures the scale anisotropy and skew a 4-parameter similarity cannot — which most affects
+    pages near the sheet edge — while staying independent of the page georeferencing. Fits only on
+    the GCPs the ``similarity`` fit accepts (residual within ``pos_threshold``), in a
+    cos(lat)-corrected frame so longitude and latitude errors weigh equally, dropping points beyond
+    ``trim`` × the median residual each round. Returns a 2×3 affine in the same form as
+    :func:`solve_similarity_2pts` (``[lon, lat]^T = A @ [px, py, 1]^T``), or None with fewer than
+    ``min_gcps`` inliers.
+    """
+    inliers = [
+        g
+        for g in gcps
+        if float(
+            np.linalg.norm(
+                np.array(apply_affine(similarity, *g.pixel)) - np.array(g.geo)
+            )
+        )
+        <= pos_threshold
+    ]
+    if len(inliers) < min_gcps:
+        return None
+    pixels = np.array([[g.pixel[0], g.pixel[1], 1.0] for g in inliers])
+    world = np.array(
+        [[g.geo[0] * cos_phi, g.geo[1]] for g in inliers]
+    )  # cos-corrected lon
+    keep = np.ones(len(inliers), dtype=bool)
+    solution = np.zeros((3, 2))
+    for _ in range(rounds):
+        solution = np.linalg.lstsq(pixels[keep], world[keep], rcond=None)[0]
+        residual = np.linalg.norm(world - pixels @ solution, axis=1)
+        updated = residual < trim * float(np.median(residual[keep]))
+        if bool((updated == keep).all()):
+            break
+        keep = updated
+    affine = solution.T.copy()  # 2×3: row 0 = (lon·cos_phi) coeffs, row 1 = lat coeffs
+    affine[0] /= cos_phi  # undo the longitude correction so the affine maps to raw lon
+    return affine
 
 
 _FT_PER_DEG_LAT: float = math.pi * 20_925_524.0 / 180.0  # feet per degree latitude
@@ -2333,6 +2383,28 @@ def process_image(
     )
 
     residuals = _inlier_residuals(features, block_index, A, inlier_feat_indices)
+
+    # A key-map index page (one with a sibling <stem>.keymap.json) is refit with a full 6-DOF
+    # affine on its own inlier GCPs, so the georef.json corners capture the scale anisotropy and
+    # skew a 4-parameter similarity cannot — read straight off by the key-map locator, with no
+    # separate refit downstream.
+    keymap_json = os.path.join(
+        os.path.dirname(image_path), f"{image_stem(image_path)}.keymap.json"
+    )
+    if os.path.exists(keymap_json):
+        affine = fit_keymap_affine(A, gcps, cos_phi)
+        if affine is not None:
+            # Report what the extra two degrees of freedom actually bought. A similarity is
+            # anisotropy 1.0 / skew 0° by construction, so these are exactly the distortion it
+            # could not have represented.
+            skew_deg, aniso = truth_distortion(affine)
+            print(
+                "Key map: refitting corners with a 6-DOF affine on its GCPs "
+                f"(anisotropy {aniso:.4f}, skew {skew_deg:+.3f}°).",
+                file=sys.stderr,
+            )
+            A = affine
+            residuals = _inlier_residuals(features, block_index, A, inlier_feat_indices)
 
     scale, center = _finalize_georef(
         A,
