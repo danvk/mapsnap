@@ -112,6 +112,83 @@ class AbsolutePrior:
     sigma_theta_rad: float = math.radians(2.0)
 
 
+@dataclass
+class LineFactor:
+    """A detected street label constrained to lie on its named centerline.
+
+    The label's pixel centroid, pre-scaled to metres (pixel_m = px *
+    scale_m_per_px), must land near one of the street's centerline segments;
+    which segment is nearest is re-evaluated inside the solver, and a label
+    farther than clamp_m from every segment contributes a constant residual
+    with zero gradient — it self-disables rather than dragging the fit
+    (bad OCR reads are common; this is the robustness the caller relies on).
+    The label's long-axis direction must also align with the centerline
+    (both mod pi).
+    """
+
+    index: int
+    pixel_m: tuple[float, float]
+    dir_pix: float
+    seg_starts: np.ndarray  # (S, 2) frame metres
+    seg_ends: np.ndarray  # (S, 2)
+    sigma_perp_m: float = 8.0
+    sigma_theta_rad: float = math.radians(3.0)
+    clamp_m: float = 40.0
+
+
+def line_factor_arrays(factors: list["LineFactor"]) -> dict:
+    """Flatten variable-length segment lists for vectorized residuals."""
+    seg_starts = np.concatenate([f.seg_starts for f in factors])
+    seg_ends = np.concatenate([f.seg_ends for f in factors])
+    counts = [len(f.seg_starts) for f in factors]
+    offsets = np.concatenate([[0], np.cumsum(counts)])[:-1]
+    return {
+        "node": np.array([f.index for f in factors], dtype=int),
+        "pixel_m": np.array([f.pixel_m for f in factors]),
+        "dir_pix": np.array([f.dir_pix for f in factors]),
+        "seg_start": seg_starts,
+        "seg_end": seg_ends,
+        "factor_of_seg": np.repeat(np.arange(len(factors)), counts),
+        "reduce_offsets": offsets,
+        "w_perp": 1.0 / np.array([f.sigma_perp_m for f in factors]),
+        "w_theta": 1.0 / np.array([f.sigma_theta_rad for f in factors]),
+        "clamp": np.array([f.clamp_m for f in factors]),
+    }
+
+
+def line_factor_residuals(poses: np.ndarray, arrays: dict) -> np.ndarray:
+    """(2F,) sigma-normalized [clamped perp distance, angle] residuals."""
+    node = arrays["node"]
+    theta = poses[node, 2]
+    c, s = np.cos(theta), np.sin(theta)
+    px, py = arrays["pixel_m"][:, 0], arrays["pixel_m"][:, 1]
+    qx = poses[node, 0] + c * px - s * py
+    qy = poses[node, 1] + s * px + c * py
+    factor_of_seg = arrays["factor_of_seg"]
+    ax, ay = arrays["seg_start"][:, 0], arrays["seg_start"][:, 1]
+    bx, by = arrays["seg_end"][:, 0], arrays["seg_end"][:, 1]
+    dx, dy = bx - ax, by - ay
+    length_sq = np.maximum(dx * dx + dy * dy, 1e-12)
+    fx, fy = qx[factor_of_seg] - ax, qy[factor_of_seg] - ay
+    t = np.clip((fx * dx + fy * dy) / length_sq, 0.0, 1.0)
+    dist = np.hypot(fx - t * dx, fy - t * dy)
+    offsets = arrays["reduce_offsets"]
+    min_dist = np.minimum.reduceat(dist, offsets)
+    # Angle of each factor's nearest segment (mod pi). Segments are stored
+    # contiguously per factor, so reduceat picks the first argmin per group.
+    is_min = dist <= (min_dist[factor_of_seg] + 1e-9)
+    seg_angle = np.arctan2(dy, dx)
+    candidate_idx = np.where(is_min, np.arange(len(dist)), len(dist) - 1)
+    first_min = np.minimum.reduceat(candidate_idx, offsets)
+    nearest_angle = seg_angle[first_min]
+    clamped = min_dist >= arrays["clamp"]
+    perp = np.minimum(min_dist, arrays["clamp"]) * arrays["w_perp"]
+    angle_err = theta + arrays["dir_pix"] - nearest_angle
+    angle_err = (angle_err + np.pi / 2) % np.pi - np.pi / 2
+    angle = np.where(clamped, 0.0, angle_err) * arrays["w_theta"]
+    return np.concatenate([perp, angle])
+
+
 def solve_pose_graph(
     initial: np.ndarray,
     measurements: list[RelativeMeasurement],
@@ -119,6 +196,7 @@ def solve_pose_graph(
     huber_scale: float = 2.5,
     max_nfev: int = 200,
     loss: str = "huber",
+    line_factors: list[LineFactor] | None = None,
 ) -> tuple[np.ndarray, dict]:
     """Robust joint solve of page poses.
 
@@ -145,9 +223,13 @@ def solve_pose_graph(
     pt_t = np.array([p.theta for p in with_theta])
     pt_w = 1.0 / np.array([p.sigma_theta_rad for p in with_theta])
 
+    factor_arrays = line_factor_arrays(line_factors) if line_factors else None
+
     def residuals(params: np.ndarray) -> np.ndarray:
         poses = params.reshape(n, 3)
         parts = []
+        if factor_arrays is not None:
+            parts.append(line_factor_residuals(poses, factor_arrays))
         if len(measurements):
             ca = np.cos(poses[m_a, 2])
             sa = np.sin(poses[m_a, 2])
@@ -228,6 +310,7 @@ def solve_pose_graph_hypotheses(
     priors: list[AbsolutePrior],
     max_rounds: int = 5,
     trim_sigma: float = 3.0,
+    line_factors: list[LineFactor] | None = None,
 ) -> tuple[np.ndarray, list[int], list[bool], dict]:
     """EM-style solve over multi-hypothesis edges.
 
@@ -245,7 +328,9 @@ def solve_pose_graph_hypotheses(
     switches_total = 0
     for _ in range(max_rounds):
         measurements = [e.candidates[assignment[i]] for i, e in enumerate(edges)]
-        poses, diag = solve_pose_graph(poses, measurements, priors)
+        poses, diag = solve_pose_graph(
+            poses, measurements, priors, line_factors=line_factors
+        )
         new_assignment = [
             min(
                 range(len(e.candidates)),
@@ -266,7 +351,10 @@ def solve_pose_graph_hypotheses(
     # cost drops.
     def solve_assigned(start: np.ndarray) -> tuple[np.ndarray, dict]:
         return solve_pose_graph(
-            start, [e.candidates[assignment[i]] for i, e in enumerate(edges)], priors
+            start,
+            [e.candidates[assignment[i]] for i, e in enumerate(edges)],
+            priors,
+            line_factors=line_factors,
         )
 
     poses, diag = solve_assigned(poses)
@@ -305,7 +393,7 @@ def solve_pose_graph_hypotheses(
             and theta_err <= trim_sigma * m.sigma_theta_rad
         )
     kept = [e.candidates[assignment[i]] for i, e in enumerate(edges) if active[i]]
-    poses, diag = solve_pose_graph(poses, kept, priors)
+    poses, diag = solve_pose_graph(poses, kept, priors, line_factors=line_factors)
     diag["switches"] = switches_total
     diag["trimmed"] = int(len(edges) - sum(active))
     return poses, assignment, active, diag

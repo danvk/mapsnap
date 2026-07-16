@@ -1722,6 +1722,8 @@ def cmd_report(volume: Path, chain_source: str = "chain") -> None:
 
 GRAPH_MIN_VERIFICATION = 0.5
 SINGLETON_MIN_VERIFICATION = 1.2
+STREET_FACTOR_MIN_CONFIDENCE = 0.7
+STREET_FACTOR_TRUST_M = 15.0
 
 
 def measurement_sigmas(verification: float, synthetic: bool) -> tuple[float, float]:
@@ -1921,6 +1923,142 @@ def effective_gcp_count(volume: Path, stem: str) -> int:
     return len(clusters)
 
 
+DIRECTIONAL_SUFFIXES = {
+    "NORTH",
+    "SOUTH",
+    "EAST",
+    "WEST",
+    "NORTHEAST",
+    "NORTHWEST",
+    "SOUTHEAST",
+    "SOUTHWEST",
+}
+
+
+def street_base_name(name: str) -> str:
+    """A street name with any trailing directional word removed.
+
+    "K STREET SOUTHEAST" and "K STREET NORTHWEST" are quadrant segments of
+    one physical street, not two candidate matches.
+    """
+    words = name.split()
+    if len(words) > 1 and words[-1] in DIRECTIONAL_SUFFIXES:
+        return " ".join(words[:-1])
+    return name
+
+
+def build_line_factors(
+    volume: Path,
+    vframe,
+    stems: list[str],
+    index: dict[str, int],
+    by_stem: dict[str, PageUnit],
+    initial: "np.ndarray",
+    min_confidence: float | None = None,
+) -> list:
+    """Street-label line factors: each accepted label must lie on its street.
+
+    Reuses the pipeline's label acceptance/assembly (prepare_label_features,
+    with the volume's own recorded gates) and the keymap vocabulary
+    restriction, mirroring align_page_region.street_matches; pages the key
+    map misses fall back to centerlines near the page's initialized pose.
+    Labels expanding to several candidate streets are dropped (ambiguous —
+    one reading would drag the fit); everything else is left to the solver's
+    clamp to reject.
+    """
+    import contextlib
+    import io
+
+    from mapsnap.edge_join_graph import LineFactor
+    from mapsnap.georef_from_labels import prepare_label_features
+    from mapsnap.keymap.align_page_region import volume_filter_params
+    from mapsnap.keymap.locate import (
+        KeymapLocator,
+        discover_keymaps,
+        geometry_segments,
+        segment_point_distance_m,
+    )
+    from mapsnap.streets import build_block_index
+    from mapsnap.utils import default_centerlines
+
+    centerlines_path = default_centerlines(volume)
+    if centerlines_path is None:
+        return []
+    features = json.loads(centerlines_path.read_text())["features"]
+    keymaps = discover_keymaps([str(volume / f"{stems[0]}.jpg")]) if stems else []
+    locator = KeymapLocator.from_keymaps(keymaps) if keymaps else None
+    filter_params = volume_filter_params(volume)
+    if min_confidence is not None:
+        filter_params["min_confidence"] = min_confidence
+
+    factors: list = []
+    for stem in stems:
+        unit = by_stem[stem]
+        streets_path = volume / f"{stem}.streets.json"
+        if not streets_path.exists():
+            continue
+        near = locator.restricted_features(unit.number, features) if locator else None
+        if near is None:
+            # Key map does not place this page: restrict by its current pose.
+            kx, ky = vframe.metre_scales()
+            x0, y0 = initial[index[stem], :2]
+            center = (x0 / kx + vframe.lon0, -y0 / ky + vframe.lat0)
+            radius = max(unit.keymap_radius_m, 800.0)
+            near = [
+                f
+                for f in features
+                if any(
+                    segment_point_distance_m(seg, center) <= radius
+                    for seg in geometry_segments(f.get("geometry", {}))
+                )
+            ]
+        if not near:
+            continue
+        block_index = build_block_index({"type": "FeatureCollection", "features": near})
+        sink = io.StringIO()
+        with contextlib.redirect_stdout(sink), contextlib.redirect_stderr(sink):
+            label_features = prepare_label_features(
+                str(streets_path),
+                block_index,
+                (unit.width, unit.height),
+                **filter_params,
+            )
+        # A label expanding to several candidate streets is ambiguous UNLESS
+        # the candidates are directional variants of one physical street
+        # (K STREET NE/NW/SE/SW): those merge into one factor whose segment
+        # soup is the union — DC's most common label type.
+        texts_per_center: dict[tuple[float, float], set[str]] = {}
+        for feature in label_features:
+            texts_per_center.setdefault(feature.center, set()).add(feature.text)
+        scale = vframe.scale_m_per_px
+        emitted: set[tuple[float, float]] = set()
+        for feature in label_features:
+            if feature.center in emitted:
+                continue
+            texts = texts_per_center[feature.center]
+            if len({street_base_name(t) for t in texts}) > 1:
+                continue
+            starts, ends = [], []
+            for text in sorted(texts):
+                for block in block_index.get(text, []):
+                    xy = [vframe.lonlat_to_xy(lon, lat) for lon, lat in block.coords]
+                    starts.extend(xy[:-1])
+                    ends.extend(xy[1:])
+            if not starts:
+                continue
+            emitted.add(feature.center)
+            factors.append(
+                LineFactor(
+                    index=index[stem],
+                    pixel_m=(feature.center[0] * scale, feature.center[1] * scale),
+                    dir_pix=feature.dir_pix,
+                    seg_starts=np.array(starts),
+                    seg_ends=np.array(ends),
+                )
+            )
+    return factors
+
+
 def keymap_position_prior(
     unit: PageUnit, vframe, init_xy: tuple[float, float]
 ) -> tuple[float, float, float] | None:
@@ -1953,7 +2091,12 @@ def keymap_position_prior(
     return None
 
 
-def cmd_posegraph(volume: Path, remeasure: bool, limit: int | None) -> None:
+def cmd_posegraph(
+    volume: Path,
+    remeasure: bool,
+    limit: int | None,
+    street_factors: bool = False,
+) -> None:
     """Global pose-graph solve over all edge-join measurements.
 
     Replaces the greedy chain's sequential accept/reject with one robust joint
@@ -2125,6 +2268,45 @@ def cmd_posegraph(volume: Path, remeasure: bool, limit: int | None) -> None:
     )
     reassigned = sum(1 for a in assignment if a != 0)
     print(f"solver: {diagnostics}; {reassigned} edges re-assigned to an alternate")
+
+    if street_factors:
+        # Two-stage: street-label line factors refine within a trust region
+        # of the seam-registered stage-1 solution. Factors snap pages that
+        # are already near truth onto their named centerlines; the trust
+        # priors keep them from relocating pages the graph placed elsewhere
+        # (a wrong start + a same-name street within clamp would otherwise
+        # lock in the error).
+        factors = build_line_factors(
+            volume,
+            vframe,
+            node_stems,
+            index,
+            by_stem,
+            solved,
+            min_confidence=STREET_FACTOR_MIN_CONFIDENCE,
+        )
+        print(
+            f"street factors: {len(factors)} labels on"
+            f" {len({f.index for f in factors})} pages"
+        )
+        trust_priors = list(priors)
+        for stem in node_stems:
+            i = index[stem]
+            x1, y1, theta1 = solved[i]
+            trust_priors.append(
+                AbsolutePrior(
+                    i,
+                    x1,
+                    y1,
+                    sigma_pos_m=STREET_FACTOR_TRUST_M,
+                    theta=theta1,
+                    sigma_theta_rad=math.radians(2.0),
+                )
+            )
+        solved, assignment, active, diagnostics = solve_pose_graph_hypotheses(
+            initial, edges, trust_priors, line_factors=factors
+        )
+        print(f"street-factor solve: {diagnostics}")
     # Rebuild incidence from surviving edges only: a page whose every edge was
     # trimmed has no measurement support and must not be written as placed.
     incident = {}
@@ -2313,6 +2495,11 @@ def main() -> None:
         action="store_true",
         help="posegraph: ignore cached measurements.jsonl",
     )
+    parser.add_argument(
+        "--street-factors",
+        action="store_true",
+        help="posegraph: refine with street-label line factors",
+    )
     args = parser.parse_args()
     if args.command == "stats":
         cmd_stats(args.volume)
@@ -2334,7 +2521,7 @@ def main() -> None:
             args.seeds,
         )
     elif args.command == "posegraph":
-        cmd_posegraph(args.volume, args.remeasure, args.limit)
+        cmd_posegraph(args.volume, args.remeasure, args.limit, args.street_factors)
     elif args.command == "materialize":
         cmd_materialize(args.volume, args.source)
     elif args.command == "report":

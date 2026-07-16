@@ -140,6 +140,42 @@ def test_hypotheses_solver_trims_unsupported_edge() -> None:
     assert np.abs(solved[:, :2] - truth[:, :2]).max() < 8.0
 
 
+def test_line_factor_pulls_page_onto_street() -> None:
+    """A label 50m into the page must land on a street at frame y=100."""
+    from mapsnap.edge_join_graph import LineFactor
+
+    street = LineFactor(
+        index=0,
+        pixel_m=(50.0, 50.0),
+        dir_pix=0.0,  # label reads horizontally, like the street
+        seg_starts=np.array([[-500.0, 100.0]]),
+        seg_ends=np.array([[500.0, 100.0]]),
+    )
+    priors = [AbsolutePrior(0, 0.0, 20.0, sigma_pos_m=200.0, theta=0.0)]
+    initial = np.array([[0.0, 20.0, 0.0]])
+    solved, _ = solve_pose_graph(initial, [], priors, line_factors=[street])
+    # Label frame-y = pose_y + 50 must equal 100.
+    assert abs(solved[0, 1] + 50.0 - 100.0) < 1.0
+    assert abs(solved[0, 0]) < 5.0  # along-street stays put (prior only)
+
+
+def test_line_factor_beyond_clamp_self_disables() -> None:
+    """A junk label whose street is 500m away must not drag the page."""
+    from mapsnap.edge_join_graph import LineFactor
+
+    junk = LineFactor(
+        index=0,
+        pixel_m=(10.0, 10.0),
+        dir_pix=0.0,
+        seg_starts=np.array([[-500.0, 500.0]]),
+        seg_ends=np.array([[500.0, 500.0]]),
+    )
+    priors = [AbsolutePrior(0, 0.0, 0.0, sigma_pos_m=5.0, theta=0.0)]
+    initial = np.array([[0.0, 0.0, 0.0]])
+    solved, _ = solve_pose_graph(initial, [], priors, line_factors=[junk])
+    assert np.abs(solved[0, :2]).max() < 1.0
+
+
 def test_spanning_tree_initialization_reaches_chain() -> None:
     truth, measurements, _ = make_square_graph()
     init = spanning_tree_initialization(
