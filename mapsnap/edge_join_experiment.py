@@ -14,6 +14,10 @@ Subcommands:
             artifacts/edge_join/roadprob/.
     sanity  per-adjacent-pair seam contact sheets and strip statistics at
             truth poses (the ceiling any matcher could exploit).
+    posegraph  measure every mutual-adjacency edge (multi-hypothesis) and
+            jointly solve all page poses with robust priors; see
+            edge_join_graph.py. `report --chain-source chain,posegraph`
+            compares the hybrid (chain first, graph fallback).
 
 Usage:
     uv run python -m mapsnap.edge_join_experiment stats data/washington_dc_1916_vol_2
@@ -1075,6 +1079,39 @@ def run_join(
         jtj_eig_ratio=round(best.jtj_eig_ratio, 5),
         world_affine=[list(row) for row in world],
     )
+    # Top plausible candidates as alternates: on self-similar grids the true
+    # pose is often rank 2 behind an aliased slide, and a pose-graph solver
+    # can re-pick the alternate that is globally consistent.
+    alternates: list[dict] = []
+    for candidate, frame, _ in all_candidates:
+        if not candidate.plausible:
+            continue
+        w = frame.raster_pose_to_world_affine(candidate.pose)
+        center = apply_affine(w, target.width / 2, target.height / 2)
+        kx = 111_320.0 * math.cos(math.radians(center[1]))
+        near_existing = any(
+            math.hypot((center[0] - c[0]) * kx, (center[1] - c[1]) * 110_540.0) < 15.0
+            for c in (a["center"] for a in alternates)
+        )
+        if near_existing:
+            continue
+        alternate = {
+            "world_affine": [list(row) for row in w],
+            "verification": round(candidate.verification_score(), 3),
+            "theta_deg": round(candidate.theta_deg, 2),
+            "center": list(center),
+        }
+        if target.truth is not None:
+            alternate["rmse_ft"] = round(
+                grid_rmse_ft_between(
+                    w, target.truth.affine_local, target.width, target.height
+                ),
+                1,
+            )
+        alternates.append(alternate)
+        if len(alternates) == 5:
+            break
+    record["alternates"] = alternates
     if target.truth is not None:
         record["rmse_ft"] = round(
             grid_rmse_ft_between(
@@ -1599,6 +1636,25 @@ def materialize_records(
     return rows
 
 
+def load_placement_records(volume: Path, sources: str) -> dict[str, dict]:
+    """Best record per target from comma-separated jsonl basenames.
+
+    Earlier sources win: "chain,posegraph" prefers the gated greedy chain's
+    placement and falls back to the pose graph for pages it refused.
+    """
+    by_target: dict[str, dict] = {}
+    for source in sources.split(","):
+        path = volume / "artifacts" / "edge_join" / f"{source.strip()}.jsonl"
+        if not path.exists():
+            print(f"note: no {path.name}", file=sys.stderr)
+            continue
+        for line in path.read_text().splitlines():
+            if line.strip():
+                record = json.loads(line)
+                by_target.setdefault(record["target"], record)
+    return by_target
+
+
 def cmd_report(volume: Path, chain_source: str = "chain") -> None:
     """Compare RANSAC-only, augmented, and replace policies on one denominator.
 
@@ -1610,13 +1666,7 @@ def cmd_report(volume: Path, chain_source: str = "chain") -> None:
                   non-anchor RANSAC fits (the study framing)
     """
     units = load_page_units(volume)
-    chain_path = volume / "artifacts" / "edge_join" / f"{chain_source}.jsonl"
-    chained: dict[str, dict] = {}
-    if chain_path.exists():
-        for line in chain_path.read_text().splitlines():
-            if line.strip():
-                record = json.loads(line)
-                chained[record["target"]] = record
+    chained = load_placement_records(volume, chain_source)
 
     def placement(unit: PageUnit, policy: str):
         chain_rec = chained.get(unit.stem)
@@ -1653,7 +1703,7 @@ def cmd_report(volume: Path, chain_source: str = "chain") -> None:
         rmses = []
         for unit in truth_units:
             _, affine = placement(unit, policy)
-            if affine is None:
+            if affine is None or unit.truth is None:
                 continue
             rmses.append(
                 grid_rmse_ft_between(
@@ -1670,11 +1720,502 @@ def cmd_report(volume: Path, chain_source: str = "chain") -> None:
         )
 
 
+GRAPH_MIN_VERIFICATION = 0.5
+SINGLETON_MIN_VERIFICATION = 1.2
+
+
+def measurement_sigmas(verification: float, synthetic: bool) -> tuple[float, float]:
+    """(sigma_pos_m, sigma_theta_rad) for one join measurement.
+
+    Calibrated on DC: verification>=1.3 joins are ~5m-class; sub-gate joins
+    enter with loose sigmas and rely on the solver's Huber loss to be outvoted
+    when wrong. Synthetic-anchor measurements (both pages unfitted, anchor
+    posed at its keymap guess) searched a worse frame, so they get 1.5x.
+    """
+    if verification >= 1.3:
+        pos, theta = 5.0, 0.6
+    elif verification >= 1.1:
+        pos, theta = 9.0, 1.2
+    elif verification >= 0.9:
+        pos, theta = 18.0, 2.5
+    else:
+        pos, theta = 35.0, 5.0
+    factor = 1.5 if synthetic else 1.0
+    return pos * factor, math.radians(theta * factor)
+
+
+def build_volume_frame(units: list[PageUnit], scale_m_per_px: float):
+    """A VolumeFrame centred on the volume's fitted (or keymap) pages."""
+    from mapsnap.edge_join_graph import VolumeFrame
+
+    lons, lats = [], []
+    for unit in units:
+        if unit.fit_state == "fitted" and unit.gen_affine is not None:
+            lon, lat = apply_affine(unit.gen_affine, unit.width / 2, unit.height / 2)
+        elif unit.keymap_centers:
+            lon, lat = unit.keymap_centers[0]
+        else:
+            continue
+        lons.append(lon)
+        lats.append(lat)
+    return VolumeFrame(statistics.mean(lons), statistics.mean(lats), scale_m_per_px)
+
+
+def median_fitted_theta(vframe, units: list[PageUnit]) -> float:
+    """Circular mean pose rotation of the volume's fitted pages."""
+    sines = cosines = 0.0
+    for unit in units:
+        if unit.fit_state == "fitted" and unit.gen_affine is not None:
+            theta = vframe.affine_to_pose(unit.gen_affine)[2]
+            sines += math.sin(theta)
+            cosines += math.cos(theta)
+    return math.atan2(sines, cosines)
+
+
+def synthetic_anchor_affine(
+    vframe, unit: PageUnit, center_lonlat: tuple[float, float], theta: float
+) -> np.ndarray:
+    """A pose guess for an unfitted anchor: keymap centre + volume rotation.
+
+    Its absolute error cancels in the relative measurement; it only needs to
+    be close enough for the matcher's search window and direction gates.
+    """
+    xc, yc = vframe.lonlat_to_xy(*center_lonlat)
+    scale = vframe.scale_m_per_px
+    c, s = math.cos(theta), math.sin(theta)
+    ox = scale * (c * unit.width / 2 - s * unit.height / 2)
+    oy = scale * (s * unit.width / 2 + c * unit.height / 2)
+    return vframe.pose_to_affine(xc - ox, yc - oy, theta)
+
+
+def collect_graph_measurements(
+    volume: Path, units: list[PageUnit], limit: int | None = None
+) -> list[dict]:
+    """Run the matcher over every measurable mutual-adjacency edge.
+
+    Direction policy per edge: both fitted -> one run anchored on the better
+    fit (the reverse adds little); one fitted -> anchored on the fitted page;
+    neither fitted -> both directions with synthetic keymap-posed anchors
+    (these island edges are what the pose graph adds over greedy chaining).
+    No verification gate here — sub-gate joins are kept as loose evidence.
+    """
+    by_number = {u.number: u for u in units}
+    pairs = detected_pairs(volume)
+    params = edge_join.MatchParams()
+    scale = volume_median_scale(units)
+    adjacency = load_adjacency(volume)
+    allowed_rotations = volume_relative_rotations(units, pairs)
+    vframe = build_volume_frame(units, scale)
+    theta_syn = median_fitted_theta(vframe, units)
+
+    footprints_by_number: dict[int, list[list[float]]] = {}
+    for unit in units:
+        if unit.anchor_free and unit.gen_affine is not None:
+            footprints_by_number[unit.number] = [
+                list(apply_affine(unit.gen_affine, x, y))
+                for x, y in [
+                    (0, 0),
+                    (unit.width, 0),
+                    (unit.width, unit.height),
+                    (0, unit.height),
+                ]
+            ]
+
+    def is_fitted(unit: PageUnit) -> bool:
+        return unit.fit_state == "fitted" and unit.gen_affine is not None
+
+    directed: list[tuple[PageUnit, PageUnit]] = []
+    for pair in sorted(pairs, key=sorted):
+        x, y = sorted(pair)
+        ux, uy = by_number.get(x), by_number.get(y)
+        if not ux or not uy or "split" in (ux.fit_state, uy.fit_state):
+            continue
+        if is_fitted(ux) and is_fitted(uy):
+            better = ux if ux.inlier_intersections >= uy.inlier_intersections else uy
+            other = uy if better is ux else ux
+            directed.append((better, other))
+        elif is_fitted(ux):
+            directed.append((ux, uy))
+        elif is_fitted(uy):
+            directed.append((uy, ux))
+        else:
+            directed.append((ux, uy))
+            directed.append((uy, ux))
+
+    records: list[dict] = []
+    for anchor, target in directed[: limit or len(directed)]:
+        synthetic = not is_fitted(anchor)
+        if synthetic:
+            if not anchor.keymap_centers:
+                continue
+            anchor_affine = synthetic_anchor_affine(
+                vframe, anchor, anchor.keymap_centers[0], theta_syn
+            )
+        else:
+            anchor_affine = anchor.gen_affine
+            assert anchor_affine is not None
+        inits = target.keymap_centers or [
+            apply_affine(anchor_affine, anchor.width / 2, anchor.height / 2)
+        ]
+        radius = target.keymap_radius_m or 800.0
+        if synthetic:
+            # The anchor's own keymap error adds to the target's; widen.
+            radius = max(radius, 900.0)
+        directions = image_neighbor_directions(adjacency, target.stem)
+        expected = (directions.get(anchor.number) or (None, 0.0))[0]
+        anchor_dirs = image_neighbor_directions(adjacency, anchor.stem)
+        anchor_side = (anchor_dirs.get(target.number) or (None, 0.0))[0]
+        exclusion = None
+        if not synthetic:
+            exclusion = [
+                fp
+                for n, fp in footprints_by_number.items()
+                if n not in (anchor.number, target.number)
+            ] or None
+        record = run_join(
+            volume,
+            anchor,
+            target,
+            anchor_affine,
+            inits,
+            radius,
+            scale,
+            params,
+            expected_direction=expected,
+            anchor_side_direction=anchor_side,
+            containment_regions=None if synthetic else target.keymap_regions,
+            exclusion_footprints=exclusion,
+            allowed_rotations=allowed_rotations,
+        )
+        if record is None:
+            continue
+        record["synthetic_anchor"] = synthetic
+        record["anchor_state"] = anchor.fit_state
+        record["target_state"] = target.fit_state
+        record["anchor_affine"] = [list(row) for row in anchor_affine]
+        records.append(record)
+        print(
+            f"  [{len(records)}/{len(directed)}] {record['anchor']}->{record['target']}"
+            f" {record.get('status')} ver={record.get('verification', 'n/a')}"
+            f" rmse={record.get('rmse_ft', 'n/a')}{' (syn)' if synthetic else ''}",
+            file=sys.stderr,
+        )
+    return records
+
+
+def keymap_position_prior(
+    unit: PageUnit, vframe, init_xy: tuple[float, float]
+) -> tuple[float, float, float] | None:
+    """(x, y, sigma_m) position evidence from the page's keymap block.
+
+    A segmented region centroid is trusted more than a bare centre; with
+    several candidate hypotheses the one nearest the initialized pose is used,
+    at a widened sigma.
+    """
+    if unit.keymap_regions:
+        from shapely.geometry import Polygon
+
+        centroids = []
+        for ring in unit.keymap_regions:
+            poly = Polygon(ring).buffer(0)
+            if not poly.is_empty and poly.area > 0:
+                centroids.append(vframe.lonlat_to_xy(poly.centroid.x, poly.centroid.y))
+        if centroids:
+            x, y = min(
+                centroids,
+                key=lambda p: math.hypot(p[0] - init_xy[0], p[1] - init_xy[1]),
+            )
+            return x, y, 150.0 if len(centroids) == 1 else 250.0
+    if unit.keymap_centers:
+        candidates = [vframe.lonlat_to_xy(lon, lat) for lon, lat in unit.keymap_centers]
+        x, y = min(
+            candidates, key=lambda p: math.hypot(p[0] - init_xy[0], p[1] - init_xy[1])
+        )
+        return x, y, 250.0 if len(candidates) == 1 else 350.0
+    return None
+
+
+def cmd_posegraph(volume: Path, remeasure: bool, limit: int | None) -> None:
+    """Global pose-graph solve over all edge-join measurements.
+
+    Replaces the greedy chain's sequential accept/reject with one robust joint
+    optimization: every mutual edge contributes a relative measurement
+    (including sub-gate ones), RANSAC fits and keymap locations contribute
+    absolute priors, and the Huber loss lets consistent evidence outvote
+    wrong locks. Writes posegraph_all.jsonl (every grounded node, for
+    `report --chain-source posegraph_all`) and posegraph.jsonl (previously
+    unfitted nodes only, for `materialize --source posegraph`).
+    """
+    from mapsnap.edge_join_graph import (
+        AbsolutePrior,
+        EdgeHypotheses,
+        RelativeMeasurement,
+        solve_pose_graph_hypotheses,
+        spanning_tree_initialization,
+    )
+
+    units = load_page_units(volume)
+    by_stem = {u.stem: u for u in units}
+    out_dir = volume / "artifacts" / "edge_join"
+    meas_path = out_dir / "measurements.jsonl"
+    if meas_path.exists() and not remeasure:
+        records = [
+            json.loads(line) for line in meas_path.read_text().splitlines() if line
+        ]
+        print(f"loaded {len(records)} cached measurements from {meas_path}")
+    else:
+        records = collect_graph_measurements(volume, units, limit)
+        meas_path.write_text("\n".join(json.dumps(r) for r in records))
+        print(f"wrote {len(records)} measurements to {meas_path}")
+
+    kept = [
+        r
+        for r in records
+        if r.get("status") == "ok"
+        and r.get("verification", 0.0) >= GRAPH_MIN_VERIFICATION
+    ]
+    print(f"{len(kept)} measurements at verification >= {GRAPH_MIN_VERIFICATION}")
+
+    scale = volume_median_scale(units)
+    vframe = build_volume_frame(units, scale)
+    theta_syn = median_fitted_theta(vframe, units)
+
+    def is_fitted(unit: PageUnit) -> bool:
+        return unit.fit_state == "fitted" and unit.gen_affine is not None
+
+    node_stems = sorted(
+        {u.stem for u in units if is_fitted(u)}
+        | {r["anchor"] for r in kept}
+        | {r["target"] for r in kept},
+        key=lambda s: by_stem[s].number,
+    )
+    index = {stem: i for i, stem in enumerate(node_stems)}
+
+    edges = []
+    incident: dict[str, list[dict]] = {}
+    for r in kept:
+        pose_a = vframe.affine_to_pose(np.array(r["anchor_affine"]))
+        candidates = []
+        # Winner first, then the recorded alternates (deduped against it):
+        # the EM solver may re-pick a lower-ranked candidate that is globally
+        # consistent (aliased slides often outrank the true pose locally).
+        alternates = r.get("alternates") or [
+            {"world_affine": r["world_affine"], "verification": r["verification"]}
+        ]
+        for alternate in alternates:
+            pose_t = vframe.affine_to_pose(np.array(alternate["world_affine"]))
+            dx, dy, dtheta = vframe.relative(pose_a, pose_t)
+            sigma_pos, sigma_theta = measurement_sigmas(
+                alternate["verification"], r.get("synthetic_anchor", False)
+            )
+            candidates.append(
+                RelativeMeasurement(
+                    index[r["anchor"]],
+                    index[r["target"]],
+                    dx,
+                    dy,
+                    dtheta,
+                    sigma_pos_m=sigma_pos,
+                    sigma_theta_rad=sigma_theta,
+                )
+            )
+        edges.append(EdgeHypotheses(index[r["anchor"]], index[r["target"]], candidates))
+        incident.setdefault(r["target"], []).append(r)
+        incident.setdefault(r["anchor"], []).append(r)
+    winners = [e.candidates[0] for e in edges]
+
+    # Grounding: connected components of the measurement graph. A component
+    # with no fitted page floats on keymap priors alone (position ~150-350m
+    # class); components with neither are unplaceable and dropped.
+    parent = list(range(len(node_stems)))
+
+    def find(i: int) -> int:
+        while parent[i] != i:
+            parent[i] = parent[parent[i]]
+            i = parent[i]
+        return i
+
+    for m in winners:
+        parent[find(m.a)] = find(m.b)
+    grounded_roots = {find(index[u.stem]) for u in units if is_fitted(u)}
+    grounded = {s for s in node_stems if find(index[s]) in grounded_roots}
+    floating = [
+        s for s in node_stems if s not in grounded and by_stem[s].keymap_centers
+    ]
+    dropped = [
+        s for s in node_stems if s not in grounded and not by_stem[s].keymap_centers
+    ]
+    print(
+        f"graph: {len(node_stems)} nodes, {len(edges)} edges;"
+        f" {len(grounded)} grounded, {len(floating)} floating-on-keymap,"
+        f" {len(dropped)} unplaceable"
+    )
+
+    initial_known = {
+        index[u.stem]: vframe.affine_to_pose(u.gen_affine)
+        for u in units
+        if is_fitted(u) and u.gen_affine is not None and u.stem in index
+    }
+    fallback = {}
+    for stem in node_stems:
+        unit = by_stem[stem]
+        if unit.keymap_centers:
+            x, y = vframe.lonlat_to_xy(*unit.keymap_centers[0])
+            fallback[index[stem]] = (x, y, theta_syn)
+    initial = spanning_tree_initialization(
+        len(node_stems), initial_known, winners, fallback
+    )
+
+    priors = []
+    for stem in node_stems:
+        unit = by_stem[stem]
+        i = index[stem]
+        if is_fitted(unit) and unit.gen_affine is not None:
+            x, y, theta = vframe.affine_to_pose(unit.gen_affine)
+            # Tight tiers (validated on DC): letting anchors drift was the
+            # dominant error source, and the Huber loss still lets the rare
+            # high-inlier-but-wrong fit be outvoted by its neighbors.
+            if unit.inlier_intersections >= 5:
+                sigma_pos, sigma_theta = 1.5, 0.15
+            elif unit.inlier_intersections >= 3:
+                sigma_pos, sigma_theta = 3.0, 0.3
+            else:
+                # Low-inlier fits are where RANSAC catastrophes live, but
+                # loosening this tier (tried 12m and 25m on DC) lets whole
+                # weakly-anchored clusters slide onto aliased grid poses;
+                # 6m was the best global compromise.
+                sigma_pos, sigma_theta = 6.0, 0.6
+            priors.append(
+                AbsolutePrior(
+                    i,
+                    x,
+                    y,
+                    sigma_pos_m=sigma_pos,
+                    theta=theta,
+                    sigma_theta_rad=math.radians(sigma_theta),
+                )
+            )
+        keymap_prior = keymap_position_prior(unit, vframe, tuple(initial[i, :2]))
+        if keymap_prior is not None:
+            x, y, sigma_pos = keymap_prior
+            priors.append(AbsolutePrior(i, x, y, sigma_pos_m=sigma_pos))
+
+    solved, assignment, active, diagnostics = solve_pose_graph_hypotheses(
+        initial, edges, priors
+    )
+    reassigned = sum(1 for a in assignment if a != 0)
+    print(f"solver: {diagnostics}; {reassigned} edges re-assigned to an alternate")
+    # Rebuild incidence from surviving edges only: a page whose every edge was
+    # trimmed has no measurement support and must not be written as placed.
+    incident = {}
+    for i, r in enumerate(kept):
+        if not active[i]:
+            continue
+        incident.setdefault(r["target"], []).append(r)
+        incident.setdefault(r["anchor"], []).append(r)
+
+    # Evaluate every node against truth at its graph pose.
+    graph_rmse: dict[str, float] = {}
+    for stem in node_stems:
+        unit = by_stem[stem]
+        if unit.truth is None:
+            continue
+        affine = vframe.pose_to_affine(*solved[index[stem]])
+        graph_rmse[stem] = grid_rmse_ft_between(
+            affine, unit.truth.affine_local, unit.width, unit.height
+        )
+    anchor_sanity = [graph_rmse[s] for s in graph_rmse if by_stem[s].anchor_truth]
+    if anchor_sanity:
+        print(
+            f"graph pose on {len(anchor_sanity)} truth-anchor pages:"
+            f" median {percentile(anchor_sanity, 0.5):.0f}ft"
+            f" max {max(anchor_sanity):.0f}ft"
+        )
+
+    def supported(stem: str) -> bool:
+        """Enough measurement support to trust the page's graph pose.
+
+        A page held by a single measurement has no redundancy for the solver
+        to exploit, so it must meet the chain's verification gate on its own;
+        multi-measurement pages are protected by trimming and re-assignment.
+        (DC+Detroit: this kills four 300-1000ft singletons at the cost of one
+        38ft placement.)
+        """
+        records = incident.get(stem, [])
+        if not records:
+            return False
+        if len(records) == 1:
+            return records[0]["verification"] >= SINGLETON_MIN_VERIFICATION
+        return True
+
+    newly = [s for s in node_stems if not is_fitted(by_stem[s]) and s in grounded]
+    print(f"\npreviously-unfitted pages placed by the graph ({len(newly)}):")
+    for stem in newly:
+        rmse = graph_rmse.get(stem)
+        n_meas = len(incident.get(stem, []))
+        best = max((r["verification"] for r in incident.get(stem, [])), default=0.0)
+        rmse_str = f"{rmse:7.1f}ft" if rmse is not None else " no truth"
+        note = "" if supported(stem) else "  (unsupported, not written)"
+        print(
+            f"  {stem:>6} was {by_stem[stem].fit_state:<9} rmse {rmse_str}"
+            f"  measurements {n_meas}  best-ver {best:.2f}{note}"
+        )
+    for stem in floating:
+        print(f"  {stem:>6} floating on keymap only (not written)")
+
+    def graph_record(stem: str) -> dict:
+        unit = by_stem[stem]
+        pose = solved[index[stem]]
+        affine = vframe.pose_to_affine(*pose)
+        incident_records = incident.get(stem, [])
+        best = max(incident_records, key=lambda r: r["verification"])
+        record = {
+            "target": stem,
+            "status": "ok",
+            "anchor": best["anchor"] if best["target"] == stem else best["target"],
+            "hop": 0,
+            "n_anchors_fused": len(incident_records),
+            "contributors": sorted(
+                {
+                    r["anchor"] if r["target"] == stem else r["target"]
+                    for r in incident_records
+                }
+            ),
+            "verification": best["verification"],
+            "inlier_frac": best["inlier_frac"],
+            "ncc_fine": best["ncc_fine"],
+            "theta_deg": round(math.degrees(pose[2]), 2),
+            "target_state": unit.fit_state,
+            "world_affine": [list(row) for row in affine],
+        }
+        if stem in graph_rmse:
+            record["rmse_ft"] = round(graph_rmse[stem], 1)
+        return record
+
+    all_records = [
+        graph_record(s)
+        for s in sorted(grounded, key=lambda s: by_stem[s].number)
+        if incident.get(s) and (is_fitted(by_stem[s]) or supported(s))
+    ]
+    (out_dir / "posegraph_all.jsonl").write_text(
+        "\n".join(json.dumps(r) for r in all_records)
+    )
+    new_records = [r for r in all_records if not is_fitted(by_stem[r["target"]])]
+    (out_dir / "posegraph.jsonl").write_text(
+        "\n".join(json.dumps(r) for r in new_records)
+    )
+    print(
+        f"\nwrote {len(all_records)} records to posegraph_all.jsonl,"
+        f" {len(new_records)} previously-unfitted to posegraph.jsonl"
+    )
+    print()
+    cmd_report(volume, "posegraph_all")
+
+
 def cmd_materialize(volume: Path, source: str) -> None:
     """Write neighbor-fit variant georef files and print inspection lists."""
     units_by_stem = {u.stem: u for u in load_page_units(volume)}
-    path = volume / "artifacts" / "edge_join" / f"{source}.jsonl"
-    records = [json.loads(line) for line in path.read_text().splitlines() if line]
+    records = list(load_placement_records(volume, source).values())
     rows = materialize_records(volume, records, units_by_stem)
     print(
         f"wrote {len(rows)} {volume.name}/pN.georef-neighbor.json files from {source}"
@@ -1715,6 +2256,7 @@ def main() -> None:
             "perturb",
             "match",
             "chain",
+            "posegraph",
             "materialize",
             "report",
         ],
@@ -1736,6 +2278,11 @@ def main() -> None:
     )
     parser.add_argument("--seeds", choices=["truth", "inliers"], default="truth")
     parser.add_argument("--chain-source", default="chain", help="report: chain file")
+    parser.add_argument(
+        "--remeasure",
+        action="store_true",
+        help="posegraph: ignore cached measurements.jsonl",
+    )
     args = parser.parse_args()
     if args.command == "stats":
         cmd_stats(args.volume)
@@ -1756,6 +2303,8 @@ def main() -> None:
             args.solve_scale,
             args.seeds,
         )
+    elif args.command == "posegraph":
+        cmd_posegraph(args.volume, args.remeasure, args.limit)
     elif args.command == "materialize":
         cmd_materialize(args.volume, args.source)
     elif args.command == "report":
