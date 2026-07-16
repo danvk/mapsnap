@@ -61,6 +61,10 @@ METERS_PER_FOOT = 0.3048
 TRUTH_ADJACENT_GAP_M = 30.0
 ANCHOR_RMSE_FT = 25.0
 ALLOWED_RELATIVE_ROTATIONS = (0.0, 90.0, -90.0)
+# Printed-side direction gates. Measured on DC: joins <=50ft never fall below
+# cos 0.92 (target-side) / 0.95 (anchor-side); wrong locks spread much lower.
+DIRECTION_COS_MIN_TARGET = 0.85
+DIRECTION_COS_MIN_ANCHOR = 0.90
 RELATIVE_ROTATION_TOLERANCE_DEG = 6.0
 
 
@@ -757,6 +761,7 @@ def run_join(
     scale_m_per_px: float,
     params: "edge_join.MatchParams",
     expected_direction: tuple[float, float] | None = None,
+    anchor_side_direction: tuple[float, float] | None = None,
     containment_regions: list[list[list[float]]] | None = None,
 ) -> dict | None:
     """One anchor->target join attempt; returns a diagnostics record.
@@ -907,7 +912,7 @@ def run_join(
                 expected_direction,
             )
             candidate.diagnostics["direction_cos"] = round(cosine, 3)
-            if cosine < 0.25:
+            if cosine < DIRECTION_COS_MIN_TARGET:
                 candidate.plausible = False
     # Relative-rotation prior: adjacent sheets in this volume differ by
     # 0 or +/-90 degrees (measured from truth: |dtheta| p90=90, max 92.8),
@@ -926,6 +931,28 @@ def run_join(
             > RELATIVE_ROTATION_TOLERANCE_DEG
         ):
             candidate.plausible = False
+    # Reciprocal printed-side prior: the ANCHOR's own claim of the target's
+    # number pins the world direction to the target (the anchor's pose is
+    # known), independent of the target's rotation. This breaks the joint
+    # rotate-and-swing symmetry that the target-side check alone cannot: a
+    # 90-degree-rotated target moved 90 degrees around the anchor keeps the
+    # target-side cosine near 1, but lands on the wrong side of the anchor.
+    if anchor_side_direction is not None:
+        for candidate, frame, anchor_center in all_candidates:
+            linear = frame.page_to_raster_affine(anchor_affine)[:, :2]
+            implied = linear @ np.array(anchor_side_direction)
+            center = candidate.pose @ np.array(
+                [target.width / 2, target.height / 2, 1.0]
+            )
+            actual = np.array(center) - np.array(anchor_center)
+            implied_norm = float(np.linalg.norm(implied))
+            actual_norm = float(np.linalg.norm(actual))
+            if implied_norm < 1e-9 or actual_norm < 1e-9:
+                continue
+            cosine = float(implied @ actual / (implied_norm * actual_norm))
+            candidate.diagnostics["anchor_side_cos"] = round(cosine, 3)
+            if cosine < DIRECTION_COS_MIN_ANCHOR:
+                candidate.plausible = False
     # Keymap-region containment: the placed page footprint should mostly
     # fall inside the key map's segmented region for this page (schematic, so
     # the threshold is loose). Kills sideways and far-slid placements.
@@ -991,6 +1018,7 @@ def run_join(
         n_points=best.n_points,
         overlap_frac=round(best.overlap_frac, 3),
         direction_cos=best.diagnostics.get("direction_cos"),
+        anchor_side_cos=best.diagnostics.get("anchor_side_cos"),
         jtj_eig_ratio=round(best.jtj_eig_ratio, 5),
         world_affine=[list(row) for row in world],
     )
@@ -1097,6 +1125,8 @@ def cmd_perturb(
             )
             directions = image_neighbor_directions(adjacency, target.stem)
             expected = (directions.get(anchor.number) or (None, 0.0))[0]
+            anchor_dirs = image_neighbor_directions(adjacency, anchor.stem)
+            anchor_side = (anchor_dirs.get(target.number) or (None, 0.0))[0]
             rec = run_join(
                 volume,
                 anchor,
@@ -1107,6 +1137,7 @@ def cmd_perturb(
                 scale,
                 params,
                 expected_direction=expected,
+                anchor_side_direction=anchor_side,
             )
             if rec is None:
                 continue
@@ -1156,6 +1187,8 @@ def cmd_match(
             radius = 800.0
         directions = image_neighbor_directions(adjacency, target.stem)
         expected = (directions.get(anchor.number) or (None, 0.0))[0]
+        anchor_dirs = image_neighbor_directions(adjacency, anchor.stem)
+        anchor_side = (anchor_dirs.get(target.number) or (None, 0.0))[0]
         rec = run_join(
             volume,
             anchor,
@@ -1166,6 +1199,7 @@ def cmd_match(
             scale,
             params,
             expected_direction=expected,
+            anchor_side_direction=anchor_side,
             containment_regions=target.keymap_regions,
         )
         if rec is None:
@@ -1257,6 +1291,8 @@ def cmd_chain(
                 radius = target.keymap_radius_m or 800.0
                 directions = image_neighbor_directions(adjacency, target.stem)
                 expected = (directions.get(anchor.number) or (None, 0.0))[0]
+                anchor_dirs = image_neighbor_directions(adjacency, anchor.stem)
+                anchor_side = (anchor_dirs.get(target.number) or (None, 0.0))[0]
                 record = run_join(
                     volume,
                     anchor,
@@ -1267,6 +1303,7 @@ def cmd_chain(
                     scale,
                     params,
                     expected_direction=expected,
+                    anchor_side_direction=anchor_side,
                     containment_regions=target.keymap_regions,
                 )
                 if record is None or record.get("status") != "ok":
