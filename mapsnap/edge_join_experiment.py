@@ -763,6 +763,8 @@ def run_join(
     expected_direction: tuple[float, float] | None = None,
     anchor_side_direction: tuple[float, float] | None = None,
     containment_regions: list[list[list[float]]] | None = None,
+    exclusion_footprints: list[list[list[float]]] | None = None,
+    debug_candidates: list | None = None,
 ) -> dict | None:
     """One anchor->target join attempt; returns a diagnostics record.
 
@@ -1002,7 +1004,53 @@ def run_join(
             candidate.diagnostics["center_dist_m"] = round(nearest, 1)
             if nearest > radius_m:
                 candidate.plausible = False
-    all_candidates.sort(key=lambda cf: -cf[0].verification_score())
+    # Posed-page exclusion: sheets only ever share a margin strip, so a
+    # candidate overlapping any already-placed page by more than a strip is
+    # physically impossible (e.g. a one-block slide onto a posed neighbor).
+    if exclusion_footprints:
+        lon_e, lat_e = exclusion_footprints[0][0]
+        kxe = 111_320.0 * math.cos(math.radians(lat_e))
+        kye = 110_540.0
+
+        def ring_metres_e(ring: list[list[float]]) -> list[tuple[float, float]]:
+            return [((lon - lon_e) * kxe, (lat - lat_e) * kye) for lon, lat in ring]
+
+        from shapely.geometry import Polygon as ShPolygon
+
+        exclusions = [
+            ShPolygon(ring_metres_e(ring)).buffer(0) for ring in exclusion_footprints
+        ]
+        for candidate, frame, _ in all_candidates:
+            if not candidate.plausible:
+                continue
+            world = frame.raster_pose_to_world_affine(candidate.pose)
+            corners = [
+                list(apply_affine(world, x, y))
+                for x, y in [
+                    (0, 0),
+                    (target.width, 0),
+                    (target.width, target.height),
+                    (0, target.height),
+                ]
+            ]
+            fp = ShPolygon(ring_metres_e(corners))
+            if fp.area <= 0:
+                continue
+            worst = max(fp.intersection(ex).area / fp.area for ex in exclusions)
+            candidate.diagnostics["posed_overlap"] = round(worst, 3)
+            if worst > 0.42:
+                candidate.plausible = False
+
+    # Rank with a keymap-containment bonus: the slid-one-block lock and the
+    # true pose score within a few hundredths on strip agreement alone, but
+    # the true pose sits squarely inside the page's keymap region.
+    def ranking_score(candidate: "edge_join.JoinCandidate") -> float:
+        bonus = 0.3 * candidate.diagnostics.get("region_containment", 0.0)
+        return candidate.verification_score() + bonus
+
+    all_candidates.sort(key=lambda cf: -ranking_score(cf[0]))
+    if debug_candidates is not None:
+        debug_candidates.extend(all_candidates)
     best, best_frame, _ = all_candidates[0]
     world = best_frame.raster_pose_to_world_affine(best.pose)
     record.update(
@@ -1171,6 +1219,26 @@ def cmd_match(
                 continue
             attempts.append((anchor, target))
     records = []
+    anchor_footprints: list[list[list[float]]] = []
+    for unit in units:
+        if unit.anchor_truth:
+            pose = (
+                unit.truth.affine_local
+                if anchor_pose == "truth" and unit.truth
+                else unit.gen_affine
+            )
+            if pose is not None:
+                anchor_footprints.append(
+                    [
+                        list(apply_affine(pose, x, y))
+                        for x, y in [
+                            (0, 0),
+                            (unit.width, 0),
+                            (unit.width, unit.height),
+                            (0, unit.height),
+                        ]
+                    ]
+                )
     for anchor, target in attempts[: limit or len(attempts)]:
         affine = (
             anchor.truth.affine_local
@@ -1201,6 +1269,7 @@ def cmd_match(
             expected_direction=expected,
             anchor_side_direction=anchor_side,
             containment_regions=target.keymap_regions,
+            exclusion_footprints=anchor_footprints,
         )
         if rec is None:
             continue
@@ -1263,6 +1332,19 @@ def cmd_chain(
     adjacency = load_adjacency(volume)
 
     posed: dict[int, tuple[np.ndarray, int]] = {}
+
+    def footprint_ring(unit: PageUnit, affine: np.ndarray) -> list[list[float]]:
+        return [
+            list(apply_affine(affine, x, y))
+            for x, y in [
+                (0, 0),
+                (unit.width, 0),
+                (unit.width, unit.height),
+                (0, unit.height),
+            ]
+        ]
+
+    posed_footprints: list[list[list[float]]] = []
     for unit in units:
         if unit.anchor_truth:
             affine = (
@@ -1272,6 +1354,7 @@ def cmd_chain(
             )
             if affine is not None:
                 posed[unit.number] = (affine, 0)
+                posed_footprints.append(footprint_ring(unit, affine))
 
     accepted: list[dict] = []
     for round_index in range(1, max_rounds + 1):
@@ -1305,6 +1388,7 @@ def cmd_chain(
                     expected_direction=expected,
                     anchor_side_direction=anchor_side,
                     containment_regions=target.keymap_regions,
+                    exclusion_footprints=posed_footprints,
                 )
                 if record is None or record.get("status") != "ok":
                     continue
@@ -1337,6 +1421,7 @@ def cmd_chain(
                 merged.pop("rmse_ft", None)
             accepted.append(merged)
             posed[target_number] = (fused, round_index)
+            posed_footprints.append(footprint_ring(target, fused))
         stats = ""
         if round_rmses:
             stats = (
@@ -1463,6 +1548,90 @@ def materialize_records(
     return rows
 
 
+def cmd_report(volume: Path) -> None:
+    """mapsnap-compare-style report over RANSAC anchors + chained neighbor fits.
+
+    Seed anchors keep their accepted RANSAC georef; every other page placed by
+    the chain uses its (fused) neighbor fit. RMSE is against the OIM truth.
+    """
+    units = load_page_units(volume)
+    chain_path = volume / "artifacts" / "edge_join" / "chain.jsonl"
+    chained: dict[str, dict] = {}
+    if chain_path.exists():
+        for line in chain_path.read_text().splitlines():
+            if line.strip():
+                record = json.loads(line)
+                chained[record["target"]] = record
+
+    rows = []
+    unplaced = []
+    n_no_truth = 0
+    for unit in sorted(units, key=lambda u: u.number):
+        source = hop = verification = affine = None
+        if unit.anchor_truth and unit.gen_affine is not None:
+            source, hop, affine = "ransac", 0, unit.gen_affine
+        elif unit.stem in chained:
+            record = chained[unit.stem]
+            source = "neighbor"
+            hop = record["hop"]
+            verification = record["verification"]
+            affine = np.array(record["world_affine"])
+        if affine is None:
+            if unit.truth is not None or unit.split_truth:
+                unplaced.append(unit)
+            continue
+        if unit.truth is None:
+            n_no_truth += 1
+            continue
+        rmse = grid_rmse_ft_between(
+            affine, unit.truth.affine_local, unit.width, unit.height
+        )
+        rows.append((unit.stem, source, hop, verification, rmse))
+
+    print(f"== {volume.name}: RANSAC anchors + chained neighbor fits ==")
+    print(f"{'Page':>6}  {'source':<9} {'hop':>3} {'ver':>5}  {'rmse_ft':>8}")
+    print("-" * 42)
+    for stem, source, hop, verification, rmse in sorted(rows, key=lambda r: -r[4]):
+        ver = f"{verification:.2f}" if verification is not None else "    -"
+        print(f"{stem:>6}  {source:<9} {hop:>3} {ver:>5}  {rmse:>8.1f}")
+    for unit in unplaced:
+        kind = (
+            "split-truth" if unit.split_truth and unit.truth is None else unit.fit_state
+        )
+        print(f"{unit.stem:>6}  {'(unplaced)':<9}     {kind:>10}   (no fit)")
+
+    total_truth = len(rows) + len(unplaced)
+    rmses = sorted(r[4] for r in rows)
+    print(
+        f"\n{len(rows)}/{total_truth} = {len(rows) / max(total_truth, 1):.2%}"
+        f" truth pages placed ({len(unplaced)} unplaced"
+        + (f"; +{n_no_truth} placed without truth" if n_no_truth else "")
+        + ")"
+    )
+    if rmses:
+        mean = sum(rmses) / len(rmses)
+        print(
+            f"RMSE:  mean={mean:.0f} ft  median={percentile(rmses, 0.5):.0f} ft"
+            f"  max={max(rmses):.0f} ft"
+        )
+        for threshold in [15, 25, 50, 100, 500, 1000]:
+            n = sum(1 for r in rmses if r <= threshold)
+            print(
+                f"  RMSE <= {threshold:>4} ft: {n}/{len(rmses)} ({n / len(rmses):.0%})"
+            )
+        by_source: dict[str, list[float]] = {}
+        for _, source, hop, _, rmse in rows:
+            key = source if source == "ransac" else f"neighbor hop{hop}"
+            by_source.setdefault(key, []).append(rmse)
+        print("\nby source:")
+        for key in sorted(by_source):
+            values = sorted(by_source[key])
+            print(
+                f"  {key:<14} n={len(values):>3}  median={percentile(values, 0.5):>5.0f} ft"
+                f"  max={max(values):>6.0f} ft"
+            )
+
+
 def cmd_materialize(volume: Path, source: str) -> None:
     """Write neighbor-fit variant georef files and print inspection lists."""
     units_by_stem = {u.stem: u for u in load_page_units(volume)}
@@ -1509,6 +1678,7 @@ def main() -> None:
             "match",
             "chain",
             "materialize",
+            "report",
         ],
     )
     parser.add_argument("volume", type=Path)
@@ -1547,6 +1717,8 @@ def main() -> None:
         )
     elif args.command == "materialize":
         cmd_materialize(args.volume, args.source)
+    elif args.command == "report":
+        cmd_report(args.volume)
 
 
 if __name__ == "__main__":
