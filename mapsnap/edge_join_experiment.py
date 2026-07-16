@@ -764,6 +764,7 @@ def run_join(
     anchor_side_direction: tuple[float, float] | None = None,
     containment_regions: list[list[list[float]]] | None = None,
     exclusion_footprints: list[list[list[float]]] | None = None,
+    allowed_rotations: tuple[float, ...] = ALLOWED_RELATIVE_ROTATIONS,
     debug_candidates: list | None = None,
 ) -> dict | None:
     """One anchor->target join attempt; returns a diagnostics record.
@@ -812,7 +813,7 @@ def run_join(
             fixed, prob_target, params.jitter_deg, fixed_valid=fixed_valid
         )
         theta_anchor = math.degrees(math.atan2(-pose_anchor[1, 0], pose_anchor[0, 0]))
-        for relative in ALLOWED_RELATIVE_ROTATIONS:
+        for relative in allowed_rotations:
             seed = angle_wrap(theta_anchor + relative)
             if all(abs(angle_wrap(seed - t)) > 1.0 for t in thetas):
                 thetas.append(seed)
@@ -926,10 +927,7 @@ def run_join(
         )
         candidate.diagnostics["relative_rotation"] = round(relative, 1)
         if (
-            min(
-                abs(angle_wrap(relative - allowed))
-                for allowed in ALLOWED_RELATIVE_ROTATIONS
-            )
+            min(abs(angle_wrap(relative - allowed)) for allowed in allowed_rotations)
             > RELATIVE_ROTATION_TOLERANCE_DEG
         ):
             candidate.plausible = False
@@ -1209,6 +1207,7 @@ def cmd_match(
     params = edge_join.MatchParams(solve_scale=solve_scale)
     scale = volume_median_scale(units)
     adjacency = load_adjacency(volume)
+    allowed_rotations = volume_relative_rotations(units, pairs)
     attempts: list[tuple[PageUnit, PageUnit]] = []
     for pair in sorted(pairs, key=sorted):
         for a, t in [tuple(sorted(pair)), tuple(sorted(pair))[::-1]]:
@@ -1270,6 +1269,7 @@ def cmd_match(
             anchor_side_direction=anchor_side,
             containment_regions=target.keymap_regions,
             exclusion_footprints=anchor_footprints,
+            allowed_rotations=allowed_rotations,
         )
         if rec is None:
             continue
@@ -1331,6 +1331,10 @@ def cmd_chain(
     params = edge_join.MatchParams(solve_scale=solve_scale)
     scale = volume_median_scale(units)
     adjacency = load_adjacency(volume)
+    allowed_rotations = volume_relative_rotations(units, pairs)
+    print(
+        f"allowed relative rotations (measured): {allowed_rotations}", file=sys.stderr
+    )
 
     posed: dict[int, tuple[np.ndarray, int]] = {}
 
@@ -1397,6 +1401,7 @@ def cmd_chain(
                     anchor_side_direction=anchor_side,
                     containment_regions=target.keymap_regions,
                     exclusion_footprints=posed_footprints,
+                    allowed_rotations=allowed_rotations,
                 )
                 if record is None or record.get("status") != "ok":
                     continue
@@ -1463,6 +1468,34 @@ def cmd_chain(
         by_state[r["target_state"]] = by_state.get(r["target_state"], 0) + 1
     print(f"  by previous state: {by_state}")
     print(f"wrote {out_path}")
+
+
+def volume_relative_rotations(
+    units: list[PageUnit], pairs: set[frozenset[int]]
+) -> tuple[float, ...]:
+    """Allowed neighbor rotation offsets, measured from the volume's own fits.
+
+    Truth-free: relative north angles of detected-adjacent RANSAC-fitted pages,
+    clustered to 6 degrees; singleton observations are kept too (a volume like
+    Brooklyn 1939 mixes many grid orientations). The {0, +/-90} lattice
+    defaults are always included.
+    """
+    by_number = {u.number: u for u in units}
+    deltas: list[float] = []
+    for pair in pairs:
+        x, y = tuple(pair)
+        a, b = by_number.get(x), by_number.get(y)
+        if not a or not b or a.gen_affine is None or b.gen_affine is None:
+            continue
+        if a.fit_state != "fitted" or b.fit_state != "fitted":
+            continue
+        delta = angle_wrap(north_angle(a.gen_affine) - north_angle(b.gen_affine))
+        deltas.extend([delta, -delta])
+    allowed = {0.0, 90.0, -90.0}
+    for delta in sorted(deltas):
+        if min(abs(angle_wrap(delta - existing)) for existing in allowed) > 6.0:
+            allowed.add(round(delta, 1))
+    return tuple(sorted(allowed))
 
 
 def fuse_affines(
