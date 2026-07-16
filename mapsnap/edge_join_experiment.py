@@ -1903,6 +1903,24 @@ def collect_graph_measurements(
     return records
 
 
+def effective_gcp_count(volume: Path, stem: str) -> int:
+    """Distinct physical intersections among a fitted page's inliers.
+
+    OSM name variants (SOUTH CAPITOL ST SE / SW / bare) expand one physical
+    intersection into several inlier records — p217 shows 6 inliers but is a
+    one-point fit, free to swing about it. Cluster by pixel distance.
+    """
+    georef = json.loads((volume / f"{stem}.georef.json").read_text())
+    clusters: list[tuple[float, float]] = []
+    for inter in georef.get("intersections", []):
+        if not inter.get("inlier"):
+            continue
+        x, y = inter["x"], inter["y"]
+        if all(math.hypot(x - cx, y - cy) >= 60 for cx, cy in clusters):
+            clusters.append((x, y))
+    return len(clusters)
+
+
 def keymap_position_prior(
     unit: PageUnit, vframe, init_xy: tuple[float, float]
 ) -> tuple[float, float, float] | None:
@@ -2072,19 +2090,21 @@ def cmd_posegraph(volume: Path, remeasure: bool, limit: int | None) -> None:
         i = index[stem]
         if is_fitted(unit) and unit.gen_affine is not None:
             x, y, theta = vframe.affine_to_pose(unit.gen_affine)
-            # Tight tiers (validated on DC): letting anchors drift was the
-            # dominant error source, and the Huber loss still lets the rare
-            # high-inlier-but-wrong fit be outvoted by its neighbors.
-            if unit.inlier_intersections >= 5:
+            # Tiered by EFFECTIVE GCPs (distinct physical intersections), not
+            # raw inlier count: one-point fits swing freely about their
+            # anchor (Detroit: 10 of 11 one-point fits are >50ft wrong) and
+            # two-point fits are where grid-aliased locks live. Tight tiers
+            # for real fits are still essential — letting good anchors drift
+            # was the dominant error source in early runs.
+            effective = effective_gcp_count(volume, stem)
+            if effective >= 4:
                 sigma_pos, sigma_theta = 1.5, 0.15
-            elif unit.inlier_intersections >= 3:
+            elif effective == 3:
                 sigma_pos, sigma_theta = 3.0, 0.3
+            elif effective == 2:
+                sigma_pos, sigma_theta = 12.0, 1.2
             else:
-                # Low-inlier fits are where RANSAC catastrophes live, but
-                # loosening this tier (tried 12m and 25m on DC) lets whole
-                # weakly-anchored clusters slide onto aliased grid poses;
-                # 6m was the best global compromise.
-                sigma_pos, sigma_theta = 6.0, 0.6
+                sigma_pos, sigma_theta = 25.0, 2.5
             priors.append(
                 AbsolutePrior(
                     i,
