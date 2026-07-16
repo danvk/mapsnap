@@ -154,9 +154,11 @@ def truth_polygon_world(item: dict) -> list[list[float]] | None:
         return None
     polygon = parse_svg_polygon(selector.get("value", ""))
     gcps = extract_gcps(item)
-    if len(polygon) < 3 or len(gcps) < 3:
+    transform_type = annotation_transform_type(item)
+    min_gcps = 2 if transform_type == "helmert" else 3
+    if len(polygon) < 3 or len(gcps) < min_gcps:
         return None
-    A = fit_transform(gcps, annotation_transform_type(item))
+    A = fit_transform(gcps, transform_type)
     ring = []
     for px, py in polygon:
         lon, lat = A @ np.array([px, py, 1.0])
@@ -180,8 +182,19 @@ def truth_polygons_world(iiif_path: Path) -> list[list[list[float]]]:
 
 
 def truth_page_number(item: dict) -> int | None:
-    """Page number N from a truth annotation label like '... p156' or '... p73 [1]'."""
-    match = re.search(r"\bp(\d+)", str(item.get("label", "")))
+    """Page number N from a truth annotation's label or image-service URL.
+
+    Handles plain labels ('... p156', '... p73 [1]') and sb-format volumes
+    whose labels read '... psb001250 [2]' (the number then comes from the
+    source id via source_id_to_page_key).
+    """
+    match = re.search(r"\bp(\d+)[a-z]?\b", str(item.get("label", "")))
+    if match:
+        return int(match.group(1))
+    key = source_id_to_page_key(
+        item.get("target", {}).get("source", {}).get("id"), str(item.get("label", ""))
+    )
+    match = re.fullmatch(r"p(\d+)[a-z]?(?:__\d+)?", key)
     return int(match.group(1)) if match else None
 
 
