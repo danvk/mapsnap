@@ -171,6 +171,7 @@ def source_id_to_page_key(source_id: str | None, label: str) -> str:
 
     if not source_id:
         return label_to_page_key(label) or ""
+    source_id = source_id.removesuffix("/info.json")
 
     # Sanborn sb-format: service:...:sb{5-digit page}{suffix char}
     m = re.search(r":sb(\d{5})([a-z0-9])$", source_id, re.IGNORECASE)
@@ -180,14 +181,14 @@ def source_id_to_page_key(source_id: str | None, label: str) -> str:
         suffix = "" if suffix_char == "0" else suffix_char
         return f"p{page_num}{suffix}" + split_suffix
 
-    # Standard LOC format: -NNNN[letter] optionally followed by /info.json
-    m = re.search(r"-(\d+)([a-zA-Z]?)(?:/info\.json)?$", source_id)
+    # Standard LOC format: -NNNN[letter]
+    m = re.search(r"-(\d+)([a-zA-Z]?)$", source_id)
     if m:
         page_key = f"p{int(m.group(1))}{m.group(2)}"
     else:
         # Fall back to the suffix after the last hyphen in the last colon-segment
         # (e.g. "...01790_01N_1950-covr" → "covr", "...01790_01N_1950-ind1" → "ind1").
-        last_segment = source_id.removesuffix("/info.json").split(":")[-1]
+        last_segment = source_id.split(":")[-1]
         page_key = last_segment.rsplit("-", 1)[-1]
     return page_key + split_suffix
 
