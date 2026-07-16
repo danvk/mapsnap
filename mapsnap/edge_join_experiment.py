@@ -195,6 +195,7 @@ def load_page_units(volume: Path) -> list[PageUnit]:
         inlier_int = inlier_str = 0
         keymap_centers: list[tuple[float, float]] = []
         keymap_radius = 0.0
+        keymap_regions = None
         if georef is not None:
             if state == "fitted":
                 gen_affine = page_world_affine(georef)
