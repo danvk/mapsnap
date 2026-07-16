@@ -269,3 +269,43 @@ def test_truth_polygons_by_page_groups_splits(tmp_path):
     assert len(by_page[73]) == 2  # both splits of page 73
     assert by_page[73][0] == [[0.0, 0.0], [10.0, 0.0], [10.0, 10.0]]
     assert len(by_page[90]) == 1
+
+
+def test_compare_pages_ignores_skeletons_with_full_color_counterparts(tmp_path):
+    from mapsnap.compare_iiif_georef import compare_pages
+
+    def item(page_id: str, label: str) -> dict:
+        return {
+            "label": label,
+            "target": {
+                "source": {
+                    "id": f"https://loc.gov/x/g123-{page_id}/info.json",
+                    "width": 1000,
+                    "height": 1000,
+                },
+            },
+            "body": {
+                "transformation": {"type": "polynomial", "options": {"order": 1}},
+                "features": [
+                    {
+                        "properties": {"resourceCoords": [x, y]},
+                        "geometry": {
+                            "coordinates": [-74.0 + x * 1e-6, 40.0 + y * 1e-6]
+                        },
+                    }
+                    for x, y in [(0, 0), (900, 0), (0, 900)]
+                ],
+            },
+        }
+
+    truth = {"items": [item("0153", "x p153"), item("0153s", "x p153s")]}
+    generated = {"items": [item("0153", "x p153")]}
+    truth_path = tmp_path / "main.iiif.json"
+    gen_path = tmp_path / "gen.iiif.json"
+    truth_path.write_text(json.dumps(truth))
+    gen_path.write_text(json.dumps(generated))
+    rows, missing = compare_pages(truth_path, gen_path)
+    # p153s maps the same ground as p153 and `mapsnap iiif` never emits it;
+    # it must not count as a missing page.
+    assert [r["page_key"] for r in rows] == ["p153"]
+    assert missing == []

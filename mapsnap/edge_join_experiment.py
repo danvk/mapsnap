@@ -138,7 +138,12 @@ def affine_scale_m_per_px(affine: np.ndarray) -> float:
 
 
 def load_truth_units(volume: Path) -> tuple[dict[str, dict], set[str]]:
-    """(unsplit truth items by page key, page keys with split-only truth)."""
+    """(unsplit truth items by page key, page keys with split-only truth).
+
+    Skeleton sheets ('s' suffix) with a full-color truth counterpart are
+    dropped, mirroring make_iiif_georef and compare: they map the same ground
+    as the full-color page.
+    """
     data = json.loads((volume / "main.iiif.json").read_text())
     unsplit: dict[str, dict] = {}
     split_parents: set[str] = set()
@@ -150,6 +155,8 @@ def load_truth_units(volume: Path) -> tuple[dict[str, dict], set[str]]:
             split_parents.add(key.split("__")[0])
         else:
             unsplit[key] = item
+    for key in [k for k in unsplit if k.endswith("s") and k[:-1] in unsplit]:
+        del unsplit[key]
     return unsplit, split_parents
 
 

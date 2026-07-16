@@ -664,6 +664,24 @@ def compare_pages(
     oim_dir = truth_path.parent / "oim"
     gen_dir = generated_path.parent
 
+    # Mirror make_iiif_georef's skeleton rule: a skeleton sheet ('s' suffix)
+    # whose full-color counterpart is also in the truth maps the same ground,
+    # and `mapsnap iiif` deliberately emits only the full-color fit — counting
+    # the skeleton separately would double-count that ground, hit or miss.
+    skeletons = sorted(
+        key
+        for key in truth_by_source
+        if key.endswith("s") and key[:-1] in truth_by_source
+    )
+    if skeletons:
+        print(
+            f"Ignoring {len(skeletons)} skeleton page(s) with full-color "
+            "truth counterparts: " + ", ".join(skeletons),
+            file=sys.stderr,
+        )
+        for key in skeletons:
+            del truth_by_source[key]
+
     rows: list[dict] = []
     missing: list[dict] = []
     for page_key, truth_items in sorted(truth_by_source.items()):
