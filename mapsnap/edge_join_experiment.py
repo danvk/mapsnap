@@ -1312,6 +1312,7 @@ def cmd_chain(
     min_verification: float,
     max_rounds: int,
     solve_scale: bool,
+    seeds: str = "truth",
 ) -> None:
     """Chaining + fusion: verification-gated joins become anchors themselves.
 
@@ -1346,7 +1347,14 @@ def cmd_chain(
 
     posed_footprints: list[list[list[float]]] = []
     for unit in units:
-        if unit.anchor_truth:
+        # "truth" seeds = RANSAC fits within 25ft of truth (study framing);
+        # "inliers" seeds = the truth-free rule (>=3 inlier intersections).
+        is_seed = (
+            unit.anchor_truth
+            if seeds == "truth"
+            else unit.fit_state == "fitted" and unit.inlier_intersections >= 3
+        )
+        if is_seed:
             affine = (
                 unit.truth.affine_local
                 if anchor_pose == "truth" and unit.truth
@@ -1430,10 +1438,13 @@ def cmd_chain(
             )
         print(f"round {round_index}: posed {len(proposals)} new pages{stats}")
 
-    out_path = volume / "artifacts" / "edge_join" / "chain.jsonl"
+    suffix = "" if seeds == "truth" else f"_{seeds}"
+    out_path = volume / "artifacts" / "edge_join" / f"chain{suffix}.jsonl"
     out_path.write_text("\n".join(json.dumps(r) for r in accepted))
     scored = [r["rmse_ft"] for r in accepted if "rmse_ft" in r]
-    print(f"\n== chain (gate {min_verification}, anchor@{anchor_pose}) ==")
+    print(
+        f"\n== chain (gate {min_verification}, anchor@{anchor_pose}, seeds={seeds}) =="
+    )
     print(
         f"posed {len(accepted)} pages beyond the {sum(1 for _, (_, h) in posed.items() if h == 0)} seed anchors"
     )
@@ -1548,14 +1559,18 @@ def materialize_records(
     return rows
 
 
-def cmd_report(volume: Path) -> None:
-    """mapsnap-compare-style report over RANSAC anchors + chained neighbor fits.
+def cmd_report(volume: Path, chain_source: str = "chain") -> None:
+    """Compare RANSAC-only, augmented, and replace policies on one denominator.
 
-    Seed anchors keep their accepted RANSAC georef; every other page placed by
-    the chain uses its (fused) neighbor fit. RMSE is against the OIM truth.
+    Policies (page level, splits excluded from neighbor placement):
+      ransac-all  every accepted RANSAC fit (any quality)
+      augment     RANSAC everywhere it fit; neighbor fits ONLY for pages
+                  RANSAC could not fit (the production intent)
+      replace     seed anchors keep RANSAC; chain placements override
+                  non-anchor RANSAC fits (the study framing)
     """
     units = load_page_units(volume)
-    chain_path = volume / "artifacts" / "edge_join" / "chain.jsonl"
+    chain_path = volume / "artifacts" / "edge_join" / f"{chain_source}.jsonl"
     chained: dict[str, dict] = {}
     if chain_path.exists():
         for line in chain_path.read_text().splitlines():
@@ -1563,73 +1578,56 @@ def cmd_report(volume: Path) -> None:
                 record = json.loads(line)
                 chained[record["target"]] = record
 
-    rows = []
-    unplaced = []
-    n_no_truth = 0
-    for unit in sorted(units, key=lambda u: u.number):
-        source = hop = verification = affine = None
-        if unit.anchor_truth and unit.gen_affine is not None:
-            source, hop, affine = "ransac", 0, unit.gen_affine
-        elif unit.stem in chained:
-            record = chained[unit.stem]
-            source = "neighbor"
-            hop = record["hop"]
-            verification = record["verification"]
-            affine = np.array(record["world_affine"])
-        if affine is None:
-            if unit.truth is not None or unit.split_truth:
-                unplaced.append(unit)
-            continue
-        if unit.truth is None:
-            n_no_truth += 1
-            continue
-        rmse = grid_rmse_ft_between(
-            affine, unit.truth.affine_local, unit.width, unit.height
+    def placement(unit: PageUnit, policy: str):
+        chain_rec = chained.get(unit.stem)
+        chain_affine = (
+            np.array(chain_rec["world_affine"]) if chain_rec is not None else None
         )
-        rows.append((unit.stem, source, hop, verification, rmse))
+        ransac = unit.gen_affine if unit.fit_state == "fitted" else None
+        if policy == "ransac-all":
+            return ("ransac", ransac)
+        if policy == "augment":
+            if ransac is not None:
+                return ("ransac", ransac)
+            return ("neighbor", chain_affine)
+        if policy == "replace":
+            if unit.anchor_truth and ransac is not None:
+                return ("ransac", ransac)
+            return ("neighbor", chain_affine)
+        raise ValueError(policy)
 
-    print(f"== {volume.name}: RANSAC anchors + chained neighbor fits ==")
-    print(f"{'Page':>6}  {'source':<9} {'hop':>3} {'ver':>5}  {'rmse_ft':>8}")
-    print("-" * 42)
-    for stem, source, hop, verification, rmse in sorted(rows, key=lambda r: -r[4]):
-        ver = f"{verification:.2f}" if verification is not None else "    -"
-        print(f"{stem:>6}  {source:<9} {hop:>3} {ver:>5}  {rmse:>8.1f}")
-    for unit in unplaced:
-        kind = (
-            "split-truth" if unit.split_truth and unit.truth is None else unit.fit_state
-        )
-        print(f"{unit.stem:>6}  {'(unplaced)':<9}     {kind:>10}   (no fit)")
-
-    total_truth = len(rows) + len(unplaced)
-    rmses = sorted(r[4] for r in rows)
+    truth_units = [u for u in units if u.truth is not None]
+    n_split_truth = sum(1 for u in units if u.split_truth and u.truth is None)
+    total = len(truth_units) + n_split_truth
     print(
-        f"\n{len(rows)}/{total_truth} = {len(rows) / max(total_truth, 1):.2%}"
-        f" truth pages placed ({len(unplaced)} unplaced"
-        + (f"; +{n_no_truth} placed without truth" if n_no_truth else "")
-        + ")"
+        f"== {volume.name}: {total} truth pages"
+        f" ({n_split_truth} split-only, out of scope) — chain={chain_source} =="
     )
-    if rmses:
-        mean = sum(rmses) / len(rmses)
+    header = (
+        f"{'policy':<12} {'placed':>8} {'median':>7} {'mean':>6} {'max':>6}"
+        f" {'<=25':>5} {'<=50':>5} {'<=100':>6}"
+    )
+    print(header)
+    print("-" * len(header))
+    for policy in ["ransac-all", "augment", "replace"]:
+        rmses = []
+        for unit in truth_units:
+            _, affine = placement(unit, policy)
+            if affine is None:
+                continue
+            rmses.append(
+                grid_rmse_ft_between(
+                    affine, unit.truth.affine_local, unit.width, unit.height
+                )
+            )
+        rmses.sort()
+        n = len(rmses)
+        buckets = [sum(1 for r in rmses if r <= t) for t in (25, 50, 100)]
         print(
-            f"RMSE:  mean={mean:.0f} ft  median={percentile(rmses, 0.5):.0f} ft"
-            f"  max={max(rmses):.0f} ft"
+            f"{policy:<12} {n:>4}/{total:<3} {percentile(rmses, 0.5):>6.0f}f"
+            f" {sum(rmses) / n:>5.0f}f {max(rmses):>5.0f}f"
+            f" {buckets[0]:>5} {buckets[1]:>5} {buckets[2]:>6}"
         )
-        for threshold in [15, 25, 50, 100, 500, 1000]:
-            n = sum(1 for r in rmses if r <= threshold)
-            print(
-                f"  RMSE <= {threshold:>4} ft: {n}/{len(rmses)} ({n / len(rmses):.0%})"
-            )
-        by_source: dict[str, list[float]] = {}
-        for _, source, hop, _, rmse in rows:
-            key = source if source == "ransac" else f"neighbor hop{hop}"
-            by_source.setdefault(key, []).append(rmse)
-        print("\nby source:")
-        for key in sorted(by_source):
-            values = sorted(by_source[key])
-            print(
-                f"  {key:<14} n={len(values):>3}  median={percentile(values, 0.5):>5.0f} ft"
-                f"  max={max(values):>6.0f} ft"
-            )
 
 
 def cmd_materialize(volume: Path, source: str) -> None:
@@ -1696,6 +1694,8 @@ def main() -> None:
     parser.add_argument(
         "--source", default="joins_generated", help="materialize: jsonl basename"
     )
+    parser.add_argument("--seeds", choices=["truth", "inliers"], default="truth")
+    parser.add_argument("--chain-source", default="chain", help="report: chain file")
     args = parser.parse_args()
     if args.command == "stats":
         cmd_stats(args.volume)
@@ -1714,11 +1714,12 @@ def main() -> None:
             args.min_verification,
             args.max_rounds,
             args.solve_scale,
+            args.seeds,
         )
     elif args.command == "materialize":
         cmd_materialize(args.volume, args.source)
     elif args.command == "report":
-        cmd_report(args.volume)
+        cmd_report(args.volume, args.chain_source)
 
 
 if __name__ == "__main__":
