@@ -1,11 +1,14 @@
 """Unit tests for make_iiif_georef helpers."""
 
+from pathlib import Path
+
 from shapely.geometry import box
 
 from mapsnap.make_iiif_georef import (
     GcpPoint,
     _load_oim_index,
     _service_url_to_page_key,
+    expand_georef_globs,
     georef_gcp_points,
     georef_path_to_page_key,
     make_annotation,
@@ -275,6 +278,28 @@ def test_georef_path_split_page():
 
 def test_georef_path_split_page_multi_digit():
     assert georef_path_to_page_key("data/vol/p4__10.georef.json") == "p4__10"
+
+
+def test_georef_path_neighbor_variant():
+    assert georef_path_to_page_key("data/vol/p147.georef-neighbor.json") == "p147"
+    assert georef_path_to_page_key("data/vol/p16s.georef-neighbor.json") == "p16s"
+
+
+def test_georef_path_other_variants_do_not_match():
+    assert georef_path_to_page_key("data/vol/p16.georef-nofit.json") is None
+    assert georef_path_to_page_key("data/vol/p16.georef-misscale.json") is None
+
+
+def test_expand_georef_globs_first_glob_wins(tmp_path):
+    for name in [
+        "p1.georef.json",
+        "p1.georef-neighbor.json",
+        "p2.georef-neighbor.json",
+    ]:
+        (tmp_path / name).write_text("{}")
+    pattern = f"{tmp_path}/p*.georef.json,{tmp_path}/p*.georef-neighbor.json"
+    paths = [Path(p).name for p in expand_georef_globs(pattern)]
+    assert paths == ["p1.georef.json", "p2.georef-neighbor.json"]
 
 
 def test_georef_path_no_match():

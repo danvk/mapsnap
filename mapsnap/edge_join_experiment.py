@@ -2213,8 +2213,18 @@ def cmd_posegraph(volume: Path, remeasure: bool, limit: int | None) -> None:
 
 
 def cmd_materialize(volume: Path, source: str) -> None:
-    """Write neighbor-fit variant georef files and print inspection lists."""
+    """Write neighbor-fit variant georef files and print inspection lists.
+
+    Existing pN.georef-neighbor.json files are removed first so the on-disk
+    set always mirrors the requested source (stale placements from earlier
+    runs would otherwise linger).
+    """
     units_by_stem = {u.stem: u for u in load_page_units(volume)}
+    stale = sorted(volume.glob("p*.georef-neighbor.json"))
+    for path in stale:
+        path.unlink()
+    if stale:
+        print(f"removed {len(stale)} existing georef-neighbor files", file=sys.stderr)
     records = list(load_placement_records(volume, source).values())
     rows = materialize_records(volume, records, units_by_stem)
     print(
