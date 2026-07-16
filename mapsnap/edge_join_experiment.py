@@ -32,6 +32,7 @@ from pathlib import Path
 import cv2
 import numpy as np
 
+from mapsnap import edge_join
 from mapsnap.compare_iiif_georef import (
     annotation_transform_type,
     extract_gcps,
@@ -40,7 +41,11 @@ from mapsnap.compare_iiif_georef import (
     north_angle,
     sample_grid,
 )
-from mapsnap.keymap.align_page_region import angle_wrap
+from mapsnap.keymap.align_page_region import (
+    angle_wrap,
+    image_neighbor_directions,
+    load_adjacency,
+)
 from mapsnap.keymap.fit_keymap import page_number, project
 from mapsnap.score_adjacency import truth_adjacent_pairs
 from mapsnap.utils import jpeg_dimensions, source_id_to_page_key
@@ -55,6 +60,8 @@ GEOREF_VARIANTS = [
 METERS_PER_FOOT = 0.3048
 TRUTH_ADJACENT_GAP_M = 30.0
 ANCHOR_RMSE_FT = 25.0
+ALLOWED_RELATIVE_ROTATIONS = (0.0, 90.0, -90.0)
+RELATIVE_ROTATION_TOLERANCE_DEG = 6.0
 
 
 @dataclass
@@ -82,6 +89,7 @@ class PageUnit:
     inlier_streets: int
     keymap_centers: list[tuple[float, float]]
     keymap_radius_m: float
+    keymap_regions: list[list[list[float]]] | None = None
     anchor_truth: bool = False
     anchor_free: bool = False
     rmse_ft: float | None = None  # generated-vs-truth RMSE
@@ -197,6 +205,7 @@ def load_page_units(volume: Path) -> list[PageUnit]:
             keymap = georef.get("keymap") or {}
             keymap_centers = [tuple(c) for c in keymap.get("centers", [])]
             keymap_radius = float(keymap.get("radius_m") or 0.0)
+            keymap_regions = keymap.get("regions") or None
 
         unit = PageUnit(
             stem=stem,
@@ -211,6 +220,7 @@ def load_page_units(volume: Path) -> list[PageUnit]:
             inlier_streets=inlier_str,
             keymap_centers=keymap_centers,
             keymap_radius_m=keymap_radius,
+            keymap_regions=keymap_regions,
         )
         if truth is not None and gen_affine is not None:
             unit.rmse_ft = grid_rmse_ft_between(
@@ -650,11 +660,561 @@ def cmd_sanity(volume: Path, limit: int | None) -> None:
     print(f"contact sheets in {out_dir}")
 
 
+@dataclass
+class FrameSpec:
+    """A pair-local raster frame: equirectangular metres, north-up rows.
+
+    col = (x - x_min) / res, row = (y_max - y) / res, where (x, y) are metres
+    east/north of `origin`. Page images map into the raster without reflection.
+    """
+
+    origin: tuple[float, float]  # lon, lat
+    x_min: float
+    y_max: float
+    res_m: float
+    shape: tuple[int, int]  # rows, cols
+
+    def metre_scales(self) -> tuple[float, float]:
+        kx = 111_320.0 * math.cos(math.radians(self.origin[1]))
+        return kx, 110_540.0
+
+    def lonlat_to_raster(self, lon: float, lat: float) -> tuple[float, float]:
+        kx, ky = self.metre_scales()
+        x = (lon - self.origin[0]) * kx
+        y = (lat - self.origin[1]) * ky
+        return (x - self.x_min) / self.res_m, (self.y_max - y) / self.res_m
+
+    def page_to_raster_affine(self, affine_local: np.ndarray) -> np.ndarray:
+        """2x3 mapping page px -> raster px given a page px -> lon/lat affine."""
+        kx, ky = self.metre_scales()
+        a = affine_local
+        metres = np.array(
+            [
+                [a[0, 0] * kx, a[0, 1] * kx, (a[0, 2] - self.origin[0]) * kx],
+                [a[1, 0] * ky, a[1, 1] * ky, (a[1, 2] - self.origin[1]) * ky],
+            ]
+        )
+        to_frame = np.array(
+            [
+                [1 / self.res_m, 0, -self.x_min / self.res_m],
+                [0, -1 / self.res_m, self.y_max / self.res_m],
+            ]
+        )
+        return edge_join.compose(to_frame, metres)
+
+    def raster_pose_to_world_affine(self, pose: np.ndarray) -> np.ndarray:
+        """2x3 mapping page px -> (lon, lat) given a page px -> raster px pose."""
+        kx, ky = self.metre_scales()
+        from_raster = np.array(
+            [
+                [self.res_m / kx, 0, self.origin[0] + self.x_min / kx],
+                [0, -self.res_m / ky, self.origin[1] + self.y_max / ky],
+            ]
+        )
+        return edge_join.compose(from_raster, pose)
+
+
+def build_frame(
+    anchor: PageUnit,
+    anchor_affine: np.ndarray,
+    init_lonlat: tuple[float, float],
+    reach_m: float,
+    res_m: float,
+) -> FrameSpec:
+    """A frame covering the anchor page plus a search disc around the init."""
+    lon0, lat0 = apply_affine(anchor_affine, anchor.width / 2, anchor.height / 2)
+    kx = 111_320.0 * math.cos(math.radians(lat0))
+    ky = 110_540.0
+    xs, ys = [], []
+    for u, v in [
+        (0, 0),
+        (anchor.width, 0),
+        (anchor.width, anchor.height),
+        (0, anchor.height),
+    ]:
+        lon, lat = apply_affine(anchor_affine, u, v)
+        xs.append((lon - lon0) * kx)
+        ys.append((lat - lat0) * ky)
+    ix = (init_lonlat[0] - lon0) * kx
+    iy = (init_lonlat[1] - lat0) * ky
+    xs += [ix - reach_m, ix + reach_m]
+    ys += [iy - reach_m, iy + reach_m]
+    pad = 20.0
+    x_min, x_max = min(xs) - pad, max(xs) + pad
+    y_min, y_max = min(ys) - pad, max(ys) + pad
+    shape = (int((y_max - y_min) / res_m) + 1, int((x_max - x_min) / res_m) + 1)
+    return FrameSpec((lon0, lat0), x_min, y_max, res_m, shape)
+
+
+def run_join(
+    volume: Path,
+    anchor: PageUnit,
+    target: PageUnit,
+    anchor_affine: np.ndarray,
+    init_centers: list[tuple[float, float]],
+    radius_m: float,
+    scale_m_per_px: float,
+    params: "edge_join.MatchParams",
+    expected_direction: tuple[float, float] | None = None,
+    containment_regions: list[list[list[float]]] | None = None,
+) -> dict | None:
+    """One anchor->target join attempt; returns a diagnostics record.
+
+    All candidates from every init center compete; the verification-best wins.
+    The record includes truth RMSE for the winner and for the best-possible
+    candidate (to separate ranking failures from search failures).
+    """
+    prob_anchor = load_prob(volume, anchor.stem)
+    prob_target = load_prob(volume, target.stem)
+    if prob_anchor is None or prob_target is None or not init_centers:
+        return None
+    from mapsnap.road_model import road_mask, road_skeleton
+
+    diag_m = math.hypot(target.width, target.height) * scale_m_per_px
+    record: dict = {"anchor": anchor.stem, "target": target.stem}
+    all_candidates: list[
+        tuple[edge_join.JoinCandidate, FrameSpec, tuple[float, float]]
+    ] = []
+    direction_mode = expected_direction is not None
+    plausibility_centers = list(init_centers)
+    if direction_mode:
+        # The printed-side prediction anchors the search next to the anchor
+        # itself; keymap init centers remain as an absolute plausibility gate
+        # (they break the 180-degree flip-and-swap-sides symmetry that the
+        # content-relative printed-side check cannot).
+        init_centers = [
+            apply_affine(anchor_affine, anchor.width / 2, anchor.height / 2)
+        ]
+    for init in init_centers:
+        reach = (diag_m + 280.0) if direction_mode else (radius_m + diag_m / 2)
+        frame = build_frame(anchor, anchor_affine, init, reach, params.resolution_m)
+        if frame.shape[0] * frame.shape[1] > 6e6:
+            record["status"] = "frame_too_large"
+            continue
+        pose_anchor = frame.page_to_raster_affine(anchor_affine)
+        anchor_center_raster = tuple(
+            pose_anchor @ np.array([anchor.width / 2, anchor.height / 2, 1.0])
+        )
+        fixed, fixed_valid = edge_join.warp_page(prob_anchor, pose_anchor, frame.shape)
+        search_center = frame.lonlat_to_raster(*init)
+        raster_scale = scale_m_per_px / frame.res_m
+        sigma_px = max(params.blur_sigma_m / frame.res_m, 0.5)
+        fixed_blur = cv2.GaussianBlur(fixed * fixed_valid, (0, 0), sigma_px)
+        thetas = edge_join.rotation_candidates(
+            fixed, prob_target, params.jitter_deg, fixed_valid=fixed_valid
+        )
+        theta_anchor = math.degrees(math.atan2(-pose_anchor[1, 0], pose_anchor[0, 0]))
+        for relative in ALLOWED_RELATIVE_ROTATIONS:
+            seed = angle_wrap(theta_anchor + relative)
+            if all(abs(angle_wrap(seed - t)) > 1.0 for t in thetas):
+                thetas.append(seed)
+        anchor_corner_offsets = (
+            np.array(
+                [
+                    [0, 0, 1],
+                    [anchor.width, 0, 1],
+                    [anchor.width, anchor.height, 1],
+                    [0, anchor.height, 1],
+                ],
+                dtype=float,
+            )
+            @ pose_anchor.T
+            - anchor_center_raster
+        )
+        candidates = []
+        for theta in thetas:
+            if expected_direction is not None:
+                # Predict the target's center: the printed number's side gives
+                # the direction, the sheets' support extents give the distance
+                # (minus the shared strip). This shrinks the search from the
+                # keymap disc to a ~250 m window, before any keymap input.
+                lin = cv2.getRotationMatrix2D((0.0, 0.0), theta, raster_scale)[:, :2]
+                d = lin @ np.array(expected_direction)
+                d /= max(float(np.linalg.norm(d)), 1e-9)
+                support_anchor = float(np.abs(anchor_corner_offsets @ d).max())
+                half = np.array([target.width / 2, target.height / 2])
+                target_offsets = (
+                    np.array([[1, 1], [1, -1], [-1, 1], [-1, -1]]) * half
+                ) @ lin.T
+                support_target = float(np.abs(target_offsets @ d).max())
+                overlap_px = 70.0 / frame.res_m
+                predicted = np.array(anchor_center_raster) - d * (
+                    support_anchor + support_target - overlap_px
+                )
+                seed_center = (float(predicted[0]), float(predicted[1]))
+                seed_radius = 250.0 / frame.res_m
+            else:
+                seed_center = search_center
+                seed_radius = radius_m / frame.res_m
+            for candidate in edge_join.match_at_rotation(
+                fixed_blur,
+                fixed_valid,
+                prob_target,
+                raster_scale,
+                theta,
+                params,
+                seed_center,
+                seed_radius,
+            ):
+                candidate.diagnostics["theta_anchor"] = theta_anchor
+                candidates.append(candidate)
+        if not candidates:
+            continue
+        mask = road_mask(fixed, min_area=500) & fixed_valid
+        skeleton = road_skeleton(mask)
+        distance = (
+            cv2.distanceTransform((~skeleton).astype(np.uint8), cv2.DIST_L2, 5).astype(
+                np.float32
+            )
+            * frame.res_m
+        )
+        distance = np.minimum(distance, 30.0)
+        points = edge_join.skeleton_points(
+            prob_target, params.mask_threshold, params.mask_min_area
+        )
+        # Score only skeleton points near the anchor (the shared strip).
+        dilate_px = max(int(30.0 / frame.res_m), 1)
+        near_anchor = cv2.dilate(
+            fixed_valid.astype(np.uint8), np.ones((dilate_px, dilate_px), np.uint8)
+        ).astype(bool)
+        ranked = edge_join.refine_and_rank(
+            candidates,
+            distance,
+            points,
+            fixed_valid=fixed_valid,
+            page_shape=prob_target.shape[:2],
+            max_overlap_frac=params.max_overlap_frac,
+            region=near_anchor,
+            fixed_prob=fixed,
+            target_prob=prob_target,
+            fine_sigma_px=params.fine_sigma_m / frame.res_m,
+            solve_scale=params.solve_scale,
+        )
+        all_candidates.extend((c, frame, anchor_center_raster) for c in ranked)
+
+    if not all_candidates:
+        record.setdefault("status", "no_candidates")
+        return record
+    # The printed-neighbor-side prior: a candidate placing the anchor on the
+    # wrong side of the target (e.g. a 180-degree flip) is disqualified.
+    if expected_direction is not None:
+        for candidate, _, anchor_center in all_candidates:
+            cosine = edge_join.direction_cosine(
+                candidate.pose,
+                prob_target.shape[:2],
+                anchor_center,
+                expected_direction,
+            )
+            candidate.diagnostics["direction_cos"] = round(cosine, 3)
+            if cosine < 0.25:
+                candidate.plausible = False
+    # Relative-rotation prior: adjacent sheets in this volume differ by
+    # 0 or +/-90 degrees (measured from truth: |dtheta| p90=90, max 92.8),
+    # so near-180 relative rotations are implausible.
+    for candidate, frame, _ in all_candidates:
+        relative = angle_wrap(
+            candidate.theta_deg
+            - candidate.diagnostics.get("theta_anchor", candidate.theta_deg)
+        )
+        candidate.diagnostics["relative_rotation"] = round(relative, 1)
+        if (
+            min(
+                abs(angle_wrap(relative - allowed))
+                for allowed in ALLOWED_RELATIVE_ROTATIONS
+            )
+            > RELATIVE_ROTATION_TOLERANCE_DEG
+        ):
+            candidate.plausible = False
+    # Keymap-region containment: the placed page footprint should mostly
+    # fall inside the key map's segmented region for this page (schematic, so
+    # the threshold is loose). Kills sideways and far-slid placements.
+    if containment_regions:
+        from shapely.geometry import Polygon
+        from shapely.ops import unary_union
+
+        lon_r, lat_r = containment_regions[0][0][0], containment_regions[0][0][1]
+        kxr = 111_320.0 * math.cos(math.radians(lat_r))
+        kyr = 110_540.0
+
+        def ring_metres(ring: list[list[float]]) -> list[tuple[float, float]]:
+            return [((lon - lon_r) * kxr, (lat - lat_r) * kyr) for lon, lat in ring]
+
+        region_poly = unary_union(
+            [Polygon(ring_metres(r)).buffer(0) for r in containment_regions]
+        ).buffer(60.0)
+        for candidate, frame, _ in all_candidates:
+            world = frame.raster_pose_to_world_affine(candidate.pose)
+            corners = [
+                apply_affine(world, x, y)
+                for x, y in [
+                    (0, 0),
+                    (target.width, 0),
+                    (target.width, target.height),
+                    (0, target.height),
+                ]
+            ]
+            footprint = Polygon(ring_metres([list(c) for c in corners]))
+            if footprint.area > 0:
+                contained = footprint.intersection(region_poly).area / footprint.area
+                candidate.diagnostics["region_containment"] = round(contained, 3)
+                if contained < 0.35:
+                    candidate.plausible = False
+    # Absolute-position gate: the target's center must land near a keymap
+    # candidate center (or the study's init). Kills opposite-side placements.
+    if plausibility_centers:
+        kx = 111_320.0 * math.cos(math.radians(plausibility_centers[0][1]))
+        ky = 110_540.0
+        for candidate, frame, _ in all_candidates:
+            world = frame.raster_pose_to_world_affine(candidate.pose)
+            lon_c, lat_c = apply_affine(world, target.width / 2, target.height / 2)
+            nearest = min(
+                math.hypot((lon_c - lon) * kx, (lat_c - lat) * ky)
+                for lon, lat in plausibility_centers
+            )
+            candidate.diagnostics["center_dist_m"] = round(nearest, 1)
+            if nearest > radius_m:
+                candidate.plausible = False
+    all_candidates.sort(key=lambda cf: -cf[0].verification_score())
+    best, best_frame, _ = all_candidates[0]
+    world = best_frame.raster_pose_to_world_affine(best.pose)
+    record.update(
+        status="ok",
+        n_candidates=len(all_candidates),
+        theta_deg=round(best.theta_deg, 2),
+        ncc=round(best.ncc, 3),
+        ncc_fine=round(best.ncc_fine, 3),
+        scale_adjust=round(best.scale_adjust, 4),
+        verification=round(best.verification_score(), 3),
+        chamfer_mean_m=round(best.chamfer_mean_m, 2),
+        inlier_frac=round(best.inlier_frac, 3),
+        n_points=best.n_points,
+        overlap_frac=round(best.overlap_frac, 3),
+        direction_cos=best.diagnostics.get("direction_cos"),
+        jtj_eig_ratio=round(best.jtj_eig_ratio, 5),
+        world_affine=[list(row) for row in world],
+    )
+    if target.truth is not None:
+        record["rmse_ft"] = round(
+            grid_rmse_ft_between(
+                world, target.truth.affine_local, target.width, target.height
+            ),
+            1,
+        )
+        rmses = []
+        for candidate, frame, _ in all_candidates:
+            w = frame.raster_pose_to_world_affine(candidate.pose)
+            rmses.append(
+                grid_rmse_ft_between(
+                    w, target.truth.affine_local, target.width, target.height
+                )
+            )
+        best_idx = int(np.argmin(rmses))
+        record["best_possible_rmse_ft"] = round(rmses[best_idx], 1)
+        record["best_possible_rank"] = best_idx
+    return record
+
+
+def volume_median_scale(units: list[PageUnit]) -> float:
+    """Median truth-anchor scale (metres per page pixel)."""
+    scales = [
+        affine_scale_m_per_px(u.truth.affine_local)
+        for u in units
+        if u.anchor_truth and u.truth
+    ]
+    return statistics.median(scales)
+
+
+def summarize_joins(records: list[dict], label: str) -> None:
+    """Print RMSE percentiles and threshold rates for join records."""
+    ok = [r for r in records if r.get("status") == "ok" and "rmse_ft" in r]
+    print(f"\n== {label}: {len(records)} attempts, {len(ok)} scored ==")
+    if not ok:
+        return
+    rmses = [r["rmse_ft"] for r in ok]
+    print(
+        f"  winner RMSE ft: median {percentile(rmses, 0.5):.0f},"
+        f" p90 {percentile(rmses, 0.9):.0f}, max {max(rmses):.0f}"
+    )
+    for threshold in [15, 25, 50, 100]:
+        n = sum(1 for r in rmses if r <= threshold)
+        print(f"    <={threshold}ft: {n}/{len(rmses)} ({n / len(rmses):.0%})")
+    possible = [r["best_possible_rmse_ft"] for r in ok]
+    n25 = sum(1 for r in possible if r <= 25)
+    print(
+        f"  best-possible RMSE <=25ft: {n25}/{len(possible)}"
+        f" (ranking losses: {n25 - sum(1 for r in rmses if r <= 25)})"
+    )
+    wrong = [r for r in ok if r["rmse_ft"] > 100 and r["inlier_frac"] > 0.6]
+    print(f"  wrong-lock (RMSE>100ft with inliers>0.6): {len(wrong)}/{len(ok)}")
+
+
+def cmd_perturb(
+    volume: Path, limit: int | None, seed: int, draws: int, solve_scale: bool
+) -> None:
+    """Phase 3a: anchor<->anchor joins from perturbed inits (precision floor)."""
+    import time as time_mod
+
+    units = load_page_units(volume)
+    by_number = {u.number: u for u in units}
+    truthp = truth_pairs_by_number(volume)
+    anchor_pairs = []
+    for p in sorted(truthp, key=sorted):
+        x, y = sorted(p)
+        ux, uy = by_number.get(x), by_number.get(y)
+        if not (ux and uy and ux.anchor_truth and uy.anchor_truth):
+            continue
+        overlap = pair_overlap_stats(ux, uy)
+        # Corner-adjacent pages share no strip; they are unjoinable by design.
+        if overlap is None or overlap["overlap_area_m2"] < 10000:
+            continue
+        anchor_pairs.append((x, y))
+    rng = np.random.default_rng(seed)
+    params = edge_join.MatchParams(solve_scale=solve_scale)
+    scale = volume_median_scale(units)
+    radius = 570.0
+    adjacency = load_adjacency(volume)
+    out_path = volume / "artifacts" / "edge_join" / "perturb.jsonl"
+    records = []
+    start = time_mod.time()
+    directed_pairs = [(x, y) for x, y in anchor_pairs] + [
+        (y, x) for x, y in anchor_pairs
+    ]
+    for x, y in directed_pairs[: limit or len(directed_pairs)]:
+        anchor, target = by_number[x], by_number[y]
+        assert anchor.truth and target.truth
+        for _ in range(draws):
+            # Init: target's truth center displaced uniformly within the disc.
+            angle = rng.uniform(0, 2 * math.pi)
+            dist = radius * math.sqrt(rng.uniform(0, 1))
+            lon_c, lat_c = apply_affine(
+                target.truth.affine_local, target.width / 2, target.height / 2
+            )
+            kx, ky = 111_320.0 * math.cos(math.radians(lat_c)), 110_540.0
+            init = (
+                lon_c + dist * math.cos(angle) / kx,
+                lat_c + dist * math.sin(angle) / ky,
+            )
+            directions = image_neighbor_directions(adjacency, target.stem)
+            expected = (directions.get(anchor.number) or (None, 0.0))[0]
+            rec = run_join(
+                volume,
+                anchor,
+                target,
+                anchor.truth.affine_local,
+                [init],
+                radius,
+                scale,
+                params,
+                expected_direction=expected,
+            )
+            if rec is None:
+                continue
+            rec["init_offset_m"] = round(dist, 1)
+            records.append(rec)
+        if len(records) % 20 < draws:
+            elapsed = time_mod.time() - start
+            print(f"  {len(records)} attempts, {elapsed:.0f}s elapsed", file=sys.stderr)
+    out_path.write_text("\n".join(json.dumps(r) for r in records))
+    summarize_joins(records, f"perturbation study ({len(anchor_pairs)} anchor pairs)")
+    print(f"wrote {out_path}")
+
+
+def cmd_match(
+    volume: Path, limit: int | None, anchor_pose: str, solve_scale: bool
+) -> None:
+    """Phase 3b: real anchor->target joins over the detected adjacency graph."""
+    units = load_page_units(volume)
+    by_number = {u.number: u for u in units}
+    pairs = detected_pairs(volume)
+    params = edge_join.MatchParams(solve_scale=solve_scale)
+    scale = volume_median_scale(units)
+    adjacency = load_adjacency(volume)
+    attempts: list[tuple[PageUnit, PageUnit]] = []
+    for pair in sorted(pairs, key=sorted):
+        for a, t in [tuple(sorted(pair)), tuple(sorted(pair))[::-1]]:
+            anchor, target = by_number.get(a), by_number.get(t)
+            if not anchor or not target or not anchor.anchor_truth:
+                continue
+            if target.anchor_truth or target.fit_state == "split":
+                continue
+            attempts.append((anchor, target))
+    records = []
+    for anchor, target in attempts[: limit or len(attempts)]:
+        affine = (
+            anchor.truth.affine_local
+            if anchor_pose == "truth" and anchor.truth
+            else anchor.gen_affine
+        )
+        if affine is None:
+            continue
+        inits = target.keymap_centers
+        radius = target.keymap_radius_m or 570.0
+        if not inits:
+            # No keymap hint: search around the anchor itself with a wide disc.
+            inits = [apply_affine(affine, anchor.width / 2, anchor.height / 2)]
+            radius = 800.0
+        directions = image_neighbor_directions(adjacency, target.stem)
+        expected = (directions.get(anchor.number) or (None, 0.0))[0]
+        rec = run_join(
+            volume,
+            anchor,
+            target,
+            affine,
+            inits,
+            radius,
+            scale,
+            params,
+            expected_direction=expected,
+            containment_regions=target.keymap_regions,
+        )
+        if rec is None:
+            continue
+        rec["anchor_pose"] = anchor_pose
+        rec["target_state"] = target.fit_state
+        records.append(rec)
+        status = rec.get("status")
+        rmse = rec.get("rmse_ft", "n/a")
+        print(
+            f"  {rec['anchor']}->{rec['target']}: {status} rmse={rmse}", file=sys.stderr
+        )
+    out_path = volume / "artifacts" / "edge_join" / f"joins_{anchor_pose}.jsonl"
+    out_path.write_text("\n".join(json.dumps(r) for r in records))
+    summarize_joins(records, f"real joins (anchor@{anchor_pose})")
+    # Cross-neighbor agreement: targets joined from 2+ anchors.
+    by_target: dict[str, list[dict]] = {}
+    for r in records:
+        if r.get("status") == "ok":
+            by_target.setdefault(r["target"], []).append(r)
+    multi = {t: rs for t, rs in by_target.items() if len(rs) >= 2}
+    agreements = []
+    for t, rs in multi.items():
+        unit = next(u for u in units if u.stem == t)
+        for i in range(len(rs)):
+            for j in range(i + 1, len(rs)):
+                a = np.array(rs[i]["world_affine"])
+                b = np.array(rs[j]["world_affine"])
+                agreements.append(grid_rmse_ft_between(a, b, unit.width, unit.height))
+    if agreements:
+        print(
+            f"  cross-neighbor agreement over {len(multi)} multi-anchor targets:"
+            f" median {percentile(agreements, 0.5):.0f}ft p90 {percentile(agreements, 0.9):.0f}ft"
+        )
+    print(f"wrote {out_path}")
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("command", choices=["stats", "infer", "sanity"])
+    parser.add_argument(
+        "command", choices=["stats", "infer", "sanity", "perturb", "match"]
+    )
     parser.add_argument("volume", type=Path)
-    parser.add_argument("--limit", type=int, help="sanity: only first N pairs")
+    parser.add_argument("--limit", type=int, help="only first N pairs/attempts")
+    parser.add_argument("--seed", type=int, default=7)
+    parser.add_argument("--draws", type=int, default=2, help="perturb: inits per pair")
+    parser.add_argument(
+        "--anchor-pose", choices=["truth", "generated"], default="truth"
+    )
+    parser.add_argument("--solve-scale", action="store_true")
     args = parser.parse_args()
     if args.command == "stats":
         cmd_stats(args.volume)
@@ -662,6 +1222,10 @@ def main() -> None:
         cmd_infer(args.volume)
     elif args.command == "sanity":
         cmd_sanity(args.volume, args.limit)
+    elif args.command == "perturb":
+        cmd_perturb(args.volume, args.limit, args.seed, args.draws, args.solve_scale)
+    elif args.command == "match":
+        cmd_match(args.volume, args.limit, args.anchor_pose, args.solve_scale)
 
 
 if __name__ == "__main__":

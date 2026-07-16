@@ -1,6 +1,5 @@
 """Synthetic-fixture tests for the edge-join matcher."""
 
-
 import cv2
 import numpy as np
 
@@ -94,6 +93,7 @@ def test_match_pair_recovers_known_pose() -> None:
         resolution_m=1.0,
         blur_sigma_m=3.0,
         min_overlap_m2=2000.0,
+        max_overlap_frac=1.0,  # the synthetic page lies fully inside the world
         peak_separation_m=20.0,
     )
     candidates = match_pair(world, np.ones_like(world, dtype=bool), page, scale, params)
@@ -161,6 +161,7 @@ def test_uniform_lattice_reports_multiple_peaks() -> None:
         resolution_m=1.0,
         blur_sigma_m=3.0,
         min_overlap_m2=2000.0,
+        max_overlap_frac=1.0,
         peak_separation_m=20.0,
     )
     candidates = match_pair(world, np.ones_like(world, dtype=bool), page, 1.0, params)

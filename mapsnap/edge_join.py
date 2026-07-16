@@ -28,6 +28,8 @@ from scipy.signal import fftconvolve
 MIN_VALID = 0.5  # validity-mask threshold after warping
 CHAMFER_CLAMP_M = 30.0
 INLIER_M = 5.0
+MIN_STRIP_POINTS = 500  # skeleton points of strip evidence a join must have
+SCALE_PRIOR_SIGMA = 0.05  # prior on log-scale deviation from the volume median
 
 
 @dataclass
@@ -43,14 +45,26 @@ class JoinCandidate:
     n_points: int = 0
     jtj_min_eig: float = 0.0
     jtj_eig_ratio: float = 0.0
+    overlap_frac: float = 0.0
+    ncc_fine: float = 0.0
+    scale_adjust: float = 1.0
+    plausible: bool = True
     refined: bool = False
     diagnostics: dict = field(default_factory=dict)
 
     def verification_score(self) -> float:
-        """Heuristic quality: high inlier fraction and low chamfer win."""
-        if not self.refined or self.n_points < 50:
+        """Heuristic quality combining strip agreement signals.
+
+        - inlier_frac and chamfer measure skeleton alignment near the anchor;
+        - ncc_fine (lightly blurred correlation at the refined pose) separates
+          the true join from 180-degree/lattice locks that align corridors but
+          not the actual drawn content;
+        - poses with near-total page overlap (physically impossible) or too
+          little strip evidence (sliver contacts overfit) are disqualified.
+        """
+        if not self.refined or not self.plausible or self.n_points < MIN_STRIP_POINTS:
             return -math.inf
-        return self.inlier_frac - self.chamfer_mean_m / CHAMFER_CLAMP_M
+        return self.inlier_frac + self.ncc_fine - self.chamfer_mean_m / CHAMFER_CLAMP_M
 
 
 def compose(a: np.ndarray, b: np.ndarray) -> np.ndarray:
@@ -119,12 +133,15 @@ def masked_ncc(
     moving: np.ndarray,
     moving_mask: np.ndarray,
     min_overlap_px: float,
+    max_overlap_px: float = math.inf,
 ) -> np.ndarray:
     """Masked normalized cross-correlation (Padfield) of moving over fixed.
 
     Returns the full-mode NCC map; entry (i, j) scores placing moving's origin
-    at fixed-frame position (i - mh + 1, j - mw + 1). Under-overlapped shifts
-    score 0.
+    at fixed-frame position (i - mh + 1, j - mw + 1). Shifts whose mask overlap
+    falls outside [min_overlap_px, max_overlap_px] score 0 — adjacent Sanborn
+    sheets only share a margin strip, so near-total overlap is physically
+    impossible and would otherwise dominate on a self-similar street grid.
     """
     f = (fixed * fixed_mask).astype(np.float64)
     g = (moving * moving_mask).astype(np.float64)
@@ -146,7 +163,7 @@ def masked_ncc(
         var_f = np.maximum(sum_ff - sum_f**2 / n, 0)
         var_g = np.maximum(sum_gg - sum_g**2 / n, 0)
         ncc = numerator / np.sqrt(np.maximum(var_f * var_g, 1e-12))
-    ncc[overlap < min_overlap_px] = 0.0
+    ncc[(overlap < min_overlap_px) | (overlap > max_overlap_px)] = 0.0
     return np.clip(np.nan_to_num(ncc), -1.0, 1.0)
 
 
@@ -185,13 +202,34 @@ def chamfer_refine(
     pose: np.ndarray,
     max_points: int = 3000,
     huber_m: float = 6.0,
+    region: np.ndarray | None = None,
+    solve_scale: bool = False,
 ) -> tuple[np.ndarray, dict]:
     """Polish a pose by minimizing skeleton-to-anchor chamfer distance.
 
     distance_m is the anchor-skeleton distance transform over the pair raster
     (metres per raster cell already applied). Optimizes (dtheta, dx, dy) around
     `pose`; returns the refined pose and diagnostics.
+
+    When `region` (a bool raster, e.g. the anchor's dilated validity) is given,
+    only skeleton points landing inside it at the initial pose are scored —
+    points far from the anchor otherwise sit at the distance clamp and reward
+    poses that maximize page overlap instead of aligning the shared strip.
     """
+    if region is not None and len(points_page):
+        initial = np.column_stack([points_page, np.ones(len(points_page))]) @ pose.T
+        rows = np.clip(initial[:, 1].round().astype(int), 0, region.shape[0] - 1)
+        cols = np.clip(initial[:, 0].round().astype(int), 0, region.shape[1] - 1)
+        points_page = points_page[region[rows, cols]]
+    if len(points_page) < 10:
+        return pose.copy(), {
+            "chamfer_mean_m": math.inf,
+            "inlier_frac": 0.0,
+            "n_points": int(len(points_page)),
+            "jtj_min_eig": 0.0,
+            "jtj_eig_ratio": 0.0,
+            "scale_adjust": 1.0,
+        }
     if len(points_page) > max_points:
         step = len(points_page) // max_points + 1
         points_page = points_page[::step]
@@ -217,62 +255,171 @@ def chamfer_refine(
     base = pose.copy()
     anchor_pts = homogeneous @ base.T
     center = anchor_pts.mean(axis=0)
+    n_params = 4 if solve_scale else 3
+    # The scale prior enters as extra residuals so a 1-sigma deviation costs
+    # like huber_m on a tenth of the points.
+    n_prior = max(len(homogeneous) // 10, 1)
+
+    def delta_matrix(params: np.ndarray) -> np.ndarray:
+        dtheta = params[0]
+        scale = math.exp(params[3]) if solve_scale else 1.0
+        rot = cv2.getRotationMatrix2D(
+            (float(center[0]), float(center[1])), math.degrees(dtheta), scale
+        )
+        rot[:, 2] += [params[1], params[2]]
+        return rot
 
     def transformed(params: np.ndarray) -> np.ndarray:
-        dtheta, dx, dy = params
-        rot = rotation_about(math.degrees(dtheta), (center[0], center[1]))
-        pts = anchor_pts @ rot[:, :2].T + rot[:, 2]
-        return pts + [dx, dy]
+        rot = delta_matrix(params)
+        return anchor_pts @ rot[:, :2].T + rot[:, 2]
 
     def residuals(params: np.ndarray) -> np.ndarray:
-        return sample(transformed(params))
+        r = sample(transformed(params))
+        if solve_scale:
+            prior = params[3] / SCALE_PRIOR_SIGMA * huber_m
+            r = np.append(r, np.full(n_prior, prior))
+        return r
 
     result = least_squares(
         residuals,
-        x0=np.zeros(3),
+        x0=np.zeros(n_params),
         loss="huber",
         f_scale=huber_m,
-        diff_step=[1e-4, 0.25, 0.25],
+        diff_step=[1e-4, 0.25, 0.25, 1e-4][:n_params],
         max_nfev=60,
     )
     final = sample(transformed(result.x))
     inliers = final < INLIER_M
     jtj = result.jac.T @ result.jac
     eigenvalues = np.linalg.eigvalsh(jtj)
-    dtheta, dx, dy = result.x
-    rot = rotation_about(math.degrees(dtheta), (center[0], center[1]))
-    refined = compose(rot, base)
-    refined[:, 2] += [dx, dy]
+    refined = compose(delta_matrix(result.x), base)
     diagnostics = {
         "chamfer_mean_m": float(final.mean()),
         "inlier_frac": float(inliers.mean()),
         "n_points": int(len(final)),
         "jtj_min_eig": float(eigenvalues[0]),
         "jtj_eig_ratio": float(eigenvalues[0] / max(eigenvalues[-1], 1e-12)),
+        "scale_adjust": float(math.exp(result.x[3])) if solve_scale else 1.0,
     }
     return refined, diagnostics
+
+
+def direction_cosine(
+    pose: np.ndarray,
+    page_shape: tuple[int, int],
+    anchor_center: tuple[float, float],
+    expected_direction_page: tuple[float, float],
+) -> float:
+    """Agreement between a pose and the printed-neighbor-side direction.
+
+    expected_direction_page is the unit direction from the target's image
+    center toward its printed claim of the anchor's sheet number (y-down page
+    frame). Returns the cosine between that direction mapped through the pose
+    and the actual direction to the anchor: ~1 for the right side, ~-1 for a
+    180-degree flip, ~0 for a sideways (90-degree) lock.
+    """
+    height, width = page_shape
+    center = pose @ np.array([width / 2, height / 2, 1.0])
+    actual = np.array(anchor_center) - center
+    actual_norm = np.linalg.norm(actual)
+    implied = pose[:, :2] @ np.array(expected_direction_page)
+    implied_norm = np.linalg.norm(implied)
+    if actual_norm < 1e-9 or implied_norm < 1e-9:
+        return 1.0
+    return float(actual @ implied / (actual_norm * implied_norm))
+
+
+def pose_overlap_frac(
+    pose: np.ndarray, page_shape: tuple[int, int], fixed_valid: np.ndarray
+) -> float:
+    """Fraction of the posed page's in-frame area overlapping the anchor."""
+    ones = np.ones(page_shape, np.float32)
+    warped = cv2.warpAffine(ones, pose, (fixed_valid.shape[1], fixed_valid.shape[0]))
+    placed = warped > MIN_VALID
+    area = placed.sum()
+    if area == 0:
+        return 1.0
+    return float((placed & fixed_valid).sum() / area)
+
+
+def pose_ncc(
+    fixed_prob: np.ndarray,
+    fixed_valid: np.ndarray,
+    target_prob: np.ndarray,
+    pose: np.ndarray,
+    sigma_px: float,
+    min_overlap_px: int = 500,
+) -> float:
+    """Correlation of the two P(road) maps over the overlap at a single pose.
+
+    Uses a light blur, so it is sensitive to the actual drawn content (junction
+    positions, corridor widths) — the signal that separates a true join from a
+    lattice or 180-degree lock that only aligns corridor directions.
+    """
+    shape = (fixed_valid.shape[1], fixed_valid.shape[0])
+    warped = cv2.warpAffine(target_prob, pose, shape)
+    warped_valid = cv2.warpAffine(np.ones_like(target_prob), pose, shape) > MIN_VALID
+    both = fixed_valid & warped_valid
+    if both.sum() < min_overlap_px:
+        return 0.0
+    a = cv2.GaussianBlur(fixed_prob, (0, 0), sigma_px)[both]
+    b = cv2.GaussianBlur(warped, (0, 0), sigma_px)[both]
+    a = a - a.mean()
+    b = b - b.mean()
+    denominator = math.sqrt(float((a * a).sum()) * float((b * b).sum()))
+    if denominator < 1e-9:
+        return 0.0
+    return float((a * b).sum() / denominator)
 
 
 def refine_and_rank(
     candidates: list[JoinCandidate],
     distance_m: np.ndarray,
     points_page: np.ndarray,
+    fixed_valid: np.ndarray | None = None,
+    page_shape: tuple[int, int] | None = None,
+    max_overlap_frac: float = 1.0,
+    region: np.ndarray | None = None,
+    fixed_prob: np.ndarray | None = None,
+    target_prob: np.ndarray | None = None,
+    fine_sigma_px: float = 1.5,
+    solve_scale: bool = False,
 ) -> list[JoinCandidate]:
     """Chamfer-refine every candidate and sort by verification score, best first.
 
     This is the step that separates aliased/wrong-rotation NCC peaks from the
     true join: a wrong lattice lock leaves many skeleton points far from the
-    anchor's corridors, tanking its inlier fraction.
+    anchor's corridors, tanking its inlier fraction. Candidates whose refined
+    pose overlaps the anchor by more than max_overlap_frac are disqualified
+    (adjacent sheets share only a margin strip).
     """
     for candidate in candidates:
-        refined, diagnostics = chamfer_refine(distance_m, points_page, candidate.pose)
+        refined, diagnostics = chamfer_refine(
+            distance_m,
+            points_page,
+            candidate.pose,
+            region=region,
+            solve_scale=solve_scale,
+        )
         candidate.pose = refined
         candidate.chamfer_mean_m = diagnostics["chamfer_mean_m"]
         candidate.inlier_frac = diagnostics["inlier_frac"]
         candidate.n_points = diagnostics["n_points"]
         candidate.jtj_min_eig = diagnostics["jtj_min_eig"]
         candidate.jtj_eig_ratio = diagnostics["jtj_eig_ratio"]
+        candidate.scale_adjust = diagnostics["scale_adjust"]
         candidate.refined = True
+        if fixed_valid is not None and page_shape is not None:
+            candidate.overlap_frac = pose_overlap_frac(refined, page_shape, fixed_valid)
+            candidate.plausible = candidate.overlap_frac <= max_overlap_frac
+        if (
+            fixed_prob is not None
+            and target_prob is not None
+            and fixed_valid is not None
+        ):
+            candidate.ncc_fine = pose_ncc(
+                fixed_prob, fixed_valid, target_prob, refined, fine_sigma_px
+            )
     return sorted(candidates, key=lambda c: -c.verification_score())
 
 
@@ -282,12 +429,15 @@ class MatchParams:
 
     resolution_m: float = 2.0
     blur_sigma_m: float = 8.0
+    fine_sigma_m: float = 3.0  # blur for the per-pose verification correlation
     min_overlap_m2: float = 8000.0
+    max_overlap_frac: float = 0.42  # of the target's area; sheets share a strip
     top_k: int = 5
     peak_separation_m: float = 60.0
     mask_threshold: float = 0.5
     mask_min_area: int = 500
     jitter_deg: tuple[float, ...] = (0.0,)
+    solve_scale: bool = False  # bounded scale DOF in chamfer refinement
 
 
 def warp_page(
@@ -309,6 +459,65 @@ def rotated_bounds(shape: tuple[int, int], matrix: np.ndarray) -> np.ndarray:
     return shifted
 
 
+def match_at_rotation(
+    fixed_blur: np.ndarray,
+    fixed_valid: np.ndarray,
+    target_prob: np.ndarray,
+    scale: float,
+    theta: float,
+    params: MatchParams,
+    search_center: tuple[float, float] | None = None,
+    search_radius_px: float | None = None,
+) -> list[JoinCandidate]:
+    """Top-K NCC translation candidates for one rotation.
+
+    fixed_blur must already be blurred by params.blur_sigma_m; search_center /
+    search_radius_px (raster px) restrict where the target's CENTER may land.
+    """
+    res = params.resolution_m
+    sigma_px = max(params.blur_sigma_m / res, 0.5)
+    min_overlap_px = params.min_overlap_m2 / (res * res)
+    separation = max(int(params.peak_separation_m / res), 2)
+
+    base = cv2.getRotationMatrix2D((0.0, 0.0), theta, scale)
+    tight = rotated_bounds(target_prob.shape[:2], base)
+    h, w = target_prob.shape[:2]
+    corners = np.array([[0, 0, 1], [w, 0, 1], [w, h, 1], [0, h, 1]], dtype=float)
+    extent = (corners @ tight.T).max(axis=0).astype(int) + 1
+    moving = cv2.warpAffine(target_prob, tight, (extent[0], extent[1]))
+    moving_valid = (
+        cv2.warpAffine(np.ones_like(target_prob), tight, (extent[0], extent[1]))
+        > MIN_VALID
+    )
+    moving_blur = cv2.GaussianBlur(moving * moving_valid, (0, 0), sigma_px)
+    max_overlap_px = params.max_overlap_frac * float(moving_valid.sum())
+    score = masked_ncc(
+        fixed_blur,
+        fixed_valid.astype(np.float32),
+        moving_blur,
+        moving_valid.astype(np.float32),
+        min_overlap_px,
+        max_overlap_px,
+    )
+    if search_center is not None and search_radius_px is not None:
+        # Peak (i, j) places moving's origin at (i - mh + 1, j - mw + 1);
+        # the moving image's center then sits at origin + extent/2.
+        mh, mw = moving.shape
+        rows = np.arange(score.shape[0])[:, None] - (mh - 1) + mh / 2
+        cols = np.arange(score.shape[1])[None, :] - (mw - 1) + mw / 2
+        dist2 = (rows - search_center[1]) ** 2 + (cols - search_center[0]) ** 2
+        score[dist2 > search_radius_px**2] = 0.0
+    candidates = []
+    for value, row, col in top_peaks(score, params.top_k, separation):
+        mh, mw = moving.shape
+        pose = tight.copy()
+        pose[:, 2] += [col - mw + 1, row - mh + 1]
+        candidates.append(
+            JoinCandidate(pose=pose, theta_deg=theta, ncc=value, overlap_px=0)
+        )
+    return candidates
+
+
 def match_pair(
     fixed: np.ndarray,
     fixed_valid: np.ndarray,
@@ -325,53 +534,23 @@ def match_pair(
     per target page pixel (volume-median metres/px divided by resolution_m).
     search_center/radius (raster px) restrict NCC peaks to an init window.
     """
-    res = params.resolution_m
-    sigma_px = max(params.blur_sigma_m / res, 0.5)
+    sigma_px = max(params.blur_sigma_m / params.resolution_m, 0.5)
     fixed_blur = cv2.GaussianBlur(fixed * fixed_valid, (0, 0), sigma_px)
-    min_overlap_px = params.min_overlap_m2 / (res * res)
-    separation = max(int(params.peak_separation_m / res), 2)
-
     candidates: list[JoinCandidate] = []
     thetas = rotation_candidates(
         fixed, target_prob, params.jitter_deg, fixed_valid=fixed_valid
     )
     for theta in thetas:
-        base = cv2.getRotationMatrix2D((0.0, 0.0), theta, scale)
-        tight = rotated_bounds(target_prob.shape[:2], base)
-        h, w = target_prob.shape[:2]
-        corners = np.array([[0, 0, 1], [w, 0, 1], [w, h, 1], [0, h, 1]], dtype=float)
-        extent = (corners @ tight.T).max(axis=0).astype(int) + 1
-        moving = cv2.warpAffine(target_prob, tight, (extent[0], extent[1]))
-        moving_valid = (
-            cv2.warpAffine(np.ones_like(target_prob), tight, (extent[0], extent[1]))
-            > MIN_VALID
-        )
-        moving_blur = cv2.GaussianBlur(moving * moving_valid, (0, 0), sigma_px)
-        score = masked_ncc(
-            fixed_blur,
-            fixed_valid.astype(np.float32),
-            moving_blur,
-            moving_valid.astype(np.float32),
-            min_overlap_px,
-        )
-        if search_center is not None and search_radius_px is not None:
-            # Peak (i, j) places moving's origin at (i - mh + 1, j - mw + 1);
-            # the moving image's center then sits at origin + extent/2.
-            mh, mw = moving.shape
-            rows = np.arange(score.shape[0])[:, None] - (mh - 1) + mh / 2
-            cols = np.arange(score.shape[1])[None, :] - (mw - 1) + mw / 2
-            dist2 = (rows - search_center[1]) ** 2 + (cols - search_center[0]) ** 2
-            score[dist2 > search_radius_px**2] = 0.0
-        for value, row, col in top_peaks(score, params.top_k, separation):
-            mh, mw = moving.shape
-            pose = tight.copy()
-            pose[:, 2] += [col - mw + 1, row - mh + 1]
-            candidates.append(
-                JoinCandidate(
-                    pose=pose,
-                    theta_deg=theta,
-                    ncc=value,
-                    overlap_px=0,
-                )
+        candidates.extend(
+            match_at_rotation(
+                fixed_blur,
+                fixed_valid,
+                target_prob,
+                scale,
+                theta,
+                params,
+                search_center,
+                search_radius_px,
             )
+        )
     return candidates
