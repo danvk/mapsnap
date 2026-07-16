@@ -1203,10 +1203,276 @@ def cmd_match(
     print(f"wrote {out_path}")
 
 
+def cmd_chain(
+    volume: Path,
+    anchor_pose: str,
+    min_verification: float,
+    max_rounds: int,
+    solve_scale: bool,
+) -> None:
+    """Chaining + fusion: verification-gated joins become anchors themselves.
+
+    Round k joins every eligible neighbor of the pages posed so far; a target
+    joined from several anchors gets a fused pose (verification-weighted corner
+    average). Newly posed pages anchor round k+1.
+    """
+    units = load_page_units(volume)
+    by_number = {u.number: u for u in units}
+    pairs = detected_pairs(volume)
+    neighbor_map: dict[int, set[int]] = {}
+    for pair in pairs:
+        x, y = tuple(pair)
+        neighbor_map.setdefault(x, set()).add(y)
+        neighbor_map.setdefault(y, set()).add(x)
+    params = edge_join.MatchParams(solve_scale=solve_scale)
+    scale = volume_median_scale(units)
+    adjacency = load_adjacency(volume)
+
+    posed: dict[int, tuple[np.ndarray, int]] = {}
+    for unit in units:
+        if unit.anchor_truth:
+            affine = (
+                unit.truth.affine_local
+                if anchor_pose == "truth" and unit.truth
+                else unit.gen_affine
+            )
+            if affine is not None:
+                posed[unit.number] = (affine, 0)
+
+    accepted: list[dict] = []
+    for round_index in range(1, max_rounds + 1):
+        proposals: dict[int, list[dict]] = {}
+        frontier = list(posed.items())
+        for anchor_number, (anchor_affine, _) in frontier:
+            for target_number in sorted(neighbor_map.get(anchor_number, ())):
+                if target_number in posed:
+                    continue
+                anchor = by_number.get(anchor_number)
+                target = by_number.get(target_number)
+                if not anchor or not target or target.fit_state == "split":
+                    continue
+                inits = target.keymap_centers or [
+                    apply_affine(anchor_affine, anchor.width / 2, anchor.height / 2)
+                ]
+                radius = target.keymap_radius_m or 800.0
+                directions = image_neighbor_directions(adjacency, target.stem)
+                expected = (directions.get(anchor.number) or (None, 0.0))[0]
+                record = run_join(
+                    volume,
+                    anchor,
+                    target,
+                    anchor_affine,
+                    inits,
+                    radius,
+                    scale,
+                    params,
+                    expected_direction=expected,
+                    containment_regions=target.keymap_regions,
+                )
+                if record is None or record.get("status") != "ok":
+                    continue
+                if record["verification"] < min_verification:
+                    continue
+                record["hop"] = round_index
+                proposals.setdefault(target_number, []).append(record)
+        if not proposals:
+            break
+        round_rmses = []
+        for target_number, records in sorted(proposals.items()):
+            target = by_number[target_number]
+            affines = [np.array(r["world_affine"]) for r in records]
+            weights = [max(r["verification"], 0.01) for r in records]
+            fused = fuse_affines(affines, weights, target.width, target.height)
+            merged = dict(max(records, key=lambda r: r["verification"]))
+            merged["world_affine"] = [list(row) for row in fused]
+            merged["n_anchors_fused"] = len(records)
+            merged["contributors"] = [r["anchor"] for r in records]
+            merged["target_state"] = target.fit_state
+            if target.truth is not None:
+                merged["rmse_ft"] = round(
+                    grid_rmse_ft_between(
+                        fused, target.truth.affine_local, target.width, target.height
+                    ),
+                    1,
+                )
+                round_rmses.append(merged["rmse_ft"])
+            else:
+                merged.pop("rmse_ft", None)
+            accepted.append(merged)
+            posed[target_number] = (fused, round_index)
+        stats = ""
+        if round_rmses:
+            stats = (
+                f"; rmse median {percentile(round_rmses, 0.5):.0f}ft"
+                f" max {max(round_rmses):.0f}ft"
+            )
+        print(f"round {round_index}: posed {len(proposals)} new pages{stats}")
+
+    out_path = volume / "artifacts" / "edge_join" / "chain.jsonl"
+    out_path.write_text("\n".join(json.dumps(r) for r in accepted))
+    scored = [r["rmse_ft"] for r in accepted if "rmse_ft" in r]
+    print(f"\n== chain (gate {min_verification}, anchor@{anchor_pose}) ==")
+    print(
+        f"posed {len(accepted)} pages beyond the {sum(1 for _, (_, h) in posed.items() if h == 0)} seed anchors"
+    )
+    if scored:
+        for threshold in [25, 50, 100]:
+            n = sum(1 for r in scored if r <= threshold)
+            print(f"  <={threshold}ft: {n}/{len(scored)} ({n / len(scored):.0%})")
+        print(
+            f"  rmse median {percentile(scored, 0.5):.0f}ft"
+            f" p90 {percentile(scored, 0.9):.0f}ft max {max(scored):.0f}ft"
+        )
+    fused_multi = [r for r in accepted if r.get("n_anchors_fused", 1) >= 2]
+    print(f"  multi-anchor fusions: {len(fused_multi)}")
+    by_state: dict[str, int] = {}
+    for r in accepted:
+        by_state[r["target_state"]] = by_state.get(r["target_state"], 0) + 1
+    print(f"  by previous state: {by_state}")
+    print(f"wrote {out_path}")
+
+
+def fuse_affines(
+    affines: list[np.ndarray],
+    weights: list[float],
+    width: int,
+    height: int,
+) -> np.ndarray:
+    """Fuse several page->world affines into one via weighted corner averaging.
+
+    Each affine's images of the page corners are averaged (weighted), and the
+    2x3 affine best mapping the corners to the averages is refit — exact when
+    the inputs agree, least-squares otherwise.
+    """
+    corners_px = [(0, 0), (width, 0), (width, height), (0, height)]
+    total = sum(weights)
+    mean_corners = []
+    for x, y in corners_px:
+        lon = sum(w * apply_affine(a, x, y)[0] for a, w in zip(affines, weights))
+        lat = sum(w * apply_affine(a, x, y)[1] for a, w in zip(affines, weights))
+        mean_corners.append((lon / total, lat / total))
+    rows = np.array([[x, y, 1.0] for x, y in corners_px])
+    solution, _, _, _ = np.linalg.lstsq(rows, np.array(mean_corners), rcond=None)
+    return solution.T
+
+
+def neighbor_variant_path(volume: Path, stem: str) -> Path:
+    """Path of a page's materialized neighbor-fit variant georef file."""
+    return volume / f"{stem}.georef-neighbor.json"
+
+
+def materialize_records(
+    volume: Path, records: list[dict], units_by_stem: dict[str, PageUnit]
+) -> list[dict]:
+    """Write pN.georef-neighbor.json files (best record per target).
+
+    The files use the standard georef shape (width/height/corners plus empty
+    streets/intersections and the page's keymap block) so the debugger renders
+    them; join diagnostics ride along under "neighbor_join". Returns the rows
+    written, for reporting.
+    """
+    best_by_target: dict[str, dict] = {}
+    for record in records:
+        if record.get("status") != "ok":
+            continue
+        stem = record["target"]
+        current = best_by_target.get(stem)
+        if current is None or record["verification"] > current["verification"]:
+            best_by_target[stem] = record
+    rows = []
+    for stem, record in sorted(best_by_target.items()):
+        unit = units_by_stem[stem]
+        affine = np.array(record["world_affine"])
+        corners = [
+            list(apply_affine(affine, x, y))
+            for x, y in [
+                (0, 0),
+                (unit.width, 0),
+                (unit.width, unit.height),
+                (0, unit.height),
+            ]
+        ]
+        _, georef = page_fit_state(volume, stem)
+        doc: dict = {
+            "width": unit.width,
+            "height": unit.height,
+            "corners": corners,
+            "streets": [],
+            "intersections": [],
+            "neighbor_join": {
+                "anchor": record["anchor"],
+                "hop": record.get("hop", 1),
+                "n_anchors": record.get("n_anchors_fused", 1),
+                "verification": record["verification"],
+                "inlier_frac": record["inlier_frac"],
+                "ncc_fine": record["ncc_fine"],
+                "theta_deg": record["theta_deg"],
+                "previous_state": unit.fit_state,
+                "rmse_ft": record.get("rmse_ft"),
+            },
+        }
+        if georef and georef.get("keymap"):
+            doc["keymap"] = georef["keymap"]
+        neighbor_variant_path(volume, stem).write_text(json.dumps(doc, indent=2))
+        rows.append(
+            {
+                "stem": stem,
+                "previous_state": unit.fit_state,
+                "rmse_ft": record.get("rmse_ft"),
+                "verification": record["verification"],
+                "hop": record.get("hop", 1),
+            }
+        )
+    return rows
+
+
+def cmd_materialize(volume: Path, source: str) -> None:
+    """Write neighbor-fit variant georef files and print inspection lists."""
+    units_by_stem = {u.stem: u for u in load_page_units(volume)}
+    path = volume / "artifacts" / "edge_join" / f"{source}.jsonl"
+    records = [json.loads(line) for line in path.read_text().splitlines() if line]
+    rows = materialize_records(volume, records, units_by_stem)
+    print(
+        f"wrote {len(rows)} {volume.name}/pN.georef-neighbor.json files from {source}"
+    )
+
+    newly = [r for r in rows if r["previous_state"] != "fitted"]
+    print(f"\nnot previously georeferenced ({len(newly)}):")
+    for r in sorted(
+        newly, key=lambda r: r["rmse_ft"] if r["rmse_ft"] is not None else 1e9
+    ):
+        rmse = f"{r['rmse_ft']:.0f}ft" if r["rmse_ft"] is not None else "no truth"
+        print(
+            f"  {r['stem']:>6} was {r['previous_state']:<9} rmse {rmse:>9}"
+            f"  ver {r['verification']:.2f}  hop {r['hop']}"
+        )
+    scored = [r for r in rows if r["rmse_ft"] is not None]
+    scored.sort(key=lambda r: r["rmse_ft"])
+    print("\nbest fits:")
+    for r in scored[:8]:
+        print(
+            f"  {r['stem']:>6} rmse {r['rmse_ft']:7.1f}ft ver {r['verification']:.2f} (was {r['previous_state']})"
+        )
+    print("\nworst fits:")
+    for r in scored[-8:][::-1]:
+        print(
+            f"  {r['stem']:>6} rmse {r['rmse_ft']:7.1f}ft ver {r['verification']:.2f} (was {r['previous_state']})"
+        )
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
-        "command", choices=["stats", "infer", "sanity", "perturb", "match"]
+        "command",
+        choices=[
+            "stats",
+            "infer",
+            "sanity",
+            "perturb",
+            "match",
+            "chain",
+            "materialize",
+        ],
     )
     parser.add_argument("volume", type=Path)
     parser.add_argument("--limit", type=int, help="only first N pairs/attempts")
@@ -1216,6 +1482,13 @@ def main() -> None:
         "--anchor-pose", choices=["truth", "generated"], default="truth"
     )
     parser.add_argument("--solve-scale", action="store_true")
+    parser.add_argument(
+        "--min-verification", type=float, default=1.2, help="chain: acceptance gate"
+    )
+    parser.add_argument("--max-rounds", type=int, default=6)
+    parser.add_argument(
+        "--source", default="joins_generated", help="materialize: jsonl basename"
+    )
     args = parser.parse_args()
     if args.command == "stats":
         cmd_stats(args.volume)
@@ -1227,6 +1500,16 @@ def main() -> None:
         cmd_perturb(args.volume, args.limit, args.seed, args.draws, args.solve_scale)
     elif args.command == "match":
         cmd_match(args.volume, args.limit, args.anchor_pose, args.solve_scale)
+    elif args.command == "chain":
+        cmd_chain(
+            args.volume,
+            args.anchor_pose,
+            args.min_verification,
+            args.max_rounds,
+            args.solve_scale,
+        )
+    elif args.command == "materialize":
+        cmd_materialize(args.volume, args.source)
 
 
 if __name__ == "__main__":
