@@ -4,7 +4,12 @@ import type {
   SkippedItem,
   VolumeInfo,
 } from '../../server/iiifAnnotations';
-import { compareToTruth, type PageCompareStats } from '../iiif/compare';
+import {
+  RMSE_BUCKET_COLORS,
+  compareToTruth,
+  rmseBucket,
+  type PageCompareStats,
+} from '../iiif/compare';
 import { fetchRewrittenAnnotation, fetchVolumes } from '../iiif/api';
 import { pagesFromAnnotation } from '../iiif/pages';
 import { InfoPanel } from './InfoPanel';
@@ -37,6 +42,7 @@ export function VolumeViewer() {
     failed: number;
   } | null>(null);
   const [opacity, setOpacity] = useState(100);
+  const [colorByRmse, setColorByRmse] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [selectedItemIndex, setSelectedItemIndex] = useState<number | null>(
     null,
@@ -105,6 +111,17 @@ export function VolumeViewer() {
       return compareToTruth(pages, truthPages);
     }, [pages, truthAnnotation]);
 
+  const pageColors: Map<number, string> | null = useMemo(() => {
+    if (!colorByRmse || !truthStats) return null;
+    const colors = new Map<number, string>();
+    for (const [itemIndex, stats] of truthStats) {
+      if (stats) {
+        colors.set(itemIndex, RMSE_BUCKET_COLORS[rmseBucket(stats.rmseFt)]);
+      }
+    }
+    return colors;
+  }, [colorByRmse, truthStats]);
+
   const selectedPage =
     selectedItemIndex === null
       ? null
@@ -160,6 +177,16 @@ export function VolumeViewer() {
             </option>
           ))}
         </select>
+        {truthStats && (
+          <label className="rmse-color-control">
+            <input
+              type="checkbox"
+              checked={colorByRmse}
+              onChange={(e) => setColorByRmse(e.target.checked)}
+            />
+            Color by RMSE
+          </label>
+        )}
         <div className="opacity-control">
           <label htmlFor="iiif-opacity-slider">Opacity</label>
           <input
@@ -186,6 +213,7 @@ export function VolumeViewer() {
           selectedItemIndex={selectedItemIndex}
           onSelectPage={setSelectedItemIndex}
           opacity={opacity / 100}
+          pageColors={pageColors}
           onLoadResult={setLoadResult}
         />
         <InfoPanel

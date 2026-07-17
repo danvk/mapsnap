@@ -465,6 +465,9 @@ tr.on-fill td {
 .page-list .rmse-ok {
   color: #9a6700;
 }
-.page-list .rmse-bad {
+.page-list .rmse-poor {
+  color: #e8590c;
+}
+.page-list .rmse-disaster {
   color: #cf222e;
 }

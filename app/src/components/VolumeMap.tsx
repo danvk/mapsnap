@@ -17,6 +17,8 @@ interface VolumeMapProps {
   onSelectPage: (itemIndex: number | null) => void;
   /** Warped-image opacity in [0, 1]. */
   opacity: number;
+  /** Per-itemIndex fill color for RMSE color-coding, or null when off. */
+  pageColors: Map<number, string> | null;
   /** Called with per-page add results whenever a new annotation is shown. */
   onLoadResult?: (result: { loaded: number; failed: number }) => void;
 }
@@ -135,6 +137,20 @@ export function VolumeMap(props: VolumeMapProps) {
     map.on('load', () => {
       const layer = new WarpedMapLayer();
       map.addLayer(layer);
+      map.addSource('rmse-fills', {
+        type: 'geojson',
+        data: EMPTY_FEATURES,
+      });
+      map.addLayer({
+        id: 'rmse-fill',
+        type: 'fill',
+        source: 'rmse-fills',
+        paint: {
+          'fill-color': ['get', 'color'],
+          'fill-opacity': 0.45,
+          'fill-outline-color': ['get', 'color'],
+        },
+      });
       map.addSource('selected-page', {
         type: 'geojson',
         data: EMPTY_FEATURES,
@@ -293,6 +309,26 @@ export function VolumeMap(props: VolumeMapProps) {
     if (!layer || !mapReady) return;
     layer.setLayerOptions({ opacity }, { animate: false });
   }, [opacity, annotation, mapReady]);
+
+  // RMSE color-coding: one translucent fill per page footprint when enabled.
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !mapReady) return;
+    const source = map.getSource<maplibregl.GeoJSONSource>('rmse-fills');
+    if (!source) return;
+    if (!props.pageColors) {
+      source.setData(EMPTY_FEATURES);
+      return;
+    }
+    const features = props.pages
+      .filter((page) => props.pageColors?.has(page.itemIndex))
+      .map((page): FeatureCollection['features'][0] => ({
+        type: 'Feature',
+        properties: { color: props.pageColors?.get(page.itemIndex) },
+        geometry: { type: 'Polygon', coordinates: [page.clipRing] },
+      }));
+    source.setData({ type: 'FeatureCollection', features });
+  }, [props.pageColors, props.pages, mapReady]);
 
   return <div id="map" ref={containerRef} />;
 }

@@ -1,6 +1,6 @@
 import { useState, type ReactElement } from 'react';
 
-import type { PageCompareStats } from '../iiif/compare';
+import { rmseBucket, type PageCompareStats } from '../iiif/compare';
 import type { PageGeo } from '../iiif/pages';
 
 interface PageListProps {
@@ -20,11 +20,9 @@ function pageSortKey(pageKey: string): [number, string, number] {
   return [Number(match[1]), match[2] ?? '', match[3] ? Number(match[3]) : 0];
 }
 
-// Color class for an RMSE value, mirroring the README's bucket boundaries.
+// Color class for an RMSE value (see compare.rmseBucket for the boundaries).
 function rmseClass(rmseFt: number): string {
-  if (rmseFt <= 25) return 'rmse-good';
-  if (rmseFt <= 100) return 'rmse-ok';
-  return 'rmse-bad';
+  return `rmse-${rmseBucket(rmseFt)}`;
 }
 
 // The sortable numeric value of a column for one page, or undefined when the

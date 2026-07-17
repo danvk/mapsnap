@@ -32,6 +32,25 @@ export interface PageCompareStats {
   scaleErrorPercent: number;
 }
 
+/** RMSE quality bucket, shared by the page table and the map color-coding. */
+export type RmseBucket = 'good' | 'ok' | 'poor' | 'disaster';
+
+/** Bucket boundaries: <=25 good, <=100 ok, <=200 poor, beyond is a disaster. */
+export function rmseBucket(rmseFt: number): RmseBucket {
+  if (rmseFt <= 25) return 'good';
+  if (rmseFt <= 100) return 'ok';
+  if (rmseFt <= 200) return 'poor';
+  return 'disaster';
+}
+
+/** Display color per bucket (also used by the .rmse-* table classes). */
+export const RMSE_BUCKET_COLORS: Record<RmseBucket, string> = {
+  good: '#1a7f37',
+  ok: '#9a6700',
+  poor: '#e8590c',
+  disaster: '#cf222e',
+};
+
 /** Great-circle distance in feet between two [lon, lat] points. */
 export function haversineFeet(
   a: [number, number],
