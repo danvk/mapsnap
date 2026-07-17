@@ -24,8 +24,8 @@
           "value": "16"
         }
       ],
-      "created": "2026-07-17T16:46:45Z",
-      "modified": "2026-07-17T16:46:45Z",
+      "created": "2026-07-17T19:48:52Z",
+      "modified": "2026-07-17T19:48:52Z",
       "creator": [
         {
           "id": "https://oldinsurancemaps.net/profile/danvk",
@@ -117,8 +117,8 @@
           "value": "8"
         }
       ],
-      "created": "2026-07-17T16:46:45Z",
-      "modified": "2026-07-17T16:46:45Z",
+      "created": "2026-07-17T19:48:52Z",
+      "modified": "2026-07-17T19:48:52Z",
       "creator": [
         {
           "id": "https://oldinsurancemaps.net/profile/danvk",
@@ -193,7 +193,7 @@
       }
     },
     {
-      "id": "https://oldinsurancemaps.net/iiif/resource/54270/georef",
+      "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd411m:g4114m:g4114gm:g04023195307:04023_07_1953-0703/georef",
       "type": "Annotation",
       "@context": [
         "http://iiif.io/api/extension/georef/1/context.json",
@@ -210,8 +210,8 @@
           "value": "3"
         }
       ],
-      "created": "2026-07-17T16:46:45Z",
-      "modified": "2026-07-17T16:46:45Z",
+      "created": "2026-07-17T19:48:52Z",
+      "modified": "2026-07-17T19:48:52Z",
       "creator": [
         {
           "id": "https://oldinsurancemaps.net/profile/danvk",
@@ -220,10 +220,10 @@
       ],
       "motivation": "georeferencing",
       "target": {
-        "id": "https://oldinsurancemaps.net/iiif/resource/54270/selector",
+        "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd411m:g4114m:g4114gm:g04023195307:04023_07_1953-0703/selector",
         "type": "SpecificResource",
         "source": {
-          "id": null,
+          "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd411m:g4114m:g4114gm:g04023195307:04023_07_1953-0703",
           "type": "ImageService2",
           "height": 8070,
           "width": 6660
@@ -234,7 +234,7 @@
         }
       },
       "body": {
-        "id": "https://oldinsurancemaps.net/iiif/resource/54270/gcps",
+        "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd411m:g4114m:g4114gm:g04023195307:04023_07_1953-0703/gcps",
         "type": "FeatureCollection",
         "transformation": {
           "type": "helmert"
@@ -286,7 +286,7 @@
       }
     },
     {
-      "id": "https://oldinsurancemaps.net/iiif/resource/54273/georef",
+      "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd411m:g4114m:g4114gm:g04023195307:04023_07_1953-0704/georef",
       "type": "Annotation",
       "@context": [
         "http://iiif.io/api/extension/georef/1/context.json",
@@ -303,8 +303,8 @@
           "value": "4"
         }
       ],
-      "created": "2026-07-17T16:46:45Z",
-      "modified": "2026-07-17T16:46:45Z",
+      "created": "2026-07-17T19:48:52Z",
+      "modified": "2026-07-17T19:48:52Z",
       "creator": [
         {
           "id": "https://oldinsurancemaps.net/profile/danvk",
@@ -313,10 +313,10 @@
       ],
       "motivation": "georeferencing",
       "target": {
-        "id": "https://oldinsurancemaps.net/iiif/resource/54273/selector",
+        "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd411m:g4114m:g4114gm:g04023195307:04023_07_1953-0704/selector",
         "type": "SpecificResource",
         "source": {
-          "id": null,
+          "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd411m:g4114m:g4114gm:g04023195307:04023_07_1953-0704",
           "type": "ImageService2",
           "height": 8070,
           "width": 6660
@@ -327,7 +327,7 @@
         }
       },
       "body": {
-        "id": "https://oldinsurancemaps.net/iiif/resource/54273/gcps",
+        "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd411m:g4114m:g4114gm:g04023195307:04023_07_1953-0704/gcps",
         "type": "FeatureCollection",
         "transformation": {
           "type": "helmert"
@@ -379,7 +379,7 @@
       }
     },
     {
-      "id": "https://oldinsurancemaps.net/iiif/resource/54274/georef",
+      "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd411m:g4114m:g4114gm:g04023195307:04023_07_1953-0705/georef",
       "type": "Annotation",
       "@context": [
         "http://iiif.io/api/extension/georef/1/context.json",
@@ -396,8 +396,8 @@
           "value": "15"
         }
       ],
-      "created": "2026-07-17T16:46:45Z",
-      "modified": "2026-07-17T16:46:45Z",
+      "created": "2026-07-17T19:48:52Z",
+      "modified": "2026-07-17T19:48:52Z",
       "creator": [
         {
           "id": "https://oldinsurancemaps.net/profile/danvk",
@@ -406,10 +406,10 @@
       ],
       "motivation": "georeferencing",
       "target": {
-        "id": "https://oldinsurancemaps.net/iiif/resource/54274/selector",
+        "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd411m:g4114m:g4114gm:g04023195307:04023_07_1953-0705/selector",
         "type": "SpecificResource",
         "source": {
-          "id": null,
+          "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd411m:g4114m:g4114gm:g04023195307:04023_07_1953-0705",
           "type": "ImageService2",
           "height": 8070,
           "width": 6660
@@ -420,7 +420,7 @@
         }
       },
       "body": {
-        "id": "https://oldinsurancemaps.net/iiif/resource/54274/gcps",
+        "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd411m:g4114m:g4114gm:g04023195307:04023_07_1953-0705/gcps",
         "type": "FeatureCollection",
         "transformation": {
           "type": "helmert"
@@ -489,8 +489,8 @@
           "value": "4"
         }
       ],
-      "created": "2026-07-17T16:46:45Z",
-      "modified": "2026-07-17T16:46:45Z",
+      "created": "2026-07-17T19:48:52Z",
+      "modified": "2026-07-17T19:48:52Z",
       "creator": [
         {
           "id": "https://oldinsurancemaps.net/profile/danvk",
@@ -565,7 +565,7 @@
       }
     },
     {
-      "id": "https://oldinsurancemaps.net/iiif/resource/54276/georef",
+      "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd411m:g4114m:g4114gm:g04023195307:04023_07_1953-0707/georef",
       "type": "Annotation",
       "@context": [
         "http://iiif.io/api/extension/georef/1/context.json",
@@ -582,8 +582,8 @@
           "value": "4"
         }
       ],
-      "created": "2026-07-17T16:46:45Z",
-      "modified": "2026-07-17T16:46:45Z",
+      "created": "2026-07-17T19:48:52Z",
+      "modified": "2026-07-17T19:48:52Z",
       "creator": [
         {
           "id": "https://oldinsurancemaps.net/profile/danvk",
@@ -592,10 +592,10 @@
       ],
       "motivation": "georeferencing",
       "target": {
-        "id": "https://oldinsurancemaps.net/iiif/resource/54276/selector",
+        "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd411m:g4114m:g4114gm:g04023195307:04023_07_1953-0707/selector",
         "type": "SpecificResource",
         "source": {
-          "id": null,
+          "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd411m:g4114m:g4114gm:g04023195307:04023_07_1953-0707",
           "type": "ImageService2",
           "height": 8070,
           "width": 6660
@@ -606,7 +606,7 @@
         }
       },
       "body": {
-        "id": "https://oldinsurancemaps.net/iiif/resource/54276/gcps",
+        "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd411m:g4114m:g4114gm:g04023195307:04023_07_1953-0707/gcps",
         "type": "FeatureCollection",
         "transformation": {
           "type": "helmert"
@@ -658,7 +658,7 @@
       }
     },
     {
-      "id": "https://oldinsurancemaps.net/iiif/resource/54277/georef",
+      "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd411m:g4114m:g4114gm:g04023195307:04023_07_1953-0708/georef",
       "type": "Annotation",
       "@context": [
         "http://iiif.io/api/extension/georef/1/context.json",
@@ -675,8 +675,8 @@
           "value": "7"
         }
       ],
-      "created": "2026-07-17T16:46:45Z",
-      "modified": "2026-07-17T16:46:45Z",
+      "created": "2026-07-17T19:48:52Z",
+      "modified": "2026-07-17T19:48:52Z",
       "creator": [
         {
           "id": "https://oldinsurancemaps.net/profile/danvk",
@@ -685,10 +685,10 @@
       ],
       "motivation": "georeferencing",
       "target": {
-        "id": "https://oldinsurancemaps.net/iiif/resource/54277/selector",
+        "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd411m:g4114m:g4114gm:g04023195307:04023_07_1953-0708/selector",
         "type": "SpecificResource",
         "source": {
-          "id": null,
+          "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd411m:g4114m:g4114gm:g04023195307:04023_07_1953-0708",
           "type": "ImageService2",
           "height": 8070,
           "width": 6660
@@ -699,7 +699,7 @@
         }
       },
       "body": {
-        "id": "https://oldinsurancemaps.net/iiif/resource/54277/gcps",
+        "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd411m:g4114m:g4114gm:g04023195307:04023_07_1953-0708/gcps",
         "type": "FeatureCollection",
         "transformation": {
           "type": "helmert"
@@ -751,7 +751,7 @@
       }
     },
     {
-      "id": "https://oldinsurancemaps.net/iiif/resource/54279/georef",
+      "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd411m:g4114m:g4114gm:g04023195307:04023_07_1953-0709/georef",
       "type": "Annotation",
       "@context": [
         "http://iiif.io/api/extension/georef/1/context.json",
@@ -768,8 +768,8 @@
           "value": "9"
         }
       ],
-      "created": "2026-07-17T16:46:45Z",
-      "modified": "2026-07-17T16:46:45Z",
+      "created": "2026-07-17T19:48:52Z",
+      "modified": "2026-07-17T19:48:52Z",
       "creator": [
         {
           "id": "https://oldinsurancemaps.net/profile/danvk",
@@ -778,10 +778,10 @@
       ],
       "motivation": "georeferencing",
       "target": {
-        "id": "https://oldinsurancemaps.net/iiif/resource/54279/selector",
+        "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd411m:g4114m:g4114gm:g04023195307:04023_07_1953-0709/selector",
         "type": "SpecificResource",
         "source": {
-          "id": null,
+          "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd411m:g4114m:g4114gm:g04023195307:04023_07_1953-0709",
           "type": "ImageService2",
           "height": 8070,
           "width": 6660
@@ -792,7 +792,7 @@
         }
       },
       "body": {
-        "id": "https://oldinsurancemaps.net/iiif/resource/54279/gcps",
+        "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd411m:g4114m:g4114gm:g04023195307:04023_07_1953-0709/gcps",
         "type": "FeatureCollection",
         "transformation": {
           "type": "helmert"
@@ -844,7 +844,7 @@
       }
     },
     {
-      "id": "https://oldinsurancemaps.net/iiif/resource/54280/georef",
+      "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd411m:g4114m:g4114gm:g04023195307:04023_07_1953-0710/georef",
       "type": "Annotation",
       "@context": [
         "http://iiif.io/api/extension/georef/1/context.json",
@@ -861,8 +861,8 @@
           "value": "6"
         }
       ],
-      "created": "2026-07-17T16:46:45Z",
-      "modified": "2026-07-17T16:46:45Z",
+      "created": "2026-07-17T19:48:52Z",
+      "modified": "2026-07-17T19:48:52Z",
       "creator": [
         {
           "id": "https://oldinsurancemaps.net/profile/danvk",
@@ -871,10 +871,10 @@
       ],
       "motivation": "georeferencing",
       "target": {
-        "id": "https://oldinsurancemaps.net/iiif/resource/54280/selector",
+        "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd411m:g4114m:g4114gm:g04023195307:04023_07_1953-0710/selector",
         "type": "SpecificResource",
         "source": {
-          "id": null,
+          "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd411m:g4114m:g4114gm:g04023195307:04023_07_1953-0710",
           "type": "ImageService2",
           "height": 8070,
           "width": 6660
@@ -885,7 +885,7 @@
         }
       },
       "body": {
-        "id": "https://oldinsurancemaps.net/iiif/resource/54280/gcps",
+        "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd411m:g4114m:g4114gm:g04023195307:04023_07_1953-0710/gcps",
         "type": "FeatureCollection",
         "transformation": {
           "type": "helmert"
@@ -937,7 +937,7 @@
       }
     },
     {
-      "id": "https://oldinsurancemaps.net/iiif/resource/54281/georef",
+      "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd411m:g4114m:g4114gm:g04023195307:04023_07_1953-0711/georef",
       "type": "Annotation",
       "@context": [
         "http://iiif.io/api/extension/georef/1/context.json",
@@ -954,8 +954,8 @@
           "value": "16"
         }
       ],
-      "created": "2026-07-17T16:46:45Z",
-      "modified": "2026-07-17T16:46:45Z",
+      "created": "2026-07-17T19:48:52Z",
+      "modified": "2026-07-17T19:48:52Z",
       "creator": [
         {
           "id": "https://oldinsurancemaps.net/profile/danvk",
@@ -964,10 +964,10 @@
       ],
       "motivation": "georeferencing",
       "target": {
-        "id": "https://oldinsurancemaps.net/iiif/resource/54281/selector",
+        "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd411m:g4114m:g4114gm:g04023195307:04023_07_1953-0711/selector",
         "type": "SpecificResource",
         "source": {
-          "id": null,
+          "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd411m:g4114m:g4114gm:g04023195307:04023_07_1953-0711",
           "type": "ImageService2",
           "height": 8070,
           "width": 6660
@@ -978,7 +978,7 @@
         }
       },
       "body": {
-        "id": "https://oldinsurancemaps.net/iiif/resource/54281/gcps",
+        "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd411m:g4114m:g4114gm:g04023195307:04023_07_1953-0711/gcps",
         "type": "FeatureCollection",
         "transformation": {
           "type": "helmert"
@@ -1047,8 +1047,8 @@
           "value": "12"
         }
       ],
-      "created": "2026-07-17T16:46:45Z",
-      "modified": "2026-07-17T16:46:45Z",
+      "created": "2026-07-17T19:48:52Z",
+      "modified": "2026-07-17T19:48:52Z",
       "creator": [
         {
           "id": "https://oldinsurancemaps.net/profile/danvk",
@@ -1123,7 +1123,7 @@
       }
     },
     {
-      "id": "https://oldinsurancemaps.net/iiif/resource/54283/georef",
+      "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd411m:g4114m:g4114gm:g04023195307:04023_07_1953-0713/georef",
       "type": "Annotation",
       "@context": [
         "http://iiif.io/api/extension/georef/1/context.json",
@@ -1140,8 +1140,8 @@
           "value": "1"
         }
       ],
-      "created": "2026-07-17T16:46:45Z",
-      "modified": "2026-07-17T16:46:45Z",
+      "created": "2026-07-17T19:48:52Z",
+      "modified": "2026-07-17T19:48:52Z",
       "creator": [
         {
           "id": "https://oldinsurancemaps.net/profile/danvk",
@@ -1150,10 +1150,10 @@
       ],
       "motivation": "georeferencing",
       "target": {
-        "id": "https://oldinsurancemaps.net/iiif/resource/54283/selector",
+        "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd411m:g4114m:g4114gm:g04023195307:04023_07_1953-0713/selector",
         "type": "SpecificResource",
         "source": {
-          "id": null,
+          "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd411m:g4114m:g4114gm:g04023195307:04023_07_1953-0713",
           "type": "ImageService2",
           "height": 8070,
           "width": 6660
@@ -1164,7 +1164,7 @@
         }
       },
       "body": {
-        "id": "https://oldinsurancemaps.net/iiif/resource/54283/gcps",
+        "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd411m:g4114m:g4114gm:g04023195307:04023_07_1953-0713/gcps",
         "type": "FeatureCollection",
         "transformation": {
           "type": "polynomial",
@@ -1282,7 +1282,7 @@
       }
     },
     {
-      "id": "https://oldinsurancemaps.net/iiif/resource/54284/georef",
+      "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd411m:g4114m:g4114gm:g04023195307:04023_07_1953-0714/georef",
       "type": "Annotation",
       "@context": [
         "http://iiif.io/api/extension/georef/1/context.json",
@@ -1299,8 +1299,8 @@
           "value": "7"
         }
       ],
-      "created": "2026-07-17T16:46:45Z",
-      "modified": "2026-07-17T16:46:45Z",
+      "created": "2026-07-17T19:48:52Z",
+      "modified": "2026-07-17T19:48:52Z",
       "creator": [
         {
           "id": "https://oldinsurancemaps.net/profile/danvk",
@@ -1309,10 +1309,10 @@
       ],
       "motivation": "georeferencing",
       "target": {
-        "id": "https://oldinsurancemaps.net/iiif/resource/54284/selector",
+        "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd411m:g4114m:g4114gm:g04023195307:04023_07_1953-0714/selector",
         "type": "SpecificResource",
         "source": {
-          "id": null,
+          "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd411m:g4114m:g4114gm:g04023195307:04023_07_1953-0714",
           "type": "ImageService2",
           "height": 8070,
           "width": 6660
@@ -1323,7 +1323,7 @@
         }
       },
       "body": {
-        "id": "https://oldinsurancemaps.net/iiif/resource/54284/gcps",
+        "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd411m:g4114m:g4114gm:g04023195307:04023_07_1953-0714/gcps",
         "type": "FeatureCollection",
         "transformation": {
           "type": "helmert"
@@ -1392,8 +1392,8 @@
           "value": "8"
         }
       ],
-      "created": "2026-07-17T16:46:45Z",
-      "modified": "2026-07-17T16:46:45Z",
+      "created": "2026-07-17T19:48:52Z",
+      "modified": "2026-07-17T19:48:52Z",
       "creator": [
         {
           "id": "https://oldinsurancemaps.net/profile/danvk",
@@ -1468,7 +1468,7 @@
       }
     },
     {
-      "id": "https://oldinsurancemaps.net/iiif/resource/54870/georef",
+      "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd411m:g4114m:g4114gm:g04023195307:04023_07_1953-0716/georef",
       "type": "Annotation",
       "@context": [
         "http://iiif.io/api/extension/georef/1/context.json",
@@ -1485,8 +1485,8 @@
           "value": "21"
         }
       ],
-      "created": "2026-07-17T16:46:45Z",
-      "modified": "2026-07-17T16:46:45Z",
+      "created": "2026-07-17T19:48:52Z",
+      "modified": "2026-07-17T19:48:52Z",
       "creator": [
         {
           "id": "https://oldinsurancemaps.net/profile/danvk",
@@ -1495,10 +1495,10 @@
       ],
       "motivation": "georeferencing",
       "target": {
-        "id": "https://oldinsurancemaps.net/iiif/resource/54870/selector",
+        "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd411m:g4114m:g4114gm:g04023195307:04023_07_1953-0716/selector",
         "type": "SpecificResource",
         "source": {
-          "id": null,
+          "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd411m:g4114m:g4114gm:g04023195307:04023_07_1953-0716",
           "type": "ImageService2",
           "height": 8070,
           "width": 6660
@@ -1509,7 +1509,7 @@
         }
       },
       "body": {
-        "id": "https://oldinsurancemaps.net/iiif/resource/54870/gcps",
+        "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd411m:g4114m:g4114gm:g04023195307:04023_07_1953-0716/gcps",
         "type": "FeatureCollection",
         "transformation": {
           "type": "helmert"
@@ -1561,7 +1561,7 @@
       }
     },
     {
-      "id": "https://oldinsurancemaps.net/iiif/resource/54871/georef",
+      "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd411m:g4114m:g4114gm:g04023195307:04023_07_1953-0717/georef",
       "type": "Annotation",
       "@context": [
         "http://iiif.io/api/extension/georef/1/context.json",
@@ -1578,8 +1578,8 @@
           "value": "9"
         }
       ],
-      "created": "2026-07-17T16:46:45Z",
-      "modified": "2026-07-17T16:46:45Z",
+      "created": "2026-07-17T19:48:52Z",
+      "modified": "2026-07-17T19:48:52Z",
       "creator": [
         {
           "id": "https://oldinsurancemaps.net/profile/danvk",
@@ -1588,10 +1588,10 @@
       ],
       "motivation": "georeferencing",
       "target": {
-        "id": "https://oldinsurancemaps.net/iiif/resource/54871/selector",
+        "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd411m:g4114m:g4114gm:g04023195307:04023_07_1953-0717/selector",
         "type": "SpecificResource",
         "source": {
-          "id": null,
+          "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd411m:g4114m:g4114gm:g04023195307:04023_07_1953-0717",
           "type": "ImageService2",
           "height": 8070,
           "width": 6660
@@ -1602,7 +1602,7 @@
         }
       },
       "body": {
-        "id": "https://oldinsurancemaps.net/iiif/resource/54871/gcps",
+        "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd411m:g4114m:g4114gm:g04023195307:04023_07_1953-0717/gcps",
         "type": "FeatureCollection",
         "transformation": {
           "type": "helmert"
@@ -1654,7 +1654,7 @@
       }
     },
     {
-      "id": "https://oldinsurancemaps.net/iiif/resource/54872/georef",
+      "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd411m:g4114m:g4114gm:g04023195307:04023_07_1953-0718/georef",
       "type": "Annotation",
       "@context": [
         "http://iiif.io/api/extension/georef/1/context.json",
@@ -1671,8 +1671,8 @@
           "value": "12"
         }
       ],
-      "created": "2026-07-17T16:46:45Z",
-      "modified": "2026-07-17T16:46:45Z",
+      "created": "2026-07-17T19:48:52Z",
+      "modified": "2026-07-17T19:48:52Z",
       "creator": [
         {
           "id": "https://oldinsurancemaps.net/profile/danvk",
@@ -1681,10 +1681,10 @@
       ],
       "motivation": "georeferencing",
       "target": {
-        "id": "https://oldinsurancemaps.net/iiif/resource/54872/selector",
+        "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd411m:g4114m:g4114gm:g04023195307:04023_07_1953-0718/selector",
         "type": "SpecificResource",
         "source": {
-          "id": null,
+          "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd411m:g4114m:g4114gm:g04023195307:04023_07_1953-0718",
           "type": "ImageService2",
           "height": 8070,
           "width": 6660
@@ -1695,7 +1695,7 @@
         }
       },
       "body": {
-        "id": "https://oldinsurancemaps.net/iiif/resource/54872/gcps",
+        "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd411m:g4114m:g4114gm:g04023195307:04023_07_1953-0718/gcps",
         "type": "FeatureCollection",
         "transformation": {
           "type": "helmert"
@@ -1747,7 +1747,7 @@
       }
     },
     {
-      "id": "https://oldinsurancemaps.net/iiif/resource/54873/georef",
+      "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd411m:g4114m:g4114gm:g04023195307:04023_07_1953-0719/georef",
       "type": "Annotation",
       "@context": [
         "http://iiif.io/api/extension/georef/1/context.json",
@@ -1764,8 +1764,8 @@
           "value": "7"
         }
       ],
-      "created": "2026-07-17T16:46:45Z",
-      "modified": "2026-07-17T16:46:45Z",
+      "created": "2026-07-17T19:48:52Z",
+      "modified": "2026-07-17T19:48:52Z",
       "creator": [
         {
           "id": "https://oldinsurancemaps.net/profile/danvk",
@@ -1774,10 +1774,10 @@
       ],
       "motivation": "georeferencing",
       "target": {
-        "id": "https://oldinsurancemaps.net/iiif/resource/54873/selector",
+        "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd411m:g4114m:g4114gm:g04023195307:04023_07_1953-0719/selector",
         "type": "SpecificResource",
         "source": {
-          "id": null,
+          "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd411m:g4114m:g4114gm:g04023195307:04023_07_1953-0719",
           "type": "ImageService2",
           "height": 8070,
           "width": 6660
@@ -1788,7 +1788,7 @@
         }
       },
       "body": {
-        "id": "https://oldinsurancemaps.net/iiif/resource/54873/gcps",
+        "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd411m:g4114m:g4114gm:g04023195307:04023_07_1953-0719/gcps",
         "type": "FeatureCollection",
         "transformation": {
           "type": "helmert"
@@ -1840,7 +1840,7 @@
       }
     },
     {
-      "id": "https://oldinsurancemaps.net/iiif/resource/55521/georef",
+      "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd411m:g4114m:g4114gm:g04023195307:04023_07_1953-0720/georef",
       "type": "Annotation",
       "@context": [
         "http://iiif.io/api/extension/georef/1/context.json",
@@ -1857,8 +1857,8 @@
           "value": "25"
         }
       ],
-      "created": "2026-07-17T16:46:45Z",
-      "modified": "2026-07-17T16:46:45Z",
+      "created": "2026-07-17T19:48:52Z",
+      "modified": "2026-07-17T19:48:52Z",
       "creator": [
         {
           "id": "https://oldinsurancemaps.net/profile/danvk",
@@ -1867,10 +1867,10 @@
       ],
       "motivation": "georeferencing",
       "target": {
-        "id": "https://oldinsurancemaps.net/iiif/resource/55521/selector",
+        "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd411m:g4114m:g4114gm:g04023195307:04023_07_1953-0720/selector",
         "type": "SpecificResource",
         "source": {
-          "id": null,
+          "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd411m:g4114m:g4114gm:g04023195307:04023_07_1953-0720",
           "type": "ImageService2",
           "height": 8070,
           "width": 6660
@@ -1881,7 +1881,7 @@
         }
       },
       "body": {
-        "id": "https://oldinsurancemaps.net/iiif/resource/55521/gcps",
+        "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd411m:g4114m:g4114gm:g04023195307:04023_07_1953-0720/gcps",
         "type": "FeatureCollection",
         "transformation": {
           "type": "helmert"
@@ -1933,7 +1933,7 @@
       }
     },
     {
-      "id": "https://oldinsurancemaps.net/iiif/resource/80433__3/georef",
+      "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd411m:g4114m:g4114gm:g04023195307:04023_07_1953-0721__3/georef",
       "type": "Annotation",
       "@context": [
         "http://iiif.io/api/extension/georef/1/context.json",
@@ -1966,8 +1966,8 @@
           "value": "3227.2"
         }
       ],
-      "created": "2026-07-17T16:46:45Z",
-      "modified": "2026-07-17T16:46:45Z",
+      "created": "2026-07-17T19:48:52Z",
+      "modified": "2026-07-17T19:48:52Z",
       "creator": [
         {
           "id": "https://oldinsurancemaps.net/profile/danvk",
@@ -1976,10 +1976,10 @@
       ],
       "motivation": "georeferencing",
       "target": {
-        "id": "https://oldinsurancemaps.net/iiif/resource/80433__3/selector",
+        "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd411m:g4114m:g4114gm:g04023195307:04023_07_1953-0721__3/selector",
         "type": "SpecificResource",
         "source": {
-          "id": null,
+          "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd411m:g4114m:g4114gm:g04023195307:04023_07_1953-0721",
           "type": "ImageService2",
           "height": 8070,
           "width": 6660
@@ -1990,7 +1990,7 @@
         }
       },
       "body": {
-        "id": "https://oldinsurancemaps.net/iiif/resource/80433__3/gcps",
+        "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd411m:g4114m:g4114gm:g04023195307:04023_07_1953-0721__3/gcps",
         "type": "FeatureCollection",
         "transformation": {
           "type": "polynomial",
@@ -2108,7 +2108,7 @@
       }
     },
     {
-      "id": "https://oldinsurancemaps.net/iiif/resource/80433__5/georef",
+      "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd411m:g4114m:g4114gm:g04023195307:04023_07_1953-0721__5/georef",
       "type": "Annotation",
       "@context": [
         "http://iiif.io/api/extension/georef/1/context.json",
@@ -2141,8 +2141,8 @@
           "value": "4848.0"
         }
       ],
-      "created": "2026-07-17T16:46:45Z",
-      "modified": "2026-07-17T16:46:45Z",
+      "created": "2026-07-17T19:48:52Z",
+      "modified": "2026-07-17T19:48:52Z",
       "creator": [
         {
           "id": "https://oldinsurancemaps.net/profile/danvk",
@@ -2151,10 +2151,10 @@
       ],
       "motivation": "georeferencing",
       "target": {
-        "id": "https://oldinsurancemaps.net/iiif/resource/80433__5/selector",
+        "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd411m:g4114m:g4114gm:g04023195307:04023_07_1953-0721__5/selector",
         "type": "SpecificResource",
         "source": {
-          "id": null,
+          "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd411m:g4114m:g4114gm:g04023195307:04023_07_1953-0721",
           "type": "ImageService2",
           "height": 8070,
           "width": 6660
@@ -2165,7 +2165,7 @@
         }
       },
       "body": {
-        "id": "https://oldinsurancemaps.net/iiif/resource/80433__5/gcps",
+        "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd411m:g4114m:g4114gm:g04023195307:04023_07_1953-0721__5/gcps",
         "type": "FeatureCollection",
         "transformation": {
           "type": "helmert"
@@ -2250,8 +2250,8 @@
           "value": "3994.2"
         }
       ],
-      "created": "2026-07-17T16:46:45Z",
-      "modified": "2026-07-17T16:46:45Z",
+      "created": "2026-07-17T19:48:52Z",
+      "modified": "2026-07-17T19:48:52Z",
       "creator": [
         {
           "id": "https://oldinsurancemaps.net/profile/danvk",
@@ -2359,8 +2359,8 @@
           "value": "4077.0"
         }
       ],
-      "created": "2026-07-17T16:46:45Z",
-      "modified": "2026-07-17T16:46:45Z",
+      "created": "2026-07-17T19:48:52Z",
+      "modified": "2026-07-17T19:48:52Z",
       "creator": [
         {
           "id": "https://oldinsurancemaps.net/profile/danvk",
@@ -2435,7 +2435,7 @@
       }
     },
     {
-      "id": "https://oldinsurancemaps.net/iiif/resource/78642__1/georef",
+      "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd411m:g4114m:g4114gm:g04023195307:04023_07_1953-0725__1/georef",
       "type": "Annotation",
       "@context": [
         "http://iiif.io/api/extension/georef/1/context.json",
@@ -2468,8 +2468,8 @@
           "value": "8070.0"
         }
       ],
-      "created": "2026-07-17T16:46:45Z",
-      "modified": "2026-07-17T16:46:45Z",
+      "created": "2026-07-17T19:48:52Z",
+      "modified": "2026-07-17T19:48:52Z",
       "creator": [
         {
           "id": "https://oldinsurancemaps.net/profile/danvk",
@@ -2478,10 +2478,10 @@
       ],
       "motivation": "georeferencing",
       "target": {
-        "id": "https://oldinsurancemaps.net/iiif/resource/78642__1/selector",
+        "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd411m:g4114m:g4114gm:g04023195307:04023_07_1953-0725__1/selector",
         "type": "SpecificResource",
         "source": {
-          "id": null,
+          "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd411m:g4114m:g4114gm:g04023195307:04023_07_1953-0725",
           "type": "ImageService2",
           "height": 8070,
           "width": 6660
@@ -2492,7 +2492,7 @@
         }
       },
       "body": {
-        "id": "https://oldinsurancemaps.net/iiif/resource/78642__1/gcps",
+        "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd411m:g4114m:g4114gm:g04023195307:04023_07_1953-0725__1/gcps",
         "type": "FeatureCollection",
         "transformation": {
           "type": "helmert"
@@ -2544,7 +2544,7 @@
       }
     },
     {
-      "id": "https://oldinsurancemaps.net/iiif/resource/78677__1/georef",
+      "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd411m:g4114m:g4114gm:g04023195307:04023_07_1953-0726__1/georef",
       "type": "Annotation",
       "@context": [
         "http://iiif.io/api/extension/georef/1/context.json",
@@ -2577,8 +2577,8 @@
           "value": "8070.0"
         }
       ],
-      "created": "2026-07-17T16:46:45Z",
-      "modified": "2026-07-17T16:46:45Z",
+      "created": "2026-07-17T19:48:52Z",
+      "modified": "2026-07-17T19:48:52Z",
       "creator": [
         {
           "id": "https://oldinsurancemaps.net/profile/danvk",
@@ -2587,10 +2587,10 @@
       ],
       "motivation": "georeferencing",
       "target": {
-        "id": "https://oldinsurancemaps.net/iiif/resource/78677__1/selector",
+        "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd411m:g4114m:g4114gm:g04023195307:04023_07_1953-0726__1/selector",
         "type": "SpecificResource",
         "source": {
-          "id": null,
+          "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd411m:g4114m:g4114gm:g04023195307:04023_07_1953-0726",
           "type": "ImageService2",
           "height": 8070,
           "width": 6660
@@ -2601,7 +2601,7 @@
         }
       },
       "body": {
-        "id": "https://oldinsurancemaps.net/iiif/resource/78677__1/gcps",
+        "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd411m:g4114m:g4114gm:g04023195307:04023_07_1953-0726__1/gcps",
         "type": "FeatureCollection",
         "transformation": {
           "type": "helmert"
@@ -2670,8 +2670,8 @@
           "value": "3"
         }
       ],
-      "created": "2026-07-17T16:46:45Z",
-      "modified": "2026-07-17T16:46:45Z",
+      "created": "2026-07-17T19:48:52Z",
+      "modified": "2026-07-17T19:48:52Z",
       "creator": [
         {
           "id": "https://oldinsurancemaps.net/profile/danvk",
@@ -2779,8 +2779,8 @@
           "value": "8070.0"
         }
       ],
-      "created": "2026-07-17T16:46:45Z",
-      "modified": "2026-07-17T16:46:45Z",
+      "created": "2026-07-17T19:48:52Z",
+      "modified": "2026-07-17T19:48:52Z",
       "creator": [
         {
           "id": "https://oldinsurancemaps.net/profile/danvk",
@@ -2888,8 +2888,8 @@
           "value": "8070.0"
         }
       ],
-      "created": "2026-07-17T16:46:45Z",
-      "modified": "2026-07-17T16:46:45Z",
+      "created": "2026-07-17T19:48:52Z",
+      "modified": "2026-07-17T19:48:52Z",
       "creator": [
         {
           "id": "https://oldinsurancemaps.net/profile/danvk",
@@ -2964,7 +2964,7 @@
       }
     },
     {
-      "id": "https://oldinsurancemaps.net/iiif/resource/78655/georef",
+      "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd411m:g4114m:g4114gm:g04023195307:04023_07_1953-0729/georef",
       "type": "Annotation",
       "@context": [
         "http://iiif.io/api/extension/georef/1/context.json",
@@ -2981,8 +2981,8 @@
           "value": "4"
         }
       ],
-      "created": "2026-07-17T16:46:45Z",
-      "modified": "2026-07-17T16:46:45Z",
+      "created": "2026-07-17T19:48:52Z",
+      "modified": "2026-07-17T19:48:52Z",
       "creator": [
         {
           "id": "https://oldinsurancemaps.net/profile/danvk",
@@ -2991,10 +2991,10 @@
       ],
       "motivation": "georeferencing",
       "target": {
-        "id": "https://oldinsurancemaps.net/iiif/resource/78655/selector",
+        "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd411m:g4114m:g4114gm:g04023195307:04023_07_1953-0729/selector",
         "type": "SpecificResource",
         "source": {
-          "id": null,
+          "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd411m:g4114m:g4114gm:g04023195307:04023_07_1953-0729",
           "type": "ImageService2",
           "height": 8070,
           "width": 6660
@@ -3005,7 +3005,7 @@
         }
       },
       "body": {
-        "id": "https://oldinsurancemaps.net/iiif/resource/78655/gcps",
+        "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd411m:g4114m:g4114gm:g04023195307:04023_07_1953-0729/gcps",
         "type": "FeatureCollection",
         "transformation": {
           "type": "helmert"
@@ -3057,7 +3057,7 @@
       }
     },
     {
-      "id": "https://oldinsurancemaps.net/iiif/resource/31402/georef",
+      "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd411m:g4114m:g4114gm:g04023195307:04023_07_1953-0809/georef",
       "type": "Annotation",
       "@context": [
         "http://iiif.io/api/extension/georef/1/context.json",
@@ -3074,8 +3074,8 @@
           "value": "19"
         }
       ],
-      "created": "2026-07-17T16:46:45Z",
-      "modified": "2026-07-17T16:46:45Z",
+      "created": "2026-07-17T19:48:52Z",
+      "modified": "2026-07-17T19:48:52Z",
       "creator": [
         {
           "id": "https://oldinsurancemaps.net/profile/danvk",
@@ -3084,10 +3084,10 @@
       ],
       "motivation": "georeferencing",
       "target": {
-        "id": "https://oldinsurancemaps.net/iiif/resource/31402/selector",
+        "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd411m:g4114m:g4114gm:g04023195307:04023_07_1953-0809/selector",
         "type": "SpecificResource",
         "source": {
-          "id": null,
+          "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd411m:g4114m:g4114gm:g04023195307:04023_07_1953-0809",
           "type": "ImageService2",
           "height": 8070,
           "width": 6660
@@ -3098,7 +3098,7 @@
         }
       },
       "body": {
-        "id": "https://oldinsurancemaps.net/iiif/resource/31402/gcps",
+        "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd411m:g4114m:g4114gm:g04023195307:04023_07_1953-0809/gcps",
         "type": "FeatureCollection",
         "transformation": {
           "type": "helmert"
@@ -3150,7 +3150,7 @@
       }
     },
     {
-      "id": "https://oldinsurancemaps.net/iiif/resource/31406/georef",
+      "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd411m:g4114m:g4114gm:g04023195307:04023_07_1953-0810/georef",
       "type": "Annotation",
       "@context": [
         "http://iiif.io/api/extension/georef/1/context.json",
@@ -3167,8 +3167,8 @@
           "value": "25"
         }
       ],
-      "created": "2026-07-17T16:46:45Z",
-      "modified": "2026-07-17T16:46:45Z",
+      "created": "2026-07-17T19:48:52Z",
+      "modified": "2026-07-17T19:48:52Z",
       "creator": [
         {
           "id": "https://oldinsurancemaps.net/profile/danvk",
@@ -3177,10 +3177,10 @@
       ],
       "motivation": "georeferencing",
       "target": {
-        "id": "https://oldinsurancemaps.net/iiif/resource/31406/selector",
+        "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd411m:g4114m:g4114gm:g04023195307:04023_07_1953-0810/selector",
         "type": "SpecificResource",
         "source": {
-          "id": null,
+          "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd411m:g4114m:g4114gm:g04023195307:04023_07_1953-0810",
           "type": "ImageService2",
           "height": 8070,
           "width": 6660
@@ -3191,7 +3191,7 @@
         }
       },
       "body": {
-        "id": "https://oldinsurancemaps.net/iiif/resource/31406/gcps",
+        "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd411m:g4114m:g4114gm:g04023195307:04023_07_1953-0810/gcps",
         "type": "FeatureCollection",
         "transformation": {
           "type": "helmert"
@@ -3243,7 +3243,7 @@
       }
     },
     {
-      "id": "https://oldinsurancemaps.net/iiif/resource/31409/georef",
+      "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd411m:g4114m:g4114gm:g04023195307:04023_07_1953-0811/georef",
       "type": "Annotation",
       "@context": [
         "http://iiif.io/api/extension/georef/1/context.json",
@@ -3260,8 +3260,8 @@
           "value": "4"
         }
       ],
-      "created": "2026-07-17T16:46:45Z",
-      "modified": "2026-07-17T16:46:45Z",
+      "created": "2026-07-17T19:48:52Z",
+      "modified": "2026-07-17T19:48:52Z",
       "creator": [
         {
           "id": "https://oldinsurancemaps.net/profile/danvk",
@@ -3270,10 +3270,10 @@
       ],
       "motivation": "georeferencing",
       "target": {
-        "id": "https://oldinsurancemaps.net/iiif/resource/31409/selector",
+        "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd411m:g4114m:g4114gm:g04023195307:04023_07_1953-0811/selector",
         "type": "SpecificResource",
         "source": {
-          "id": null,
+          "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd411m:g4114m:g4114gm:g04023195307:04023_07_1953-0811",
           "type": "ImageService2",
           "height": 8070,
           "width": 6660
@@ -3284,7 +3284,7 @@
         }
       },
       "body": {
-        "id": "https://oldinsurancemaps.net/iiif/resource/31409/gcps",
+        "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd411m:g4114m:g4114gm:g04023195307:04023_07_1953-0811/gcps",
         "type": "FeatureCollection",
         "transformation": {
           "type": "helmert"
@@ -3336,7 +3336,7 @@
       }
     },
     {
-      "id": "https://oldinsurancemaps.net/iiif/resource/31410/georef",
+      "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd411m:g4114m:g4114gm:g04023195307:04023_07_1953-0812/georef",
       "type": "Annotation",
       "@context": [
         "http://iiif.io/api/extension/georef/1/context.json",
@@ -3353,8 +3353,8 @@
           "value": "12"
         }
       ],
-      "created": "2026-07-17T16:46:45Z",
-      "modified": "2026-07-17T16:46:45Z",
+      "created": "2026-07-17T19:48:52Z",
+      "modified": "2026-07-17T19:48:52Z",
       "creator": [
         {
           "id": "https://oldinsurancemaps.net/profile/danvk",
@@ -3363,10 +3363,10 @@
       ],
       "motivation": "georeferencing",
       "target": {
-        "id": "https://oldinsurancemaps.net/iiif/resource/31410/selector",
+        "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd411m:g4114m:g4114gm:g04023195307:04023_07_1953-0812/selector",
         "type": "SpecificResource",
         "source": {
-          "id": null,
+          "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd411m:g4114m:g4114gm:g04023195307:04023_07_1953-0812",
           "type": "ImageService2",
           "height": 8070,
           "width": 6660
@@ -3377,7 +3377,7 @@
         }
       },
       "body": {
-        "id": "https://oldinsurancemaps.net/iiif/resource/31410/gcps",
+        "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd411m:g4114m:g4114gm:g04023195307:04023_07_1953-0812/gcps",
         "type": "FeatureCollection",
         "transformation": {
           "type": "helmert"
@@ -3429,7 +3429,7 @@
       }
     },
     {
-      "id": "https://oldinsurancemaps.net/iiif/resource/31411/georef",
+      "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd411m:g4114m:g4114gm:g04023195307:04023_07_1953-0813/georef",
       "type": "Annotation",
       "@context": [
         "http://iiif.io/api/extension/georef/1/context.json",
@@ -3446,8 +3446,8 @@
           "value": "15"
         }
       ],
-      "created": "2026-07-17T16:46:45Z",
-      "modified": "2026-07-17T16:46:45Z",
+      "created": "2026-07-17T19:48:52Z",
+      "modified": "2026-07-17T19:48:52Z",
       "creator": [
         {
           "id": "https://oldinsurancemaps.net/profile/danvk",
@@ -3456,10 +3456,10 @@
       ],
       "motivation": "georeferencing",
       "target": {
-        "id": "https://oldinsurancemaps.net/iiif/resource/31411/selector",
+        "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd411m:g4114m:g4114gm:g04023195307:04023_07_1953-0813/selector",
         "type": "SpecificResource",
         "source": {
-          "id": null,
+          "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd411m:g4114m:g4114gm:g04023195307:04023_07_1953-0813",
           "type": "ImageService2",
           "height": 8070,
           "width": 6660
@@ -3470,7 +3470,7 @@
         }
       },
       "body": {
-        "id": "https://oldinsurancemaps.net/iiif/resource/31411/gcps",
+        "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd411m:g4114m:g4114gm:g04023195307:04023_07_1953-0813/gcps",
         "type": "FeatureCollection",
         "transformation": {
           "type": "helmert"
@@ -3522,7 +3522,7 @@
       }
     },
     {
-      "id": "https://oldinsurancemaps.net/iiif/resource/31505/georef",
+      "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd411m:g4114m:g4114gm:g04023195307:04023_07_1953-0814/georef",
       "type": "Annotation",
       "@context": [
         "http://iiif.io/api/extension/georef/1/context.json",
@@ -3539,8 +3539,8 @@
           "value": "4"
         }
       ],
-      "created": "2026-07-17T16:46:45Z",
-      "modified": "2026-07-17T16:46:45Z",
+      "created": "2026-07-17T19:48:52Z",
+      "modified": "2026-07-17T19:48:52Z",
       "creator": [
         {
           "id": "https://oldinsurancemaps.net/profile/danvk",
@@ -3549,10 +3549,10 @@
       ],
       "motivation": "georeferencing",
       "target": {
-        "id": "https://oldinsurancemaps.net/iiif/resource/31505/selector",
+        "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd411m:g4114m:g4114gm:g04023195307:04023_07_1953-0814/selector",
         "type": "SpecificResource",
         "source": {
-          "id": null,
+          "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd411m:g4114m:g4114gm:g04023195307:04023_07_1953-0814",
           "type": "ImageService2",
           "height": 8070,
           "width": 6660
@@ -3563,7 +3563,7 @@
         }
       },
       "body": {
-        "id": "https://oldinsurancemaps.net/iiif/resource/31505/gcps",
+        "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd411m:g4114m:g4114gm:g04023195307:04023_07_1953-0814/gcps",
         "type": "FeatureCollection",
         "transformation": {
           "type": "helmert"
@@ -3615,7 +3615,7 @@
       }
     },
     {
-      "id": "https://oldinsurancemaps.net/iiif/resource/31506/georef",
+      "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd411m:g4114m:g4114gm:g04023195307:04023_07_1953-0815/georef",
       "type": "Annotation",
       "@context": [
         "http://iiif.io/api/extension/georef/1/context.json",
@@ -3632,8 +3632,8 @@
           "value": "3"
         }
       ],
-      "created": "2026-07-17T16:46:45Z",
-      "modified": "2026-07-17T16:46:45Z",
+      "created": "2026-07-17T19:48:52Z",
+      "modified": "2026-07-17T19:48:52Z",
       "creator": [
         {
           "id": "https://oldinsurancemaps.net/profile/danvk",
@@ -3642,10 +3642,10 @@
       ],
       "motivation": "georeferencing",
       "target": {
-        "id": "https://oldinsurancemaps.net/iiif/resource/31506/selector",
+        "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd411m:g4114m:g4114gm:g04023195307:04023_07_1953-0815/selector",
         "type": "SpecificResource",
         "source": {
-          "id": null,
+          "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd411m:g4114m:g4114gm:g04023195307:04023_07_1953-0815",
           "type": "ImageService2",
           "height": 8070,
           "width": 6660
@@ -3656,7 +3656,7 @@
         }
       },
       "body": {
-        "id": "https://oldinsurancemaps.net/iiif/resource/31506/gcps",
+        "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd411m:g4114m:g4114gm:g04023195307:04023_07_1953-0815/gcps",
         "type": "FeatureCollection",
         "transformation": {
           "type": "helmert"
@@ -3708,7 +3708,7 @@
       }
     },
     {
-      "id": "https://oldinsurancemaps.net/iiif/resource/31507/georef",
+      "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd411m:g4114m:g4114gm:g04023195307:04023_07_1953-0816/georef",
       "type": "Annotation",
       "@context": [
         "http://iiif.io/api/extension/georef/1/context.json",
@@ -3725,8 +3725,8 @@
           "value": "3"
         }
       ],
-      "created": "2026-07-17T16:46:45Z",
-      "modified": "2026-07-17T16:46:45Z",
+      "created": "2026-07-17T19:48:52Z",
+      "modified": "2026-07-17T19:48:52Z",
       "creator": [
         {
           "id": "https://oldinsurancemaps.net/profile/danvk",
@@ -3735,10 +3735,10 @@
       ],
       "motivation": "georeferencing",
       "target": {
-        "id": "https://oldinsurancemaps.net/iiif/resource/31507/selector",
+        "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd411m:g4114m:g4114gm:g04023195307:04023_07_1953-0816/selector",
         "type": "SpecificResource",
         "source": {
-          "id": null,
+          "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd411m:g4114m:g4114gm:g04023195307:04023_07_1953-0816",
           "type": "ImageService2",
           "height": 8070,
           "width": 6660
@@ -3749,7 +3749,7 @@
         }
       },
       "body": {
-        "id": "https://oldinsurancemaps.net/iiif/resource/31507/gcps",
+        "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd411m:g4114m:g4114gm:g04023195307:04023_07_1953-0816/gcps",
         "type": "FeatureCollection",
         "transformation": {
           "type": "helmert"
@@ -3801,7 +3801,7 @@
       }
     },
     {
-      "id": "https://oldinsurancemaps.net/iiif/resource/31508/georef",
+      "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd411m:g4114m:g4114gm:g04023195307:04023_07_1953-0817/georef",
       "type": "Annotation",
       "@context": [
         "http://iiif.io/api/extension/georef/1/context.json",
@@ -3818,8 +3818,8 @@
           "value": "17"
         }
       ],
-      "created": "2026-07-17T16:46:45Z",
-      "modified": "2026-07-17T16:46:45Z",
+      "created": "2026-07-17T19:48:52Z",
+      "modified": "2026-07-17T19:48:52Z",
       "creator": [
         {
           "id": "https://oldinsurancemaps.net/profile/danvk",
@@ -3828,10 +3828,10 @@
       ],
       "motivation": "georeferencing",
       "target": {
-        "id": "https://oldinsurancemaps.net/iiif/resource/31508/selector",
+        "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd411m:g4114m:g4114gm:g04023195307:04023_07_1953-0817/selector",
         "type": "SpecificResource",
         "source": {
-          "id": null,
+          "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd411m:g4114m:g4114gm:g04023195307:04023_07_1953-0817",
           "type": "ImageService2",
           "height": 8070,
           "width": 6660
@@ -3842,7 +3842,7 @@
         }
       },
       "body": {
-        "id": "https://oldinsurancemaps.net/iiif/resource/31508/gcps",
+        "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd411m:g4114m:g4114gm:g04023195307:04023_07_1953-0817/gcps",
         "type": "FeatureCollection",
         "transformation": {
           "type": "helmert"
@@ -3894,7 +3894,7 @@
       }
     },
     {
-      "id": "https://oldinsurancemaps.net/iiif/resource/31509/georef",
+      "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd411m:g4114m:g4114gm:g04023195307:04023_07_1953-0818/georef",
       "type": "Annotation",
       "@context": [
         "http://iiif.io/api/extension/georef/1/context.json",
@@ -3911,8 +3911,8 @@
           "value": "20"
         }
       ],
-      "created": "2026-07-17T16:46:45Z",
-      "modified": "2026-07-17T16:46:45Z",
+      "created": "2026-07-17T19:48:52Z",
+      "modified": "2026-07-17T19:48:52Z",
       "creator": [
         {
           "id": "https://oldinsurancemaps.net/profile/danvk",
@@ -3921,10 +3921,10 @@
       ],
       "motivation": "georeferencing",
       "target": {
-        "id": "https://oldinsurancemaps.net/iiif/resource/31509/selector",
+        "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd411m:g4114m:g4114gm:g04023195307:04023_07_1953-0818/selector",
         "type": "SpecificResource",
         "source": {
-          "id": null,
+          "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd411m:g4114m:g4114gm:g04023195307:04023_07_1953-0818",
           "type": "ImageService2",
           "height": 8070,
           "width": 6660
@@ -3935,7 +3935,7 @@
         }
       },
       "body": {
-        "id": "https://oldinsurancemaps.net/iiif/resource/31509/gcps",
+        "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd411m:g4114m:g4114gm:g04023195307:04023_07_1953-0818/gcps",
         "type": "FeatureCollection",
         "transformation": {
           "type": "helmert"
@@ -3987,7 +3987,7 @@
       }
     },
     {
-      "id": "https://oldinsurancemaps.net/iiif/resource/31884/georef",
+      "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd411m:g4114m:g4114gm:g04023195307:04023_07_1953-0820/georef",
       "type": "Annotation",
       "@context": [
         "http://iiif.io/api/extension/georef/1/context.json",
@@ -4004,8 +4004,8 @@
           "value": "20"
         }
       ],
-      "created": "2026-07-17T16:46:45Z",
-      "modified": "2026-07-17T16:46:45Z",
+      "created": "2026-07-17T19:48:52Z",
+      "modified": "2026-07-17T19:48:52Z",
       "creator": [
         {
           "id": "https://oldinsurancemaps.net/profile/danvk",
@@ -4014,10 +4014,10 @@
       ],
       "motivation": "georeferencing",
       "target": {
-        "id": "https://oldinsurancemaps.net/iiif/resource/31884/selector",
+        "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd411m:g4114m:g4114gm:g04023195307:04023_07_1953-0820/selector",
         "type": "SpecificResource",
         "source": {
-          "id": null,
+          "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd411m:g4114m:g4114gm:g04023195307:04023_07_1953-0820",
           "type": "ImageService2",
           "height": 8070,
           "width": 6660
@@ -4028,7 +4028,7 @@
         }
       },
       "body": {
-        "id": "https://oldinsurancemaps.net/iiif/resource/31884/gcps",
+        "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd411m:g4114m:g4114gm:g04023195307:04023_07_1953-0820/gcps",
         "type": "FeatureCollection",
         "transformation": {
           "type": "helmert"
@@ -4080,7 +4080,7 @@
       }
     },
     {
-      "id": "https://oldinsurancemaps.net/iiif/resource/31514/georef",
+      "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd411m:g4114m:g4114gm:g04023195307:04023_07_1953-0821/georef",
       "type": "Annotation",
       "@context": [
         "http://iiif.io/api/extension/georef/1/context.json",
@@ -4097,8 +4097,8 @@
           "value": "6"
         }
       ],
-      "created": "2026-07-17T16:46:45Z",
-      "modified": "2026-07-17T16:46:45Z",
+      "created": "2026-07-17T19:48:52Z",
+      "modified": "2026-07-17T19:48:52Z",
       "creator": [
         {
           "id": "https://oldinsurancemaps.net/profile/danvk",
@@ -4107,10 +4107,10 @@
       ],
       "motivation": "georeferencing",
       "target": {
-        "id": "https://oldinsurancemaps.net/iiif/resource/31514/selector",
+        "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd411m:g4114m:g4114gm:g04023195307:04023_07_1953-0821/selector",
         "type": "SpecificResource",
         "source": {
-          "id": null,
+          "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd411m:g4114m:g4114gm:g04023195307:04023_07_1953-0821",
           "type": "ImageService2",
           "height": 8070,
           "width": 6660
@@ -4121,7 +4121,7 @@
         }
       },
       "body": {
-        "id": "https://oldinsurancemaps.net/iiif/resource/31514/gcps",
+        "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd411m:g4114m:g4114gm:g04023195307:04023_07_1953-0821/gcps",
         "type": "FeatureCollection",
         "transformation": {
           "type": "helmert"
@@ -4173,7 +4173,7 @@
       }
     },
     {
-      "id": "https://oldinsurancemaps.net/iiif/resource/31518/georef",
+      "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd411m:g4114m:g4114gm:g04023195307:04023_07_1953-0822/georef",
       "type": "Annotation",
       "@context": [
         "http://iiif.io/api/extension/georef/1/context.json",
@@ -4190,8 +4190,8 @@
           "value": "6"
         }
       ],
-      "created": "2026-07-17T16:46:45Z",
-      "modified": "2026-07-17T16:46:45Z",
+      "created": "2026-07-17T19:48:52Z",
+      "modified": "2026-07-17T19:48:52Z",
       "creator": [
         {
           "id": "https://oldinsurancemaps.net/profile/danvk",
@@ -4200,10 +4200,10 @@
       ],
       "motivation": "georeferencing",
       "target": {
-        "id": "https://oldinsurancemaps.net/iiif/resource/31518/selector",
+        "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd411m:g4114m:g4114gm:g04023195307:04023_07_1953-0822/selector",
         "type": "SpecificResource",
         "source": {
-          "id": null,
+          "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd411m:g4114m:g4114gm:g04023195307:04023_07_1953-0822",
           "type": "ImageService2",
           "height": 8070,
           "width": 6660
@@ -4214,7 +4214,7 @@
         }
       },
       "body": {
-        "id": "https://oldinsurancemaps.net/iiif/resource/31518/gcps",
+        "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd411m:g4114m:g4114gm:g04023195307:04023_07_1953-0822/gcps",
         "type": "FeatureCollection",
         "transformation": {
           "type": "helmert"
@@ -4266,7 +4266,7 @@
       }
     },
     {
-      "id": "https://oldinsurancemaps.net/iiif/resource/31520/georef",
+      "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd411m:g4114m:g4114gm:g04023195307:04023_07_1953-0823/georef",
       "type": "Annotation",
       "@context": [
         "http://iiif.io/api/extension/georef/1/context.json",
@@ -4283,8 +4283,8 @@
           "value": "1"
         }
       ],
-      "created": "2026-07-17T16:46:45Z",
-      "modified": "2026-07-17T16:46:45Z",
+      "created": "2026-07-17T19:48:52Z",
+      "modified": "2026-07-17T19:48:52Z",
       "creator": [
         {
           "id": "https://oldinsurancemaps.net/profile/danvk",
@@ -4293,10 +4293,10 @@
       ],
       "motivation": "georeferencing",
       "target": {
-        "id": "https://oldinsurancemaps.net/iiif/resource/31520/selector",
+        "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd411m:g4114m:g4114gm:g04023195307:04023_07_1953-0823/selector",
         "type": "SpecificResource",
         "source": {
-          "id": null,
+          "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd411m:g4114m:g4114gm:g04023195307:04023_07_1953-0823",
           "type": "ImageService2",
           "height": 8070,
           "width": 6660
@@ -4307,7 +4307,7 @@
         }
       },
       "body": {
-        "id": "https://oldinsurancemaps.net/iiif/resource/31520/gcps",
+        "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd411m:g4114m:g4114gm:g04023195307:04023_07_1953-0823/gcps",
         "type": "FeatureCollection",
         "transformation": {
           "type": "polynomial",
@@ -4425,7 +4425,7 @@
       }
     },
     {
-      "id": "https://oldinsurancemaps.net/iiif/resource/31521/georef",
+      "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd411m:g4114m:g4114gm:g04023195307:04023_07_1953-0824/georef",
       "type": "Annotation",
       "@context": [
         "http://iiif.io/api/extension/georef/1/context.json",
@@ -4442,8 +4442,8 @@
           "value": "3"
         }
       ],
-      "created": "2026-07-17T16:46:45Z",
-      "modified": "2026-07-17T16:46:45Z",
+      "created": "2026-07-17T19:48:52Z",
+      "modified": "2026-07-17T19:48:52Z",
       "creator": [
         {
           "id": "https://oldinsurancemaps.net/profile/danvk",
@@ -4452,10 +4452,10 @@
       ],
       "motivation": "georeferencing",
       "target": {
-        "id": "https://oldinsurancemaps.net/iiif/resource/31521/selector",
+        "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd411m:g4114m:g4114gm:g04023195307:04023_07_1953-0824/selector",
         "type": "SpecificResource",
         "source": {
-          "id": null,
+          "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd411m:g4114m:g4114gm:g04023195307:04023_07_1953-0824",
           "type": "ImageService2",
           "height": 8070,
           "width": 6660
@@ -4466,7 +4466,7 @@
         }
       },
       "body": {
-        "id": "https://oldinsurancemaps.net/iiif/resource/31521/gcps",
+        "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd411m:g4114m:g4114gm:g04023195307:04023_07_1953-0824/gcps",
         "type": "FeatureCollection",
         "transformation": {
           "type": "helmert"
@@ -4518,7 +4518,7 @@
       }
     },
     {
-      "id": "https://oldinsurancemaps.net/iiif/resource/31879/georef",
+      "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd411m:g4114m:g4114gm:g04023195307:04023_07_1953-0825/georef",
       "type": "Annotation",
       "@context": [
         "http://iiif.io/api/extension/georef/1/context.json",
@@ -4535,8 +4535,8 @@
           "value": "5"
         }
       ],
-      "created": "2026-07-17T16:46:45Z",
-      "modified": "2026-07-17T16:46:45Z",
+      "created": "2026-07-17T19:48:52Z",
+      "modified": "2026-07-17T19:48:52Z",
       "creator": [
         {
           "id": "https://oldinsurancemaps.net/profile/danvk",
@@ -4545,10 +4545,10 @@
       ],
       "motivation": "georeferencing",
       "target": {
-        "id": "https://oldinsurancemaps.net/iiif/resource/31879/selector",
+        "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd411m:g4114m:g4114gm:g04023195307:04023_07_1953-0825/selector",
         "type": "SpecificResource",
         "source": {
-          "id": null,
+          "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd411m:g4114m:g4114gm:g04023195307:04023_07_1953-0825",
           "type": "ImageService2",
           "height": 8070,
           "width": 6660
@@ -4559,7 +4559,7 @@
         }
       },
       "body": {
-        "id": "https://oldinsurancemaps.net/iiif/resource/31879/gcps",
+        "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd411m:g4114m:g4114gm:g04023195307:04023_07_1953-0825/gcps",
         "type": "FeatureCollection",
         "transformation": {
           "type": "helmert"
@@ -4611,7 +4611,7 @@
       }
     },
     {
-      "id": "https://oldinsurancemaps.net/iiif/resource/31883__2/georef",
+      "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd411m:g4114m:g4114gm:g04023195307:04023_07_1953-0826__2/georef",
       "type": "Annotation",
       "@context": [
         "http://iiif.io/api/extension/georef/1/context.json",
@@ -4644,8 +4644,8 @@
           "value": "8070.0"
         }
       ],
-      "created": "2026-07-17T16:46:45Z",
-      "modified": "2026-07-17T16:46:45Z",
+      "created": "2026-07-17T19:48:52Z",
+      "modified": "2026-07-17T19:48:52Z",
       "creator": [
         {
           "id": "https://oldinsurancemaps.net/profile/danvk",
@@ -4654,10 +4654,10 @@
       ],
       "motivation": "georeferencing",
       "target": {
-        "id": "https://oldinsurancemaps.net/iiif/resource/31883__2/selector",
+        "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd411m:g4114m:g4114gm:g04023195307:04023_07_1953-0826__2/selector",
         "type": "SpecificResource",
         "source": {
-          "id": null,
+          "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd411m:g4114m:g4114gm:g04023195307:04023_07_1953-0826",
           "type": "ImageService2",
           "height": 8070,
           "width": 6660
@@ -4668,7 +4668,7 @@
         }
       },
       "body": {
-        "id": "https://oldinsurancemaps.net/iiif/resource/31883__2/gcps",
+        "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd411m:g4114m:g4114gm:g04023195307:04023_07_1953-0826__2/gcps",
         "type": "FeatureCollection",
         "transformation": {
           "type": "helmert"
@@ -4720,7 +4720,7 @@
       }
     },
     {
-      "id": "https://oldinsurancemaps.net/iiif/resource/31524/georef",
+      "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd411m:g4114m:g4114gm:g04023195307:04023_07_1953-0827/georef",
       "type": "Annotation",
       "@context": [
         "http://iiif.io/api/extension/georef/1/context.json",
@@ -4737,8 +4737,8 @@
           "value": "10"
         }
       ],
-      "created": "2026-07-17T16:46:45Z",
-      "modified": "2026-07-17T16:46:45Z",
+      "created": "2026-07-17T19:48:52Z",
+      "modified": "2026-07-17T19:48:52Z",
       "creator": [
         {
           "id": "https://oldinsurancemaps.net/profile/danvk",
@@ -4747,10 +4747,10 @@
       ],
       "motivation": "georeferencing",
       "target": {
-        "id": "https://oldinsurancemaps.net/iiif/resource/31524/selector",
+        "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd411m:g4114m:g4114gm:g04023195307:04023_07_1953-0827/selector",
         "type": "SpecificResource",
         "source": {
-          "id": null,
+          "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd411m:g4114m:g4114gm:g04023195307:04023_07_1953-0827",
           "type": "ImageService2",
           "height": 8070,
           "width": 6660
@@ -4761,7 +4761,7 @@
         }
       },
       "body": {
-        "id": "https://oldinsurancemaps.net/iiif/resource/31524/gcps",
+        "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd411m:g4114m:g4114gm:g04023195307:04023_07_1953-0827/gcps",
         "type": "FeatureCollection",
         "transformation": {
           "type": "helmert"
@@ -4813,7 +4813,7 @@
       }
     },
     {
-      "id": "https://oldinsurancemaps.net/iiif/resource/31837/georef",
+      "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd411m:g4114m:g4114gm:g04023195307:04023_07_1953-0828/georef",
       "type": "Annotation",
       "@context": [
         "http://iiif.io/api/extension/georef/1/context.json",
@@ -4830,8 +4830,8 @@
           "value": "3"
         }
       ],
-      "created": "2026-07-17T16:46:45Z",
-      "modified": "2026-07-17T16:46:45Z",
+      "created": "2026-07-17T19:48:52Z",
+      "modified": "2026-07-17T19:48:52Z",
       "creator": [
         {
           "id": "https://oldinsurancemaps.net/profile/danvk",
@@ -4840,10 +4840,10 @@
       ],
       "motivation": "georeferencing",
       "target": {
-        "id": "https://oldinsurancemaps.net/iiif/resource/31837/selector",
+        "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd411m:g4114m:g4114gm:g04023195307:04023_07_1953-0828/selector",
         "type": "SpecificResource",
         "source": {
-          "id": null,
+          "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd411m:g4114m:g4114gm:g04023195307:04023_07_1953-0828",
           "type": "ImageService2",
           "height": 8070,
           "width": 6660
@@ -4854,7 +4854,7 @@
         }
       },
       "body": {
-        "id": "https://oldinsurancemaps.net/iiif/resource/31837/gcps",
+        "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd411m:g4114m:g4114gm:g04023195307:04023_07_1953-0828/gcps",
         "type": "FeatureCollection",
         "transformation": {
           "type": "helmert"
@@ -4906,7 +4906,7 @@
       }
     },
     {
-      "id": "https://oldinsurancemaps.net/iiif/resource/31838/georef",
+      "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd411m:g4114m:g4114gm:g04023195307:04023_07_1953-0829/georef",
       "type": "Annotation",
       "@context": [
         "http://iiif.io/api/extension/georef/1/context.json",
@@ -4923,8 +4923,8 @@
           "value": "18"
         }
       ],
-      "created": "2026-07-17T16:46:45Z",
-      "modified": "2026-07-17T16:46:45Z",
+      "created": "2026-07-17T19:48:52Z",
+      "modified": "2026-07-17T19:48:52Z",
       "creator": [
         {
           "id": "https://oldinsurancemaps.net/profile/danvk",
@@ -4933,10 +4933,10 @@
       ],
       "motivation": "georeferencing",
       "target": {
-        "id": "https://oldinsurancemaps.net/iiif/resource/31838/selector",
+        "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd411m:g4114m:g4114gm:g04023195307:04023_07_1953-0829/selector",
         "type": "SpecificResource",
         "source": {
-          "id": null,
+          "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd411m:g4114m:g4114gm:g04023195307:04023_07_1953-0829",
           "type": "ImageService2",
           "height": 8070,
           "width": 6660
@@ -4947,7 +4947,7 @@
         }
       },
       "body": {
-        "id": "https://oldinsurancemaps.net/iiif/resource/31838/gcps",
+        "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd411m:g4114m:g4114gm:g04023195307:04023_07_1953-0829/gcps",
         "type": "FeatureCollection",
         "transformation": {
           "type": "helmert"
@@ -4999,7 +4999,7 @@
       }
     },
     {
-      "id": "https://oldinsurancemaps.net/iiif/resource/31839/georef",
+      "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd411m:g4114m:g4114gm:g04023195307:04023_07_1953-0830/georef",
       "type": "Annotation",
       "@context": [
         "http://iiif.io/api/extension/georef/1/context.json",
@@ -5016,8 +5016,8 @@
           "value": "15"
         }
       ],
-      "created": "2026-07-17T16:46:45Z",
-      "modified": "2026-07-17T16:46:45Z",
+      "created": "2026-07-17T19:48:52Z",
+      "modified": "2026-07-17T19:48:52Z",
       "creator": [
         {
           "id": "https://oldinsurancemaps.net/profile/danvk",
@@ -5026,10 +5026,10 @@
       ],
       "motivation": "georeferencing",
       "target": {
-        "id": "https://oldinsurancemaps.net/iiif/resource/31839/selector",
+        "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd411m:g4114m:g4114gm:g04023195307:04023_07_1953-0830/selector",
         "type": "SpecificResource",
         "source": {
-          "id": null,
+          "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd411m:g4114m:g4114gm:g04023195307:04023_07_1953-0830",
           "type": "ImageService2",
           "height": 8070,
           "width": 6660
@@ -5040,7 +5040,7 @@
         }
       },
       "body": {
-        "id": "https://oldinsurancemaps.net/iiif/resource/31839/gcps",
+        "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd411m:g4114m:g4114gm:g04023195307:04023_07_1953-0830/gcps",
         "type": "FeatureCollection",
         "transformation": {
           "type": "helmert"
@@ -5092,7 +5092,7 @@
       }
     },
     {
-      "id": "https://oldinsurancemaps.net/iiif/resource/31840/georef",
+      "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd411m:g4114m:g4114gm:g04023195307:04023_07_1953-0831/georef",
       "type": "Annotation",
       "@context": [
         "http://iiif.io/api/extension/georef/1/context.json",
@@ -5109,8 +5109,8 @@
           "value": "7"
         }
       ],
-      "created": "2026-07-17T16:46:45Z",
-      "modified": "2026-07-17T16:46:45Z",
+      "created": "2026-07-17T19:48:52Z",
+      "modified": "2026-07-17T19:48:52Z",
       "creator": [
         {
           "id": "https://oldinsurancemaps.net/profile/danvk",
@@ -5119,10 +5119,10 @@
       ],
       "motivation": "georeferencing",
       "target": {
-        "id": "https://oldinsurancemaps.net/iiif/resource/31840/selector",
+        "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd411m:g4114m:g4114gm:g04023195307:04023_07_1953-0831/selector",
         "type": "SpecificResource",
         "source": {
-          "id": null,
+          "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd411m:g4114m:g4114gm:g04023195307:04023_07_1953-0831",
           "type": "ImageService2",
           "height": 8070,
           "width": 6660
@@ -5133,7 +5133,7 @@
         }
       },
       "body": {
-        "id": "https://oldinsurancemaps.net/iiif/resource/31840/gcps",
+        "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd411m:g4114m:g4114gm:g04023195307:04023_07_1953-0831/gcps",
         "type": "FeatureCollection",
         "transformation": {
           "type": "helmert"
@@ -5185,7 +5185,7 @@
       }
     },
     {
-      "id": "https://oldinsurancemaps.net/iiif/resource/31841/georef",
+      "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd411m:g4114m:g4114gm:g04023195307:04023_07_1953-0832/georef",
       "type": "Annotation",
       "@context": [
         "http://iiif.io/api/extension/georef/1/context.json",
@@ -5202,8 +5202,8 @@
           "value": "5"
         }
       ],
-      "created": "2026-07-17T16:46:45Z",
-      "modified": "2026-07-17T16:46:45Z",
+      "created": "2026-07-17T19:48:52Z",
+      "modified": "2026-07-17T19:48:52Z",
       "creator": [
         {
           "id": "https://oldinsurancemaps.net/profile/danvk",
@@ -5212,10 +5212,10 @@
       ],
       "motivation": "georeferencing",
       "target": {
-        "id": "https://oldinsurancemaps.net/iiif/resource/31841/selector",
+        "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd411m:g4114m:g4114gm:g04023195307:04023_07_1953-0832/selector",
         "type": "SpecificResource",
         "source": {
-          "id": null,
+          "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd411m:g4114m:g4114gm:g04023195307:04023_07_1953-0832",
           "type": "ImageService2",
           "height": 8070,
           "width": 6660
@@ -5226,7 +5226,7 @@
         }
       },
       "body": {
-        "id": "https://oldinsurancemaps.net/iiif/resource/31841/gcps",
+        "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd411m:g4114m:g4114gm:g04023195307:04023_07_1953-0832/gcps",
         "type": "FeatureCollection",
         "transformation": {
           "type": "helmert"
@@ -5278,7 +5278,7 @@
       }
     },
     {
-      "id": "https://oldinsurancemaps.net/iiif/resource/31928/georef",
+      "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd411m:g4114m:g4114gm:g04023195307:04023_07_1953-0834/georef",
       "type": "Annotation",
       "@context": [
         "http://iiif.io/api/extension/georef/1/context.json",
@@ -5295,8 +5295,8 @@
           "value": "15"
         }
       ],
-      "created": "2026-07-17T16:46:45Z",
-      "modified": "2026-07-17T16:46:45Z",
+      "created": "2026-07-17T19:48:52Z",
+      "modified": "2026-07-17T19:48:52Z",
       "creator": [
         {
           "id": "https://oldinsurancemaps.net/profile/danvk",
@@ -5305,10 +5305,10 @@
       ],
       "motivation": "georeferencing",
       "target": {
-        "id": "https://oldinsurancemaps.net/iiif/resource/31928/selector",
+        "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd411m:g4114m:g4114gm:g04023195307:04023_07_1953-0834/selector",
         "type": "SpecificResource",
         "source": {
-          "id": null,
+          "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd411m:g4114m:g4114gm:g04023195307:04023_07_1953-0834",
           "type": "ImageService2",
           "height": 8070,
           "width": 6660
@@ -5319,7 +5319,7 @@
         }
       },
       "body": {
-        "id": "https://oldinsurancemaps.net/iiif/resource/31928/gcps",
+        "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd411m:g4114m:g4114gm:g04023195307:04023_07_1953-0834/gcps",
         "type": "FeatureCollection",
         "transformation": {
           "type": "helmert"
@@ -5371,7 +5371,7 @@
       }
     },
     {
-      "id": "https://oldinsurancemaps.net/iiif/resource/31842/georef",
+      "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd411m:g4114m:g4114gm:g04023195307:04023_07_1953-0835/georef",
       "type": "Annotation",
       "@context": [
         "http://iiif.io/api/extension/georef/1/context.json",
@@ -5388,8 +5388,8 @@
           "value": "4"
         }
       ],
-      "created": "2026-07-17T16:46:45Z",
-      "modified": "2026-07-17T16:46:45Z",
+      "created": "2026-07-17T19:48:52Z",
+      "modified": "2026-07-17T19:48:52Z",
       "creator": [
         {
           "id": "https://oldinsurancemaps.net/profile/danvk",
@@ -5398,10 +5398,10 @@
       ],
       "motivation": "georeferencing",
       "target": {
-        "id": "https://oldinsurancemaps.net/iiif/resource/31842/selector",
+        "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd411m:g4114m:g4114gm:g04023195307:04023_07_1953-0835/selector",
         "type": "SpecificResource",
         "source": {
-          "id": null,
+          "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd411m:g4114m:g4114gm:g04023195307:04023_07_1953-0835",
           "type": "ImageService2",
           "height": 8070,
           "width": 6660
@@ -5412,7 +5412,7 @@
         }
       },
       "body": {
-        "id": "https://oldinsurancemaps.net/iiif/resource/31842/gcps",
+        "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd411m:g4114m:g4114gm:g04023195307:04023_07_1953-0835/gcps",
         "type": "FeatureCollection",
         "transformation": {
           "type": "helmert"
@@ -5464,7 +5464,7 @@
       }
     },
     {
-      "id": "https://oldinsurancemaps.net/iiif/resource/31843/georef",
+      "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd411m:g4114m:g4114gm:g04023195307:04023_07_1953-0836/georef",
       "type": "Annotation",
       "@context": [
         "http://iiif.io/api/extension/georef/1/context.json",
@@ -5481,8 +5481,8 @@
           "value": "2"
         }
       ],
-      "created": "2026-07-17T16:46:45Z",
-      "modified": "2026-07-17T16:46:45Z",
+      "created": "2026-07-17T19:48:52Z",
+      "modified": "2026-07-17T19:48:52Z",
       "creator": [
         {
           "id": "https://oldinsurancemaps.net/profile/danvk",
@@ -5491,10 +5491,10 @@
       ],
       "motivation": "georeferencing",
       "target": {
-        "id": "https://oldinsurancemaps.net/iiif/resource/31843/selector",
+        "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd411m:g4114m:g4114gm:g04023195307:04023_07_1953-0836/selector",
         "type": "SpecificResource",
         "source": {
-          "id": null,
+          "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd411m:g4114m:g4114gm:g04023195307:04023_07_1953-0836",
           "type": "ImageService2",
           "height": 8070,
           "width": 6660
@@ -5505,7 +5505,7 @@
         }
       },
       "body": {
-        "id": "https://oldinsurancemaps.net/iiif/resource/31843/gcps",
+        "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd411m:g4114m:g4114gm:g04023195307:04023_07_1953-0836/gcps",
         "type": "FeatureCollection",
         "transformation": {
           "type": "helmert"
@@ -5557,7 +5557,7 @@
       }
     },
     {
-      "id": "https://oldinsurancemaps.net/iiif/resource/31934__1/georef",
+      "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd411m:g4114m:g4114gm:g04023195307:04023_07_1953-0837__1/georef",
       "type": "Annotation",
       "@context": [
         "http://iiif.io/api/extension/georef/1/context.json",
@@ -5590,8 +5590,8 @@
           "value": "8070.0"
         }
       ],
-      "created": "2026-07-17T16:46:45Z",
-      "modified": "2026-07-17T16:46:45Z",
+      "created": "2026-07-17T19:48:52Z",
+      "modified": "2026-07-17T19:48:52Z",
       "creator": [
         {
           "id": "https://oldinsurancemaps.net/profile/danvk",
@@ -5600,10 +5600,10 @@
       ],
       "motivation": "georeferencing",
       "target": {
-        "id": "https://oldinsurancemaps.net/iiif/resource/31934__1/selector",
+        "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd411m:g4114m:g4114gm:g04023195307:04023_07_1953-0837__1/selector",
         "type": "SpecificResource",
         "source": {
-          "id": null,
+          "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd411m:g4114m:g4114gm:g04023195307:04023_07_1953-0837",
           "type": "ImageService2",
           "height": 8070,
           "width": 6660
@@ -5614,7 +5614,7 @@
         }
       },
       "body": {
-        "id": "https://oldinsurancemaps.net/iiif/resource/31934__1/gcps",
+        "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd411m:g4114m:g4114gm:g04023195307:04023_07_1953-0837__1/gcps",
         "type": "FeatureCollection",
         "transformation": {
           "type": "helmert"
@@ -5666,7 +5666,7 @@
       }
     },
     {
-      "id": "https://oldinsurancemaps.net/iiif/resource/31844/georef",
+      "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd411m:g4114m:g4114gm:g04023195307:04023_07_1953-0838/georef",
       "type": "Annotation",
       "@context": [
         "http://iiif.io/api/extension/georef/1/context.json",
@@ -5683,8 +5683,8 @@
           "value": "12"
         }
       ],
-      "created": "2026-07-17T16:46:45Z",
-      "modified": "2026-07-17T16:46:45Z",
+      "created": "2026-07-17T19:48:52Z",
+      "modified": "2026-07-17T19:48:52Z",
       "creator": [
         {
           "id": "https://oldinsurancemaps.net/profile/danvk",
@@ -5693,10 +5693,10 @@
       ],
       "motivation": "georeferencing",
       "target": {
-        "id": "https://oldinsurancemaps.net/iiif/resource/31844/selector",
+        "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd411m:g4114m:g4114gm:g04023195307:04023_07_1953-0838/selector",
         "type": "SpecificResource",
         "source": {
-          "id": null,
+          "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd411m:g4114m:g4114gm:g04023195307:04023_07_1953-0838",
           "type": "ImageService2",
           "height": 8070,
           "width": 6660
@@ -5707,7 +5707,7 @@
         }
       },
       "body": {
-        "id": "https://oldinsurancemaps.net/iiif/resource/31844/gcps",
+        "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd411m:g4114m:g4114gm:g04023195307:04023_07_1953-0838/gcps",
         "type": "FeatureCollection",
         "transformation": {
           "type": "helmert"
@@ -5759,7 +5759,7 @@
       }
     },
     {
-      "id": "https://oldinsurancemaps.net/iiif/resource/31845/georef",
+      "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd411m:g4114m:g4114gm:g04023195307:04023_07_1953-0839/georef",
       "type": "Annotation",
       "@context": [
         "http://iiif.io/api/extension/georef/1/context.json",
@@ -5776,8 +5776,8 @@
           "value": "6"
         }
       ],
-      "created": "2026-07-17T16:46:45Z",
-      "modified": "2026-07-17T16:46:45Z",
+      "created": "2026-07-17T19:48:52Z",
+      "modified": "2026-07-17T19:48:52Z",
       "creator": [
         {
           "id": "https://oldinsurancemaps.net/profile/danvk",
@@ -5786,10 +5786,10 @@
       ],
       "motivation": "georeferencing",
       "target": {
-        "id": "https://oldinsurancemaps.net/iiif/resource/31845/selector",
+        "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd411m:g4114m:g4114gm:g04023195307:04023_07_1953-0839/selector",
         "type": "SpecificResource",
         "source": {
-          "id": null,
+          "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd411m:g4114m:g4114gm:g04023195307:04023_07_1953-0839",
           "type": "ImageService2",
           "height": 8070,
           "width": 6660
@@ -5800,7 +5800,7 @@
         }
       },
       "body": {
-        "id": "https://oldinsurancemaps.net/iiif/resource/31845/gcps",
+        "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd411m:g4114m:g4114gm:g04023195307:04023_07_1953-0839/gcps",
         "type": "FeatureCollection",
         "transformation": {
           "type": "helmert"
@@ -5852,7 +5852,7 @@
       }
     },
     {
-      "id": "https://oldinsurancemaps.net/iiif/resource/31931/georef",
+      "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd411m:g4114m:g4114gm:g04023195307:04023_07_1953-0840/georef",
       "type": "Annotation",
       "@context": [
         "http://iiif.io/api/extension/georef/1/context.json",
@@ -5869,8 +5869,8 @@
           "value": "12"
         }
       ],
-      "created": "2026-07-17T16:46:45Z",
-      "modified": "2026-07-17T16:46:45Z",
+      "created": "2026-07-17T19:48:52Z",
+      "modified": "2026-07-17T19:48:52Z",
       "creator": [
         {
           "id": "https://oldinsurancemaps.net/profile/danvk",
@@ -5879,10 +5879,10 @@
       ],
       "motivation": "georeferencing",
       "target": {
-        "id": "https://oldinsurancemaps.net/iiif/resource/31931/selector",
+        "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd411m:g4114m:g4114gm:g04023195307:04023_07_1953-0840/selector",
         "type": "SpecificResource",
         "source": {
-          "id": null,
+          "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd411m:g4114m:g4114gm:g04023195307:04023_07_1953-0840",
           "type": "ImageService2",
           "height": 8070,
           "width": 6660
@@ -5893,7 +5893,7 @@
         }
       },
       "body": {
-        "id": "https://oldinsurancemaps.net/iiif/resource/31931/gcps",
+        "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd411m:g4114m:g4114gm:g04023195307:04023_07_1953-0840/gcps",
         "type": "FeatureCollection",
         "transformation": {
           "type": "helmert"
@@ -5945,7 +5945,7 @@
       }
     },
     {
-      "id": "https://oldinsurancemaps.net/iiif/resource/31932/georef",
+      "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd411m:g4114m:g4114gm:g04023195307:04023_07_1953-0841/georef",
       "type": "Annotation",
       "@context": [
         "http://iiif.io/api/extension/georef/1/context.json",
@@ -5962,8 +5962,8 @@
           "value": "35"
         }
       ],
-      "created": "2026-07-17T16:46:45Z",
-      "modified": "2026-07-17T16:46:45Z",
+      "created": "2026-07-17T19:48:52Z",
+      "modified": "2026-07-17T19:48:52Z",
       "creator": [
         {
           "id": "https://oldinsurancemaps.net/profile/danvk",
@@ -5972,10 +5972,10 @@
       ],
       "motivation": "georeferencing",
       "target": {
-        "id": "https://oldinsurancemaps.net/iiif/resource/31932/selector",
+        "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd411m:g4114m:g4114gm:g04023195307:04023_07_1953-0841/selector",
         "type": "SpecificResource",
         "source": {
-          "id": null,
+          "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd411m:g4114m:g4114gm:g04023195307:04023_07_1953-0841",
           "type": "ImageService2",
           "height": 8070,
           "width": 6660
@@ -5986,7 +5986,7 @@
         }
       },
       "body": {
-        "id": "https://oldinsurancemaps.net/iiif/resource/31932/gcps",
+        "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd411m:g4114m:g4114gm:g04023195307:04023_07_1953-0841/gcps",
         "type": "FeatureCollection",
         "transformation": {
           "type": "helmert"
@@ -6038,7 +6038,7 @@
       }
     },
     {
-      "id": "https://oldinsurancemaps.net/iiif/resource/31846/georef",
+      "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd411m:g4114m:g4114gm:g04023195307:04023_07_1953-0842/georef",
       "type": "Annotation",
       "@context": [
         "http://iiif.io/api/extension/georef/1/context.json",
@@ -6055,8 +6055,8 @@
           "value": "20"
         }
       ],
-      "created": "2026-07-17T16:46:45Z",
-      "modified": "2026-07-17T16:46:45Z",
+      "created": "2026-07-17T19:48:52Z",
+      "modified": "2026-07-17T19:48:52Z",
       "creator": [
         {
           "id": "https://oldinsurancemaps.net/profile/danvk",
@@ -6065,10 +6065,10 @@
       ],
       "motivation": "georeferencing",
       "target": {
-        "id": "https://oldinsurancemaps.net/iiif/resource/31846/selector",
+        "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd411m:g4114m:g4114gm:g04023195307:04023_07_1953-0842/selector",
         "type": "SpecificResource",
         "source": {
-          "id": null,
+          "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd411m:g4114m:g4114gm:g04023195307:04023_07_1953-0842",
           "type": "ImageService2",
           "height": 8070,
           "width": 6660
@@ -6079,7 +6079,7 @@
         }
       },
       "body": {
-        "id": "https://oldinsurancemaps.net/iiif/resource/31846/gcps",
+        "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd411m:g4114m:g4114gm:g04023195307:04023_07_1953-0842/gcps",
         "type": "FeatureCollection",
         "transformation": {
           "type": "helmert"
@@ -6131,7 +6131,7 @@
       }
     },
     {
-      "id": "https://oldinsurancemaps.net/iiif/resource/31862/georef",
+      "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd411m:g4114m:g4114gm:g04023195307:04023_07_1953-0843/georef",
       "type": "Annotation",
       "@context": [
         "http://iiif.io/api/extension/georef/1/context.json",
@@ -6148,8 +6148,8 @@
           "value": "6"
         }
       ],
-      "created": "2026-07-17T16:46:45Z",
-      "modified": "2026-07-17T16:46:45Z",
+      "created": "2026-07-17T19:48:52Z",
+      "modified": "2026-07-17T19:48:52Z",
       "creator": [
         {
           "id": "https://oldinsurancemaps.net/profile/danvk",
@@ -6158,10 +6158,10 @@
       ],
       "motivation": "georeferencing",
       "target": {
-        "id": "https://oldinsurancemaps.net/iiif/resource/31862/selector",
+        "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd411m:g4114m:g4114gm:g04023195307:04023_07_1953-0843/selector",
         "type": "SpecificResource",
         "source": {
-          "id": null,
+          "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd411m:g4114m:g4114gm:g04023195307:04023_07_1953-0843",
           "type": "ImageService2",
           "height": 8070,
           "width": 6660
@@ -6172,7 +6172,7 @@
         }
       },
       "body": {
-        "id": "https://oldinsurancemaps.net/iiif/resource/31862/gcps",
+        "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd411m:g4114m:g4114gm:g04023195307:04023_07_1953-0843/gcps",
         "type": "FeatureCollection",
         "transformation": {
           "type": "helmert"
@@ -6224,7 +6224,7 @@
       }
     },
     {
-      "id": "https://oldinsurancemaps.net/iiif/resource/78681__1/georef",
+      "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd411m:g4114m:g4114gm:g04023195307:04023_07_1953-0845__1/georef",
       "type": "Annotation",
       "@context": [
         "http://iiif.io/api/extension/georef/1/context.json",
@@ -6257,8 +6257,8 @@
           "value": "5072.7"
         }
       ],
-      "created": "2026-07-17T16:46:45Z",
-      "modified": "2026-07-17T16:46:45Z",
+      "created": "2026-07-17T19:48:52Z",
+      "modified": "2026-07-17T19:48:52Z",
       "creator": [
         {
           "id": "https://oldinsurancemaps.net/profile/danvk",
@@ -6267,10 +6267,10 @@
       ],
       "motivation": "georeferencing",
       "target": {
-        "id": "https://oldinsurancemaps.net/iiif/resource/78681__1/selector",
+        "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd411m:g4114m:g4114gm:g04023195307:04023_07_1953-0845__1/selector",
         "type": "SpecificResource",
         "source": {
-          "id": null,
+          "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd411m:g4114m:g4114gm:g04023195307:04023_07_1953-0845",
           "type": "ImageService2",
           "height": 8070,
           "width": 6660
@@ -6281,7 +6281,7 @@
         }
       },
       "body": {
-        "id": "https://oldinsurancemaps.net/iiif/resource/78681__1/gcps",
+        "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd411m:g4114m:g4114gm:g04023195307:04023_07_1953-0845__1/gcps",
         "type": "FeatureCollection",
         "transformation": {
           "type": "helmert"

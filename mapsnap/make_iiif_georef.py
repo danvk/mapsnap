@@ -170,7 +170,51 @@ def _load_oim_index(data: dict) -> dict[str, dict]:
         if page_key is None:
             continue
         index[page_key] = item
+    fill_missing_source_ids(index)
     return index
+
+
+def fill_missing_source_ids(items_by_key: dict[str, dict]) -> None:
+    """Fill null OIM source ids by extrapolating the volume's LOC id pattern.
+
+    Some OIM volumes (e.g. Grand Rapids 1953 vol 7) link only a few sheets to
+    their LOC image service and carry ``source.id: null`` for the rest, even
+    though LOC hosts every sheet of the volume under one predictable scheme
+    (``<service prefix>-<zero-padded page><suffix>``). When every known id in
+    the volume shares a single prefix and digit width, the missing ids are
+    synthesized from each item's page key — the extrapolated services resolve
+    on tile.loc.gov. Volumes with no ids, mixed prefixes, or non-dash id
+    forms are left untouched.
+    """
+    patterns = set()
+    for item in items_by_key.values():
+        source_id = ((item.get("target") or {}).get("source") or {}).get("id")
+        if not source_id:
+            continue
+        match = re.fullmatch(r"(.*)-(\d+)([A-Za-z]*)", source_id)
+        if not match:
+            return  # non-dash id form (e.g. sb-format): don't guess
+        patterns.add((match.group(1), len(match.group(2))))
+    if len(patterns) != 1:
+        return
+    prefix, width = next(iter(patterns))
+    filled = []
+    for page_key, item in items_by_key.items():
+        source = (item.get("target") or {}).get("source")
+        if not isinstance(source, dict) or source.get("id"):
+            continue
+        key_match = re.fullmatch(r"p(\d+)([a-z]?)", page_key)
+        if not key_match:
+            continue
+        number, suffix = key_match.groups()
+        source["id"] = f"{prefix}-{int(number):0{width}d}{suffix.upper()}"
+        filled.append(page_key)
+    if filled:
+        print(
+            f"Filled {len(filled)} null source id(s) from the volume's LOC "
+            f"pattern {prefix}-*",
+            file=sys.stderr,
+        )
 
 
 def _load_loc_index(data: dict) -> dict[str, dict]:

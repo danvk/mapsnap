@@ -4,9 +4,16 @@ import type {
   SkippedItem,
   VolumeInfo,
 } from '../../server/iiifAnnotations';
+import {
+  RMSE_BUCKET_COLORS,
+  compareToTruth,
+  rmseBucket,
+  type PageCompareStats,
+} from '../iiif/compare';
 import { fetchRewrittenAnnotation, fetchVolumes } from '../iiif/api';
 import { pagesFromAnnotation } from '../iiif/pages';
 import { InfoPanel } from './InfoPanel';
+import { PageList } from './PageList';
 import { VolumeMap } from './VolumeMap';
 
 // Split a repo-root-relative annotation path like
@@ -35,10 +42,12 @@ export function VolumeViewer() {
     failed: number;
   } | null>(null);
   const [opacity, setOpacity] = useState(100);
+  const [colorByRmse, setColorByRmse] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [selectedItemIndex, setSelectedItemIndex] = useState<number | null>(
     null,
   );
+  const [truthAnnotation, setTruthAnnotation] = useState<unknown>(null);
 
   useEffect(() => {
     fetchVolumes()
@@ -66,6 +75,20 @@ export function VolumeViewer() {
     params.set('view', 'iiif');
     params.set('iiif', selectedPath);
     history.replaceState(null, '', `?${params}`);
+
+    // Truth for the compare column: the volume's main.iiif.json, rewritten
+    // into the same local pixel frame. Skipped when viewing the truth itself.
+    setTruthAnnotation(null);
+    const parsed = parseAnnotationPath(selectedPath);
+    if (parsed && parsed.file !== 'main.iiif.json') {
+      fetchRewrittenAnnotation(`data/${parsed.volume}/main.iiif.json`)
+        .then((resp) => {
+          if (!cancelled) setTruthAnnotation(resp.annotation);
+        })
+        .catch(() => {
+          // No truth data for this volume; the list simply has no RMSE column.
+        });
+    }
     return () => {
       cancelled = true;
     };
@@ -79,6 +102,26 @@ export function VolumeViewer() {
       annotation ? pagesFromAnnotation(annotation as GeorefAnnotationPage) : [],
     [annotation],
   );
+  const truthStats: Map<number, PageCompareStats | null> | null =
+    useMemo(() => {
+      if (!truthAnnotation) return null;
+      const truthPages = pagesFromAnnotation(
+        truthAnnotation as GeorefAnnotationPage,
+      );
+      return compareToTruth(pages, truthPages);
+    }, [pages, truthAnnotation]);
+
+  const pageColors: Map<number, string> | null = useMemo(() => {
+    if (!colorByRmse || !truthStats) return null;
+    const colors = new Map<number, string>();
+    for (const [itemIndex, stats] of truthStats) {
+      if (stats) {
+        colors.set(itemIndex, RMSE_BUCKET_COLORS[rmseBucket(stats.rmseFt)]);
+      }
+    }
+    return colors;
+  }, [colorByRmse, truthStats]);
+
   const selectedPage =
     selectedItemIndex === null
       ? null
@@ -134,6 +177,16 @@ export function VolumeViewer() {
             </option>
           ))}
         </select>
+        {truthStats && (
+          <label className="rmse-color-control">
+            <input
+              type="checkbox"
+              checked={colorByRmse}
+              onChange={(e) => setColorByRmse(e.target.checked)}
+            />
+            Color by RMSE
+          </label>
+        )}
         <div className="opacity-control">
           <label htmlFor="iiif-opacity-slider">Opacity</label>
           <input
@@ -148,12 +201,19 @@ export function VolumeViewer() {
         <span className="iiif-status">{status}</span>
       </div>
       <div className="volume-viewer-body">
+        <PageList
+          pages={pages}
+          stats={truthStats}
+          selectedItemIndex={selectedItemIndex}
+          onSelectPage={setSelectedItemIndex}
+        />
         <VolumeMap
           annotation={annotation}
           pages={pages}
           selectedItemIndex={selectedItemIndex}
           onSelectPage={setSelectedItemIndex}
           opacity={opacity / 100}
+          pageColors={pageColors}
           onLoadResult={setLoadResult}
         />
         <InfoPanel
@@ -161,6 +221,11 @@ export function VolumeViewer() {
           skipped={skipped}
           annotationName={selection?.file ?? null}
           selectedPage={selectedPage}
+          selectedStats={
+            selectedItemIndex === null
+              ? null
+              : (truthStats?.get(selectedItemIndex) ?? null)
+          }
           volume={selection?.volume ?? ''}
           onClose={() => setSelectedItemIndex(null)}
         />

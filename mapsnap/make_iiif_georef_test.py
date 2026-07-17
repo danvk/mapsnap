@@ -9,6 +9,7 @@ from mapsnap.make_iiif_georef import (
     _load_oim_index,
     _service_url_to_page_key,
     expand_georef_globs,
+    fill_missing_source_ids,
     georef_gcp_points,
     georef_path_to_page_key,
     make_annotation,
@@ -484,3 +485,39 @@ def test_load_oim_index_non_sheet_skipped():
     )
     data = {"items": [_make_oim_item(cover_url, "Cover")]}
     assert _load_oim_index(data) == {}
+
+
+def _item_with_id(source_id):
+    return {"target": {"source": {"id": source_id, "width": 6660, "height": 8070}}}
+
+
+def test_fill_missing_source_ids_extrapolates_loc_pattern():
+    prefix = "https://tile.loc.gov/image-services/iiif/service:gmd:g04023195307:04023_07_1953"
+    index = {
+        "p715": _item_with_id(f"{prefix}-0715"),
+        "p712": _item_with_id(f"{prefix}-0712"),
+        "p714": _item_with_id(None),
+        "p6n": _item_with_id(None),
+    }
+    fill_missing_source_ids(index)
+    assert index["p714"]["target"]["source"]["id"] == f"{prefix}-0714"
+    assert index["p6n"]["target"]["source"]["id"] == f"{prefix}-0006N"
+
+
+def test_fill_missing_source_ids_requires_one_unambiguous_pattern():
+    index = {
+        "p1": _item_with_id("https://x/a-0001"),
+        "p2": _item_with_id("https://y/b-0002"),
+        "p3": _item_with_id(None),
+    }
+    fill_missing_source_ids(index)
+    assert index["p3"]["target"]["source"]["id"] is None
+
+
+def test_fill_missing_source_ids_skips_sb_format():
+    index = {
+        "p125": _item_with_id("https://tile.loc.gov/x/g01227003:sb001250"),
+        "p126": _item_with_id(None),
+    }
+    fill_missing_source_ids(index)
+    assert index["p126"]["target"]["source"]["id"] is None

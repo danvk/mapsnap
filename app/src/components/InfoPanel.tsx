@@ -1,4 +1,5 @@
 import type { SkippedItem } from '../../server/iiifAnnotations';
+import type { PageCompareStats } from '../iiif/compare';
 import type { PageGeo } from '../iiif/pages';
 
 interface InfoPanelProps {
@@ -9,6 +10,8 @@ interface InfoPanelProps {
   /** The loaded annotation file's name, for the summary header. */
   annotationName: string | null;
   selectedPage: PageGeo | null;
+  /** Truth-compare stats for the selected page, when the volume has truth. */
+  selectedStats: PageCompareStats | null;
   /** Volume directory name, e.g. "brooklyn_ny_1906_vol_6". */
   volume: string;
   onClose: () => void;
@@ -47,8 +50,15 @@ function fitSummary(pages: PageGeo[]): string {
  * the page's streets or georef view in this same app.
  */
 export function InfoPanel(props: InfoPanelProps) {
-  const { pages, skipped, annotationName, selectedPage, volume, onClose } =
-    props;
+  const {
+    pages,
+    skipped,
+    annotationName,
+    selectedPage,
+    selectedStats,
+    volume,
+    onClose,
+  } = props;
 
   if (selectedPage) {
     const base = `data/${volume}/${selectedPage.pageKey}`;
@@ -61,6 +71,21 @@ export function InfoPanel(props: InfoPanelProps) {
           </button>
         </div>
         <dl>
+          {selectedStats && (
+            <>
+              <dt>RMSE</dt>
+              <dd>
+                {selectedStats.rmseFt.toFixed(1)} ft (max{' '}
+                {selectedStats.maxFt.toFixed(1)} ft)
+              </dd>
+              <dt>Translation</dt>
+              <dd>{selectedStats.translationFt.toFixed(1)} ft</dd>
+              <dt>Rotation Δ</dt>
+              <dd>{selectedStats.rotationErrorDegrees.toFixed(2)}°</dd>
+              <dt>Scale Δ</dt>
+              <dd>{selectedStats.scaleErrorPercent.toFixed(2)}%</dd>
+            </>
+          )}
           <dt>Scale</dt>
           <dd>{selectedPage.scalePixelsPerFoot.toFixed(2)} px/ft</dd>
           <dt>Rotation</dt>

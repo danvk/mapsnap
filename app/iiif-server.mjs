@@ -28,6 +28,7 @@ import {
   rewriteAnnotationPage,
   serviceUrlToPageKey,
 } from './server/iiifAnnotations.ts';
+import { normalizeIiifImageUrl } from './server/iiifSizeWorkaround.ts';
 import { jpegDimensions } from './server/jpegDimensions.ts';
 
 const require = createRequire(import.meta.url);
@@ -48,6 +49,11 @@ app.use((req, res, next) => {
   next();
 });
 
+// See iiifSizeWorkaround: express-iiif mangles size===region requests.
+app.use('/iiif', (req, _res, next) => {
+  req.url = normalizeIiifImageUrl(req.url);
+  next();
+});
 app.use('/iiif', iiif({ imageDir }));
 
 const PAGE_IMAGE_PATTERN = /^p\d+[a-z]?\.jpg$/i;

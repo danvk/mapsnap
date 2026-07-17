@@ -413,3 +413,61 @@
 tr.on-fill td {
   opacity: 0.75;
 }
+
+/* Volume-viewer page list (left of the map): capped to the map height so
+   the page itself never scrolls, capped in width with its own horizontal
+   scroll when the truth columns overflow. */
+.page-list {
+  max-width: 20rem;
+  max-height: 90vh;
+  flex-shrink: 0;
+  overflow: auto;
+  border: 1px solid #ccc;
+  border-radius: 6px;
+  font-family: sans-serif;
+  font-size: 0.8rem;
+}
+.page-list table {
+  border-collapse: collapse;
+  white-space: nowrap;
+}
+.page-list th {
+  position: sticky;
+  top: 0;
+  background: #fff;
+  cursor: pointer;
+  user-select: none;
+  text-align: left;
+  padding: 0.3rem 0.5rem;
+  border-bottom: 1px solid #ccc;
+}
+.page-list td {
+  padding: 0.2rem 0.5rem;
+}
+.page-list th.numeric,
+.page-list td.numeric {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+.page-list tbody tr {
+  cursor: pointer;
+}
+.page-list tbody tr:hover {
+  background: #eef;
+}
+.page-list tbody tr.selected {
+  background: #dde5ff;
+  font-weight: bold;
+}
+.page-list .rmse-good {
+  color: #1a7f37;
+}
+.page-list .rmse-ok {
+  color: #9a6700;
+}
+.page-list .rmse-poor {
+  color: #e8590c;
+}
+.page-list .rmse-disaster {
+  color: #cf222e;
+}
