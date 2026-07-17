@@ -3144,7 +3144,7 @@ def main() -> None:
         metavar="KM",
         help=(
             "Rename georefs whose center is more than this many km from every other "
-            "georeferenced page to .georef-outlier.json (default: 1.0). Set to 0 to disable."
+            "georeferenced page to .georef-outlier.json (default: %(default)s). Set to 0 to disable."
         ),
     )
     parser.add_argument(
@@ -3526,7 +3526,12 @@ def main() -> None:
             print(f"Dropped {n_dropped} scale outlier(s).", file=sys.stderr)
 
     # Drop georef files whose center is far from every other georeferenced page.
-    if args.min_distance_for_outlier_km > 0 and len(location_records) >= 2:
+    # Only meaningful with a real sample: with a handful of pages every page is
+    # "far from the rest" of nothing — a 2-image key-map run (Brooklyn's p0+p0b
+    # halves, centroids 2.1 km apart but each sheet 4 km across) dropped both
+    # perfectly-fit halves. Five georeferenced pages is the floor for calling
+    # anything an outlier.
+    if args.min_distance_for_outlier_km > 0 and len(location_records) >= 5:
         # Only pages whose .georef.json still exists (not already renamed by scale check).
         active = [
             (p, c) for p, c in location_records if os.path.exists(derive_paths(p)[1])
