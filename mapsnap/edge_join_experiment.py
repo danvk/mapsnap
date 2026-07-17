@@ -142,6 +142,16 @@ def affine_scale_m_per_px(affine: np.ndarray) -> float:
     return (u + v) / 2
 
 
+def require_truth(volume: Path, command: str) -> None:
+    """Exit with a clear message when a truth-only command lacks main.iiif.json."""
+    if not (volume / "main.iiif.json").exists():
+        sys.exit(
+            f"`{command}` evaluates against ground truth and needs "
+            f"{volume / 'main.iiif.json'}; production commands "
+            "(infer/chain/posegraph/materialize) run without it."
+        )
+
+
 def load_truth_units(volume: Path) -> tuple[dict[str, dict], set[str]]:
     """(unsplit truth items by page key, page keys with split-only truth).
 
@@ -150,7 +160,12 @@ def load_truth_units(volume: Path) -> tuple[dict[str, dict], set[str]]:
     has a georef fit, the full-color page otherwise (matching compare_pages
     and make_iiif_georef).
     """
-    data = json.loads((volume / "main.iiif.json").read_text())
+    truth_path = volume / "main.iiif.json"
+    if not truth_path.exists():
+        # No truth data: production placement still works, all truth-derived
+        # diagnostics (rmse_ft, anchor_truth) are simply absent.
+        return {}, set()
+    data = json.loads(truth_path.read_text())
     unsplit: dict[str, dict] = {}
     split_parents: set[str] = set()
     for item in data.get("items", []):
@@ -402,6 +417,7 @@ def percentile(values: list[float], q: float) -> float:
 
 def cmd_stats(volume: Path) -> None:
     """Phase 1: anchors, pairs, rotations, overlap strips, coverage ceiling."""
+    require_truth(volume, "stats")
     units = load_page_units(volume)
     by_number = {u.number: u for u in units}
     truth_by_key, _ = load_truth_units(volume)
@@ -590,6 +606,7 @@ def render_to_frame(
 
 def cmd_sanity(volume: Path, limit: int | None) -> None:
     """Phase 2: seam contact sheets + strip stats at truth poses."""
+    require_truth(volume, "sanity")
     from mapsnap.road_model import road_mask, road_skeleton, skeleton_junctions
 
     units = {u.number: u for u in load_page_units(volume)}
@@ -1194,6 +1211,7 @@ def cmd_perturb(
     volume: Path, *, limit: int | None, seed: int, draws: int, solve_scale: bool
 ) -> None:
     """Phase 3a: anchor<->anchor joins from perturbed inits (precision floor)."""
+    require_truth(volume, "perturb")
     import time as time_mod
 
     units = load_page_units(volume)
@@ -1403,6 +1421,14 @@ def cmd_chain(
     print(
         f"allowed relative rotations (measured): {allowed_rotations}", file=sys.stderr
     )
+
+    if seeds == "truth" and not any(u.anchor_truth for u in units):
+        print(
+            "no truth data: falling back to --seeds inliers (fitted pages "
+            "with >=3 inlier intersections)",
+            file=sys.stderr,
+        )
+        seeds = "inliers"
 
     posed: dict[int, tuple[np.ndarray, int]] = {}
 
@@ -1713,6 +1739,9 @@ def cmd_report(volume: Path, chain_source: str = "chain") -> None:
     truth_units = [u for u in units if u.truth is not None]
     n_split_truth = sum(1 for u in units if u.split_truth and u.truth is None)
     total = len(truth_units) + n_split_truth
+    if total == 0:
+        print(f"{volume.name}: no truth pages — nothing to report against.")
+        return
     print(
         f"== {volume.name}: {total} truth pages"
         f" ({n_split_truth} split-only, out of scope) — chain={chain_source} =="
