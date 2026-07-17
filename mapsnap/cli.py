@@ -68,10 +68,6 @@ SUBCOMMANDS: dict[str, tuple[str, str]] = {
         "mapsnap.oim_truth",
         "Locate OIM's manual split regions on the canvas for comparison",
     ),
-    "oim-truth": (
-        "mapsnap.oim_api_truth",
-        "Build a truth IIIF AnnotationPage from the OldInsuranceMaps API",
-    ),
 }
 
 _cmd_width = max(len(cmd) for cmd in SUBCOMMANDS)
