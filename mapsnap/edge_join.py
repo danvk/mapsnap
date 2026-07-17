@@ -39,7 +39,6 @@ class JoinCandidate:
     pose: np.ndarray  # 2x3, target page px -> pair raster px
     theta_deg: float
     ncc: float
-    overlap_px: int
     chamfer_mean_m: float = math.inf
     inlier_frac: float = 0.0
     n_points: int = 0
@@ -70,11 +69,6 @@ class JoinCandidate:
 def compose(a: np.ndarray, b: np.ndarray) -> np.ndarray:
     """The 2x3 affine applying b first, then a."""
     return a @ np.vstack([b, [0.0, 0.0, 1.0]])
-
-
-def rotation_about(theta_deg: float, center: tuple[float, float]) -> np.ndarray:
-    """2x3 rotation about a point (positive = CCW in array coordinates)."""
-    return cv2.getRotationMatrix2D(center, theta_deg, 1.0)
 
 
 def dominant_orientation_deg(
@@ -132,6 +126,7 @@ def masked_ncc(
     fixed_mask: np.ndarray,
     moving: np.ndarray,
     moving_mask: np.ndarray,
+    *,
     min_overlap_px: float,
     max_overlap_px: float = math.inf,
 ) -> np.ndarray:
@@ -182,7 +177,7 @@ def top_peaks(
         peaks.append((value, int(row), int(col)))
         r0 = max(0, row - min_separation_px)
         c0 = max(0, col - min_separation_px)
-        working[r0 : row + min_separation_px, c0 : col + min_separation_px] = -1
+        working[r0 : row + min_separation_px + 1, c0 : col + min_separation_px + 1] = -1
     return peaks
 
 
@@ -347,6 +342,7 @@ def pose_ncc(
     fixed_valid: np.ndarray,
     target_prob: np.ndarray,
     pose: np.ndarray,
+    *,
     sigma_px: float,
     min_overlap_px: int = 500,
 ) -> float:
@@ -418,14 +414,14 @@ def refine_and_rank(
             and fixed_valid is not None
         ):
             candidate.ncc_fine = pose_ncc(
-                fixed_prob, fixed_valid, target_prob, refined, fine_sigma_px
+                fixed_prob, fixed_valid, target_prob, refined, sigma_px=fine_sigma_px
             )
     return sorted(candidates, key=lambda c: -c.verification_score())
 
 
 @dataclass
 class MatchParams:
-    """Knobs for match_pair, in raster cells unless noted."""
+    """Knobs for match_pair, in metres unless noted."""
 
     resolution_m: float = 2.0
     blur_sigma_m: float = 8.0
@@ -463,6 +459,7 @@ def match_at_rotation(
     fixed_blur: np.ndarray,
     fixed_valid: np.ndarray,
     target_prob: np.ndarray,
+    *,
     scale: float,
     theta: float,
     params: MatchParams,
@@ -496,8 +493,8 @@ def match_at_rotation(
         fixed_valid.astype(np.float32),
         moving_blur,
         moving_valid.astype(np.float32),
-        min_overlap_px,
-        max_overlap_px,
+        min_overlap_px=min_overlap_px,
+        max_overlap_px=max_overlap_px,
     )
     if search_center is not None and search_radius_px is not None:
         # Peak (i, j) places moving's origin at (i - mh + 1, j - mw + 1);
@@ -512,9 +509,7 @@ def match_at_rotation(
         mh, mw = moving.shape
         pose = tight.copy()
         pose[:, 2] += [col - mw + 1, row - mh + 1]
-        candidates.append(
-            JoinCandidate(pose=pose, theta_deg=theta, ncc=value, overlap_px=0)
-        )
+        candidates.append(JoinCandidate(pose=pose, theta_deg=theta, ncc=value))
     return candidates
 
 
@@ -522,6 +517,7 @@ def match_pair(
     fixed: np.ndarray,
     fixed_valid: np.ndarray,
     target_prob: np.ndarray,
+    *,
     scale: float,
     params: MatchParams,
     search_center: tuple[float, float] | None = None,
@@ -546,11 +542,11 @@ def match_pair(
                 fixed_blur,
                 fixed_valid,
                 target_prob,
-                scale,
-                theta,
-                params,
-                search_center,
-                search_radius_px,
+                scale=scale,
+                theta=theta,
+                params=params,
+                search_center=search_center,
+                search_radius_px=search_radius_px,
             )
         )
     return candidates

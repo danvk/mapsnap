@@ -614,6 +614,7 @@ def street_soup_metres(
 def street_matches(
     volume: Path,
     stem: str,
+    *,
     number: int,
     size: tuple[int, int],
     origin: Point,
@@ -634,11 +635,21 @@ def street_matches(
     if not near:
         return []
     block_index = build_block_index({"type": "FeatureCollection", "features": near})
+    # streets.json coordinates live in the frame OCR ran on (the original
+    # 25%-scale jpg), not the caller's working frame: acceptance gates (edge
+    # margins, size thresholds) must run in the label frame, and accepted
+    # centers are then rescaled into `size` for the pose residuals. Passing
+    # the working size here silently discarded every label in the right and
+    # bottom band of pages larger than the working long side.
+    doc = json.loads(streets_path.read_text())
+    label_size = (int(doc["width"]), int(doc["height"]))
     sink = io.StringIO()
     with contextlib.redirect_stdout(sink), contextlib.redirect_stderr(sink):
         features: list[LabelFeature] = prepare_label_features(
-            str(streets_path), block_index, size, **filter_params
+            str(streets_path), block_index, label_size, **filter_params
         )
+    scale_x = size[0] / label_size[0]
+    scale_y = size[1] / label_size[1]
     # A label read as several distinct streets (VAN BRUNT vs VAN DYKE at one box) is ambiguous:
     # one candidate is wrong and would drag the fit, so drop it from position constraints (this is
     # factor_place's unambiguous-only rule). Same-name repeats along a street are kept.
@@ -652,15 +663,15 @@ def street_matches(
             continue
         starts, ends = street_soup_metres(blocks, origin)
         if len(starts):
-            matches.append(
-                (feature.center, feature.dir_pix, feature.text, starts, ends)
-            )
+            center = (feature.center[0] * scale_x, feature.center[1] * scale_y)
+            matches.append((center, feature.dir_pix, feature.text, starts, ends))
     return matches
 
 
 def stamp_constraints(
     number: int,
     stem: str,
+    *,
     size: tuple[int, int],
     origin: Point,
     locator: KeymapLocator,
@@ -724,6 +735,7 @@ def pose_residuals(
     pose: StreetPose,
     matches: list[StreetSegments],
     stamps: list[Stamp],
+    *,
     region_vertices: np.ndarray,
     size: tuple[int, int],
     prior_log_scale: float,
@@ -778,6 +790,7 @@ def refine_pose_with_streets(
     model: Model,
     matches: list[StreetSegments],
     stamps: list[Stamp],
+    *,
     region_vertices: np.ndarray,
     size: tuple[int, int],
     scale_px_per_m: float | None = None,
@@ -809,9 +822,9 @@ def refine_pose_with_streets(
                     (pose[0], pose[1], pose[2], pose[3]),
                     matches,
                     stamps,
-                    region_vertices,
-                    size,
-                    prior_log_scale,
+                    region_vertices=region_vertices,
+                    size=size,
+                    prior_log_scale=prior_log_scale,
                 ),
                 start,
                 loss="soft_l1",
@@ -856,7 +869,16 @@ def pose_corners_world(
 
 
 def find_truth_item(truth_path: Path, page: int) -> dict | None:
-    """The truth IIIF annotation for a page number that has a fittable transform, or None."""
+    """The truth IIIF annotation for a page number that has a fittable transform, or None.
+
+    KNOWN BUG (evaluation-only; georef output unaffected): split pages share a
+    page number and OIM truth then has several items for it, but this returns
+    the FIRST >=3-GCP item — so both halves of a split sheet are scored against
+    the same (possibly wrong) division, and for OIM-API-built truth the item's
+    source dimensions are the full parent canvas while our corners cover only
+    the split image, mixing frames. The >=3 gate also skips 2-GCP helmert
+    truth items entirely, so those pages get no RMSE at all.
+    """
     if not truth_path.exists():
         return None
     data = json.loads(truth_path.read_text())
@@ -1025,21 +1047,32 @@ def align_page(
         matches = street_matches(
             volume,
             stem,
-            number,
-            size,
-            origin,
-            locator,
-            options.centerlines,
-            options.filter_params,
+            number=number,
+            size=size,
+            origin=origin,
+            locator=locator,
+            centerlines=options.centerlines,
+            filter_params=options.filter_params,
         )
         stamps = stamp_constraints(
-            number, stem, size, origin, locator, adjacency, options.scale_px_per_m
+            number,
+            stem,
+            size=size,
+            origin=origin,
+            locator=locator,
+            adjacency=adjacency,
+            scale_px_per_m=options.scale_px_per_m,
         )
         result.streets_used = len(matches)
         if matches or stamps:
             region_vertices = np.array(polygon_exterior(region))
             pose = refine_pose_with_streets(
-                model, matches, stamps, region_vertices, size, options.scale_px_per_m
+                model,
+                matches,
+                stamps,
+                region_vertices=region_vertices,
+                size=size,
+                scale_px_per_m=options.scale_px_per_m,
             )
             # Backstop against a bad street/stamp constraint dominating: the region init is a
             # decent anchor, so a refine that slides the page center more than half a page width
@@ -1068,7 +1101,7 @@ def align_page(
 
     keymap_entry = locator.page_keymap(number)
     truth = options.truth_regions.get(number)
-    write_georef(volume, stem, size, result, keymap_entry, truth)
+    write_georef(volume, stem, size, result, keymap=keymap_entry, truth=truth)
     if options.overlay:
         write_overlay(rgb, outline, region, model, volume / f"{stem}.region-align.png")
     return result
@@ -1079,6 +1112,7 @@ def write_georef(
     stem: str,
     size: tuple[int, int],
     result: PageResult,
+    *,
     keymap: dict | None = None,
     truth: list[list[list[float]]] | None = None,
 ) -> None:

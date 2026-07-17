@@ -252,7 +252,14 @@ def test_street_soup_metres_splits_into_segments():
 def test_pose_residuals_length_and_finite():
     region = np.array(UNIT_SQUARE)
     pose = (0.0, 0.0, 0.0, math.log(4.0))
-    residuals = pose_residuals(pose, [], [], region, (100, 100), math.log(4.0))
+    residuals = pose_residuals(
+        pose,
+        [],
+        [],
+        region_vertices=region,
+        size=(100, 100),
+        prior_log_scale=math.log(4.0),
+    )
     # One residual per region vertex + 2 centroid + 1 scale prior, all finite.
     assert len(residuals) == len(region) + 3
     assert np.all(np.isfinite(residuals))
@@ -272,7 +279,7 @@ def test_write_georef_includes_keymap_truth_and_focus_hull(tmp_path):
         "regions": [[[0, 0]]],
     }
     truth = [[[-73.99, 40.67], [-73.98, 40.67], [-73.98, 40.68]]]
-    write_georef(tmp_path, "p45", (100, 200), result, keymap, truth)
+    write_georef(tmp_path, "p45", (100, 200), result, keymap=keymap, truth=truth)
     written = json.loads((tmp_path / "p45.georef-region.json").read_text())
     assert written["page"] == 45 and written["accepted"] is True
     assert written["keymap"]["lat"] == 40.67 and "regions" in written["keymap"]

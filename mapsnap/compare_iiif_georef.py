@@ -188,13 +188,13 @@ def truth_page_number(item: dict) -> int | None:
     whose labels read '... psb001250 [2]' (the number then comes from the
     source id via source_id_to_page_key).
     """
-    match = re.search(r"\bp(\d+)[a-z]?\b", str(item.get("label", "")))
+    match = re.search(r"\bp(\d+)[a-zA-Z]?\b", str(item.get("label", "")))
     if match:
         return int(match.group(1))
     key = source_id_to_page_key(
         item.get("target", {}).get("source", {}).get("id"), str(item.get("label", ""))
     )
-    match = re.fullmatch(r"p(\d+)[a-z]?(?:__\d+)?", key)
+    match = re.fullmatch(r"p(\d+)[a-zA-Z]?(?:__\d+)?", key)
     return int(match.group(1)) if match else None
 
 
@@ -649,6 +649,36 @@ def match_split_pairs(
     return pairs, unmatched
 
 
+def redundant_skeleton_keys(truth_keys: set[str], generated_keys: set[str]) -> set[str]:
+    """Truth page keys to drop under the skeleton rule.
+
+    A skeleton sheet (pNs) maps the same ground as its full-color page (pN),
+    so when both are in the truth exactly one may contribute to a comparison:
+    pNs when it alone has a generated fit, pN in every other case (including
+    when neither fit — the miss is counted once, against pN).
+
+    Keys with a compound suffix (e.g. 'p6ns', where the trailing 's' is
+    ambiguous with a direction or sequence letter) raise instead of guessing:
+    dropping a real page silently is worse than failing loudly.
+    """
+    for key in truth_keys | generated_keys:
+        assert not re.fullmatch(r"p\d+[a-zA-Z]s(?:__\d+)?", key), (
+            f"page key {key!r} has a compound suffix ending in 's'; the "
+            "skeleton rule cannot tell a skeleton sheet from a direction or "
+            "sequence letter here"
+        )
+    drop: set[str] = set()
+    for key in truth_keys:
+        if not key.endswith("s") or key[:-1] not in truth_keys:
+            continue
+        base = key[:-1]
+        if key in generated_keys and base not in generated_keys:
+            drop.add(base)
+        else:
+            drop.add(key)
+    return drop
+
+
 def compare_pages(
     truth_path: Path, generated_path: Path
 ) -> tuple[list[dict], list[dict]]:
@@ -664,19 +694,14 @@ def compare_pages(
     oim_dir = truth_path.parent / "oim"
     gen_dir = generated_path.parent
 
-    # Mirror make_iiif_georef's skeleton rule: a skeleton sheet ('s' suffix)
-    # whose full-color counterpart is also in the truth maps the same ground,
-    # and `mapsnap iiif` deliberately emits only the full-color fit — counting
-    # the skeleton separately would double-count that ground, hit or miss.
-    skeletons = sorted(
-        key
-        for key in truth_by_source
-        if key.endswith("s") and key[:-1] in truth_by_source
-    )
+    # Skeleton rule: a skeleton sheet ('s' suffix) and its full-color page map
+    # the same ground, so only one of the pair may contribute — whichever one
+    # the generated file actually fit (the full-color page when neither did).
+    skeletons = redundant_skeleton_keys(set(truth_by_source), set(gen_by_source))
     if skeletons:
         print(
-            f"Ignoring {len(skeletons)} skeleton page(s) with full-color "
-            "truth counterparts: " + ", ".join(skeletons),
+            f"Skeleton rule: ignoring {len(skeletons)} redundant truth "
+            "page(s): " + ", ".join(sorted(skeletons)),
             file=sys.stderr,
         )
         for key in skeletons:

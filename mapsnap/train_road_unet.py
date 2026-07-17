@@ -151,11 +151,20 @@ def validation_iou(
     model.eval()
     intersection = union = 0.0
     edge_intersection = edge_union = 0.0
+
+    def grid_positions(extent: int) -> list[int]:
+        # Cover the full extent: regular stride plus a final patch flush with
+        # the far edge (the edge band is exactly what the edge IoU measures).
+        positions = list(range(0, extent - PATCH + 1, PATCH))
+        if positions and positions[-1] != extent - PATCH:
+            positions.append(extent - PATCH)
+        return positions
+
     with torch.no_grad():
         for gray, mask in pages:
             height, width = gray.shape
-            for y in range(0, height - PATCH, PATCH):
-                for x in range(0, width - PATCH, PATCH):
+            for y in grid_positions(height):
+                for x in grid_positions(width):
                     patch = gray[y : y + PATCH, x : x + PATCH]
                     label = mask[y : y + PATCH, x : x + PATCH] > 127
                     tensor = (
@@ -239,6 +248,12 @@ def main() -> None:
         gray = cv2.imread(str(image), cv2.IMREAD_GRAYSCALE)
         mask = cached_mask(image, georef, val_features, args.cache_dir)
         val_pages.append((gray, mask))
+    # An empty validation set would train to completion but never save a
+    # checkpoint (0 IoU never beats 0); fail before spending hours.
+    assert val_pages, (
+        f"no usable validation pages in {args.val} "
+        f"(min_effective_gcps={args.min_effective_gcps})"
+    )
     print(f"validation pages: {len(val_pages)} from {args.val}", file=sys.stderr)
 
     model = UNet(base=args.base).to(device)

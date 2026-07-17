@@ -43,6 +43,7 @@ from mapsnap.compare_iiif_georef import (
     fit_transform,
     haversine_ft,
     north_angle,
+    redundant_skeleton_keys,
     sample_grid,
 )
 from mapsnap.keymap.align_page_region import (
@@ -144,9 +145,10 @@ def affine_scale_m_per_px(affine: np.ndarray) -> float:
 def load_truth_units(volume: Path) -> tuple[dict[str, dict], set[str]]:
     """(unsplit truth items by page key, page keys with split-only truth).
 
-    Skeleton sheets ('s' suffix) with a full-color truth counterpart are
-    dropped, mirroring make_iiif_georef and compare: they map the same ground
-    as the full-color page.
+    Skeleton sheets ('s' suffix) with a full-color truth counterpart map the
+    same ground, so only one of the pair is kept: the skeleton when it alone
+    has a georef fit, the full-color page otherwise (matching compare_pages
+    and make_iiif_georef).
     """
     data = json.loads((volume / "main.iiif.json").read_text())
     unsplit: dict[str, dict] = {}
@@ -159,7 +161,8 @@ def load_truth_units(volume: Path) -> tuple[dict[str, dict], set[str]]:
             split_parents.add(key.split("__")[0])
         else:
             unsplit[key] = item
-    for key in [k for k in unsplit if k.endswith("s") and k[:-1] in unsplit]:
+    fitted = {k for k in unsplit if (volume / f"{k}.georef.json").exists()}
+    for key in redundant_skeleton_keys(set(unsplit), fitted):
         del unsplit[key]
     return unsplit, split_parents
 
@@ -553,6 +556,7 @@ def render_to_frame(
     prob: np.ndarray,
     affine_local: np.ndarray,
     origin: tuple[float, float],
+    *,
     frame_shape: tuple[int, int],
     res_m: float,
     frame_min: tuple[float, float],
@@ -622,10 +626,20 @@ def cmd_sanity(volume: Path, limit: int | None) -> None:
             continue
         frame_min = (min(xs), max(ys))
         wa, va = render_to_frame(
-            prob_a, ua.truth.affine_local, origin, frame_shape, res, frame_min
+            prob_a,
+            ua.truth.affine_local,
+            origin,
+            frame_shape=frame_shape,
+            res_m=res,
+            frame_min=frame_min,
         )
         wb, vb = render_to_frame(
-            prob_b, ub.truth.affine_local, origin, frame_shape, res, frame_min
+            prob_b,
+            ub.truth.affine_local,
+            origin,
+            frame_shape=frame_shape,
+            res_m=res,
+            frame_min=frame_min,
         )
         both = va & vb
         if not both.any():
@@ -734,6 +748,7 @@ def build_frame(
     anchor: PageUnit,
     anchor_affine: np.ndarray,
     init_lonlat: tuple[float, float],
+    *,
     reach_m: float,
     res_m: float,
 ) -> FrameSpec:
@@ -767,6 +782,7 @@ def run_join(
     anchor: PageUnit,
     target: PageUnit,
     anchor_affine: np.ndarray,
+    *,
     init_centers: list[tuple[float, float]],
     radius_m: float,
     scale_m_per_px: float,
@@ -807,7 +823,9 @@ def run_join(
         ]
     for init in init_centers:
         reach = (diag_m + 280.0) if direction_mode else (radius_m + diag_m / 2)
-        frame = build_frame(anchor, anchor_affine, init, reach, params.resolution_m)
+        frame = build_frame(
+            anchor, anchor_affine, init, reach_m=reach, res_m=params.resolution_m
+        )
         if frame.shape[0] * frame.shape[1] > 6e6:
             record["status"] = "frame_too_large"
             continue
@@ -870,11 +888,11 @@ def run_join(
                 fixed_blur,
                 fixed_valid,
                 prob_target,
-                raster_scale,
-                theta,
-                params,
-                seed_center,
-                seed_radius,
+                scale=raster_scale,
+                theta=theta,
+                params=params,
+                search_center=seed_center,
+                search_radius_px=seed_radius,
             ):
                 candidate.diagnostics["theta_anchor"] = theta_anchor
                 candidates.append(candidate)
@@ -1134,11 +1152,16 @@ def run_join(
 
 
 def volume_median_scale(units: list[PageUnit]) -> float:
-    """Median truth-anchor scale (metres per page pixel)."""
+    """Median RANSAC-fit scale (metres per page pixel).
+
+    Deliberately truth-free: the volume scale must come from the pipeline's
+    own fits so the matcher and pose graph run identically on volumes without
+    ground truth.
+    """
     scales = [
-        affine_scale_m_per_px(u.truth.affine_local)
+        affine_scale_m_per_px(u.gen_affine)
         for u in units
-        if u.anchor_truth and u.truth
+        if u.fit_state == "fitted" and u.gen_affine is not None
     ]
     return statistics.median(scales)
 
@@ -1168,7 +1191,7 @@ def summarize_joins(records: list[dict], label: str) -> None:
 
 
 def cmd_perturb(
-    volume: Path, limit: int | None, seed: int, draws: int, solve_scale: bool
+    volume: Path, *, limit: int | None, seed: int, draws: int, solve_scale: bool
 ) -> None:
     """Phase 3a: anchor<->anchor joins from perturbed inits (precision floor)."""
     import time as time_mod
@@ -1222,10 +1245,10 @@ def cmd_perturb(
                 anchor,
                 target,
                 anchor.truth.affine_local,
-                [init],
-                radius,
-                scale,
-                params,
+                init_centers=[init],
+                radius_m=radius,
+                scale_m_per_px=scale,
+                params=params,
                 expected_direction=expected,
                 anchor_side_direction=anchor_side,
             )
@@ -1305,10 +1328,10 @@ def cmd_match(
             anchor,
             target,
             affine,
-            inits,
-            radius,
-            scale,
-            params,
+            init_centers=inits,
+            radius_m=radius,
+            scale_m_per_px=scale,
+            params=params,
             expected_direction=expected,
             anchor_side_direction=anchor_side,
             containment_regions=target.keymap_regions,
@@ -1352,6 +1375,7 @@ def cmd_match(
 
 def cmd_chain(
     volume: Path,
+    *,
     anchor_pose: str,
     min_verification: float,
     max_rounds: int,
@@ -1437,10 +1461,10 @@ def cmd_chain(
                     anchor,
                     target,
                     anchor_affine,
-                    inits,
-                    radius,
-                    scale,
-                    params,
+                    init_centers=inits,
+                    radius_m=radius,
+                    scale_m_per_px=scale,
+                    params=params,
                     expected_direction=expected,
                     anchor_side_direction=anchor_side,
                     containment_regions=target.keymap_regions,
@@ -1879,10 +1903,10 @@ def collect_graph_measurements(
             anchor,
             target,
             anchor_affine,
-            inits,
-            radius,
-            scale,
-            params,
+            init_centers=inits,
+            radius_m=radius,
+            scale_m_per_px=scale,
+            params=params,
             expected_direction=expected,
             anchor_side_direction=anchor_side,
             containment_regions=None if synthetic else target.keymap_regions,
@@ -1943,6 +1967,7 @@ def street_base_name(name: str) -> str:
 def build_line_factors(
     volume: Path,
     vframe,
+    *,
     stems: list[str],
     index: dict[str, int],
     by_stem: dict[str, PageUnit],
@@ -2272,10 +2297,10 @@ def cmd_posegraph(
         factors = build_line_factors(
             volume,
             vframe,
-            node_stems,
-            index,
-            by_stem,
-            solved,
+            stems=node_stems,
+            index=index,
+            by_stem=by_stem,
+            initial=solved,
             min_confidence=STREET_FACTOR_MIN_CONFIDENCE,
         )
         print(
@@ -2501,17 +2526,23 @@ def main() -> None:
     elif args.command == "sanity":
         cmd_sanity(args.volume, args.limit)
     elif args.command == "perturb":
-        cmd_perturb(args.volume, args.limit, args.seed, args.draws, args.solve_scale)
+        cmd_perturb(
+            args.volume,
+            limit=args.limit,
+            seed=args.seed,
+            draws=args.draws,
+            solve_scale=args.solve_scale,
+        )
     elif args.command == "match":
         cmd_match(args.volume, args.limit, args.anchor_pose, args.solve_scale)
     elif args.command == "chain":
         cmd_chain(
             args.volume,
-            args.anchor_pose,
-            args.min_verification,
-            args.max_rounds,
-            args.solve_scale,
-            args.seeds,
+            anchor_pose=args.anchor_pose,
+            min_verification=args.min_verification,
+            max_rounds=args.max_rounds,
+            solve_scale=args.solve_scale,
+            seeds=args.seeds,
         )
     elif args.command == "posegraph":
         cmd_posegraph(args.volume, args.remeasure, args.limit, args.street_factors)

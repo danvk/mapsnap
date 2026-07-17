@@ -96,7 +96,9 @@ def test_match_pair_recovers_known_pose() -> None:
         max_overlap_frac=1.0,  # the synthetic page lies fully inside the world
         peak_separation_m=20.0,
     )
-    candidates = match_pair(world, np.ones_like(world, dtype=bool), page, scale, params)
+    candidates = match_pair(
+        world, np.ones_like(world, dtype=bool), page, scale=scale, params=params
+    )
     assert candidates
     best = min(
         candidates,
@@ -164,7 +166,9 @@ def test_uniform_lattice_reports_multiple_peaks() -> None:
         max_overlap_frac=1.0,
         peak_separation_m=20.0,
     )
-    candidates = match_pair(world, np.ones_like(world, dtype=bool), page, 1.0, params)
+    candidates = match_pair(
+        world, np.ones_like(world, dtype=bool), page, scale=1.0, params=params
+    )
     zero_theta = [
         c for c in candidates if abs(c.theta_deg) < 1 or abs(abs(c.theta_deg) - 90) < 1
     ]
