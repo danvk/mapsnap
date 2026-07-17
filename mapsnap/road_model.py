@@ -218,12 +218,36 @@ def predict_page(
 
 
 def load_model(model_path: Path, device) -> "UNet":
-    """Load a trained road UNet from a checkpoint, moved to ``device`` and set to eval mode."""
-    model = UNet()
-    model.load_state_dict(torch.load(str(model_path), map_location=device))
+    """Load a trained road UNet from a checkpoint, moved to ``device`` and set to eval mode.
+
+    The channel width is inferred from the checkpoint so differently-sized
+    models (--base at training time) load transparently.
+    """
+    state_dict = torch.load(str(model_path), map_location=device)
+    model = UNet(base=int(state_dict["enc1.block.0.weight"].shape[0]))
+    model.load_state_dict(state_dict)
     model.to(device)
     model.eval()
     return model
+
+
+def effective_gcp_count(georef: dict) -> int:
+    """Distinct physical intersections among a fitted page's inliers.
+
+    OSM name variants (SOUTH CAPITOL ST SE / SW / bare) expand one physical
+    intersection into several inlier records, so raw inlier counts overstate
+    how constrained a fit is; cluster by pixel distance instead. Pages with
+    fewer than ~3 of these are fragile fits whose OSM projection may not
+    match the drawn streets.
+    """
+    clusters: list[tuple[float, float]] = []
+    for intersection in georef.get("intersections", []):
+        if not intersection.get("inlier"):
+            continue
+        x, y = intersection["x"], intersection["y"]
+        if all(math.hypot(x - cx, y - cy) >= 60 for cx, cy in clusters):
+            clusters.append((x, y))
+    return len(clusters)
 
 
 def road_mask(

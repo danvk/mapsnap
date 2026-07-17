@@ -1908,19 +1908,12 @@ def collect_graph_measurements(
 def effective_gcp_count(volume: Path, stem: str) -> int:
     """Distinct physical intersections among a fitted page's inliers.
 
-    OSM name variants (SOUTH CAPITOL ST SE / SW / bare) expand one physical
-    intersection into several inlier records — p217 shows 6 inliers but is a
-    one-point fit, free to swing about it. Cluster by pixel distance.
+    See road_model.effective_gcp_count — p217 shows 6 inliers but is a
+    one-point fit, free to swing about its single anchor.
     """
-    georef = json.loads((volume / f"{stem}.georef.json").read_text())
-    clusters: list[tuple[float, float]] = []
-    for inter in georef.get("intersections", []):
-        if not inter.get("inlier"):
-            continue
-        x, y = inter["x"], inter["y"]
-        if all(math.hypot(x - cx, y - cy) >= 60 for cx, cy in clusters):
-            clusters.append((x, y))
-    return len(clusters)
+    from mapsnap.road_model import effective_gcp_count as count_from_georef
+
+    return count_from_georef(json.loads((volume / f"{stem}.georef.json").read_text()))
 
 
 DIRECTIONAL_SUFFIXES = {

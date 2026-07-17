@@ -23,23 +23,42 @@ import torch
 from torch import nn
 
 from mapsnap.keymap.number_model import select_device
-from mapsnap.road_model import PATCH, UNet, normalize_patch, rasterize_road_mask
+from mapsnap.road_model import (
+    PATCH,
+    UNet,
+    effective_gcp_count,
+    normalize_patch,
+    rasterize_road_mask,
+)
 from mapsnap.utils import image_stem
 
 # Random patches sampled from each page per epoch.
 PATCHES_PER_PAGE = 6
+# Fraction of training patches constrained to the page-margin band, where the
+# seam strips the edge-join matcher depends on live.
+EDGE_FRACTION = 0.5
+# Width of that band in pixels (~75m at the 25%-scale ~0.24 m/px).
+EDGE_BAND_PX = 320
 
 
-def volume_pages(volume: Path) -> list[tuple[Path, dict]]:
-    """(image path, georef) for each fitted, non-split page of a volume."""
+def volume_pages(volume: Path, min_effective_gcps: int) -> list[tuple[Path, dict]]:
+    """(image path, georef) for each fitted, non-split, well-fit page.
+
+    Pages below the effective-GCP gate are dropped: their OSM projection is
+    the training label, and a fragile fit paints roads in the wrong place.
+    """
     pages = []
     for path in sorted(volume.glob("p*.georef.json")):
         stem = image_stem(str(path))
         if "__" in stem:
             continue
         image = volume / f"{stem}.jpg"
-        if image.exists():
-            pages.append((image, json.load(open(path))))
+        if not image.exists():
+            continue
+        georef = json.load(open(path))
+        if effective_gcp_count(georef) < min_effective_gcps:
+            continue
+        pages.append((image, georef))
     return pages
 
 
@@ -65,10 +84,27 @@ def sample_patch(
 
     The rotation augmentation matters here: adjacent Sanborn sheets are drawn grid-aligned
     rather than north-up, so at inference the model sees corridors at arbitrary angles.
+    EDGE_FRACTION of patches are pinned to the page-margin band: the edge-join matcher
+    reads the model exclusively in seam strips, where content is sketchier (duplicated
+    margin blocks, big sheet numbers) than in the page interior.
     """
     height, width = gray.shape
-    y = rng.integers(0, max(1, height - PATCH))
-    x = rng.integers(0, max(1, width - PATCH))
+    y_max, x_max = max(1, height - PATCH), max(1, width - PATCH)
+    if rng.random() < EDGE_FRACTION:
+        side = int(rng.integers(0, 4))
+        band_y = min(EDGE_BAND_PX, y_max)
+        band_x = min(EDGE_BAND_PX, x_max)
+        if side == 0:  # top
+            y, x = rng.integers(0, band_y), rng.integers(0, x_max)
+        elif side == 1:  # bottom
+            y, x = rng.integers(y_max - band_y, y_max), rng.integers(0, x_max)
+        elif side == 2:  # left
+            y, x = rng.integers(0, y_max), rng.integers(0, band_x)
+        else:  # right
+            y, x = rng.integers(0, y_max), rng.integers(x_max - band_x, x_max)
+    else:
+        y = rng.integers(0, y_max)
+        x = rng.integers(0, x_max)
     patch = gray[y : y + PATCH, x : x + PATCH]
     label = mask[y : y + PATCH, x : x + PATCH]
     k = int(rng.integers(0, 4))
@@ -106,10 +142,15 @@ def validation_iou(
     model: nn.Module,
     pages: list[tuple[np.ndarray, np.ndarray]],
     device,
-) -> float:
-    """Mean IoU at threshold 0.5 over a fixed grid of patches from the val pages."""
+) -> tuple[float, float]:
+    """(overall IoU, edge-band IoU) at threshold 0.5 over a fixed patch grid.
+
+    The edge-band figure counts only patches touching the outer EDGE_BAND_PX
+    of the page — the seam strips the edge-join matcher actually reads.
+    """
     model.eval()
     intersection = union = 0.0
+    edge_intersection = edge_union = 0.0
     with torch.no_grad():
         for gray, mask in pages:
             height, width = gray.shape
@@ -124,10 +165,24 @@ def validation_iou(
                         .to(device)
                     )
                     predicted = torch.sigmoid(model(tensor))[0, 0].cpu().numpy() > 0.5
-                    intersection += float(np.logical_and(predicted, label).sum())
-                    union += float(np.logical_or(predicted, label).sum())
+                    patch_intersection = float(np.logical_and(predicted, label).sum())
+                    patch_union = float(np.logical_or(predicted, label).sum())
+                    intersection += patch_intersection
+                    union += patch_union
+                    on_edge = (
+                        y < EDGE_BAND_PX
+                        or x < EDGE_BAND_PX
+                        or y + PATCH > height - EDGE_BAND_PX
+                        or x + PATCH > width - EDGE_BAND_PX
+                    )
+                    if on_edge:
+                        edge_intersection += patch_intersection
+                        edge_union += patch_union
     model.train()
-    return intersection / union if union else 0.0
+    return (
+        intersection / union if union else 0.0,
+        edge_intersection / edge_union if edge_union else 0.0,
+    )
 
 
 def main() -> None:
@@ -141,6 +196,13 @@ def main() -> None:
     parser.add_argument("--epochs", type=int, default=12)
     parser.add_argument("--batch-size", type=int, default=16)
     parser.add_argument("--learning-rate", type=float, default=3e-4)
+    parser.add_argument("--base", type=int, default=24, help="UNet channel width.")
+    parser.add_argument(
+        "--min-effective-gcps",
+        type=int,
+        default=3,
+        help="Drop training pages with fewer distinct inlier intersections.",
+    )
     parser.add_argument(
         "--limit-pages", type=int, default=0, help="Per volume, for smoke tests."
     )
@@ -162,16 +224,16 @@ def main() -> None:
     train_set: list[tuple[Path, dict, list[dict]]] = []
     for volume in args.volumes:
         features = json.load(open(volume / "centerlines.geojson"))["features"]
-        pages = volume_pages(volume)
+        pages = volume_pages(volume, args.min_effective_gcps)
         if args.limit_pages:
             pages = pages[: args.limit_pages]
         train_set.extend((image, georef, features) for image, georef in pages)
+        print(f"  {volume.name}: {len(pages)} pages", file=sys.stderr)
     print(f"training pages: {len(train_set)}", file=sys.stderr)
 
     val_features = json.load(open(args.val / "centerlines.geojson"))["features"]
-    val_pages_meta = volume_pages(args.val)[
-        :: max(1, len(volume_pages(args.val)) // args.val_pages)
-    ]
+    all_val_pages = volume_pages(args.val, args.min_effective_gcps)
+    val_pages_meta = all_val_pages[:: max(1, len(all_val_pages) // args.val_pages)]
     val_pages = []
     for image, georef in val_pages_meta[: args.val_pages]:
         gray = cv2.imread(str(image), cv2.IMREAD_GRAYSCALE)
@@ -179,7 +241,7 @@ def main() -> None:
         val_pages.append((gray, mask))
     print(f"validation pages: {len(val_pages)} from {args.val}", file=sys.stderr)
 
-    model = UNet().to(device)
+    model = UNet(base=args.base).to(device)
     optimizer = torch.optim.Adam(model.parameters(), lr=args.learning_rate)
     bce = nn.BCEWithLogitsLoss()
     rng = np.random.default_rng(0)
@@ -207,19 +269,20 @@ def main() -> None:
                     loss.backward()
                     optimizer.step()
                     losses.append(float(loss.detach()))
-        iou = validation_iou(model, val_pages, device)
+        iou, edge_iou = validation_iou(model, val_pages, device)
         marker = ""
-        if iou > best_iou:
-            best_iou = iou
+        # The edge band is where the matcher reads the model; select on it.
+        if edge_iou > best_iou:
+            best_iou = edge_iou
             args.output.parent.mkdir(parents=True, exist_ok=True)
             torch.save(model.state_dict(), args.output)
             marker = "  (saved)"
         print(
             f"epoch {epoch:2d}: loss {np.mean(losses):.4f}  val IoU {iou:.3f}"
-            f"  [{time.time() - start:.0f}s]{marker}",
+            f"  edge IoU {edge_iou:.3f}  [{time.time() - start:.0f}s]{marker}",
             file=sys.stderr,
         )
-    print(f"best val IoU {best_iou:.3f} -> {args.output}", file=sys.stderr)
+    print(f"best val edge IoU {best_iou:.3f} -> {args.output}", file=sys.stderr)
 
 
 if __name__ == "__main__":
