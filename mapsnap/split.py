@@ -21,11 +21,12 @@ from typing import TypedDict
 import cv2
 import numpy as np
 from PIL import Image, ImageDraw
+import shapely.affinity
 from shapely.geometry import LineString, Point, Polygon, box
 from shapely.ops import polygonize, unary_union
 from skimage.morphology import medial_axis
 
-from mapsnap.utils import image_stem
+from mapsnap.utils import image_stem, jpeg_dimensions
 
 
 class PanelsJson(TypedDict):
@@ -963,17 +964,28 @@ def compute_panels(image_path: Path, border: int = BORDER_PX) -> list:
     return panels
 
 
+def order_panels(panels: list) -> list:
+    """Panels in reading order (top to bottom, then left to right).
+
+    Ordering happens once, at the scale the panels were detected at, so a
+    raw-resolution copy written from scaled polygons keeps identical numbering
+    (the row-bucketing would bucket differently at 4x coordinates).
+    """
+    return sorted(panels, key=lambda p: (round(p.bounds[1] / 50), p.bounds[0]))
+
+
 def write_panels(image_path: Path, panels: list, base: str) -> list[Path]:
     """Write each panel to <base>__N.jpg next to image_path; return the written paths.
 
     A panel is cropped to its bounding box, with any pixels outside its (possibly
-    non-rectangular) polygon set to white. Panels are numbered in reading order: top to
-    bottom, then left to right. Also writes <base>.panels.json recording the panel
-    polygons in image_path's pixel frame, in the same order as the numbering.
+    non-rectangular) polygon set to white. ``panels`` must already be in reading
+    order (see order_panels); numbering follows the given order. Also writes
+    <base>.panels.json recording the panel polygons in image_path's pixel frame,
+    in the same order as the numbering.
     """
     rgb = load_rgb(image_path)
     h, w = rgb.shape[:2]
-    ordered = sorted(panels, key=lambda p: (round(p.bounds[1] / 50), p.bounds[0]))
+    ordered = panels
     out_paths = []
     for i, panel in enumerate(ordered, start=1):
         mask = np.zeros((h, w), dtype=np.uint8)
@@ -1047,15 +1059,38 @@ def process_image(image_path: Path, debug: bool = False) -> None:
             out_dir / f"{base}.panels.png"
         )
 
+    raw_path = image_path.parent / "raw" / image_path.name
+    if raw_path.exists():
+        remove_split_outputs(raw_path)
+
     # A single panel covering the whole page means no split was found.
     is_single_full = len(panels) == 1 and panels[0].area >= 0.99 * full_h * full_w
     if is_single_full:
         print(f"{image_path.name}: single panel — not split")
         return
-    out_paths = write_panels(image_path, panels, base)
+    ordered = order_panels(panels)
+    out_paths = write_panels(image_path, ordered, base)
     print(
         f"{image_path.name}: {len(panels)} panels → {', '.join(p.name for p in out_paths)}"
     )
+
+    # Mirror the split onto the full-resolution copy, if one exists: the key-map
+    # pipeline needs raw/<panel>.jpg when the key map shares its sheet with
+    # another panel (a multi-volume index map, a legend). The splitter itself
+    # can only run on the 25% images, so the raw panels are cut from the same
+    # polygons scaled up to the raw frame, keeping identical numbering.
+    if raw_path.exists():
+        raw_width, raw_height = jpeg_dimensions(raw_path)
+        scaled = [
+            shapely.affinity.scale(
+                panel, xfact=raw_width / w, yfact=raw_height / h, origin=(0, 0)
+            )
+            for panel in ordered
+        ]
+        raw_paths = write_panels(raw_path, scaled, base)
+        print(
+            f"  raw copy: {len(raw_paths)} panels → {', '.join(p.name for p in raw_paths)}"
+        )
 
 
 def main() -> None:
