@@ -2,6 +2,8 @@
 
 import json
 
+import pytest
+
 from shapely.geometry import Polygon as ShapelyPolygon
 
 from mapsnap.compare_iiif_georef import (
@@ -245,6 +247,37 @@ def test_truth_page_number():
     assert truth_page_number({"label": "no page here"}) is None
 
 
+def test_truth_page_number_uppercase_direction_suffix():
+    # Chicago-style labels carry uppercase direction suffixes; the number must
+    # still parse (a regression here silently emptied truth_polygons_by_page).
+    assert truth_page_number({"label": "Chicago, Ill. | 1950 | Vol. 1 p103W"}) == 103
+    assert truth_page_number({"label": "Chicago, Ill. | 1950 | Vol. 1 p22N"}) == 22
+    assert truth_page_number({"label": "Hudson | 1950 p6n"}) == 6
+
+
+def test_redundant_skeleton_keys_prefers_whichever_fit():
+    from mapsnap.compare_iiif_georef import redundant_skeleton_keys
+
+    truth = {"p153", "p153s", "p90"}
+    # Full-color page fit: the skeleton is redundant.
+    assert redundant_skeleton_keys(truth, {"p153"}) == {"p153s"}
+    # Only the skeleton fit: keep it, drop the full-color truth row.
+    assert redundant_skeleton_keys(truth, {"p153s"}) == {"p153"}
+    # Neither fit: the miss counts once, against the full-color page.
+    assert redundant_skeleton_keys(truth, set()) == {"p153s"}
+    # Both fit: the full-color page wins.
+    assert redundant_skeleton_keys(truth, {"p153", "p153s"}) == {"p153s"}
+    # A lone skeleton (no full-color counterpart in truth) is never dropped.
+    assert redundant_skeleton_keys({"p12s"}, set()) == set()
+
+
+def test_redundant_skeleton_keys_rejects_compound_suffixes():
+    from mapsnap.compare_iiif_georef import redundant_skeleton_keys
+
+    with pytest.raises(AssertionError):
+        redundant_skeleton_keys({"p6ns", "p6n"}, set())
+
+
 def test_truth_polygons_by_page_groups_splits(tmp_path):
     def labeled(label: str, poly: list[tuple[float, float]]) -> dict:
         item = _identity_georef_item(poly)
@@ -269,3 +302,43 @@ def test_truth_polygons_by_page_groups_splits(tmp_path):
     assert len(by_page[73]) == 2  # both splits of page 73
     assert by_page[73][0] == [[0.0, 0.0], [10.0, 0.0], [10.0, 10.0]]
     assert len(by_page[90]) == 1
+
+
+def test_compare_pages_ignores_skeletons_with_full_color_counterparts(tmp_path):
+    from mapsnap.compare_iiif_georef import compare_pages
+
+    def item(page_id: str, label: str) -> dict:
+        return {
+            "label": label,
+            "target": {
+                "source": {
+                    "id": f"https://loc.gov/x/g123-{page_id}/info.json",
+                    "width": 1000,
+                    "height": 1000,
+                },
+            },
+            "body": {
+                "transformation": {"type": "polynomial", "options": {"order": 1}},
+                "features": [
+                    {
+                        "properties": {"resourceCoords": [x, y]},
+                        "geometry": {
+                            "coordinates": [-74.0 + x * 1e-6, 40.0 + y * 1e-6]
+                        },
+                    }
+                    for x, y in [(0, 0), (900, 0), (0, 900)]
+                ],
+            },
+        }
+
+    truth = {"items": [item("0153", "x p153"), item("0153s", "x p153s")]}
+    generated = {"items": [item("0153", "x p153")]}
+    truth_path = tmp_path / "main.iiif.json"
+    gen_path = tmp_path / "gen.iiif.json"
+    truth_path.write_text(json.dumps(truth))
+    gen_path.write_text(json.dumps(generated))
+    rows, missing = compare_pages(truth_path, gen_path)
+    # p153s maps the same ground as p153 and `mapsnap iiif` never emits it;
+    # it must not count as a missing page.
+    assert [r["page_key"] for r in rows] == ["p153"]
+    assert missing == []

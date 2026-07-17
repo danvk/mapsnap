@@ -154,9 +154,11 @@ def truth_polygon_world(item: dict) -> list[list[float]] | None:
         return None
     polygon = parse_svg_polygon(selector.get("value", ""))
     gcps = extract_gcps(item)
-    if len(polygon) < 3 or len(gcps) < 3:
+    transform_type = annotation_transform_type(item)
+    min_gcps = 2 if transform_type == "helmert" else 3
+    if len(polygon) < 3 or len(gcps) < min_gcps:
         return None
-    A = fit_transform(gcps, annotation_transform_type(item))
+    A = fit_transform(gcps, transform_type)
     ring = []
     for px, py in polygon:
         lon, lat = A @ np.array([px, py, 1.0])
@@ -180,8 +182,19 @@ def truth_polygons_world(iiif_path: Path) -> list[list[list[float]]]:
 
 
 def truth_page_number(item: dict) -> int | None:
-    """Page number N from a truth annotation label like '... p156' or '... p73 [1]'."""
-    match = re.search(r"\bp(\d+)", str(item.get("label", "")))
+    """Page number N from a truth annotation's label or image-service URL.
+
+    Handles plain labels ('... p156', '... p73 [1]') and sb-format volumes
+    whose labels read '... psb001250 [2]' (the number then comes from the
+    source id via source_id_to_page_key).
+    """
+    match = re.search(r"\bp(\d+)[a-zA-Z]?\b", str(item.get("label", "")))
+    if match:
+        return int(match.group(1))
+    key = source_id_to_page_key(
+        item.get("target", {}).get("source", {}).get("id"), str(item.get("label", ""))
+    )
+    match = re.fullmatch(r"p(\d+)[a-zA-Z]?(?:__\d+)?", key)
     return int(match.group(1)) if match else None
 
 
@@ -636,6 +649,36 @@ def match_split_pairs(
     return pairs, unmatched
 
 
+def redundant_skeleton_keys(truth_keys: set[str], generated_keys: set[str]) -> set[str]:
+    """Truth page keys to drop under the skeleton rule.
+
+    A skeleton sheet (pNs) maps the same ground as its full-color page (pN),
+    so when both are in the truth exactly one may contribute to a comparison:
+    pNs when it alone has a generated fit, pN in every other case (including
+    when neither fit — the miss is counted once, against pN).
+
+    Keys with a compound suffix (e.g. 'p6ns', where the trailing 's' is
+    ambiguous with a direction or sequence letter) raise instead of guessing:
+    dropping a real page silently is worse than failing loudly.
+    """
+    for key in truth_keys | generated_keys:
+        assert not re.fullmatch(r"p\d+[a-zA-Z]s(?:__\d+)?", key), (
+            f"page key {key!r} has a compound suffix ending in 's'; the "
+            "skeleton rule cannot tell a skeleton sheet from a direction or "
+            "sequence letter here"
+        )
+    drop: set[str] = set()
+    for key in truth_keys:
+        if not key.endswith("s") or key[:-1] not in truth_keys:
+            continue
+        base = key[:-1]
+        if key in generated_keys and base not in generated_keys:
+            drop.add(base)
+        else:
+            drop.add(key)
+    return drop
+
+
 def compare_pages(
     truth_path: Path, generated_path: Path
 ) -> tuple[list[dict], list[dict]]:
@@ -650,6 +693,19 @@ def compare_pages(
     gen_by_source = annotations_by_source(generated_path)
     oim_dir = truth_path.parent / "oim"
     gen_dir = generated_path.parent
+
+    # Skeleton rule: a skeleton sheet ('s' suffix) and its full-color page map
+    # the same ground, so only one of the pair may contribute — whichever one
+    # the generated file actually fit (the full-color page when neither did).
+    skeletons = redundant_skeleton_keys(set(truth_by_source), set(gen_by_source))
+    if skeletons:
+        print(
+            f"Skeleton rule: ignoring {len(skeletons)} redundant truth "
+            "page(s): " + ", ".join(sorted(skeletons)),
+            file=sys.stderr,
+        )
+        for key in skeletons:
+            del truth_by_source[key]
 
     rows: list[dict] = []
     missing: list[dict] = []

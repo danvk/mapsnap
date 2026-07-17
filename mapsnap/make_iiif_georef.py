@@ -37,6 +37,7 @@ from shapely.geometry import Polygon as ShapelyPolygon
 from shapely.geometry import mapping as geom_mapping
 
 from mapsnap.clip_masks import compute_all_clip_masks, geo_polygon_to_svg
+from mapsnap.compare_iiif_georef import redundant_skeleton_keys
 from mapsnap.split import panels_json_path, read_panels_json
 from mapsnap.utils import default_centerlines, jpeg_dimensions, label_to_page_key
 
@@ -47,11 +48,12 @@ FULL_RES_FACTOR = 4
 def georef_path_to_page_key(path: str) -> str | None:
     """Extract page key like 'p428__2' from a georef filename.
 
-    Accepts filenames ending in '_p16s.georef.json', '_p16.georef.json', or
-    '_p16s.gcps.georef.json' (the '.gcps' infix is optional).
+    Accepts filenames ending in '_p16s.georef.json', '_p16.georef.json',
+    '_p16s.gcps.georef.json' (the '.gcps' infix is optional), or the
+    neighbor-fit variant '_p16.georef-neighbor.json'.
     """
     m = re.search(
-        r"(?:\b|_)(p\d+)([snewlr]?)((?:__\d+)?)(?:\.[^.]+)?\.georef2?\.json$",
+        r"(?:\b|_)(p\d+)([snewlr]?)((?:__\d+)?)(?:\.[^.]+)?\.georef(?:2|-neighbor)?\.json$",
         path,
         re.IGNORECASE,
     )
@@ -59,6 +61,44 @@ def georef_path_to_page_key(path: str) -> str | None:
         return None
     page_num, suffix, split = m.groups()
     return f"{page_num}{suffix.lower()}{split}"
+
+
+def expand_georef_globs(pattern: str) -> list[str]:
+    """Paths for a comma-separated list of globs, first glob wins per page.
+
+    'v/p*.georef.json,v/p*.georef-neighbor.json' renders the hybrid volume:
+    the RANSAC georef when a page has one, the neighbor/pose-graph placement
+    otherwise.
+    """
+    chosen: dict[str, str] = {}
+    ordered: list[str] = []
+    for sub_pattern in pattern.split(","):
+        for path in sorted(glob.glob(sub_pattern.strip())):
+            page_key = georef_path_to_page_key(path)
+            if page_key is None or page_key in chosen:
+                continue
+            chosen[page_key] = path
+            ordered.append(path)
+    return ordered
+
+
+def drop_redundant_skeletons(valid_items: list) -> list:
+    """Drop skeleton pages ('s' suffix) whose full-color counterpart also fit.
+
+    Delegates to compare_iiif_georef.redundant_skeleton_keys, which also
+    asserts that no key carries a compound suffix ending in 's' (where the
+    rule could not tell a skeleton from a direction/sequence letter).
+    """
+    keys = {page_key for page_key, *_ in valid_items}
+    skipped = redundant_skeleton_keys(keys, keys)
+    if skipped:
+        print(
+            f"Dropping {len(skipped)} skeleton page(s) with full-color "
+            "counterparts: " + ", ".join(sorted(skipped)),
+            file=sys.stderr,
+        )
+        valid_items = [item for item in valid_items if item[0] not in skipped]
+    return valid_items
 
 
 def _service_url_to_page_key(url: str | None) -> str | None:
@@ -444,7 +484,7 @@ def _load_s3_items(
 
     The image URL for each page is: {image_base_url}/{parent_key}.jpg
     """
-    georef_paths = sorted(glob.glob(georef_glob_pattern))
+    georef_paths = expand_georef_globs(georef_glob_pattern)
     if not georef_paths:
         print(f"Error: no files matched '{georef_glob_pattern}'.", file=sys.stderr)
         sys.exit(1)
@@ -481,20 +521,7 @@ def _load_s3_items(
         georef = json.load(open(path))
         valid_items.append((page_key, canvas_item, georef, image_path, Path(path)))
 
-    # Drop skeleton pages within this volume.
-    non_skeleton_keys = {pk for pk, _, _, _, _ in valid_items if not pk.endswith("s")}
-    skipped = [
-        pk
-        for pk, _, _, _, _ in valid_items
-        if pk.endswith("s") and pk[:-1] in non_skeleton_keys
-    ]
-    if skipped:
-        print(
-            f"Dropping {len(skipped)} skeleton page(s) with full-color counterparts: "
-            + ", ".join(skipped),
-            file=sys.stderr,
-        )
-        valid_items = [item for item in valid_items if item[0] not in set(skipped)]
+    valid_items = drop_redundant_skeletons(valid_items)
 
     print(
         f"Loaded {len(valid_items)} pages from {len(georef_paths)} georef files.",
@@ -519,7 +546,7 @@ def _load_volume_items(
     """
     source_data: dict = json.load(open(iiif_path))
 
-    georef_paths = sorted(glob.glob(georef_glob_pattern))
+    georef_paths = expand_georef_globs(georef_glob_pattern)
     if not georef_paths:
         print(f"Error: no files matched '{georef_glob_pattern}'.", file=sys.stderr)
         sys.exit(1)
@@ -564,19 +591,7 @@ def _load_volume_items(
     # Drop skeleton pages (key ends in 's') when a full-color counterpart exists
     # within this volume. Scoped per-volume so skeletons in one volume are never
     # dropped because another volume has a matching full-color page.
-    non_skeleton_keys = {pk for pk, _, _, _, _ in valid_items if not pk.endswith("s")}
-    skipped = [
-        pk
-        for pk, _, _, _, _ in valid_items
-        if pk.endswith("s") and pk[:-1] in non_skeleton_keys
-    ]
-    if skipped:
-        print(
-            f"Dropping {len(skipped)} skeleton page(s) with full-color counterparts: "
-            + ", ".join(skipped),
-            file=sys.stderr,
-        )
-        valid_items = [item for item in valid_items if item[0] not in set(skipped)]
+    valid_items = drop_redundant_skeletons(valid_items)
 
     return valid_items, result_id, label
 
