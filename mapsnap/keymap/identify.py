@@ -11,7 +11,10 @@ Two stages:
 
   * candidates (cheap, filenames only) — the key map is always page 0 or page 1, including
     lettered/split variants (p0, p0b, p0L/p0R, p1a-d). candidate_keys nominates the page-0 and
-    page-1 families, no model needed.
+    page-1 families, no model needed. An unsplit page-0 family short-circuits confirmation
+    entirely: a census of every volume under data/ found page 0 is always the key map (see
+    detection_plan), while page-0 split panels (composite sheets mixing the key map with a
+    volume-index map or legend) are confirmed individually.
   * confirmation (content) — read each candidate's numbers with the CNN localizer + CRNN
     recognizer, snap to the valid page set, and keep candidates whose distinct valid reads cover a
     large fraction of the volume (see is_keymap). Handles split key maps (each half still covers a
@@ -88,6 +91,43 @@ def candidate_keys(volume: Path) -> list[str]:
     for number in sorted(by_number):
         keys.extend(by_number[number])
     return keys
+
+
+def page_zero_stems(volume: Path) -> tuple[list[str], list[str]]:
+    """(unsplit page-0 stems, page-0 split-panel stems) with images present.
+
+    Lettered variants (p0b, p0L/p0R, p0s) count as unsplit page-0 sheets;
+    ``p0__N`` panels are the splits.
+    """
+    unsplit: list[str] = []
+    splits: list[str] = []
+    for image in sorted(volume.glob("p0*.jpg")):
+        stem = image_stem(str(image))
+        if page_number(stem) != 0:
+            continue
+        (splits if "__" in stem else unsplit).append(stem)
+    return unsplit, splits
+
+
+def detection_plan(volume: Path) -> tuple[list[str], list[str]]:
+    """(keys assumed to be key maps untested, keys to confirm by coverage).
+
+    A census of every volume under data/ (34 volumes, 64 page-0 files,
+    2026-07-17) found the page-0 sheet is ALWAYS the key map — or one half of
+    a two-sheet key map (p0+p0b, p0L/p0R) — so an unsplit page-0 family is
+    reported as key maps outright, with no model run. The exception is a
+    composite page-0 sheet that has been split into panels: there the sheet
+    mixes the key map with a volume-index map or symbol legend (Kansas City
+    p0__2, New Orleans 1951 p0__1, New York 1905 p0__2), so each panel is
+    confirmed individually by coverage and the unsplit parent is dropped.
+    """
+    page_zero, page_zero_splits = page_zero_stems(volume)
+    if page_zero and not page_zero_splits:
+        return page_zero, []
+    keys = candidate_keys(volume)
+    if page_zero_splits:
+        keys = page_zero_splits + [key for key in keys if page_number(key) != 0]
+    return [], keys
 
 
 def is_keymap(
@@ -171,9 +211,12 @@ def identify_keymaps(
 ) -> list[str]:
     """Page keys of ``volume`` that are key maps (candidate generation + coverage confirmation).
 
-    By default only the low-numbered candidate pages are tested (candidate_keys); ``scan_all``
-    tests every non-split page image, a slower fallback for a volume whose key map is not in the
-    front matter. Returns the confirmed keys sorted by page number.
+    An unsplit page-0 family short-circuits detection entirely (see
+    detection_plan: page 0 is always the key map in every surveyed volume);
+    page-0 split panels are confirmed individually by coverage. Otherwise only
+    the low-numbered candidate pages are tested (candidate_keys); ``scan_all``
+    tests every non-split page image, a slower fallback that also disables the
+    short-circuit. Returns the confirmed keys sorted by page number.
     """
     valid_pages = volume_valid_pages(volume)
     if scan_all:
@@ -183,7 +226,14 @@ def identify_keymaps(
             if "__" not in image_stem(str(image))
         ]
     else:
-        keys = candidate_keys(volume)
+        assumed, keys = detection_plan(volume)
+        if assumed:
+            for key in assumed:
+                print(
+                    f"  {key:8s} page-0 sheet with no split panels: key map by convention",
+                    file=sys.stderr,
+                )
+            return sorted(assumed, key=lambda key: (page_number(key) or 0, key))
 
     cnn, crnn, device = load_models(cnn_weights, crnn_weights)
     confirmed: list[str] = []

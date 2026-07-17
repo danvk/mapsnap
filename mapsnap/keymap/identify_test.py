@@ -1,6 +1,12 @@
 from pathlib import Path
 
-from mapsnap.keymap.identify import candidate_keys, is_keymap, volume_valid_pages
+from mapsnap.keymap.identify import (
+    candidate_keys,
+    detection_plan,
+    is_keymap,
+    page_zero_stems,
+    volume_valid_pages,
+)
 
 
 def make_volume(tmp_path: Path, names: list[str]) -> Path:
@@ -62,3 +68,40 @@ def test_is_keymap_absolute_floor_guards_tiny_volume():
 
 def test_is_keymap_empty_volume():
     assert not is_keymap(0, 0)
+
+
+def test_page_zero_stems_splits_and_variants(tmp_path: Path):
+    volume = make_volume(
+        tmp_path, ["p0.jpg", "p0b.jpg", "p0__1.jpg", "p0__2.jpg", "p1.jpg"]
+    )
+    unsplit, splits = page_zero_stems(volume)
+    assert unsplit == ["p0", "p0b"]
+    assert splits == ["p0__1", "p0__2"]
+
+
+def test_detection_plan_unsplit_page_zero_short_circuits(tmp_path: Path):
+    # Nashville/Grand Rapids case: p0.jpg with no splits is the key map, no
+    # model confirmation needed.
+    volume = make_volume(tmp_path, ["p0.jpg", "p0b.jpg", "p1.jpg", "p5.jpg"])
+    assumed, to_test = detection_plan(volume)
+    assert assumed == ["p0", "p0b"]
+    assert to_test == []
+
+
+def test_detection_plan_split_panels_tested_individually(tmp_path: Path):
+    # Kansas City case: the page-0 sheet mixes the key map with a volume-index
+    # map, so its panels are confirmed one by one and the composite parent is
+    # dropped; the page-1 family fallback stays.
+    volume = make_volume(
+        tmp_path, ["p0.jpg", "p0__1.jpg", "p0__2.jpg", "p1N.jpg", "p5.jpg"]
+    )
+    assumed, to_test = detection_plan(volume)
+    assert assumed == []
+    assert to_test == ["p0__1", "p0__2", "p1N"]
+
+
+def test_detection_plan_no_page_zero_uses_candidates(tmp_path: Path):
+    volume = make_volume(tmp_path, ["p1a.jpg", "p1b.jpg", "p125.jpg"])
+    assumed, to_test = detection_plan(volume)
+    assert assumed == []
+    assert to_test == ["p1a", "p1b"]
