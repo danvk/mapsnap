@@ -414,44 +414,43 @@ tr.on-fill td {
   opacity: 0.75;
 }
 
-/* Volume-viewer page list (left of the map). */
+/* Volume-viewer page list (left of the map): capped to the map height so
+   the page itself never scrolls, capped in width with its own horizontal
+   scroll when the truth columns overflow. */
 .page-list {
-  width: 12rem;
+  max-width: 20rem;
+  max-height: 90vh;
   flex-shrink: 0;
-  overflow-y: auto;
-  border-right: 1px solid #ccc;
-  font-size: 0.85rem;
+  overflow: auto;
+  border: 1px solid #ccc;
+  border-radius: 6px;
+  font-family: sans-serif;
+  font-size: 0.8rem;
 }
-.page-list-header {
-  display: flex;
-  justify-content: space-between;
-  padding: 0.3rem 0.6rem;
-  font-weight: bold;
-  border-bottom: 1px solid #ccc;
+.page-list table {
+  border-collapse: collapse;
+  white-space: nowrap;
+}
+.page-list th {
   position: sticky;
   top: 0;
   background: #fff;
-}
-.page-list ul {
-  list-style: none;
-  margin: 0;
-  padding: 0;
-}
-.page-list li button {
-  display: flex;
-  justify-content: space-between;
-  width: 100%;
-  padding: 0.25rem 0.6rem;
-  border: none;
-  background: none;
   cursor: pointer;
-  font: inherit;
+  user-select: none;
   text-align: left;
+  padding: 0.3rem 0.5rem;
+  border-bottom: 1px solid #ccc;
 }
-.page-list li button:hover {
+.page-list td {
+  padding: 0.2rem 0.5rem;
+}
+.page-list tbody tr {
+  cursor: pointer;
+}
+.page-list tbody tr:hover {
   background: #eef;
 }
-.page-list li button.selected {
+.page-list tbody tr.selected {
   background: #dde5ff;
   font-weight: bold;
 }
