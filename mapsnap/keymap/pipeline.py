@@ -119,6 +119,14 @@ def main() -> None:
         action="store_true",
         help="Skip the key-map OCR pass for images that already have a .streets.json output.",
     )
+    parser.add_argument(
+        "--reuse-boxes",
+        action="store_true",
+        help=(
+            "Pass --reuse-boxes --allow-missing-boxes to the key-map OCR pass: reuse existing "
+            "<stem>.boxes.json CRAFT boxes and run detection only for key maps without one."
+        ),
+    )
     args = parser.parse_args()
 
     images = [Path(image) for image in args.images]
@@ -177,6 +185,8 @@ def main() -> None:
     ]
     if args.resume:
         ocr_cmd.append("--resume")
+    if args.reuse_boxes:
+        ocr_cmd.extend(["--reuse-boxes", "--allow-missing-boxes"])
     run_cmd([*ocr_cmd, *image_args])
     run_cmd(
         [
