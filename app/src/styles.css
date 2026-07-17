@@ -444,6 +444,11 @@ tr.on-fill td {
 .page-list td {
   padding: 0.2rem 0.5rem;
 }
+.page-list th.numeric,
+.page-list td.numeric {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
 .page-list tbody tr {
   cursor: pointer;
 }

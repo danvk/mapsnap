@@ -94,7 +94,11 @@ export function PageList(props: PageListProps) {
   function header(key: SortKey, label: string, title?: string): ReactElement {
     const active = effectiveSort.key === key;
     return (
-      <th onClick={() => clickHeader(key)} title={title}>
+      <th
+        className={key === 'page' ? '' : 'numeric'}
+        onClick={() => clickHeader(key)}
+        title={title}
+      >
         {label}
         {active ? (effectiveSort.descending ? ' ▼' : ' ▲') : ''}
       </th>
@@ -135,7 +139,7 @@ export function PageList(props: PageListProps) {
               >
                 <td>{page.pageKey}</td>
                 {hasTruth && (
-                  <td>
+                  <td className="numeric">
                     {pageStats ? (
                       <span className={rmseClass(pageStats.rmseFt)}>
                         {pageStats.rmseFt.toFixed(0)}ft
@@ -149,17 +153,19 @@ export function PageList(props: PageListProps) {
                     )}
                   </td>
                 )}
-                <td>{page.rotationDegrees.toFixed(1)}°</td>
-                <td>{page.scalePixelsPerFoot.toFixed(2)}</td>
+                <td className="numeric">{page.rotationDegrees.toFixed(1)}°</td>
+                <td className="numeric">
+                  {page.scalePixelsPerFoot.toFixed(2)}
+                </td>
                 {hasTruth && (
-                  <td>
+                  <td className="numeric">
                     {pageStats
                       ? `${pageStats.rotationErrorDegrees.toFixed(2)}°`
                       : ''}
                   </td>
                 )}
                 {hasTruth && (
-                  <td>
+                  <td className="numeric">
                     {pageStats
                       ? `${pageStats.scaleErrorPercent.toFixed(1)}%`
                       : ''}
