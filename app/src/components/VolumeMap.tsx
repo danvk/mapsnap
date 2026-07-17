@@ -234,6 +234,16 @@ export function VolumeMap(props: VolumeMapProps) {
     if (!annotation) return;
     const results = layer.addGeoreferenceAnnotation(annotation);
     mapIdsRef.current = results.map((r) => (typeof r === 'string' ? r : null));
+    results.forEach((r, i) => {
+      if (r instanceof Error) {
+        const item = annotation.items?.[i];
+        console.error(
+          `addGeoreferenceAnnotation failed for item ${i}`,
+          item?.label,
+          r,
+        );
+      }
+    });
     const failed = results.filter((r) => r instanceof Error).length;
     onLoadResultRef.current?.({ loaded: results.length - failed, failed });
     const bounds = layer.getBounds();
