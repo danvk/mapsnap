@@ -236,7 +236,9 @@ export function VolumeMap(props: VolumeMapProps) {
     mapIdsRef.current = results.map((r) => (typeof r === 'string' ? r : null));
     results.forEach((r, i) => {
       if (r instanceof Error) {
-        const item = annotation.items?.[i];
+        const item = (annotation as { items?: { label?: unknown }[] }).items?.[
+          i
+        ];
         console.error(
           `addGeoreferenceAnnotation failed for item ${i}`,
           item?.label,

@@ -413,3 +413,54 @@
 tr.on-fill td {
   opacity: 0.75;
 }
+
+/* Volume-viewer page list (left of the map). */
+.page-list {
+  width: 12rem;
+  flex-shrink: 0;
+  overflow-y: auto;
+  border-right: 1px solid #ccc;
+  font-size: 0.85rem;
+}
+.page-list-header {
+  display: flex;
+  justify-content: space-between;
+  padding: 0.3rem 0.6rem;
+  font-weight: bold;
+  border-bottom: 1px solid #ccc;
+  position: sticky;
+  top: 0;
+  background: #fff;
+}
+.page-list ul {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.page-list li button {
+  display: flex;
+  justify-content: space-between;
+  width: 100%;
+  padding: 0.25rem 0.6rem;
+  border: none;
+  background: none;
+  cursor: pointer;
+  font: inherit;
+  text-align: left;
+}
+.page-list li button:hover {
+  background: #eef;
+}
+.page-list li button.selected {
+  background: #dde5ff;
+  font-weight: bold;
+}
+.page-list .rmse-good {
+  color: #1a7f37;
+}
+.page-list .rmse-ok {
+  color: #9a6700;
+}
+.page-list .rmse-bad {
+  color: #cf222e;
+}
