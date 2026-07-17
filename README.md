@@ -20,14 +20,19 @@ After a few minutes, depending on the number of images in the Sanborn volume, yo
 
 Test data comes from hand-geocoding by volunteers on OldInsuranceMaps.net:
 
-Volume | Pages | Num Fit | Median RMSE | Within 15ft | Within 25ft | Allmaps
------- | ----- | ------- | ----------- | ----------- | ----------- | -------
-[New Orleans 1951 Vol 5][nola5] | 109 | 103 (94%) | 12ft | 68% | 85% | [view][nola5-iiif]
-[New Orleans 1896 Vol 2][nola2] | 91 | 82 (90%) | 27ft | 32% | 46% | [view][nola2-iiif]
-[Detroit 1929 Vol 11][detroit] | 103 | 83 (81%) | 15ft | 51% | 67% | [view][detroit-iiif]
-[Chicago 1950 Vol 1][chicago] | 111 | 100 (90%) | 10ft | 69% | 83% | [view][chicago-iiif]
-[Champaign, Ill. 1915][champaign] | 33 | 27 (82%) | 10ft | 85% | 96% | [view][champaign-iiif]
-[Brooklyn 1939 Vol 1][brooklyn1] | 62 | 55 (89%) | 10ft | 73% | 75% | [view][brooklyn1-iiif]
+Volume | Fit / Total | Median RMSE | Mean RMSE | Max RMSE | ≤25ft | 25–50ft | 50–100ft | 100–200ft | 200ft+ | Allmaps
+------ | ----------- | ----------- | --------- | -------- | ----- | ------- | -------- | --------- | ------ | -------
+[New Orleans 1951 Vol 5][nola5] | 103/109 (94%) | 12ft | 47ft | 878ft | 85% | 7% | 3% | 1% | 4% | [view][nola5-iiif]
+[New Orleans 1896 Vol 2][nola2] | 82/91 (90%) | 30ft | 66ft | 772ft | 45% | 13% | 21% | 17% | 4% | [view][nola2-iiif]
+[Detroit 1929 Vol 11][detroit] | 81/103 (79%) | 15ft | 25ft | 166ft | 70% | 20% | 5% | 5% | 0% | [view][detroit-iiif]
+[Chicago 1950 Vol 1][chicago] | 100/111 (90%) | 10ft | 49ft | 2989ft | 82% | 10% | 5% | 1% | 2% | [view][chicago-iiif]
+[Champaign, Ill. 1915][champaign] | 27/33 (82%) | 10ft | 28ft | 453ft | 89% | 7% | 0% | 0% | 4% | [view][champaign-iiif]
+[Brooklyn 1939 Vol 1][brooklyn1] | 54/62 (87%) | 10ft | 103ft | 2645ft | 76% | 6% | 13% | 0% | 6% | [view][brooklyn1-iiif]
+[Washington DC 1916 Vol 2][dc] | 85/134 (63%) | 28ft | 123ft | 4746ft | 48% | 28% | 12% | 4% | 8% | [view][dc-iiif]
+[Hudson County 1950 Vol 9][hudson] | 60/95 (63%) | 13ft | 34ft | 874ft | 67% | 27% | 5% | 0% | 2% | [view][hudson-iiif]
+[Kansas City 1951 Vol 4][kc] | 107/142 (75%) | 19ft | 39ft | 830ft | 68% | 24% | 2% | 1% | 5% | [view][kc-iiif]
+[Nashville 1957 Vol 1A][nashville] | 55/71 (77%) | 14ft | 52ft | 390ft | 62% | 13% | 15% | 2% | 9% | [view][nashville-iiif]
+[Grand Rapids 1953 Vol 7][grandrapids] | 63/83 (76%) | 18ft | 63ft | 1149ft | 71% | 17% | 3% | 2% | 6% | [view][grandrapids-iiif]
 
 RMSE was measured across 49 equally-spaced points on each image. You can view the fits on Allmaps or get the IIIF files from the `gallery` directory. For notes on poor fits, see [test data notes].
 
@@ -37,6 +42,11 @@ RMSE was measured across 49 equally-spaced points on each image. You can view th
 [chicago]: https://oldinsurancemaps.net/map/sanborn01790_085
 [champaign]: https://oldinsurancemaps.net/map/sanborn01778_006
 [brooklyn1]: https://oldinsurancemaps.net/map/sanborn05791_053
+[dc]: https://oldinsurancemaps.net/map/sanborn01227_003
+[hudson]: https://oldinsurancemaps.net/map/sanborn05511_036
+[kc]: https://oldinsurancemaps.net/map/sanborn04720_021
+[nashville]: https://oldinsurancemaps.net/map/sanborn08356_019
+[grandrapids]: https://oldinsurancemaps.net/map/sanborn04023_023
 
 [nola5-iiif]: https://dev.viewer.allmaps.org/?url=https%3A%2F%2Fraw.githubusercontent.com%2Fdanvk%2Fmapsnap%2Frefs%2Fheads%2Fmain%2Fgallery%2Fnew_orleans_la_1951_vol_5.iiif.json
 [nola2-iiif]: https://dev.viewer.allmaps.org/?url=https%3A%2F%2Fraw.githubusercontent.com%2Fdanvk%2Fmapsnap%2Frefs%2Fheads%2Fmain%2Fgallery%2Fnew_orleans_la_1896_vol_2.iiif.json
@@ -44,6 +54,11 @@ RMSE was measured across 49 equally-spaced points on each image. You can view th
 [chicago-iiif]: https://dev.viewer.allmaps.org/?url=https%3A%2F%2Fraw.githubusercontent.com%2Fdanvk%2Fmapsnap%2Frefs%2Fheads%2Fmain%2Fgallery%2Fchicago_il_1950_vol_1.iiif.json
 [champaign-iiif]: https://dev.viewer.allmaps.org/?url=https%3A%2F%2Fraw.githubusercontent.com%2Fdanvk%2Fmapsnap%2Frefs%2Fheads%2Fmain%2Fgallery%2Fchampaign_ill_1915.iiif.json
 [brooklyn1-iiif]: https://dev.viewer.allmaps.org/?url=https%3A%2F%2Fraw.githubusercontent.com%2Fdanvk%2Fmapsnap%2Frefs%2Fheads%2Fmain%2Fgallery%2Fbrooklyn_ny_1939_vol_1.iiif.json
+[dc-iiif]: https://dev.viewer.allmaps.org/?url=https%3A%2F%2Fraw.githubusercontent.com%2Fdanvk%2Fmapsnap%2Frefs%2Fheads%2Fmain%2Fgallery%2Fwashington_dc_1916_vol_2.iiif.json
+[hudson-iiif]: https://dev.viewer.allmaps.org/?url=https%3A%2F%2Fraw.githubusercontent.com%2Fdanvk%2Fmapsnap%2Frefs%2Fheads%2Fmain%2Fgallery%2Fhudson_co_nj_1950_vol_9.iiif.json
+[kc-iiif]: https://dev.viewer.allmaps.org/?url=https%3A%2F%2Fraw.githubusercontent.com%2Fdanvk%2Fmapsnap%2Frefs%2Fheads%2Fmain%2Fgallery%2Fkansas_city_mo_1951_vol_4.iiif.json
+[nashville-iiif]: https://dev.viewer.allmaps.org/?url=https%3A%2F%2Fraw.githubusercontent.com%2Fdanvk%2Fmapsnap%2Frefs%2Fheads%2Fmain%2Fgallery%2Fnashville_tn_1957_vol1a.iiif.json
+[grandrapids-iiif]: https://dev.viewer.allmaps.org/?url=https%3A%2F%2Fraw.githubusercontent.com%2Fdanvk%2Fmapsnap%2Frefs%2Fheads%2Fmain%2Fgallery%2Fgrand_rapids_mi_1953_vol7.iiif.json
 [test data notes]: https://github.com/danvk/mapsnap/wiki/Test-data-notes
 
 ## How it Works
