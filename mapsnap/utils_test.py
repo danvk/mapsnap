@@ -143,6 +143,9 @@ def test_source_id_sb():
     assert source_id_to_page_key(f"{_DC}:sb002160", "") == "p216"
     assert source_id_to_page_key(f"{_DC}:sb00154s", "") == "p154s"
     assert source_id_to_page_key(f"{_DC}:sb00001a", "") == "p1a"
+    # Annotation source ids carry an /info.json suffix; same keys must result.
+    assert source_id_to_page_key(f"{_DC}:sb001250/info.json", "") == "p125"
+    assert source_id_to_page_key(f"{_DC}:sb001250/info.json", "x [2]") == "p125__2"
 
 
 # source_id_to_page_key — Chicago 1950 format (e.g. 01790_01N_1950-0003N)
