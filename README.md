@@ -20,19 +20,172 @@ After a few minutes, depending on the number of images in the Sanborn volume, yo
 
 Test data comes from hand-geocoding by volunteers on OldInsuranceMaps.net:
 
-Volume | Fit / Total | Median RMSE | Mean RMSE | Max RMSE | ≤25ft | 25–50ft | 50–100ft | 100–200ft | 200ft+ | Allmaps
------- | ----------- | ----------- | --------- | -------- | ----- | ------- | -------- | --------- | ------ | -------
-[New Orleans 1951 Vol 5][nola5] | 103/109 (94%) | 12ft | 47ft | 878ft | 85% | 7% | 3% | 1% | 4% | [view][nola5-iiif]
-[New Orleans 1896 Vol 2][nola2] | 82/91 (90%) | 30ft | 66ft | 772ft | 45% | 13% | 21% | 17% | 4% | [view][nola2-iiif]
-[Detroit 1929 Vol 11][detroit] | 81/103 (79%) | 15ft | 25ft | 166ft | 70% | 20% | 5% | 5% | 0% | [view][detroit-iiif]
-[Chicago 1950 Vol 1][chicago] | 100/111 (90%) | 10ft | 49ft | 2989ft | 82% | 10% | 5% | 1% | 2% | [view][chicago-iiif]
-[Champaign, Ill. 1915][champaign] | 27/33 (82%) | 10ft | 28ft | 453ft | 89% | 7% | 0% | 0% | 4% | [view][champaign-iiif]
-[Brooklyn 1939 Vol 1][brooklyn1] | 54/62 (87%) | 10ft | 103ft | 2645ft | 76% | 6% | 13% | 0% | 6% | [view][brooklyn1-iiif]
-[Washington DC 1916 Vol 2][dc] | 85/134 (63%) | 28ft | 123ft | 4746ft | 48% | 28% | 12% | 4% | 8% | [view][dc-iiif]
-[Hudson County 1950 Vol 9][hudson] | 60/95 (63%) | 13ft | 34ft | 874ft | 67% | 27% | 5% | 0% | 2% | [view][hudson-iiif]
-[Kansas City 1951 Vol 4][kc] | 107/142 (75%) | 19ft | 39ft | 830ft | 68% | 24% | 2% | 1% | 5% | [view][kc-iiif]
-[Nashville 1957 Vol 1A][nashville] | 55/71 (77%) | 14ft | 52ft | 390ft | 62% | 13% | 15% | 2% | 9% | [view][nashville-iiif]
-[Grand Rapids 1953 Vol 7][grandrapids] | 63/83 (76%) | 18ft | 63ft | 1149ft | 71% | 17% | 3% | 2% | 6% | [view][grandrapids-iiif]
+<table>
+  <thead>
+    <tr>
+      <th rowspan="2">Volume</th>
+      <th rowspan="2">Fit / Total</th>
+      <th colspan="3">RMSE Stats</th>
+      <th colspan="5">RMSE Distribution</th>
+      <th rowspan="2">Allmaps</th>
+    </tr>
+    <tr>
+      <th>Median</th>
+      <th>Mean</th>
+      <th>Max</th>
+      <th>≤25ft</th>
+      <th>25–50ft</th>
+      <th>50–100ft</th>
+      <th>100–200ft</th>
+      <th>200ft+</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td><a href="https://oldinsurancemaps.net/map/sanborn03376_029">New Orleans 1951 Vol 5</a></td>
+      <td align="right">103/109 (94%)</td>
+      <td align="right">12ft</td>
+      <td align="right">47ft</td>
+      <td align="right">878ft</td>
+      <td align="right">85%</td>
+      <td align="right">7%</td>
+      <td align="right">3%</td>
+      <td align="right">1%</td>
+      <td align="right">4%</td>
+      <td><a href="https://dev.viewer.allmaps.org/?url=https%3A%2F%2Fraw.githubusercontent.com%2Fdanvk%2Fmapsnap%2Frefs%2Fheads%2Fmain%2Fgallery%2Fnew_orleans_la_1951_vol_5.iiif.json">view</a></td>
+    </tr>
+    <tr>
+      <td><a href="https://oldinsurancemaps.net/map/sanborn03376_006">New Orleans 1896 Vol 2</a></td>
+      <td align="right">82/91 (90%)</td>
+      <td align="right">30ft</td>
+      <td align="right">66ft</td>
+      <td align="right">772ft</td>
+      <td align="right">45%</td>
+      <td align="right">13%</td>
+      <td align="right">21%</td>
+      <td align="right">17%</td>
+      <td align="right">4%</td>
+      <td><a href="https://dev.viewer.allmaps.org/?url=https%3A%2F%2Fraw.githubusercontent.com%2Fdanvk%2Fmapsnap%2Frefs%2Fheads%2Fmain%2Fgallery%2Fnew_orleans_la_1896_vol_2.iiif.json">view</a></td>
+    </tr>
+    <tr>
+      <td><a href="https://oldinsurancemaps.net/map/sanborn03985_041">Detroit 1929 Vol 11</a></td>
+      <td align="right">81/103 (79%)</td>
+      <td align="right">15ft</td>
+      <td align="right">25ft</td>
+      <td align="right">166ft</td>
+      <td align="right">70%</td>
+      <td align="right">20%</td>
+      <td align="right">5%</td>
+      <td align="right">5%</td>
+      <td align="right">0%</td>
+      <td><a href="https://dev.viewer.allmaps.org/?url=https%3A%2F%2Fraw.githubusercontent.com%2Fdanvk%2Fmapsnap%2Frefs%2Fheads%2Fmain%2Fgallery%2Fdetroit_mich_1929_vol_11.iiif.json">view</a></td>
+    </tr>
+    <tr>
+      <td><a href="https://oldinsurancemaps.net/map/sanborn01790_085">Chicago 1950 Vol 1</a></td>
+      <td align="right">100/111 (90%)</td>
+      <td align="right">10ft</td>
+      <td align="right">49ft</td>
+      <td align="right">2989ft</td>
+      <td align="right">82%</td>
+      <td align="right">10%</td>
+      <td align="right">5%</td>
+      <td align="right">1%</td>
+      <td align="right">2%</td>
+      <td><a href="https://dev.viewer.allmaps.org/?url=https%3A%2F%2Fraw.githubusercontent.com%2Fdanvk%2Fmapsnap%2Frefs%2Fheads%2Fmain%2Fgallery%2Fchicago_il_1950_vol_1.iiif.json">view</a></td>
+    </tr>
+    <tr>
+      <td><a href="https://oldinsurancemaps.net/map/sanborn01778_006">Champaign, Ill. 1915</a></td>
+      <td align="right">27/33 (82%)</td>
+      <td align="right">10ft</td>
+      <td align="right">28ft</td>
+      <td align="right">453ft</td>
+      <td align="right">89%</td>
+      <td align="right">7%</td>
+      <td align="right">0%</td>
+      <td align="right">0%</td>
+      <td align="right">4%</td>
+      <td><a href="https://dev.viewer.allmaps.org/?url=https%3A%2F%2Fraw.githubusercontent.com%2Fdanvk%2Fmapsnap%2Frefs%2Fheads%2Fmain%2Fgallery%2Fchampaign_ill_1915.iiif.json">view</a></td>
+    </tr>
+    <tr>
+      <td><a href="https://oldinsurancemaps.net/map/sanborn05791_053">Brooklyn 1939 Vol 1</a></td>
+      <td align="right">54/62 (87%)</td>
+      <td align="right">10ft</td>
+      <td align="right">103ft</td>
+      <td align="right">2645ft</td>
+      <td align="right">76%</td>
+      <td align="right">6%</td>
+      <td align="right">13%</td>
+      <td align="right">0%</td>
+      <td align="right">6%</td>
+      <td><a href="https://dev.viewer.allmaps.org/?url=https%3A%2F%2Fraw.githubusercontent.com%2Fdanvk%2Fmapsnap%2Frefs%2Fheads%2Fmain%2Fgallery%2Fbrooklyn_ny_1939_vol_1.iiif.json">view</a></td>
+    </tr>
+    <tr>
+      <td><a href="https://oldinsurancemaps.net/map/sanborn01227_003">Washington DC 1916 Vol 2</a></td>
+      <td align="right">85/134 (63%)</td>
+      <td align="right">28ft</td>
+      <td align="right">123ft</td>
+      <td align="right">4746ft</td>
+      <td align="right">48%</td>
+      <td align="right">28%</td>
+      <td align="right">12%</td>
+      <td align="right">4%</td>
+      <td align="right">8%</td>
+      <td><a href="https://dev.viewer.allmaps.org/?url=https%3A%2F%2Fraw.githubusercontent.com%2Fdanvk%2Fmapsnap%2Frefs%2Fheads%2Fmain%2Fgallery%2Fwashington_dc_1916_vol_2.iiif.json">view</a></td>
+    </tr>
+    <tr>
+      <td><a href="https://oldinsurancemaps.net/map/sanborn05511_036">Hudson County 1950 Vol 9</a></td>
+      <td align="right">60/95 (63%)</td>
+      <td align="right">13ft</td>
+      <td align="right">34ft</td>
+      <td align="right">874ft</td>
+      <td align="right">67%</td>
+      <td align="right">27%</td>
+      <td align="right">5%</td>
+      <td align="right">0%</td>
+      <td align="right">2%</td>
+      <td><a href="https://dev.viewer.allmaps.org/?url=https%3A%2F%2Fraw.githubusercontent.com%2Fdanvk%2Fmapsnap%2Frefs%2Fheads%2Fmain%2Fgallery%2Fhudson_co_nj_1950_vol_9.iiif.json">view</a></td>
+    </tr>
+    <tr>
+      <td><a href="https://oldinsurancemaps.net/map/sanborn04720_021">Kansas City 1951 Vol 4</a></td>
+      <td align="right">107/142 (75%)</td>
+      <td align="right">19ft</td>
+      <td align="right">39ft</td>
+      <td align="right">830ft</td>
+      <td align="right">68%</td>
+      <td align="right">24%</td>
+      <td align="right">2%</td>
+      <td align="right">1%</td>
+      <td align="right">5%</td>
+      <td><a href="https://dev.viewer.allmaps.org/?url=https%3A%2F%2Fraw.githubusercontent.com%2Fdanvk%2Fmapsnap%2Frefs%2Fheads%2Fmain%2Fgallery%2Fkansas_city_mo_1951_vol_4.iiif.json">view</a></td>
+    </tr>
+    <tr>
+      <td><a href="https://oldinsurancemaps.net/map/sanborn08356_019">Nashville 1957 Vol 1A</a></td>
+      <td align="right">55/71 (77%)</td>
+      <td align="right">14ft</td>
+      <td align="right">52ft</td>
+      <td align="right">390ft</td>
+      <td align="right">62%</td>
+      <td align="right">13%</td>
+      <td align="right">15%</td>
+      <td align="right">2%</td>
+      <td align="right">9%</td>
+      <td><a href="https://dev.viewer.allmaps.org/?url=https%3A%2F%2Fraw.githubusercontent.com%2Fdanvk%2Fmapsnap%2Frefs%2Fheads%2Fmain%2Fgallery%2Fnashville_tn_1957_vol1a.iiif.json">view</a></td>
+    </tr>
+    <tr>
+      <td><a href="https://oldinsurancemaps.net/map/sanborn04023_023">Grand Rapids 1953 Vol 7</a></td>
+      <td align="right">63/83 (76%)</td>
+      <td align="right">18ft</td>
+      <td align="right">63ft</td>
+      <td align="right">1149ft</td>
+      <td align="right">71%</td>
+      <td align="right">17%</td>
+      <td align="right">3%</td>
+      <td align="right">2%</td>
+      <td align="right">6%</td>
+      <td><a href="https://dev.viewer.allmaps.org/?url=https%3A%2F%2Fraw.githubusercontent.com%2Fdanvk%2Fmapsnap%2Frefs%2Fheads%2Fmain%2Fgallery%2Fgrand_rapids_mi_1953_vol7.iiif.json">view</a></td>
+    </tr>
+  </tbody>
+</table>
 
 RMSE was measured across 49 equally-spaced points on each image. You can view the fits on Allmaps or get the IIIF files from the `gallery` directory. For notes on poor fits, see [test data notes].
 
