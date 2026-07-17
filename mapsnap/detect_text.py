@@ -571,8 +571,9 @@ def detect_text(
 
     reuse_boxes loads CRAFT bounding boxes from the existing <stem>.boxes.json
     file instead of re-running CRAFT. Useful for iterating on recognition
-    parameters without redoing the (slower) detection step. The caller is
-    responsible for ensuring the file exists before calling with reuse_boxes=True.
+    parameters without redoing the (slower) detection step. An image with no
+    .boxes.json falls back to running CRAFT (and writes the file); the CLI
+    gates that fallback behind --allow-missing-boxes.
 
     Writes <stem>.boxes.json alongside the image whenever CRAFT is run (i.e.
     when reuse_boxes=False). The file records the image dimensions, a timestamp,
@@ -606,7 +607,7 @@ def detect_text(
     img = Image.open(image_path).convert("RGB")
     orig_width, orig_height = img.size
 
-    if reuse_boxes:
+    if reuse_boxes and Path(_boxes_path(image_path)).exists():
         with open(_boxes_path(image_path)) as f:
             angle_boxes: list[dict] = json.load(f)["boxes"]
     else:
@@ -904,7 +905,16 @@ def main() -> None:
             "Reuse CRAFT bounding boxes from existing <stem>.boxes.json files instead "
             "of re-running CRAFT detection. Useful for iterating on recognition "
             "parameters without redoing detection. All images must already have a "
-            ".boxes.json file; this flag aborts with an error if any are missing."
+            ".boxes.json file; this flag aborts with an error if any are missing "
+            "(see --allow-missing-boxes)."
+        ),
+    )
+    parser.add_argument(
+        "--allow-missing-boxes",
+        action="store_true",
+        help=(
+            "With --reuse-boxes: images that have no .boxes.json (e.g. freshly split "
+            "panels) run full CRAFT detection instead of aborting the run."
         ),
     )
     args = parser.parse_args()
@@ -997,11 +1007,18 @@ def main() -> None:
 
     if args.reuse_boxes:
         missing = [p for p in images if not Path(_boxes_path(p)).exists()]
-        if missing:
+        if missing and not args.allow_missing_boxes:
             for p in missing:
                 print(f"Missing boxes file: {_boxes_path(p)}", file=sys.stderr)
             sys.exit(
-                f"--reuse-boxes: {len(missing)} image(s) have no .boxes.json file."
+                f"--reuse-boxes: {len(missing)} image(s) have no .boxes.json file "
+                "(pass --allow-missing-boxes to run CRAFT for them)."
+            )
+        if missing:
+            print(
+                f"--reuse-boxes: {len(missing)}/{len(images)} image(s) have no "
+                ".boxes.json; running full CRAFT detection for those.",
+                file=sys.stderr,
             )
 
     gpu = not args.no_gpu

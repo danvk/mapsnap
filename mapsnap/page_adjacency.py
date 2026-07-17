@@ -142,13 +142,41 @@ def box_center(bbox: list[list[float]]) -> tuple[float, float]:
     return (sum(p[0] for p in bbox) / 4, sum(p[1] for p in bbox) / 4)
 
 
-def digit_detections(image_path: Path, reader, valid_numbers: set[int]) -> list[dict]:
+def cached_craft_boxes(image_path: Path) -> tuple[list, list] | None:
+    """The angle-0 CRAFT boxes from ``<stem>.boxes.json`` (written by ``mapsnap ocr``), or None.
+
+    Returns (horizontal_list, free_list) in the same shape ``reader.detect`` yields, so
+    recognition can skip the CRAFT pass entirely. Returns None when the file is absent, records
+    different image dimensions (boxes from another resolution would misplace every read), or has
+    no angle-0 entry.
+    """
+    boxes_path = image_path.parent / f"{image_stem(str(image_path))}.boxes.json"
+    if not boxes_path.exists():
+        return None
+    doc = json.loads(boxes_path.read_text())
+    with Image.open(image_path) as image:
+        if (doc.get("width"), doc.get("height")) != image.size:
+            return None
+    for entry in doc.get("boxes", []):
+        if entry.get("angle") == 0:
+            return entry.get("horizontal_list", []), entry.get("free_list", [])
+    return None
+
+
+def digit_detections(
+    image_path: Path,
+    reader,
+    valid_numbers: set[int],
+    craft_boxes: tuple[list, list] | None = None,
+) -> list[dict]:
     """All digit reads on one page that parse to a valid volume page number.
 
     Two recognition passes over the same image: the digits-only pass supplies the
     transcription (immune to look-alike substitutions like 0 -> O), and a letters-allowed
     pass over the same boxes vetoes the ones that are actually street names or other text
-    (see is_text_veto).
+    (see is_text_veto). ``craft_boxes`` (from cached_craft_boxes) skips the CRAFT
+    detection pass — by far the most expensive step — reusing the boxes ``mapsnap ocr``
+    already computed for the same image.
 
     Each detection records the parsed ``number``, the raw OCR ``text``, EasyOCR's polygon and
     confidence, the glyph ``height`` in pixels, position as width/height fractions, the
@@ -165,7 +193,10 @@ def digit_detections(image_path: Path, reader, valid_numbers: set[int]) -> list[
     # allowlist-independent, so the two passes share its boxes (readtext = detect +
     # recognize with these same defaults).
     img, img_grey = reformat_input(image)
-    horizontal_lists, free_lists = reader.detect(img)
+    if craft_boxes is not None:
+        horizontal_lists, free_lists = [craft_boxes[0]], [craft_boxes[1]]
+    else:
+        horizontal_lists, free_lists = reader.detect(img)
     results = reader.recognize(
         img_grey, horizontal_lists[0], free_lists[0], allowlist="0123456789"
     )
@@ -360,6 +391,15 @@ def main() -> None:
     parser.add_argument(
         "--no-gpu", action="store_true", help="Disable GPU acceleration for EasyOCR."
     )
+    parser.add_argument(
+        "--reuse-boxes",
+        action="store_true",
+        help=(
+            "Reuse CRAFT boxes from each page's <stem>.boxes.json (written by mapsnap ocr) "
+            "instead of re-running detection; pages without one (or whose boxes were computed "
+            "at different image dimensions) still run CRAFT."
+        ),
+    )
     args = parser.parse_args()
 
     import easyocr
@@ -379,17 +419,22 @@ def main() -> None:
     reader = easyocr.Reader(["en"], gpu=not args.no_gpu, verbose=False)
 
     pages: dict[str, dict] = {}
+    reused = 0
     for image in tqdm(images, smoothing=0):
         stem = image_stem(str(image))
         # Record the scanned image's dimensions so a viewer can rescale detection
         # polygons when it loads the page at a different resolution.
         width, height = Image.open(image).size
+        craft_boxes = cached_craft_boxes(image) if args.reuse_boxes else None
+        reused += craft_boxes is not None
         pages[stem] = {
             "number": page_number(stem),
             "width": width,
             "height": height,
-            "detections": digit_detections(image, reader, valid_numbers),
+            "detections": digit_detections(image, reader, valid_numbers, craft_boxes),
         }
+    if args.reuse_boxes:
+        print(f"Reused CRAFT boxes for {reused}/{len(images)} pages.", file=sys.stderr)
 
     def compute_claims(
         height_band: tuple[float, float] | None,

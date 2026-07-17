@@ -17,6 +17,10 @@ SUBCOMMANDS: dict[str, tuple[str, str]] = {
         "mapsnap.fit",
         "Georeference, build IIIF, and optionally compare (fast pipeline)",
     ),
+    "rerun": (
+        "mapsnap.pipeline_rerun",
+        "Re-run split/keymap/ocr/adjacency/fit on downloaded volumes, reusing CRAFT boxes",
+    ),
     "experiments": (
         "mapsnap.experiments",
         "Compare archived fit runs (experiments diff <id-a> <id-b>)",
