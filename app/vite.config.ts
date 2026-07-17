@@ -89,6 +89,7 @@ export default defineConfig({
   },
   server: {
     proxy: {
+      '/iiif-api': 'http://localhost:8182',
       '/iiif': 'http://localhost:8182',
       '/api': 'http://localhost:8183',
     },
