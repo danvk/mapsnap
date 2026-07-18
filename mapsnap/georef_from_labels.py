@@ -2949,23 +2949,26 @@ def _rotation_from_gcp_features(
 
 def process_deferred_image(
     deferred: dict,
-    scale_deg_per_px: float,
+    scale_candidates: list[tuple[float, str]],
     block_index: dict[str, list[Block]],
     cos_phi: float,
     neighbor_rotations: list[tuple[tuple[float, float], float]],
 ) -> ProcessResult:
     """Georeference an image that was deferred for having a single distinct intersection.
 
-    Uses the provided scale (deg/px) and estimates rotation from the two streets at the
-    GCP. The undirected rotation is then validated against adjacent pages (already
-    successfully georeferenced): if ≥2 neighbours within 1.5× page dimensions agree with
-    one of the two directed candidates (±180°), that candidate is used. When both are
-    equally supported, the 180° ambiguity is resolved by the north-up heuristic.
+    ``scale_candidates`` is a list of (deg/px, source description): the volume reference
+    scale plus any family-rung suggestions from the page's key-map region prior or from
+    adjacent pages' fitted scales. Every candidate is fitted and the page's own labels
+    arbitrate — rung signals can be wrong individually (a merged key-map region mimics a
+    half-scale sheet; a page bordering the downtown district inherits the wrong local
+    rung), but street labels only align at the true scale. Rotation is estimated from
+    the two streets at the GCP and validated against adjacent pages (≥2 neighbours
+    within 1.5× page dimensions agreeing picks a direction; otherwise north-up).
 
-    When the intersection has several world candidates (a jogging street's two crossings),
-    each is fitted and the one with the most inlier labels — then the lowest total residual —
-    is kept. Confirmed fits (≥2 neighbours) are written to output_path (.georef.json);
-    unconfirmed fits are written to a .georef-1gcp.json sidecar and returned success=False.
+    Across (scale candidate × world candidate) fits the one with the most inlier labels —
+    then the lowest total residual — is kept. Confirmed fits (≥2 neighbours) are written
+    to output_path (.georef.json); unconfirmed fits are written to a .georef-1gcp.json
+    sidecar and returned success=False.
     """
     image_path: str = deferred["image_path"]
     output_path: str = deferred["output_path"]
@@ -2979,12 +2982,11 @@ def process_deferred_image(
     keymap: dict | None = deferred.get("keymap")
     truth_polygons: list[list[list[float]]] | None = deferred.get("truth_polygons")
 
-    page_dim_lat = scale_deg_per_px * img_h
-    page_dim_lon = scale_deg_per_px * img_w / cos_phi
     pos_threshold = 0.001
 
-    # Fit each world candidate for the single image point and keep the best by inlier count,
-    # then by total residual. With one candidate (the usual 1-GCP case) the loop runs once.
+    # Fit each (scale candidate, world candidate) pair and keep the best by inlier
+    # count, then by total residual. With one scale and one world candidate (the
+    # usual 1-GCP case) the loop runs once.
     best: (
         tuple[
             tuple[int, float],
@@ -2993,32 +2995,36 @@ def process_deferred_image(
             list[float],
             RotationDecision,
             IntersectionGCP,
+            str,
         ]
         | None
     ) = None
-    for gcp in gcps:
-        undirected = _rotation_from_gcp_features(gcp, block_index)
-        if undirected is None:
-            continue
-        decision = _rotation_from_neighbors(
-            candidate=undirected,
-            approx_center=gcp.geo,
-            page_dim_deg=(page_dim_lon, page_dim_lat),
-            neighbor_rotations=neighbor_rotations,
-        )
-        A = build_affine_from_scale_rotation_gcp(
-            scale_deg_per_px, decision.rotation, gcp, cos_phi
-        )
-        inliers, _ = label_inliers(
-            features, block_index, A, pos_threshold, extrapolate=True
-        )
-        if not inliers:
-            continue
-        residuals = _inlier_residuals(features, block_index, A, inliers)
-        # Maximise inlier count, then minimise total residual (better-aligned jog side).
-        key = (len(inliers), -sum(residuals))
-        if best is None or key > best[0]:
-            best = (key, A, inliers, residuals, decision, gcp)
+    for scale_deg_per_px, scale_source in scale_candidates:
+        page_dim_lat = scale_deg_per_px * img_h
+        page_dim_lon = scale_deg_per_px * img_w / cos_phi
+        for gcp in gcps:
+            undirected = _rotation_from_gcp_features(gcp, block_index)
+            if undirected is None:
+                continue
+            decision = _rotation_from_neighbors(
+                candidate=undirected,
+                approx_center=gcp.geo,
+                page_dim_deg=(page_dim_lon, page_dim_lat),
+                neighbor_rotations=neighbor_rotations,
+            )
+            A = build_affine_from_scale_rotation_gcp(
+                scale_deg_per_px, decision.rotation, gcp, cos_phi
+            )
+            inliers, _ = label_inliers(
+                features, block_index, A, pos_threshold, extrapolate=True
+            )
+            if not inliers:
+                continue
+            residuals = _inlier_residuals(features, block_index, A, inliers)
+            # Maximise inlier count, then minimise total residual (better-aligned jog side).
+            key = (len(inliers), -sum(residuals))
+            if best is None or key > best[0]:
+                best = (key, A, inliers, residuals, decision, gcp, scale_source)
 
     if best is None:
         print(
@@ -3027,10 +3033,16 @@ def process_deferred_image(
         )
         return ProcessResult(success=False)
 
-    _, A, inlier_feat_indices, residuals, decision, gcp = best
+    _, A, inlier_feat_indices, residuals, decision, gcp, scale_source = best
     if len(gcps) > 1:
         print(
             f"Deferred: picked 1 of {len(gcps)} world candidates at the shared pixel.",
+            file=sys.stderr,
+        )
+    if len(scale_candidates) > 1:
+        print(
+            f"Deferred: labels chose the {scale_source} scale of "
+            f"{len(scale_candidates)} candidates.",
             file=sys.stderr,
         )
     print(
@@ -3573,12 +3585,15 @@ def main() -> None:
                     # A sheet drawn at a different scale than the volume (Detroit's p93/p50
                     # are half-scale) breaks the assigned-reference-scale assumption, and no
                     # internal check can catch it — the fitted scale IS the reference. Two
-                    # independent rung signals: the page's key-map region prior (its own
-                    # footprint; trusted down-only, since segmentation fragments mimic an
-                    # oversized prior), then the fitted scales of adjacent pages (Sanborn
-                    # drawing scale varies by geography, so neighbors predict the rung).
-                    page_scale_deg_per_px = scale_deg_per_px
-                    multiplier = 1.0
+                    # independent rung signals propose alternative scales: the page's
+                    # key-map region prior (its own footprint; down-only, since
+                    # segmentation fragments mimic an oversized prior) and the fitted
+                    # scales of adjacent pages (Sanborn drawing scale varies by
+                    # geography). Either can be wrong individually (a merged region
+                    # mimics a half-scale sheet; a page bordering downtown inherits the
+                    # wrong local rung), so they only nominate candidates — the page's
+                    # own labels arbitrate inside process_deferred_image.
+                    candidates = [(scale_deg_per_px, "reference")]
                     region_prior = region_prior_px_per_ft(
                         deferred.get("keymap"),
                         deferred["img_w"],
@@ -3593,10 +3608,18 @@ def main() -> None:
                             print(
                                 f"  key-map region is "
                                 f"{median_region_prior / region_prior:.2f}x the "
-                                f"volume's typical area ratio; snapping to "
-                                f"{multiplier}x reference scale"
+                                f"volume's typical area ratio; proposing the "
+                                f"{multiplier}x rung"
                             )
-                    if multiplier == 1.0 and deferred["gcps"]:
+                            candidates.append(
+                                (
+                                    px_per_ft_to_deg_per_px(
+                                        ref_scale_px_per_ft * multiplier
+                                    ),
+                                    "key-map region",
+                                )
+                            )
+                    if deferred["gcps"]:
                         page_dim = (
                             scale_deg_per_px * deferred["img_w"] / cos_phi,
                             scale_deg_per_px * deferred["img_h"],
@@ -3605,18 +3628,20 @@ def main() -> None:
                             deferred["gcps"][0].geo, page_dim, neighbor_scales
                         )
                         multiplier = local_rung_multiplier(ref_scale_px_per_ft, nearby)
-                        if multiplier != 1.0:
+                        snapped = px_per_ft_to_deg_per_px(
+                            ref_scale_px_per_ft * multiplier
+                        )
+                        if multiplier != 1.0 and all(
+                            abs(snapped - scale) > 1e-12 for scale, _ in candidates
+                        ):
                             print(
-                                f"  {len(nearby)} adjacent page(s) suggest the "
-                                f"{multiplier}x rung of the reference scale"
+                                f"  {len(nearby)} adjacent page(s) propose the "
+                                f"{multiplier}x rung"
                             )
-                    if multiplier != 1.0:
-                        snapped = ref_scale_px_per_ft * multiplier
-                        page_scale_deg_per_px = px_per_ft_to_deg_per_px(snapped)
-                        print(f"  deferred scale prior: {snapped:.3f} px/ft")
+                            candidates.append((snapped, "adjacent pages"))
                     deferred_result = process_deferred_image(
                         deferred=deferred,
-                        scale_deg_per_px=page_scale_deg_per_px,
+                        scale_candidates=candidates,
                         block_index=block_index,
                         cos_phi=cos_phi,
                         neighbor_rotations=neighbor_rotations,
