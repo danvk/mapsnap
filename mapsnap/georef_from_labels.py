@@ -3595,6 +3595,7 @@ def main() -> None:
                     #   page bordering the downtown district inherits the wrong rung
                     #   (Nashville p10/p56), and there the page's own labels reliably
                     #   pick the true scale inside process_deferred_image.
+                    candidates = [(scale_deg_per_px, "reference")]
                     region_multiplier = 1.0
                     region_prior = region_prior_px_per_ft(
                         deferred.get("keymap"),
@@ -3606,22 +3607,21 @@ def main() -> None:
                         region_multiplier = region_relative_scale(
                             region_prior, median_region_prior
                         )
-                    if region_multiplier != 1.0:
-                        snapped_px_per_ft = ref_scale_px_per_ft * region_multiplier
-                        print(
-                            f"  key-map region is "
-                            f"{median_region_prior / region_prior:.2f}x the "
-                            f"volume's typical area ratio; snapping to the "
-                            f"{region_multiplier}x rung = {snapped_px_per_ft:.3f} px/ft"
-                        )
-                        candidates = [
-                            (
-                                px_per_ft_to_deg_per_px(snapped_px_per_ft),
-                                "key-map region",
+                        if region_multiplier != 1.0:
+                            snapped_px_per_ft = ref_scale_px_per_ft * region_multiplier
+                            print(
+                                f"  key-map region is "
+                                f"{median_region_prior / region_prior:.2f}x the "
+                                f"volume's typical area ratio; snapping to the "
+                                f"{region_multiplier}x rung = "
+                                f"{snapped_px_per_ft:.3f} px/ft"
                             )
-                        ]
-                    else:
-                        candidates = [(scale_deg_per_px, "reference")]
+                            candidates = [
+                                (
+                                    px_per_ft_to_deg_per_px(snapped_px_per_ft),
+                                    "key-map region",
+                                )
+                            ]
                     if region_multiplier == 1.0 and deferred["gcps"]:
                         page_dim = (
                             scale_deg_per_px * deferred["img_w"] / cos_phi,
