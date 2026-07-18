@@ -272,10 +272,14 @@ def ransac(
 
 
 def volume_page_numbers(volume: Path) -> set[int]:
-    """All page numbers present in the volume (from its page images)."""
+    """All page numbers present in the volume (from its page images).
+
+    Split panels contribute their base page's number: parsing ``pa__1`` whole
+    would read the panel index as a page number (a letter page has none).
+    """
     numbers: set[int] = set()
     for image in volume.glob("p*.jpg"):
-        number = page_number(image.name.split(".")[0])
+        number = page_number(image.name.split(".")[0].split("__")[0])
         if number is not None:
             numbers.add(number)
     return numbers

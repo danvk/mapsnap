@@ -200,10 +200,14 @@ def label_to_page_key(label: str) -> str | None:
     to lowercase with bracket variants collapsed to double-underscores:
       "New Orleans, La. | 1951 | Vol. 5 p428 [2]" → "p428__2"
       "New Orleans, La. | 1896 | Vol. 2 p156"     → "p156"
+    Un-numbered index sheets (key maps) carry letter-only page ids:
+      "Los Angeles, Calif. | 1949 | Vol. 14 pa [2]" → "pa__2"
     Returns None if no page identifier is found.
     """
     last_part = label.rsplit("|", 1)[-1].strip()
-    m = re.search(r"\b(p\d+[a-z]?)(?:\s*\[(\d+)\])?$", last_part, re.IGNORECASE)
+    m = re.search(
+        r"\b(p\d+[a-z]?|p[a-z]{1,2})(?:\s*\[(\d+)\])?$", last_part, re.IGNORECASE
+    )
     if m is None:
         return None
     page = m.group(1).lower()

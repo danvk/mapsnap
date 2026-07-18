@@ -105,3 +105,26 @@ def test_detection_plan_no_page_zero_uses_candidates(tmp_path: Path):
     assumed, to_test = detection_plan(volume)
     assert assumed == []
     assert to_test == ["p1a", "p1b"]
+
+
+def test_candidate_keys_letter_pages(tmp_path: Path):
+    # Los Angeles-style: un-numbered index sheets pa/pb are the key maps.
+    volume = make_volume(tmp_path, ["pa.jpg", "pb.jpg", "p1401.jpg", "p1402.jpg"])
+    assert candidate_keys(volume) == ["pa", "pb"]
+
+
+def test_detection_plan_letter_page_splits_tested_as_panels(tmp_path: Path):
+    # A split letter-page candidate is tested panel-by-panel; the parent is dropped.
+    volume = make_volume(
+        tmp_path,
+        ["pa.jpg", "pa__1.jpg", "pa__2.jpg", "pb.jpg", "p1401.jpg"],
+    )
+    assumed, confirm = detection_plan(volume)
+    assert assumed == []
+    assert confirm == ["pa__1", "pa__2", "pb"]
+
+
+def test_letter_page_panels_do_not_pollute_valid_pages(tmp_path: Path):
+    # pa__1's panel index must not be read as a volume page number.
+    volume = make_volume(tmp_path, ["pa.jpg", "pa__1.jpg", "p1401.jpg", "p1402.jpg"])
+    assert volume_valid_pages(volume) == ["1401", "1402"]
