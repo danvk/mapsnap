@@ -30,6 +30,8 @@ import { AdjacencyTable } from './components/AdjacencyTable';
 import { DetectionsTable } from './components/DetectionsTable';
 import { PanelsTable } from './components/PanelsTable';
 import { VolumeViewer } from './components/VolumeViewer';
+import { NoteButton } from './components/NoteButton';
+import { noteContextFromFiles, type NoteContext } from './notes/api';
 import { loadImage } from './loadImage';
 
 // The seed pair the pipeline chose: the two intersections flagged `initial`.
@@ -137,6 +139,9 @@ export function App() {
   const [selectedIndices, setSelectedIndices] = useState<Set<number>>(
     new Set(),
   );
+  // The (volume, page) this view is on, when opened via a `?files=data/...`
+  // deep link — the anchor for per-page notes. Null for dropped files.
+  const [noteContext, setNoteContext] = useState<NoteContext | null>(null);
 
   // Display toggles.
   const [opacity, setOpacity] = useState(85); // 0..100
@@ -441,6 +446,7 @@ export function App() {
       .split(',')
       .map((s) => s.trim())
       .filter(Boolean);
+    setNoteContext(noteContextFromFiles(files));
     void loadFromUrls(files);
     // Runs once on mount; loadFromUrls closes over the initial (empty) state.
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -474,6 +480,7 @@ export function App() {
     >
       <nav className="view-nav">
         <a href="?view=iiif">volume viewer</a>
+        {noteContext && <NoteButton ctx={noteContext} />}
       </nav>
       <ImageColumn
         mode={mode}

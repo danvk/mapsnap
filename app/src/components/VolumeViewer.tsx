@@ -11,6 +11,7 @@ import {
   type PageCompareStats,
 } from '../iiif/compare';
 import { fetchRewrittenAnnotation, fetchVolumes } from '../iiif/api';
+import { fetchVolumeNotes } from '../notes/api';
 import { pagesFromAnnotation } from '../iiif/pages';
 import { InfoPanel } from './InfoPanel';
 import { PageList } from './PageList';
@@ -48,6 +49,8 @@ export function VolumeViewer() {
     null,
   );
   const [truthAnnotation, setTruthAnnotation] = useState<unknown>(null);
+  // Page key → note text for the selected volume (markers + tooltip).
+  const [notes, setNotes] = useState<Map<string, string>>(new Map());
 
   useEffect(() => {
     fetchVolumes()
@@ -96,6 +99,26 @@ export function VolumeViewer() {
 
   const selection = parseAnnotationPath(selectedPath);
   const selectedVolume = volumes?.find((v) => v.name === selection?.volume);
+
+  // Load the selected volume's page notes for the list markers and tooltip.
+  const volumeName = selection?.volume;
+  useEffect(() => {
+    if (!volumeName) {
+      setNotes(new Map());
+      return;
+    }
+    let cancelled = false;
+    fetchVolumeNotes(volumeName)
+      .then((map) => {
+        if (!cancelled) setNotes(map);
+      })
+      .catch(() => {
+        if (!cancelled) setNotes(new Map());
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [volumeName]);
 
   const pages = useMemo(
     () =>
@@ -204,6 +227,7 @@ export function VolumeViewer() {
         <PageList
           pages={pages}
           stats={truthStats}
+          notes={notes}
           selectedItemIndex={selectedItemIndex}
           onSelectPage={setSelectedItemIndex}
         />
@@ -225,6 +249,9 @@ export function VolumeViewer() {
             selectedItemIndex === null
               ? null
               : (truthStats?.get(selectedItemIndex) ?? null)
+          }
+          selectedNote={
+            selectedPage ? (notes.get(selectedPage.pageKey) ?? null) : null
           }
           volume={selection?.volume ?? ''}
           onClose={() => setSelectedItemIndex(null)}

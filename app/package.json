@@ -8,8 +8,7 @@
     "type-check": "tsc --noEmit",
     "test": "vitest run",
     "format": "prettier --write .",
-    "iiif": "node iiif-server.mjs",
-    "keymap": "node keymap-server.mjs"
+    "server": "node server.mjs"
   },
   "type": "module",
   "dependencies": {
