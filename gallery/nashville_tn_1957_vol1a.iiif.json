@@ -24,8 +24,8 @@
           "value": "1"
         }
       ],
-      "created": "2026-07-17T17:04:52Z",
-      "modified": "2026-07-17T17:04:52Z",
+      "created": "2026-07-18T02:42:26Z",
+      "modified": "2026-07-18T02:42:26Z",
       "creator": [
         {
           "id": "https://oldinsurancemaps.net/profile/danvk",
@@ -44,7 +44,7 @@
         },
         "selector": {
           "type": "SvgSelector",
-          "value": "<svg><polygon points=\"-0.0,8040.0 0.0,0.0 5603.5,0.0 5679.6,8040.0 2781.5,8040.0 2500.4,7625.9 2498.7,8040.0 1026.7,8040.0 -0.0,8040.0\" /></svg>"
+          "value": "<svg><polygon points=\"-0.0,6732.3 0.0,0.0 4016.2,0.0 5109.2,733.6 5609.4,765.5 5681.8,6161.9 5250.0,6155.3 5281.9,6684.5 4704.1,6708.0 -0.0,6732.3\" /></svg>"
         }
       },
       "body": {
@@ -73,8 +73,8 @@
             "geometry": {
               "type": "Point",
               "coordinates": [
-                -86.78250033170485,
-                36.16864915720646
+                -86.78418395211922,
+                36.168499104831575
               ]
             }
           },
@@ -94,8 +94,8 @@
             "geometry": {
               "type": "Point",
               "coordinates": [
-                -86.780704058303,
-                36.169391821884716
+                -86.78073249285357,
+                36.16992610190361
               ]
             }
           },
@@ -115,8 +115,8 @@
             "geometry": {
               "type": "Point",
               "coordinates": [
-                -86.77958396251518,
-                36.16762442424559
+                -86.77858027872998,
+                36.1665301261288
               ]
             }
           },
@@ -136,8 +136,8 @@
             "geometry": {
               "type": "Point",
               "coordinates": [
-                -86.78138023591703,
-                36.16688175956733
+                -86.78203173799562,
+                36.16510312905676
               ]
             }
           },
@@ -183,8 +183,8 @@
           "value": "4"
         }
       ],
-      "created": "2026-07-17T17:04:52Z",
-      "modified": "2026-07-17T17:04:52Z",
+      "created": "2026-07-18T02:42:26Z",
+      "modified": "2026-07-18T02:42:26Z",
       "creator": [
         {
           "id": "https://oldinsurancemaps.net/profile/danvk",
@@ -203,7 +203,7 @@
         },
         "selector": {
           "type": "SvgSelector",
-          "value": "<svg><polygon points=\"-0.0,7083.7 -0.0,5604.4 143.4,5812.7 1428.0,5784.2 1379.5,2174.2 -0.0,2180.1 -0.0,0.0 6600.0,0.0 6600.0,8040.0 4084.1,8040.0 3987.5,6536.1 1085.3,6602.5 1114.6,7059.0 616.3,7081.4 -0.0,7083.7\" /></svg>"
+          "value": "<svg><polygon points=\"1457.8,6606.5 1376.9,1950.8 945.3,1925.2 -0.0,1299.8 -0.0,0.0 6600.0,0.0 6600.0,8040.0 4084.1,8040.0 3987.5,6536.1 1457.8,6606.5\" /></svg>"
         }
       },
       "body": {
@@ -276,8 +276,8 @@
           "value": "6"
         }
       ],
-      "created": "2026-07-17T17:04:52Z",
-      "modified": "2026-07-17T17:04:52Z",
+      "created": "2026-07-18T02:42:26Z",
+      "modified": "2026-07-18T02:42:26Z",
       "creator": [
         {
           "id": "https://oldinsurancemaps.net/profile/danvk",
@@ -369,8 +369,8 @@
           "value": "8"
         }
       ],
-      "created": "2026-07-17T17:04:52Z",
-      "modified": "2026-07-17T17:04:52Z",
+      "created": "2026-07-18T02:42:26Z",
+      "modified": "2026-07-18T02:42:26Z",
       "creator": [
         {
           "id": "https://oldinsurancemaps.net/profile/danvk",
@@ -462,8 +462,8 @@
           "value": "6"
         }
       ],
-      "created": "2026-07-17T17:04:52Z",
-      "modified": "2026-07-17T17:04:52Z",
+      "created": "2026-07-18T02:42:26Z",
+      "modified": "2026-07-18T02:42:26Z",
       "creator": [
         {
           "id": "https://oldinsurancemaps.net/profile/danvk",
@@ -482,7 +482,7 @@
         },
         "selector": {
           "type": "SvgSelector",
-          "value": "<svg><polygon points=\"2614.0,6893.4 886.8,6617.9 895.4,1612.0 4604.2,1613.3 5303.2,0.0 5617.9,0.0 5891.0,1634.4 6600.0,1631.0 6600.0,8040.0 -0.0,8040.0 -0.0,7802.5 2576.7,7797.7 2614.0,6893.4\" /></svg>"
+          "value": "<svg><polygon points=\"2614.0,6893.4 886.8,6617.9 895.4,1612.0 4604.2,1613.3 5303.2,0.0 5617.9,0.0 5891.0,1634.4 6600.0,1631.0 6600.0,4109.2 5705.3,4110.2 5394.3,8040.0 -0.0,8040.0 -0.0,7802.5 2576.7,7797.7 2614.0,6893.4\" /></svg>"
         }
       },
       "body": {
@@ -548,15 +548,15 @@
       "metadata": [
         {
           "label": "streets",
-          "value": "4"
+          "value": "5"
         },
         {
           "label": "intersections",
           "value": "1"
         }
       ],
-      "created": "2026-07-17T17:04:52Z",
-      "modified": "2026-07-17T17:04:52Z",
+      "created": "2026-07-18T02:42:26Z",
+      "modified": "2026-07-18T02:42:26Z",
       "creator": [
         {
           "id": "https://oldinsurancemaps.net/profile/danvk",
@@ -575,7 +575,7 @@
         },
         "selector": {
           "type": "SvgSelector",
-          "value": "<svg><polygon points=\"5936.0,6936.0 -0.0,7040.8 0.0,0.0 5721.4,0.0 5936.0,6936.0\" /></svg>"
+          "value": "<svg><polygon points=\"-0.0,8040.0 -0.0,3995.7 891.4,3924.5 696.0,1455.8 5490.1,1034.9 5821.2,3216.3 5936.0,6936.0 2427.6,7004.1 2455.9,8040.0 -0.0,8040.0\" /></svg>"
         }
       },
       "body": {
@@ -604,8 +604,8 @@
             "geometry": {
               "type": "Point",
               "coordinates": [
-                -86.79141699244411,
-                36.15688878899281
+                -86.7937869688246,
+                36.15769588165345
               ]
             }
           },
@@ -625,8 +625,8 @@
             "geometry": {
               "type": "Point",
               "coordinates": [
-                -86.78961234545017,
-                36.15761808995978
+                -86.79031942007504,
+                36.15909720095
               ]
             }
           },
@@ -646,8 +646,8 @@
             "geometry": {
               "type": "Point",
               "coordinates": [
-                -86.7885124049722,
-                36.155842453337165
+                -86.78820593348084,
+                36.15568539433569
               ]
             }
           },
@@ -667,8 +667,8 @@
             "geometry": {
               "type": "Point",
               "coordinates": [
-                -86.79031705196616,
-                36.15511315237019
+                -86.79167348223041,
+                36.15428407503914
               ]
             }
           },
@@ -714,8 +714,8 @@
           "value": "10"
         }
       ],
-      "created": "2026-07-17T17:04:52Z",
-      "modified": "2026-07-17T17:04:52Z",
+      "created": "2026-07-18T02:42:26Z",
+      "modified": "2026-07-18T02:42:26Z",
       "creator": [
         {
           "id": "https://oldinsurancemaps.net/profile/danvk",
@@ -734,7 +734,7 @@
         },
         "selector": {
           "type": "SvgSelector",
-          "value": "<svg><polygon points=\"6056.4,6991.6 478.3,7048.0 420.3,3380.8 -0.0,3374.6 -0.0,1057.1 2330.0,903.1 2217.8,0.0 6600.0,0.0 6600.0,629.0 6002.7,653.4 6056.4,6991.6\" /></svg>"
+          "value": "<svg><polygon points=\"6056.4,6991.6 478.3,7048.0 418.8,3269.1 116.1,1049.0 2330.0,903.1 2217.8,0.0 6600.0,0.0 6600.0,629.0 6002.7,653.4 6056.4,6991.6\" /></svg>"
         }
       },
       "body": {
@@ -807,8 +807,8 @@
           "value": "3"
         }
       ],
-      "created": "2026-07-17T17:04:52Z",
-      "modified": "2026-07-17T17:04:52Z",
+      "created": "2026-07-18T02:42:26Z",
+      "modified": "2026-07-18T02:42:26Z",
       "creator": [
         {
           "id": "https://oldinsurancemaps.net/profile/danvk",
@@ -900,8 +900,8 @@
           "value": "2"
         }
       ],
-      "created": "2026-07-17T17:04:52Z",
-      "modified": "2026-07-17T17:04:52Z",
+      "created": "2026-07-18T02:42:26Z",
+      "modified": "2026-07-18T02:42:26Z",
       "creator": [
         {
           "id": "https://oldinsurancemaps.net/profile/danvk",
@@ -1009,8 +1009,8 @@
           "value": "8040.0"
         }
       ],
-      "created": "2026-07-17T17:04:52Z",
-      "modified": "2026-07-17T17:04:52Z",
+      "created": "2026-07-18T02:42:26Z",
+      "modified": "2026-07-18T02:42:26Z",
       "creator": [
         {
           "id": "https://oldinsurancemaps.net/profile/danvk",
@@ -1118,8 +1118,8 @@
           "value": "8040.0"
         }
       ],
-      "created": "2026-07-17T17:04:52Z",
-      "modified": "2026-07-17T17:04:52Z",
+      "created": "2026-07-18T02:42:26Z",
+      "modified": "2026-07-18T02:42:26Z",
       "creator": [
         {
           "id": "https://oldinsurancemaps.net/profile/danvk",
@@ -1211,8 +1211,8 @@
           "value": "3"
         }
       ],
-      "created": "2026-07-17T17:04:52Z",
-      "modified": "2026-07-17T17:04:52Z",
+      "created": "2026-07-18T02:42:26Z",
+      "modified": "2026-07-18T02:42:26Z",
       "creator": [
         {
           "id": "https://oldinsurancemaps.net/profile/danvk",
@@ -1304,8 +1304,8 @@
           "value": "2"
         }
       ],
-      "created": "2026-07-17T17:04:52Z",
-      "modified": "2026-07-17T17:04:52Z",
+      "created": "2026-07-18T02:42:26Z",
+      "modified": "2026-07-18T02:42:26Z",
       "creator": [
         {
           "id": "https://oldinsurancemaps.net/profile/danvk",
@@ -1324,7 +1324,7 @@
         },
         "selector": {
           "type": "SvgSelector",
-          "value": "<svg><polygon points=\"1845.7,7449.3 1573.1,5857.3 1297.6,5853.3 1496.7,5411.5 650.0,467.6 3636.8,634.8 3609.5,0.0 6600.0,0.0 6600.0,837.7 5484.5,748.8 5194.8,1931.5 5367.0,7487.4 6600.0,7476.9 6600.0,8040.0 2526.1,8040.0 2534.5,7456.0 1845.7,7449.3\" /></svg>"
+          "value": "<svg><polygon points=\"1573.1,5857.3 1297.6,5853.3 1496.7,5411.5 650.0,467.6 5484.5,748.8 5194.8,1931.5 5122.7,3041.2 5367.0,7487.4 1845.7,7449.3 1573.1,5857.3\" /></svg>"
         }
       },
       "body": {
@@ -1397,8 +1397,8 @@
           "value": "2"
         }
       ],
-      "created": "2026-07-17T17:04:52Z",
-      "modified": "2026-07-17T17:04:52Z",
+      "created": "2026-07-18T02:42:26Z",
+      "modified": "2026-07-18T02:42:26Z",
       "creator": [
         {
           "id": "https://oldinsurancemaps.net/profile/danvk",
@@ -1417,7 +1417,7 @@
         },
         "selector": {
           "type": "SvgSelector",
-          "value": "<svg><polygon points=\"2851.8,7028.7 1576.2,6981.8 1531.4,2372.4 1657.8,1228.1 2012.7,18.6 3162.1,162.7 3169.5,0.0 6600.0,0.0 6600.0,6401.5 5680.5,6287.3 5680.6,7189.3 3370.1,7056.3 3248.0,8040.0 -0.0,8040.0 -0.0,7483.2 2825.5,7610.9 2851.8,7028.7\" /></svg>"
+          "value": "<svg><polygon points=\"1531.4,2372.4 1657.8,1228.1 2020.7,0.0 6600.0,0.0 6600.0,6401.5 5680.5,6287.3 5680.6,7189.3 1576.2,6981.8 1531.4,2372.4\" /></svg>"
         }
       },
       "body": {
@@ -1490,8 +1490,8 @@
           "value": "5"
         }
       ],
-      "created": "2026-07-17T17:04:52Z",
-      "modified": "2026-07-17T17:04:52Z",
+      "created": "2026-07-18T02:42:26Z",
+      "modified": "2026-07-18T02:42:26Z",
       "creator": [
         {
           "id": "https://oldinsurancemaps.net/profile/danvk",
@@ -1583,8 +1583,8 @@
           "value": "1"
         }
       ],
-      "created": "2026-07-17T17:04:52Z",
-      "modified": "2026-07-17T17:04:52Z",
+      "created": "2026-07-18T02:42:26Z",
+      "modified": "2026-07-18T02:42:26Z",
       "creator": [
         {
           "id": "https://oldinsurancemaps.net/profile/danvk",
@@ -1603,7 +1603,7 @@
         },
         "selector": {
           "type": "SvgSelector",
-          "value": "<svg><polygon points=\"-0.0,6084.6 0.0,0.0 6600.0,0.0 6600.0,7658.9 716.0,7072.0 690.2,6432.4 -0.0,6084.6\" /></svg>"
+          "value": "<svg><polygon points=\"0.0,0.0 6600.0,0.0 6600.0,7557.2 716.0,7072.0 702.6,6739.1 -0.0,6385.2 0.0,0.0\" /></svg>"
         }
       },
       "body": {
@@ -1632,8 +1632,8 @@
             "geometry": {
               "type": "Point",
               "coordinates": [
-                -86.79764142591385,
-                36.160974880783414
+                -86.79893369887475,
+                36.16221053479578
               ]
             }
           },
@@ -1653,8 +1653,8 @@
             "geometry": {
               "type": "Point",
               "coordinates": [
-                -86.7959765414066,
-                36.16189587200982
+                -86.7957346975129,
+                36.163980178380484
               ]
             }
           },
@@ -1674,8 +1674,8 @@
             "geometry": {
               "type": "Point",
               "coordinates": [
-                -86.79458749137697,
-                36.16025775113997
+                -86.7930656998034,
+                36.160832602154805
               ]
             }
           },
@@ -1695,8 +1695,8 @@
             "geometry": {
               "type": "Point",
               "coordinates": [
-                -86.79625237588422,
-                36.159336759913565
+                -86.79626470116524,
+                36.159062958570104
               ]
             }
           },
@@ -1742,8 +1742,8 @@
           "value": "3"
         }
       ],
-      "created": "2026-07-17T17:04:52Z",
-      "modified": "2026-07-17T17:04:52Z",
+      "created": "2026-07-18T02:42:26Z",
+      "modified": "2026-07-18T02:42:26Z",
       "creator": [
         {
           "id": "https://oldinsurancemaps.net/profile/danvk",
@@ -1762,7 +1762,7 @@
         },
         "selector": {
           "type": "SvgSelector",
-          "value": "<svg><polygon points=\"5895.8,664.0 5896.0,7276.0 818.5,7348.9 1009.6,590.4 -0.0,599.5 -0.0,0.0 6600.0,0.0 6600.0,675.6 5895.8,664.0\" /></svg>"
+          "value": "<svg><polygon points=\"5895.8,664.0 5896.0,7276.0 818.5,7348.9 1009.6,590.4 5895.8,664.0\" /></svg>"
         }
       },
       "body": {
@@ -1835,8 +1835,8 @@
           "value": "5"
         }
       ],
-      "created": "2026-07-17T17:04:52Z",
-      "modified": "2026-07-17T17:04:52Z",
+      "created": "2026-07-18T02:42:26Z",
+      "modified": "2026-07-18T02:42:26Z",
       "creator": [
         {
           "id": "https://oldinsurancemaps.net/profile/danvk",
@@ -1928,8 +1928,8 @@
           "value": "4"
         }
       ],
-      "created": "2026-07-17T17:04:52Z",
-      "modified": "2026-07-17T17:04:52Z",
+      "created": "2026-07-18T02:42:26Z",
+      "modified": "2026-07-18T02:42:26Z",
       "creator": [
         {
           "id": "https://oldinsurancemaps.net/profile/danvk",
@@ -1948,7 +1948,7 @@
         },
         "selector": {
           "type": "SvgSelector",
-          "value": "<svg><polygon points=\"849.2,641.2 6048.2,814.8 5696.0,7264.0 629.8,7175.1 849.2,641.2\" /></svg>"
+          "value": "<svg><polygon points=\"629.8,7175.1 849.2,641.2 3966.6,797.0 6048.2,814.8 5696.0,7264.0 629.8,7175.1\" /></svg>"
         }
       },
       "body": {
@@ -2021,8 +2021,8 @@
           "value": "2"
         }
       ],
-      "created": "2026-07-17T17:04:52Z",
-      "modified": "2026-07-17T17:04:52Z",
+      "created": "2026-07-18T02:42:26Z",
+      "modified": "2026-07-18T02:42:26Z",
       "creator": [
         {
           "id": "https://oldinsurancemaps.net/profile/danvk",
@@ -2041,7 +2041,7 @@
         },
         "selector": {
           "type": "SvgSelector",
-          "value": "<svg><polygon points=\"398.3,8040.0 804.0,1699.8 -0.0,1684.2 -0.0,643.3 6600.0,916.2 6600.0,8040.0 398.3,8040.0\" /></svg>"
+          "value": "<svg><polygon points=\"412.0,7704.0 804.0,1699.8 -0.0,1684.2 -0.0,643.3 6600.0,916.2 6600.0,8040.0 1374.1,8040.0 1389.5,7757.1 412.0,7704.0\" /></svg>"
         }
       },
       "body": {
@@ -2114,8 +2114,8 @@
           "value": "4"
         }
       ],
-      "created": "2026-07-17T17:04:52Z",
-      "modified": "2026-07-17T17:04:52Z",
+      "created": "2026-07-18T02:42:26Z",
+      "modified": "2026-07-18T02:42:26Z",
       "creator": [
         {
           "id": "https://oldinsurancemaps.net/profile/danvk",
@@ -2207,8 +2207,8 @@
           "value": "6"
         }
       ],
-      "created": "2026-07-17T17:04:52Z",
-      "modified": "2026-07-17T17:04:52Z",
+      "created": "2026-07-18T02:42:26Z",
+      "modified": "2026-07-18T02:42:26Z",
       "creator": [
         {
           "id": "https://oldinsurancemaps.net/profile/danvk",
@@ -2300,8 +2300,8 @@
           "value": "2"
         }
       ],
-      "created": "2026-07-17T17:04:52Z",
-      "modified": "2026-07-17T17:04:52Z",
+      "created": "2026-07-18T02:42:26Z",
+      "modified": "2026-07-18T02:42:26Z",
       "creator": [
         {
           "id": "https://oldinsurancemaps.net/profile/danvk",
@@ -2393,8 +2393,8 @@
           "value": "2"
         }
       ],
-      "created": "2026-07-17T17:04:52Z",
-      "modified": "2026-07-17T17:04:52Z",
+      "created": "2026-07-18T02:42:26Z",
+      "modified": "2026-07-18T02:42:26Z",
       "creator": [
         {
           "id": "https://oldinsurancemaps.net/profile/danvk",
@@ -2486,8 +2486,8 @@
           "value": "6"
         }
       ],
-      "created": "2026-07-17T17:04:52Z",
-      "modified": "2026-07-17T17:04:52Z",
+      "created": "2026-07-18T02:42:26Z",
+      "modified": "2026-07-18T02:42:26Z",
       "creator": [
         {
           "id": "https://oldinsurancemaps.net/profile/danvk",
@@ -2506,7 +2506,7 @@
         },
         "selector": {
           "type": "SvgSelector",
-          "value": "<svg><polygon points=\"740.0,732.0 5593.2,603.9 5598.0,949.7 6600.0,895.0 6600.0,5906.1 5608.4,5916.8 5611.9,7132.5 807.7,7242.4 740.0,732.0\" /></svg>"
+          "value": "<svg><polygon points=\"740.0,732.0 6600.0,603.6 6600.0,7092.3 807.7,7242.4 740.0,732.0\" /></svg>"
         }
       },
       "body": {
@@ -2579,8 +2579,8 @@
           "value": "2"
         }
       ],
-      "created": "2026-07-17T17:04:52Z",
-      "modified": "2026-07-17T17:04:52Z",
+      "created": "2026-07-18T02:42:26Z",
+      "modified": "2026-07-18T02:42:26Z",
       "creator": [
         {
           "id": "https://oldinsurancemaps.net/profile/danvk",
@@ -2672,8 +2672,8 @@
           "value": "2"
         }
       ],
-      "created": "2026-07-17T17:04:52Z",
-      "modified": "2026-07-17T17:04:52Z",
+      "created": "2026-07-18T02:42:26Z",
+      "modified": "2026-07-18T02:42:26Z",
       "creator": [
         {
           "id": "https://oldinsurancemaps.net/profile/danvk",
@@ -2765,8 +2765,8 @@
           "value": "1"
         }
       ],
-      "created": "2026-07-17T17:04:52Z",
-      "modified": "2026-07-17T17:04:52Z",
+      "created": "2026-07-18T02:42:26Z",
+      "modified": "2026-07-18T02:42:26Z",
       "creator": [
         {
           "id": "https://oldinsurancemaps.net/profile/danvk",
@@ -2785,7 +2785,7 @@
         },
         "selector": {
           "type": "SvgSelector",
-          "value": "<svg><polygon points=\"2537.2,6751.1 2659.2,0.0 6600.0,0.0 6600.0,6184.2 4067.7,6155.5 4050.7,6733.1 2537.2,6751.1\" /></svg>"
+          "value": "<svg><polygon points=\"2578.0,5175.7 3343.8,5172.4 3378.0,3765.1 2590.3,3774.4 2621.3,1825.6 2097.4,1827.8 2101.4,0.0 6600.0,0.0 6600.0,8040.0 6375.3,8040.0 6377.5,6568.9 5403.1,6567.5 5392.3,7545.5 3298.6,7521.8 3298.3,7164.1 2557.7,7076.6 2578.0,5175.7\" /></svg>"
         }
       },
       "body": {
@@ -2814,8 +2814,8 @@
             "geometry": {
               "type": "Point",
               "coordinates": [
-                -86.77849571904534,
-                36.164244324924475
+                -86.77995615129157,
+                36.16389474770452
               ]
             }
           },
@@ -2835,8 +2835,8 @@
             "geometry": {
               "type": "Point",
               "coordinates": [
-                -86.77493612988464,
-                36.16578054765666
+                -86.7731165594021,
+                36.16684653120118
               ]
             }
           },
@@ -2856,8 +2856,8 @@
             "geometry": {
               "type": "Point",
               "coordinates": [
-                -86.7726191803085,
-                36.16227818021504
+                -86.76866464407878,
+                36.16011688829404
               ]
             }
           },
@@ -2877,8 +2877,8 @@
             "geometry": {
               "type": "Point",
               "coordinates": [
-                -86.77617876946921,
-                36.160741957482855
+                -86.77550423596826,
+                36.15716510479738
               ]
             }
           },
@@ -2924,8 +2924,8 @@
           "value": "9"
         }
       ],
-      "created": "2026-07-17T17:04:52Z",
-      "modified": "2026-07-17T17:04:52Z",
+      "created": "2026-07-18T02:42:26Z",
+      "modified": "2026-07-18T02:42:26Z",
       "creator": [
         {
           "id": "https://oldinsurancemaps.net/profile/danvk",
@@ -2944,7 +2944,7 @@
         },
         "selector": {
           "type": "SvgSelector",
-          "value": "<svg><polygon points=\"938.8,7012.0 950.8,782.9 5629.0,733.4 5620.0,7012.0 938.8,7012.0\" /></svg>"
+          "value": "<svg><polygon points=\"938.8,7012.0 950.8,782.9 6600.0,705.7 6600.0,5728.9 5622.5,5733.2 5620.0,7012.0 938.8,7012.0\" /></svg>"
         }
       },
       "body": {
@@ -3000,115 +3000,6 @@
       }
     },
     {
-      "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd396m:g3964m:g3964nm:g3964nm_g08356195701A:08356_01A_1957-0041__1/georef",
-      "type": "Annotation",
-      "@context": [
-        "http://iiif.io/api/extension/georef/1/context.json",
-        "http://iiif.io/api/presentation/3/context.json"
-      ],
-      "label": "Nashville, Tenn. | 1957 | Vol. 1a p41 [2]",
-      "metadata": [
-        {
-          "label": "streets",
-          "value": "4"
-        },
-        {
-          "label": "intersections",
-          "value": "4"
-        },
-        {
-          "label": "split_canvas_x",
-          "value": "0.0"
-        },
-        {
-          "label": "split_canvas_y",
-          "value": "0.0"
-        },
-        {
-          "label": "split_canvas_w",
-          "value": "3480.8"
-        },
-        {
-          "label": "split_canvas_h",
-          "value": "8040.0"
-        }
-      ],
-      "created": "2026-07-17T17:04:52Z",
-      "modified": "2026-07-17T17:04:52Z",
-      "creator": [
-        {
-          "id": "https://oldinsurancemaps.net/profile/danvk",
-          "type": "Person"
-        }
-      ],
-      "motivation": "georeferencing",
-      "target": {
-        "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd396m:g3964m:g3964nm:g3964nm_g08356195701A:08356_01A_1957-0041__1/selector",
-        "type": "SpecificResource",
-        "source": {
-          "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd396m:g3964m:g3964nm:g3964nm_g08356195701A:08356_01A_1957-0041/info.json",
-          "type": "ImageService2",
-          "height": 8040,
-          "width": 6600
-        },
-        "selector": {
-          "type": "SvgSelector",
-          "value": "<svg><polygon points=\"476.1,5624.0 483.2,0.0 2857.1,10.4 2755.7,5629.4 476.1,5624.0\" /></svg>"
-        }
-      },
-      "body": {
-        "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd396m:g3964m:g3964nm:g3964nm_g08356195701A:08356_01A_1957-0041__1/gcps",
-        "type": "FeatureCollection",
-        "transformation": {
-          "type": "helmert"
-        },
-        "features": [
-          {
-            "type": "Feature",
-            "properties": {
-              "resourceCoords": [
-                476.1,
-                5624.0
-              ],
-              "creator": {
-                "id": "https://oldinsurancemaps.net/profile/danvk",
-                "type": "Person"
-              },
-              "type": "gcp"
-            },
-            "geometry": {
-              "type": "Point",
-              "coordinates": [
-                -86.7768481,
-                36.1629182
-              ]
-            }
-          },
-          {
-            "type": "Feature",
-            "properties": {
-              "resourceCoords": [
-                476.1,
-                892.0
-              ],
-              "creator": {
-                "id": "https://oldinsurancemaps.net/profile/danvk",
-                "type": "Person"
-              },
-              "type": "gcp"
-            },
-            "geometry": {
-              "type": "Point",
-              "coordinates": [
-                -86.7777305,
-                36.1642557
-              ]
-            }
-          }
-        ]
-      }
-    },
-    {
       "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd396m:g3964m:g3964nm:g3964nm_g08356195701A:08356_01A_1957-0041__2/georef",
       "type": "Annotation",
       "@context": [
@@ -3142,8 +3033,8 @@
           "value": "8040.0"
         }
       ],
-      "created": "2026-07-17T17:04:52Z",
-      "modified": "2026-07-17T17:04:52Z",
+      "created": "2026-07-18T02:42:26Z",
+      "modified": "2026-07-18T02:42:26Z",
       "creator": [
         {
           "id": "https://oldinsurancemaps.net/profile/danvk",
@@ -3162,7 +3053,7 @@
         },
         "selector": {
           "type": "SvgSelector",
-          "value": "<svg><polygon points=\"6580.5,1189.1 6456.1,6988.0 3713.5,6988.0 3823.8,1166.4 6580.5,1189.1\" /></svg>"
+          "value": "<svg><polygon points=\"6600.0,0.0 6456.1,6988.0 3713.5,6988.0 3831.3,0.0 6600.0,0.0\" /></svg>"
         }
       },
       "body": {
@@ -3235,8 +3126,8 @@
           "value": "4"
         }
       ],
-      "created": "2026-07-17T17:04:52Z",
-      "modified": "2026-07-17T17:04:52Z",
+      "created": "2026-07-18T02:42:26Z",
+      "modified": "2026-07-18T02:42:26Z",
       "creator": [
         {
           "id": "https://oldinsurancemaps.net/profile/danvk",
@@ -3328,8 +3219,8 @@
           "value": "5"
         }
       ],
-      "created": "2026-07-17T17:04:52Z",
-      "modified": "2026-07-17T17:04:52Z",
+      "created": "2026-07-18T02:42:26Z",
+      "modified": "2026-07-18T02:42:26Z",
       "creator": [
         {
           "id": "https://oldinsurancemaps.net/profile/danvk",
@@ -3421,8 +3312,8 @@
           "value": "2"
         }
       ],
-      "created": "2026-07-17T17:04:52Z",
-      "modified": "2026-07-17T17:04:52Z",
+      "created": "2026-07-18T02:42:26Z",
+      "modified": "2026-07-18T02:42:26Z",
       "creator": [
         {
           "id": "https://oldinsurancemaps.net/profile/danvk",
@@ -3441,7 +3332,7 @@
         },
         "selector": {
           "type": "SvgSelector",
-          "value": "<svg><polygon points=\"-0.0,7434.5 -0.0,817.6 5658.0,148.5 6583.8,8040.0 974.5,8040.0 892.0,7428.0 -0.0,7434.5\" /></svg>"
+          "value": "<svg><polygon points=\"5658.0,148.5 6462.3,6639.6 6204.9,6724.8 -0.0,7434.5 -0.0,817.6 5658.0,148.5\" /></svg>"
         }
       },
       "body": {
@@ -3514,8 +3405,8 @@
           "value": "3"
         }
       ],
-      "created": "2026-07-17T17:04:52Z",
-      "modified": "2026-07-17T17:04:52Z",
+      "created": "2026-07-18T02:42:26Z",
+      "modified": "2026-07-18T02:42:26Z",
       "creator": [
         {
           "id": "https://oldinsurancemaps.net/profile/danvk",
@@ -3607,8 +3498,8 @@
           "value": "2"
         }
       ],
-      "created": "2026-07-17T17:04:52Z",
-      "modified": "2026-07-17T17:04:52Z",
+      "created": "2026-07-18T02:42:26Z",
+      "modified": "2026-07-18T02:42:26Z",
       "creator": [
         {
           "id": "https://oldinsurancemaps.net/profile/danvk",
@@ -3627,7 +3518,7 @@
         },
         "selector": {
           "type": "SvgSelector",
-          "value": "<svg><polygon points=\"1281.5,1276.2 5884.0,1592.0 5380.3,8040.0 717.7,8040.0 909.9,5510.2 -0.0,5445.1 -0.0,2399.4 1125.3,2629.6 1281.5,1276.2\" /></svg>"
+          "value": "<svg><polygon points=\"5884.0,1592.0 5382.0,8040.0 528.3,8040.0 1093.3,1263.3 5884.0,1592.0\" /></svg>"
         }
       },
       "body": {
@@ -3656,8 +3547,8 @@
             "geometry": {
               "type": "Point",
               "coordinates": [
-                -86.77896660340704,
-                36.16057807451386
+                -86.77889671037964,
+                36.16059562237369
               ]
             }
           },
@@ -3677,8 +3568,8 @@
             "geometry": {
               "type": "Point",
               "coordinates": [
-                -86.7772629435322,
-                36.161451580926105
+                -86.77725995712858,
+                36.16143482418925
               ]
             }
           },
@@ -3698,8 +3589,8 @@
             "geometry": {
               "type": "Point",
               "coordinates": [
-                -86.77594551066962,
-                36.159775308017096
+                -86.77599426287075,
+                36.15982438235518
               ]
             }
           },
@@ -3719,8 +3610,8 @@
             "geometry": {
               "type": "Point",
               "coordinates": [
-                -86.77764917054446,
-                36.15890180160485
+                -86.77763101612183,
+                36.158985180539624
               ]
             }
           },
@@ -3787,8 +3678,8 @@
           "value": "6"
         }
       ],
-      "created": "2026-07-17T17:04:52Z",
-      "modified": "2026-07-17T17:04:52Z",
+      "created": "2026-07-18T02:42:26Z",
+      "modified": "2026-07-18T02:42:26Z",
       "creator": [
         {
           "id": "https://oldinsurancemaps.net/profile/danvk",
@@ -3880,8 +3771,8 @@
           "value": "4"
         }
       ],
-      "created": "2026-07-17T17:04:52Z",
-      "modified": "2026-07-17T17:04:52Z",
+      "created": "2026-07-18T02:42:26Z",
+      "modified": "2026-07-18T02:42:26Z",
       "creator": [
         {
           "id": "https://oldinsurancemaps.net/profile/danvk",
@@ -3973,8 +3864,8 @@
           "value": "7"
         }
       ],
-      "created": "2026-07-17T17:04:52Z",
-      "modified": "2026-07-17T17:04:52Z",
+      "created": "2026-07-18T02:42:26Z",
+      "modified": "2026-07-18T02:42:26Z",
       "creator": [
         {
           "id": "https://oldinsurancemaps.net/profile/danvk",
@@ -4066,8 +3957,8 @@
           "value": "2"
         }
       ],
-      "created": "2026-07-17T17:04:52Z",
-      "modified": "2026-07-17T17:04:52Z",
+      "created": "2026-07-18T02:42:26Z",
+      "modified": "2026-07-18T02:42:26Z",
       "creator": [
         {
           "id": "https://oldinsurancemaps.net/profile/danvk",
@@ -4086,7 +3977,7 @@
         },
         "selector": {
           "type": "SvgSelector",
-          "value": "<svg><polygon points=\"946.3,6912.4 -0.0,7339.2 0.0,0.0 417.7,0.0 406.6,404.3 5941.6,405.9 5895.5,6674.6 1218.0,6648.7 946.3,6912.4\" /></svg>"
+          "value": "<svg><polygon points=\"946.3,6912.4 -0.0,7339.2 -0.0,406.6 5941.6,405.9 5895.5,6674.6 1218.0,6648.7 946.3,6912.4\" /></svg>"
         }
       },
       "body": {
@@ -4159,8 +4050,8 @@
           "value": "5"
         }
       ],
-      "created": "2026-07-17T17:04:52Z",
-      "modified": "2026-07-17T17:04:52Z",
+      "created": "2026-07-18T02:42:26Z",
+      "modified": "2026-07-18T02:42:26Z",
       "creator": [
         {
           "id": "https://oldinsurancemaps.net/profile/danvk",
@@ -4252,8 +4143,8 @@
           "value": "15"
         }
       ],
-      "created": "2026-07-17T17:04:52Z",
-      "modified": "2026-07-17T17:04:52Z",
+      "created": "2026-07-18T02:42:26Z",
+      "modified": "2026-07-18T02:42:26Z",
       "creator": [
         {
           "id": "https://oldinsurancemaps.net/profile/danvk",
@@ -4345,8 +4236,8 @@
           "value": "2"
         }
       ],
-      "created": "2026-07-17T17:04:52Z",
-      "modified": "2026-07-17T17:04:52Z",
+      "created": "2026-07-18T02:42:26Z",
+      "modified": "2026-07-18T02:42:26Z",
       "creator": [
         {
           "id": "https://oldinsurancemaps.net/profile/danvk",
@@ -4365,7 +4256,7 @@
         },
         "selector": {
           "type": "SvgSelector",
-          "value": "<svg><polygon points=\"1198.7,5745.1 1112.1,6027.4 1083.2,444.8 5044.8,334.1 5632.0,388.0 5642.3,722.0 6600.0,821.3 6600.0,2704.2 5693.3,2728.8 5791.6,7154.3 1198.7,5745.1\" /></svg>"
+          "value": "<svg><polygon points=\"1112.1,6027.4 1083.2,444.8 5632.0,388.0 5791.6,7154.3 1198.7,5745.1 1112.1,6027.4\" /></svg>"
         }
       },
       "body": {
@@ -4438,8 +4329,8 @@
           "value": "1"
         }
       ],
-      "created": "2026-07-17T17:04:52Z",
-      "modified": "2026-07-17T17:04:52Z",
+      "created": "2026-07-18T02:42:26Z",
+      "modified": "2026-07-18T02:42:26Z",
       "creator": [
         {
           "id": "https://oldinsurancemaps.net/profile/danvk",
@@ -4458,7 +4349,7 @@
         },
         "selector": {
           "type": "SvgSelector",
-          "value": "<svg><polygon points=\"6162.3,0.0 6151.1,2537.1 6600.0,2504.9 6600.0,4954.0 768.0,4908.0 774.8,0.0 6162.3,0.0\" /></svg>"
+          "value": "<svg><polygon points=\"3537.8,8040.0 3568.9,4931.7 768.0,4908.0 772.8,171.0 3611.0,142.0 3571.0,3541.8 5991.7,3368.7 5938.0,8040.0 3537.8,8040.0\" /></svg>"
         }
       },
       "body": {
@@ -4487,8 +4378,8 @@
             "geometry": {
               "type": "Point",
               "coordinates": [
-                -86.77948748607828,
-                36.15882786291815
+                -86.78033383005426,
+                36.159728182840766
               ]
             }
           },
@@ -4508,8 +4399,8 @@
             "geometry": {
               "type": "Point",
               "coordinates": [
-                -86.77771099521344,
-                36.15960094754032
+                -86.77692038205161,
+                36.16121363047895
               ]
             }
           },
@@ -4529,8 +4420,8 @@
             "geometry": {
               "type": "Point",
               "coordinates": [
-                -86.77654501970083,
-                36.15785301442657
+                -86.77468001208211,
+                36.15785505492193
               ]
             }
           },
@@ -4550,8 +4441,8 @@
             "geometry": {
               "type": "Point",
               "coordinates": [
-                -86.77832151056568,
-                36.157079929804404
+                -86.77809346008476,
+                36.15636960728376
               ]
             }
           },
@@ -4597,8 +4488,8 @@
           "value": "6"
         }
       ],
-      "created": "2026-07-17T17:04:52Z",
-      "modified": "2026-07-17T17:04:52Z",
+      "created": "2026-07-18T02:42:26Z",
+      "modified": "2026-07-18T02:42:26Z",
       "creator": [
         {
           "id": "https://oldinsurancemaps.net/profile/danvk",
@@ -4617,7 +4508,7 @@
         },
         "selector": {
           "type": "SvgSelector",
-          "value": "<svg><polygon points=\"5273.1,7211.3 1465.7,7297.7 1475.8,5429.9 -0.0,5446.2 -0.0,4137.1 1483.9,3931.0 3808.0,3923.9 3814.4,3456.2 5303.7,3445.3 5273.1,7211.3\" /></svg>"
+          "value": "<svg><polygon points=\"5273.1,7211.3 1465.7,7297.7 1483.9,3931.0 3808.0,3923.9 3814.4,3456.2 5303.7,3445.3 5273.1,7211.3\" /></svg>"
         }
       },
       "body": {
@@ -4690,8 +4581,8 @@
           "value": "4"
         }
       ],
-      "created": "2026-07-17T17:04:52Z",
-      "modified": "2026-07-17T17:04:52Z",
+      "created": "2026-07-18T02:42:26Z",
+      "modified": "2026-07-18T02:42:26Z",
       "creator": [
         {
           "id": "https://oldinsurancemaps.net/profile/danvk",
@@ -4710,7 +4601,7 @@
         },
         "selector": {
           "type": "SvgSelector",
-          "value": "<svg><polygon points=\"2444.2,7331.4 975.3,7174.7 974.2,3408.5 2490.8,3384.6 2538.8,0.0 6600.0,0.0 6600.0,8040.0 2452.6,8040.0 2444.2,7331.4\" /></svg>"
+          "value": "<svg><polygon points=\"0,8040 0,0 6600,0 6600,8040 0,8040\" /></svg>"
         }
       },
       "body": {
@@ -4799,8 +4690,8 @@
           "value": "8040.0"
         }
       ],
-      "created": "2026-07-17T17:04:52Z",
-      "modified": "2026-07-17T17:04:52Z",
+      "created": "2026-07-18T02:42:26Z",
+      "modified": "2026-07-18T02:42:26Z",
       "creator": [
         {
           "id": "https://oldinsurancemaps.net/profile/danvk",
@@ -4892,8 +4783,8 @@
           "value": "7"
         }
       ],
-      "created": "2026-07-17T17:04:52Z",
-      "modified": "2026-07-17T17:04:52Z",
+      "created": "2026-07-18T02:42:26Z",
+      "modified": "2026-07-18T02:42:26Z",
       "creator": [
         {
           "id": "https://oldinsurancemaps.net/profile/danvk",
@@ -4985,8 +4876,8 @@
           "value": "10"
         }
       ],
-      "created": "2026-07-17T17:04:52Z",
-      "modified": "2026-07-17T17:04:52Z",
+      "created": "2026-07-18T02:42:26Z",
+      "modified": "2026-07-18T02:42:26Z",
       "creator": [
         {
           "id": "https://oldinsurancemaps.net/profile/danvk",
@@ -5005,7 +4896,7 @@
         },
         "selector": {
           "type": "SvgSelector",
-          "value": "<svg><polygon points=\"0.0,2184.7 127.7,2176.8 138.5,1679.8 2717.4,1511.3 2740.6,2014.3 4407.9,1910.7 4519.3,1615.3 4115.0,1161.0 4067.5,0.0 6600.0,0.0 6600.0,2881.3 6243.6,3412.0 6312.9,6022.8 94.1,7296.8 241.1,8040.0 0.0,8040.0 0.0,2184.7\" /></svg>"
+          "value": "<svg><polygon points=\"0.0,8040.0 0.0,2184.7 127.7,2176.8 138.5,1679.8 2717.4,1511.3 2740.6,2014.3 4407.9,1910.7 4519.3,1615.3 4115.0,1161.0 4067.5,0.0 6600.0,0.0 6600.0,2881.3 6243.6,3412.0 6312.9,6022.8 21.1,7311.9 241.1,8040.0 0.0,8040.0\" /></svg>"
         }
       },
       "body": {
@@ -5078,8 +4969,8 @@
           "value": "3"
         }
       ],
-      "created": "2026-07-17T17:04:52Z",
-      "modified": "2026-07-17T17:04:52Z",
+      "created": "2026-07-18T02:42:26Z",
+      "modified": "2026-07-18T02:42:26Z",
       "creator": [
         {
           "id": "https://oldinsurancemaps.net/profile/danvk",
@@ -5171,8 +5062,8 @@
           "value": "8"
         }
       ],
-      "created": "2026-07-17T17:04:52Z",
-      "modified": "2026-07-17T17:04:52Z",
+      "created": "2026-07-18T02:42:26Z",
+      "modified": "2026-07-18T02:42:26Z",
       "creator": [
         {
           "id": "https://oldinsurancemaps.net/profile/danvk",
@@ -5264,8 +5155,8 @@
           "value": "5"
         }
       ],
-      "created": "2026-07-17T17:04:52Z",
-      "modified": "2026-07-17T17:04:52Z",
+      "created": "2026-07-18T02:42:26Z",
+      "modified": "2026-07-18T02:42:26Z",
       "creator": [
         {
           "id": "https://oldinsurancemaps.net/profile/danvk",
@@ -5284,7 +5175,7 @@
         },
         "selector": {
           "type": "SvgSelector",
-          "value": "<svg><polygon points=\"716.0,7412.0 682.0,443.6 3715.2,419.5 3708.7,0.0 4391.1,0.0 4395.0,406.5 5884.0,376.0 5883.8,8040.0 1496.5,8040.0 1694.0,7421.4 716.0,7412.0\" /></svg>"
+          "value": "<svg><polygon points=\"803.8,7412.7 716.0,7412.0 682.0,443.6 3481.1,423.0 3498.2,3530.1 5896.5,3492.1 5883.8,8040.0 1496.5,8040.0 1694.0,7421.4 803.8,7412.7\" /></svg>"
         }
       },
       "body": {
@@ -5357,8 +5248,8 @@
           "value": "6"
         }
       ],
-      "created": "2026-07-17T17:04:52Z",
-      "modified": "2026-07-17T17:04:52Z",
+      "created": "2026-07-18T02:42:26Z",
+      "modified": "2026-07-18T02:42:26Z",
       "creator": [
         {
           "id": "https://oldinsurancemaps.net/profile/danvk",
@@ -5377,7 +5268,7 @@
         },
         "selector": {
           "type": "SvgSelector",
-          "value": "<svg><polygon points=\"770.6,6647.0 840.9,1115.1 4732.9,1034.5 6232.5,1210.4 6232.6,1291.2 6233.7,2024.2 6600.0,1938.6 6600.0,8040.0 -0.0,8040.0 -0.0,6960.0 765.9,6968.8 767.1,6889.4 770.6,6647.0\" /></svg>"
+          "value": "<svg><polygon points=\"770.6,6647.0 840.9,1115.1 4732.9,1034.5 6232.5,1210.4 6233.5,4239.2 6453.7,4901.6 6126.5,5470.8 6108.3,6498.9 6600.0,6496.0 6600.0,8040.0 -0.0,8040.0 -0.0,6960.0 765.9,6968.8 767.1,6889.4 770.6,6647.0\" /></svg>"
         }
       },
       "body": {
@@ -5433,6 +5324,165 @@
       }
     },
     {
+      "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd396m:g3964m:g3964nm:g3964nm_g08356195701A:08356_01A_1957-0066/georef",
+      "type": "Annotation",
+      "@context": [
+        "http://iiif.io/api/extension/georef/1/context.json",
+        "http://iiif.io/api/presentation/3/context.json"
+      ],
+      "label": "Nashville, Tenn. | 1957 | Vol. 1a p66",
+      "metadata": [
+        {
+          "label": "streets",
+          "value": "3"
+        },
+        {
+          "label": "intersections",
+          "value": "1"
+        }
+      ],
+      "created": "2026-07-18T02:42:26Z",
+      "modified": "2026-07-18T02:42:26Z",
+      "creator": [
+        {
+          "id": "https://oldinsurancemaps.net/profile/danvk",
+          "type": "Person"
+        }
+      ],
+      "motivation": "georeferencing",
+      "target": {
+        "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd396m:g3964m:g3964nm:g3964nm_g08356195701A:08356_01A_1957-0066/selector",
+        "type": "SpecificResource",
+        "source": {
+          "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd396m:g3964m:g3964nm:g3964nm_g08356195701A:08356_01A_1957-0066/info.json",
+          "type": "ImageService2",
+          "height": 8040,
+          "width": 6600
+        },
+        "selector": {
+          "type": "SvgSelector",
+          "value": "<svg><polygon points=\"665.3,4844.9 459.6,4334.5 445.2,1914.9 4632.6,1956.2 4651.3,0.0 6600.0,0.0 6600.0,8040.0 812.7,7944.4 811.3,6419.5 325.5,6422.7 342.6,5407.3 665.3,4844.9\" /></svg>"
+        }
+      },
+      "body": {
+        "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd396m:g3964m:g3964nm:g3964nm_g08356195701A:08356_01A_1957-0066/gcps",
+        "type": "FeatureCollection",
+        "transformation": {
+          "type": "polynomial",
+          "options": {
+            "order": 1
+          }
+        },
+        "features": [
+          {
+            "type": "Feature",
+            "properties": {
+              "resourceCoords": [
+                0.0,
+                0.0
+              ],
+              "creator": {
+                "id": "https://oldinsurancemaps.net/profile/danvk",
+                "type": "Person"
+              },
+              "type": "corner"
+            },
+            "geometry": {
+              "type": "Point",
+              "coordinates": [
+                -86.77313232728623,
+                36.15977690541481
+              ]
+            }
+          },
+          {
+            "type": "Feature",
+            "properties": {
+              "resourceCoords": [
+                6600.0,
+                0.0
+              ],
+              "creator": {
+                "id": "https://oldinsurancemaps.net/profile/danvk",
+                "type": "Person"
+              },
+              "type": "corner"
+            },
+            "geometry": {
+              "type": "Point",
+              "coordinates": [
+                -86.76970981906221,
+                36.16124868986296
+              ]
+            }
+          },
+          {
+            "type": "Feature",
+            "properties": {
+              "resourceCoords": [
+                6600.0,
+                8040.0
+              ],
+              "creator": {
+                "id": "https://oldinsurancemaps.net/profile/danvk",
+                "type": "Person"
+              },
+              "type": "corner"
+            },
+            "geometry": {
+              "type": "Point",
+              "coordinates": [
+                -86.76749005608002,
+                36.15788119973101
+              ]
+            }
+          },
+          {
+            "type": "Feature",
+            "properties": {
+              "resourceCoords": [
+                0.0,
+                8040.0
+              ],
+              "creator": {
+                "id": "https://oldinsurancemaps.net/profile/danvk",
+                "type": "Person"
+              },
+              "type": "corner"
+            },
+            "geometry": {
+              "type": "Point",
+              "coordinates": [
+                -86.77091256430404,
+                36.15640941528286
+              ]
+            }
+          },
+          {
+            "type": "Feature",
+            "properties": {
+              "resourceCoords": [
+                1632.0,
+                6412.0
+              ],
+              "creator": {
+                "id": "https://oldinsurancemaps.net/profile/danvk",
+                "type": "Person"
+              },
+              "type": "gcp"
+            },
+            "geometry": {
+              "type": "Point",
+              "coordinates": [
+                -86.7705151,
+                36.1574555
+              ]
+            }
+          }
+        ]
+      }
+    },
+    {
       "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd396m:g3964m:g3964nm:g3964nm_g08356195701A:08356_01A_1957-0067/georef",
       "type": "Annotation",
       "@context": [
@@ -5450,8 +5500,8 @@
           "value": "13"
         }
       ],
-      "created": "2026-07-17T17:04:52Z",
-      "modified": "2026-07-17T17:04:52Z",
+      "created": "2026-07-18T02:42:26Z",
+      "modified": "2026-07-18T02:42:26Z",
       "creator": [
         {
           "id": "https://oldinsurancemaps.net/profile/danvk",
@@ -5543,8 +5593,8 @@
           "value": "2"
         }
       ],
-      "created": "2026-07-17T17:04:52Z",
-      "modified": "2026-07-17T17:04:52Z",
+      "created": "2026-07-18T02:42:26Z",
+      "modified": "2026-07-18T02:42:26Z",
       "creator": [
         {
           "id": "https://oldinsurancemaps.net/profile/danvk",
@@ -5563,7 +5613,7 @@
         },
         "selector": {
           "type": "SvgSelector",
-          "value": "<svg><polygon points=\"5677.1,7299.3 -0.0,7221.4 -0.0,0.0 4883.7,142.4 4883.4,726.3 5866.6,717.9 5677.1,7299.3\" /></svg>"
+          "value": "<svg><polygon points=\"5866.6,717.9 5677.1,7299.3 -0.0,7221.4 -0.0,0.0 3949.8,0.0 3937.6,736.2 5866.6,717.9\" /></svg>"
         }
       },
       "body": {

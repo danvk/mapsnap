@@ -408,28 +408,127 @@ def is_scale_outlier(ratio: float) -> bool:
     )
 
 
-def consensus_scale(scales: list[float]) -> float:
-    """The page scale that keeps the most pages within the scale-outlier bands.
+FAMILY_FOLD_WINDOW = math.log2(1.15)
+"""Half-width, in folded log2 space, of the scale-family membership window (±15%)."""
 
-    Anchors the scale-outlier check (and the deferred 1-GCP scale prior) on the scale shared —
-    directly or at a clean 0.5x/2x multiple (:func:`is_scale_outlier`) — by the most pages,
-    rather than the positional median. This has two properties the median lacks:
 
-    * On a 1x/2x/4x scale ladder it selects the middle (2x) rung, the only anchor under which
-      every rung lands in a band.
-    * It is robust to a cluster of consistent *bad* fits at an intermediate, non-2x-related
-      scale capturing the median — Nashville's ~2.14 px/ft misfit cluster holds the positional
-      median (keeping 13/59 pages), where the consensus 2.78 keeps 58/59 and still drops the
-      lone wild outlier.
+def folded_log2_distance(a: float, b: float) -> float:
+    """Circular distance between two log2-mod-1 positions (period 1)."""
+    d = abs(a - b) % 1.0
+    return min(d, 1.0 - d)
 
-    Always returns an actual page's scale (it never averages two values). ``scales`` must be
-    non-empty; ties are broken toward the smaller scale for determinism.
+
+def family_scale(scales: list[float]) -> float:
+    """Reference scale of the volume's dominant 2x-related scale family.
+
+    Sanborn sheet scales come in clean 2x ratios (50/100 ft-per-inch), so in
+    log2(scale) mod 1 every rung of the same family folds onto one point while junk
+    fits land elsewhere. The densest folded window is the family; family members
+    unfold into integer rungs; the most-populated rung is the volume's nominal scale
+    and its median is returned. Count ties break toward the rung whose median keeps
+    the most family members inside the scale-outlier bands (so a balanced 1x/2x/4x
+    ladder anchors on the middle rung, the only anchor that keeps every rung).
+
+    Predecessor ``consensus_scale`` maximized band-kept count over all page scales as
+    anchors, which let junk vote: one junk fit entering the population could flip the
+    anchor to a second junk fit 20% off the true cluster (Detroit), slide it to admit
+    a borderline bad fit into the half-band (Brooklyn p44), or tie-break onto a lone
+    half-scale sheet and halve every deferred page's scale (New Orleans 1951 p431-3).
+    A fold-then-median estimator has none of those failure modes: only 2x-related
+    pages pool, and the output is a dense-cluster median that barely moves when one
+    page enters or leaves. ``scales`` must be non-empty.
     """
+    if len(scales) == 1:
+        return scales[0]
+    folded = [math.log2(scale) % 1.0 for scale in scales]
 
-    def kept(reference: float) -> int:
-        return sum(not is_scale_outlier(scale / reference) for scale in scales)
+    def support(i: int) -> int:
+        return sum(
+            1
+            for f in folded
+            if folded_log2_distance(f, folded[i]) <= FAMILY_FOLD_WINDOW
+        )
 
-    return max(sorted(scales), key=kept)
+    anchor = min(range(len(scales)), key=lambda i: (-support(i), scales[i]))
+    members = [
+        scale
+        for scale, f in zip(scales, folded)
+        if folded_log2_distance(f, folded[anchor]) <= FAMILY_FOLD_WINDOW
+    ]
+    rungs: dict[int, list[float]] = {}
+    for scale in members:
+        rungs.setdefault(round(math.log2(scale / scales[anchor])), []).append(scale)
+
+    def in_band_coverage(reference: float) -> int:
+        return sum(not is_scale_outlier(scale / reference) for scale in members)
+
+    best = max(
+        rungs.items(),
+        key=lambda kv: (
+            len(kv[1]),
+            in_band_coverage(statistics.median(kv[1])),
+            -abs(kv[0]),
+            -kv[0],
+        ),
+    )
+    return statistics.median(best[1])
+
+
+def adjacent_page_scales(
+    approx_center: tuple[float, float],
+    page_dim_deg: tuple[float, float],
+    neighbor_scales: list[tuple[tuple[float, float], float]],
+) -> list[float]:
+    """Scales of pages whose fitted center lies within 1.5x page dimensions.
+
+    Same adjacency criterion as the deferred-fit rotation confirmation
+    (:func:`_rotation_from_neighbors`).
+    """
+    approx_lon, approx_lat = approx_center
+    thresh_lon = 1.5 * page_dim_deg[0]
+    thresh_lat = 1.5 * page_dim_deg[1]
+    return [
+        scale
+        for (n_lon, n_lat), scale in neighbor_scales
+        if abs(n_lon - approx_lon) <= thresh_lon
+        and abs(n_lat - approx_lat) <= thresh_lat
+    ]
+
+
+def local_rung_multiplier(
+    reference_px_per_ft: float, nearby_scales: list[float]
+) -> float:
+    """Family-rung multiplier (0.5/1/2) suggested by adjacent pages' fitted scales.
+
+    Sanborn volumes mix drawing scales by geography (downtown districts at larger
+    scale), so the pages *around* a page are a strong prior for which rung of the
+    scale family it belongs to. The adjacent median is snapped to the nearest clean
+    rung of the reference; returns 1.0 when there are fewer than 2 adjacent pages or
+    the median isn't near a clean rung (unclear signal).
+    """
+    if len(nearby_scales) < 2:
+        return 1.0
+    offset = math.log2(statistics.median(nearby_scales) / reference_px_per_ft)
+    rung = max(-1, min(1, round(offset)))
+    if abs(offset - rung) > FAMILY_FOLD_WINDOW:
+        return 1.0
+    return 2.0**rung
+
+
+def scale_corroborated_by_neighbors(
+    px_per_ft: float, nearby_scales: list[float]
+) -> bool:
+    """Whether a fitted scale matches the median scale of ≥2 adjacent pages.
+
+    Backs the scale-outlier check: a scale that falls in a gap between the outlier
+    bands but agrees with the pages around it (same-scale band of their median) is a
+    real local drawing scale — e.g. Nashville's downtown split panels — not a misfit.
+    """
+    if len(nearby_scales) < 2:
+        return False
+    ratio = px_per_ft / statistics.median(nearby_scales)
+    low, high = SAME_SCALE_BAND
+    return low <= ratio <= high
 
 
 def image_size(image_path: str) -> tuple[int, int]:
@@ -2850,23 +2949,26 @@ def _rotation_from_gcp_features(
 
 def process_deferred_image(
     deferred: dict,
-    scale_deg_per_px: float,
+    scale_candidates: list[tuple[float, str]],
     block_index: dict[str, list[Block]],
     cos_phi: float,
     neighbor_rotations: list[tuple[tuple[float, float], float]],
 ) -> ProcessResult:
     """Georeference an image that was deferred for having a single distinct intersection.
 
-    Uses the provided scale (deg/px) and estimates rotation from the two streets at the
-    GCP. The undirected rotation is then validated against adjacent pages (already
-    successfully georeferenced): if ≥2 neighbours within 1.5× page dimensions agree with
-    one of the two directed candidates (±180°), that candidate is used. When both are
-    equally supported, the 180° ambiguity is resolved by the north-up heuristic.
+    ``scale_candidates`` is a list of (deg/px, source description): the volume reference
+    scale plus any family-rung suggestions from the page's key-map region prior or from
+    adjacent pages' fitted scales. Every candidate is fitted and the page's own labels
+    arbitrate — rung signals can be wrong individually (a merged key-map region mimics a
+    half-scale sheet; a page bordering the downtown district inherits the wrong local
+    rung), but street labels only align at the true scale. Rotation is estimated from
+    the two streets at the GCP and validated against adjacent pages (≥2 neighbours
+    within 1.5× page dimensions agreeing picks a direction; otherwise north-up).
 
-    When the intersection has several world candidates (a jogging street's two crossings),
-    each is fitted and the one with the most inlier labels — then the lowest total residual —
-    is kept. Confirmed fits (≥2 neighbours) are written to output_path (.georef.json);
-    unconfirmed fits are written to a .georef-1gcp.json sidecar and returned success=False.
+    Across (scale candidate × world candidate) fits the one with the most inlier labels —
+    then the lowest total residual — is kept. Confirmed fits (≥2 neighbours) are written
+    to output_path (.georef.json); unconfirmed fits are written to a .georef-1gcp.json
+    sidecar and returned success=False.
     """
     image_path: str = deferred["image_path"]
     output_path: str = deferred["output_path"]
@@ -2880,12 +2982,11 @@ def process_deferred_image(
     keymap: dict | None = deferred.get("keymap")
     truth_polygons: list[list[list[float]]] | None = deferred.get("truth_polygons")
 
-    page_dim_lat = scale_deg_per_px * img_h
-    page_dim_lon = scale_deg_per_px * img_w / cos_phi
     pos_threshold = 0.001
 
-    # Fit each world candidate for the single image point and keep the best by inlier count,
-    # then by total residual. With one candidate (the usual 1-GCP case) the loop runs once.
+    # Fit each (scale candidate, world candidate) pair and keep the best by inlier
+    # count, then by total residual. With one scale and one world candidate (the
+    # usual 1-GCP case) the loop runs once.
     best: (
         tuple[
             tuple[int, float],
@@ -2894,32 +2995,36 @@ def process_deferred_image(
             list[float],
             RotationDecision,
             IntersectionGCP,
+            str,
         ]
         | None
     ) = None
-    for gcp in gcps:
-        undirected = _rotation_from_gcp_features(gcp, block_index)
-        if undirected is None:
-            continue
-        decision = _rotation_from_neighbors(
-            candidate=undirected,
-            approx_center=gcp.geo,
-            page_dim_deg=(page_dim_lon, page_dim_lat),
-            neighbor_rotations=neighbor_rotations,
-        )
-        A = build_affine_from_scale_rotation_gcp(
-            scale_deg_per_px, decision.rotation, gcp, cos_phi
-        )
-        inliers, _ = label_inliers(
-            features, block_index, A, pos_threshold, extrapolate=True
-        )
-        if not inliers:
-            continue
-        residuals = _inlier_residuals(features, block_index, A, inliers)
-        # Maximise inlier count, then minimise total residual (better-aligned jog side).
-        key = (len(inliers), -sum(residuals))
-        if best is None or key > best[0]:
-            best = (key, A, inliers, residuals, decision, gcp)
+    for scale_deg_per_px, scale_source in scale_candidates:
+        page_dim_lat = scale_deg_per_px * img_h
+        page_dim_lon = scale_deg_per_px * img_w / cos_phi
+        for gcp in gcps:
+            undirected = _rotation_from_gcp_features(gcp, block_index)
+            if undirected is None:
+                continue
+            decision = _rotation_from_neighbors(
+                candidate=undirected,
+                approx_center=gcp.geo,
+                page_dim_deg=(page_dim_lon, page_dim_lat),
+                neighbor_rotations=neighbor_rotations,
+            )
+            A = build_affine_from_scale_rotation_gcp(
+                scale_deg_per_px, decision.rotation, gcp, cos_phi
+            )
+            inliers, _ = label_inliers(
+                features, block_index, A, pos_threshold, extrapolate=True
+            )
+            if not inliers:
+                continue
+            residuals = _inlier_residuals(features, block_index, A, inliers)
+            # Maximise inlier count, then minimise total residual (better-aligned jog side).
+            key = (len(inliers), -sum(residuals))
+            if best is None or key > best[0]:
+                best = (key, A, inliers, residuals, decision, gcp, scale_source)
 
     if best is None:
         print(
@@ -2928,10 +3033,16 @@ def process_deferred_image(
         )
         return ProcessResult(success=False)
 
-    _, A, inlier_feat_indices, residuals, decision, gcp = best
+    _, A, inlier_feat_indices, residuals, decision, gcp, scale_source = best
     if len(gcps) > 1:
         print(
             f"Deferred: picked 1 of {len(gcps)} world candidates at the shared pixel.",
+            file=sys.stderr,
+        )
+    if len(scale_candidates) > 1:
+        print(
+            f"Deferred: labels chose the {scale_source} scale of "
+            f"{len(scale_candidates)} candidates.",
             file=sys.stderr,
         )
     print(
@@ -3081,7 +3192,8 @@ def main() -> None:
         metavar="PX_PER_FT",
         help=(
             "Override the scale (pixels per foot) used for deferred single-GCP images. "
-            "If not set, the median scale from successfully georeferenced images is used."
+            "If not set, the dominant scale family of successfully georeferenced images "
+            "is used."
         ),
     )
     parser.add_argument(
@@ -3153,7 +3265,8 @@ def main() -> None:
         default=False,
         help=(
             "Disable georeferencing of pages with only 1 intersection GCP. "
-            "By default, such pages are attempted using the median scale from other pages."
+            "By default, such pages are attempted using the reference scale from "
+            "other pages."
         ),
     )
     parser.add_argument(
@@ -3373,6 +3486,7 @@ def main() -> None:
     neighbor_rotations: list[
         tuple[tuple[float, float], float]
     ] = []  # (center, rotation)
+    neighbor_scales: list[tuple[tuple[float, float], float]] = []  # (center, px_per_ft)
     deferred_list: list[dict] = []
 
     worker_initargs = (
@@ -3425,19 +3539,25 @@ def main() -> None:
                 location_records.append((image_path, result.center))
                 if result.rotation is not None:
                     neighbor_rotations.append((result.center, result.rotation))
+                if result.scale_deg_per_px is not None:
+                    neighbor_scales.append(
+                        (
+                            result.center,
+                            deg_per_px_to_px_per_ft(result.scale_deg_per_px),
+                        )
+                    )
         elif result.deferred is not None:
             deferred_list.append(result.deferred)
 
     # Determine reference scale: explicit override takes priority, then the volume's
-    # consensus scale (consensus_scale) — the actual page scale that keeps the most pages
-    # within the outlier bands. The positional median fails when a bimodal or trimodal volume
-    # puts the middle page between the real scale clusters (Nashville: 3 clusters ~1.43/2.14/
-    # 2.9, median lands on the bad-fit ~2.14 middle and drops the two real families); the
-    # consensus anchors on the dominant 0.5x/1x/2x scale family instead.
+    # dominant scale family (family_scale). The positional median fails when a bimodal or
+    # trimodal volume puts the middle page between the real scale clusters (Nashville:
+    # ~1.43 and ~2.9 families with split panels between); folding 2x-related scales
+    # together anchors on the dominant family's most-populated rung instead.
     if args.scale is not None:
         ref_scale_px_per_ft: float | None = args.scale
     elif scales:
-        ref_scale_px_per_ft = consensus_scale(scales)
+        ref_scale_px_per_ft = family_scale(scales)
     else:
         ref_scale_px_per_ft = None
 
@@ -3463,12 +3583,20 @@ def main() -> None:
                 with _captured_page_log(deferred["log_path"], args.debug, append=True):
                     print(f"\n--- {deferred_image_path} (deferred) ---")
                     # A sheet drawn at a different scale than the volume (Detroit's p93/p50
-                    # are half-scale) breaks the assigned-median-scale assumption, and no
-                    # internal check can catch it — the fitted scale IS the median. The
-                    # page's key-map region gives an independent prior, comparable only
-                    # *relative* to the volume's median region prior (regions are drawn
-                    # with a volume-wide area bias).
-                    page_scale_deg_per_px = scale_deg_per_px
+                    # are half-scale) breaks the assigned-reference-scale assumption, and no
+                    # internal check can catch it — the fitted scale IS the reference. Two
+                    # rung signals of different reliability:
+                    #
+                    # * The key-map region prior (the page's own drawn footprint) is
+                    #   authoritative when it fires: a 1-GCP page rarely has enough
+                    #   labels to overrule it (Detroit p93's 2-label fit "preferred"
+                    #   the wrong rung when allowed to arbitrate).
+                    # * Adjacent pages' fitted scales only *propose* a candidate — a
+                    #   page bordering the downtown district inherits the wrong rung
+                    #   (Nashville p10/p56), and there the page's own labels reliably
+                    #   pick the true scale inside process_deferred_image.
+                    candidates = [(scale_deg_per_px, "reference")]
+                    region_multiplier = 1.0
                     region_prior = region_prior_px_per_ft(
                         deferred.get("keymap"),
                         deferred["img_w"],
@@ -3476,21 +3604,47 @@ def main() -> None:
                         split_page=is_split_page(image_stem(deferred["image_path"])),
                     )
                     if region_prior is not None and median_region_prior is not None:
-                        multiplier = region_relative_scale(
+                        region_multiplier = region_relative_scale(
                             region_prior, median_region_prior
                         )
-                        if multiplier != 1.0:
-                            snapped = ref_scale_px_per_ft * multiplier
-                            page_scale_deg_per_px = px_per_ft_to_deg_per_px(snapped)
+                        if region_multiplier != 1.0:
+                            snapped_px_per_ft = ref_scale_px_per_ft * region_multiplier
                             print(
                                 f"  key-map region is "
                                 f"{median_region_prior / region_prior:.2f}x the "
-                                f"volume's typical area ratio; snapping to "
-                                f"{multiplier}x median scale = {snapped:.3f} px/ft"
+                                f"volume's typical area ratio; snapping to the "
+                                f"{region_multiplier}x rung = "
+                                f"{snapped_px_per_ft:.3f} px/ft"
                             )
+                            candidates = [
+                                (
+                                    px_per_ft_to_deg_per_px(snapped_px_per_ft),
+                                    "key-map region",
+                                )
+                            ]
+                    if region_multiplier == 1.0 and deferred["gcps"]:
+                        page_dim = (
+                            scale_deg_per_px * deferred["img_w"] / cos_phi,
+                            scale_deg_per_px * deferred["img_h"],
+                        )
+                        nearby = adjacent_page_scales(
+                            deferred["gcps"][0].geo, page_dim, neighbor_scales
+                        )
+                        multiplier = local_rung_multiplier(ref_scale_px_per_ft, nearby)
+                        snapped = px_per_ft_to_deg_per_px(
+                            ref_scale_px_per_ft * multiplier
+                        )
+                        if multiplier != 1.0 and all(
+                            abs(snapped - scale) > 1e-12 for scale, _ in candidates
+                        ):
+                            print(
+                                f"  {len(nearby)} adjacent page(s) propose the "
+                                f"{multiplier}x rung"
+                            )
+                            candidates.append((snapped, "adjacent pages"))
                     deferred_result = process_deferred_image(
                         deferred=deferred,
-                        scale_deg_per_px=page_scale_deg_per_px,
+                        scale_candidates=candidates,
                         block_index=block_index,
                         cos_phi=cos_phi,
                         neighbor_rotations=neighbor_rotations,
@@ -3502,12 +3656,31 @@ def main() -> None:
                             (deferred_image_path, deferred_result.center)
                         )
 
-    # Drop georef files whose fitted scale is a major outlier vs the reference.
+    # Drop georef files whose fitted scale is a major outlier vs the reference —
+    # unless the scale agrees with the pages fitted around it (an intermediate local
+    # drawing scale, e.g. a downtown sheet, lands in the gap between outlier bands).
     if ref_scale_px_per_ft is not None and not args.disable_scale_outlier_check:
+        centers_by_path = dict(location_records)
         n_dropped = 0
         for img_path, px_per_ft in scale_records:
             ratio = px_per_ft / ref_scale_px_per_ft
             if is_scale_outlier(ratio):
+                center = centers_by_path.get(img_path)
+                if center is not None:
+                    deg_per_px = px_per_ft_to_deg_per_px(px_per_ft)
+                    width, height = image_size(img_path)
+                    page_dim = (deg_per_px * width / cos_phi, deg_per_px * height)
+                    nearby = adjacent_page_scales(center, page_dim, neighbor_scales)
+                    if px_per_ft in nearby:  # the page itself is in neighbor_scales
+                        nearby.remove(px_per_ft)
+                    if scale_corroborated_by_neighbors(px_per_ft, nearby):
+                        print(
+                            f"Keeping scale outlier {img_path}: {px_per_ft:.4f} px/ft "
+                            f"({ratio:.2f}x reference) corroborated by "
+                            f"{len(nearby)} adjacent page(s)",
+                            file=sys.stderr,
+                        )
+                        continue
                 _, out_path, _ = derive_paths(img_path)
                 misscale_path = out_path.replace(
                     ".georef.json", ".georef-misscale.json"

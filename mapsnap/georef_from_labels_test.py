@@ -1406,32 +1406,106 @@ def test_is_scale_outlier():
     assert is_scale_outlier(2.3)
 
 
-def test_consensus_scale_picks_middle_of_ladder():
-    from mapsnap.georef_from_labels import consensus_scale
+def test_family_scale_picks_middle_of_balanced_ladder():
+    from mapsnap.georef_from_labels import family_scale
 
-    # 1x/2x/4x ladder: only the middle (2.0) rung is within a band of all three rungs.
+    # 1x/2x/4x ladder with equal rung counts: only the middle (2.0) rung keeps every
+    # rung within a scale-outlier band, so the count tie breaks toward it.
     scales = [1.0, 1.0, 2.0, 2.0, 4.0, 4.0]
-    assert consensus_scale(scales) == 2.0
+    assert family_scale(scales) == 2.0
 
 
-def test_consensus_scale_ignores_intermediate_bad_cluster():
-    from mapsnap.georef_from_labels import consensus_scale
+def test_family_scale_ignores_intermediate_bad_cluster():
+    from mapsnap.georef_from_labels import family_scale
 
-    # Two real scales 2x apart (2.0, 4.0) plus a bad-fit cluster at 2.8 (not 2x-related).
-    # Anchoring on 2.0 keeps the 2.0 (1x) and 4.0 (2x) families and drops 2.8; anchoring on
-    # 2.8 keeps only itself. The consensus is the dominant family's scale, not the median.
+    # Two real scales 2x apart (2.0, 4.0) plus a bad-fit cluster at 2.8 (not
+    # 2x-related). 2.8 folds far from the family, so it can't vote; the dominant
+    # rung (2.0, ten pages) wins.
     scales = [2.0] * 10 + [4.0] * 8 + [2.8] * 3
     assert (
         sorted(scales)[len(scales) // 2] == 2.8
     )  # positional median is the bad cluster
-    assert consensus_scale(scales) == 2.0
+    assert family_scale(scales) == 2.0
 
 
-def test_consensus_scale_returns_an_actual_page_scale():
-    from mapsnap.georef_from_labels import consensus_scale
+def test_family_scale_unimodal_matches_median():
+    from mapsnap.georef_from_labels import family_scale
 
     scales = [1.03, 0.97, 1.0, 1.02, 0.99]
-    assert consensus_scale(scales) in scales
+    assert family_scale(scales) == 1.0
+    assert family_scale([1.5]) == 1.5
+
+
+def test_family_scale_stable_when_junk_enters_population():
+    from mapsnap.georef_from_labels import family_scale
+
+    # The Detroit keymapfix flip: consensus_scale moved its anchor 22% (to a lone
+    # 1.79 fit) when a half-scale page left and a 2.08 junk fit joined. The family
+    # estimator must not move.
+    cluster = [1.51, 1.52, 1.52, 1.53, 1.52, 1.51, 1.53, 1.52, 1.52, 1.52]
+    before = cluster + [0.67, 1.79]  # half-scale page present
+    after = cluster + [1.79, 2.08]  # half-scale page gone, junk fit added
+    assert family_scale(before) == 1.52
+    assert family_scale(after) == 1.52
+
+
+def test_family_scale_does_not_anchor_on_lone_half_scale_page():
+    from mapsnap.georef_from_labels import family_scale
+
+    # The New Orleans 1951 trap: one genuine half-scale sheet tied with the main
+    # cluster on band-kept count and consensus_scale's smaller-scale tie-break
+    # anchored on it, halving every deferred page's scale. The half page folds into
+    # the family but its rung has 1 page vs the cluster's 5.
+    scales = [1.50, 1.50, 1.51, 1.50, 1.50, 0.754]
+    assert family_scale(scales) == 1.50
+
+
+def test_family_scale_pools_two_real_families():
+    from mapsnap.georef_from_labels import family_scale
+
+    # Nashville: ~1.43 and ~2.9 families (clean 2x apart) with a smaller junk
+    # cluster between. Folding pools the two real families' mass; the junk rung
+    # can't compete even though it out-numbers either family's minority.
+    scales = [1.43] * 6 + [2.9] * 5 + [2.14] * 4
+    assert family_scale(scales) == 1.43
+
+
+def test_local_rung_multiplier():
+    from mapsnap.georef_from_labels import local_rung_multiplier
+
+    # Neighbors on the reference rung, the double rung, and the half rung.
+    assert local_rung_multiplier(1.44, [1.43, 1.45, 1.46]) == 1.0
+    assert local_rung_multiplier(1.44, [2.85, 2.9, 2.92]) == 2.0
+    assert local_rung_multiplier(1.44, [0.71, 0.73]) == 0.5
+    # Fewer than 2 neighbors, or a median far from any clean rung: no snap.
+    assert local_rung_multiplier(1.44, [2.9]) == 1.0
+    assert local_rung_multiplier(1.44, []) == 1.0
+    assert local_rung_multiplier(1.44, [2.1, 2.15]) == 1.0
+    # Beyond one rung the signal is clamped away rather than extrapolated.
+    assert local_rung_multiplier(1.44, [5.7, 5.8]) == 1.0
+
+
+def test_adjacent_page_scales_and_corroboration():
+    from mapsnap.georef_from_labels import (
+        adjacent_page_scales,
+        scale_corroborated_by_neighbors,
+    )
+
+    page_dim = (0.01, 0.01)
+    neighbor_scales = [
+        ((0.0, 0.0), 2.9),
+        ((0.012, 0.0), 2.85),
+        ((0.0, -0.014), 2.95),
+        ((0.5, 0.5), 1.44),  # far away: excluded
+    ]
+    nearby = adjacent_page_scales((0.001, 0.001), page_dim, neighbor_scales)
+    assert nearby == [2.9, 2.85, 2.95]
+    # A gap-scale fit (e.g. 2.45 vs reference 1.44: outside every band) survives
+    # when it matches its neighborhood's median...
+    assert scale_corroborated_by_neighbors(2.45, nearby)
+    # ...but not when the neighborhood disagrees, or is too small to vouch.
+    assert not scale_corroborated_by_neighbors(1.44, nearby)
+    assert not scale_corroborated_by_neighbors(2.45, [2.9])
 
 
 def _vertical_label(text: str, cx: float, cy: float, short: float, conf: float) -> dict:
