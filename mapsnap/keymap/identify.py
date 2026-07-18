@@ -28,6 +28,7 @@ to decide which pages to fetch and process as key maps.
 """
 
 import argparse
+import re
 import sys
 from collections import defaultdict
 from pathlib import Path
@@ -63,6 +64,16 @@ MIN_DISTINCT = 6
 CANDIDATE_PAGE_NUMBERS = (0, 1)
 
 
+def is_letter_page(stem: str) -> bool:
+    """True for a letter-only page id like ``pa`` or ``pb`` (no digits).
+
+    Some volumes bind un-numbered index sheets in front of the numbered pages
+    (Los Angeles 1949 vol 14's key maps are its ``pa`` and ``pb`` sheets), so
+    letter pages are key-map candidates alongside the page-0/page-1 families.
+    """
+    return re.fullmatch(r"p[a-z]{1,2}", stem) is not None
+
+
 def volume_valid_pages(volume: Path) -> list[str]:
     """The volume's real page numbers as strings (positive, from its ``p*.jpg`` images)."""
     return [
@@ -71,23 +82,28 @@ def volume_valid_pages(volume: Path) -> list[str]:
 
 
 def candidate_keys(volume: Path) -> list[str]:
-    """Page keys to test as key maps: every page numbered 0 or 1 (CANDIDATE_PAGE_NUMBERS).
+    """Page keys to test as key maps: letter pages plus every page numbered 0 or 1.
 
-    The key map is always page 0 or page 1, and shares its number with any lettered/split siblings
-    (p0/p0b/p0L/p0R, p1a-d); nominating both families covers a page-0 cover sitting in front of a
-    page-1 key map while staying a handful of pages. Numbering by absolute value (not rank) avoids
-    dragging in the first real map page when it starts high, e.g. p125. Split panels (stems with
+    The key map is an un-numbered letter sheet (pa/pb) or page 0 or page 1, and shares
+    its number with any lettered/split siblings (p0/p0b/p0L/p0R, p1a-d); nominating all
+    these families covers a page-0 cover sitting in front of a page-1 key map while
+    staying a handful of pages. Numbering by absolute value (not rank) avoids dragging
+    in the first real map page when it starts high, e.g. p125. Split panels (stems with
     ``__``) are never key maps and are skipped.
     """
+    letters: list[str] = []
     by_number: dict[int, list[str]] = defaultdict(list)
     for image in sorted(volume.glob("p*.jpg")):
         stem = image_stem(str(image))
         if "__" in stem:
             continue
+        if is_letter_page(stem):
+            letters.append(stem)
+            continue
         number = page_number(stem)
         if number is not None and number in CANDIDATE_PAGE_NUMBERS:
             by_number[number].append(stem)
-    keys: list[str] = []
+    keys = letters
     for number in sorted(by_number):
         keys.extend(by_number[number])
     return keys
@@ -124,9 +140,15 @@ def detection_plan(volume: Path) -> tuple[list[str], list[str]]:
     page_zero, page_zero_splits = page_zero_stems(volume)
     if page_zero and not page_zero_splits:
         return page_zero, []
-    keys = candidate_keys(volume)
-    if page_zero_splits:
-        keys = page_zero_splits + [key for key in keys if page_number(key) != 0]
+    # A candidate sheet that has been split into panels is tested panel-by-panel
+    # (the composite may mix the key map with an index map or legend) and the
+    # unsplit parent is dropped.
+    keys: list[str] = []
+    for key in candidate_keys(volume):
+        panels = sorted(
+            image_stem(str(image)) for image in volume.glob(f"{key}__*.jpg")
+        )
+        keys.extend(panels or [key])
     return [], keys
 
 

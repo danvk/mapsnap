@@ -8,6 +8,7 @@ from mapsnap.utils import (
     Step,
     default_centerlines,
     image_stem,
+    label_to_page_key,
     list_pages,
     mark_step_done,
     source_id_to_page_key,
@@ -207,3 +208,11 @@ def test_step_leaves_no_stamp_when_body_raises(tmp_path: Path):
         with step("osm"):
             raise ValueError("boom")
     assert not step_done(tmp_path, "osm")  # interrupted step re-runs next time
+
+
+def test_label_letter_page_key():
+    # Un-numbered index sheets (key maps) have letter-only page ids.
+    assert label_to_page_key("Los Angeles, Calif. | 1949 | Vol. 14 pa [2]") == "pa__2"
+    assert label_to_page_key("Los Angeles, Calif. | 1949 | Vol. 14 pb") == "pb"
+    # A trailing non-page word must not become a page key.
+    assert label_to_page_key("Los Angeles, Calif. | 1949 | key map") is None
