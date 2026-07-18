@@ -84,8 +84,22 @@ def main() -> None:
         keymap_keys = identify_keymaps(dir_path)
         if keymap_keys:
             print(f"Key map page(s): {', '.join(keymap_keys)}", flush=True)
-            scaled_keymaps = [str(dir_path / f"{key}.jpg") for key in keymap_keys]
-            run_cmd(["mapsnap", "download-raw", *scaled_keymaps])
+            # A key confirmed as a split panel (p0__1) has no LOC image of its
+            # own: download the parent sheet's raw scan, then re-run split so
+            # the raw copy gains the matching panel files (the splitter mirrors
+            # a page's split onto raw/ when the raw scan is present).
+            parents = sorted({key.split("__")[0] for key in keymap_keys})
+            run_cmd(
+                ["mapsnap", "download-raw"]
+                + [str(dir_path / f"{parent}.jpg") for parent in parents]
+            )
+            split_parents = [
+                str(dir_path / f"{parent}.jpg")
+                for parent in parents
+                if any(key.startswith(f"{parent}__") for key in keymap_keys)
+            ]
+            if split_parents:
+                run_cmd(["mapsnap", "split", *split_parents])
             raw_keymaps = [str(dir_path / "raw" / f"{key}.jpg") for key in keymap_keys]
             run_cmd(["mapsnap", "keymap", *raw_keymaps])
         else:

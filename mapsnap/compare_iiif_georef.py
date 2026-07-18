@@ -786,6 +786,7 @@ def main() -> None:
     if args.csv:
         fields = [
             "page_key",
+            "gen_page_key",
             "n_truth",
             "n_gen",
             "n_streets",
