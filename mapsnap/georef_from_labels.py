@@ -3585,15 +3585,17 @@ def main() -> None:
                     # A sheet drawn at a different scale than the volume (Detroit's p93/p50
                     # are half-scale) breaks the assigned-reference-scale assumption, and no
                     # internal check can catch it — the fitted scale IS the reference. Two
-                    # independent rung signals propose alternative scales: the page's
-                    # key-map region prior (its own footprint; down-only, since
-                    # segmentation fragments mimic an oversized prior) and the fitted
-                    # scales of adjacent pages (Sanborn drawing scale varies by
-                    # geography). Either can be wrong individually (a merged region
-                    # mimics a half-scale sheet; a page bordering downtown inherits the
-                    # wrong local rung), so they only nominate candidates — the page's
-                    # own labels arbitrate inside process_deferred_image.
-                    candidates = [(scale_deg_per_px, "reference")]
+                    # rung signals of different reliability:
+                    #
+                    # * The key-map region prior (the page's own drawn footprint) is
+                    #   authoritative when it fires: a 1-GCP page rarely has enough
+                    #   labels to overrule it (Detroit p93's 2-label fit "preferred"
+                    #   the wrong rung when allowed to arbitrate).
+                    # * Adjacent pages' fitted scales only *propose* a candidate — a
+                    #   page bordering the downtown district inherits the wrong rung
+                    #   (Nashville p10/p56), and there the page's own labels reliably
+                    #   pick the true scale inside process_deferred_image.
+                    region_multiplier = 1.0
                     region_prior = region_prior_px_per_ft(
                         deferred.get("keymap"),
                         deferred["img_w"],
@@ -3601,25 +3603,26 @@ def main() -> None:
                         split_page=is_split_page(image_stem(deferred["image_path"])),
                     )
                     if region_prior is not None and median_region_prior is not None:
-                        multiplier = region_relative_scale(
+                        region_multiplier = region_relative_scale(
                             region_prior, median_region_prior
                         )
-                        if multiplier != 1.0:
-                            print(
-                                f"  key-map region is "
-                                f"{median_region_prior / region_prior:.2f}x the "
-                                f"volume's typical area ratio; proposing the "
-                                f"{multiplier}x rung"
+                    if region_multiplier != 1.0:
+                        snapped_px_per_ft = ref_scale_px_per_ft * region_multiplier
+                        print(
+                            f"  key-map region is "
+                            f"{median_region_prior / region_prior:.2f}x the "
+                            f"volume's typical area ratio; snapping to the "
+                            f"{region_multiplier}x rung = {snapped_px_per_ft:.3f} px/ft"
+                        )
+                        candidates = [
+                            (
+                                px_per_ft_to_deg_per_px(snapped_px_per_ft),
+                                "key-map region",
                             )
-                            candidates.append(
-                                (
-                                    px_per_ft_to_deg_per_px(
-                                        ref_scale_px_per_ft * multiplier
-                                    ),
-                                    "key-map region",
-                                )
-                            )
-                    if deferred["gcps"]:
+                        ]
+                    else:
+                        candidates = [(scale_deg_per_px, "reference")]
+                    if region_multiplier == 1.0 and deferred["gcps"]:
                         page_dim = (
                             scale_deg_per_px * deferred["img_w"] / cos_phi,
                             scale_deg_per_px * deferred["img_h"],
