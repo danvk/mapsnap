@@ -11,6 +11,8 @@ import {
   type PageCompareStats,
 } from '../iiif/compare';
 import { fetchRewrittenAnnotation, fetchVolumes } from '../iiif/api';
+import { isTypingTarget } from '../keyboard';
+import { fetchVolumeNotes } from '../notes/api';
 import { pagesFromAnnotation } from '../iiif/pages';
 import { InfoPanel } from './InfoPanel';
 import { PageList } from './PageList';
@@ -48,6 +50,8 @@ export function VolumeViewer() {
     null,
   );
   const [truthAnnotation, setTruthAnnotation] = useState<unknown>(null);
+  // Page key → note text for the selected volume (markers + tooltip).
+  const [notes, setNotes] = useState<Map<string, string>>(new Map());
 
   useEffect(() => {
     fetchVolumes()
@@ -96,6 +100,40 @@ export function VolumeViewer() {
 
   const selection = parseAnnotationPath(selectedPath);
   const selectedVolume = volumes?.find((v) => v.name === selection?.volume);
+
+  // Load the selected volume's page notes for the list markers and tooltip.
+  const volumeName = selection?.volume;
+  useEffect(() => {
+    if (!volumeName) {
+      setNotes(new Map());
+      return;
+    }
+    let cancelled = false;
+    fetchVolumeNotes(volumeName)
+      .then((map) => {
+        if (!cancelled) setNotes(map);
+      })
+      .catch(() => {
+        if (!cancelled) setNotes(new Map());
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [volumeName]);
+
+  // Cycle warped-image opacity through 0/50/100% on the 'p' key, matching the
+  // georef view (skipped while the user is typing).
+  useEffect(() => {
+    function onKeydown(e: KeyboardEvent): void {
+      if (e.key !== 'p' || isTypingTarget(e.target)) return;
+      const steps = [0, 50, 100];
+      setOpacity(
+        (prev) => steps[(steps.indexOf(prev) + 1) % steps.length] ?? 0,
+      );
+    }
+    window.addEventListener('keydown', onKeydown);
+    return () => window.removeEventListener('keydown', onKeydown);
+  }, []);
 
   const pages = useMemo(
     () =>
@@ -204,6 +242,7 @@ export function VolumeViewer() {
         <PageList
           pages={pages}
           stats={truthStats}
+          notes={notes}
           selectedItemIndex={selectedItemIndex}
           onSelectPage={setSelectedItemIndex}
         />
@@ -225,6 +264,9 @@ export function VolumeViewer() {
             selectedItemIndex === null
               ? null
               : (truthStats?.get(selectedItemIndex) ?? null)
+          }
+          selectedNote={
+            selectedPage ? (notes.get(selectedPage.pageKey) ?? null) : null
           }
           volume={selection?.volume ?? ''}
           onClose={() => setSelectedItemIndex(null)}

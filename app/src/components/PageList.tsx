@@ -7,6 +7,8 @@ interface PageListProps {
   pages: PageGeo[];
   /** Per-itemIndex truth stats; null entry = truth exists but is incomparable (split). */
   stats: Map<number, PageCompareStats | null> | null;
+  /** Page key → note text for the volume; keys present here get a marker. */
+  notes: Map<string, string>;
   selectedItemIndex: number | null;
   onSelectPage: (itemIndex: number | null) => void;
 }
@@ -55,7 +57,7 @@ function sortValue(
  * the worst fits are on top — and a row to select the page on the map.
  */
 export function PageList(props: PageListProps) {
-  const { pages, stats, selectedItemIndex, onSelectPage } = props;
+  const { pages, stats, notes, selectedItemIndex, onSelectPage } = props;
   const [sort, setSort] = useState<{ key: SortKey; descending: boolean }>({
     key: 'rmse',
     descending: true,
@@ -135,7 +137,18 @@ export function PageList(props: PageListProps) {
                   )
                 }
               >
-                <td>{page.pageKey}</td>
+                <td>
+                  {page.pageKey}
+                  {notes.has(page.pageKey) && (
+                    <span
+                      className="page-note-marker"
+                      title={notes.get(page.pageKey)}
+                    >
+                      {' '}
+                      📓
+                    </span>
+                  )}
+                </td>
                 {hasTruth && (
                   <td className="numeric">
                     {pageStats ? (

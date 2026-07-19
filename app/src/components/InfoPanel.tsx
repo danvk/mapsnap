@@ -12,6 +12,8 @@ interface InfoPanelProps {
   selectedPage: PageGeo | null;
   /** Truth-compare stats for the selected page, when the volume has truth. */
   selectedStats: PageCompareStats | null;
+  /** The selected page's note text, or null when it has none. */
+  selectedNote: string | null;
   /** Volume directory name, e.g. "brooklyn_ny_1906_vol_6". */
   volume: string;
   onClose: () => void;
@@ -56,6 +58,7 @@ export function InfoPanel(props: InfoPanelProps) {
     annotationName,
     selectedPage,
     selectedStats,
+    selectedNote,
     volume,
     onClose,
   } = props;
@@ -99,6 +102,12 @@ export function InfoPanel(props: InfoPanelProps) {
           <dt>Fit</dt>
           <dd>{selectedPage.transformationType}</dd>
         </dl>
+        {selectedNote && (
+          <div className="page-info-note">
+            <span className="page-info-note-label">📓 Note</span>
+            <p>{selectedNote}</p>
+          </div>
+        )}
         <div className="page-info-links">
           <a href={`?files=${base}.jpg,${base}.streets.json`}>streets view</a>
           <a href={`?files=${base}.jpg,${base}.georef.json`}>georef view</a>

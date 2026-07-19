@@ -8,17 +8,18 @@
     "type-check": "tsc --noEmit",
     "test": "vitest run",
     "format": "prettier --write .",
-    "iiif": "node iiif-server.mjs",
-    "keymap": "node keymap-server.mjs"
+    "server": "node server/main.ts"
   },
   "type": "module",
   "dependencies": {
     "@allmaps/maplibre": "1.0.0-beta.43",
+    "crosswalk": "^1.5.0",
     "maplibre-gl": "^5.19.0",
     "react": "^19.2.7",
     "react-dom": "^19.2.7"
   },
   "devDependencies": {
+    "@types/express": "^4.17.25",
     "@types/node": "^26.1.0",
     "@types/react": "^19.2.17",
     "@types/react-dom": "^19.2.3",
@@ -30,5 +31,10 @@
     "typescript": "^5.9.3",
     "vite": "^7.3.1",
     "vitest": "^3.2.6"
+  },
+  "overrides": {
+    "crosswalk": {
+      "typescript": "$typescript"
+    }
   }
 }

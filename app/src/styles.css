@@ -223,6 +223,9 @@
   font-family: sans-serif;
   font-size: 13px;
   z-index: 10;
+  display: flex;
+  align-items: center;
+  gap: 10px;
 }
 
 .opacity-control {
@@ -470,4 +473,136 @@ tr.on-fill td {
 }
 .page-list .rmse-disaster {
   color: #cf222e;
+}
+
+/* Per-page notes: nav toggle + inline editor, list markers, tooltip display. */
+.note-control {
+  position: relative;
+  display: inline-flex;
+}
+
+.note-toggle {
+  border: 1px solid transparent;
+  background: none;
+  padding: 1px 4px;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 15px;
+  line-height: 1;
+  /* Greyed out until the page has a note. */
+  filter: grayscale(1);
+  opacity: 0.45;
+  transition:
+    filter 0.1s,
+    opacity 0.1s,
+    background 0.1s;
+}
+
+.note-toggle:hover {
+  opacity: 0.8;
+}
+
+/* Clearly "lit" when the page has a note: full-colour icon on a yellow chip. */
+.note-toggle.has-note {
+  filter: none;
+  opacity: 1;
+  background: #ffe066;
+  border-color: #e6b800;
+}
+
+.note-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 20;
+}
+
+.note-editor {
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  z-index: 21;
+  width: 280px;
+  background: #fff;
+  border: 1px solid #bbb;
+  border-radius: 6px;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.18);
+  padding: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-family: sans-serif;
+  font-size: 13px;
+}
+
+.note-editor-title {
+  font-weight: 600;
+  color: #444;
+}
+
+.note-editor textarea {
+  width: 100%;
+  min-height: 90px;
+  resize: vertical;
+  box-sizing: border-box;
+  font: inherit;
+  padding: 6px;
+  border: 1px solid #ccc;
+  border-radius: 4px;
+}
+
+.note-editor-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.note-editor-hint {
+  flex: 1;
+  color: #999;
+  font-size: 11px;
+}
+
+.note-editor-actions button {
+  cursor: pointer;
+  border: 1px solid #ccc;
+  border-radius: 4px;
+  background: #f6f6f6;
+  padding: 3px 10px;
+  font: inherit;
+}
+
+.note-editor-actions button.note-save {
+  background: #1a7f37;
+  border-color: #1a7f37;
+  color: #fff;
+}
+
+.note-editor-actions button:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.page-note-marker {
+  font-size: 11px;
+}
+
+.page-info-note {
+  margin: 4px 0 10px;
+  padding: 6px 8px;
+  background: #fffbe6;
+  border: 1px solid #f0e0a0;
+  border-radius: 4px;
+}
+
+.page-info-note-label {
+  display: block;
+  font-size: 11px;
+  color: #8a6d00;
+  margin-bottom: 2px;
+}
+
+.page-info-note p {
+  margin: 0;
+  white-space: pre-wrap;
+  word-break: break-word;
 }
