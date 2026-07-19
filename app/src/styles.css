@@ -482,9 +482,10 @@ tr.on-fill td {
 }
 
 .note-toggle {
-  border: none;
+  border: 1px solid transparent;
   background: none;
-  padding: 0;
+  padding: 1px 4px;
+  border-radius: 4px;
   cursor: pointer;
   font-size: 15px;
   line-height: 1;
@@ -493,16 +494,20 @@ tr.on-fill td {
   opacity: 0.45;
   transition:
     filter 0.1s,
-    opacity 0.1s;
+    opacity 0.1s,
+    background 0.1s;
 }
 
 .note-toggle:hover {
   opacity: 0.8;
 }
 
+/* Clearly "lit" when the page has a note: full-colour icon on a yellow chip. */
 .note-toggle.has-note {
   filter: none;
   opacity: 1;
+  background: #ffe066;
+  border-color: #e6b800;
 }
 
 .note-backdrop {

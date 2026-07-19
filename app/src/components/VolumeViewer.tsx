@@ -11,6 +11,7 @@ import {
   type PageCompareStats,
 } from '../iiif/compare';
 import { fetchRewrittenAnnotation, fetchVolumes } from '../iiif/api';
+import { isTypingTarget } from '../keyboard';
 import { fetchVolumeNotes } from '../notes/api';
 import { pagesFromAnnotation } from '../iiif/pages';
 import { InfoPanel } from './InfoPanel';
@@ -119,6 +120,20 @@ export function VolumeViewer() {
       cancelled = true;
     };
   }, [volumeName]);
+
+  // Cycle warped-image opacity through 0/50/100% on the 'p' key, matching the
+  // georef view (skipped while the user is typing).
+  useEffect(() => {
+    function onKeydown(e: KeyboardEvent): void {
+      if (e.key !== 'p' || isTypingTarget(e.target)) return;
+      const steps = [0, 50, 100];
+      setOpacity(
+        (prev) => steps[(steps.indexOf(prev) + 1) % steps.length] ?? 0,
+      );
+    }
+    window.addEventListener('keydown', onKeydown);
+    return () => window.removeEventListener('keydown', onKeydown);
+  }, []);
 
   const pages = useMemo(
     () =>

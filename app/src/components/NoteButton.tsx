@@ -1,18 +1,10 @@
 import { useEffect, useRef, useState } from 'react';
+import { isTypingTarget } from '../keyboard';
 import { fetchNote, saveNote, type NoteContext } from '../notes/api';
 
 interface NoteButtonProps {
   /** The page a note attaches to (from the `?files=` deep link). */
   ctx: NoteContext;
-}
-
-// Whether a keyboard event originated in a field the user is typing into.
-function isTypingTarget(target: EventTarget | null): boolean {
-  const el = target as HTMLElement | null;
-  const tag = el?.tagName;
-  return (
-    tag === 'INPUT' || tag === 'TEXTAREA' || el?.isContentEditable === true
-  );
 }
 
 /**
