@@ -1,14 +1,17 @@
 /**
- * Client for the per-page notes API (served by server.mjs at /notes-api).
+ * Client for the per-page notes API (served at /notes-api; see server/api.ts).
  *
  * A note is free text attached to one page of one volume, identified the same
  * way the debugger's `?files=` deep links are: a volume directory name plus a
  * page key (e.g. "los_angeles_ca_1949_vol_14" / "p1401__2").
  */
 
+import { typedApi } from 'crosswalk';
+import { jsonFetch } from '../apiFetch';
+import type { API } from '../../server/api';
 import { pageStem } from '../fileLoading';
 
-const API_BASE = '/notes-api';
+const api = typedApi<API>({ fetch: jsonFetch });
 
 /** The volume + page a note attaches to. */
 export interface NoteContext {
@@ -37,11 +40,8 @@ export function noteContextFromFiles(files: string[]): NoteContext | null {
 
 /** Fetch one page's note text ("" when there is none). */
 export async function fetchNote(ctx: NoteContext): Promise<string> {
-  const resp = await fetch(
-    `${API_BASE}/note?volume=${encodeURIComponent(ctx.volume)}&page=${encodeURIComponent(ctx.page)}`,
-  );
-  if (!resp.ok) throw new Error(`Failed to load note: ${resp.status}`);
-  return ((await resp.json()) as { note: string }).note;
+  const { note } = await api.get('/notes-api/note')(null, ctx);
+  return note;
 }
 
 /** Save one page's note; a blank note deletes it. Returns the stored text. */
@@ -49,26 +49,14 @@ export async function saveNote(
   ctx: NoteContext,
   note: string,
 ): Promise<string> {
-  const resp = await fetch(
-    `${API_BASE}/note?volume=${encodeURIComponent(ctx.volume)}&page=${encodeURIComponent(ctx.page)}`,
-    {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ note }),
-    },
-  );
-  if (!resp.ok) throw new Error(`Failed to save note: ${resp.status}`);
-  return ((await resp.json()) as { note: string }).note;
+  const result = await api.put('/notes-api/note')({}, { note }, ctx);
+  return result.note;
 }
 
 /** Fetch every page's note in a volume, as a page-key → text map. */
 export async function fetchVolumeNotes(
   volume: string,
 ): Promise<Map<string, string>> {
-  const resp = await fetch(
-    `${API_BASE}/notes?volume=${encodeURIComponent(volume)}`,
-  );
-  if (!resp.ok) throw new Error(`Failed to load notes: ${resp.status}`);
-  const data = (await resp.json()) as { notes: Record<string, string> };
-  return new Map(Object.entries(data.notes));
+  const { notes } = await api.get('/notes-api/notes')(null, { volume });
+  return new Map(Object.entries(notes));
 }
