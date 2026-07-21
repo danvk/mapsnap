@@ -51,9 +51,15 @@ def georef_path_to_page_key(path: str) -> str | None:
     Accepts filenames ending in '_p16s.georef.json', '_p16.georef.json',
     '_p16s.gcps.georef.json' (the '.gcps' infix is optional), or the
     neighbor-fit variant '_p16.georef-neighbor.json'.
+
+    Any letter page suffix is kept (Sanborn sheets run 'a', 'b', … past the
+    directional 's'/'n'/'e'/'w'/'l'/'r' letters), not just a known few — a
+    dropped suffix silently loses that page from the manifest. Compound suffixes
+    that are ambiguous with a skeleton sheet (a letter then 's', e.g. 'p6ns')
+    still parse here; drop_redundant_skeletons raises on them rather than guess.
     """
     m = re.search(
-        r"(?:\b|_)(p\d+)([snewlr]?)((?:__\d+)?)(?:\.[^.]+)?\.georef(?:2|-neighbor)?\.json$",
+        r"(?:\b|_)(p\d+)([a-z]*)((?:__\d+)?)(?:\.[^.]+)?\.georef(?:2|-neighbor)?\.json$",
         path,
         re.IGNORECASE,
     )
@@ -69,13 +75,26 @@ def expand_georef_globs(pattern: str) -> list[str]:
     'v/p*.georef.json,v/p*.georef-neighbor.json' renders the hybrid volume:
     the RANSAC georef when a page has one, the neighbor/pose-graph placement
     otherwise.
+
+    A file whose page key cannot be parsed is skipped with a warning rather than
+    silently: it would otherwise vanish from the output with no trace (as an
+    unrecognized page suffix once did). A later glob repeating an already-chosen
+    page key is skipped quietly, since that is the intended first-glob-wins
+    behaviour of the hybrid pattern above.
     """
     chosen: dict[str, str] = {}
     ordered: list[str] = []
     for sub_pattern in pattern.split(","):
         for path in sorted(glob.glob(sub_pattern.strip())):
             page_key = georef_path_to_page_key(path)
-            if page_key is None or page_key in chosen:
+            if page_key is None:
+                print(
+                    f"Warning: could not parse a page key from '{path}'; "
+                    "omitting it from the output.",
+                    file=sys.stderr,
+                )
+                continue
+            if page_key in chosen:
                 continue
             chosen[page_key] = path
             ordered.append(path)
