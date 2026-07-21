@@ -32,6 +32,10 @@ const EMPTY_FEATURES: FeatureCollection = {
   features: [],
 };
 
+// The RMSE color-coding fill opacity at full slider opacity; scaled down in
+// proportion as the opacity slider is reduced, so the fills fade with the maps.
+const RMSE_FILL_OPACITY = 0.45;
+
 // Overlay features for a selected page: the full image rectangle (solid), the
 // clipping polygon (dashed), and its GCPs (circles), distinguished by `kind`.
 function selectionFeatures(page: PageGeo): FeatureCollection {
@@ -157,7 +161,10 @@ export function VolumeMap(props: VolumeMapProps) {
         source: 'rmse-fills',
         paint: {
           'fill-color': ['get', 'color'],
-          'fill-opacity': 0.45,
+          'fill-opacity': RMSE_FILL_OPACITY,
+          // No transition so the fill tracks the opacity slider instantly,
+          // matching the warped maps (which animate: false below).
+          'fill-opacity-transition': { duration: 0 },
           'fill-outline-color': ['get', 'color'],
         },
       });
@@ -348,9 +355,18 @@ export function VolumeMap(props: VolumeMapProps) {
   // disabled so scrubbing the slider tracks instantly instead of queueing
   // 300ms transitions.
   useEffect(() => {
+    const map = mapRef.current;
     const layer = layerRef.current;
-    if (!layer || !mapReady) return;
+    if (!map || !layer || !mapReady) return;
     layer.setLayerOptions({ opacity }, { animate: false });
+    // Fade the RMSE color fills along with the maps, proportional to their base.
+    if (map.getLayer('rmse-fill')) {
+      map.setPaintProperty(
+        'rmse-fill',
+        'fill-opacity',
+        RMSE_FILL_OPACITY * opacity,
+      );
+    }
   }, [opacity, annotation, mapReady]);
 
   // RMSE color-coding: one translucent fill per page footprint when enabled.
