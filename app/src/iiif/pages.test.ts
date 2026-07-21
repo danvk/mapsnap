@@ -1,6 +1,12 @@
 import { describe, expect, it } from 'vitest';
 import type { GeorefAnnotationPage } from '../../server/iiifAnnotations';
-import { bearingDegrees, pagesFromAnnotation, svgPolygonPoints } from './pages';
+import {
+  bearingDegrees,
+  missingTruthPages,
+  pagesFromAnnotation,
+  svgPolygonPoints,
+  type PageGeo,
+} from './pages';
 
 const METERS_PER_DEGREE_LAT = 110574;
 const METERS_PER_DEGREE_LON_AT_EQUATOR = 111320;
@@ -164,5 +170,34 @@ describe('pagesFromAnnotation', () => {
 
     const oneGcp = annotationWith([gcpFeature(0, 0, offset(0, 0))]);
     expect(pagesFromAnnotation(oneGcp)).toHaveLength(0);
+  });
+});
+
+// A stand-in PageGeo carrying only the fields missingTruthPages reads.
+function pageGeo(pageKey: string, itemIndex: number): PageGeo {
+  return { pageKey, itemIndex } as PageGeo;
+}
+
+describe('missingTruthPages', () => {
+  it('returns truth pages absent from the fit, with negative ids', () => {
+    const fit = [pageGeo('p1', 0), pageGeo('p2', 1)];
+    const truth = [pageGeo('p1', 0), pageGeo('p2', 1), pageGeo('p3', 2)];
+    const missing = missingTruthPages(fit, truth);
+    expect(missing.map((p) => p.pageKey)).toEqual(['p3']);
+    // Negative id keeps it out of the fit pages' itemIndex space.
+    expect(missing[0]!.itemIndex).toBe(-1);
+  });
+
+  it('dedupes a split parent that appears once per truth panel', () => {
+    const fit = [pageGeo('p1', 0)];
+    const truth = [pageGeo('p9', 5), pageGeo('p9', 6), pageGeo('p10', 7)];
+    const missing = missingTruthPages(fit, truth);
+    expect(missing.map((p) => p.pageKey)).toEqual(['p9', 'p10']);
+    expect(missing.map((p) => p.itemIndex)).toEqual([-1, -2]);
+  });
+
+  it('returns nothing when every truth page was fitted', () => {
+    const fit = [pageGeo('p1', 0), pageGeo('p2', 1)];
+    expect(missingTruthPages(fit, [pageGeo('p1', 0)])).toEqual([]);
   });
 });

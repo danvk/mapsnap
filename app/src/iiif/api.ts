@@ -23,3 +23,16 @@ export function fetchRewrittenAnnotation(
 ): Promise<RewrittenAnnotationResponse> {
   return api.get('/iiif-api/annotation')(null, { path });
 }
+
+/**
+ * Fetch a volume's failed-georef sidecars as a page-stem → failure-kind map
+ * (e.g. "p1452" → "nofit"), for linking un-georeferenced pages to the georef view.
+ */
+export async function fetchFailedGeorefs(
+  volume: string,
+): Promise<Map<string, string>> {
+  const { failed } = await api.get('/iiif-api/failed-georefs')(null, {
+    volume,
+  });
+  return new Map(Object.entries(failed));
+}

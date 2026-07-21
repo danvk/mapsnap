@@ -27,6 +27,10 @@ const iiif = require('express-iiif').default;
 
 const PAGE_IMAGE_PATTERN = /^p\d+[a-z]?\.jpg$/i;
 
+// A failed-georef sidecar name -> [full, stem, kind], e.g.
+// "p1452.georef-nofit.json" -> ["…", "p1452", "nofit"].
+const FAILED_GEOREF_PATTERN = /^(.+)\.georef-([a-z0-9]+)\.json$/i;
+
 // Reject a path segment that could escape the data directory.
 function isSafeName(name: string): boolean {
   return (
@@ -150,5 +154,30 @@ export function registerIiifApi(
     const volumePath = parts.slice(0, -1).join('/');
     const serviceBaseUrl = `${request.protocol}://${request.get('host')}/iiif/${volumePath}`;
     return rewriteAnnotationPage(page, localPages, serviceBaseUrl);
+  });
+
+  // Page stems with a failed-georef sidecar in a volume, and each one's kind, so
+  // the viewer can link an un-georeferenced page to its georef-<kind>.json file.
+  // ?volume=<dir> → { failed: { "p1452": "nofit", "p1427": "misscale" } }.
+  router.get('/iiif-api/failed-georefs', async (_params, request) => {
+    const { volume } = request.query;
+    if (!isSafeName(volume)) {
+      throw new HTTPError(400, `invalid volume: ${volume}`);
+    }
+    let files: string[];
+    try {
+      files = await readdir(join(dataDir, volume));
+    } catch {
+      throw new HTTPError(404, `no such volume: ${volume}`);
+    }
+    const failed: Record<string, string> = {};
+    for (const file of files) {
+      const match = file.match(FAILED_GEOREF_PATTERN);
+      // First kind wins if a page somehow has more than one failed sidecar.
+      if (match && match[1] && match[2] && !(match[1] in failed)) {
+        failed[match[1]] = match[2].toLowerCase();
+      }
+    }
+    return { failed };
   });
 }
