@@ -1,8 +1,10 @@
 import { useState } from 'react';
+import type { IndexedBox } from '../boxes';
 import type { DetectionFilters, IndexedDetection } from '../detections';
 import { pointInPolygon } from '../geometry';
-import type { Box, IntersectionPoint, PanelPolygon, Street } from '../types';
+import type { IntersectionPoint, PanelPolygon, Street } from '../types';
 import { useElementSize } from '../hooks/useElementSize';
+import { BoxControls } from './BoxControls';
 import { BoxesOverlay } from './BoxesOverlay';
 import { DetectionsOverlay } from './DetectionsOverlay';
 import { GeorefOverlay } from './GeorefOverlay';
@@ -26,8 +28,10 @@ interface ImageColumnProps {
   filteredDetections: IndexedDetection[];
   panels: PanelPolygon[];
   panelLabels?: string[];
-  boxes: Box[];
+  boxes: IndexedBox[];
   enabledAngles: Set<number>;
+  boxAngleGroups: [number, number][];
+  onToggleAngle: (angle: number) => void;
   selectedIndices: Set<number>;
   onSelectIndices: (indices: Set<number>) => void;
   showStreetsOnImage: boolean;
@@ -60,6 +64,8 @@ export function ImageColumn(props: ImageColumnProps) {
     panelLabels,
     boxes,
     enabledAngles,
+    boxAngleGroups,
+    onToggleAngle,
     selectedIndices,
     onSelectIndices,
     showStreetsOnImage,
@@ -81,13 +87,11 @@ export function ImageColumn(props: ImageColumnProps) {
   const boxesMode = mode === 'boxes';
   // Adjacency mode renders detections just like streets mode (overlay + click select).
   const detectionsMode = streetsMode || mode === 'adjacency';
-  // Modes with no per-shape selection: clicking does nothing and the cursor stays default.
-  const nonSelectableMode = georefMode || boxesMode;
 
-  // In streets/panels mode, select the shapes under the click point. The wrapper
+  // In streets/panels/boxes mode, select the shapes under the click point. The wrapper
   // (currentTarget) tightly wraps the image, so its rect matches the image's.
   function handleClick(e: React.MouseEvent): void {
-    if (nonSelectableMode || !imgSize.width || !imgSize.height) return;
+    if (georefMode || !imgSize.width || !imgSize.height) return;
     const rect = e.currentTarget.getBoundingClientRect();
     const imgX = ((e.clientX - rect.left) * jsonWidth) / imgSize.width;
     const imgY = ((e.clientY - rect.top) * jsonHeight) / imgSize.height;
@@ -95,9 +99,13 @@ export function ImageColumn(props: ImageColumnProps) {
       ? panels.flatMap((polygon, i) =>
           pointInPolygon(imgX, imgY, polygon) ? [i] : [],
         )
-      : filteredDetections
-          .filter(({ det }) => pointInPolygon(imgX, imgY, det.polygon))
-          .map(({ i }) => i);
+      : boxesMode
+        ? boxes.flatMap(({ box, i }) =>
+            pointInPolygon(imgX, imgY, box.polygon) ? [i] : [],
+          )
+        : filteredDetections
+            .filter(({ det }) => pointInPolygon(imgX, imgY, det.polygon))
+            .map(({ i }) => i);
     onSelectIndices(new Set(hit));
   }
 
@@ -128,7 +136,7 @@ export function ImageColumn(props: ImageColumnProps) {
       {imageSrc ? (
         <div
           className="image-wrapper"
-          style={{ cursor: nonSelectableMode ? undefined : 'crosshair' }}
+          style={{ cursor: georefMode ? undefined : 'crosshair' }}
           onClick={handleClick}
         >
           <img
@@ -160,7 +168,7 @@ export function ImageColumn(props: ImageColumnProps) {
           {boxesMode && (
             <BoxesOverlay
               boxes={boxes}
-              enabledAngles={enabledAngles}
+              selectedIndices={selectedIndices}
               displayWidth={imgSize.width}
               displayHeight={imgSize.height}
               jsonWidth={jsonWidth}
@@ -294,6 +302,16 @@ export function ImageColumn(props: ImageColumnProps) {
             <label htmlFor="show-ignored">Show ignored detections</label>
           </div>
         </div>
+      )}
+
+      {boxesMode && (
+        <BoxControls
+          angleGroups={boxAngleGroups}
+          enabledAngles={enabledAngles}
+          onToggleAngle={onToggleAngle}
+          filters={filters}
+          setFilters={setFilters}
+        />
       )}
     </div>
   );

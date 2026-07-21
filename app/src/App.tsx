@@ -23,6 +23,7 @@ import {
   type DetectionFilters,
   type IndexedDetection,
 } from './detections';
+import { filterBoxes } from './boxes';
 import { pageStem, parseDroppedJson } from './fileLoading';
 import { ImageColumn, type Mode } from './components/ImageColumn';
 import { MapView } from './components/MapView';
@@ -30,7 +31,7 @@ import { GcpControls, type GcpFitStats } from './components/GcpControls';
 import { AdjacencyTable } from './components/AdjacencyTable';
 import { DetectionsTable } from './components/DetectionsTable';
 import { PanelsTable } from './components/PanelsTable';
-import { BoxControls } from './components/BoxControls';
+import { BoxesTable } from './components/BoxesTable';
 import { VolumeViewer } from './components/VolumeViewer';
 import { NoteButton } from './components/NoteButton';
 import { noteContextFromFiles, type NoteContext } from './notes/api';
@@ -264,6 +265,27 @@ export function App() {
   const filteredDetections = useMemo(
     () => filterDetections(detections, filters),
     [detections, filters],
+  );
+
+  // Boxes mode: apply the short/long-side sliders, then hide the toggled-off rotations.
+  // The angle checkboxes count from the side-filtered set so the numbers track the sliders,
+  // while the overlay/table show only the enabled rotations.
+  const sideFilteredBoxes = useMemo(
+    () => filterBoxes(boxes, filters),
+    [boxes, filters],
+  );
+  const boxAngleGroups = useMemo<[number, number][]>(() => {
+    const angles = [...new Set(boxes.map((box) => box.angle))].sort(
+      (a, b) => a - b,
+    );
+    return angles.map((angle) => [
+      angle,
+      sideFilteredBoxes.filter(({ box }) => box.angle === angle).length,
+    ]);
+  }, [boxes, sideFilteredBoxes]);
+  const visibleBoxes = useMemo(
+    () => sideFilteredBoxes.filter(({ box }) => enabledAngles.has(box.angle)),
+    [sideFilteredBoxes, enabledAngles],
   );
 
   // Adjacency mode: the loaded image's page entry (identified by filename stem)
@@ -527,8 +549,10 @@ export function App() {
         }
         panels={panels}
         panelLabels={panelLabels}
-        boxes={boxes}
+        boxes={visibleBoxes}
         enabledAngles={enabledAngles}
+        boxAngleGroups={boxAngleGroups}
+        onToggleAngle={toggleAngle}
         selectedIndices={selectedIndices}
         onSelectIndices={setSelectedIndices}
         showStreetsOnImage={showStreetsOnImage}
@@ -633,10 +657,13 @@ export function App() {
           />
         )}
         {mode === 'boxes' && (
-          <BoxControls
-            boxes={boxes}
-            enabledAngles={enabledAngles}
-            onToggleAngle={toggleAngle}
+          <BoxesTable
+            boxes={visibleBoxes}
+            selectedIndices={selectedIndices}
+            onSelect={(index) => setSelectedIndices(new Set([index]))}
+            image={imageEl}
+            jsonWidth={jsonWidth}
+            jsonHeight={jsonHeight}
           />
         )}
         {mode === 'adjacency' && adjacencyData && (

@@ -1,6 +1,13 @@
 import { describe, expect, it } from 'vitest';
-import { boxAngleColor, boxesFromJson, unrotatePoint } from './boxes';
-import type { BoxesJsonData } from './types';
+import {
+  boxArea,
+  boxAngleColor,
+  boxesFromJson,
+  boxSideLengths,
+  filterBoxes,
+  unrotatePoint,
+} from './boxes';
+import type { Box, BoxesJsonData } from './types';
 
 describe('unrotatePoint', () => {
   it('is the identity at angle 0', () => {
@@ -66,6 +73,13 @@ describe('boxesFromJson', () => {
     ]);
   });
 
+  it('records each box long/short side lengths', () => {
+    const [box] = boxesFromJson(data);
+    // 30px wide, 18px tall.
+    expect(box.long_side).toBe(30);
+    expect(box.short_side).toBe(18);
+  });
+
   it('leaves free-list polygons untouched at angle 0', () => {
     expect(boxesFromJson(data)[1].polygon).toEqual([
       [867, 44],
@@ -89,6 +103,44 @@ describe('boxesFromJson', () => {
       [19, 769],
       [19, 801],
     ]);
+  });
+});
+
+describe('boxSideLengths', () => {
+  it('averages opposite edges of a skewed quad', () => {
+    const { long, short } = boxSideLengths([
+      [0, 0],
+      [10, 0],
+      [10, 4],
+      [0, 4],
+    ]);
+    expect(long).toBe(10);
+    expect(short).toBe(4);
+  });
+});
+
+function makeBox(long: number, short: number, angle = 0): Box {
+  return { polygon: [], angle, long_side: long, short_side: short };
+}
+
+describe('filterBoxes', () => {
+  const boxes = [makeBox(30, 18), makeBox(200, 40), makeBox(10, 8)];
+
+  it('keeps boxes meeting both side minimums, with original indices', () => {
+    const kept = filterBoxes(boxes, { minShortSide: 15, minLongSide: 20 });
+    expect(kept.map((b) => b.i)).toEqual([0, 1]);
+  });
+
+  it('drops a box failing either minimum', () => {
+    expect(
+      filterBoxes(boxes, { minShortSide: 20, minLongSide: 0 }),
+    ).toHaveLength(1);
+  });
+});
+
+describe('boxArea', () => {
+  it('multiplies the two side lengths', () => {
+    expect(boxArea(makeBox(30, 18))).toBe(540);
   });
 });
 

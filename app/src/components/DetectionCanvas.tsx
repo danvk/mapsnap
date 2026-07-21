@@ -1,15 +1,14 @@
 import { useEffect, useRef } from 'react';
-import { drawDetectionCanvas } from '../detections';
-import type { Detection } from '../types';
+import { drawDetectionCanvas, type OrientedBox } from '../detections';
 
 interface DetectionCanvasProps {
-  det: Detection;
+  det: OrientedBox;
   image: HTMLImageElement | null;
   jsonWidth: number;
   jsonHeight: number;
 }
 
-/** A small canvas showing the rotated, deskewed image patch for one detection. */
+/** A small canvas showing the rotated, deskewed image patch for one detection or box. */
 export function DetectionCanvas(props: DetectionCanvasProps) {
   const { det, image, jsonWidth, jsonHeight } = props;
   const canvasRef = useRef<HTMLCanvasElement>(null);

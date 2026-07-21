@@ -171,6 +171,10 @@ export interface Box {
   polygon: [number, number][];
   /** Rotation pass that produced the box, in degrees: 0, 90, or 270. */
   angle: number;
+  /** Length of the box's longer side, in image pixels. */
+  long_side: number;
+  /** Length of the box's shorter side, in image pixels. */
+  short_side: number;
 }
 
 /**

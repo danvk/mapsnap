@@ -607,24 +607,20 @@ tr.on-fill td {
   word-break: break-word;
 }
 
-/* Boxes mode: right-column panel toggling each detection rotation's overlay. */
-#box-controls {
-  font-family: sans-serif;
-  font-size: 14px;
+/* Boxes mode: image-column checkboxes toggling each detection rotation's overlay. */
+#box-angle-toggles {
   display: flex;
   flex-direction: column;
   gap: 6px;
-}
-
-#box-controls h3 {
-  margin: 0;
-  font-size: 15px;
+  font-family: sans-serif;
+  font-size: 14px;
 }
 
 .box-controls-note {
-  margin: 0 0 4px;
+  margin: 0;
   font-size: 12px;
   color: #777;
+  max-width: 320px;
 }
 
 .box-angle-row {
