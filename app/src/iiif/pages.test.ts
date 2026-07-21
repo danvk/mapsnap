@@ -177,9 +177,26 @@ describe('pagesFromAnnotation', () => {
       gcpFeature(1000, 0, offset(2000, 0)),
     ]);
     annotation.items[0]!.id = 'https://oim/…656_14_1949-1499L/georef';
+    // A generated whole page can carry a stray "[3]" label copied from the truth; ignore it.
+    annotation.items[0]!.label = 'Los Angeles p1499L [3]';
     const page = pagesFromAnnotation(annotation)[0]!;
     expect(page.splitIndex).toBeNull();
     expect(page.stem).toBe('p7');
+  });
+
+  it('reads a truth split index from a trailing "[N]" label', () => {
+    const annotation = annotationWith([
+      gcpFeature(0, 0, offset(0, 0)),
+      gcpFeature(1000, 0, offset(2000, 0)),
+    ]);
+    // Truth items have a plain resource id (no "/georef") and the split number in the label.
+    annotation.items[0]!.id =
+      'https://oldinsurancemaps.net/iiif/resource/57213/';
+    annotation.items[0]!.label =
+      'Los Angeles, Calif. | 1949 | Vol. 14 p1404 [2]';
+    const page = pagesFromAnnotation(annotation)[0]!;
+    expect(page.splitIndex).toBe(2);
+    expect(page.stem).toBe('p7__2');
   });
 
   it('skips items without page metadata or enough GCPs', () => {
