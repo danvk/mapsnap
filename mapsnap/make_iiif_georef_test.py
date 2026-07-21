@@ -273,6 +273,24 @@ def test_georef_path_with_gcps_infix():
     assert georef_path_to_page_key("data/vol/p16s.gcps.georef.json") == "p16s"
 
 
+def test_georef_path_with_sequence_letter_suffix():
+    # Sanborn sheets run past the directional letters into a/b/c/…; every letter
+    # suffix must be kept, not just s/n/e/w/l/r.
+    assert georef_path_to_page_key("data/vol/p1499o.georef.json") == "p1499o"
+    assert georef_path_to_page_key("data/vol/p1499a.georef.json") == "p1499a"
+    assert georef_path_to_page_key("data/vol/p1499q.georef.json") == "p1499q"
+
+
+def test_georef_path_sequence_letter_split():
+    assert georef_path_to_page_key("data/vol/p1499q__2.georef.json") == "p1499q__2"
+
+
+def test_georef_path_multi_letter_suffix_parses():
+    # A compound suffix parses (rather than silently dropping the page);
+    # drop_redundant_skeletons is what raises on the ambiguous trailing 's'.
+    assert georef_path_to_page_key("data/vol/p6ns.georef.json") == "p6ns"
+
+
 def test_georef_path_split_page():
     assert georef_path_to_page_key("data/vol/p20__2.georef.json") == "p20__2"
 
@@ -301,6 +319,19 @@ def test_expand_georef_globs_first_glob_wins(tmp_path):
     pattern = f"{tmp_path}/p*.georef.json,{tmp_path}/p*.georef-neighbor.json"
     paths = [Path(p).name for p in expand_georef_globs(pattern)]
     assert paths == ["p1.georef.json", "p2.georef-neighbor.json"]
+
+
+def test_expand_georef_globs_warns_on_unparsable_key(tmp_path, capsys):
+    # A file whose name encodes no page key must not vanish silently: it is
+    # skipped, but with a warning naming the file (regression guard for the
+    # suffix bug that once dropped pages with no trace).
+    (tmp_path / "p16.georef.json").write_text("{}")
+    (tmp_path / "key.georef.json").write_text("{}")
+    paths = [Path(p).name for p in expand_georef_globs(f"{tmp_path}/*.georef.json")]
+    assert paths == ["p16.georef.json"]
+    err = capsys.readouterr().err
+    assert "could not parse" in err
+    assert "key.georef.json" in err
 
 
 def test_georef_path_no_match():
