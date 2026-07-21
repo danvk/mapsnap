@@ -160,6 +160,28 @@ describe('pagesFromAnnotation', () => {
     expect(page.clipRing[0]![1]).toBeCloseTo(LAT0, 5);
   });
 
+  it('reads the split index and file stem from a generated annotation id', () => {
+    const annotation = annotationWith([
+      gcpFeature(0, 0, offset(0, 0)),
+      gcpFeature(1000, 0, offset(2000, 0)),
+    ]);
+    annotation.items[0]!.id = 'https://oim/…656_14_1949-1499M__2/georef';
+    const page = pagesFromAnnotation(annotation)[0]!;
+    expect(page.splitIndex).toBe(2);
+    expect(page.stem).toBe('p7__2');
+  });
+
+  it('leaves a whole page with no split index (stem === pageKey)', () => {
+    const annotation = annotationWith([
+      gcpFeature(0, 0, offset(0, 0)),
+      gcpFeature(1000, 0, offset(2000, 0)),
+    ]);
+    annotation.items[0]!.id = 'https://oim/…656_14_1949-1499L/georef';
+    const page = pagesFromAnnotation(annotation)[0]!;
+    expect(page.splitIndex).toBeNull();
+    expect(page.stem).toBe('p7');
+  });
+
   it('skips items without page metadata or enough GCPs', () => {
     const noMetadata = annotationWith([
       gcpFeature(0, 0, offset(0, 0)),

@@ -33,7 +33,16 @@ export interface PageGcp {
 export interface PageGeo {
   /** Index of this page's item in the annotation's items array; selection id. */
   itemIndex: number;
+  /** Parent page key (splits share it), e.g. "p1499m" for both p1499m panels. */
   pageKey: string;
+  /**
+   * Split panel number from the annotation id (`…__2/georef`), or null for a whole
+   * page. Present only on our generated splits; a truth split carries it in its
+   * label instead and is matched by panel overlap rather than by number.
+   */
+  splitIndex: number | null;
+  /** Page key including any split index, matching the on-disk file stem (e.g. "p1499m__2"). */
+  stem: string;
   width: number;
   height: number;
   /** Geo images of the image corners (0,0), (w,0), (w,h), (0,h) as [lon, lat]. */
@@ -42,12 +51,20 @@ export interface PageGeo {
   rectRing: [number, number][];
   /** Closed [lon, lat] ring of the clipping polygon. */
   clipRing: [number, number][];
+  /** The clipping polygon in the local image's pixel frame, for split panel overlap (IoU). */
+  clipPolygon: [number, number][];
   scalePixelsPerFoot: number;
   /** Rotation from north-up in degrees, positive clockwise. */
   rotationDegrees: number;
   gcps: PageGcp[];
   /** The annotation's transformation type, e.g. "polynomial" or "helmert". */
   transformationType: string;
+}
+
+/** Split panel number from a generated annotation id like "…-1499M__2/georef", or null. */
+function idSplitIndex(id: string | undefined): number | null {
+  const match = id?.match(/__(\d+)\//);
+  return match ? Number(match[1]) : null;
 }
 
 /** Parse the vertex list out of an SvgSelector's polygon value. */
@@ -223,14 +240,27 @@ export function pagesFromAnnotation(
 
     const rectRing = closedRing([...corners]);
     const clipPoints = svgPolygonPoints(item.target?.selector?.value ?? '');
-    const clipRing =
-      clipPoints.length >= 3
-        ? closedRing(
-            clipPoints.map(([x, y]) =>
-              projectThroughCorners(corners, width, height, x, y),
-            ),
-          )
-        : rectRing;
+    const hasClip = clipPoints.length >= 3;
+    const clipRing = hasClip
+      ? closedRing(
+          clipPoints.map(([x, y]) =>
+            projectThroughCorners(corners, width, height, x, y),
+          ),
+        )
+      : rectRing;
+    // The clip polygon in the local pixel frame (for split-panel overlap); a page
+    // with no clip covers its whole rectangle.
+    const clipPolygon: [number, number][] = hasClip
+      ? clipPoints
+      : [
+          [0, 0],
+          [width, 0],
+          [width, height],
+          [0, height],
+        ];
+
+    const splitIndex = idSplitIndex(item.id);
+    const stem = splitIndex != null ? `${pageKey}__${splitIndex}` : pageKey;
 
     const [nw, ne, , sw] = corners;
     const feetAcross = Math.hypot(...deltaMeters(nw, ne)) * FEET_PER_METER;
@@ -246,11 +276,14 @@ export function pagesFromAnnotation(
     pages.push({
       itemIndex,
       pageKey,
+      splitIndex,
+      stem,
       width,
       height,
       corners,
       rectRing,
       clipRing,
+      clipPolygon,
       scalePixelsPerFoot,
       rotationDegrees,
       gcps: points,

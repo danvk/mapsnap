@@ -76,11 +76,11 @@ export function InfoPanel(props: InfoPanelProps) {
   } = props;
 
   if (selectedPage) {
-    const base = `data/${volume}/${selectedPage.pageKey}`;
+    const base = `data/${volume}/${selectedPage.stem}`;
     return (
       <div className="page-info-panel">
         <div className="page-info-header">
-          <strong>{selectedPage.pageKey}</strong>
+          <strong>{selectedPage.stem}</strong>
           <button type="button" onClick={onClose} title="Deselect page">
             ×
           </button>

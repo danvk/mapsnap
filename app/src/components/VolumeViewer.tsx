@@ -311,9 +311,7 @@ export function VolumeViewer() {
           selectedPage={selectedPage}
           selectedMissing={selectedIsMissing}
           selectedFailedGeorefType={
-            selectedPage
-              ? (failedGeorefs.get(selectedPage.pageKey) ?? null)
-              : null
+            selectedPage ? (failedGeorefs.get(selectedPage.stem) ?? null) : null
           }
           selectedStats={
             selectedItemIndex === null
@@ -321,7 +319,7 @@ export function VolumeViewer() {
               : (truthStats?.get(selectedItemIndex) ?? null)
           }
           selectedNote={
-            selectedPage ? (notes.get(selectedPage.pageKey) ?? null) : null
+            selectedPage ? (notes.get(selectedPage.stem) ?? null) : null
           }
           volume={selection?.volume ?? ''}
           onClose={() => setSelectedItemIndex(null)}

@@ -76,7 +76,7 @@ export function PageList(props: PageListProps) {
   // truth stats, so they blank out the RMSE/Δ columns and sink under those sorts.
   const missingKeys = new Set(missingPages.map((page) => page.itemIndex));
   const sorted = [...pages, ...missingPages].sort((a, b) => {
-    const naturalOrder = comparePageKeys(a.pageKey, b.pageKey);
+    const naturalOrder = comparePageKeys(a.stem, b.stem);
     if (effectiveSort.key === 'page') {
       return effectiveSort.descending ? -naturalOrder : naturalOrder;
     }
@@ -155,11 +155,11 @@ export function PageList(props: PageListProps) {
                 }
               >
                 <td>
-                  {page.pageKey}
-                  {notes.has(page.pageKey) && (
+                  {page.stem}
+                  {notes.has(page.stem) && (
                     <span
                       className="page-note-marker"
-                      title={notes.get(page.pageKey)}
+                      title={notes.get(page.stem)}
                     >
                       {' '}
                       📓
