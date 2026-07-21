@@ -11,12 +11,22 @@ interface VolumeMapProps {
   annotation: unknown;
   /** Derived page geometry for hit-testing and outlines. */
   pages: PageGeo[];
+  /** Truth pages never fitted; drawn as dashed truth-location footprints. */
+  missingPages: PageGeo[];
+  /** Whether the missing-page footprints are drawn and clickable. */
+  showMissing: boolean;
   /** itemIndex of the selected page, or null for no selection. */
   selectedItemIndex: number | null;
   /** Called with the clicked page's itemIndex, or null for empty space. */
   onSelectPage: (itemIndex: number | null) => void;
   /** Warped-image opacity in [0, 1]. */
   opacity: number;
+  /**
+   * True while a selected annotation is still loading. The map stays hidden
+   * until it has been fit to that annotation, so it never flashes the default
+   * location before the volume's real one arrives.
+   */
+  awaitingView: boolean;
   /** Per-itemIndex fill color for RMSE color-coding, or null when off. */
   pageColors: Map<number, string> | null;
   /** Called with per-page add results whenever a new annotation is shown. */
@@ -27,6 +37,10 @@ const EMPTY_FEATURES: FeatureCollection = {
   type: 'FeatureCollection',
   features: [],
 };
+
+// The RMSE color-coding fill opacity at full slider opacity; scaled down in
+// proportion as the opacity slider is reduced, so the fills fade with the maps.
+const RMSE_FILL_OPACITY = 0.45;
 
 // Overlay features for a selected page: the full image rectangle (solid), the
 // clipping polygon (dashed), and its GCPs (circles), distinguished by `kind`.
@@ -63,9 +77,12 @@ export function VolumeMap(props: VolumeMapProps) {
   const {
     annotation,
     pages,
+    missingPages,
+    showMissing,
     selectedItemIndex,
     onSelectPage,
     opacity,
+    awaitingView,
     onLoadResult,
   } = props;
 
@@ -73,16 +90,34 @@ export function VolumeMap(props: VolumeMapProps) {
   const mapRef = useRef<maplibregl.Map | null>(null);
   const layerRef = useRef<WarpedMapLayer | null>(null);
   const [mapReady, setMapReady] = useState(false);
+  // Whether the map has been fit to a loaded annotation.
+  const [positioned, setPositioned] = useState(false);
+  // Whether the map is shown. Latched true once there is something to show, so
+  // it never reverts to hidden on a later volume/selection change.
+  const [revealed, setRevealed] = useState(false);
+
+  // Reveal once the map is fit to its annotation, or — when nothing is loading
+  // and no annotation is present (the volume picker) — right away at the default view.
+  useEffect(() => {
+    if (revealed) return;
+    if (mapReady && (positioned || (!annotation && !awaitingView))) {
+      setRevealed(true);
+    }
+  }, [revealed, mapReady, positioned, annotation, awaitingView]);
 
   // Latest props for the click/hover handlers, which are installed once.
   const pagesRef = useRef(pages);
+  const missingPagesRef = useRef(missingPages);
+  const showMissingRef = useRef(showMissing);
   const onSelectPageRef = useRef(onSelectPage);
   const selectedRef = useRef(selectedItemIndex);
   useEffect(() => {
     pagesRef.current = pages;
+    missingPagesRef.current = missingPages;
+    showMissingRef.current = showMissing;
     onSelectPageRef.current = onSelectPage;
     selectedRef.current = selectedItemIndex;
-  }, [pages, onSelectPage, selectedItemIndex]);
+  }, [pages, missingPages, showMissing, onSelectPage, selectedItemIndex]);
 
   // Allmaps map IDs indexed by annotation itemIndex, and the itemIndexes
   // brought to front so far (most recent last) so hit-testing can pick the
@@ -147,8 +182,33 @@ export function VolumeMap(props: VolumeMapProps) {
         source: 'rmse-fills',
         paint: {
           'fill-color': ['get', 'color'],
-          'fill-opacity': 0.45,
+          'fill-opacity': RMSE_FILL_OPACITY,
+          // No transition so the fill tracks the opacity slider instantly,
+          // matching the warped maps (which animate: false below).
+          'fill-opacity-transition': { duration: 0 },
           'fill-outline-color': ['get', 'color'],
+        },
+      });
+      // Missing (un-fitted) pages, drawn at their truth footprint as translucent
+      // white polygons with a dashed border to read as distinct from fit pages.
+      map.addSource('missing-pages', {
+        type: 'geojson',
+        data: EMPTY_FEATURES,
+      });
+      map.addLayer({
+        id: 'missing-pages-fill',
+        type: 'fill',
+        source: 'missing-pages',
+        paint: { 'fill-color': '#ffffff', 'fill-opacity': 0.35 },
+      });
+      map.addLayer({
+        id: 'missing-pages-outline',
+        type: 'line',
+        source: 'missing-pages',
+        paint: {
+          'line-color': '#333333',
+          'line-width': 1.5,
+          'line-dasharray': [3, 2],
         },
       });
       map.addSource('selected-page', {
@@ -200,11 +260,13 @@ export function VolumeMap(props: VolumeMapProps) {
     // The selected page renders unclipped, so its full rectangle counts as a
     // hit while it is selected. Otherwise the most-recently-selected page wins
     // an overlap, then the later-added page (Allmaps renders later additions
-    // on top).
+    // on top). Missing-page footprints are considered last (and only when
+    // shown), so a fitted page always wins where the two overlap.
     function pageAtPoint(lng: number, lat: number): number | null {
-      const selected = pagesRef.current.find(
-        (p) => p.itemIndex === selectedRef.current,
-      );
+      const selectedId = selectedRef.current;
+      const selected =
+        pagesRef.current.find((p) => p.itemIndex === selectedId) ??
+        missingPagesRef.current.find((p) => p.itemIndex === selectedId);
       if (selected && pointInPolygon(lng, lat, selected.rectRing)) {
         return selected.itemIndex;
       }
@@ -219,7 +281,13 @@ export function VolumeMap(props: VolumeMapProps) {
           best = page.itemIndex;
         }
       }
-      return best;
+      if (best !== null) return best;
+      if (showMissingRef.current) {
+        for (const page of missingPagesRef.current) {
+          if (pointInPolygon(lng, lat, page.clipRing)) return page.itemIndex;
+        }
+      }
+      return null;
     }
 
     map.on('click', (e) => {
@@ -266,6 +334,7 @@ export function VolumeMap(props: VolumeMapProps) {
     onLoadResultRef.current?.({ loaded: results.length - failed, failed });
     const bounds = layer.getBounds();
     if (bounds) map.fitBounds(bounds, { padding: 40, animate: false });
+    setPositioned(true);
   }, [annotation, mapReady]);
 
   // Outline the selected page, bring it to the front of the stack, and remove
@@ -282,10 +351,13 @@ export function VolumeMap(props: VolumeMapProps) {
       unmaskedMapIdRef.current = null;
     }
     const source = map.getSource<maplibregl.GeoJSONSource>('selected-page');
+    // A missing page has no warped map to bring forward; its footprint is still
+    // outlined here so selecting one (from the list or the map) shows where it is.
     const page =
       selectedItemIndex === null
         ? undefined
-        : pages.find((p) => p.itemIndex === selectedItemIndex);
+        : (pages.find((p) => p.itemIndex === selectedItemIndex) ??
+          missingPages.find((p) => p.itemIndex === selectedItemIndex));
     if (!page) {
       source?.setData(EMPTY_FEATURES);
       return;
@@ -298,16 +370,25 @@ export function VolumeMap(props: VolumeMapProps) {
       unmaskedMapIdRef.current = mapId;
       frontOrderRef.current.push(page.itemIndex);
     }
-  }, [selectedItemIndex, pages, mapReady]);
+  }, [selectedItemIndex, pages, missingPages, mapReady]);
 
   // Also depends on `annotation`: newly added maps start at full opacity, so
   // the current value must be reapplied after each volume load. Animation is
   // disabled so scrubbing the slider tracks instantly instead of queueing
   // 300ms transitions.
   useEffect(() => {
+    const map = mapRef.current;
     const layer = layerRef.current;
-    if (!layer || !mapReady) return;
+    if (!map || !layer || !mapReady) return;
     layer.setLayerOptions({ opacity }, { animate: false });
+    // Fade the RMSE color fills along with the maps, proportional to their base.
+    if (map.getLayer('rmse-fill')) {
+      map.setPaintProperty(
+        'rmse-fill',
+        'fill-opacity',
+        RMSE_FILL_OPACITY * opacity,
+      );
+    }
   }, [opacity, annotation, mapReady]);
 
   // RMSE color-coding: one translucent fill per page footprint when enabled.
@@ -330,5 +411,32 @@ export function VolumeMap(props: VolumeMapProps) {
     source.setData({ type: 'FeatureCollection', features });
   }, [props.pageColors, props.pages, mapReady]);
 
-  return <div id="map" ref={containerRef} />;
+  // Missing-page footprints: one translucent white polygon per un-fitted page
+  // at its truth clip ring, shown only when the toggle is on.
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !mapReady) return;
+    const source = map.getSource<maplibregl.GeoJSONSource>('missing-pages');
+    if (!source) return;
+    if (!showMissing) {
+      source.setData(EMPTY_FEATURES);
+      return;
+    }
+    source.setData({
+      type: 'FeatureCollection',
+      features: missingPages.map((page): FeatureCollection['features'][0] => ({
+        type: 'Feature',
+        properties: { itemIndex: page.itemIndex },
+        geometry: { type: 'Polygon', coordinates: [page.clipRing] },
+      })),
+    });
+  }, [missingPages, showMissing, mapReady]);
+
+  return (
+    <div
+      id="map"
+      ref={containerRef}
+      style={{ visibility: revealed ? undefined : 'hidden' }}
+    />
+  );
 }

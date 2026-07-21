@@ -157,6 +157,30 @@ function gcpPoints(features: GcpFeature[]): PageGcp[] {
   return points;
 }
 
+/**
+ * Truth pages that the loaded run never georeferenced, ready to show as
+ * "missing" rows and footprints.
+ *
+ * A truth page is missing when its page key is absent from the fitted pages.
+ * Results are deduped by page key (a split parent has one truth item per panel;
+ * we keep the first) and given negative `itemIndex` selection ids so they never
+ * collide with the fitted pages' array indices.
+ */
+export function missingTruthPages(
+  fitPages: PageGeo[],
+  truthPages: PageGeo[],
+): PageGeo[] {
+  const fitKeys = new Set(fitPages.map((page) => page.pageKey));
+  const seen = new Set<string>();
+  const missing: PageGeo[] = [];
+  for (const truthPage of truthPages) {
+    if (fitKeys.has(truthPage.pageKey) || seen.has(truthPage.pageKey)) continue;
+    seen.add(truthPage.pageKey);
+    missing.push({ ...truthPage, itemIndex: -(missing.length + 1) });
+  }
+  return missing;
+}
+
 // Close a ring in place if its last point differs from its first.
 function closedRing(ring: [number, number][]): [number, number][] {
   if (ring.length === 0) return ring;

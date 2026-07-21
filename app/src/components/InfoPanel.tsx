@@ -5,11 +5,20 @@ import type { PageGeo } from '../iiif/pages';
 interface InfoPanelProps {
   /** All pages in the loaded annotation, or [] before one is loaded. */
   pages: PageGeo[];
+  /** How many truth pages the run never georeferenced, for the volume summary. */
+  missingCount: number;
   /** Items the server dropped while rewriting the annotation. */
   skipped: SkippedItem[];
   /** The loaded annotation file's name, for the summary header. */
   annotationName: string | null;
   selectedPage: PageGeo | null;
+  /** Whether the selected page is a missing (un-fitted) truth page. */
+  selectedMissing: boolean;
+  /**
+   * Failure kind of the selected page's failed-georef sidecar ("nofit"/"1gcp"/…),
+   * or null when it has none; drives the georef-view link for a missing page.
+   */
+  selectedFailedGeorefType: string | null;
   /** Truth-compare stats for the selected page, when the volume has truth. */
   selectedStats: PageCompareStats | null;
   /** The selected page's note text, or null when it has none. */
@@ -54,9 +63,12 @@ function fitSummary(pages: PageGeo[]): string {
 export function InfoPanel(props: InfoPanelProps) {
   const {
     pages,
+    missingCount,
     skipped,
     annotationName,
     selectedPage,
+    selectedMissing,
+    selectedFailedGeorefType,
     selectedStats,
     selectedNote,
     volume,
@@ -74,33 +86,50 @@ export function InfoPanel(props: InfoPanelProps) {
           </button>
         </div>
         <dl>
-          {selectedStats && (
+          {selectedMissing ? (
             <>
-              <dt>RMSE</dt>
+              <dt>Status</dt>
+              <dd>not georeferenced</dd>
+              <dt>Truth scale</dt>
+              <dd>{selectedPage.scalePixelsPerFoot.toFixed(2)} px/ft</dd>
+              <dt>Truth rotation</dt>
+              <dd>{selectedPage.rotationDegrees.toFixed(1)}°</dd>
+              <dt>Size</dt>
               <dd>
-                {selectedStats.rmseFt.toFixed(1)} ft (max{' '}
-                {selectedStats.maxFt.toFixed(1)} ft)
+                {selectedPage.width} × {selectedPage.height} px
               </dd>
-              <dt>Translation</dt>
-              <dd>{selectedStats.translationFt.toFixed(1)} ft</dd>
-              <dt>Rotation Δ</dt>
-              <dd>{selectedStats.rotationErrorDegrees.toFixed(2)}°</dd>
-              <dt>Scale Δ</dt>
-              <dd>{selectedStats.scaleErrorPercent.toFixed(2)}%</dd>
+            </>
+          ) : (
+            <>
+              {selectedStats && (
+                <>
+                  <dt>RMSE</dt>
+                  <dd>
+                    {selectedStats.rmseFt.toFixed(1)} ft (max{' '}
+                    {selectedStats.maxFt.toFixed(1)} ft)
+                  </dd>
+                  <dt>Translation</dt>
+                  <dd>{selectedStats.translationFt.toFixed(1)} ft</dd>
+                  <dt>Rotation Δ</dt>
+                  <dd>{selectedStats.rotationErrorDegrees.toFixed(2)}°</dd>
+                  <dt>Scale Δ</dt>
+                  <dd>{selectedStats.scaleErrorPercent.toFixed(2)}%</dd>
+                </>
+              )}
+              <dt>Scale</dt>
+              <dd>{selectedPage.scalePixelsPerFoot.toFixed(2)} px/ft</dd>
+              <dt>Rotation</dt>
+              <dd>{selectedPage.rotationDegrees.toFixed(1)}°</dd>
+              <dt>Size</dt>
+              <dd>
+                {selectedPage.width} × {selectedPage.height} px
+              </dd>
+              <dt>GCPs</dt>
+              <dd>{selectedPage.gcps.length}</dd>
+              <dt>Fit</dt>
+              <dd>{selectedPage.transformationType}</dd>
             </>
           )}
-          <dt>Scale</dt>
-          <dd>{selectedPage.scalePixelsPerFoot.toFixed(2)} px/ft</dd>
-          <dt>Rotation</dt>
-          <dd>{selectedPage.rotationDegrees.toFixed(1)}°</dd>
-          <dt>Size</dt>
-          <dd>
-            {selectedPage.width} × {selectedPage.height} px
-          </dd>
-          <dt>GCPs</dt>
-          <dd>{selectedPage.gcps.length}</dd>
-          <dt>Fit</dt>
-          <dd>{selectedPage.transformationType}</dd>
         </dl>
         {selectedNote && (
           <div className="page-info-note">
@@ -110,7 +139,17 @@ export function InfoPanel(props: InfoPanelProps) {
         )}
         <div className="page-info-links">
           <a href={`?files=${base}.jpg,${base}.streets.json`}>streets view</a>
-          <a href={`?files=${base}.jpg,${base}.georef.json`}>georef view</a>
+          {selectedMissing ? (
+            selectedFailedGeorefType && (
+              <a
+                href={`?files=${base}.jpg,${base}.georef-${selectedFailedGeorefType}.json`}
+              >
+                georef view ({selectedFailedGeorefType})
+              </a>
+            )
+          ) : (
+            <a href={`?files=${base}.jpg,${base}.georef.json`}>georef view</a>
+          )}
         </div>
       </div>
     );
@@ -137,6 +176,12 @@ export function InfoPanel(props: InfoPanelProps) {
       <dl>
         <dt>Pages</dt>
         <dd>{pages.length}</dd>
+        {missingCount > 0 && (
+          <>
+            <dt>Missing</dt>
+            <dd>{missingCount}</dd>
+          </>
+        )}
         {skipped.length > 0 && (
           <>
             <dt>Skipped</dt>

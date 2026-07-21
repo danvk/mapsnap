@@ -5,6 +5,8 @@ import type { PageGeo } from '../iiif/pages';
 
 interface PageListProps {
   pages: PageGeo[];
+  /** Truth pages the run never fitted; shown with blank RMSE/Δ columns. */
+  missingPages: PageGeo[];
   /** Per-itemIndex truth stats; null entry = truth exists but is incomparable (split). */
   stats: Map<number, PageCompareStats | null> | null;
   /** Page key → note text for the volume; keys present here get a marker. */
@@ -57,7 +59,8 @@ function sortValue(
  * the worst fits are on top — and a row to select the page on the map.
  */
 export function PageList(props: PageListProps) {
-  const { pages, stats, notes, selectedItemIndex, onSelectPage } = props;
+  const { pages, missingPages, stats, notes, selectedItemIndex, onSelectPage } =
+    props;
   const [sort, setSort] = useState<{ key: SortKey; descending: boolean }>({
     key: 'rmse',
     descending: true,
@@ -69,14 +72,24 @@ export function PageList(props: PageListProps) {
       ? { key: 'page' as SortKey, descending: false }
       : sort;
 
-  const sorted = [...pages].sort((a, b) => {
+  // Missing (un-fitted) pages carry a negative synthetic itemIndex and have no
+  // truth stats, so they blank out the RMSE/Δ columns and sink under those sorts.
+  const missingKeys = new Set(missingPages.map((page) => page.itemIndex));
+  const sorted = [...pages, ...missingPages].sort((a, b) => {
     const naturalOrder = comparePageKeys(a.pageKey, b.pageKey);
     if (effectiveSort.key === 'page') {
       return effectiveSort.descending ? -naturalOrder : naturalOrder;
     }
     const aValue = sortValue(effectiveSort.key, a, stats?.get(a.itemIndex));
     const bValue = sortValue(effectiveSort.key, b, stats?.get(b.itemIndex));
-    if (aValue === undefined && bValue === undefined) return naturalOrder;
+    if (aValue === undefined && bValue === undefined) {
+      // Both rows lack a value under this sort. Cluster them so the fitted-but-
+      // incomparable (split) pages sit above the un-fitted missing pages, keeping
+      // all missing pages grouped at the very bottom; alphabetical within a group.
+      const aMissing = missingKeys.has(a.itemIndex) ? 1 : 0;
+      const bMissing = missingKeys.has(b.itemIndex) ? 1 : 0;
+      return aMissing - bMissing || naturalOrder;
+    }
     if (aValue === undefined) return 1; // valueless rows always sink
     if (bValue === undefined) return -1;
     const order = aValue - bValue;
@@ -123,12 +136,16 @@ export function PageList(props: PageListProps) {
         <tbody>
           {sorted.map((page) => {
             const pageStats = stats?.get(page.itemIndex);
+            const missing = missingKeys.has(page.itemIndex);
             return (
               <tr
                 key={page.itemIndex}
-                className={
-                  page.itemIndex === selectedItemIndex ? 'selected' : ''
-                }
+                className={[
+                  page.itemIndex === selectedItemIndex ? 'selected' : '',
+                  missing ? 'missing' : '',
+                ]
+                  .filter(Boolean)
+                  .join(' ')}
                 onClick={() =>
                   onSelectPage(
                     page.itemIndex === selectedItemIndex
@@ -151,7 +168,11 @@ export function PageList(props: PageListProps) {
                 </td>
                 {hasTruth && (
                   <td className="numeric">
-                    {pageStats ? (
+                    {missing ? (
+                      <span title="not georeferenced; shown at its truth location">
+                        —
+                      </span>
+                    ) : pageStats ? (
                       <span className={rmseClass(pageStats.rmseFt)}>
                         {pageStats.rmseFt.toFixed(0)}ft
                       </span>

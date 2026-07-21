@@ -41,6 +41,17 @@ export interface VolumeQuery {
   volume: string;
 }
 
+/**
+ * Response of GET /iiif-api/failed-georefs — page stem → failure kind.
+ *
+ * Maps each page that has a failed-georef sidecar (`<stem>.georef-<kind>.json`,
+ * e.g. `p1452.georef-nofit.json`) to its kind ("nofit", "1gcp", "misscale", …),
+ * so the volume viewer can link a not-georeferenced page to that debug file.
+ */
+export interface FailedGeorefsResponse {
+  failed: Record<string, string>;
+}
+
 /** Query naming one page of one volume. */
 export interface NoteTarget {
   volume: string;
@@ -74,6 +85,9 @@ export interface API {
   };
   '/iiif-api/annotation': {
     get: GetEndpoint<RewrittenAnnotationResponse, AnnotationQuery>;
+  };
+  '/iiif-api/failed-georefs': {
+    get: GetEndpoint<FailedGeorefsResponse, VolumeQuery>;
   };
   '/api/images': {
     get: GetEndpoint<KeymapImagesResponse>;

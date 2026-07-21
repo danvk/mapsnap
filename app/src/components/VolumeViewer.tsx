@@ -10,10 +10,14 @@ import {
   rmseBucket,
   type PageCompareStats,
 } from '../iiif/compare';
-import { fetchRewrittenAnnotation, fetchVolumes } from '../iiif/api';
+import {
+  fetchFailedGeorefs,
+  fetchRewrittenAnnotation,
+  fetchVolumes,
+} from '../iiif/api';
 import { isTypingTarget } from '../keyboard';
 import { fetchVolumeNotes } from '../notes/api';
-import { pagesFromAnnotation } from '../iiif/pages';
+import { missingTruthPages, pagesFromAnnotation } from '../iiif/pages';
 import { InfoPanel } from './InfoPanel';
 import { PageList } from './PageList';
 import { VolumeMap } from './VolumeMap';
@@ -45,6 +49,7 @@ export function VolumeViewer() {
   } | null>(null);
   const [opacity, setOpacity] = useState(100);
   const [colorByRmse, setColorByRmse] = useState(false);
+  const [showMissing, setShowMissing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [selectedItemIndex, setSelectedItemIndex] = useState<number | null>(
     null,
@@ -52,6 +57,10 @@ export function VolumeViewer() {
   const [truthAnnotation, setTruthAnnotation] = useState<unknown>(null);
   // Page key → note text for the selected volume (markers + tooltip).
   const [notes, setNotes] = useState<Map<string, string>>(new Map());
+  // Page stem → failed-georef kind ("nofit"/"1gcp"/…) for the selected volume.
+  const [failedGeorefs, setFailedGeorefs] = useState<Map<string, string>>(
+    new Map(),
+  );
 
   useEffect(() => {
     fetchVolumes()
@@ -101,11 +110,13 @@ export function VolumeViewer() {
   const selection = parseAnnotationPath(selectedPath);
   const selectedVolume = volumes?.find((v) => v.name === selection?.volume);
 
-  // Load the selected volume's page notes for the list markers and tooltip.
+  // Load the selected volume's page notes and failed-georef sidecars: the notes
+  // drive the list markers/tooltip, the failed-georefs the missing-page links.
   const volumeName = selection?.volume;
   useEffect(() => {
     if (!volumeName) {
       setNotes(new Map());
+      setFailedGeorefs(new Map());
       return;
     }
     let cancelled = false;
@@ -115,6 +126,13 @@ export function VolumeViewer() {
       })
       .catch(() => {
         if (!cancelled) setNotes(new Map());
+      });
+    fetchFailedGeorefs(volumeName)
+      .then((map) => {
+        if (!cancelled) setFailedGeorefs(map);
+      })
+      .catch(() => {
+        if (!cancelled) setFailedGeorefs(new Map());
       });
     return () => {
       cancelled = true;
@@ -140,14 +158,22 @@ export function VolumeViewer() {
       annotation ? pagesFromAnnotation(annotation as GeorefAnnotationPage) : [],
     [annotation],
   );
-  const truthStats: Map<number, PageCompareStats | null> | null =
-    useMemo(() => {
-      if (!truthAnnotation) return null;
-      const truthPages = pagesFromAnnotation(
-        truthAnnotation as GeorefAnnotationPage,
-      );
-      return compareToTruth(pages, truthPages);
-    }, [pages, truthAnnotation]);
+  const truthPages = useMemo(
+    () =>
+      truthAnnotation
+        ? pagesFromAnnotation(truthAnnotation as GeorefAnnotationPage)
+        : null,
+    [truthAnnotation],
+  );
+  const truthStats: Map<number, PageCompareStats | null> | null = useMemo(
+    () => (truthPages ? compareToTruth(pages, truthPages) : null),
+    [pages, truthPages],
+  );
+  // Truth pages the run never georeferenced, shown as "missing" rows/footprints.
+  const missingPages = useMemo(
+    () => (truthPages ? missingTruthPages(pages, truthPages) : []),
+    [pages, truthPages],
+  );
 
   const pageColors: Map<number, string> | null = useMemo(() => {
     if (!colorByRmse || !truthStats) return null;
@@ -160,10 +186,18 @@ export function VolumeViewer() {
     return colors;
   }, [colorByRmse, truthStats]);
 
+  // A missing page carries a negative synthetic id, so it is found in
+  // missingPages, not the fitted pages; the info panel renders it differently.
   const selectedPage =
     selectedItemIndex === null
       ? null
-      : (pages.find((p) => p.itemIndex === selectedItemIndex) ?? null);
+      : (pages.find((p) => p.itemIndex === selectedItemIndex) ??
+        missingPages.find((p) => p.itemIndex === selectedItemIndex) ??
+        null);
+  const selectedIsMissing =
+    selectedPage !== null &&
+    selectedItemIndex !== null &&
+    selectedItemIndex < 0;
 
   function selectVolume(name: string): void {
     const volume = volumes?.find((v) => v.name === name);
@@ -225,6 +259,16 @@ export function VolumeViewer() {
             Color by RMSE
           </label>
         )}
+        {missingPages.length > 0 && (
+          <label className="rmse-color-control">
+            <input
+              type="checkbox"
+              checked={showMissing}
+              onChange={(e) => setShowMissing(e.target.checked)}
+            />
+            Show missing pages
+          </label>
+        )}
         <div className="opacity-control">
           <label htmlFor="iiif-opacity-slider">Opacity</label>
           <input
@@ -241,6 +285,7 @@ export function VolumeViewer() {
       <div className="volume-viewer-body">
         <PageList
           pages={pages}
+          missingPages={missingPages}
           stats={truthStats}
           notes={notes}
           selectedItemIndex={selectedItemIndex}
@@ -249,17 +294,27 @@ export function VolumeViewer() {
         <VolumeMap
           annotation={annotation}
           pages={pages}
+          missingPages={missingPages}
+          showMissing={showMissing}
           selectedItemIndex={selectedItemIndex}
           onSelectPage={setSelectedItemIndex}
           opacity={opacity / 100}
+          awaitingView={!!selectedPath && !error}
           pageColors={pageColors}
           onLoadResult={setLoadResult}
         />
         <InfoPanel
           pages={pages}
+          missingCount={missingPages.length}
           skipped={skipped}
           annotationName={selection?.file ?? null}
           selectedPage={selectedPage}
+          selectedMissing={selectedIsMissing}
+          selectedFailedGeorefType={
+            selectedPage
+              ? (failedGeorefs.get(selectedPage.pageKey) ?? null)
+              : null
+          }
           selectedStats={
             selectedItemIndex === null
               ? null

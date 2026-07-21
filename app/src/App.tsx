@@ -150,6 +150,12 @@ export function App() {
   // The (volume, page) this view is on, when opened via a `?files=data/...`
   // deep link — the anchor for per-page notes. Null for dropped files.
   const [noteContext, setNoteContext] = useState<NoteContext | null>(null);
+  // True until the initial `?files=` deep link finishes loading, so the georef
+  // map can stay hidden until it knows where to look instead of flashing the
+  // default location. Only a deep link waits; a fresh app has nothing pending.
+  const [initialViewPending, setInitialViewPending] = useState(() =>
+    new URLSearchParams(window.location.search).has('files'),
+  );
 
   // Display toggles.
   const [opacity, setOpacity] = useState(85); // 0..100
@@ -500,7 +506,7 @@ export function App() {
       .map((s) => s.trim())
       .filter(Boolean);
     setNoteContext(noteContextFromFiles(files));
-    void loadFromUrls(files);
+    void loadFromUrls(files).finally(() => setInitialViewPending(false));
     // Runs once on mount; loadFromUrls closes over the initial (empty) state.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -579,6 +585,7 @@ export function App() {
               showLabels={showLabels}
               showIntersections={showIntersections}
               colorByInlier={colorByInlier}
+              awaitingView={initialViewPending}
             />
             {gcpPairs && selectedPair && intersections.length >= 2 && (
               <GcpControls

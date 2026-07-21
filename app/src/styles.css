@@ -462,6 +462,14 @@ tr.on-fill td {
   background: #dde5ff;
   font-weight: bold;
 }
+/* Missing (un-fitted) pages, shown at their truth location. */
+.page-list tbody tr.missing {
+  color: #888;
+  font-style: italic;
+}
+.page-list tbody tr.missing.selected {
+  color: inherit;
+}
 .page-list .rmse-good {
   color: #1a7f37;
 }
