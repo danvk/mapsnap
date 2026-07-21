@@ -23,6 +23,12 @@ interface MapViewProps {
   showLabels: boolean;
   showIntersections: boolean;
   colorByInlier: boolean;
+  /**
+   * True while a deep link is still loading the page whose view isn't known yet.
+   * The map stays hidden until it has been positioned, so it never flashes at the
+   * default location before the real one arrives.
+   */
+  awaitingView: boolean;
 }
 
 // Teal for streets read by the key-map rectangle fallback vocabulary (matching the neighborhood
@@ -85,12 +91,28 @@ export function MapView(props: MapViewProps) {
     showLabels,
     showIntersections,
     colorByInlier,
+    awaitingView,
   } = props;
 
   const containerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<maplibregl.Map | null>(null);
   const lastFittedCornersRef = useRef('');
   const [mapReady, setMapReady] = useState(false);
+  // Whether the map has been framed on real data (corners or a key-map location).
+  const [positioned, setPositioned] = useState(false);
+  // Whether the map is shown. Latched true once there is something to show, so it
+  // never reverts to hidden on a later data change.
+  const [revealed, setRevealed] = useState(false);
+
+  // Reveal once the map is framed on its data, or — when nothing is loading and
+  // there is nothing to frame (the empty debugger) — right away at the default view.
+  const hasView = Boolean(corners) || Boolean(keymap);
+  useEffect(() => {
+    if (revealed) return;
+    if (mapReady && (positioned || (!hasView && !awaitingView))) {
+      setRevealed(true);
+    }
+  }, [revealed, mapReady, positioned, hasView, awaitingView]);
 
   useEffect(() => {
     if (!containerRef.current) return;
@@ -180,6 +202,7 @@ export function MapView(props: MapViewProps) {
           animate: shouldAnimateTo(map, newCenterLon, newCenterLat),
         },
       );
+      setPositioned(true);
     }
   }, [mapReady, corners, imageSrc, opacity]);
 
@@ -506,6 +529,7 @@ export function MapView(props: MapViewProps) {
           animate: shouldAnimateTo(map, targetLon, targetLat),
         },
       );
+      setPositioned(true);
     }
   }, [mapReady, keymap, corners]);
 
@@ -547,5 +571,11 @@ export function MapView(props: MapViewProps) {
     }
   }, [mapReady, truth]);
 
-  return <div id="map" ref={containerRef} />;
+  return (
+    <div
+      id="map"
+      ref={containerRef}
+      style={{ visibility: revealed ? undefined : 'hidden' }}
+    />
+  );
 }

@@ -21,6 +21,12 @@ interface VolumeMapProps {
   onSelectPage: (itemIndex: number | null) => void;
   /** Warped-image opacity in [0, 1]. */
   opacity: number;
+  /**
+   * True while a selected annotation is still loading. The map stays hidden
+   * until it has been fit to that annotation, so it never flashes the default
+   * location before the volume's real one arrives.
+   */
+  awaitingView: boolean;
   /** Per-itemIndex fill color for RMSE color-coding, or null when off. */
   pageColors: Map<number, string> | null;
   /** Called with per-page add results whenever a new annotation is shown. */
@@ -76,6 +82,7 @@ export function VolumeMap(props: VolumeMapProps) {
     selectedItemIndex,
     onSelectPage,
     opacity,
+    awaitingView,
     onLoadResult,
   } = props;
 
@@ -83,6 +90,20 @@ export function VolumeMap(props: VolumeMapProps) {
   const mapRef = useRef<maplibregl.Map | null>(null);
   const layerRef = useRef<WarpedMapLayer | null>(null);
   const [mapReady, setMapReady] = useState(false);
+  // Whether the map has been fit to a loaded annotation.
+  const [positioned, setPositioned] = useState(false);
+  // Whether the map is shown. Latched true once there is something to show, so
+  // it never reverts to hidden on a later volume/selection change.
+  const [revealed, setRevealed] = useState(false);
+
+  // Reveal once the map is fit to its annotation, or — when nothing is loading
+  // and no annotation is present (the volume picker) — right away at the default view.
+  useEffect(() => {
+    if (revealed) return;
+    if (mapReady && (positioned || (!annotation && !awaitingView))) {
+      setRevealed(true);
+    }
+  }, [revealed, mapReady, positioned, annotation, awaitingView]);
 
   // Latest props for the click/hover handlers, which are installed once.
   const pagesRef = useRef(pages);
@@ -313,6 +334,7 @@ export function VolumeMap(props: VolumeMapProps) {
     onLoadResultRef.current?.({ loaded: results.length - failed, failed });
     const bounds = layer.getBounds();
     if (bounds) map.fitBounds(bounds, { padding: 40, animate: false });
+    setPositioned(true);
   }, [annotation, mapReady]);
 
   // Outline the selected page, bring it to the front of the stack, and remove
@@ -410,5 +432,11 @@ export function VolumeMap(props: VolumeMapProps) {
     });
   }, [missingPages, showMissing, mapReady]);
 
-  return <div id="map" ref={containerRef} />;
+  return (
+    <div
+      id="map"
+      ref={containerRef}
+      style={{ visibility: revealed ? undefined : 'hidden' }}
+    />
+  );
 }

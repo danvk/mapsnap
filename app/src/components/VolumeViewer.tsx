@@ -299,6 +299,7 @@ export function VolumeViewer() {
           selectedItemIndex={selectedItemIndex}
           onSelectPage={setSelectedItemIndex}
           opacity={opacity / 100}
+          awaitingView={!!selectedPath && !error}
           pageColors={pageColors}
           onLoadResult={setLoadResult}
         />
