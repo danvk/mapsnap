@@ -6,11 +6,13 @@ import type {
 } from '../../server/iiifAnnotations';
 import {
   RMSE_BUCKET_COLORS,
-  compareToTruth,
   rmseBucket,
+  statsByItemIndex,
   type PageCompareStats,
 } from '../iiif/compare';
+import type { ComparePageStats } from '../../server/compareTxt';
 import {
+  fetchCompare,
   fetchFailedGeorefs,
   fetchRewrittenAnnotation,
   fetchVolumes,
@@ -55,6 +57,11 @@ export function VolumeViewer() {
     null,
   );
   const [truthAnnotation, setTruthAnnotation] = useState<unknown>(null);
+  // Paired-page error stats from the annotation's `mapsnap compare` sidecar, or null when
+  // there is no sidecar (no truth comparison for this annotation).
+  const [compareRows, setCompareRows] = useState<ComparePageStats[] | null>(
+    null,
+  );
   // Page key → note text for the selected volume (markers + tooltip).
   const [notes, setNotes] = useState<Map<string, string>>(new Map());
   // Page stem → failed-georef kind ("nofit"/"1gcp"/…) for the selected volume.
@@ -89,8 +96,18 @@ export function VolumeViewer() {
     params.set('iiif', selectedPath);
     history.replaceState(null, '', `?${params}`);
 
-    // Truth for the compare column: the volume's main.iiif.json, rewritten
-    // into the same local pixel frame. Skipped when viewing the truth itself.
+    // Per-page truth error from this annotation's `mapsnap compare` sidecar table.
+    setCompareRows(null);
+    fetchCompare(selectedPath)
+      .then((pages) => {
+        if (!cancelled) setCompareRows(pages);
+      })
+      .catch(() => {
+        if (!cancelled) setCompareRows([]);
+      });
+
+    // Truth annotation, rewritten into the same local pixel frame, for the missing-page
+    // footprints. Skipped when viewing the truth itself.
     setTruthAnnotation(null);
     const parsed = parseAnnotationPath(selectedPath);
     if (parsed && parsed.file !== 'main.iiif.json') {
@@ -165,9 +182,14 @@ export function VolumeViewer() {
         : null,
     [truthAnnotation],
   );
-  const truthStats: Map<number, PageCompareStats | null> | null = useMemo(
-    () => (truthPages ? compareToTruth(pages, truthPages) : null),
-    [pages, truthPages],
+  // Per-page compare stats keyed by itemIndex, from the sidecar rows. Null when the annotation
+  // has no compare sidecar; empty rows also read as "no comparison".
+  const truthStats: Map<number, PageCompareStats> | null = useMemo(
+    () =>
+      compareRows && compareRows.length > 0
+        ? statsByItemIndex(compareRows, pages)
+        : null,
+    [compareRows, pages],
   );
   // Truth pages the run never georeferenced, shown as "missing" rows/footprints.
   const missingPages = useMemo(
@@ -179,9 +201,7 @@ export function VolumeViewer() {
     if (!colorByRmse || !truthStats) return null;
     const colors = new Map<number, string>();
     for (const [itemIndex, stats] of truthStats) {
-      if (stats) {
-        colors.set(itemIndex, RMSE_BUCKET_COLORS[rmseBucket(stats.rmseFt)]);
-      }
+      colors.set(itemIndex, RMSE_BUCKET_COLORS[rmseBucket(stats.rmseFt)]);
     }
     return colors;
   }, [colorByRmse, truthStats]);

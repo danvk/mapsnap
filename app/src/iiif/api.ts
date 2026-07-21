@@ -1,6 +1,7 @@
 import { typedApi } from 'crosswalk';
 import { jsonFetch } from '../apiFetch';
 import type { API } from '../../server/api';
+import type { ComparePageStats } from '../../server/compareTxt';
 import type {
   RewrittenAnnotationResponse,
   VolumeListResponse,
@@ -35,4 +36,13 @@ export async function fetchFailedGeorefs(
     volume,
   });
   return new Map(Object.entries(failed));
+}
+
+/**
+ * Fetch the per-page truth comparison from an annotation's `mapsnap compare` sidecar table,
+ * as paired-page stats keyed by generated page stem. Empty when there is no sidecar.
+ */
+export async function fetchCompare(path: string): Promise<ComparePageStats[]> {
+  const { pages } = await api.get('/iiif-api/compare')(null, { path });
+  return pages;
 }

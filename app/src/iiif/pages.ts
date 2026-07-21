@@ -51,8 +51,6 @@ export interface PageGeo {
   rectRing: [number, number][];
   /** Closed [lon, lat] ring of the clipping polygon. */
   clipRing: [number, number][];
-  /** The clipping polygon in the local image's pixel frame, for split panel overlap (IoU). */
-  clipPolygon: [number, number][];
   scalePixelsPerFoot: number;
   /** Rotation from north-up in degrees, positive clockwise. */
   rotationDegrees: number;
@@ -259,24 +257,14 @@ export function pagesFromAnnotation(
 
     const rectRing = closedRing([...corners]);
     const clipPoints = svgPolygonPoints(item.target?.selector?.value ?? '');
-    const hasClip = clipPoints.length >= 3;
-    const clipRing = hasClip
-      ? closedRing(
-          clipPoints.map(([x, y]) =>
-            projectThroughCorners(corners, width, height, x, y),
-          ),
-        )
-      : rectRing;
-    // The clip polygon in the local pixel frame (for split-panel overlap); a page
-    // with no clip covers its whole rectangle.
-    const clipPolygon: [number, number][] = hasClip
-      ? clipPoints
-      : [
-          [0, 0],
-          [width, 0],
-          [width, height],
-          [0, height],
-        ];
+    const clipRing =
+      clipPoints.length >= 3
+        ? closedRing(
+            clipPoints.map(([x, y]) =>
+              projectThroughCorners(corners, width, height, x, y),
+            ),
+          )
+        : rectRing;
 
     const splitIndex = splitIndexFor(item.id, item.label);
     const stem = splitIndex != null ? `${pageKey}__${splitIndex}` : pageKey;
@@ -302,7 +290,6 @@ export function pagesFromAnnotation(
       corners,
       rectRing,
       clipRing,
-      clipPolygon,
       scalePixelsPerFoot,
       rotationDegrees,
       gcps: points,

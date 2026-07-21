@@ -21,6 +21,7 @@ import {
 } from './iiifAnnotations.ts';
 import { normalizeIiifImageUrl } from './iiifSizeWorkaround.ts';
 import { jpegDimensions } from './jpegDimensions.ts';
+import { parseCompareTxt } from './compareTxt.ts';
 
 const require = createRequire(import.meta.url);
 const iiif = require('express-iiif').default;
@@ -154,6 +155,30 @@ export function registerIiifApi(
     const volumePath = parts.slice(0, -1).join('/');
     const serviceBaseUrl = `${request.protocol}://${request.get('host')}/iiif/${volumePath}`;
     return rewriteAnnotationPage(page, localPages, serviceBaseUrl);
+  });
+
+  // Per-page truth comparison from the annotation's `mapsnap compare` sidecar table
+  // (`<name>.txt` next to `<name>.iiif.json`). Empty when there is no sidecar.
+  router.get('/iiif-api/compare', async (_params, request) => {
+    const rawPath = request.query.path;
+    const relativePath = rawPath.replace(/^data\//, '');
+    const parts = relativePath.split('/');
+    if (
+      !relativePath.endsWith('.iiif.json') ||
+      parts.length < 2 ||
+      !parts.every(isSafeName)
+    ) {
+      throw new HTTPError(400, `invalid path: ${rawPath}`);
+    }
+    const txtPath = join(
+      dataDir,
+      relativePath.replace(/\.iiif\.json$/, '.txt'),
+    );
+    try {
+      return { pages: parseCompareTxt(await readFile(txtPath, 'utf8')) };
+    } catch {
+      return { pages: [] };
+    }
   });
 
   // Page stems with a failed-georef sidecar in a volume, and each one's kind, so

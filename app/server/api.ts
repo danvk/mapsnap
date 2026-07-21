@@ -16,6 +16,7 @@ import type {
   RewrittenAnnotationResponse,
   VolumeListResponse,
 } from './iiifAnnotations.ts';
+import type { CompareResponse } from './compareTxt.ts';
 import type { ImageInfo, LabelsJson } from '../src/keymap/types.ts';
 
 /** Query naming a georeference AnnotationPage, repo-root-relative. */
@@ -88,6 +89,9 @@ export interface API {
   };
   '/iiif-api/failed-georefs': {
     get: GetEndpoint<FailedGeorefsResponse, VolumeQuery>;
+  };
+  '/iiif-api/compare': {
+    get: GetEndpoint<CompareResponse, AnnotationQuery>;
   };
   '/api/images': {
     get: GetEndpoint<KeymapImagesResponse>;
