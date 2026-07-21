@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import './styles.css';
 import type {
   AdjacencyData,
+  Box,
   Corners,
   GcpPairResult,
   GeorefData,
@@ -29,6 +30,7 @@ import { GcpControls, type GcpFitStats } from './components/GcpControls';
 import { AdjacencyTable } from './components/AdjacencyTable';
 import { DetectionsTable } from './components/DetectionsTable';
 import { PanelsTable } from './components/PanelsTable';
+import { BoxControls } from './components/BoxControls';
 import { VolumeViewer } from './components/VolumeViewer';
 import { NoteButton } from './components/NoteButton';
 import { noteContextFromFiles, type NoteContext } from './notes/api';
@@ -101,8 +103,9 @@ declare global {
 }
 
 /**
- * Top-level debugger app with three modes: georef (map + overlays), streets
- * (text detections), and panels (page-split polygons).
+ * Top-level debugger app with several modes: georef (map + overlays), streets
+ * (text detections), panels (page-split polygons), and boxes (raw CRAFT
+ * detection boxes per rotation).
  */
 export function App() {
   const [mode, setMode] = useState<Mode>(() =>
@@ -131,6 +134,9 @@ export function App() {
   const [panelLabels, setPanelLabels] = useState<string[] | undefined>(
     undefined,
   );
+  const [boxes, setBoxes] = useState<Box[]>([]);
+  // Detection rotations currently shown in boxes mode (0/90/270°).
+  const [enabledAngles, setEnabledAngles] = useState<Set<number>>(new Set());
   const [adjacencyData, setAdjacencyData] = useState<AdjacencyData | null>(
     null,
   );
@@ -332,6 +338,7 @@ export function App() {
       setDetections(result.detections);
       setPanels([]);
       setPanelLabels(undefined);
+      setBoxes([]);
       setJsonWidth(result.width);
       setJsonHeight(result.height);
     } else if (result.kind === 'panels') {
@@ -340,6 +347,17 @@ export function App() {
       setPanels(result.panels);
       setPanelLabels(result.labels);
       setDetections([]);
+      setBoxes([]);
+      setJsonWidth(result.width);
+      setJsonHeight(result.height);
+    } else if (result.kind === 'boxes') {
+      setMode('boxes');
+      setSelectedIndices(new Set());
+      setBoxes(result.boxes);
+      setEnabledAngles(new Set(result.boxes.map((box) => box.angle)));
+      setDetections([]);
+      setPanels([]);
+      setPanelLabels(undefined);
       setJsonWidth(result.width);
       setJsonHeight(result.height);
     } else if (result.kind === 'adjacency') {
@@ -349,14 +367,26 @@ export function App() {
       setDetections([]);
       setPanels([]);
       setPanelLabels(undefined);
+      setBoxes([]);
     } else {
       setMode('georef');
       setSelectedIndices(new Set());
       setDetections([]);
       setPanels([]);
       setPanelLabels(undefined);
+      setBoxes([]);
       applyGeorefJson(result.text);
     }
+  }
+
+  // Toggle whether a detection rotation's boxes are shown (boxes mode).
+  function toggleAngle(angle: number): void {
+    setEnabledAngles((prev) => {
+      const next = new Set(prev);
+      if (next.has(angle)) next.delete(angle);
+      else next.add(angle);
+      return next;
+    });
   }
 
   // Point the viewer at a decoded image, updating its source and JSON dimensions.
@@ -497,6 +527,8 @@ export function App() {
         }
         panels={panels}
         panelLabels={panelLabels}
+        boxes={boxes}
+        enabledAngles={enabledAngles}
         selectedIndices={selectedIndices}
         onSelectIndices={setSelectedIndices}
         showStreetsOnImage={showStreetsOnImage}
@@ -598,6 +630,13 @@ export function App() {
             onSelect={(index) => setSelectedIndices(new Set([index]))}
             jsonWidth={jsonWidth}
             jsonHeight={jsonHeight}
+          />
+        )}
+        {mode === 'boxes' && (
+          <BoxControls
+            boxes={boxes}
+            enabledAngles={enabledAngles}
+            onToggleAngle={toggleAngle}
           />
         )}
         {mode === 'adjacency' && adjacencyData && (

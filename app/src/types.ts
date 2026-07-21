@@ -163,6 +163,40 @@ export interface AdjacencyData {
   adjacency: [string, string][];
 }
 
+/**
+ * A single CRAFT detection box, mapped into the original image's pixel space and
+ * tagged with the rotation pass that found it (before any text recognition).
+ */
+export interface Box {
+  polygon: [number, number][];
+  /** Rotation pass that produced the box, in degrees: 0, 90, or 270. */
+  angle: number;
+}
+
+/**
+ * One rotation pass's raw boxes in boxes.json, in the rotated image's coordinate
+ * frame (CRAFT is run on the image rotated by `angle`).
+ */
+export interface BoxAngleGroup {
+  angle: number;
+  /** Axis-aligned boxes as [x_min, x_max, y_min, y_max] in the rotated frame. */
+  horizontal_list: [number, number, number, number][];
+  /** Free (quadrilateral) boxes as [x, y] corner lists in the rotated frame. */
+  free_list: [number, number][][];
+}
+
+/**
+ * boxes.json sidecar: the raw CRAFT detection boxes from `mapsnap ocr`, grouped by
+ * rotation pass, before recognition assigns any text.
+ */
+export interface BoxesJsonData {
+  width: number;
+  height: number;
+  timestamp: string;
+  command: string[];
+  boxes: BoxAngleGroup[];
+}
+
 /** A single panel polygon ring (one [x, y] vertex per point, in pixel space). */
 export type PanelPolygon = [number, number][];
 
