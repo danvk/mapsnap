@@ -136,6 +136,28 @@ describe('parseDroppedJson', () => {
     }
   });
 
+  it('recognizes boxes.json and maps boxes into the image frame', () => {
+    const text = JSON.stringify({
+      width: 1409,
+      height: 2037,
+      timestamp: 'now',
+      command: [],
+      boxes: [
+        { angle: 0, horizontal_list: [[63, 93, 31, 49]], free_list: [] },
+        { angle: 90, horizontal_list: [[1071, 1107, -1, 15]], free_list: [] },
+      ],
+    });
+    const result = parseDroppedJson(text, fallback);
+    expect(result.kind).toBe('boxes');
+    if (result.kind === 'boxes') {
+      expect(result.width).toBe(1409);
+      expect(result.height).toBe(2037);
+      expect(result.boxes.map((b) => b.angle)).toEqual([0, 90]);
+      // The 90° box is unrotated back onto the original image frame.
+      expect(result.boxes[1].polygon[0]).toEqual([1409, 1071]);
+    }
+  });
+
   it('treats georef objects as georef', () => {
     const text = JSON.stringify({
       width: 100,

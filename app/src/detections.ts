@@ -136,10 +136,21 @@ export function previewOrientation(
   };
 }
 
+/**
+ * The oriented-box geometry {@link drawDetectionCanvas} needs to crop and deskew a patch.
+ * Satisfied by both a {@link Detection} and a boxes.json `Box`.
+ */
+export interface OrientedBox {
+  polygon: [number, number][];
+  angle: number;
+  long_side: number;
+  short_side: number;
+}
+
 /** Options for {@link drawDetectionCanvas}. */
 export interface DrawDetectionOptions {
   canvas: HTMLCanvasElement;
-  det: Detection;
+  det: OrientedBox;
   image: HTMLImageElement;
   jsonWidth: number;
   jsonHeight: number;

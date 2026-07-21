@@ -1,13 +1,22 @@
 import { useState } from 'react';
+import type { IndexedBox } from '../boxes';
 import type { DetectionFilters, IndexedDetection } from '../detections';
 import { pointInPolygon } from '../geometry';
 import type { IntersectionPoint, PanelPolygon, Street } from '../types';
 import { useElementSize } from '../hooks/useElementSize';
+import { BoxControls } from './BoxControls';
+import { BoxesOverlay } from './BoxesOverlay';
 import { DetectionsOverlay } from './DetectionsOverlay';
 import { GeorefOverlay } from './GeorefOverlay';
 import { PanelsOverlay } from './PanelsOverlay';
 
-export type Mode = 'georef' | 'streets' | 'panels' | 'adjacency' | 'iiif';
+export type Mode =
+  | 'georef'
+  | 'streets'
+  | 'panels'
+  | 'boxes'
+  | 'adjacency'
+  | 'iiif';
 
 interface ImageColumnProps {
   mode: Mode;
@@ -19,6 +28,10 @@ interface ImageColumnProps {
   filteredDetections: IndexedDetection[];
   panels: PanelPolygon[];
   panelLabels?: string[];
+  boxes: IndexedBox[];
+  enabledAngles: Set<number>;
+  boxAngleGroups: [number, number][];
+  onToggleAngle: (angle: number) => void;
   selectedIndices: Set<number>;
   onSelectIndices: (indices: Set<number>) => void;
   showStreetsOnImage: boolean;
@@ -49,6 +62,10 @@ export function ImageColumn(props: ImageColumnProps) {
     filteredDetections,
     panels,
     panelLabels,
+    boxes,
+    enabledAngles,
+    boxAngleGroups,
+    onToggleAngle,
     selectedIndices,
     onSelectIndices,
     showStreetsOnImage,
@@ -67,10 +84,11 @@ export function ImageColumn(props: ImageColumnProps) {
   const streetsMode = mode === 'streets';
   const panelsMode = mode === 'panels';
   const georefMode = mode === 'georef';
+  const boxesMode = mode === 'boxes';
   // Adjacency mode renders detections just like streets mode (overlay + click select).
   const detectionsMode = streetsMode || mode === 'adjacency';
 
-  // In streets/panels mode, select the shapes under the click point. The wrapper
+  // In streets/panels/boxes mode, select the shapes under the click point. The wrapper
   // (currentTarget) tightly wraps the image, so its rect matches the image's.
   function handleClick(e: React.MouseEvent): void {
     if (georefMode || !imgSize.width || !imgSize.height) return;
@@ -81,9 +99,13 @@ export function ImageColumn(props: ImageColumnProps) {
       ? panels.flatMap((polygon, i) =>
           pointInPolygon(imgX, imgY, polygon) ? [i] : [],
         )
-      : filteredDetections
-          .filter(({ det }) => pointInPolygon(imgX, imgY, det.polygon))
-          .map(({ i }) => i);
+      : boxesMode
+        ? boxes.flatMap(({ box, i }) =>
+            pointInPolygon(imgX, imgY, box.polygon) ? [i] : [],
+          )
+        : filteredDetections
+            .filter(({ det }) => pointInPolygon(imgX, imgY, det.polygon))
+            .map(({ i }) => i);
     onSelectIndices(new Set(hit));
   }
 
@@ -136,6 +158,16 @@ export function ImageColumn(props: ImageColumnProps) {
             <PanelsOverlay
               panels={panels}
               labels={panelLabels}
+              selectedIndices={selectedIndices}
+              displayWidth={imgSize.width}
+              displayHeight={imgSize.height}
+              jsonWidth={jsonWidth}
+              jsonHeight={jsonHeight}
+            />
+          )}
+          {boxesMode && (
+            <BoxesOverlay
+              boxes={boxes}
               selectedIndices={selectedIndices}
               displayWidth={imgSize.width}
               displayHeight={imgSize.height}
@@ -270,6 +302,16 @@ export function ImageColumn(props: ImageColumnProps) {
             <label htmlFor="show-ignored">Show ignored detections</label>
           </div>
         </div>
+      )}
+
+      {boxesMode && (
+        <BoxControls
+          angleGroups={boxAngleGroups}
+          enabledAngles={enabledAngles}
+          onToggleAngle={onToggleAngle}
+          filters={filters}
+          setFilters={setFilters}
+        />
       )}
     </div>
   );

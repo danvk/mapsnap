@@ -606,3 +606,43 @@ tr.on-fill td {
   white-space: pre-wrap;
   word-break: break-word;
 }
+
+/* Boxes mode: image-column checkboxes toggling each detection rotation's overlay. */
+#box-angle-toggles {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-family: sans-serif;
+  font-size: 14px;
+}
+
+.box-controls-note {
+  margin: 0;
+  font-size: 12px;
+  color: #777;
+  max-width: 320px;
+}
+
+.box-angle-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+}
+
+.box-swatch {
+  display: inline-block;
+  width: 14px;
+  height: 14px;
+  border-radius: 3px;
+  flex-shrink: 0;
+}
+
+.box-angle-label {
+  width: 3em;
+}
+
+.box-angle-count {
+  color: #777;
+  font-variant-numeric: tabular-nums;
+}

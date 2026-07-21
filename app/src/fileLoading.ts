@@ -1,5 +1,8 @@
+import { boxesFromJson } from './boxes';
 import type {
   AdjacencyData,
+  Box,
+  BoxesJsonData,
   Detection,
   PanelPolygon,
   PanelsJsonData,
@@ -22,6 +25,13 @@ export type ParsedJson =
       text: string;
       panels: PanelPolygon[];
       labels?: string[];
+      width: number;
+      height: number;
+    }
+  | {
+      kind: 'boxes';
+      text: string;
+      boxes: Box[];
       width: number;
       height: number;
     }
@@ -66,6 +76,18 @@ function isPanelsFormat(parsed: unknown): parsed is PanelsJsonData {
   );
 }
 
+// Whether a parsed object is a boxes.json sidecar (raw CRAFT boxes grouped by rotation).
+function isBoxesFormat(parsed: unknown): parsed is BoxesJsonData {
+  if (typeof parsed !== 'object' || parsed === null || !('boxes' in parsed)) {
+    return false;
+  }
+  const boxes = (parsed as BoxesJsonData).boxes;
+  return (
+    Array.isArray(boxes) &&
+    (boxes.length === 0 || 'horizontal_list' in boxes[0])
+  );
+}
+
 // Whether a parsed object is a volume adjacency.json (per-page detections + edge list).
 function isAdjacencyFormat(parsed: unknown): parsed is AdjacencyData {
   return (
@@ -85,6 +107,7 @@ function isAdjacencyFormat(parsed: unknown): parsed is AdjacencyData {
  * streets.json comes either as a bare array of detections (old format) or as an
  * object with a `streets` array plus image metadata (new format). panels.json is
  * an object with a `panels` array of polygon rings plus image metadata.
+ * boxes.json is an object with a `boxes` array of per-rotation CRAFT box groups.
  * adjacency.json is an object with `pages` and `adjacency` keys. Anything else
  * is treated as georef data. Returns `{ kind: 'invalid' }` if the text is not
  * JSON.
@@ -110,6 +133,16 @@ export function parseDroppedJson(
       text,
       panels: parsed.panels,
       labels: parsed.labels,
+      width: parsed.width || fallback.width || 1,
+      height: parsed.height || fallback.height || 1,
+    };
+  }
+
+  if (!Array.isArray(parsed) && isBoxesFormat(parsed)) {
+    return {
+      kind: 'boxes',
+      text,
+      boxes: boxesFromJson(parsed),
       width: parsed.width || fallback.width || 1,
       height: parsed.height || fallback.height || 1,
     };
