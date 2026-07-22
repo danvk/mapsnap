@@ -41,7 +41,6 @@ from mapsnap.compare_iiif_georef import (
     annotation_transform_type,
     extract_gcps,
     fit_transform,
-    haversine_ft,
     north_angle,
     redundant_skeleton_keys,
     sample_grid,
@@ -53,7 +52,12 @@ from mapsnap.keymap.align_page_region import (
 )
 from mapsnap.keymap.fit_keymap import page_number, project
 from mapsnap.score_adjacency import truth_adjacent_pairs
-from mapsnap.utils import jpeg_dimensions, source_id_to_page_key
+from mapsnap.utils import (
+    FEET_PER_METER,
+    haversine_m,
+    jpeg_dimensions,
+    source_id_to_page_key,
+)
 
 GEOREF_VARIANTS = [
     "georef",
@@ -128,7 +132,7 @@ def grid_rmse_ft_between(
     for x, y in sample_grid(width, height):
         lon_a, lat_a = apply_affine(affine_a, x, y)
         lon_b, lat_b = apply_affine(affine_b, x, y)
-        errors.append(haversine_ft(lat_a, lon_a, lat_b, lon_b) ** 2)
+        errors.append((haversine_m(lat_a, lon_a, lat_b, lon_b) * FEET_PER_METER) ** 2)
     return math.sqrt(sum(errors) / len(errors))
 
 

@@ -1,6 +1,7 @@
 """Shared utilities for mapsnap scripts."""
 
 import json
+import math
 import re
 import struct
 import subprocess
@@ -8,6 +9,24 @@ import sys
 from datetime import datetime, timezone
 from pathlib import Path
 from types import FrameType
+
+FEET_PER_METER = 3.280839895
+# Earth radius shared across mapsnap. Kept equal to the 20,925,524 ft radius that compare's
+# degree-per-foot scale uses, so distances and pixel/foot scales assume one sphere and
+# haversine_m(...) * FEET_PER_METER reproduces the historical foot distances exactly.
+EARTH_RADIUS_M = 20_925_524.0 / FEET_PER_METER
+
+
+def haversine_m(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
+    """Great-circle distance in metres between two (lat, lon) points."""
+    phi1, phi2 = math.radians(lat1), math.radians(lat2)
+    d_phi = math.radians(lat2 - lat1)
+    d_lambda = math.radians(lon2 - lon1)
+    a = (
+        math.sin(d_phi / 2) ** 2
+        + math.cos(phi1) * math.cos(phi2) * math.sin(d_lambda / 2) ** 2
+    )
+    return 2 * EARTH_RADIUS_M * math.asin(math.sqrt(a))
 
 
 def run_cmd(cmd: list[str]) -> None:

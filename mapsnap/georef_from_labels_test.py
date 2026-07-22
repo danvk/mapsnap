@@ -1579,6 +1579,42 @@ def test_drop_collinear_dominated_keeps_when_not_strictly_worse():
     assert len(kept) == 2
 
 
+# p1477's derived gate: min_confidence 0.15, auto min_short_side ~17, min_long_side ~34.
+_ADMISSION_GATE = {
+    "min_confidence": 0.15,
+    "min_short_side": 17.0,
+    "min_long_side": 34.0,
+    "min_aspect_ratio": 1.75,
+    "high_confidence_size_fraction": 0.7,
+}
+
+
+def _sized_label(text: str, short: float, long: float, conf: float) -> dict:
+    """A detection with explicit short/long side and confidence (geometry irrelevant here)."""
+    return {"text": text, "confidence": conf, "short_side": short, "long_side": long}
+
+
+def test_passes_admission_gate_rejects_low_confidence_small_label():
+    from mapsnap.georef_from_labels import passes_admission_gate
+
+    # The junk "1ST" copy that rides a better street's line (conf 0.001, 12px) fails the
+    # confidence/size gate on its own, so its collinear drop is not worth logging.
+    junk = _sized_label("1ST", short=12.0, long=26.0, conf=0.001)
+    assert not passes_admission_gate(junk, set(), **_ADMISSION_GATE)
+
+
+def test_passes_admission_gate_aspect_floor_gates_short_names():
+    from mapsnap.georef_from_labels import passes_admission_gate
+
+    # p1477's real "1ST": clears confidence and both size floors but is nearly square
+    # (38/24 = 1.58). A 1.75 aspect floor rejects it; dropping the floor to 1.0 admits it.
+    first = _sized_label("1ST", short=24.0, long=38.0, conf=0.237)
+    assert not passes_admission_gate(first, set(), **_ADMISSION_GATE)
+    assert passes_admission_gate(
+        first, set(), **{**_ADMISSION_GATE, "min_aspect_ratio": 1.0}
+    )
+
+
 def _on(text: str, hue: float, chroma: float = 12.0) -> dict:
     """A detection OCR marked as sitting on a fill of the given hue."""
     return {
@@ -1711,3 +1747,78 @@ def test_needs_size_relaxation_tracks_the_base_gate():
     assert not needs_size_relaxation(
         {"short_side": 4.0, "long_side": 4.0, "promoted": True}, 18.0, 36.0
     )
+
+
+def test_haversine_m_one_degree_latitude():
+    from mapsnap.utils import haversine_m
+
+    # One degree of latitude is ~111 km anywhere on the globe.
+    assert abs(haversine_m(0.0, 0.0, 1.0, 0.0) - 111_320) < 500
+    assert haversine_m(38.9, -77.0, 38.9, -77.0) == 0.0
+
+
+def test_keymap_center_distance_m():
+    from mapsnap.georef_from_labels import keymap_center_distance_m
+
+    keymap = {"lat": 38.8734, "lon": -77.0173}
+    # center is (lon, lat): ~0 m at the key-map point.
+    near = keymap_center_distance_m((-77.0173, 38.8734), keymap)
+    assert near is not None and near < 1.0
+    # p214's NW mismatch: ~0.034 deg north is a few km, far outside the 570 m radius.
+    far = keymap_center_distance_m((-77.0166, 38.9070), keymap)
+    assert far is not None and far > 3000
+    # No key-map location to measure against -> None.
+    assert keymap_center_distance_m((-77.0, 38.9), None) is None
+    assert keymap_center_distance_m((-77.0, 38.9), {}) is None
+
+
+def test_has_confident_street_in_radius(tmp_path):
+    from mapsnap.georef_from_labels import has_confident_street_in_radius
+
+    in_radius = {"DELAWARE AVENUE SOUTHWEST", "NORTH STREET SOUTHWEST"}
+
+    def labels(detections: list[dict]) -> str:
+        path = tmp_path / "p.streets.json"
+        _write_streets_json(path, detections)
+        return str(path)
+
+    # A confident in-radius street name is evidence the page belongs at the key-map location.
+    assert has_confident_street_in_radius(
+        labels([{"text": "DELAWARE", "confidence": 0.99}]), in_radius, 0.5
+    )
+    # The same name below the confidence bar is not trusted.
+    assert not has_confident_street_in_radius(
+        labels([{"text": "DELAWARE", "confidence": 0.1}]), in_radius, 0.5
+    )
+    # A confident detection that names no in-radius street is not evidence.
+    assert not has_confident_street_in_radius(
+        labels([{"text": "BROADWAY", "confidence": 0.99}]), in_radius, 0.5
+    )
+
+
+def test_keymap_location_is_anchored():
+    from mapsnap.georef_from_labels import keymap_location_is_anchored
+
+    # A tight single-region key map (DC p214): the location anchors the check.
+    tight = {
+        "lat": 38.8734,
+        "lon": -77.0173,
+        "radius_m": 570.0,
+        "regions": [[[-77.018, 38.873], [-77.016, 38.873], [-77.017, 38.874]]],
+    }
+    assert keymap_location_is_anchored(tight)
+    # No regions -> just the point; treated as anchored.
+    assert keymap_location_is_anchored({"lat": 38.8, "lon": -77.0, "radius_m": 570.0})
+    # A multi-panel page whose regions span kilometres (LA p1499) is not a reliable anchor.
+    spread = {
+        "lat": 34.03,
+        "lon": -118.19,
+        "radius_m": 472.0,
+        "regions": [
+            [[-118.19, 34.03], [-118.191, 34.031]],
+            [[-118.14, 34.06], [-118.141, 34.061]],
+        ],
+    }
+    assert not keymap_location_is_anchored(spread)
+    # No key map at all -> not anchored.
+    assert not keymap_location_is_anchored(None)

@@ -61,12 +61,12 @@ from mapsnap.compare_iiif_georef import (
     annotation_transform_type,
     extract_gcps,
     fit_transform,
-    haversine_ft,
     sample_grid,
     truth_page_number,
     truth_polygons_by_page,
 )
 from mapsnap.georef_from_labels import LabelFeature, prepare_label_features
+from mapsnap.utils import FEET_PER_METER, haversine_m
 from mapsnap.keymap.fit_keymap import (
     project,
     similarity_apply,
@@ -911,7 +911,7 @@ def grid_rmse_ft(
         lon_g, lat_g = bilinear_pixel_to_world(
             corner_points, 1, 1, (px / truth_width, py / truth_height)
         )
-        errors.append(haversine_ft(lat_t, lon_t, lat_g, lon_g))
+        errors.append(haversine_m(lat_t, lon_t, lat_g, lon_g) * FEET_PER_METER)
     rmse = math.sqrt(sum(error**2 for error in errors) / len(errors))
     return rmse, max(errors)
 
@@ -1183,13 +1183,8 @@ def volume_median_scale_px_per_m(volume: Path) -> float | None:
         if not corners or not width or not height or len(corners) != 4:
             continue
         top_left, top_right, _bottom_right, bottom_left = corners
-        width_m = (
-            haversine_ft(top_left[1], top_left[0], top_right[1], top_right[0]) / 3.28084
-        )
-        height_m = (
-            haversine_ft(top_left[1], top_left[0], bottom_left[1], bottom_left[0])
-            / 3.28084
-        )
+        width_m = haversine_m(top_left[1], top_left[0], top_right[1], top_right[0])
+        height_m = haversine_m(top_left[1], top_left[0], bottom_left[1], bottom_left[0])
         if width_m > 0 and height_m > 0:
             scales.append((width / width_m + height / height_m) / 2)
     if not scales:

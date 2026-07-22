@@ -50,7 +50,7 @@ from mapsnap.streets import (
     is_number_only,
     normalize_street,
 )
-from mapsnap.utils import default_centerlines, image_stem
+from mapsnap.utils import default_centerlines, haversine_m, image_stem
 
 
 @dataclass
@@ -328,6 +328,17 @@ WEAK_PARTNER_CONFIDENCE = 0.05
 # line for drop_collinear_dominated. 20 px admits Nashville p9's 4 px 3RD/7TH offset while
 # keeping genuinely parallel streets (a block apart) separate.
 COLLINEAR_PERP_TOLERANCE_PX = 20.0
+
+# Confidence a detection must clear to count as evidence that a page belongs at its key-map
+# location (see has_confident_street_in_radius / the key-map-outlier rejection).
+KEYMAP_OUTLIER_MIN_CONFIDENCE = 0.5
+
+# The key-map-outlier rejection trusts a page's key-map location only when its key-map regions
+# cluster within this many radii of each other. A multi-panel page (e.g. an index sheet split
+# across the map) has its number detected in far-apart regions, so its single (lat, lon) is not a
+# reliable anchor — LA's p1499 series spans 6 km at a 472 m radius, and its correct fits land far
+# from that point. Above this ratio the check is skipped rather than reject a good fit.
+KEYMAP_OUTLIER_MAX_REGION_SPREAD_RATIO = 3.0
 
 
 def is_split_page(stem: str) -> bool:
@@ -2145,6 +2156,62 @@ def _init_worker(
     )
 
 
+def keymap_center_distance_m(
+    center: tuple[float, float], keymap: dict | None
+) -> float | None:
+    """Distance (m) from a fitted (lon, lat) page center to the page's key-map location.
+
+    Returns None when there is no key-map location to measure against.
+    """
+    if not keymap or keymap.get("lat") is None or keymap.get("lon") is None:
+        return None
+    lon, lat = center
+    return haversine_m(lat, lon, keymap["lat"], keymap["lon"])
+
+
+def keymap_location_is_anchored(keymap: dict | None) -> bool:
+    """Whether a page's key-map regions are tight enough for its location to anchor a check.
+
+    True when the page has at most one key-map region, or when all its regions cluster within
+    ``KEYMAP_OUTLIER_MAX_REGION_SPREAD_RATIO`` radii of each other. A multi-panel page detected in
+    far-apart regions (LA's p1499 spans 6 km) fails this, so the key-map-outlier rejection is
+    skipped for it rather than reject a correct fit against an unreliable single location.
+    """
+    if not keymap or keymap.get("radius_m") is None:
+        return False
+    centroids = [
+        (sum(p[0] for p in ring) / len(ring), sum(p[1] for p in ring) / len(ring))
+        for ring in (keymap.get("regions") or [])
+        if ring
+    ]
+    if len(centroids) <= 1:
+        return True
+    spread_m = max(
+        haversine_m(a[1], a[0], b[1], b[0]) for a in centroids for b in centroids
+    )
+    return spread_m <= KEYMAP_OUTLIER_MAX_REGION_SPREAD_RATIO * keymap["radius_m"]
+
+
+def has_confident_street_in_radius(
+    labels_path: str, in_radius_streets: set[str], min_confidence: float
+) -> bool:
+    """Whether any confident detection names a street inside the key-map radius.
+
+    This is the evidence that a page truly belongs at its key-map location: an OCR read that
+    both clears ``min_confidence`` and canonically matches a street within the radius. It gates
+    the key-map-outlier rejection, so a page with no such local evidence — whose key-map location
+    may itself be unreliable — is never rejected merely for landing elsewhere.
+    """
+    for detection in load_detections(labels_path):
+        if (
+            detection.get("confidence", 0.0) >= min_confidence
+            and canonical_street_match(detection.get("text", ""), in_radius_streets)
+            is not None
+        ):
+            return True
+    return False
+
+
 def _process_one_image(image_path: str) -> tuple[str, ProcessResult]:
     """Georeference one image using _worker_state, capturing its log to a <stem>.txt sidecar.
 
@@ -2160,6 +2227,7 @@ def _process_one_image(image_path: str) -> tuple[str, ProcessResult]:
         ".georef-outlier.json",
         ".georef-1gcp.json",
         ".georef-nofit.json",
+        ".georef-keymap-outlier.json",
     ):
         stale_path = output_path.replace(".georef.json", stale_suffix)
         if os.path.exists(stale_path):
@@ -2266,17 +2334,34 @@ def _process_one_image(image_path: str) -> tuple[str, ProcessResult]:
                     broadened = run(*rectangle_index)
                     # The rectangle vocabulary reintroduces same-name streets from across
                     # the volume, which fallback-vocab labels can assemble into a spurious
-                    # multi-GCP fit (p61W: 16 GCPs at 0.04x the true scale). The page's
-                    # key-map region gives an independent per-page scale check.
-                    if broadened.success and broadened.scale_deg_per_px is not None:
-                        prior = region_prior_px_per_ft(
-                            keymap,
-                            *image_size(image_path),
-                            split_page=is_split_page(image_stem(image_path)),
+                    # multi-GCP fit (p61W: 16 GCPs at 0.04x the true scale). Two independent
+                    # key-map checks reject those: the page's region gives a per-page scale
+                    # check, and its location gives a per-page position check.
+                    if broadened.success:
+                        prior = (
+                            region_prior_px_per_ft(
+                                keymap,
+                                *image_size(image_path),
+                                split_page=is_split_page(image_stem(image_path)),
+                            )
+                            if broadened.scale_deg_per_px is not None
+                            else None
                         )
-                        fitted = deg_per_px_to_px_per_ft(broadened.scale_deg_per_px)
-                        if prior is not None and not broadened_scale_plausible(
-                            fitted, prior
+                        fitted = (
+                            deg_per_px_to_px_per_ft(broadened.scale_deg_per_px)
+                            if broadened.scale_deg_per_px is not None
+                            else None
+                        )
+                        distance_m = (
+                            keymap_center_distance_m(broadened.center, keymap)
+                            if broadened.center is not None
+                            else None
+                        )
+                        radius_m = (keymap or {}).get("radius_m")
+                        if (
+                            fitted is not None
+                            and prior is not None
+                            and not broadened_scale_plausible(fitted, prior)
                         ):
                             print(
                                 f"  rejecting broadened fit: {fitted:.3f} px/ft is "
@@ -2287,10 +2372,35 @@ def _process_one_image(image_path: str) -> tuple[str, ProcessResult]:
                             # rejection isn't a no-op on disk.
                             if os.path.exists(output_path):
                                 os.remove(output_path)
+                        elif (
+                            distance_m is not None
+                            and radius_m is not None
+                            and distance_m > radius_m
+                            and keymap_location_is_anchored(keymap)
+                            and has_confident_street_in_radius(
+                                labels_path,
+                                set(near.keys()),
+                                KEYMAP_OUTLIER_MIN_CONFIDENCE,
+                            )
+                        ):
+                            print(
+                                f"  rejecting broadened fit: placed {distance_m:.0f} m from "
+                                f"the key-map location ({distance_m / radius_m:.1f}x the "
+                                f"{radius_m:.0f} m radius) despite confident in-radius streets"
+                            )
+                            # Keep the fit as a key-map-outlier sidecar (it records where the
+                            # page was wrongly placed) instead of a plain georef.json.
+                            os.replace(
+                                output_path,
+                                output_path.replace(
+                                    ".georef.json", ".georef-keymap-outlier.json"
+                                ),
+                            )
+                            # Failure with nofit_written set: the page stays unplaced and the
+                            # redundant nofit sidecar is suppressed (the outlier one stands in).
+                            result = ProcessResult(success=False, nofit_written=True)
                         else:
                             result = broadened
-                    elif broadened.success:
-                        result = broadened
             elif rectangle_index is not None:
                 # Unplaced page: the key-map rectangle is the tightest vocabulary available.
                 result = run(*rectangle_index)
@@ -2441,6 +2551,47 @@ def drop_collinear_dominated(
     return kept, dominated
 
 
+def passes_admission_gate(
+    det: dict,
+    normalized_streets: set[str],
+    *,
+    min_confidence: float,
+    min_short_side: float,
+    min_long_side: float,
+    min_aspect_ratio: float,
+    high_confidence_size_fraction: float,
+) -> bool:
+    """Whether an unpromoted detection clears the confidence, size, aspect, and word gates.
+
+    This is the admission test applied in :func:`prepare_label_features` to a non-promoted
+    detection: the confidence floor, the confidence-relaxed size floor, the aspect-ratio floor,
+    and the number-only/bare-letter/direction-word rejections. Promoted detections bypass these
+    (confidence only) and are not covered here.
+    """
+    required_short_side = confidence_relaxed_threshold(
+        det["confidence"],
+        min_confidence,
+        min_short_side,
+        min_short_side * high_confidence_size_fraction,
+    )
+    required_long_side = min_long_side * (required_short_side / min_short_side)
+    return (
+        det["confidence"] >= min_confidence
+        and det.get("long_side", float("inf")) >= required_long_side
+        and det.get("short_side", float("inf")) >= required_short_side
+        and det.get("long_side", float("inf"))
+        >= min_aspect_ratio * det.get("short_side", 1.0)
+        and not is_number_only(det["text"])
+        # Bare single letters are accepted only via promotion; an unpromoted "M"/"W" is almost
+        # always a rotated misread of a quadrant/type box, so reject it here.
+        and not is_bare_letter(det["text"])
+        and (
+            normalize_street(det["text"]) not in DIRECTION_WORDS
+            or det["text"].upper().strip() in normalized_streets
+        )
+    )
+
+
 def prepare_label_features(
     labels_path: str,
     block_index: dict[str, list[Block]],
@@ -2539,12 +2690,27 @@ def prepare_label_features(
             min_long_side=min_long_side,
             perp_tolerance_px=collinear_perp_tolerance_px,
         )
-        if dominated:
+        # Only surface drops that would otherwise have been admitted; a detection the
+        # size/confidence gate would reject anyway is not informative, just log noise.
+        loggable = [
+            d
+            for d in dominated
+            if passes_admission_gate(
+                d,
+                normalized_streets,
+                min_confidence=min_confidence,
+                min_short_side=min_short_side,
+                min_long_side=min_long_side,
+                min_aspect_ratio=min_aspect_ratio,
+                high_confidence_size_fraction=high_confidence_size_fraction,
+            )
+        ]
+        if loggable:
             print(
-                f"Dropped {len(dominated)} collinear-dominated detection(s): "
+                f"Dropped {len(loggable)} collinear-dominated detection(s): "
                 + ", ".join(
                     f"{d['text']}({d.get('short_side', 0):.0f}px,{d.get('confidence', 0):.2f})"
-                    for d in dominated
+                    for d in loggable
                 ),
                 file=sys.stderr,
             )
@@ -2556,28 +2722,14 @@ def prepare_label_features(
             if det["confidence"] < min_confidence or is_number_only(det["text"]):
                 continue
         else:
-            required_short_side = confidence_relaxed_threshold(
-                det["confidence"],
-                min_confidence,
-                min_short_side,
-                min_short_side * high_confidence_size_fraction,
-            )
-            required_long_side = min_long_side * (required_short_side / min_short_side)
-            if not (
-                det["confidence"] >= min_confidence
-                and det.get("long_side", float("inf")) >= required_long_side
-                and det.get("short_side", float("inf")) >= required_short_side
-                and det.get("long_side", float("inf"))
-                >= min_aspect_ratio * det.get("short_side", 1.0)
-                and not is_number_only(det["text"])
-                # Bare single letters are accepted only via promotion (the is_promoted
-                # branch above); an unpromoted "M"/"W" is almost always a rotated misread of
-                # a quadrant/type box, so reject it here.
-                and not is_bare_letter(det["text"])
-                and (
-                    normalize_street(det["text"]) not in DIRECTION_WORDS
-                    or det["text"].upper().strip() in normalized_streets
-                )
+            if not passes_admission_gate(
+                det,
+                normalized_streets,
+                min_confidence=min_confidence,
+                min_short_side=min_short_side,
+                min_long_side=min_long_side,
+                min_aspect_ratio=min_aspect_ratio,
+                high_confidence_size_fraction=high_confidence_size_fraction,
             ):
                 continue
         if edge_margin > 0 and not is_promoted:
@@ -3168,7 +3320,7 @@ def main() -> None:
     parser.add_argument(
         "--min-aspect-ratio",
         type=float,
-        default=1.75,
+        default=1.00,
         metavar="RATIO",
         help="Minimum long/short side ratio for a text polygon (default: %(default)s)",
     )
