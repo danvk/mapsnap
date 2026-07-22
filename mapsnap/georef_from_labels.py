@@ -50,7 +50,7 @@ from mapsnap.streets import (
     is_number_only,
     normalize_street,
 )
-from mapsnap.utils import default_centerlines, image_stem
+from mapsnap.utils import default_centerlines, haversine_m, image_stem
 
 
 @dataclass
@@ -2154,19 +2154,6 @@ def _init_worker(
         rectangle_index=rectangle_index,
         truth_by_page=truth_by_page or None,
     )
-
-
-def haversine_m(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
-    """Great-circle distance in metres between two (lat, lon) points."""
-    radius_m = 6_371_000.0
-    phi1, phi2 = math.radians(lat1), math.radians(lat2)
-    d_phi = math.radians(lat2 - lat1)
-    d_lambda = math.radians(lon2 - lon1)
-    a = (
-        math.sin(d_phi / 2) ** 2
-        + math.cos(phi1) * math.cos(phi2) * math.sin(d_lambda / 2) ** 2
-    )
-    return 2 * radius_m * math.asin(math.sqrt(a))
 
 
 def keymap_center_distance_m(

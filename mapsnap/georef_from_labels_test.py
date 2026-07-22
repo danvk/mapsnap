@@ -1750,10 +1750,10 @@ def test_needs_size_relaxation_tracks_the_base_gate():
 
 
 def test_haversine_m_one_degree_latitude():
-    from mapsnap.georef_from_labels import haversine_m
+    from mapsnap.utils import haversine_m
 
     # One degree of latitude is ~111 km anywhere on the globe.
-    assert abs(haversine_m(0.0, 0.0, 1.0, 0.0) - 111_195) < 1000
+    assert abs(haversine_m(0.0, 0.0, 1.0, 0.0) - 111_320) < 500
     assert haversine_m(38.9, -77.0, 38.9, -77.0) == 0.0
 
 

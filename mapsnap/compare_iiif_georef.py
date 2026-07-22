@@ -30,7 +30,7 @@ import numpy as np
 from shapely.geometry import Polygon as ShapelyPolygon
 from shapely.geometry import box
 
-from mapsnap.utils import source_id_to_page_key
+from mapsnap.utils import FEET_PER_METER, haversine_m, source_id_to_page_key
 
 GCP = tuple[tuple[float, float], tuple[float, float]]  # ((px, py), (lon, lat))
 EARTH_RADIUS_FT = 20_925_524.0
@@ -238,18 +238,6 @@ def px_per_ft(A: np.ndarray) -> float:
     return 1.0 / (scale_deg_per_px(A) * _FT_PER_DEG_LAT)
 
 
-def haversine_ft(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
-    """Return Haversine distance in feet between two (lat, lon) points."""
-    phi1, phi2 = math.radians(lat1), math.radians(lat2)
-    dphi = math.radians(lat2 - lat1)
-    dlam = math.radians(lon2 - lon1)
-    a = (
-        math.sin(dphi / 2) ** 2
-        + math.cos(phi1) * math.cos(phi2) * math.sin(dlam / 2) ** 2
-    )
-    return 2.0 * EARTH_RADIUS_FT * math.asin(math.sqrt(a))
-
-
 def sample_grid(width: float, height: float, n: int = 7) -> list[tuple[float, float]]:
     """Return an n×n grid of pixel points at uniform fractional positions.
 
@@ -348,7 +336,7 @@ def analyze_pair(truth_item: dict, gen_item: dict) -> dict:
         v = np.array([px, py, 1.0])
         lon_t, lat_t = A_truth @ v
         lon_g, lat_g = A_gen @ v
-        errors.append(haversine_ft(lat_t, lon_t, lat_g, lon_g))
+        errors.append(haversine_m(lat_t, lon_t, lat_g, lon_g) * FEET_PER_METER)
 
     rmse_ft = math.sqrt(sum(e**2 for e in errors) / len(errors))
     max_ft = max(errors)
@@ -358,7 +346,7 @@ def analyze_pair(truth_item: dict, gen_item: dict) -> dict:
     v_center = np.array([cx, cy, 1.0])
     lon_t, lat_t = A_truth @ v_center
     lon_g, lat_g = A_gen @ v_center
-    trans_ft = haversine_ft(lat_t, lon_t, lat_g, lon_g)
+    trans_ft = haversine_m(lat_t, lon_t, lat_g, lon_g) * FEET_PER_METER
 
     # Rotation and scale from affine linear parts.
     rot_err = angle_diff(north_angle(A_gen), north_angle(A_truth))
