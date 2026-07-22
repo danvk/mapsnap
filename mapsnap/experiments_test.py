@@ -265,3 +265,81 @@ def test_page_status_missing_when_absent_from_truth():
     man = _manifest_with_truth({"p1": 10.0})
     assert page_status(man, "p1") == "ok"
     assert page_status(man, "p9") == "missing"
+
+
+def _georef_item(label: str, source_id: str) -> dict:
+    # Pixel (0..100)^2 mapped to a ~110m lon/lat box; selector = the full rect.
+    gcps = [
+        ((0, 0), (0.0, 0.0)),
+        ((100, 0), (0.001, 0.0)),
+        ((100, 100), (0.001, -0.001)),
+        ((0, 100), (0.0, -0.001)),
+    ]
+    return {
+        "label": label,
+        "target": {
+            "source": {"id": source_id, "width": 100, "height": 100},
+            "selector": {
+                "type": "SvgSelector",
+                "value": '<svg><polygon points="0,0 100,0 100,100 0,100" /></svg>',
+            },
+        },
+        "body": {
+            "features": [
+                {
+                    "properties": {"resourceCoords": list(px)},
+                    "geometry": {"coordinates": list(geo)},
+                }
+                for px, geo in gcps
+            ],
+        },
+    }
+
+
+def test_truth_metrics_includes_score(tmp_path):
+    from mapsnap.experiments import truth_metrics
+
+    item = _georef_item("p1", "https://example.com/x-1950-0001/info.json")
+    truth = tmp_path / "main.iiif.json"
+    truth.write_text(json.dumps({"items": [item]}))
+    generated = tmp_path / "run.iiif.json"
+    generated.write_text(json.dumps({"items": [item]}))
+    # One street through the page footprint: the whole box is "land".
+    (tmp_path / "centerlines.geojson").write_text(
+        json.dumps(
+            {
+                "features": [
+                    {
+                        "geometry": {
+                            "type": "LineString",
+                            "coordinates": [[-0.001, -0.0005], [0.002, -0.0005]],
+                        },
+                        "properties": {"street_name": "Main"},
+                    }
+                ]
+            }
+        )
+    )
+    metrics = truth_metrics(truth, generated)
+    assert metrics["compared"] == 1 and metrics["missing"] == 0
+    score = metrics["score"]
+    # Identical transforms: RMSE 0 -> the whole (all-land) footprint is good.
+    assert score == {
+        "net": 1.0,
+        "good_share": 1.0,
+        "disaster_share": 0.0,
+        "n_pages": 1,
+        "n_placed": 1,
+    }
+
+
+def test_truth_metrics_score_absent_without_centerlines(tmp_path):
+    from mapsnap.experiments import truth_metrics
+
+    item = _georef_item("p1", "https://example.com/x-1950-0001/info.json")
+    truth = tmp_path / "main.iiif.json"
+    truth.write_text(json.dumps({"items": [item]}))
+    generated = tmp_path / "run.iiif.json"
+    generated.write_text(json.dumps({"items": [item]}))
+    metrics = truth_metrics(truth, generated)
+    assert "score" not in metrics
