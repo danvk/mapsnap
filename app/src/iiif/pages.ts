@@ -33,7 +33,16 @@ export interface PageGcp {
 export interface PageGeo {
   /** Index of this page's item in the annotation's items array; selection id. */
   itemIndex: number;
+  /** Parent page key (splits share it), e.g. "p1499m" for both p1499m panels. */
   pageKey: string;
+  /**
+   * Split panel number from the annotation id (`…__2/georef`), or null for a whole
+   * page. Present only on our generated splits; a truth split carries it in its
+   * label instead and is matched by panel overlap rather than by number.
+   */
+  splitIndex: number | null;
+  /** Page key including any split index, matching the on-disk file stem (e.g. "p1499m__2"). */
+  stem: string;
   width: number;
   height: number;
   /** Geo images of the image corners (0,0), (w,0), (w,h), (0,h) as [lon, lat]. */
@@ -48,6 +57,24 @@ export interface PageGeo {
   gcps: PageGcp[];
   /** The annotation's transformation type, e.g. "polynomial" or "helmert". */
   transformationType: string;
+}
+
+/**
+ * Split panel number for an item, or null for a whole page.
+ *
+ * A generated split carries it in its id (`…-1499M__2/georef`); a truth split carries it in
+ * a trailing `[N]` on its label. A generated whole page's id ends in `/georef` and its label
+ * may still carry a stray `[N]` copied from the truth — which is ignored.
+ */
+function splitIndexFor(
+  id: string | undefined,
+  label: string | undefined,
+): number | null {
+  const idMatch = id?.match(/__(\d+)\//);
+  if (idMatch) return Number(idMatch[1]);
+  if (id?.includes('/georef')) return null; // generated whole page
+  const labelMatch = label?.match(/\[(\d+)\]\s*$/);
+  return labelMatch ? Number(labelMatch[1]) : null;
 }
 
 /** Parse the vertex list out of an SvgSelector's polygon value. */
@@ -176,7 +203,14 @@ export function missingTruthPages(
   for (const truthPage of truthPages) {
     if (fitKeys.has(truthPage.pageKey) || seen.has(truthPage.pageKey)) continue;
     seen.add(truthPage.pageKey);
-    missing.push({ ...truthPage, itemIndex: -(missing.length + 1) });
+    // The whole page is missing (no panel was fitted), so label it by the parent
+    // key rather than the first truth panel's split stem.
+    missing.push({
+      ...truthPage,
+      itemIndex: -(missing.length + 1),
+      splitIndex: null,
+      stem: truthPage.pageKey,
+    });
   }
   return missing;
 }
@@ -232,6 +266,9 @@ export function pagesFromAnnotation(
           )
         : rectRing;
 
+    const splitIndex = splitIndexFor(item.id, item.label);
+    const stem = splitIndex != null ? `${pageKey}__${splitIndex}` : pageKey;
+
     const [nw, ne, , sw] = corners;
     const feetAcross = Math.hypot(...deltaMeters(nw, ne)) * FEET_PER_METER;
     const feetDown = Math.hypot(...deltaMeters(nw, sw)) * FEET_PER_METER;
@@ -246,6 +283,8 @@ export function pagesFromAnnotation(
     pages.push({
       itemIndex,
       pageKey,
+      splitIndex,
+      stem,
       width,
       height,
       corners,

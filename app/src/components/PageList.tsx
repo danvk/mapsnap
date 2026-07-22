@@ -7,8 +7,8 @@ interface PageListProps {
   pages: PageGeo[];
   /** Truth pages the run never fitted; shown with blank RMSE/Δ columns. */
   missingPages: PageGeo[];
-  /** Per-itemIndex truth stats; null entry = truth exists but is incomparable (split). */
-  stats: Map<number, PageCompareStats | null> | null;
+  /** Per-itemIndex compare stats; a page absent here has no truth counterpart. Null: no truth. */
+  stats: Map<number, PageCompareStats> | null;
   /** Page key → note text for the volume; keys present here get a marker. */
   notes: Map<string, string>;
   selectedItemIndex: number | null;
@@ -34,7 +34,7 @@ function rmseClass(rmseFt: number): string {
 function sortValue(
   key: SortKey,
   page: PageGeo,
-  stats: PageCompareStats | null | undefined,
+  stats: PageCompareStats | undefined,
 ): number | undefined {
   switch (key) {
     case 'page':
@@ -76,7 +76,7 @@ export function PageList(props: PageListProps) {
   // truth stats, so they blank out the RMSE/Δ columns and sink under those sorts.
   const missingKeys = new Set(missingPages.map((page) => page.itemIndex));
   const sorted = [...pages, ...missingPages].sort((a, b) => {
-    const naturalOrder = comparePageKeys(a.pageKey, b.pageKey);
+    const naturalOrder = comparePageKeys(a.stem, b.stem);
     if (effectiveSort.key === 'page') {
       return effectiveSort.descending ? -naturalOrder : naturalOrder;
     }
@@ -155,11 +155,11 @@ export function PageList(props: PageListProps) {
                 }
               >
                 <td>
-                  {page.pageKey}
-                  {notes.has(page.pageKey) && (
+                  {page.stem}
+                  {notes.has(page.stem) && (
                     <span
                       className="page-note-marker"
-                      title={notes.get(page.pageKey)}
+                      title={notes.get(page.stem)}
                     >
                       {' '}
                       📓
@@ -176,12 +176,8 @@ export function PageList(props: PageListProps) {
                       <span className={rmseClass(pageStats.rmseFt)}>
                         {pageStats.rmseFt.toFixed(0)}ft
                       </span>
-                    ) : stats.has(page.itemIndex) ? (
-                      <span title="split page: truth is in the parent canvas frame">
-                        split
-                      </span>
                     ) : (
-                      <span title="no truth annotation for this page">—</span>
+                      <span title="no truth counterpart for this page">—</span>
                     )}
                   </td>
                 )}
