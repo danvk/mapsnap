@@ -1747,3 +1747,76 @@ def test_needs_size_relaxation_tracks_the_base_gate():
     assert not needs_size_relaxation(
         {"short_side": 4.0, "long_side": 4.0, "promoted": True}, 18.0, 36.0
     )
+
+
+def test_haversine_m_one_degree_latitude():
+    from mapsnap.georef_from_labels import haversine_m
+
+    # One degree of latitude is ~111 km anywhere on the globe.
+    assert abs(haversine_m(0.0, 0.0, 1.0, 0.0) - 111_195) < 1000
+    assert haversine_m(38.9, -77.0, 38.9, -77.0) == 0.0
+
+
+def test_keymap_center_distance_m():
+    from mapsnap.georef_from_labels import keymap_center_distance_m
+
+    keymap = {"lat": 38.8734, "lon": -77.0173}
+    # center is (lon, lat): ~0 m at the key-map point.
+    assert keymap_center_distance_m((-77.0173, 38.8734), keymap) < 1.0
+    # p214's NW mismatch: ~0.034 deg north is a few km, far outside the 570 m radius.
+    assert keymap_center_distance_m((-77.0166, 38.9070), keymap) > 3000
+    # No key-map location to measure against -> None.
+    assert keymap_center_distance_m((-77.0, 38.9), None) is None
+    assert keymap_center_distance_m((-77.0, 38.9), {}) is None
+
+
+def test_has_confident_street_in_radius(tmp_path):
+    from mapsnap.georef_from_labels import has_confident_street_in_radius
+
+    in_radius = {"DELAWARE AVENUE SOUTHWEST", "NORTH STREET SOUTHWEST"}
+
+    def labels(detections: list[dict]) -> str:
+        path = tmp_path / "p.streets.json"
+        _write_streets_json(path, detections)
+        return str(path)
+
+    # A confident in-radius street name is evidence the page belongs at the key-map location.
+    assert has_confident_street_in_radius(
+        labels([{"text": "DELAWARE", "confidence": 0.99}]), in_radius, 0.5
+    )
+    # The same name below the confidence bar is not trusted.
+    assert not has_confident_street_in_radius(
+        labels([{"text": "DELAWARE", "confidence": 0.1}]), in_radius, 0.5
+    )
+    # A confident detection that names no in-radius street is not evidence.
+    assert not has_confident_street_in_radius(
+        labels([{"text": "BROADWAY", "confidence": 0.99}]), in_radius, 0.5
+    )
+
+
+def test_keymap_location_is_anchored():
+    from mapsnap.georef_from_labels import keymap_location_is_anchored
+
+    # A tight single-region key map (DC p214): the location anchors the check.
+    tight = {
+        "lat": 38.8734,
+        "lon": -77.0173,
+        "radius_m": 570.0,
+        "regions": [[[-77.018, 38.873], [-77.016, 38.873], [-77.017, 38.874]]],
+    }
+    assert keymap_location_is_anchored(tight)
+    # No regions -> just the point; treated as anchored.
+    assert keymap_location_is_anchored({"lat": 38.8, "lon": -77.0, "radius_m": 570.0})
+    # A multi-panel page whose regions span kilometres (LA p1499) is not a reliable anchor.
+    spread = {
+        "lat": 34.03,
+        "lon": -118.19,
+        "radius_m": 472.0,
+        "regions": [
+            [[-118.19, 34.03], [-118.191, 34.031]],
+            [[-118.14, 34.06], [-118.141, 34.061]],
+        ],
+    }
+    assert not keymap_location_is_anchored(spread)
+    # No key map at all -> not anchored.
+    assert not keymap_location_is_anchored(None)
