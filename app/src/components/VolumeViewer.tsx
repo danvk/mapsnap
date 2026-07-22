@@ -11,7 +11,9 @@ import {
   type PageCompareStats,
 } from '../iiif/compare';
 import type { ComparePageStats } from '../../server/compareTxt';
+import type { AdjacencyData } from '../types';
 import {
+  fetchAdjacency,
   fetchCompare,
   fetchFailedGeorefs,
   fetchRewrittenAnnotation,
@@ -19,6 +21,7 @@ import {
 } from '../iiif/api';
 import { isTypingTarget } from '../keyboard';
 import { fetchVolumeNotes } from '../notes/api';
+import { adjacencyClaimFeatures } from '../iiif/adjacency';
 import { missingTruthPages, pagesFromAnnotation } from '../iiif/pages';
 import { InfoPanel } from './InfoPanel';
 import { PageList } from './PageList';
@@ -52,6 +55,7 @@ export function VolumeViewer() {
   const [opacity, setOpacity] = useState(100);
   const [colorByRmse, setColorByRmse] = useState(false);
   const [showMissing, setShowMissing] = useState(false);
+  const [showAdjacency, setShowAdjacency] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [selectedItemIndex, setSelectedItemIndex] = useState<number | null>(
     null,
@@ -60,6 +64,10 @@ export function VolumeViewer() {
   // Paired-page error stats from the annotation's `mapsnap compare` sidecar, or null when
   // there is no sidecar (no truth comparison for this annotation).
   const [compareRows, setCompareRows] = useState<ComparePageStats[] | null>(
+    null,
+  );
+  // The selected volume's adjacency.json (per-page claims + mutual graph), or null when absent.
+  const [adjacencyData, setAdjacencyData] = useState<AdjacencyData | null>(
     null,
   );
   // Page key → note text for the selected volume (markers + tooltip).
@@ -127,13 +135,15 @@ export function VolumeViewer() {
   const selection = parseAnnotationPath(selectedPath);
   const selectedVolume = volumes?.find((v) => v.name === selection?.volume);
 
-  // Load the selected volume's page notes and failed-georef sidecars: the notes
-  // drive the list markers/tooltip, the failed-georefs the missing-page links.
+  // Load the selected volume's page notes, failed-georef sidecars, and adjacency data: the
+  // notes drive the list markers/tooltip, the failed-georefs the missing-page links, the
+  // adjacency the claim overlay.
   const volumeName = selection?.volume;
   useEffect(() => {
     if (!volumeName) {
       setNotes(new Map());
       setFailedGeorefs(new Map());
+      setAdjacencyData(null);
       return;
     }
     let cancelled = false;
@@ -150,6 +160,14 @@ export function VolumeViewer() {
       })
       .catch(() => {
         if (!cancelled) setFailedGeorefs(new Map());
+      });
+    setAdjacencyData(null);
+    fetchAdjacency(volumeName)
+      .then((data) => {
+        if (!cancelled) setAdjacencyData(data);
+      })
+      .catch(() => {
+        if (!cancelled) setAdjacencyData(null);
       });
     return () => {
       cancelled = true;
@@ -196,6 +214,14 @@ export function VolumeViewer() {
     () => (truthPages ? missingTruthPages(pages, truthPages) : []),
     [pages, truthPages],
   );
+
+  // Adjacency claim boxes, mapped into geo through each page's georeference: the fitted pages,
+  // plus the missing pages (via their truth georef) when those are being shown.
+  const adjacencyClaims = useMemo(() => {
+    if (!adjacencyData) return [];
+    const withGeoref = showMissing ? [...pages, ...missingPages] : pages;
+    return adjacencyClaimFeatures(adjacencyData, withGeoref);
+  }, [adjacencyData, pages, missingPages, showMissing]);
 
   const pageColors: Map<number, string> | null = useMemo(() => {
     if (!colorByRmse || !truthStats) return null;
@@ -289,6 +315,16 @@ export function VolumeViewer() {
             Show missing pages
           </label>
         )}
+        {adjacencyData && (
+          <label className="rmse-color-control">
+            <input
+              type="checkbox"
+              checked={showAdjacency}
+              onChange={(e) => setShowAdjacency(e.target.checked)}
+            />
+            Show adjacency
+          </label>
+        )}
         <div className="opacity-control">
           <label htmlFor="iiif-opacity-slider">Opacity</label>
           <input
@@ -322,6 +358,8 @@ export function VolumeViewer() {
           opacity={opacity / 100}
           awaitingView={!!selectedPath && !error}
           pageColors={pageColors}
+          adjacencyClaims={showAdjacency ? adjacencyClaims : []}
+          selectedStem={selectedPage?.stem ?? null}
           onLoadResult={setLoadResult}
         />
         <InfoPanel
@@ -342,6 +380,7 @@ export function VolumeViewer() {
           selectedNote={
             selectedPage ? (notes.get(selectedPage.stem) ?? null) : null
           }
+          hasAdjacency={adjacencyData !== null}
           volume={selection?.volume ?? ''}
           onClose={() => setSelectedItemIndex(null)}
         />

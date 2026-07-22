@@ -23,6 +23,8 @@ interface InfoPanelProps {
   selectedStats: PageCompareStats | null;
   /** The selected page's note text, or null when it has none. */
   selectedNote: string | null;
+  /** Whether the volume has adjacency data (adds an adjacency-view link). */
+  hasAdjacency: boolean;
   /** Volume directory name, e.g. "brooklyn_ny_1906_vol_6". */
   volume: string;
   onClose: () => void;
@@ -71,6 +73,7 @@ export function InfoPanel(props: InfoPanelProps) {
     selectedFailedGeorefType,
     selectedStats,
     selectedNote,
+    hasAdjacency,
     volume,
     onClose,
   } = props;
@@ -149,6 +152,11 @@ export function InfoPanel(props: InfoPanelProps) {
             )
           ) : (
             <a href={`?files=${base}.jpg,${base}.georef.json`}>georef view</a>
+          )}
+          {hasAdjacency && (
+            <a href={`?files=${base}.jpg,data/${volume}/adjacency.json`}>
+              adjacency view
+            </a>
           )}
         </div>
       </div>

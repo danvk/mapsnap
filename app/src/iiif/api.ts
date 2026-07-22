@@ -6,6 +6,7 @@ import type {
   RewrittenAnnotationResponse,
   VolumeListResponse,
 } from '../../server/iiifAnnotations';
+import type { AdjacencyData } from '../types';
 
 const api = typedApi<API>({ fetch: jsonFetch });
 
@@ -45,4 +46,12 @@ export async function fetchFailedGeorefs(
 export async function fetchCompare(path: string): Promise<ComparePageStats[]> {
   const { pages } = await api.get('/iiif-api/compare')(null, { path });
   return pages;
+}
+
+/** Fetch a volume's adjacency.json (per-page sheet-number claims + mutual graph), or null. */
+export async function fetchAdjacency(
+  volume: string,
+): Promise<AdjacencyData | null> {
+  const { adjacency } = await api.get('/iiif-api/adjacency')(null, { volume });
+  return adjacency;
 }
