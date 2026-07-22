@@ -181,6 +181,24 @@ export function registerIiifApi(
     }
   });
 
+  // A volume's adjacency.json (per-page sheet-number claims + the mutual-edge graph),
+  // for the viewer's adjacency overlay. Null when the volume has no adjacency data.
+  router.get('/iiif-api/adjacency', async (_params, request) => {
+    const { volume } = request.query;
+    if (!isSafeName(volume)) {
+      throw new HTTPError(400, `invalid volume: ${volume}`);
+    }
+    try {
+      const text = await readFile(
+        join(dataDir, volume, 'adjacency.json'),
+        'utf8',
+      );
+      return { adjacency: JSON.parse(text) };
+    } catch {
+      return { adjacency: null };
+    }
+  });
+
   // Page stems with a failed-georef sidecar in a volume, and each one's kind, so
   // the viewer can link an un-georeferenced page to its georef-<kind>.json file.
   // ?volume=<dir> → { failed: { "p1452": "nofit", "p1427": "misscale" } }.

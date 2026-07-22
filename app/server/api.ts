@@ -18,6 +18,12 @@ import type {
 } from './iiifAnnotations.ts';
 import type { CompareResponse } from './compareTxt.ts';
 import type { ImageInfo, LabelsJson } from '../src/keymap/types.ts';
+import type { AdjacencyData } from '../src/types.ts';
+
+/** Response of GET /iiif-api/adjacency — the volume's adjacency.json, or null when absent. */
+export interface AdjacencyResponse {
+  adjacency: AdjacencyData | null;
+}
 
 /** Query naming a georeference AnnotationPage, repo-root-relative. */
 export interface AnnotationQuery {
@@ -92,6 +98,9 @@ export interface API {
   };
   '/iiif-api/compare': {
     get: GetEndpoint<CompareResponse, AnnotationQuery>;
+  };
+  '/iiif-api/adjacency': {
+    get: GetEndpoint<AdjacencyResponse, VolumeQuery>;
   };
   '/api/images': {
     get: GetEndpoint<KeymapImagesResponse>;

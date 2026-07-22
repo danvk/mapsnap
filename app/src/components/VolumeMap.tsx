@@ -5,6 +5,7 @@ import { WarpedMapLayer } from '@allmaps/maplibre';
 import type { FeatureCollection } from 'geojson';
 import { pointInPolygon } from '../geometry';
 import type { PageGeo } from '../iiif/pages';
+import type { AdjacencyClaim } from '../iiif/adjacency';
 
 interface VolumeMapProps {
   /** Rewritten Georeference AnnotationPage to display, or null before load. */
@@ -34,6 +35,13 @@ interface VolumeMapProps {
   awaitingView: boolean;
   /** Per-itemIndex fill color for RMSE color-coding, or null when off. */
   pageColors: Map<number, string> | null;
+  /** Adjacency claim boxes to draw (blue mutual / amber one-sided); empty to hide the overlay. */
+  adjacencyClaims: AdjacencyClaim[];
+  /**
+   * File stem of the selected page, or null when nothing is selected. Claims on this page draw
+   * filled; claims on other pages draw as a dashed outline, as if underneath it.
+   */
+  selectedStem: string | null;
   /** Called with per-page add results whenever a new annotation is shown. */
   onLoadResult?: (result: { loaded: number; failed: number }) => void;
 }
@@ -224,6 +232,41 @@ export function VolumeMap(props: VolumeMapProps) {
           'line-color': '#333333',
           'line-width': 1.5,
           'line-dasharray': [3, 2],
+        },
+      });
+      // Adjacency claim boxes: blue where the claimed neighbor claims back (mutual), red for
+      // a one-sided claim. Drawn where each read sits on its page.
+      map.addSource('adjacency-claims', {
+        type: 'geojson',
+        data: EMPTY_FEATURES,
+      });
+      // Claims on the selected page (or all of them when nothing is selected) draw filled with a
+      // solid outline; `onSelectedPage` is set per feature in the source-populating effect.
+      map.addLayer({
+        id: 'adjacency-claims-fill',
+        type: 'fill',
+        source: 'adjacency-claims',
+        paint: {
+          'fill-color': ['case', ['get', 'mutual'], '#2563eb', '#d97706'],
+          'fill-opacity': ['case', ['get', 'onSelectedPage'], 0.5, 0],
+          'fill-outline-color': [
+            'case',
+            ['get', 'mutual'],
+            '#1e3a8a',
+            '#92400e',
+          ],
+        },
+      });
+      // Claims on other pages draw as a dashed outline only, reading as "underneath" the selection.
+      map.addLayer({
+        id: 'adjacency-claims-dashed',
+        type: 'line',
+        source: 'adjacency-claims',
+        filter: ['!', ['get', 'onSelectedPage']],
+        paint: {
+          'line-color': ['case', ['get', 'mutual'], '#2563eb', '#d97706'],
+          'line-width': 1.5,
+          'line-dasharray': [2, 2],
         },
       });
       map.addSource('selected-page', {
@@ -442,6 +485,30 @@ export function VolumeMap(props: VolumeMapProps) {
       }));
     source.setData({ type: 'FeatureCollection', features });
   }, [props.pageColors, props.pages, mapReady]);
+
+  // Adjacency claim boxes, one polygon per claim. `mutual` drives the colour; `onSelectedPage`
+  // (true for every claim when nothing is selected) drives filled-vs-dashed in the layer paint.
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !mapReady) return;
+    const source = map.getSource<maplibregl.GeoJSONSource>('adjacency-claims');
+    if (!source) return;
+    const { selectedStem } = props;
+    source.setData({
+      type: 'FeatureCollection',
+      features: props.adjacencyClaims.map(
+        (claim): FeatureCollection['features'][0] => ({
+          type: 'Feature',
+          properties: {
+            mutual: claim.mutual,
+            onSelectedPage:
+              selectedStem === null || claim.stem === selectedStem,
+          },
+          geometry: { type: 'Polygon', coordinates: [claim.ring] },
+        }),
+      ),
+    });
+  }, [props.adjacencyClaims, props.selectedStem, mapReady]);
 
   // Missing-page footprints: one translucent white polygon per un-fitted page
   // at its truth clip ring, shown only when the toggle is on.
