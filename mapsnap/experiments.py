@@ -25,7 +25,8 @@ import sys
 from pathlib import Path
 
 from mapsnap.compare_iiif_georef import compare_pages
-from mapsnap.utils import list_pages
+from mapsnap.score import summarize, volume_page_scores
+from mapsnap.utils import default_centerlines, list_pages
 
 ARTIFACTS_DIRNAME = "artifacts"
 
@@ -176,7 +177,8 @@ def truth_metrics(truth_path: Path, iiif_path: Path) -> dict:
     """Compute aggregate and per-page error of a generated IIIF against truth.
 
     Error is each page's RMSE in feet (the headline metric of ``mapsnap compare``). Returns
-    ``compared``/``missing`` counts, mean/median RMSE, and a ``per_page`` map.
+    ``compared``/``missing`` counts, mean/median RMSE, a ``per_page`` map, and — when the
+    volume has centerlines for land weighting — the project success ``score``.
     """
     rows, missing = compare_pages(truth_path, iiif_path)
     rmses = sorted(r["rmse_ft"] for r in rows)
@@ -188,13 +190,26 @@ def truth_metrics(truth_path: Path, iiif_path: Path) -> dict:
         )
     else:
         mean_rmse = median_rmse = 0.0
-    return {
+    metrics = {
         "compared": n,
         "missing": len(missing),
         "mean_rmse_ft": round(mean_rmse, 1),
         "median_rmse_ft": round(median_rmse, 1),
         "per_page": {r["page_key"]: r["rmse_ft"] for r in rows},
     }
+    # The project success metric (see mapsnap.score): land-weighted good share
+    # minus disaster share. Needs centerlines for the land weights, which a
+    # truth-bearing volume normally has.
+    if default_centerlines(iiif_path.parent) is not None:
+        score = summarize(volume_page_scores(iiif_path))
+        metrics["score"] = {
+            "net": round(score.net_score, 4),
+            "good_share": round(score.good_share, 4),
+            "disaster_share": round(score.disaster_share, 4),
+            "n_pages": score.n_pages,
+            "n_placed": score.n_placed,
+        }
+    return metrics
 
 
 def build_manifest(

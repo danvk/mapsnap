@@ -2,6 +2,7 @@
 
 import argparse
 import glob
+import json
 import subprocess
 import sys
 from pathlib import Path
@@ -158,6 +159,14 @@ def main() -> None:
         compare_txt,
         args.label,
     )
+    manifest = json.loads((archived / "manifest.json").read_text())
+    score = manifest.get("metrics", {}).get("score")
+    if score:
+        print(
+            f"\nScore: {score['net']:.1%} "
+            f"(<=25ft {score['good_share']:.1%}, >=200ft {score['disaster_share']:.1%}, "
+            f"{score['n_placed']}/{score['n_pages']} pages placed)"
+        )
     print(f"\nArchived run {run_id} to {archived}")
 
 
