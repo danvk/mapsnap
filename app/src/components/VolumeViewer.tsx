@@ -315,6 +315,7 @@ export function VolumeViewer() {
           annotation={annotation}
           pages={pages}
           missingPages={missingPages}
+          truthPages={truthPages ?? []}
           showMissing={showMissing}
           selectedItemIndex={selectedItemIndex}
           onSelectPage={setSelectedItemIndex}

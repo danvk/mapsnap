@@ -13,6 +13,11 @@ interface VolumeMapProps {
   pages: PageGeo[];
   /** Truth pages never fitted; drawn as dashed truth-location footprints. */
   missingPages: PageGeo[];
+  /**
+   * All truth pages (from the volume's main.iiif.json), for drawing the selected fit page's
+   * truth box beneath its generated outline. Empty when the volume has no truth data.
+   */
+  truthPages: PageGeo[];
   /** Whether the missing-page footprints are drawn and clickable. */
   showMissing: boolean;
   /** itemIndex of the selected page, or null for no selection. */
@@ -42,12 +47,21 @@ const EMPTY_FEATURES: FeatureCollection = {
 // proportion as the opacity slider is reduced, so the fills fade with the maps.
 const RMSE_FILL_OPACITY = 0.45;
 
-// Overlay features for a selected page: the full image rectangle (solid), the
-// clipping polygon (dashed), and its GCPs (circles), distinguished by `kind`.
-function selectionFeatures(page: PageGeo): FeatureCollection {
+// Overlay features for a selected page: its truth box(es) (green, drawn under everything), the
+// full image rectangle (solid), the clipping polygon (dashed), and its GCPs (circles),
+// distinguished by `kind`. `truthRings` are the matching truth pages' corner rectangles.
+function selectionFeatures(
+  page: PageGeo,
+  truthRings: [number, number][][],
+): FeatureCollection {
   return {
     type: 'FeatureCollection',
     features: [
+      ...truthRings.map((ring): FeatureCollection['features'][0] => ({
+        type: 'Feature',
+        properties: { kind: 'truth' },
+        geometry: { type: 'LineString', coordinates: ring },
+      })),
       {
         type: 'Feature',
         properties: { kind: 'rect' },
@@ -78,6 +92,7 @@ export function VolumeMap(props: VolumeMapProps) {
     annotation,
     pages,
     missingPages,
+    truthPages,
     showMissing,
     selectedItemIndex,
     onSelectPage,
@@ -214,6 +229,15 @@ export function VolumeMap(props: VolumeMapProps) {
       map.addSource('selected-page', {
         type: 'geojson',
         data: EMPTY_FEATURES,
+      });
+      // The selected page's truth box, drawn first so it sits under the generated outline:
+      // where the human georeference places the same four image corners.
+      map.addLayer({
+        id: 'selected-page-truth',
+        type: 'line',
+        source: 'selected-page',
+        filter: ['==', ['get', 'kind'], 'truth'],
+        paint: { 'line-color': '#16a34a', 'line-width': 1.5 },
       });
       map.addLayer({
         id: 'selected-page-rect',
@@ -362,7 +386,15 @@ export function VolumeMap(props: VolumeMapProps) {
       source?.setData(EMPTY_FEATURES);
       return;
     }
-    source?.setData(selectionFeatures(page));
+    // A fitted page (non-negative id) shows the truth box(es) sharing its page key beneath its
+    // outline; a missing page is itself truth, so it gets none.
+    const truthRings =
+      page.itemIndex >= 0
+        ? truthPages
+            .filter((truth) => truth.pageKey === page.pageKey)
+            .map((truth) => truth.rectRing)
+        : [];
+    source?.setData(selectionFeatures(page, truthRings));
     const mapId = mapIdsRef.current[page.itemIndex];
     if (mapId) {
       layer.bringMapsToFront([mapId]);
@@ -370,7 +402,7 @@ export function VolumeMap(props: VolumeMapProps) {
       unmaskedMapIdRef.current = mapId;
       frontOrderRef.current.push(page.itemIndex);
     }
-  }, [selectedItemIndex, pages, missingPages, mapReady]);
+  }, [selectedItemIndex, pages, missingPages, truthPages, mapReady]);
 
   // Also depends on `annotation`: newly added maps start at full opacity, so
   // the current value must be reapplied after each volume load. Animation is
