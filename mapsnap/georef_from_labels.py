@@ -3210,7 +3210,7 @@ def main() -> None:
     parser.add_argument(
         "--min-aspect-ratio",
         type=float,
-        default=1.75,
+        default=1.00,
         metavar="RATIO",
         help="Minimum long/short side ratio for a text polygon (default: %(default)s)",
     )
