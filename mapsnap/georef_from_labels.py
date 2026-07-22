@@ -2441,6 +2441,47 @@ def drop_collinear_dominated(
     return kept, dominated
 
 
+def passes_admission_gate(
+    det: dict,
+    normalized_streets: set[str],
+    *,
+    min_confidence: float,
+    min_short_side: float,
+    min_long_side: float,
+    min_aspect_ratio: float,
+    high_confidence_size_fraction: float,
+) -> bool:
+    """Whether an unpromoted detection clears the confidence, size, aspect, and word gates.
+
+    This is the admission test applied in :func:`prepare_label_features` to a non-promoted
+    detection: the confidence floor, the confidence-relaxed size floor, the aspect-ratio floor,
+    and the number-only/bare-letter/direction-word rejections. Promoted detections bypass these
+    (confidence only) and are not covered here.
+    """
+    required_short_side = confidence_relaxed_threshold(
+        det["confidence"],
+        min_confidence,
+        min_short_side,
+        min_short_side * high_confidence_size_fraction,
+    )
+    required_long_side = min_long_side * (required_short_side / min_short_side)
+    return (
+        det["confidence"] >= min_confidence
+        and det.get("long_side", float("inf")) >= required_long_side
+        and det.get("short_side", float("inf")) >= required_short_side
+        and det.get("long_side", float("inf"))
+        >= min_aspect_ratio * det.get("short_side", 1.0)
+        and not is_number_only(det["text"])
+        # Bare single letters are accepted only via promotion; an unpromoted "M"/"W" is almost
+        # always a rotated misread of a quadrant/type box, so reject it here.
+        and not is_bare_letter(det["text"])
+        and (
+            normalize_street(det["text"]) not in DIRECTION_WORDS
+            or det["text"].upper().strip() in normalized_streets
+        )
+    )
+
+
 def prepare_label_features(
     labels_path: str,
     block_index: dict[str, list[Block]],
@@ -2539,12 +2580,27 @@ def prepare_label_features(
             min_long_side=min_long_side,
             perp_tolerance_px=collinear_perp_tolerance_px,
         )
-        if dominated:
+        # Only surface drops that would otherwise have been admitted; a detection the
+        # size/confidence gate would reject anyway is not informative, just log noise.
+        loggable = [
+            d
+            for d in dominated
+            if passes_admission_gate(
+                d,
+                normalized_streets,
+                min_confidence=min_confidence,
+                min_short_side=min_short_side,
+                min_long_side=min_long_side,
+                min_aspect_ratio=min_aspect_ratio,
+                high_confidence_size_fraction=high_confidence_size_fraction,
+            )
+        ]
+        if loggable:
             print(
-                f"Dropped {len(dominated)} collinear-dominated detection(s): "
+                f"Dropped {len(loggable)} collinear-dominated detection(s): "
                 + ", ".join(
                     f"{d['text']}({d.get('short_side', 0):.0f}px,{d.get('confidence', 0):.2f})"
-                    for d in dominated
+                    for d in loggable
                 ),
                 file=sys.stderr,
             )
@@ -2556,28 +2612,14 @@ def prepare_label_features(
             if det["confidence"] < min_confidence or is_number_only(det["text"]):
                 continue
         else:
-            required_short_side = confidence_relaxed_threshold(
-                det["confidence"],
-                min_confidence,
-                min_short_side,
-                min_short_side * high_confidence_size_fraction,
-            )
-            required_long_side = min_long_side * (required_short_side / min_short_side)
-            if not (
-                det["confidence"] >= min_confidence
-                and det.get("long_side", float("inf")) >= required_long_side
-                and det.get("short_side", float("inf")) >= required_short_side
-                and det.get("long_side", float("inf"))
-                >= min_aspect_ratio * det.get("short_side", 1.0)
-                and not is_number_only(det["text"])
-                # Bare single letters are accepted only via promotion (the is_promoted
-                # branch above); an unpromoted "M"/"W" is almost always a rotated misread of
-                # a quadrant/type box, so reject it here.
-                and not is_bare_letter(det["text"])
-                and (
-                    normalize_street(det["text"]) not in DIRECTION_WORDS
-                    or det["text"].upper().strip() in normalized_streets
-                )
+            if not passes_admission_gate(
+                det,
+                normalized_streets,
+                min_confidence=min_confidence,
+                min_short_side=min_short_side,
+                min_long_side=min_long_side,
+                min_aspect_ratio=min_aspect_ratio,
+                high_confidence_size_fraction=high_confidence_size_fraction,
             ):
                 continue
         if edge_margin > 0 and not is_promoted:

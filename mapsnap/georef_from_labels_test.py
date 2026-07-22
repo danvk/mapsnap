@@ -1579,6 +1579,42 @@ def test_drop_collinear_dominated_keeps_when_not_strictly_worse():
     assert len(kept) == 2
 
 
+# p1477's derived gate: min_confidence 0.15, auto min_short_side ~17, min_long_side ~34.
+_ADMISSION_GATE = {
+    "min_confidence": 0.15,
+    "min_short_side": 17.0,
+    "min_long_side": 34.0,
+    "min_aspect_ratio": 1.75,
+    "high_confidence_size_fraction": 0.7,
+}
+
+
+def _sized_label(text: str, short: float, long: float, conf: float) -> dict:
+    """A detection with explicit short/long side and confidence (geometry irrelevant here)."""
+    return {"text": text, "confidence": conf, "short_side": short, "long_side": long}
+
+
+def test_passes_admission_gate_rejects_low_confidence_small_label():
+    from mapsnap.georef_from_labels import passes_admission_gate
+
+    # The junk "1ST" copy that rides a better street's line (conf 0.001, 12px) fails the
+    # confidence/size gate on its own, so its collinear drop is not worth logging.
+    junk = _sized_label("1ST", short=12.0, long=26.0, conf=0.001)
+    assert not passes_admission_gate(junk, set(), **_ADMISSION_GATE)
+
+
+def test_passes_admission_gate_aspect_floor_gates_short_names():
+    from mapsnap.georef_from_labels import passes_admission_gate
+
+    # p1477's real "1ST": clears confidence and both size floors but is nearly square
+    # (38/24 = 1.58). A 1.75 aspect floor rejects it; dropping the floor to 1.0 admits it.
+    first = _sized_label("1ST", short=24.0, long=38.0, conf=0.237)
+    assert not passes_admission_gate(first, set(), **_ADMISSION_GATE)
+    assert passes_admission_gate(
+        first, set(), **{**_ADMISSION_GATE, "min_aspect_ratio": 1.0}
+    )
+
+
 def _on(text: str, hue: float, chroma: float = 12.0) -> dict:
     """A detection OCR marked as sitting on a fill of the given hue."""
     return {
