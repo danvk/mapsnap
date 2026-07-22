@@ -1762,9 +1762,11 @@ def test_keymap_center_distance_m():
 
     keymap = {"lat": 38.8734, "lon": -77.0173}
     # center is (lon, lat): ~0 m at the key-map point.
-    assert keymap_center_distance_m((-77.0173, 38.8734), keymap) < 1.0
+    near = keymap_center_distance_m((-77.0173, 38.8734), keymap)
+    assert near is not None and near < 1.0
     # p214's NW mismatch: ~0.034 deg north is a few km, far outside the 570 m radius.
-    assert keymap_center_distance_m((-77.0166, 38.9070), keymap) > 3000
+    far = keymap_center_distance_m((-77.0166, 38.9070), keymap)
+    assert far is not None and far > 3000
     # No key-map location to measure against -> None.
     assert keymap_center_distance_m((-77.0, 38.9), None) is None
     assert keymap_center_distance_m((-77.0, 38.9), {}) is None
