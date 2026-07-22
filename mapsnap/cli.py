@@ -51,6 +51,10 @@ SUBCOMMANDS: dict[str, tuple[str, str]] = {
         "mapsnap.compare_iiif_georef",
         "Compare human vs computer IIIF georeferencing",
     ),
+    "score": (
+        "mapsnap.score",
+        "Land-weighted success score vs truth (good share minus disaster share)",
+    ),
     "download-osm": ("mapsnap.download_osm", "Download street data from OSM"),
     "osm-to-geojson": ("mapsnap.osm_to_centerlines", "Convert OSM data to GeoJSON."),
     "scale": ("mapsnap.scale_images", "Shrink images by a uniform amount."),
