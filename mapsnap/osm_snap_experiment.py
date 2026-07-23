@@ -258,7 +258,7 @@ def load_panel_units(volume: Path) -> list[PageUnit]:
         scale_affine_to_local,
     )
     from mapsnap.keymap.fit_keymap import page_number
-    from mapsnap.road_model import page_world_affine
+    from mapsnap.road_model import effective_gcp_count, page_world_affine
     from mapsnap.utils import jpeg_dimensions, source_id_to_page_key
 
     truth_path = volume / "main.iiif.json"
@@ -337,12 +337,14 @@ def load_panel_units(volume: Path) -> list[PageUnit]:
                     )
 
         gen_affine = None
+        effective_gcps = 0
         keymap_centers: list[tuple[float, float]] = []
         keymap_radius = 0.0
         keymap_regions = None
         if georef is not None:
             if state == "fitted":
                 gen_affine = page_world_affine(georef)
+                effective_gcps = effective_gcp_count(georef)
             keymap = georef.get("keymap") or {}
             keymap_centers = [tuple(c) for c in keymap.get("centers", [])]
             keymap_radius = float(keymap.get("radius_m") or 0.0)
@@ -358,7 +360,7 @@ def load_panel_units(volume: Path) -> list[PageUnit]:
                 truth=truth,
                 split_truth=False,
                 gen_affine=gen_affine,
-                inlier_intersections=0,
+                inlier_intersections=effective_gcps,
                 inlier_streets=0,
                 keymap_centers=keymap_centers,
                 keymap_radius_m=keymap_radius,
@@ -1010,29 +1012,147 @@ GATE_MARGINS = [0.0, 0.1, 0.25, 0.5]
 
 VOLUME_MODE_GATE = 1.5  # the dev-chosen conservative elbow for the energy mode
 
+# Sheet-integrity gate for split panels: every panel is a rigid crop of one
+# sheet, so a panel placement determines the WHOLE sheet's placement exactly
+# (the crop is a pure translation). Two placements of the same sheet — from a
+# candidate and a fitted sibling, or from two co-accepted candidates — must
+# agree to within this corner tolerance. Correct fits agree to ~10-30 m;
+# LA p1408__2's along-the-cut-line alias disagreed by 258 m while still
+# touching its sibling, which is why mere contiguity was not enough.
+SHEET_AGREE_TOL_M = 60.0
+# A fitted sibling anchors the sheet-agreement gate only when its own fit has
+# real evidence: eff>=3 panels measure <=57ft everywhere truth exists, while
+# eff<=2 panels range to 6640ft — agreeing with those rejects true candidates.
+SIBLING_ANCHOR_MIN_GCPS = 3
+# A panel with no reliable anchor and no co-accepted sibling may still be
+# accepted on its own score, at a much higher bar than base pages: small
+# pages alias more readily, and this is where their confident failures live.
+PANEL_SOLO_GATE = 2.2
+
+
+def panel_ring_origin(ring: list[list[float]]) -> tuple[int, int]:
+    """The bbox origin write_panels cropped this panel at (base-jpg px)."""
+    return (
+        max(0, int(min(x for x, _ in ring))),
+        max(0, int(min(y for _, y in ring))),
+    )
+
+
+def implied_sheet_corners(
+    affine: np.ndarray,
+    origin: tuple[int, int],
+    sheet_size: tuple[float, float],
+) -> list[tuple[float, float]]:
+    """The full sheet's corner lon/lats implied by one panel's affine."""
+    x0, y0 = origin
+    sheet = affine.copy()
+    sheet[:, 2] = affine @ np.array([-x0, -y0, 1.0])
+    width, height = sheet_size
+    corners = []
+    for x, y in [(0, 0), (width, 0), (width, height), (0, height)]:
+        corners.append(
+            (
+                sheet[0, 0] * x + sheet[0, 1] * y + sheet[0, 2],
+                sheet[1, 0] * x + sheet[1, 1] * y + sheet[1, 2],
+            )
+        )
+    return corners
+
+
+def sheets_agree(a: list[tuple[float, float]], b: list[tuple[float, float]]) -> bool:
+    """Whether two implied-sheet placements agree within SHEET_AGREE_TOL_M."""
+    worst = max(haversine_m(pa[1], pa[0], pb[1], pb[0]) for pa, pb in zip(a, b))
+    return worst <= SHEET_AGREE_TOL_M
+
+
+def panel_allowed_candidates(
+    volume: Path, records: list[dict]
+) -> dict[str, set[int] | None]:
+    """Per panel stem: candidate indices whose implied sheet placement agrees
+    with every fitted sibling's. None = no fitted sibling to check against
+    (the volume-energy mutual-agreement terms are then the only constraint).
+    """
+    panel_units = load_panel_units(volume)
+    by_base: dict[str, list[PageUnit]] = {}
+    for unit in panel_units:
+        base = panel_base(unit.stem)
+        if base is not None:
+            by_base.setdefault(base, []).append(unit)
+
+    result: dict[str, set[int] | None] = {}
+    panels_cache: dict[str, dict] = {}
+
+    def doc_of(base: str) -> dict:
+        if base not in panels_cache:
+            panels_cache[base] = json.loads(
+                (volume / f"{base}.panels.json").read_text()
+            )
+        return panels_cache[base]
+
+    for record in records:
+        stem = record["target"]
+        base = panel_base(stem)
+        if base is None or record.get("status") != "ok":
+            continue
+        siblings = [
+            u
+            for u in by_base.get(base, [])
+            if u.stem != stem
+            and u.fit_state == "fitted"
+            and u.gen_affine is not None
+            and u.inlier_intersections >= SIBLING_ANCHOR_MIN_GCPS
+        ]
+        if not siblings:
+            result[stem] = None
+            continue
+        panels_doc = doc_of(base)
+        rings = panels_doc["panels"]
+        sheet_size = (panels_doc["width"], panels_doc["height"])
+        origin = panel_ring_origin(rings[int(stem.rpartition("__")[2]) - 1])
+        sibling_sheets = []
+        for sibling in siblings:
+            assert sibling.gen_affine is not None
+            sibling_origin = panel_ring_origin(
+                rings[int(sibling.stem.rpartition("__")[2]) - 1]
+            )
+            sibling_sheets.append(
+                implied_sheet_corners(sibling.gen_affine, sibling_origin, sheet_size)
+            )
+        allowed: set[int] = set()
+        for k, candidate in enumerate(record.get("candidates") or []):
+            candidate_sheet = implied_sheet_corners(
+                np.array(candidate["world_affine"]), origin, sheet_size
+            )
+            if all(sheets_agree(candidate_sheet, s) for s in sibling_sheets):
+                allowed.add(k)
+        result[stem] = allowed
+    return result
+
 
 def cmd_select(volume: Path, mode: str, gate_score: float, gate_margin: float) -> None:
     """Pick one candidate (or abstain) per page; write selection_<mode>.jsonl."""
     records = load_candidates(volume)
+    allowed = panel_allowed_candidates(volume, records)
     out_path = artifacts_dir(volume) / f"selection_{mode}.jsonl"
     if mode == "volume":
-        selections = select_volume(volume, records, gate_score)
+        selections = select_volume(volume, records, gate_score, allowed)
     elif mode == "union":
         # The two dev-calibrated committees are complementary: the energy mode
         # (at its conservative gate) resolves joint/ambiguous pages, and the
         # per-page argmax gate is the floor for pages the energy abstains on.
         by_target = {
-            s["target"]: s for s in select_volume(volume, records, VOLUME_MODE_GATE)
+            s["target"]: s
+            for s in select_volume(volume, records, VOLUME_MODE_GATE, allowed)
         }
         selections = []
-        for choice in select_argmax(records, gate_score, gate_margin):
+        for choice in select_argmax(records, gate_score, gate_margin, allowed):
             volume_choice = by_target.get(choice["target"])
             if volume_choice is not None and volume_choice.get("chosen") is not None:
                 selections.append(volume_choice)
             else:
                 selections.append(choice)
     else:
-        selections = select_argmax(records, gate_score, gate_margin)
+        selections = select_argmax(records, gate_score, gate_margin, allowed)
     accepted = sum(1 for s in selections if s.get("chosen") is not None)
     with out_path.open("w") as handle:
         for choice in selections:
@@ -1041,14 +1161,37 @@ def cmd_select(volume: Path, mode: str, gate_score: float, gate_margin: float) -
 
 
 def select_argmax(
-    records: list[dict], gate_score: float, gate_margin: float
+    records: list[dict],
+    gate_score: float,
+    gate_margin: float,
+    panel_allowed: dict[str, set[int] | None] | None = None,
 ) -> list[dict]:
-    """v0: per-page rank-1 with abstention gates."""
+    """v0: per-page rank-1 with abstention gates.
+
+    Panels face the sheet-integrity gate on top of the usual ones: rank-1 must
+    agree with any reliable fitted sibling's implied sheet; a panel with no
+    reliable anchor is held to the much higher PANEL_SOLO_GATE instead.
+    """
+    panel_allowed = panel_allowed or {}
     selections = []
     for record in records:
         stem = record["target"]
         choice: dict = {"target": stem, "chosen": None, "reason": record["status"]}
         if record.get("status") == "ok" and record.get("candidates"):
+            if panel_base(stem) is not None:
+                allowed = panel_allowed.get(stem)
+                if allowed is not None and 0 not in allowed:
+                    choice["reason"] = "sheet-agreement"
+                    selections.append(choice)
+                    continue
+                if allowed is None:
+                    top_score = record["candidates"][0].get("select_score")
+                    if top_score is None or top_score < PANEL_SOLO_GATE:
+                        choice["reason"] = (
+                            f"panel-solo score {top_score} < {PANEL_SOLO_GATE}"
+                        )
+                        selections.append(choice)
+                        continue
             top = record["candidates"][0]
             score = top.get("select_score")
             margin = distinct_margin(record)
@@ -1091,7 +1234,12 @@ def overlap_penalty(iou_over_min: float, soft: float, hard: float) -> float:
     return frac * frac
 
 
-def select_volume(volume: Path, records: list[dict], gate_score: float) -> list[dict]:
+def select_volume(
+    volume: Path,
+    records: list[dict],
+    gate_score: float,
+    panel_allowed: dict[str, set[int] | None] | None = None,
+) -> list[dict]:
     """v1: joint selection over per-page candidate sets.
 
     Energy = per-page unary (a pick must beat abstention by its select_score
@@ -1101,11 +1249,17 @@ def select_volume(volume: Path, records: list[dict], gate_score: float) -> list[
     truth does not), keymap-centroid distance consistency, and a side-agreement
     reward. Connected components solve exhaustively when small, else ICM from
     several greedy orderings.
+
+    Panels additionally face sheet-integrity constraints: options inconsistent
+    with a fitted sibling are dropped up front, page-space-adjacent sibling
+    picks must land next to each other, and an accepted panel with no fitted
+    sibling must have a co-accepted contiguous sibling backing it up.
     """
     from shapely.geometry import Polygon
 
     from mapsnap.score import LocalFrame
 
+    panel_allowed = panel_allowed or {}
     units = load_page_units(volume) + load_panel_units(volume)
     stem_to_number = {u.stem: u.number for u in units}
     region_pairs, centroids = keymap_region_adjacency(volume)
@@ -1120,10 +1274,36 @@ def select_volume(volume: Path, records: list[dict], gate_score: float) -> list[
             for k, c in enumerate(record["candidates"])
             if c.get("select_score") is not None
         ]
+        allowed = panel_allowed.get(record["target"])
+        if allowed is not None:
+            options = [(k, c) for k, c in options if k in allowed]
         if options:
             eligible[record["target"]] = {"record": record, "options": options}
     if not eligible:
         return select_argmax(records, gate_score, gate_margin=0.0)
+
+    # Implied-sheet corners per eligible panel candidate, for the mutual
+    # sheet-agreement constraint between co-accepted siblings.
+    panels_cache: dict[str, dict] = {}
+
+    def sheet_corners_of(stem: str, candidate: dict) -> list[tuple[float, float]]:
+        base = panel_base(stem)
+        assert base is not None
+        if base not in panels_cache:
+            panels_cache[base] = json.loads(
+                (volume / f"{base}.panels.json").read_text()
+            )
+        doc = panels_cache[base]
+        origin = panel_ring_origin(doc["panels"][int(stem.rpartition("__")[2]) - 1])
+        return implied_sheet_corners(
+            np.array(candidate["world_affine"]), origin, (doc["width"], doc["height"])
+        )
+
+    sheet_corners: dict[tuple[str, int], list[tuple[float, float]]] = {}
+    for stem, entry in eligible.items():
+        if panel_base(stem) is not None:
+            for k, candidate in entry["options"]:
+                sheet_corners[(stem, k)] = sheet_corners_of(stem, candidate)
 
     first = next(iter(eligible.values()))["options"][0][1]
     frame = LocalFrame(first["center"][0], first["center"][1])
@@ -1149,12 +1329,17 @@ def select_volume(volume: Path, records: list[dict], gate_score: float) -> list[
     # Fitted context, with skeleton twins deduped: a fitted pNs maps the same
     # ground as fitted pN, and its ~100% overlap would poison both the
     # calibration below and every candidate that legitimately touches pN.
+    # Fitted PANELS are excluded outright — their own placements are the least
+    # reliable in the volume (LA's fitted p1499n__3 sits 392ft off and lies on
+    # p1484's true ground), so they cannot serve as overlap evidence; panel
+    # consistency is enforced by the sheet-agreement machinery instead.
     fitted_stems = {u.stem for u in units if u.fit_state == "fitted"}
     fitted_units = [
         u
         for u in units
         if u.fit_state == "fitted"
         and u.gen_affine is not None
+        and panel_base(u.stem) is None
         and not (u.stem.endswith("s") and u.stem[:-1] in fitted_stems)
     ]
     fitted_polys: dict[str, Polygon] = {}
@@ -1176,15 +1361,23 @@ def select_volume(volume: Path, records: list[dict], gate_score: float) -> list[
         return a.intersection(b).area / smaller
 
     # Calibrate the overlap thresholds from the volume's own adjacent fitted
-    # pairs: Sanborn sheets legitimately share strips (Hudson true locks sit
-    # at 0.32-0.43 IoU-over-min against their fitted neighbors), so a fixed
-    # threshold either misses slides or punishes correct seams.
-    observed = [
-        iou_over_min(fitted_polys[sa], fitted_polys[sb])
-        for a, b in (tuple(pair) for pair in pairs)
-        for sa in number_to_fitted.get(a, [])
-        for sb in number_to_fitted.get(b, [])
-    ]
+    # BASE pairs: Sanborn sheets legitimately share strips (Hudson true locks
+    # sit at 0.32-0.43 IoU-over-min against their fitted neighbors), so a
+    # fixed threshold either misses slides or punishes correct seams. One
+    # value per NUMBER pair — the max over member sheets — because a page
+    # number can name a whole lettered family (LA p1499a..q) of which only
+    # one member actually neighbors the partner; flooding the distribution
+    # with the other members' near-zero overlaps drags the percentile down
+    # and tightens the gate onto true seams.
+    observed = []
+    for a, b in (tuple(pair) for pair in pairs):
+        values = [
+            iou_over_min(fitted_polys[sa], fitted_polys[sb])
+            for sa in number_to_fitted.get(a, [])
+            for sb in number_to_fitted.get(b, [])
+        ]
+        if values:
+            observed.append(max(values))
     if len(observed) >= 5:
         p90 = float(np.percentile(observed, 90))
         overlap_soft = min(0.5, max(OVERLAP_SOFT, p90 + 0.05))
@@ -1211,10 +1404,17 @@ def select_volume(volume: Path, records: list[dict], gate_score: float) -> list[
         return frame.to_xy(*centroid) if centroid else None
 
     def coupled(stem_a: str, stem_b: str) -> str | None:
-        """'sibling' | 'adjacent' | None: whether two stems interact at all."""
+        """'sibling' | 'adjacent' | None: whether two stems interact at all.
+
+        Panels couple ONLY with their siblings: coupling them into the wider
+        adjacency graph balloons component sizes (degrading the solver) for a
+        constraint the unary fitted-overlap term already carries.
+        """
         base_a, base_b = panel_base(stem_a), panel_base(stem_b)
         if base_a is not None and base_a == base_b:
             return "sibling"
+        if base_a is not None or base_b is not None:
+            return None
         na, nb = stem_to_number.get(stem_a), stem_to_number.get(stem_b)
         if na is not None and nb is not None and frozenset((na, nb)) in pairs:
             return "adjacent"
@@ -1226,21 +1426,17 @@ def select_volume(volume: Path, records: list[dict], gate_score: float) -> list[
         coupling = coupled(stem_a, stem_b)
         if coupling is None:
             return 0.0
+        if coupling == "sibling":
+            # Rigid-sheet constraint: two co-accepted panels of one sheet must
+            # imply (nearly) the same full-sheet placement.
+            if sheets_agree(sheet_corners[(stem_a, ka)], sheet_corners[(stem_b, kb)]):
+                return 0.0
+            return 1e6
         energy = W_OVERLAP * overlap_penalty(
             iou_over_min(polygons[(stem_a, ka)], polygons[(stem_b, kb)]),
             overlap_soft,
             overlap_hard,
         )
-        # The centroid geometry terms describe SHEET centers; a panel's center
-        # legitimately sits away from its sheet's keymap centroid, so any pair
-        # involving a panel keeps only the overlap term (siblings of one sheet
-        # must simply not land on top of each other).
-        if (
-            coupling == "sibling"
-            or panel_base(stem_a) is not None
-            or panel_base(stem_b) is not None
-        ):
-            return energy
         na, nb = stem_to_number.get(stem_a), stem_to_number.get(stem_b)
         ca, cb = centroid_xy(na), centroid_xy(nb)
         if ca and cb:
@@ -1319,7 +1515,13 @@ def select_volume(volume: Path, records: list[dict], gate_score: float) -> list[
             assert best_assign_c is not None
             assignment.update(best_assign_c)
         else:
-            # ICM from a few deterministic starts: best-unary and abstain-all.
+            # ICM from two deterministic starts: best-unary and abstain-all.
+            # Deliberately NOT more: the best-unary start biases convergence
+            # toward acceptance, and on the dev volumes that bias scores
+            # better than the energy model's own global optimum — the ADJ
+            # term over-penalizes true placements where keymap centroids are
+            # unreliable (LA's lettered sheets), so a stronger optimizer
+            # abstains on pages the weak one correctly keeps.
             best_assign = None
             best_energy = math.inf
             starts: list[dict[str, int | None]] = [
@@ -1352,6 +1554,32 @@ def select_volume(volume: Path, records: list[dict], gate_score: float) -> list[
                     best_assign = assign
             assert best_assign is not None
             assignment.update(best_assign)
+
+    # Post-pass: an accepted panel with no reliable fitted anchor needs either
+    # a co-accepted sibling backing it up (their mutual sheet agreement is
+    # enforced by the pairwise term) or a solo score above PANEL_SOLO_GATE —
+    # an ordinary score on a lone small panel is not trustworthy evidence.
+    # Dropping one panel can orphan another, so iterate.
+    changed_post = True
+    while changed_post:
+        changed_post = False
+        for stem, chosen in list(assignment.items()):
+            if chosen is None:
+                continue
+            if stem not in panel_allowed:
+                continue  # not a panel
+            if panel_allowed[stem] is not None:
+                continue  # has reliable anchors: gated in the options filter
+            base = panel_base(stem)
+            supported = any(
+                other != stem and other_chosen is not None and panel_base(other) == base
+                for other, other_chosen in assignment.items()
+            )
+            if not supported:
+                score = dict(eligible[stem]["options"])[chosen].get("select_score")
+                if score is None or score < PANEL_SOLO_GATE:
+                    assignment[stem] = None
+                    changed_post = True
 
     selections = []
     for record in records:
