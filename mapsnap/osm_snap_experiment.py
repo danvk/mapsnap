@@ -141,8 +141,92 @@ def keymap_fit_residuals(units: list[PageUnit]) -> list[float]:
     return residuals
 
 
+def attach_missing_truth(volume: Path, units: list[PageUnit]) -> int:
+    """Attach truth to pages load_page_units missed; returns pages annotated.
+
+    Two classes were invisible to the harness (their candidates carried no
+    rmse, so the gate sweep was blind to them) even though `mapsnap score`
+    scores their placements: (1) unsplit truth items whose page key differs
+    from the jpg stem only in letter case (Chicago 'p51N' vs 'p51n'); (2)
+    pages whose truth exists only as split items — a whole-page placement of
+    such a sheet is scored against its LARGEST truth split (the whole-canvas
+    stand-in rule in match_split_pairs), so that split's transform is the
+    right truth here, with rmse sampled over the full canvas exactly like
+    analyze_pair's whole-page grid.
+    """
+    from mapsnap.compare_iiif_georef import (
+        annotation_transform_type,
+        extract_gcps,
+        fit_transform,
+        label_split_index,
+        load_split_polygons,
+    )
+    from mapsnap.edge_join_experiment import TruthFit, scale_affine_to_local
+    from mapsnap.utils import source_id_to_page_key
+
+    truth_path = volume / "main.iiif.json"
+    if not truth_path.exists():
+        return 0
+    unsplit_by_lower: dict[str, dict] = {}
+    splits_by_parent: dict[str, list[dict]] = {}
+    for item in json.loads(truth_path.read_text()).get("items", []):
+        key = source_id_to_page_key(
+            item.get("target", {}).get("source", {}).get("id"), item.get("label", "")
+        )
+        if "__" in key:
+            splits_by_parent.setdefault(key.split("__")[0].lower(), []).append(item)
+        else:
+            unsplit_by_lower.setdefault(key.lower(), item)
+
+    def truth_fit(item: dict, local_width: int) -> TruthFit | None:
+        gcps = extract_gcps(item)
+        if len(gcps) < 2:
+            return None
+        affine_full = fit_transform(gcps, annotation_transform_type(item))
+        return TruthFit(
+            affine_local=scale_affine_to_local(
+                affine_full, item["target"]["source"]["width"], local_width
+            ),
+            gcp_count=len(gcps),
+            transform_type=annotation_transform_type(item),
+        )
+
+    annotated = 0
+    for unit in units:
+        if unit.truth is not None:
+            continue
+        stem_lower = unit.stem.lower()
+        item = unsplit_by_lower.get(stem_lower)
+        if item is None:
+            items = splits_by_parent.get(stem_lower)
+            if not items:
+                continue
+            panels_path = next(
+                (
+                    p
+                    for p in (volume / "oim").glob("*.panels.json")
+                    if p.name.lower() == f"{stem_lower}.panels.json"
+                ),
+                None,
+            )
+            panels = load_split_polygons(panels_path) if panels_path else {}
+
+            def panel_area(split_item: dict) -> float:
+                index = label_split_index(split_item)
+                polygon = panels.get(index) if index is not None else None
+                return polygon.area if polygon is not None else 0.0
+
+            item = max(items, key=lambda i: (panel_area(i), len(extract_gcps(i))))
+        fit = truth_fit(item, unit.width)
+        if fit is not None:
+            unit.truth = fit
+            annotated += 1
+    return annotated
+
+
 def load_volume_context(volume: Path) -> VolumeContext:
     units = load_page_units(volume)
+    attach_missing_truth(volume, units)
     centerlines_path = default_centerlines(volume)
     if centerlines_path is None:
         sys.exit(f"no centerlines.geojson under {volume}")
@@ -700,12 +784,29 @@ GATE_SCORES = [0.5, 0.75, 1.0, 1.25, 1.5, 1.75, 2.0]
 GATE_MARGINS = [0.0, 0.1, 0.25, 0.5]
 
 
+VOLUME_MODE_GATE = 1.5  # the dev-chosen conservative elbow for the energy mode
+
+
 def cmd_select(volume: Path, mode: str, gate_score: float, gate_margin: float) -> None:
     """Pick one candidate (or abstain) per page; write selection_<mode>.jsonl."""
     records = load_candidates(volume)
     out_path = artifacts_dir(volume) / f"selection_{mode}.jsonl"
     if mode == "volume":
         selections = select_volume(volume, records, gate_score)
+    elif mode == "union":
+        # The two dev-calibrated committees are complementary: the energy mode
+        # (at its conservative gate) resolves joint/ambiguous pages, and the
+        # per-page argmax gate is the floor for pages the energy abstains on.
+        by_target = {
+            s["target"]: s for s in select_volume(volume, records, VOLUME_MODE_GATE)
+        }
+        selections = []
+        for choice in select_argmax(records, gate_score, gate_margin):
+            volume_choice = by_target.get(choice["target"])
+            if volume_choice is not None and volume_choice.get("chosen") is not None:
+                selections.append(volume_choice)
+            else:
+                selections.append(choice)
     else:
         selections = select_argmax(records, gate_score, gate_margin)
     accepted = sum(1 for s in selections if s.get("chosen") is not None)
@@ -1032,6 +1133,48 @@ def select_volume(volume: Path, records: list[dict], gate_score: float) -> list[
     return selections
 
 
+def cmd_reannotate(volume: Path) -> None:
+    """Refresh the rmse_ft annotations on cached candidates from current truth.
+
+    Cheap (no matching): recomputes every candidate's grid rmse against the
+    unit's truth affine, including pages that attach_missing_truth
+    now covers (case-mismatched keys and split-only truth). Rewrites candidates.jsonl in place.
+    """
+    units = {u.stem: u for u in load_page_units(volume)}
+    newly = attach_missing_truth(volume, list(units.values()))
+    records = load_candidates(volume)
+    changed = 0
+    for record in records:
+        unit = units.get(record["target"])
+        if unit is None:
+            continue
+        has_truth = unit.truth is not None
+        if record.get("has_truth") != has_truth:
+            record["has_truth"] = has_truth
+            changed += 1
+        for candidate in record.get("candidates") or []:
+            if unit.truth is None:
+                candidate.pop("rmse_ft", None)
+                continue
+            candidate["rmse_ft"] = round(
+                grid_rmse_ft_between(
+                    unit.truth.affine_local,
+                    np.array(candidate["world_affine"]),
+                    unit.width,
+                    unit.height,
+                ),
+                1,
+            )
+    out_path = artifacts_dir(volume) / "candidates.jsonl"
+    with out_path.open("w") as handle:
+        for record in records:
+            handle.write(json.dumps(record) + "\n")
+    print(
+        f"{volume.name}: {newly} split-truth pages attached, "
+        f"{changed} records flipped has_truth"
+    )
+
+
 def osm_variant_path(volume: Path, stem: str) -> Path:
     return volume / f"{stem}.georef-osm.json"
 
@@ -1118,13 +1261,20 @@ def main() -> None:
 
     p_sel = sub.add_parser("select", help="pick candidates / abstain per page")
     p_sel.add_argument("volume", type=Path)
-    p_sel.add_argument("--mode", choices=["argmax", "volume"], default="argmax")
+    p_sel.add_argument(
+        "--mode", choices=["argmax", "volume", "union"], default="argmax"
+    )
     p_sel.add_argument("--gate-score", type=float, default=1.0)
     p_sel.add_argument("--gate-margin", type=float, default=0.25)
 
     p_mat = sub.add_parser("materialize", help="write pN.georef-osm.json sidecars")
     p_mat.add_argument("volume", type=Path)
-    p_mat.add_argument("--mode", choices=["argmax", "volume"], default="argmax")
+    p_mat.add_argument(
+        "--mode", choices=["argmax", "volume", "union"], default="argmax"
+    )
+
+    p_re = sub.add_parser("reannotate", help="refresh cached rmse annotations")
+    p_re.add_argument("volume", type=Path)
 
     args = parser.parse_args()
     if args.command == "candidates":
@@ -1145,6 +1295,8 @@ def main() -> None:
         cmd_select(args.volume, args.mode, args.gate_score, args.gate_margin)
     elif args.command == "materialize":
         cmd_materialize(args.volume, args.mode)
+    elif args.command == "reannotate":
+        cmd_reannotate(args.volume)
 
 
 if __name__ == "__main__":
