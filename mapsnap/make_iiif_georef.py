@@ -50,7 +50,8 @@ def georef_path_to_page_key(path: str) -> str | None:
 
     Accepts filenames ending in '_p16s.georef.json', '_p16.georef.json',
     '_p16s.gcps.georef.json' (the '.gcps' infix is optional), or the
-    neighbor-fit variant '_p16.georef-neighbor.json'.
+    neighbor-fit / OSM-snap variants '_p16.georef-neighbor.json' and
+    '_p16.georef-osm.json'.
 
     Any letter page suffix is kept (Sanborn sheets run 'a', 'b', … past the
     directional 's'/'n'/'e'/'w'/'l'/'r' letters), not just a known few — a
@@ -59,7 +60,7 @@ def georef_path_to_page_key(path: str) -> str | None:
     still parse here; drop_redundant_skeletons raises on them rather than guess.
     """
     m = re.search(
-        r"(?:\b|_)(p\d+)([a-z]*)((?:__\d+)?)(?:\.[^.]+)?\.georef(?:2|-neighbor)?\.json$",
+        r"(?:\b|_)(p\d+)([a-z]*)((?:__\d+)?)(?:\.[^.]+)?\.georef(?:2|-neighbor|-osm)?\.json$",
         path,
         re.IGNORECASE,
     )

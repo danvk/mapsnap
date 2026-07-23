@@ -304,6 +304,11 @@ def test_georef_path_neighbor_variant():
     assert georef_path_to_page_key("data/vol/p16s.georef-neighbor.json") == "p16s"
 
 
+def test_georef_path_osm_variant():
+    assert georef_path_to_page_key("data/vol/p147.georef-osm.json") == "p147"
+    assert georef_path_to_page_key("data/vol/p4l__2.georef-osm.json") == "p4l__2"
+
+
 def test_georef_path_other_variants_do_not_match():
     assert georef_path_to_page_key("data/vol/p16.georef-nofit.json") is None
     assert georef_path_to_page_key("data/vol/p16.georef-misscale.json") is None

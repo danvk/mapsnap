@@ -795,58 +795,9 @@ def cmd_sanity(volume: Path, limit: int | None) -> None:
     print(f"contact sheets in {out_dir}")
 
 
-@dataclass
-class FrameSpec:
-    """A pair-local raster frame: equirectangular metres, north-up rows.
-
-    col = (x - x_min) / res, row = (y_max - y) / res, where (x, y) are metres
-    east/north of `origin`. Page images map into the raster without reflection.
-    """
-
-    origin: tuple[float, float]  # lon, lat
-    x_min: float
-    y_max: float
-    res_m: float
-    shape: tuple[int, int]  # rows, cols
-
-    def metre_scales(self) -> tuple[float, float]:
-        kx = 111_320.0 * math.cos(math.radians(self.origin[1]))
-        return kx, 110_540.0
-
-    def lonlat_to_raster(self, lon: float, lat: float) -> tuple[float, float]:
-        kx, ky = self.metre_scales()
-        x = (lon - self.origin[0]) * kx
-        y = (lat - self.origin[1]) * ky
-        return (x - self.x_min) / self.res_m, (self.y_max - y) / self.res_m
-
-    def page_to_raster_affine(self, affine_local: np.ndarray) -> np.ndarray:
-        """2x3 mapping page px -> raster px given a page px -> lon/lat affine."""
-        kx, ky = self.metre_scales()
-        a = affine_local
-        metres = np.array(
-            [
-                [a[0, 0] * kx, a[0, 1] * kx, (a[0, 2] - self.origin[0]) * kx],
-                [a[1, 0] * ky, a[1, 1] * ky, (a[1, 2] - self.origin[1]) * ky],
-            ]
-        )
-        to_frame = np.array(
-            [
-                [1 / self.res_m, 0, -self.x_min / self.res_m],
-                [0, -1 / self.res_m, self.y_max / self.res_m],
-            ]
-        )
-        return edge_join.compose(to_frame, metres)
-
-    def raster_pose_to_world_affine(self, pose: np.ndarray) -> np.ndarray:
-        """2x3 mapping page px -> (lon, lat) given a page px -> raster px pose."""
-        kx, ky = self.metre_scales()
-        from_raster = np.array(
-            [
-                [self.res_m / kx, 0, self.origin[0] + self.x_min / kx],
-                [0, -self.res_m / ky, self.origin[1] + self.y_max / ky],
-            ]
-        )
-        return edge_join.compose(from_raster, pose)
+# The frame class moved to the truth-free matcher library; re-exported here
+# because the harness's artifacts and callers refer to it by this module.
+FrameSpec = edge_join.FrameSpec
 
 
 def build_frame(
