@@ -17,7 +17,8 @@ Per volume:
   4. ``mapsnap ocr --reuse-boxes --allow-missing-boxes`` re-recognizes every page (panels
      supersede their parent), auto-discovering the georeferenced key maps;
   5. ``mapsnap adjacency --reuse-boxes`` rebuilds the printed-neighbor adjacency graph;
-  6. ``mapsnap fit --tag <tag>`` georeferences, builds the IIIF AnnotationPage, and
+  6. ``mapsnap fit --tag <tag>`` georeferences, runs the geometry-first snap
+     channel (rescue/arbitrate/refine), builds the IIIF AnnotationPage, and
      compares against truth.
 
 Steps are resumable per volume via ``.pipeline/rerun-<tag>-<step>.done`` stamps (the tag

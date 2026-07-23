@@ -43,6 +43,10 @@ SUBCOMMANDS: dict[str, tuple[str, str]] = {
         "mapsnap.page_adjacency",
         "Detect printed adjacent-sheet numbers and build a volume adjacency graph",
     ),
+    "snap": (
+        "mapsnap.snap",
+        "Geometry-first OSM snap: rescue unplaced pages, arbitrate and refine fits",
+    ),
     "iiif": (
         "mapsnap.make_iiif_georef",
         "Combine georeferences into a IIIF AnnotationPage",
