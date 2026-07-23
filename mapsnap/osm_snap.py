@@ -27,10 +27,12 @@ import numpy as np
 
 from mapsnap.edge_join import (
     CHAMFER_CLAMP_M,
+    INLIER_M,
     FrameSpec,
     JoinCandidate,
     MatchParams,
     match_at_rotation,
+    pose_ncc,
     refine_and_rank,
     rotation_candidates,
     skeleton_points,
@@ -583,6 +585,80 @@ def region_containment_frac(
     if footprint.area <= 0:
         return 0.0
     return float(footprint.intersection(region_poly).area / footprint.area)
+
+
+def evaluate_pose(
+    ctx: PageContext,
+    features: list[dict],
+    world_affine: np.ndarray,
+    params: MatchParams = OSM_MATCH_PARAMS,
+) -> dict | None:
+    """Score an EXISTING pose with the matcher's own evidence (no search).
+
+    The arbitration head-to-head: an incumbent RANSAC pose and a snap
+    candidate are judged by identical features — road-skeleton chamfer against
+    the OSM centerlines, fine content correlation, and name alignment — so
+    "challenger beats incumbent" compares like with like. The verification
+    formula matches JoinCandidate.verification_score exactly. Returns None
+    when the pose cannot be evaluated (no OSM in the frame, too few skeleton
+    points).
+    """
+    res = params.resolution_m
+    center_x, center_y = ctx.width / 2.0, ctx.height / 2.0
+    lon_c = (
+        world_affine[0, 0] * center_x
+        + world_affine[0, 1] * center_y
+        + world_affine[0, 2]
+    )
+    lat_c = (
+        world_affine[1, 0] * center_x
+        + world_affine[1, 1] * center_y
+        + world_affine[1, 2]
+    )
+    diag_m = math.hypot(ctx.width, ctx.height) * max(
+        sp.m_per_px for sp in ctx.scale_priors
+    )
+    frame = frame_around((lon_c, lat_c), half_m=diag_m / 2 + 100.0, res_m=res)
+    osm_prob, valid, skeleton = osm_rasters(frame, features)
+    if not skeleton.any():
+        return None
+    distance = osm_distance_m(skeleton, res)
+    pose = frame.page_to_raster_affine(world_affine)
+    points = skeleton_points(ctx.prob, params.mask_threshold, params.mask_min_area)
+    if len(points) < 10:
+        return None
+    if len(points) > 3000:
+        points = points[:: len(points) // 3000 + 1]
+    placed = np.column_stack([points, np.ones(len(points))]) @ pose.T
+    rows = np.clip(placed[:, 1].round().astype(int), 0, distance.shape[0] - 1)
+    cols = np.clip(placed[:, 0].round().astype(int), 0, distance.shape[1] - 1)
+    sampled = distance[rows, cols]
+    inlier_frac = float((sampled < INLIER_M).mean())
+    chamfer_mean = float(sampled.mean())
+    ncc_fine = pose_ncc(
+        osm_prob,
+        valid,
+        ctx.prob,
+        pose,
+        sigma_px=max(params.fine_sigma_m / res, 0.5),
+    )
+    evaluation: dict = {
+        "verification": round(
+            inlier_frac + ncc_fine - chamfer_mean / CHAMFER_CLAMP_M, 4
+        ),
+        "inlier_frac": round(inlier_frac, 4),
+        "chamfer_mean_m": round(chamfer_mean, 2),
+        "ncc_fine": round(ncc_fine, 4),
+        "n_points": int(len(sampled)),
+    }
+    if ctx.label_features and ctx.block_index:
+        name = name_alignment(ctx.label_features, ctx.block_index, world_affine)
+        evaluation["name"] = {
+            "score": round(name.score, 4),
+            "n_labels": name.n_labels,
+            "n_hits": name.n_hits,
+        }
+    return evaluation
 
 
 def snap_page(

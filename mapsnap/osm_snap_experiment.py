@@ -43,11 +43,12 @@ from mapsnap.osm_snap import (
     PageContext,
     RotationPrior,
     SnapCandidate,
+    adjacency_keymap_rotations,
     affine_theta_deg,
     calibrated_radius_m,
+    evaluate_pose,
     frame_around,
     label_osm_rotations,
-    adjacency_keymap_rotations,
     osm_rasters,
     page_scale_priors,
     snap_page,
@@ -521,6 +522,21 @@ def build_page_context(
     if prob is None:
         return None, "no_prob"
     centers, regions = page_keymap_data(vctx, unit)
+    if unit.fit_state == "fitted" and unit.gen_affine is not None:
+        # For arbitration the incumbent pose itself is the natural search
+        # init — it also reaches fitted pages the keymap never placed.
+        lon_c = (
+            unit.gen_affine[0, 0] * unit.width / 2
+            + unit.gen_affine[0, 1] * unit.height / 2
+            + unit.gen_affine[0, 2]
+        )
+        lat_c = (
+            unit.gen_affine[1, 0] * unit.width / 2
+            + unit.gen_affine[1, 1] * unit.height / 2
+            + unit.gen_affine[1, 2]
+        )
+        if all(haversine_m(lat_c, lon_c, b, a) > 50.0 for a, b in centers):
+            centers = centers + [(lon_c, lat_c)]
     if not centers:
         return None, "no_keymap"
     labels = page_label_features(vctx, unit)
@@ -659,6 +675,18 @@ def page_record(
             for p in ctx.scale_priors
         ],
     }
+    if unit.fit_state == "fitted" and unit.gen_affine is not None:
+        # Arbitration head-to-head: score the incumbent RANSAC pose with the
+        # same evidence the challenger candidates carry.
+        incumbent = evaluate_pose(ctx, vctx.features, unit.gen_affine)
+        if incumbent is not None:
+            incumbent["world_affine"] = [
+                [float(v) for v in row] for row in unit.gen_affine
+            ]
+            incumbent["effective_gcps"] = unit.inlier_intersections
+            if unit.rmse_ft is not None:
+                incumbent["rmse_ft"] = round(unit.rmse_ft, 1)
+            record["incumbent"] = incumbent
     candidates = snap_page(ctx, vctx.features)
     if not candidates:
         record["status"] = "no_candidates"
@@ -753,11 +781,10 @@ def cmd_candidates(
         for u in vctx.units
         if (all_pages and u.fit_state != "split") or u.fit_state in RESCUE_STATES
     ]
-    targets += [
-        u
-        for u in vctx.panel_units
-        if (all_pages and u.fit_state == "fitted") or u.fit_state in RESCUE_STATES
-    ]
+    # Panels are rescue-only even under --all-pages: arbitration challenges
+    # base fitted pages, and fitted panels are the least reliable fits in the
+    # volume — not worth the compute to challenge.
+    targets += [u for u in vctx.panel_units if u.fit_state in RESCUE_STATES]
     if pages:
         wanted = set(pages)
         targets = [u for u in targets if u.stem in wanted]
@@ -817,7 +844,9 @@ def load_candidates(volume: Path) -> list[dict]:
 
 def cmd_report(volume: Path) -> None:
     """Recall / ranking diagnostics for the cached candidates, against truth."""
-    records = load_candidates(volume)
+    records = [
+        r for r in load_candidates(volume) if r.get("fit_state") in RESCUE_STATES
+    ]
     by_status: dict[str, int] = {}
     for record in records:
         by_status[record["status"]] = by_status.get(record["status"], 0) + 1
@@ -989,7 +1018,9 @@ def simulate_delta_net(
 
 def cmd_sweep(volume: Path) -> None:
     """Grid the abstention gates and print the simulated Δnet for each."""
-    records = load_candidates(volume)
+    records = [
+        r for r in load_candidates(volume) if r.get("fit_state") in RESCUE_STATES
+    ]
     weights, total_land = truth_land_weights(volume)
     print(f"== {volume.name}: simulated Δnet over gate grid ==")
     print(f"  {'gate':>6} " + "".join(f"m>={m:<4.1f}" + " " * 14 for m in GATE_MARGINS))
@@ -1008,9 +1039,114 @@ def cmd_sweep(volume: Path) -> None:
 
 GATE_SCORES = [0.5, 0.75, 1.0, 1.25, 1.5, 1.75, 2.0]
 GATE_MARGINS = [0.0, 0.1, 0.25, 0.5]
+ARBITRATE_GATES = [1.5, 1.75, 2.0, 2.25, 2.5, 2.75]
+
+
+def cmd_sweep_arbitrate(volume: Path) -> None:
+    """Grid the arbitration gate; print the simulated Δnet from challenges."""
+    records = load_candidates(volume)
+    weights, total_land = truth_land_weights(volume)
+
+    def bucket_value(rmse: float | None) -> int:
+        if rmse is None:
+            return 0
+        if rmse <= 25.0:
+            return 1
+        if rmse >= 200.0:
+            return -1
+        return 0
+
+    print(f"== {volume.name}: simulated arbitration Δnet ==")
+    for gate in ARBITRATE_GATES:
+        delta = 0.0
+        challenged = improved = worsened = unweighted = 0
+        details = []
+        for record in records:
+            if record.get("fit_state") != "fitted":
+                continue
+            challenge = arbitrate_challenge(record, gate)
+            if challenge is None:
+                continue
+            challenged += 1
+            old_rmse = (record.get("incumbent") or {}).get("rmse_ft")
+            new_rmse = record["candidates"][0].get("rmse_ft")
+            if new_rmse is not None and old_rmse is not None:
+                if new_rmse < old_rmse:
+                    improved += 1
+                elif new_rmse > old_rmse:
+                    worsened += 1
+                details.append(f"{record['target']}:{old_rmse:.0f}->{new_rmse:.0f}")
+            weight = weights.get(record["target"])
+            if weight is None or old_rmse is None or new_rmse is None:
+                unweighted += 1
+                continue
+            delta += weight * (bucket_value(new_rmse) - bucket_value(old_rmse))
+        net = delta / total_land if total_land else 0.0
+        print(
+            f"  gate {gate:>5.2f}: {net * 100:+5.1f}%  {challenged} challenged"
+            f" ({improved} better, {worsened} worse, {unweighted} unweighted)"
+        )
+        if details:
+            print("      " + "  ".join(details[:10]))
 
 
 VOLUME_MODE_GATE = 1.5  # the dev-chosen conservative elbow for the energy mode
+
+# Arbitration: a snap candidate may replace a placed RANSAC fit only when it
+# is a confident, unambiguous lock that clearly disagrees with the incumbent
+# AND beats it on the shared evidence (geometry verification + name score).
+ARBITRATE_MIN_DISAGREE_FT = 100.0
+
+
+def arbitrate_challenge(record: dict, arbitrate_gate: float) -> dict | None:
+    """The challenge decision for one fitted page, or None to keep RANSAC.
+
+    Truth-free head-to-head: the challenger must clear the (high) arbitration
+    score gate with an unambiguous margin, disagree with the incumbent by more
+    than the mid-tier threshold, and win on BOTH shared-evidence axes — the
+    matcher's geometric verification and the street-name alignment. Ties keep
+    the incumbent: replacing a placed page is the risky direction.
+    """
+    incumbent = record.get("incumbent")
+    candidates = record.get("candidates") or []
+    if not incumbent or not candidates:
+        return None
+    top = candidates[0]
+    score = top.get("select_score")
+    if score is None or score < arbitrate_gate:
+        return None
+    margin = distinct_margin(record)
+    if margin is None or margin < 0.25:
+        return None
+    disagreement = grid_rmse_ft_between(
+        np.array(incumbent["world_affine"]),
+        np.array(top["world_affine"]),
+        record["width"],
+        record["height"],
+    )
+    if disagreement < ARBITRATE_MIN_DISAGREE_FT:
+        return None
+    incumbent_verification = incumbent.get("verification")
+    top_verification = top.get("verification")
+    if incumbent_verification is None or top_verification is None:
+        return None
+    if top_verification <= incumbent_verification:
+        return None
+    incumbent_name = (incumbent.get("name") or {}).get("score") or 0.0
+    top_name = (top.get("name") or {}).get("score") or 0.0
+    if top_name < incumbent_name:
+        return None
+    return {
+        "target": record["target"],
+        "chosen": 0,
+        "reason": "challenge",
+        "challenge": True,
+        "select_score": score,
+        "disagreement_ft": round(disagreement, 1),
+        "incumbent_verification": incumbent_verification,
+        "challenger_verification": top_verification,
+    }
+
 
 # Sheet-integrity gate for split panels: every panel is a rigid crop of one
 # sheet, so a panel placement determines the WHOLE sheet's placement exactly
@@ -1129,30 +1265,62 @@ def panel_allowed_candidates(
     return result
 
 
-def cmd_select(volume: Path, mode: str, gate_score: float, gate_margin: float) -> None:
+def select_union(
+    volume: Path,
+    records: list[dict],
+    gate_score: float,
+    gate_margin: float,
+    allowed: dict[str, set[int] | None],
+) -> list[dict]:
+    """The two dev-calibrated committees, combined: the energy mode (at its
+    conservative gate) resolves joint/ambiguous pages, and the per-page argmax
+    gate is the floor for pages the energy abstains on."""
+    by_target = {
+        s["target"]: s
+        for s in select_volume(volume, records, VOLUME_MODE_GATE, allowed)
+    }
+    selections = []
+    for choice in select_argmax(records, gate_score, gate_margin, allowed):
+        volume_choice = by_target.get(choice["target"])
+        if volume_choice is not None and volume_choice.get("chosen") is not None:
+            selections.append(volume_choice)
+        else:
+            selections.append(choice)
+    return selections
+
+
+def cmd_select(
+    volume: Path,
+    mode: str,
+    gate_score: float,
+    gate_margin: float,
+    arbitrate_gate: float = 2.0,
+) -> None:
     """Pick one candidate (or abstain) per page; write selection_<mode>.jsonl."""
     records = load_candidates(volume)
-    allowed = panel_allowed_candidates(volume, records)
+    # Fitted pages' records (from `candidates --all-pages`) exist solely for
+    # arbitration; the rescue committees must never treat them as targets.
+    rescue = [r for r in records if r.get("fit_state") in RESCUE_STATES]
+    allowed = panel_allowed_candidates(volume, rescue)
     out_path = artifacts_dir(volume) / f"selection_{mode}.jsonl"
     if mode == "volume":
-        selections = select_volume(volume, records, gate_score, allowed)
+        selections = select_volume(volume, rescue, gate_score, allowed)
     elif mode == "union":
-        # The two dev-calibrated committees are complementary: the energy mode
-        # (at its conservative gate) resolves joint/ambiguous pages, and the
-        # per-page argmax gate is the floor for pages the energy abstains on.
-        by_target = {
-            s["target"]: s
-            for s in select_volume(volume, records, VOLUME_MODE_GATE, allowed)
-        }
-        selections = []
-        for choice in select_argmax(records, gate_score, gate_margin, allowed):
-            volume_choice = by_target.get(choice["target"])
-            if volume_choice is not None and volume_choice.get("chosen") is not None:
-                selections.append(volume_choice)
-            else:
-                selections.append(choice)
+        selections = select_union(volume, rescue, gate_score, gate_margin, allowed)
+    elif mode == "arbitrate":
+        # The union rescue selection, plus challenges to placed RANSAC fits.
+        selections = select_union(volume, rescue, gate_score, gate_margin, allowed)
+        challenged = 0
+        for record in records:
+            if record.get("fit_state") != "fitted":
+                continue
+            challenge = arbitrate_challenge(record, arbitrate_gate)
+            if challenge is not None:
+                selections.append(challenge)
+                challenged += 1
+        print(f"{challenged} challenges accepted")
     else:
-        selections = select_argmax(records, gate_score, gate_margin, allowed)
+        selections = select_argmax(rescue, gate_score, gate_margin, allowed)
     accepted = sum(1 for s in selections if s.get("chosen") is not None)
     with out_path.open("w") as handle:
         for choice in selections:
@@ -1706,6 +1874,7 @@ def cmd_materialize(volume: Path, mode: str) -> None:
             "osm_snap": {
                 "previous_state": record["fit_state"],
                 "mode": mode,
+                "challenge": bool(choice.get("challenge")),
                 "select_score": candidate.get("select_score"),
                 "margin": record.get("margin"),
                 "verification": candidate.get("verification"),
@@ -1746,19 +1915,27 @@ def main() -> None:
     p_rep.add_argument(
         "--sweep", action="store_true", help="grid the gates, print simulated Δnet"
     )
+    p_rep.add_argument(
+        "--sweep-arbitrate",
+        action="store_true",
+        help="grid the arbitration gate over fitted-page challenges",
+    )
 
     p_sel = sub.add_parser("select", help="pick candidates / abstain per page")
     p_sel.add_argument("volume", type=Path)
     p_sel.add_argument(
-        "--mode", choices=["argmax", "volume", "union"], default="argmax"
+        "--mode", choices=["argmax", "volume", "union", "arbitrate"], default="argmax"
     )
     p_sel.add_argument("--gate-score", type=float, default=1.0)
     p_sel.add_argument("--gate-margin", type=float, default=0.25)
+    p_sel.add_argument("--arbitrate-gate", type=float, default=2.0)
 
     p_mat = sub.add_parser("materialize", help="write pN.georef-osm.json sidecars")
     p_mat.add_argument("volume", type=Path)
     p_mat.add_argument(
-        "--mode", choices=["argmax", "volume", "union"], default="argmax"
+        "--mode",
+        choices=["argmax", "volume", "union", "arbitrate"],
+        default="argmax",
     )
 
     p_re = sub.add_parser("reannotate", help="refresh cached rmse annotations")
@@ -1775,12 +1952,20 @@ def main() -> None:
             vis=not args.no_vis,
         )
     elif args.command == "report":
-        if args.sweep:
+        if args.sweep_arbitrate:
+            cmd_sweep_arbitrate(args.volume)
+        elif args.sweep:
             cmd_sweep(args.volume)
         else:
             cmd_report(args.volume)
     elif args.command == "select":
-        cmd_select(args.volume, args.mode, args.gate_score, args.gate_margin)
+        cmd_select(
+            args.volume,
+            args.mode,
+            args.gate_score,
+            args.gate_margin,
+            args.arbitrate_gate,
+        )
     elif args.command == "materialize":
         cmd_materialize(args.volume, args.mode)
     elif args.command == "reannotate":

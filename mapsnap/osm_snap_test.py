@@ -376,6 +376,30 @@ def test_snap_flipped_prior_recovered_by_mask_sweep() -> None:
     assert affine_corner_error_m(best.world_affine, truth_affine, (300, 420)) < 8.0
 
 
+def test_evaluate_pose_truth_beats_shifted() -> None:
+    from mapsnap.osm_snap import evaluate_pose
+
+    page, truth_affine, center = make_world_and_page(25.0)
+    ctx = PageContext(
+        stem="p1",
+        number=1,
+        width=300,
+        height=420,
+        prob=page,
+        search_centers=[center],
+        radius_m=250.0,
+        rotation_priors=[],
+        scale_priors=[ScalePrior(1.0, 0.05, "volume-median")],
+    )
+    good = evaluate_pose(ctx, grid_features(), truth_affine)
+    shifted_affine = truth_affine.copy()
+    shifted_affine[0, 2] += 60.0 / KX  # slide 60 m east
+    bad = evaluate_pose(ctx, grid_features(), shifted_affine)
+    assert good is not None and bad is not None
+    assert good["verification"] > bad["verification"]
+    assert good["inlier_frac"] > bad["inlier_frac"]
+
+
 def make_candidate(select: float, lon: float, theta: float = 0.0) -> SnapCandidate:
     # verification carries the whole select_score here (no bonuses attached).
     return SnapCandidate(
