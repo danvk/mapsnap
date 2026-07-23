@@ -1096,6 +1096,13 @@ VOLUME_MODE_GATE = 1.5  # the dev-chosen conservative elbow for the energy mode
 # is a confident, unambiguous lock that clearly disagrees with the incumbent
 # AND beats it on the shared evidence (geometry verification + name score).
 ARBITRATE_MIN_DISAGREE_FT = 100.0
+# ... and only when the incumbent is geometrically INDEFENSIBLE: across all 11
+# truth-graded challenges (dev + holdout), every correct overturn had
+# incumbent verification <= 0.05 and every wrong one >= 0.12. A plausible
+# incumbent losing narrowly is the OSM-divergence trap (Chicago's 1950 core:
+# a 400ft slide matches MODERN OSM better than the truth does), so arbitration
+# is disaster recovery for fits OSM actively contradicts — not relitigation.
+INCUMBENT_DEFENSIBLE_VERIFICATION = 0.1
 
 
 def arbitrate_challenge(record: dict, arbitrate_gate: float) -> dict | None:
@@ -1129,6 +1136,8 @@ def arbitrate_challenge(record: dict, arbitrate_gate: float) -> dict | None:
     incumbent_verification = incumbent.get("verification")
     top_verification = top.get("verification")
     if incumbent_verification is None or top_verification is None:
+        return None
+    if incumbent_verification >= INCUMBENT_DEFENSIBLE_VERIFICATION:
         return None
     if top_verification <= incumbent_verification:
         return None
