@@ -41,7 +41,11 @@ from mapsnap.utils import haversine_m
 OSM_RES_M = 2.0  # raster resolution
 OSM_WIDTH_M = 12.0  # stroked corridor width for the OSM "P(road)" analog
 REFINE_SHIFT_MAX_M = 30.0  # chamfer refinement may not slide farther than this
-CONTAINMENT_MIN = 0.35  # of the footprint inside the (buffered) keymap region
+# Hard containment gate: only egregious slides fail it. Schematic keymap
+# regions run small relative to true page footprints (Hudson true locks sit
+# near 0.33), so the run_join-style 0.35 threshold kills good fits here;
+# discrimination comes from the ranking bonus and the radius gate instead.
+CONTAINMENT_MIN = 0.15  # of the footprint inside the (buffered) keymap region
 CONTAINMENT_BUFFER_M = 60.0
 RADIUS_SLACK_M = 60.0  # post-refinement slack on the center-distance gate
 THETA_DEDUPE_DEG = 3.0
@@ -134,7 +138,9 @@ class SnapCandidate:
         if self.region_containment is not None:
             score += W_CONTAIN * self.region_containment
         if self.prior_theta_residual_sigma is not None:
-            score += W_PRIOR * max(0.0, 1.0 - self.prior_theta_residual_sigma)
+            # Signed: within 1 sigma earns the bonus, a gross disagreement
+            # (e.g. a 180-flip against agreeing directed priors) costs it.
+            score += W_PRIOR * max(-1.0, 1.0 - self.prior_theta_residual_sigma)
         return score
 
 
@@ -719,12 +725,16 @@ def snap_page(
                 if snap.region_containment < CONTAINMENT_MIN:
                     snap.plausible = False
                     snap.gate_reasons.append("containment")
-            if ctx.rotation_priors:
-                # Both flips of a mod-180 prior are present as entries, so a
-                # plain directed comparison is correct for every source.
+            # Only DIRECTED priors can flag a 180-flip: the mod-180 rung emits
+            # both flips as entries, so including it would let the wrong flip
+            # always match one of the pair and pin the residual at zero.
+            directed = [
+                p for p in ctx.rotation_priors if p.source != "label-osm-mod180"
+            ]
+            if directed:
                 snap.prior_theta_residual_sigma = min(
                     abs(wrap_deg(candidate.theta_deg - p.theta_deg)) / p.sigma_deg
-                    for p in ctx.rotation_priors
+                    for p in directed
                 )
             if ctx.label_features and ctx.block_index:
                 snap.name = name_alignment(ctx.label_features, ctx.block_index, world)
