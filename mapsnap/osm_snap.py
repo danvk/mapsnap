@@ -18,6 +18,7 @@ The harness (osm_snap_experiment.py) loads volumes, composes PageContext
 objects, and evaluates against truth; nothing in this module reads truth data.
 """
 
+import dataclasses
 import math
 from dataclasses import dataclass, field
 
@@ -602,6 +603,14 @@ def snap_page(
     page_diag_m = math.hypot(ctx.width, ctx.height) * max(
         sp.m_per_px for sp in ctx.scale_priors
     )
+    # A small page (split panel) can cover less ground than the absolute
+    # minimum-overlap floor; cap the floor at half its own area or the NCC
+    # masks out every shift and no candidates ever surface.
+    page_area_m2 = (
+        ctx.width * ctx.height * min(sp.m_per_px for sp in ctx.scale_priors) ** 2
+    )
+    if params.min_overlap_m2 > 0.5 * page_area_m2:
+        params = dataclasses.replace(params, min_overlap_m2=0.5 * page_area_m2)
     half_m = ctx.radius_m + page_diag_m / 2 + 100.0
     points = skeleton_points(ctx.prob, params.mask_threshold, params.mask_min_area)
     sigma_px = max(params.blur_sigma_m / res, 0.5)

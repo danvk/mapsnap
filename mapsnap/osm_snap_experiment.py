@@ -69,6 +69,7 @@ class VolumeContext:
 
     volume: Path
     units: list[PageUnit]
+    panel_units: list[PageUnit]
     features: list[dict]
     locator: KeymapLocator | None
     volume_m_per_px: float
@@ -224,6 +225,149 @@ def attach_missing_truth(volume: Path, units: list[PageUnit]) -> int:
     return annotated
 
 
+def panel_base(stem: str) -> str | None:
+    """The base page stem of a panel stem ('p474__1' -> 'p474'), or None."""
+    if "__" not in stem:
+        return None
+    return stem.rpartition("__")[0]
+
+
+def load_panel_units(volume: Path) -> list[PageUnit]:
+    """One PageUnit per split-panel jpg (pN__k.jpg), with truth attached.
+
+    A panel jpg is the base jpg cropped to its panel polygon's bounding box
+    (split.write_panels), so panel px -> base px is a pure translation by the
+    bbox origin. Truth comes from the truth split item whose OIM panel polygon
+    best overlaps ours in canvas coordinates — the same IoU rule compare_pages
+    uses, so OIM's split numbering need not match ours — translated into the
+    panel's own pixel frame.
+    """
+    from mapsnap.compare_iiif_georef import (
+        MIN_SPLIT_IOU,
+        annotation_transform_type,
+        extract_gcps,
+        fit_transform,
+        label_split_index,
+        load_split_polygons,
+        polygon_iou,
+        ring_to_polygon,
+    )
+    from mapsnap.edge_join_experiment import (
+        TruthFit,
+        page_fit_state,
+        scale_affine_to_local,
+    )
+    from mapsnap.keymap.fit_keymap import page_number
+    from mapsnap.road_model import page_world_affine
+    from mapsnap.utils import jpeg_dimensions, source_id_to_page_key
+
+    truth_path = volume / "main.iiif.json"
+    splits_by_parent: dict[str, list[dict]] = {}
+    if truth_path.exists():
+        for item in json.loads(truth_path.read_text()).get("items", []):
+            key = source_id_to_page_key(
+                item.get("target", {}).get("source", {}).get("id"),
+                item.get("label", ""),
+            )
+            if "__" in key:
+                splits_by_parent.setdefault(key.split("__")[0].lower(), []).append(item)
+
+    units: list[PageUnit] = []
+    for jpg in sorted(volume.glob("p*__*.jpg")):
+        stem = jpg.stem
+        base = panel_base(stem)
+        index_str = stem.rpartition("__")[2]
+        if base is None or not index_str.isdigit():
+            continue
+        number = page_number(base)
+        panels_path = volume / f"{base}.panels.json"
+        if number is None or not panels_path.exists():
+            continue
+        panels_doc = json.loads(panels_path.read_text())
+        rings = panels_doc.get("panels", [])
+        index = int(index_str)
+        if not (1 <= index <= len(rings)):
+            continue
+        ring = rings[index - 1]
+        width, height = jpeg_dimensions(jpg)
+        state, georef = page_fit_state(volume, stem)
+
+        truth: TruthFit | None = None
+        items = splits_by_parent.get(base.lower())
+        if items:
+            source = items[0]["target"]["source"]
+            canvas_scale = float(source["width"]) / panels_doc["width"]
+            our_polygon = ring_to_polygon(
+                [[x * canvas_scale, y * canvas_scale] for x, y in ring]
+            )
+            oim_path = next(
+                (
+                    p
+                    for p in (volume / "oim").glob("*.panels.json")
+                    if p.name.lower() == f"{base.lower()}.panels.json"
+                ),
+                None,
+            )
+            oim_polygons = load_split_polygons(oim_path) if oim_path else {}
+            best_iou, best_item = 0.0, None
+            for item in items:
+                item_index = label_split_index(item)
+                polygon = oim_polygons.get(item_index) if item_index else None
+                if polygon is None:
+                    continue
+                iou = polygon_iou(our_polygon, polygon)
+                if iou > best_iou:
+                    best_iou, best_item = iou, item
+            if best_item is not None and best_iou >= MIN_SPLIT_IOU:
+                gcps = extract_gcps(best_item)
+                if len(gcps) >= 2:
+                    base_local = scale_affine_to_local(
+                        fit_transform(gcps, annotation_transform_type(best_item)),
+                        best_item["target"]["source"]["width"],
+                        panels_doc["width"],
+                    )
+                    x0 = max(0, int(min(x for x, _ in ring)))
+                    y0 = max(0, int(min(y for _, y in ring)))
+                    panel_affine = base_local.copy()
+                    panel_affine[:, 2] = base_local @ np.array([x0, y0, 1.0])
+                    truth = TruthFit(
+                        affine_local=panel_affine,
+                        gcp_count=len(gcps),
+                        transform_type=annotation_transform_type(best_item),
+                    )
+
+        gen_affine = None
+        keymap_centers: list[tuple[float, float]] = []
+        keymap_radius = 0.0
+        keymap_regions = None
+        if georef is not None:
+            if state == "fitted":
+                gen_affine = page_world_affine(georef)
+            keymap = georef.get("keymap") or {}
+            keymap_centers = [tuple(c) for c in keymap.get("centers", [])]
+            keymap_radius = float(keymap.get("radius_m") or 0.0)
+            keymap_regions = keymap.get("regions") or None
+
+        units.append(
+            PageUnit(
+                stem=stem,
+                number=number,
+                width=width,
+                height=height,
+                fit_state=state,
+                truth=truth,
+                split_truth=False,
+                gen_affine=gen_affine,
+                inlier_intersections=0,
+                inlier_streets=0,
+                keymap_centers=keymap_centers,
+                keymap_radius_m=keymap_radius,
+                keymap_regions=keymap_regions,
+            )
+        )
+    return units
+
+
 def load_volume_context(volume: Path) -> VolumeContext:
     units = load_page_units(volume)
     attach_missing_truth(volume, units)
@@ -240,6 +384,7 @@ def load_volume_context(volume: Path) -> VolumeContext:
     return VolumeContext(
         volume=volume,
         units=units,
+        panel_units=load_panel_units(volume),
         features=features,
         locator=locator,
         volume_m_per_px=volume_median_scale(units),
@@ -317,11 +462,26 @@ def rotation_priors_for(
     if labels is not None and search_centers:
         features, block_index = labels
         priors.extend(label_osm_rotations(features, block_index, search_centers[0]))
+    base = panel_base(unit.stem)
+    if base is not None:
+        # A fitted sibling panel is the same physical sheet: its rotation is
+        # the most reliable directed prior a panel can get.
+        for sibling in vctx.panel_units:
+            if (
+                sibling.stem != unit.stem
+                and panel_base(sibling.stem) == base
+                and sibling.fit_state == "fitted"
+            ):
+                theta = unit_theta_deg(sibling)
+                if theta is not None:
+                    priors.append(RotationPrior(theta, 6.0, "ransac-neighbor"))
     own_centroid = vctx.region_centroids.get(unit.number)
     if own_centroid is None and search_centers:
         own_centroid = search_centers[0]
     if own_centroid is not None:
-        image_directions = image_neighbor_directions(vctx.adjacency, unit.stem)
+        # Printed neighbor claims live on the base sheet's margins; the crop
+        # preserves orientation, so the base stem's directions apply to a panel.
+        image_directions = image_neighbor_directions(vctx.adjacency, base or unit.stem)
         priors.extend(
             adjacency_keymap_rotations(
                 image_directions, vctx.region_centroids, own_centroid
@@ -363,7 +523,31 @@ def build_page_context(
         return None, "no_keymap"
     labels = page_label_features(vctx, unit)
     priors = rotation_priors_for(vctx, unit, centers, labels)
-    scales = page_scale_priors(vctx.volume_m_per_px, regions, unit.width, unit.height)
+    base = panel_base(unit.stem)
+    radius = vctx.radius_m
+    if base is not None:
+        # The keymap places the SHEET; a panel's center can sit up to half the
+        # base diagonal away from it, so widen the center-search accordingly.
+        # The region's area implies the sheet's scale (which the panel shares),
+        # so the family-rung test runs against the BASE dims, not the panel's.
+        base_unit = next((u for u in vctx.units if u.stem == base), None)
+        if base_unit is not None:
+            scales = page_scale_priors(
+                vctx.volume_m_per_px, regions, base_unit.width, base_unit.height
+            )
+            base_diag = (
+                math.hypot(base_unit.width, base_unit.height) * vctx.volume_m_per_px
+            )
+            panel_diag = math.hypot(unit.width, unit.height) * vctx.volume_m_per_px
+            radius = vctx.radius_m + max(0.0, (base_diag - panel_diag) / 2)
+        else:
+            scales = page_scale_priors(
+                vctx.volume_m_per_px, None, unit.width, unit.height
+            )
+    else:
+        scales = page_scale_priors(
+            vctx.volume_m_per_px, regions, unit.width, unit.height
+        )
     ctx = PageContext(
         stem=unit.stem,
         number=unit.number,
@@ -371,7 +555,7 @@ def build_page_context(
         height=unit.height,
         prob=prob,
         search_centers=centers,
-        radius_m=vctx.radius_m,
+        radius_m=radius,
         rotation_priors=priors,
         scale_priors=scales,
         keymap_regions=regions,
@@ -515,6 +699,33 @@ def write_contact_sheet(
         cv2.imwrite(str(out_dir / f"{unit.stem}_{rank + 1}{suffix}.png"), rgb)
 
 
+def ensure_probs(volume: Path, stems: list[str]) -> None:
+    """Run road-UNet inference for stems missing a cached P(road) map."""
+    missing = [
+        s
+        for s in stems
+        if load_prob(volume, s) is None and (volume / f"{s}.jpg").exists()
+    ]
+    if not missing:
+        return
+    import torch  # noqa: F401  (import check before loading model)
+
+    from mapsnap.keymap.number_model import select_device
+    from mapsnap.road_model import load_model, predict_page
+
+    out_dir = volume / "artifacts" / "edge_join" / "roadprob"
+    out_dir.mkdir(parents=True, exist_ok=True)
+    device = select_device()
+    model = load_model(Path("models/road_unet.pt"), device)
+    for stem in missing:
+        gray = cv2.imread(str(volume / f"{stem}.jpg"), cv2.IMREAD_GRAYSCALE)
+        if gray is None:
+            continue
+        prob = predict_page(model, gray, device)
+        cv2.imwrite(str(out_dir / f"{stem}.png"), (prob * 255).round().astype(np.uint8))
+    print(f"  inferred {len(missing)} P(road) maps")
+
+
 def cmd_candidates(
     volume: Path,
     pages: list[str] | None,
@@ -540,11 +751,24 @@ def cmd_candidates(
         for u in vctx.units
         if (all_pages and u.fit_state != "split") or u.fit_state in RESCUE_STATES
     ]
+    targets += [
+        u
+        for u in vctx.panel_units
+        if (all_pages and u.fit_state == "fitted") or u.fit_state in RESCUE_STATES
+    ]
     if pages:
         wanted = set(pages)
         targets = [u for u in targets if u.stem in wanted]
     if limit is not None:
         targets = targets[:limit]
+    ensure_probs(
+        volume,
+        [
+            u.stem
+            for u in targets
+            if "__" in u.stem and (u.stem not in existing or recompute or pages)
+        ],
+    )
 
     print(
         f"{volume.name}: {len(targets)} target pages, radius "
@@ -882,7 +1106,7 @@ def select_volume(volume: Path, records: list[dict], gate_score: float) -> list[
 
     from mapsnap.score import LocalFrame
 
-    units = load_page_units(volume)
+    units = load_page_units(volume) + load_panel_units(volume)
     stem_to_number = {u.stem: u.number for u in units}
     region_pairs, centroids = keymap_region_adjacency(volume)
     pairs = detected_pairs(volume) | region_pairs
@@ -933,15 +1157,17 @@ def select_volume(volume: Path, records: list[dict], gate_score: float) -> list[
         and u.gen_affine is not None
         and not (u.stem.endswith("s") and u.stem[:-1] in fitted_stems)
     ]
-    fitted_by_number: dict[int, Polygon] = {}
+    fitted_polys: dict[str, Polygon] = {}
+    number_to_fitted: dict[int, list[str]] = {}
     for unit in fitted_units:
         assert unit.gen_affine is not None
-        fitted_by_number[unit.number] = polygon_of(
+        fitted_polys[unit.stem] = polygon_of(
             [[float(v) for v in row] for row in unit.gen_affine],
             unit.width,
             unit.height,
         )
-    fitted_polygons = list(fitted_by_number.values())
+        number_to_fitted.setdefault(unit.number, []).append(unit.stem)
+    fitted_polygons = list(fitted_polys.values())
 
     def iou_over_min(a: Polygon, b: Polygon) -> float:
         smaller = min(a.area, b.area)
@@ -954,9 +1180,10 @@ def select_volume(volume: Path, records: list[dict], gate_score: float) -> list[
     # at 0.32-0.43 IoU-over-min against their fitted neighbors), so a fixed
     # threshold either misses slides or punishes correct seams.
     observed = [
-        iou_over_min(fitted_by_number[a], fitted_by_number[b])
+        iou_over_min(fitted_polys[sa], fitted_polys[sb])
         for a, b in (tuple(pair) for pair in pairs)
-        if a in fitted_by_number and b in fitted_by_number
+        for sa in number_to_fitted.get(a, [])
+        for sb in number_to_fitted.get(b, [])
     ]
     if len(observed) >= 5:
         p90 = float(np.percentile(observed, 90))
@@ -983,17 +1210,38 @@ def select_volume(volume: Path, records: list[dict], gate_score: float) -> list[
         centroid = centroids.get(number)
         return frame.to_xy(*centroid) if centroid else None
 
+    def coupled(stem_a: str, stem_b: str) -> str | None:
+        """'sibling' | 'adjacent' | None: whether two stems interact at all."""
+        base_a, base_b = panel_base(stem_a), panel_base(stem_b)
+        if base_a is not None and base_a == base_b:
+            return "sibling"
+        na, nb = stem_to_number.get(stem_a), stem_to_number.get(stem_b)
+        if na is not None and nb is not None and frozenset((na, nb)) in pairs:
+            return "adjacent"
+        return None
+
     def pairwise(stem_a: str, ka: int | None, stem_b: str, kb: int | None) -> float:
         if ka is None or kb is None:
             return 0.0
-        na, nb = stem_to_number.get(stem_a), stem_to_number.get(stem_b)
-        if na is None or nb is None or frozenset((na, nb)) not in pairs:
+        coupling = coupled(stem_a, stem_b)
+        if coupling is None:
             return 0.0
         energy = W_OVERLAP * overlap_penalty(
             iou_over_min(polygons[(stem_a, ka)], polygons[(stem_b, kb)]),
             overlap_soft,
             overlap_hard,
         )
+        # The centroid geometry terms describe SHEET centers; a panel's center
+        # legitimately sits away from its sheet's keymap centroid, so any pair
+        # involving a panel keeps only the overlap term (siblings of one sheet
+        # must simply not land on top of each other).
+        if (
+            coupling == "sibling"
+            or panel_base(stem_a) is not None
+            or panel_base(stem_b) is not None
+        ):
+            return energy
+        na, nb = stem_to_number.get(stem_a), stem_to_number.get(stem_b)
         ca, cb = centroid_xy(na), centroid_xy(nb)
         if ca and cb:
             xa, ya = centers_xy[(stem_a, ka)]
@@ -1011,15 +1259,14 @@ def select_volume(volume: Path, records: list[dict], gate_score: float) -> list[
                 energy -= W_SIDE * max(0.0, cosine)
         return energy
 
-    # Connected components over the adjacency among eligible pages.
+    # Connected components over the coupling graph among eligible pages.
     stems = sorted(eligible)
     neighbors: dict[str, set[str]] = {s: set() for s in stems}
     for sa in stems:
         for sb in stems:
             if sa >= sb:
                 continue
-            na, nb = stem_to_number.get(sa), stem_to_number.get(sb)
-            if na is not None and nb is not None and frozenset((na, nb)) in pairs:
+            if coupled(sa, sb) is not None:
                 neighbors[sa].add(sb)
                 neighbors[sb].add(sa)
     components: list[list[str]] = []
@@ -1140,8 +1387,9 @@ def cmd_reannotate(volume: Path) -> None:
     unit's truth affine, including pages that attach_missing_truth
     now covers (case-mismatched keys and split-only truth). Rewrites candidates.jsonl in place.
     """
-    units = {u.stem: u for u in load_page_units(volume)}
-    newly = attach_missing_truth(volume, list(units.values()))
+    unit_list = load_page_units(volume) + load_panel_units(volume)
+    units = {u.stem: u for u in unit_list}
+    newly = attach_missing_truth(volume, unit_list)
     records = load_candidates(volume)
     changed = 0
     for record in records:
@@ -1209,6 +1457,18 @@ def cmd_materialize(volume: Path, mode: str) -> None:
                 ]
             )
         _, georef = page_fit_state(volume, choice["target"])
+        if not georef or not georef.get("keymap"):
+            # A panel with no own sidecar borrows the keymap block from any
+            # sibling variant of the same sheet (the sheet is what the keymap
+            # places). The stale-osm cleanup above already ran, so a sibling's
+            # georef-osm sidecar can only be one written earlier this loop.
+            base = panel_base(choice["target"])
+            if base is not None:
+                for sibling in sorted(volume.glob(f"{base}__*.georef*.json")):
+                    sibling_doc = json.loads(sibling.read_text())
+                    if sibling_doc.get("keymap"):
+                        georef = sibling_doc
+                        break
         doc: dict = {
             "width": width,
             "height": height,
