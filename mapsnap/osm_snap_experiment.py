@@ -222,6 +222,10 @@ def attach_missing_truth(volume: Path, units: list[PageUnit]) -> int:
         fit = truth_fit(item, unit.width)
         if fit is not None:
             unit.truth = fit
+            if unit.gen_affine is not None:
+                unit.rmse_ft = grid_rmse_ft_between(
+                    fit.affine_local, unit.gen_affine, unit.width, unit.height
+                )
             annotated += 1
     return annotated
 
@@ -1103,6 +1107,56 @@ ARBITRATE_MIN_DISAGREE_FT = 100.0
 # a 400ft slide matches MODERN OSM better than the truth does), so arbitration
 # is disaster recovery for fits OSM actively contradicts — not relitigation.
 INCUMBENT_DEFENSIBLE_VERIFICATION = 0.1
+# Refinement: adopting an AGREEING challenger that clearly wins the evidence
+# head-to-head. RANSAC's mid-tier error is label-placement noise; the snap
+# pose is chamfer-locked to the street grid, so when the two agree on the
+# lock, the snap is simply the more precise estimator (25-50ft incumbents:
+# challenger closer to truth 93% of the time, median 33ft -> 12ft). The
+# margin protects already-good incumbents from churn; 0.1 is the dev elbow
+# (47 bucket gains / 2 losses on the dev volumes).
+REFINE_VER_MARGIN = 0.1
+
+
+def refine_adoption(record: dict) -> dict | None:
+    """Adopt an agreeing challenger as a precision refinement, or None.
+
+    The complement of arbitrate_challenge: same head-to-head evidence, but for
+    challengers that AGREE with the incumbent (within the arbitration
+    disagreement floor) and beat its verification by a clear margin. This is
+    what reaches the 25-100ft mid-tier that arbitration structurally cannot
+    touch (a correct challenger agrees with those incumbents).
+    """
+    incumbent = record.get("incumbent")
+    candidates = record.get("candidates") or []
+    if not incumbent or not candidates:
+        return None
+    top = candidates[0]
+    if top.get("select_score") is None:
+        return None
+    incumbent_verification = incumbent.get("verification")
+    top_verification = top.get("verification")
+    if incumbent_verification is None or top_verification is None:
+        return None
+    if top_verification <= incumbent_verification + REFINE_VER_MARGIN:
+        return None
+    disagreement = grid_rmse_ft_between(
+        np.array(incumbent["world_affine"]),
+        np.array(top["world_affine"]),
+        record["width"],
+        record["height"],
+    )
+    if disagreement >= ARBITRATE_MIN_DISAGREE_FT:
+        return None  # that far apart is arbitration territory, not refinement
+    return {
+        "target": record["target"],
+        "chosen": 0,
+        "reason": "refine",
+        "refine": True,
+        "select_score": top["select_score"],
+        "disagreement_ft": round(disagreement, 1),
+        "incumbent_verification": incumbent_verification,
+        "challenger_verification": top_verification,
+    }
 
 
 def arbitrate_challenge(record: dict, arbitrate_gate: float) -> dict | None:
@@ -1319,7 +1373,7 @@ def cmd_select(
     elif mode == "arbitrate":
         # The union rescue selection, plus challenges to placed RANSAC fits.
         selections = select_union(volume, rescue, gate_score, gate_margin, allowed)
-        challenged = 0
+        challenged = refined = 0
         for record in records:
             if record.get("fit_state") != "fitted":
                 continue
@@ -1327,7 +1381,12 @@ def cmd_select(
             if challenge is not None:
                 selections.append(challenge)
                 challenged += 1
-        print(f"{challenged} challenges accepted")
+                continue
+            refinement = refine_adoption(record)
+            if refinement is not None:
+                selections.append(refinement)
+                refined += 1
+        print(f"{challenged} challenges, {refined} refinements accepted")
     else:
         selections = select_argmax(rescue, gate_score, gate_margin, allowed)
     accepted = sum(1 for s in selections if s.get("chosen") is not None)
@@ -1818,6 +1877,20 @@ def cmd_reannotate(volume: Path) -> None:
                 ),
                 1,
             )
+        incumbent = record.get("incumbent")
+        if incumbent is not None:
+            if unit.truth is not None and unit.gen_affine is not None:
+                incumbent["rmse_ft"] = round(
+                    grid_rmse_ft_between(
+                        unit.truth.affine_local,
+                        unit.gen_affine,
+                        unit.width,
+                        unit.height,
+                    ),
+                    1,
+                )
+            else:
+                incumbent.pop("rmse_ft", None)
     out_path = artifacts_dir(volume) / "candidates.jsonl"
     with out_path.open("w") as handle:
         for record in records:
@@ -1884,6 +1957,7 @@ def cmd_materialize(volume: Path, mode: str) -> None:
                 "previous_state": record["fit_state"],
                 "mode": mode,
                 "challenge": bool(choice.get("challenge")),
+                "refine": bool(choice.get("refine")),
                 "select_score": candidate.get("select_score"),
                 "margin": record.get("margin"),
                 "verification": candidate.get("verification"),
