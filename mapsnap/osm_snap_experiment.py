@@ -608,6 +608,41 @@ def truth_land_weights(volume: Path) -> tuple[dict[str, float], float]:
     return weights, total
 
 
+DISTINCT_SEPARATION_M = 100.0
+DISTINCT_THETA_DEG = 10.0
+
+
+def distinct_margin(record: dict) -> float | None:
+    """Rank-1's select_score lead over the best *distinct* alternative lock.
+
+    Near-identical twins (the same lock found from two search centers, within
+    100 m and 10 degrees) are not ambiguity — a margin computed against them
+    wrongly abstains on confident pages. If no distinct alternative exists the
+    margin is infinite. None when the top candidate is implausible.
+    """
+    candidates = record.get("candidates") or []
+    if not candidates or candidates[0].get("select_score") is None:
+        return None
+    top = candidates[0]
+    for candidate in candidates[1:]:
+        if candidate.get("select_score") is None:
+            continue
+        separation = haversine_m(
+            top["center"][1],
+            top["center"][0],
+            candidate["center"][1],
+            candidate["center"][0],
+        )
+        theta_gap = abs(
+            (candidate["theta_deg"] - top["theta_deg"] + 180.0) % 360.0 - 180.0
+        )
+        if separation > DISTINCT_SEPARATION_M or theta_gap > DISTINCT_THETA_DEG:
+            # Candidates are sorted by select_score, so the first distinct
+            # alternative is the strongest one.
+            return top["select_score"] - candidate["select_score"]
+    return math.inf
+
+
 def simulate_delta_net(
     records: list[dict],
     weights: dict[str, float],
@@ -623,7 +658,7 @@ def simulate_delta_net(
             continue
         top = record["candidates"][0]
         score = top.get("select_score")
-        margin = record.get("margin")
+        margin = distinct_margin(record)
         if score is None or score < gate_score:
             continue
         if margin is None or margin < gate_margin:
@@ -669,15 +704,29 @@ def cmd_select(volume: Path, mode: str, gate_score: float, gate_margin: float) -
     """Pick one candidate (or abstain) per page; write selection_<mode>.jsonl."""
     records = load_candidates(volume)
     out_path = artifacts_dir(volume) / f"selection_{mode}.jsonl"
+    if mode == "volume":
+        selections = select_volume(volume, records, gate_score)
+    else:
+        selections = select_argmax(records, gate_score, gate_margin)
+    accepted = sum(1 for s in selections if s.get("chosen") is not None)
+    with out_path.open("w") as handle:
+        for choice in selections:
+            handle.write(json.dumps(choice) + "\n")
+    print(f"{accepted}/{len(selections)} pages accepted -> {out_path}")
+
+
+def select_argmax(
+    records: list[dict], gate_score: float, gate_margin: float
+) -> list[dict]:
+    """v0: per-page rank-1 with abstention gates."""
     selections = []
-    accepted = 0
     for record in records:
         stem = record["target"]
         choice: dict = {"target": stem, "chosen": None, "reason": record["status"]}
         if record.get("status") == "ok" and record.get("candidates"):
             top = record["candidates"][0]
             score = top.get("select_score")
-            margin = record.get("margin")
+            margin = distinct_margin(record)
             if score is None:
                 choice["reason"] = "implausible"
             elif score < gate_score:
@@ -690,14 +739,297 @@ def cmd_select(volume: Path, mode: str, gate_score: float, gate_margin: float) -
                     "chosen": 0,
                     "reason": "accepted",
                     "select_score": score,
-                    "margin": margin,
+                    "margin": None if math.isinf(margin) else round(margin, 4),
                 }
-                accepted += 1
         selections.append(choice)
-    with out_path.open("w") as handle:
-        for choice in selections:
-            handle.write(json.dumps(choice) + "\n")
-    print(f"{accepted}/{len(selections)} pages accepted -> {out_path}")
+    return selections
+
+
+# --- v1: volume-wide discrete selection ------------------------------------
+
+W_OVERLAP = 3.0
+W_ADJACENT = 0.5
+W_SIDE = 0.3
+OVERLAP_SOFT = 0.15  # IoU-over-min where the penalty starts
+OVERLAP_HARD = 0.5  # and where it becomes prohibitive
+ADJACENT_SIGMA_M = 150.0  # schematic keymap-centroid geometry
+EXHAUSTIVE_LIMIT = 20_000
+
+
+def overlap_penalty(iou_over_min: float, soft: float, hard: float) -> float:
+    """0 below soft, quadratic to hard, prohibitive above."""
+    if iou_over_min <= soft:
+        return 0.0
+    if iou_over_min >= hard:
+        return 1e6
+    frac = (iou_over_min - soft) / (hard - soft)
+    return frac * frac
+
+
+def select_volume(volume: Path, records: list[dict], gate_score: float) -> list[dict]:
+    """v1: joint selection over per-page candidate sets.
+
+    Energy = per-page unary (a pick must beat abstention by its select_score
+    over the gate) + pairwise terms on keymap/printed adjacency edges:
+    footprint-overlap penalty (including against FITTED pages — this is what
+    kills a one-block slide, which collides with a placed neighbor where the
+    truth does not), keymap-centroid distance consistency, and a side-agreement
+    reward. Connected components solve exhaustively when small, else ICM from
+    several greedy orderings.
+    """
+    from shapely.geometry import Polygon
+
+    from mapsnap.score import LocalFrame
+
+    units = load_page_units(volume)
+    stem_to_number = {u.stem: u.number for u in units}
+    region_pairs, centroids = keymap_region_adjacency(volume)
+    pairs = detected_pairs(volume) | region_pairs
+
+    eligible: dict[str, dict] = {}
+    for record in records:
+        if record.get("status") != "ok" or not record.get("candidates"):
+            continue
+        options = [
+            (k, c)
+            for k, c in enumerate(record["candidates"])
+            if c.get("select_score") is not None
+        ]
+        if options:
+            eligible[record["target"]] = {"record": record, "options": options}
+    if not eligible:
+        return select_argmax(records, gate_score, gate_margin=0.0)
+
+    first = next(iter(eligible.values()))["options"][0][1]
+    frame = LocalFrame(first["center"][0], first["center"][1])
+
+    def polygon_of(affine: list[list[float]], width: int, height: int) -> Polygon:
+        ring = []
+        for x, y in [(0, 0), (width, 0), (width, height), (0, height)]:
+            lon = affine[0][0] * x + affine[0][1] * y + affine[0][2]
+            lat = affine[1][0] * x + affine[1][1] * y + affine[1][2]
+            ring.append(frame.to_xy(lon, lat))
+        return Polygon(ring).buffer(0)
+
+    polygons: dict[tuple[str, int], Polygon] = {}
+    centers_xy: dict[tuple[str, int], tuple[float, float]] = {}
+    for stem, entry in eligible.items():
+        record = entry["record"]
+        for k, candidate in entry["options"]:
+            polygons[(stem, k)] = polygon_of(
+                candidate["world_affine"], record["width"], record["height"]
+            )
+            centers_xy[(stem, k)] = frame.to_xy(*candidate["center"])
+
+    # Fitted context, with skeleton twins deduped: a fitted pNs maps the same
+    # ground as fitted pN, and its ~100% overlap would poison both the
+    # calibration below and every candidate that legitimately touches pN.
+    fitted_stems = {u.stem for u in units if u.fit_state == "fitted"}
+    fitted_units = [
+        u
+        for u in units
+        if u.fit_state == "fitted"
+        and u.gen_affine is not None
+        and not (u.stem.endswith("s") and u.stem[:-1] in fitted_stems)
+    ]
+    fitted_by_number: dict[int, Polygon] = {}
+    for unit in fitted_units:
+        assert unit.gen_affine is not None
+        fitted_by_number[unit.number] = polygon_of(
+            [[float(v) for v in row] for row in unit.gen_affine],
+            unit.width,
+            unit.height,
+        )
+    fitted_polygons = list(fitted_by_number.values())
+
+    def iou_over_min(a: Polygon, b: Polygon) -> float:
+        smaller = min(a.area, b.area)
+        if smaller <= 0:
+            return 0.0
+        return a.intersection(b).area / smaller
+
+    # Calibrate the overlap thresholds from the volume's own adjacent fitted
+    # pairs: Sanborn sheets legitimately share strips (Hudson true locks sit
+    # at 0.32-0.43 IoU-over-min against their fitted neighbors), so a fixed
+    # threshold either misses slides or punishes correct seams.
+    observed = [
+        iou_over_min(fitted_by_number[a], fitted_by_number[b])
+        for a, b in (tuple(pair) for pair in pairs)
+        if a in fitted_by_number and b in fitted_by_number
+    ]
+    if len(observed) >= 5:
+        p90 = float(np.percentile(observed, 90))
+        overlap_soft = min(0.5, max(OVERLAP_SOFT, p90 + 0.05))
+    else:
+        overlap_soft = OVERLAP_SOFT
+    overlap_hard = min(0.85, overlap_soft + 0.3)
+
+    def unary(stem: str, k: int | None) -> float:
+        if k is None:
+            return 0.0
+        candidate = dict(eligible[stem]["options"])[k]
+        energy = -(candidate["select_score"] - gate_score)
+        polygon = polygons[(stem, k)]
+        for fitted in fitted_polygons:
+            energy += W_OVERLAP * overlap_penalty(
+                iou_over_min(polygon, fitted), overlap_soft, overlap_hard
+            )
+        return energy
+
+    def centroid_xy(number: int | None) -> tuple[float, float] | None:
+        if number is None:
+            return None
+        centroid = centroids.get(number)
+        return frame.to_xy(*centroid) if centroid else None
+
+    def pairwise(stem_a: str, ka: int | None, stem_b: str, kb: int | None) -> float:
+        if ka is None or kb is None:
+            return 0.0
+        na, nb = stem_to_number.get(stem_a), stem_to_number.get(stem_b)
+        if na is None or nb is None or frozenset((na, nb)) not in pairs:
+            return 0.0
+        energy = W_OVERLAP * overlap_penalty(
+            iou_over_min(polygons[(stem_a, ka)], polygons[(stem_b, kb)]),
+            overlap_soft,
+            overlap_hard,
+        )
+        ca, cb = centroid_xy(na), centroid_xy(nb)
+        if ca and cb:
+            xa, ya = centers_xy[(stem_a, ka)]
+            xb, yb = centers_xy[(stem_b, kb)]
+            realized = (xb - xa, yb - ya)
+            expected = (cb[0] - ca[0], cb[1] - ca[1])
+            gap = math.hypot(realized[0] - expected[0], realized[1] - expected[1])
+            energy += W_ADJACENT * min(3.0, (gap / ADJACENT_SIGMA_M) ** 2)
+            norm_r = math.hypot(*realized)
+            norm_e = math.hypot(*expected)
+            if norm_r > 1e-6 and norm_e > 1e-6:
+                cosine = (realized[0] * expected[0] + realized[1] * expected[1]) / (
+                    norm_r * norm_e
+                )
+                energy -= W_SIDE * max(0.0, cosine)
+        return energy
+
+    # Connected components over the adjacency among eligible pages.
+    stems = sorted(eligible)
+    neighbors: dict[str, set[str]] = {s: set() for s in stems}
+    for sa in stems:
+        for sb in stems:
+            if sa >= sb:
+                continue
+            na, nb = stem_to_number.get(sa), stem_to_number.get(sb)
+            if na is not None and nb is not None and frozenset((na, nb)) in pairs:
+                neighbors[sa].add(sb)
+                neighbors[sb].add(sa)
+    components: list[list[str]] = []
+    seen: set[str] = set()
+    for stem in stems:
+        if stem in seen:
+            continue
+        component = []
+        queue = [stem]
+        seen.add(stem)
+        while queue:
+            current = queue.pop()
+            component.append(current)
+            for other in neighbors[current]:
+                if other not in seen:
+                    seen.add(other)
+                    queue.append(other)
+        components.append(sorted(component))
+
+    def stem_options(stem: str) -> list[int | None]:
+        choices: list[int | None] = [None]
+        choices.extend(k for k, _ in eligible[stem]["options"])
+        return choices
+
+    assignment: dict[str, int | None] = {}
+    for component in components:
+        choices_per_stem = [stem_options(stem) for stem in component]
+        size = 1
+        for choices in choices_per_stem:
+            size *= len(choices)
+
+        def total_energy(assign: dict[str, int | None]) -> float:
+            energy = sum(unary(s, assign[s]) for s in component)
+            for i, sa in enumerate(component):
+                for sb in component[i + 1 :]:
+                    energy += pairwise(sa, assign[sa], sb, assign[sb])
+            return energy
+
+        if size <= EXHAUSTIVE_LIMIT:
+            import itertools
+
+            best_assign_c: dict[str, int | None] | None = None
+            best_energy = math.inf
+            for combo in itertools.product(*choices_per_stem):
+                assign: dict[str, int | None] = dict(zip(component, combo))
+                energy = total_energy(assign)
+                if energy < best_energy:
+                    best_energy = energy
+                    best_assign_c = assign
+            assert best_assign_c is not None
+            assignment.update(best_assign_c)
+        else:
+            # ICM from a few deterministic starts: best-unary and abstain-all.
+            best_assign = None
+            best_energy = math.inf
+            starts: list[dict[str, int | None]] = [
+                {s: eligible[s]["options"][0][0] for s in component},
+                {s: None for s in component},
+            ]
+            for start in starts:
+                assign = dict(start)
+                for _ in range(20):
+                    changed = False
+                    for stem in component:
+                        stem_choices = stem_options(stem)
+                        best_k = assign[stem]
+                        best_local = math.inf
+                        for k in stem_choices:
+                            trial = dict(assign)
+                            trial[stem] = k
+                            energy = total_energy(trial)
+                            if energy < best_local:
+                                best_local = energy
+                                best_k = k
+                        if best_k != assign[stem]:
+                            assign[stem] = best_k
+                            changed = True
+                    if not changed:
+                        break
+                energy = total_energy(assign)
+                if energy < best_energy:
+                    best_energy = energy
+                    best_assign = assign
+            assert best_assign is not None
+            assignment.update(best_assign)
+
+    selections = []
+    for record in records:
+        stem = record["target"]
+        if stem not in eligible:
+            selections.append(
+                {"target": stem, "chosen": None, "reason": record["status"]}
+            )
+            continue
+        chosen = assignment.get(stem)
+        if chosen is None:
+            selections.append(
+                {"target": stem, "chosen": None, "reason": "energy-abstain"}
+            )
+        else:
+            candidate = dict(eligible[stem]["options"])[chosen]
+            selections.append(
+                {
+                    "target": stem,
+                    "chosen": chosen,
+                    "reason": "energy",
+                    "select_score": candidate["select_score"],
+                    "rank": chosen,
+                }
+            )
+    return selections
 
 
 def osm_variant_path(volume: Path, stem: str) -> Path:
