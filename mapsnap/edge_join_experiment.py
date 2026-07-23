@@ -2032,30 +2032,6 @@ def effective_gcp_count(volume: Path, stem: str) -> int:
     return count_from_georef(json.loads((volume / f"{stem}.georef.json").read_text()))
 
 
-DIRECTIONAL_SUFFIXES = {
-    "NORTH",
-    "SOUTH",
-    "EAST",
-    "WEST",
-    "NORTHEAST",
-    "NORTHWEST",
-    "SOUTHEAST",
-    "SOUTHWEST",
-}
-
-
-def street_base_name(name: str) -> str:
-    """A street name with any trailing directional word removed.
-
-    "K STREET SOUTHEAST" and "K STREET NORTHWEST" are quadrant segments of
-    one physical street, not two candidate matches.
-    """
-    words = name.split()
-    if len(words) > 1 and words[-1] in DIRECTIONAL_SUFFIXES:
-        return " ".join(words[:-1])
-    return name
-
-
 def build_line_factors(
     volume: Path,
     vframe,
@@ -2088,7 +2064,7 @@ def build_line_factors(
         geometry_segments,
         segment_point_distance_m,
     )
-    from mapsnap.streets import build_block_index
+    from mapsnap.streets import build_block_index, street_base_name
     from mapsnap.utils import default_centerlines
 
     centerlines_path = default_centerlines(volume)
