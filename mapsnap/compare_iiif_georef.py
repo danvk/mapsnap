@@ -27,6 +27,7 @@ from collections import defaultdict
 from pathlib import Path
 
 import numpy as np
+from shapely.geometry import Point as ShapelyPoint
 from shapely.geometry import Polygon as ShapelyPolygon
 from shapely.geometry import box
 
@@ -37,6 +38,9 @@ EARTH_RADIUS_FT = 20_925_524.0
 MIN_SPLIT_IOU = (
     0.1  # minimum panel overlap to treat a truth and generated split as the same region
 )
+# A truth panel is graded only when this fraction of its region is actually
+# displayed by some generated annotation; below it, the panel is unplaced.
+TRUTH_REGION_COVERAGE_MIN = 0.5
 
 
 def extract_metadata_int(item: dict, label: str) -> int | None:
@@ -248,6 +252,37 @@ def sample_grid(width: float, height: float, n: int = 7) -> list[tuple[float, fl
     return [(f_x * width, f_y * height) for f_y in fracs for f_x in fracs]
 
 
+def truth_region_grid(
+    polygon: ShapelyPolygon, n: int = 7, min_points: int = 49
+) -> list[tuple[float, float]]:
+    """Grid sample points inside a truth panel's polygon (canvas pixels).
+
+    Samples a lattice over the polygon's bounds (with the same corner-avoiding
+    fractions as sample_grid) and keeps the interior points, so a split panel
+    is graded over ITS OWN region rather than the whole canvas. Non-convex
+    panels (L-shapes) fill only part of their bounds, so the lattice is
+    densified until at least ``min_points`` land inside — a rectangle's 7×7
+    grid keeps all 49, and an L deserves the same effective density (at 7×7,
+    Champaign p21's L keeps only 24 points and understates its converged RMSE
+    by ~6%). Falls back to the last lattice for degenerate slivers containing
+    fewer than five points at any density.
+    """
+    min_x, min_y, max_x, max_y = polygon.bounds
+    lattice: list[tuple[float, float]] = []
+    inside: list[tuple[float, float]] = []
+    for lattice_n in (n, 11, 15, 21, 31):
+        fracs = [(k + 1) / (lattice_n + 1) for k in range(lattice_n)]
+        lattice = [
+            (min_x + f_x * (max_x - min_x), min_y + f_y * (max_y - min_y))
+            for f_y in fracs
+            for f_x in fracs
+        ]
+        inside = [p for p in lattice if polygon.contains(ShapelyPoint(p))]
+        if len(inside) >= min_points:
+            return inside
+    return inside if len(inside) >= 5 else lattice
+
+
 def truth_distortion(A: np.ndarray) -> tuple[float, float]:
     """Compute skew (°) and anisotropy from the truth affine linear part.
 
@@ -288,13 +323,21 @@ def angle_diff(a: float, b: float) -> float:
     return d - 360.0 if d > 180.0 else d
 
 
-def analyze_pair(truth_item: dict, gen_item: dict) -> dict:
+def analyze_pair(
+    truth_item: dict,
+    gen_item: dict,
+    grid: list[tuple[float, float]] | None = None,
+) -> dict:
     """Compute accuracy metrics for one page by comparing two IIIF georef annotations.
 
     Returns a dict with keys: page_key, gen_page_key, n_truth, n_gen, rmse_ft, max_ft,
     trans_ft, rot_err, scale_pct, skew_deg, aniso. page_key uses the truth's split
     numbering; gen_page_key uses the matched generated split's numbering (they can differ
     when OIM and our splitter number panels differently).
+
+    ``grid`` overrides the sample points (canvas pixels) the error is measured
+    over — compare_pages passes a truth panel's own region so a split page is
+    graded on what the generated annotation actually displays there.
     """
     source_id = truth_item["target"]["source"].get("id")
     page_key = source_id_to_page_key(source_id, truth_item["label"])
@@ -311,24 +354,26 @@ def analyze_pair(truth_item: dict, gen_item: dict) -> dict:
     width = float(truth_item["target"]["source"]["width"])
     height = float(truth_item["target"]["source"]["height"])
 
-    # For split sub-images with known canvas placement, sample only within the
-    # split region so the error metric covers actual split pixels, not the full canvas.
-    split_cx = extract_metadata_float(gen_item, "split_canvas_x")
-    split_cy = extract_metadata_float(gen_item, "split_canvas_y")
-    split_cw = extract_metadata_float(gen_item, "split_canvas_w")
-    split_ch = extract_metadata_float(gen_item, "split_canvas_h")
+    if grid is None:
+        # For split sub-images with known canvas placement, sample only within
+        # the split region so the error metric covers actual split pixels, not
+        # the full canvas.
+        split_cx = extract_metadata_float(gen_item, "split_canvas_x")
+        split_cy = extract_metadata_float(gen_item, "split_canvas_y")
+        split_cw = extract_metadata_float(gen_item, "split_canvas_w")
+        split_ch = extract_metadata_float(gen_item, "split_canvas_h")
 
-    if (
-        split_cx is not None
-        and split_cy is not None
-        and split_cw is not None
-        and split_ch is not None
-    ):
-        grid = [
-            (x + split_cx, y + split_cy) for x, y in sample_grid(split_cw, split_ch)
-        ]
-    else:
-        grid = sample_grid(width, height)
+        if (
+            split_cx is not None
+            and split_cy is not None
+            and split_cw is not None
+            and split_ch is not None
+        ):
+            grid = [
+                (x + split_cx, y + split_cy) for x, y in sample_grid(split_cw, split_ch)
+            ]
+        else:
+            grid = sample_grid(width, height)
 
     # Positional errors at grid sample points.
     errors: list[float] = []
@@ -581,62 +626,6 @@ def load_split_polygons(
     }
 
 
-def match_split_pairs(
-    truth_items: list[dict],
-    gen_items: list[dict],
-    truth_polygons: dict[int, ShapelyPolygon],
-    gen_polygons: dict[int, ShapelyPolygon],
-    canvas_polygon: ShapelyPolygon | None = None,
-) -> tuple[list[tuple[dict, dict]], list[dict]]:
-    """Associate truth and generated split annotations by panel-polygon overlap.
-
-    OIM's split numbering need not match ours, so pairs are chosen by greatest panel IoU
-    globally: every (truth, generated) pair with IoU >= MIN_SPLIT_IOU is considered, and
-    the highest-overlap pairs are assigned first (each split used once). Choosing globally
-    rather than per-truth-in-file-order matters — a truth split that merely grazes a
-    generated panel must not claim it ahead of the truth split that actually overlaps it.
-
-    When OIM split a page but we kept it whole, the generated annotation has no split index;
-    canvas_polygon (the full page) then stands in as its panel, so it pairs with the truth
-    split it most overlaps — i.e. the largest split. Both sides' polygons are in canvas
-    coordinates. Returns (pairs, unmatched_truth_items).
-    """
-
-    def gen_polygon(gen: dict) -> ShapelyPolygon | None:
-        gen_index = annotation_split_index(gen)
-        if gen_index is not None:
-            return gen_polygons.get(gen_index)
-        return canvas_polygon  # unsplit page: one panel covering the whole canvas
-
-    candidates: list[tuple[float, int, int]] = []  # (iou, truth_idx, gen_idx)
-    for ti, truth in enumerate(truth_items):
-        truth_index = label_split_index(truth)
-        truth_poly = truth_polygons.get(truth_index) if truth_index else None
-        if truth_poly is None:
-            continue
-        for gi, gen in enumerate(gen_items):
-            gen_poly = gen_polygon(gen)
-            if gen_poly is None:
-                continue
-            iou = polygon_iou(truth_poly, gen_poly)
-            if iou >= MIN_SPLIT_IOU:
-                candidates.append((iou, ti, gi))
-
-    candidates.sort(reverse=True)  # assign highest-overlap pairs first
-    used_truth: set[int] = set()
-    used_gen: set[int] = set()
-    pairs: list[tuple[dict, dict]] = []
-    for _iou, ti, gi in candidates:
-        if ti in used_truth or gi in used_gen:
-            continue
-        pairs.append((truth_items[ti], gen_items[gi]))
-        used_truth.add(ti)
-        used_gen.add(gi)
-
-    unmatched = [t for ti, t in enumerate(truth_items) if ti not in used_truth]
-    return pairs, unmatched
-
-
 def redundant_skeleton_keys(truth_keys: set[str], generated_keys: set[str]) -> set[str]:
     """Truth page keys to drop under the skeleton rule.
 
@@ -730,14 +719,45 @@ def compare_pages(
         gen_polygons = load_split_polygons(
             gen_dir / f"{page_key}.panels.json", source_dims
         )
-        # If we kept the page whole, a generated annotation with no split index stands in
-        # for a panel covering the full canvas, matching the largest truth split.
+        # A generated annotation with no split index displays the whole canvas.
         canvas_polygon = box(0.0, 0.0, source_dims[0], source_dims[1])
-        pairs, unmatched = match_split_pairs(
-            truth_splits, gen_items, truth_polygons, gen_polygons, canvas_polygon
-        )
-        rows.extend(analyze_pair(t, g) for t, g in pairs)
-        missing.extend(analyze_truth_only(t) for t in unmatched)
+
+        def generated_region(gen: dict) -> ShapelyPolygon | None:
+            gen_index = annotation_split_index(gen)
+            if gen_index is not None:
+                return gen_polygons.get(gen_index)
+            return canvas_polygon
+
+        # Grade every truth panel over ITS OWN region, against whatever
+        # generated annotation covers that region (one-to-many: a whole-page
+        # placement covers, and is graded on, every truth panel). This is what
+        # makes the metric sensitive to bad splits: a page georeferenced
+        # whole onto one inset of a composite sheet displays the OTHER
+        # insets' imagery in the wrong place, and grading those regions under
+        # the same transform turns them into disasters — whereas an honest
+        # abstention leaves them merely unplaced. A truth panel mostly
+        # uncovered (below TRUTH_REGION_COVERAGE_MIN) counts as unplaced.
+        for truth in truth_splits:
+            truth_index = label_split_index(truth)
+            truth_poly = truth_polygons.get(truth_index) if truth_index else None
+            if truth_poly is None or truth_poly.is_empty:
+                missing.append(analyze_truth_only(truth))
+                continue
+            best_gen: dict | None = None
+            best_coverage = 0.0
+            for gen in gen_items:
+                region = generated_region(gen)
+                if region is None or region.is_empty:
+                    continue
+                coverage = truth_poly.intersection(region).area / truth_poly.area
+                if coverage > best_coverage:
+                    best_coverage, best_gen = coverage, gen
+            if best_gen is None or best_coverage < TRUTH_REGION_COVERAGE_MIN:
+                missing.append(analyze_truth_only(truth))
+                continue
+            rows.append(
+                analyze_pair(truth, best_gen, grid=truth_region_grid(truth_poly))
+            )
     return rows, missing
 
 
