@@ -38,6 +38,31 @@ function parseAnnotationPath(
   return match ? { volume: match[1] ?? '', file: match[2] ?? '' } : null;
 }
 
+// Map viewport from the URL's `center=lng,lat` and `zoom=Z` params, or null when absent/invalid.
+function parseViewport(
+  params: URLSearchParams,
+): { center: [number, number]; zoom: number } | null {
+  const center = params.get('center')?.split(',').map(Number);
+  const zoom = Number(params.get('zoom'));
+  if (
+    !center ||
+    center.length !== 2 ||
+    ![...center, zoom].every(Number.isFinite)
+  )
+    return null;
+  return { center: [center[0]!, center[1]!], zoom };
+}
+
+// Merge updates into the current URL query and replace history (null value deletes a key).
+function updateUrl(updates: Record<string, string | null>): void {
+  const params = new URLSearchParams(window.location.search);
+  for (const [key, value] of Object.entries(updates)) {
+    if (value === null) params.delete(key);
+    else params.set(key, value);
+  }
+  history.replaceState(null, '', `?${params}`);
+}
+
 /**
  * Full-volume IIIF viewer: pick a volume and one of its georeference
  * annotation files, and every georeferenced page is shown warped and clipped
@@ -55,13 +80,24 @@ export function VolumeViewer() {
     failed: number;
   } | null>(null);
   const [opacity, setOpacity] = useState(100);
-  const [colorByRmse, setColorByRmse] = useState(false);
-  const [showMissing, setShowMissing] = useState(false);
-  const [showAdjacency, setShowAdjacency] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [selectedItemIndex, setSelectedItemIndex] = useState<number | null>(
-    null,
+  // View state seeded from the URL so a shared/reloaded link restores the same view, and so
+  // switching annotation files within a volume keeps the selection, checkboxes, and viewport.
+  const initialParams = new URLSearchParams(window.location.search);
+  const [colorByRmse, setColorByRmse] = useState(
+    () => initialParams.get('rmse') === '1',
   );
+  const [showMissing, setShowMissing] = useState(
+    () => initialParams.get('missing') === '1',
+  );
+  const [showAdjacency, setShowAdjacency] = useState(
+    () => initialParams.get('adj') === '1',
+  );
+  const [error, setError] = useState<string | null>(null);
+  // Selection is tracked by page stem (stable across annotation files, unlike the item index).
+  const [selectedStem, setSelectedStem] = useState<string | null>(() =>
+    initialParams.get('page'),
+  );
+  const [initialViewport] = useState(() => parseViewport(initialParams));
   const [truthAnnotation, setTruthAnnotation] = useState<unknown>(null);
   // Paired-page error stats from the annotation's `mapsnap compare` sidecar, or null when
   // there is no sidecar (no truth comparison for this annotation).
@@ -89,13 +125,14 @@ export function VolumeViewer() {
       .catch((err) => setError(String(err)));
   }, []);
 
-  // Load the selected annotation and keep the ?iiif= deep link in sync.
+  // Load the selected annotation and keep the ?iiif= deep link in sync. The selection is not
+  // reset here: it is keyed by stem, so it carries across annotation files within a volume and
+  // simply resolves to nothing when the stem is absent from a newly chosen volume.
   useEffect(() => {
     if (!selectedPath) return;
     let cancelled = false;
     setError(null);
     setLoadResult(null);
-    setSelectedItemIndex(null);
     fetchRewrittenAnnotation(selectedPath)
       .then((resp) => {
         if (cancelled) return;
@@ -105,10 +142,7 @@ export function VolumeViewer() {
       .catch((err) => {
         if (!cancelled) setError(String(err));
       });
-    const params = new URLSearchParams(window.location.search);
-    params.set('view', 'iiif');
-    params.set('iiif', selectedPath);
-    history.replaceState(null, '', `?${params}`);
+    updateUrl({ view: 'iiif', iiif: selectedPath });
 
     // Per-page truth error and summary footer from this annotation's `mapsnap compare` sidecar.
     setCompareRows(null);
@@ -249,18 +283,42 @@ export function VolumeViewer() {
     return colors;
   }, [colorByRmse, truthStats]);
 
-  // A missing page carries a negative synthetic id, so it is found in
-  // missingPages, not the fitted pages; the info panel renders it differently.
+  // The selected page (fitted or missing) resolved from its stem, or null when nothing is
+  // selected or the stem is absent from the current annotation. A missing page carries a
+  // negative synthetic id, so it is found in missingPages; the info panel renders it differently.
   const selectedPage =
-    selectedItemIndex === null
+    selectedStem === null
       ? null
-      : (pages.find((p) => p.itemIndex === selectedItemIndex) ??
-        missingPages.find((p) => p.itemIndex === selectedItemIndex) ??
+      : (pages.find((p) => p.stem === selectedStem) ??
+        missingPages.find((p) => p.stem === selectedStem) ??
         null);
+  const selectedItemIndex = selectedPage?.itemIndex ?? null;
   const selectedIsMissing =
     selectedPage !== null &&
     selectedItemIndex !== null &&
     selectedItemIndex < 0;
+
+  // Selection is set by page stem so it survives an annotation-file switch (item ids differ).
+  function handleSelectPage(itemIndex: number | null): void {
+    if (itemIndex === null) {
+      setSelectedStem(null);
+      return;
+    }
+    const page =
+      pages.find((p) => p.itemIndex === itemIndex) ??
+      missingPages.find((p) => p.itemIndex === itemIndex);
+    setSelectedStem(page?.stem ?? null);
+  }
+
+  // Mirror the selection and toggle state into the URL (the map writes the viewport itself).
+  useEffect(() => {
+    updateUrl({
+      page: selectedStem,
+      rmse: colorByRmse ? '1' : null,
+      missing: showMissing ? '1' : null,
+      adj: showAdjacency ? '1' : null,
+    });
+  }, [selectedStem, colorByRmse, showMissing, showAdjacency]);
 
   function selectVolume(name: string): void {
     const volume = volumes?.find((v) => v.name === name);
@@ -362,7 +420,7 @@ export function VolumeViewer() {
           stats={truthStats}
           notes={notes}
           selectedItemIndex={selectedItemIndex}
-          onSelectPage={setSelectedItemIndex}
+          onSelectPage={handleSelectPage}
         />
         <VolumeMap
           annotation={annotation}
@@ -371,12 +429,20 @@ export function VolumeViewer() {
           truthPages={truthPages ?? []}
           showMissing={showMissing}
           selectedItemIndex={selectedItemIndex}
-          onSelectPage={setSelectedItemIndex}
+          onSelectPage={handleSelectPage}
           opacity={opacity / 100}
           awaitingView={!!selectedPath && !error}
           pageColors={pageColors}
           adjacencyClaims={showAdjacency ? adjacencyClaims : []}
           selectedStem={selectedPage?.stem ?? null}
+          initialViewport={initialViewport}
+          fitVolumeKey={volumeName ?? null}
+          onViewportChange={(center, zoom) =>
+            updateUrl({
+              center: `${center[0].toFixed(5)},${center[1].toFixed(5)}`,
+              zoom: zoom.toFixed(2),
+            })
+          }
           onLoadResult={setLoadResult}
         />
         <InfoPanel
@@ -401,7 +467,7 @@ export function VolumeViewer() {
           compareFooter={compareFooter}
           keymaps={keymaps}
           volume={selection?.volume ?? ''}
-          onClose={() => setSelectedItemIndex(null)}
+          onClose={() => setSelectedStem(null)}
         />
       </div>
     </div>
