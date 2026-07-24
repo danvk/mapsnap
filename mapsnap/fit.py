@@ -113,7 +113,12 @@ def main() -> None:
     inputs = experiments.gather_inputs(
         dir_path, centerlines, truth if truth.exists() else None
     )
-    run_id = resolve_run_id(dir_path, args.tag, georef_extra, inputs, git)
+    # The config hash must see the snap setting: identical georef flags with
+    # snap on vs off produce different outputs and need different run ids
+    # (an id collision would silently SKIP the second variant as already
+    # archived).
+    id_tokens = [*georef_extra, *(["--no-snap"] if args.no_snap else [])]
+    run_id = resolve_run_id(dir_path, args.tag, id_tokens, inputs, git)
 
     archive_dir = dir_path / experiments.ARTIFACTS_DIRNAME / run_id
     if archive_dir.exists():

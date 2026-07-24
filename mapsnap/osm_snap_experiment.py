@@ -375,8 +375,34 @@ def load_panel_units(volume: Path) -> list[PageUnit]:
     return units
 
 
-def load_volume_context(volume: Path) -> VolumeContext:
-    units = load_page_units(volume)
+def georef_variant_mtime(volume: Path, stem: str) -> int | None:
+    """mtime of the stem's current georef-variant sidecar, or None for none.
+
+    The staleness key for cached candidates: `mapsnap fit` re-runs georef
+    before snap, and a page whose fit changed (or whose fit STATE changed)
+    must be re-matched — its cached record carries the old incumbent pose.
+    """
+    from mapsnap.edge_join_experiment import GEOREF_VARIANTS
+
+    for variant in GEOREF_VARIANTS:
+        path = volume / f"{stem}.{variant}.json"
+        if path.exists():
+            return int(path.stat().st_mtime)
+    return None
+
+
+def candidates_record_fresh(record: dict, unit: PageUnit, mtime: int | None) -> bool:
+    """Whether a cached candidates record still matches the page's fit state."""
+    return (
+        record.get("fit_state") == unit.fit_state
+        and record.get("georef_mtime") == mtime
+    )
+
+
+def load_volume_context(
+    volume: Path, units: list[PageUnit] | None = None
+) -> VolumeContext:
+    units = units if units is not None else load_page_units(volume)
     attach_missing_truth(volume, units)
     centerlines_path = default_centerlines(volume)
     if centerlines_path is None:
@@ -641,15 +667,14 @@ def candidate_record(candidate: SnapCandidate, unit: PageUnit) -> dict:
     return record
 
 
-def page_record(
-    vctx: VolumeContext, unit: PageUnit, limit_note: str | None = None
-) -> dict:
+def page_record(vctx: VolumeContext, unit: PageUnit) -> dict:
     """Generate the full candidates.jsonl record for one page."""
     ctx, status = build_page_context(vctx, unit)
     record: dict = {
         "target": unit.stem,
         "status": status,
         "fit_state": unit.fit_state,
+        "georef_mtime": georef_variant_mtime(vctx.volume, unit.stem),
         "width": unit.width,
         "height": unit.height,
         "has_truth": unit.truth is not None,
@@ -745,12 +770,12 @@ def ensure_probs(volume: Path, stems: list[str]) -> None:
     import torch  # noqa: F401  (import check before loading model)
 
     from mapsnap.keymap.number_model import select_device
-    from mapsnap.road_model import load_model, predict_page
+    from mapsnap.road_model import ROAD_MODEL_PATH, load_model, predict_page
 
     out_dir = volume / "artifacts" / "edge_join" / "roadprob"
     out_dir.mkdir(parents=True, exist_ok=True)
     device = select_device()
-    model = load_model(Path("models/road_unet.pt"), device)
+    model = load_model(ROAD_MODEL_PATH, device)
     for stem in missing:
         gray = cv2.imread(str(volume / f"{stem}.jpg"), cv2.IMREAD_GRAYSCALE)
         if gray is None:
@@ -769,10 +794,22 @@ def cmd_candidates(
     vis: bool,
 ) -> None:
     """Generate candidates.jsonl for the volume's rescue targets."""
-    vctx = load_volume_context(volume)
     out_dir = artifacts_dir(volume)
     out_dir.mkdir(parents=True, exist_ok=True)
     out_path = out_dir / "candidates.jsonl"
+    units = load_page_units(volume)
+    if not any(u.fit_state == "fitted" and u.gen_affine is not None for u in units):
+        # Nothing to calibrate scale/radius/rotation against — and nothing for
+        # the channel to do that could be trusted. Leave an empty candidates
+        # file so select/materialize no-op cleanly instead of erroring.
+        print(
+            f"{volume.name}: no fitted pages to calibrate against; "
+            "skipping snap candidates."
+        )
+        if not out_path.exists():
+            out_path.write_text("")
+        return
+    vctx = load_volume_context(volume, units)
     existing: dict[str, dict] = {}
     if out_path.exists():
         for line in out_path.read_text().splitlines():
@@ -813,7 +850,15 @@ def cmd_candidates(
         vis_dir.mkdir(exist_ok=True)
     done = 0
     for unit in targets:
-        if unit.stem in existing and not recompute and not pages:
+        cached = existing.get(unit.stem)
+        if (
+            cached is not None
+            and not recompute
+            and not pages
+            and candidates_record_fresh(
+                cached, unit, georef_variant_mtime(volume, unit.stem)
+            )
+        ):
             continue
         record = page_record(vctx, unit)
         existing[unit.stem] = record
@@ -1094,6 +1139,12 @@ def cmd_sweep_arbitrate(volume: Path) -> None:
             print("      " + "  ".join(details[:10]))
 
 
+# The frozen production gates (dev-swept; `mapsnap snap` uses these): the
+# per-page rescue score/margin gates, the volume-energy conservative elbow,
+# and the arbitration score gate.
+PRODUCTION_GATE_SCORE = 1.25
+PRODUCTION_GATE_MARGIN = 0.25
+PRODUCTION_ARBITRATE_GATE = 1.5
 VOLUME_MODE_GATE = 1.5  # the dev-chosen conservative elbow for the energy mode
 
 # Arbitration: a snap candidate may replace a placed RANSAC fit only when it
@@ -1177,7 +1228,7 @@ def arbitrate_challenge(record: dict, arbitrate_gate: float) -> dict | None:
     if score is None or score < arbitrate_gate:
         return None
     margin = distinct_margin(record)
-    if margin is None or margin < 0.25:
+    if margin is None or margin < PRODUCTION_GATE_MARGIN:
         return None
     disagreement = grid_rmse_ft_between(
         np.array(incumbent["world_affine"]),
@@ -1328,6 +1379,89 @@ def panel_allowed_candidates(
     return result
 
 
+SNAP_LOG_BEGIN = "==== mapsnap snap ===="
+SNAP_LOG_END = "==== end mapsnap snap ===="
+
+
+def append_snap_logs(
+    volume: Path, records: list[dict], selections: list[dict], mode: str
+) -> None:
+    """Append each page's snap decision to its pN.txt georef log.
+
+    The RANSAC georeferencer captures its per-page log to <stem>.txt; the
+    debugger surfaces that file, so the snap channel's decision belongs there
+    too. Idempotent: any previous snap section is replaced, not duplicated.
+    """
+    by_target = {s["target"]: s for s in selections}
+    for record in records:
+        stem = record["target"]
+        choice = by_target.get(stem)
+        lines = [
+            SNAP_LOG_BEGIN,
+            f"mode: {mode}   status: {record['status']}   "
+            f"fit_state: {record['fit_state']}",
+        ]
+        priors = record.get("priors", {}).get("rotation", [])
+        if priors:
+            lines.append(
+                "rotation priors: "
+                + ", ".join(f"{p['theta_deg']:.0f}deg({p['source']})" for p in priors)
+            )
+        for rank, candidate in enumerate((record.get("candidates") or [])[:3]):
+            name = candidate.get("name") or {}
+            lines.append(
+                f"#{rank + 1}: select={candidate.get('select_score')} "
+                f"ver={candidate.get('verification')} "
+                f"theta={candidate['theta_deg']:.0f}deg({candidate['theta_source']}) "
+                f"name={name.get('n_hits')}/{name.get('n_labels')} "
+                f"center_dist={candidate['center_dist_m']:.0f}m"
+                + (
+                    f" rmse={candidate['rmse_ft']:.0f}ft(vs truth)"
+                    if candidate.get("rmse_ft") is not None
+                    else ""
+                )
+            )
+        incumbent = record.get("incumbent")
+        if incumbent:
+            name = incumbent.get("name") or {}
+            lines.append(
+                f"incumbent: ver={incumbent.get('verification')} "
+                f"name={name.get('n_hits')}/{name.get('n_labels')}"
+                + (
+                    f" rmse={incumbent['rmse_ft']:.0f}ft(vs truth)"
+                    if incumbent.get("rmse_ft") is not None
+                    else ""
+                )
+            )
+        if choice is None:
+            outcome = (
+                "incumbent kept" if record["fit_state"] == "fitted" else "no entry"
+            )
+        elif choice.get("chosen") is None:
+            outcome = f"abstain ({choice.get('reason')})"
+        else:
+            kind = (
+                "challenge"
+                if choice.get("challenge")
+                else "refine"
+                if choice.get("refine")
+                else "rescue"
+            )
+            outcome = f"{kind}: candidate #{choice['chosen'] + 1} accepted"
+        lines.append(f"outcome: {outcome}")
+        lines.append(SNAP_LOG_END)
+
+        path = volume / f"{stem}.txt"
+        text = path.read_text() if path.exists() else ""
+        if SNAP_LOG_BEGIN in text:
+            head, _, rest = text.partition(SNAP_LOG_BEGIN)
+            _, _, tail = rest.partition(SNAP_LOG_END)
+            text = head + tail.lstrip("\n")
+        if text and not text.endswith("\n"):
+            text += "\n"
+        path.write_text(text + "\n".join(lines) + "\n")
+
+
 def select_union(
     volume: Path,
     records: list[dict],
@@ -1393,6 +1527,7 @@ def cmd_select(
     with out_path.open("w") as handle:
         for choice in selections:
             handle.write(json.dumps(choice) + "\n")
+    append_snap_logs(volume, records, selections, mode)
     print(f"{accepted}/{len(selections)} pages accepted -> {out_path}")
 
 
@@ -1486,10 +1621,11 @@ def select_volume(
     reward. Connected components solve exhaustively when small, else ICM from
     several greedy orderings.
 
-    Panels additionally face sheet-integrity constraints: options inconsistent
-    with a fitted sibling are dropped up front, page-space-adjacent sibling
-    picks must land next to each other, and an accepted panel with no fitted
-    sibling must have a co-accepted contiguous sibling backing it up.
+    Panels additionally face rigid-sheet constraints: options whose implied
+    full-sheet placement disagrees with a reliable fitted sibling's are
+    dropped up front, co-accepted sibling picks must imply the same sheet
+    (the pairwise sheets_agree term), and an accepted panel with no reliable
+    anchor needs a co-accepted sibling or a PANEL_SOLO_GATE score.
     """
     from shapely.geometry import Polygon
 
@@ -1959,7 +2095,14 @@ def cmd_materialize(volume: Path, mode: str) -> None:
                 "challenge": bool(choice.get("challenge")),
                 "refine": bool(choice.get("refine")),
                 "select_score": candidate.get("select_score"),
-                "margin": record.get("margin"),
+                # The margin selection actually gated on: rank-1's lead over
+                # the best DISTINCT lock (raw rank1-rank2 is misleading when
+                # the runner-up is a near-identical twin).
+                "margin": (
+                    None
+                    if (margin := distinct_margin(record)) is None or math.isinf(margin)
+                    else round(margin, 4)
+                ),
                 "verification": candidate.get("verification"),
                 "ncc_fine": candidate.get("ncc_fine"),
                 "inlier_frac": candidate.get("inlier_frac"),
@@ -2007,11 +2150,19 @@ def main() -> None:
     p_sel = sub.add_parser("select", help="pick candidates / abstain per page")
     p_sel.add_argument("volume", type=Path)
     p_sel.add_argument(
-        "--mode", choices=["argmax", "volume", "union", "arbitrate"], default="argmax"
+        "--mode",
+        choices=["argmax", "volume", "union", "arbitrate"],
+        default="argmax",
+        help=(
+            "argmax/volume: single rescue committee; union: both committees; "
+            "arbitrate: union PLUS challenges and refinements of placed fits"
+        ),
     )
-    p_sel.add_argument("--gate-score", type=float, default=1.0)
-    p_sel.add_argument("--gate-margin", type=float, default=0.25)
-    p_sel.add_argument("--arbitrate-gate", type=float, default=2.0)
+    p_sel.add_argument("--gate-score", type=float, default=PRODUCTION_GATE_SCORE)
+    p_sel.add_argument("--gate-margin", type=float, default=PRODUCTION_GATE_MARGIN)
+    p_sel.add_argument(
+        "--arbitrate-gate", type=float, default=PRODUCTION_ARBITRATE_GATE
+    )
 
     p_mat = sub.add_parser("materialize", help="write pN.georef-osm.json sidecars")
     p_mat.add_argument("volume", type=Path)

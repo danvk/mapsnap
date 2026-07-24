@@ -623,12 +623,12 @@ def cmd_infer(volume: Path) -> None:
     import torch  # noqa: F401  (import check before loading model)
 
     from mapsnap.keymap.number_model import select_device
-    from mapsnap.road_model import load_model, predict_page
+    from mapsnap.road_model import ROAD_MODEL_PATH, load_model, predict_page
 
     out_dir = volume / "artifacts" / "edge_join" / "roadprob"
     out_dir.mkdir(parents=True, exist_ok=True)
     device = select_device()
-    model = load_model(Path("models/road_unet.pt"), device)
+    model = load_model(ROAD_MODEL_PATH, device)
     jpgs = [p for p in sorted(volume.glob("p*.jpg")) if "__" not in p.stem]
     done = 0
     for jpg in jpgs:

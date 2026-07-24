@@ -35,14 +35,6 @@ Usage:
 import argparse
 from pathlib import Path
 
-# The production gates, frozen from the dev-volume sweeps (see the osm-snap
-# PR for the calibration story): argmax rescue gate + distinct margin, the
-# volume-energy conservative elbow (VOLUME_MODE_GATE), the arbitration score
-# gate, and the refinement verification margin (REFINE_VER_MARGIN).
-GATE_SCORE = 1.25
-GATE_MARGIN = 0.25
-ARBITRATE_GATE = 1.5
-
 
 def main() -> None:
     parser = argparse.ArgumentParser(
@@ -69,7 +61,13 @@ def main() -> None:
     )
     args = parser.parse_args()
 
+    # The production gates are frozen alongside the selection code (see the
+    # osm-snap PR for the calibration story); VOLUME_MODE_GATE and
+    # REFINE_VER_MARGIN live there too.
     from mapsnap.osm_snap_experiment import (
+        PRODUCTION_ARBITRATE_GATE,
+        PRODUCTION_GATE_MARGIN,
+        PRODUCTION_GATE_SCORE,
         cmd_candidates,
         cmd_materialize,
         cmd_select,
@@ -84,7 +82,13 @@ def main() -> None:
         recompute=args.recompute,
         vis=False,
     )
-    cmd_select(args.dir, mode, GATE_SCORE, GATE_MARGIN, ARBITRATE_GATE)
+    cmd_select(
+        args.dir,
+        mode,
+        PRODUCTION_GATE_SCORE,
+        PRODUCTION_GATE_MARGIN,
+        PRODUCTION_ARBITRATE_GATE,
+    )
     cmd_materialize(args.dir, mode)
 
 
