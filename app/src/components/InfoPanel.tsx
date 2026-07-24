@@ -25,6 +25,8 @@ interface InfoPanelProps {
   selectedNote: string | null;
   /** Whether the volume has adjacency data (adds an adjacency-view link). */
   hasAdjacency: boolean;
+  /** The compare table's summary footer, shown in the no-selection view; "" if none. */
+  compareFooter: string;
   /** Volume directory name, e.g. "brooklyn_ny_1906_vol_6". */
   volume: string;
   onClose: () => void;
@@ -74,6 +76,7 @@ export function InfoPanel(props: InfoPanelProps) {
     selectedStats,
     selectedNote,
     hasAdjacency,
+    compareFooter,
     volume,
     onClose,
   } = props;
@@ -205,6 +208,9 @@ export function InfoPanel(props: InfoPanelProps) {
           {median(pages.map((p) => p.scalePixelsPerFoot)).toFixed(2)} px/ft
         </dd>
       </dl>
+      {compareFooter && (
+        <pre className="page-info-compare-footer">{compareFooter}</pre>
+      )}
       <p className="page-info-hint">Click a page for details.</p>
     </div>
   );

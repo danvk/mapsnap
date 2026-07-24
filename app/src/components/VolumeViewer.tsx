@@ -66,6 +66,8 @@ export function VolumeViewer() {
   const [compareRows, setCompareRows] = useState<ComparePageStats[] | null>(
     null,
   );
+  // The compare table's summary footer ("N/M pages georeferenced", RMSE stats), or "" if none.
+  const [compareFooter, setCompareFooter] = useState<string>('');
   // The selected volume's adjacency.json (per-page claims + mutual graph), or null when absent.
   const [adjacencyData, setAdjacencyData] = useState<AdjacencyData | null>(
     null,
@@ -104,11 +106,14 @@ export function VolumeViewer() {
     params.set('iiif', selectedPath);
     history.replaceState(null, '', `?${params}`);
 
-    // Per-page truth error from this annotation's `mapsnap compare` sidecar table.
+    // Per-page truth error and summary footer from this annotation's `mapsnap compare` sidecar.
     setCompareRows(null);
+    setCompareFooter('');
     fetchCompare(selectedPath)
-      .then((pages) => {
-        if (!cancelled) setCompareRows(pages);
+      .then(({ pages, footer }) => {
+        if (cancelled) return;
+        setCompareRows(pages);
+        setCompareFooter(footer);
       })
       .catch(() => {
         if (!cancelled) setCompareRows([]);
@@ -381,6 +386,7 @@ export function VolumeViewer() {
             selectedPage ? (notes.get(selectedPage.stem) ?? null) : null
           }
           hasAdjacency={adjacencyData !== null}
+          compareFooter={compareFooter}
           volume={selection?.volume ?? ''}
           onClose={() => setSelectedItemIndex(null)}
         />

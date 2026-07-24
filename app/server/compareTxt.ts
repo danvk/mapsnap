@@ -23,9 +23,11 @@ export interface ComparePageStats {
   scaleErrorPercent: number;
 }
 
-/** Response of GET /iiif-api/compare — paired-page stats from the sidecar table. */
+/** Response of GET /iiif-api/compare — paired-page stats plus the table's summary footer. */
 export interface CompareResponse {
   pages: ComparePageStats[];
+  /** The summary block below the table ("N/M = …% pages georeferenced", RMSE stats, …); "" if none. */
+  footer: string;
 }
 
 // Whether a line is a header/rule row of the compare table (not a data row).
@@ -97,4 +99,22 @@ export function parseCompareTxt(text: string): ComparePageStats[] {
     if (row) pages.push(row);
   }
   return pages;
+}
+
+/**
+ * The summary block a `mapsnap compare` table prints below its data rows — the
+ * "N/M = …% pages georeferenced" line and the RMSE/translation/rotation stats.
+ *
+ * It is the text after the table's closing `---` rule (the second separator),
+ * with surrounding blank lines trimmed. Returns "" when the text has no such
+ * footer (e.g. an unrelated `.txt` or a table without a closing rule).
+ */
+export function parseCompareFooter(text: string): string {
+  const lines = text.split('\n');
+  const separators = lines.flatMap((line, i) => (isSeparator(line) ? [i] : []));
+  if (separators.length < 2) return '';
+  return lines
+    .slice(separators[1]! + 1)
+    .join('\n')
+    .trim();
 }

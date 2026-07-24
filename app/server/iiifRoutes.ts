@@ -21,7 +21,7 @@ import {
 } from './iiifAnnotations.ts';
 import { normalizeIiifImageUrl } from './iiifSizeWorkaround.ts';
 import { jpegDimensions } from './jpegDimensions.ts';
-import { parseCompareTxt } from './compareTxt.ts';
+import { parseCompareFooter, parseCompareTxt } from './compareTxt.ts';
 
 const require = createRequire(import.meta.url);
 const iiif = require('express-iiif').default;
@@ -175,9 +175,10 @@ export function registerIiifApi(
       relativePath.replace(/\.iiif\.json$/, '.txt'),
     );
     try {
-      return { pages: parseCompareTxt(await readFile(txtPath, 'utf8')) };
+      const text = await readFile(txtPath, 'utf8');
+      return { pages: parseCompareTxt(text), footer: parseCompareFooter(text) };
     } catch {
-      return { pages: [] };
+      return { pages: [], footer: '' };
     }
   });
 
