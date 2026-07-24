@@ -16,9 +16,11 @@ import {
   fetchAdjacency,
   fetchCompare,
   fetchFailedGeorefs,
+  fetchKeymaps,
   fetchRewrittenAnnotation,
   fetchVolumes,
 } from '../iiif/api';
+import type { KeymapInfo } from '../../server/api';
 import { isTypingTarget } from '../keyboard';
 import { fetchVolumeNotes } from '../notes/api';
 import { adjacencyClaimFeatures } from '../iiif/adjacency';
@@ -78,6 +80,8 @@ export function VolumeViewer() {
   const [failedGeorefs, setFailedGeorefs] = useState<Map<string, string>>(
     new Map(),
   );
+  // The selected volume's key-map sheets (raw/*.keymap.json), for the info-panel links.
+  const [keymaps, setKeymaps] = useState<KeymapInfo[]>([]);
 
   useEffect(() => {
     fetchVolumes()
@@ -149,9 +153,17 @@ export function VolumeViewer() {
       setNotes(new Map());
       setFailedGeorefs(new Map());
       setAdjacencyData(null);
+      setKeymaps([]);
       return;
     }
     let cancelled = false;
+    fetchKeymaps(volumeName)
+      .then((list) => {
+        if (!cancelled) setKeymaps(list);
+      })
+      .catch(() => {
+        if (!cancelled) setKeymaps([]);
+      });
     fetchVolumeNotes(volumeName)
       .then((map) => {
         if (!cancelled) setNotes(map);
@@ -387,6 +399,7 @@ export function VolumeViewer() {
           }
           hasAdjacency={adjacencyData !== null}
           compareFooter={compareFooter}
+          keymaps={keymaps}
           volume={selection?.volume ?? ''}
           onClose={() => setSelectedItemIndex(null)}
         />

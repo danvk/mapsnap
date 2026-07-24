@@ -1,6 +1,6 @@
 import { typedApi } from 'crosswalk';
 import { jsonFetch } from '../apiFetch';
-import type { API } from '../../server/api';
+import type { API, KeymapInfo } from '../../server/api';
 import type { CompareResponse } from '../../server/compareTxt';
 import type {
   RewrittenAnnotationResponse,
@@ -54,4 +54,10 @@ export async function fetchAdjacency(
 ): Promise<AdjacencyData | null> {
   const { adjacency } = await api.get('/iiif-api/adjacency')(null, { volume });
   return adjacency;
+}
+
+/** Fetch a volume's key-map sheets (raw/*.keymap.json) and which sidecars each has. */
+export async function fetchKeymaps(volume: string): Promise<KeymapInfo[]> {
+  const { keymaps } = await api.get('/iiif-api/keymaps')(null, { volume });
+  return keymaps;
 }
