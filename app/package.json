@@ -25,7 +25,7 @@
     "@types/react-dom": "^19.2.3",
     "@vitejs/plugin-react": "^5.2.0",
     "express": "^4.22.2",
-    "express-iiif": "^1.7.0",
+    "express-iiif": "^1.8.0",
     "jsdom": "^29.1.1",
     "prettier": "^3.8.1",
     "typescript": "^5.9.3",
