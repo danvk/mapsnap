@@ -19,7 +19,6 @@ import {
   type GeorefAnnotationPage,
   type VolumeInfo,
 } from './iiifAnnotations.ts';
-import { normalizeIiifImageUrl } from './iiifSizeWorkaround.ts';
 import { jpegDimensions } from './jpegDimensions.ts';
 import { parseCompareTxt } from './compareTxt.ts';
 
@@ -75,11 +74,6 @@ async function cachedJpegDimensions(
 
 /** Mount the raw IIIF image service (express-iiif) under `/iiif`. */
 export function registerIiifImages(app: Express, dataDir: string): void {
-  // See iiifSizeWorkaround: express-iiif mangles size===region requests.
-  app.use('/iiif', (req, _res, next) => {
-    req.url = normalizeIiifImageUrl(req.url);
-    next();
-  });
   app.use('/iiif', iiif({ imageDir: dataDir }));
 }
 
