@@ -86,6 +86,29 @@ function resolveDataUrl(file: string): string {
   if (/^https?:\/\//.test(file) || file.startsWith('/')) return file;
   return import.meta.env.BASE_URL.replace(/\/$/, '') + '/' + file;
 }
+
+// The standard road-probability map path for a `data/<vol>/<stem>.jpg` image
+// (`data/<vol>/artifacts/edge_join/roadprob/<stem>.png`), or null for a non-data path.
+function roadProbPath(imagePath: string): string | null {
+  const slash = imagePath.lastIndexOf('/');
+  if (slash < 0 || !imagePath.startsWith('data/')) return null;
+  return `${imagePath.slice(0, slash)}/artifacts/edge_join/roadprob/${pageStem(imagePath)}.png`;
+}
+
+// Whether a sibling road-probability map exists at `url`. The dev server falls
+// back to the SPA (text/html) for a missing file, so an image content-type is
+// the reliable signal that the PNG is really there.
+async function roadMapExists(url: string): Promise<boolean> {
+  try {
+    const response = await fetch(url, { method: 'HEAD' });
+    return (
+      response.ok &&
+      (response.headers.get('content-type')?.startsWith('image/') ?? false)
+    );
+  } catch {
+    return false;
+  }
+}
 /**
  * Debug API exposed on `window.mapsnap` so data can be injected without the UI
  * (e.g. from the browser console or automated tests). `loadJson` accepts either
@@ -130,6 +153,10 @@ export function App() {
   const [jsonHeight, setJsonHeight] = useState(0);
   const [imageSrc, setImageSrc] = useState('');
   const [imageEl, setImageEl] = useState<HTMLImageElement | null>(null);
+  // URL of the page's road-probability map when one exists at the standard
+  // location, and whether to show it in place of the image.
+  const [roadMapSrc, setRoadMapSrc] = useState<string | null>(null);
+  const [showRoadMap, setShowRoadMap] = useState(false);
   const [detections, setDetections] = useState<Detection[]>([]);
   const [panels, setPanels] = useState<PanelPolygon[]>([]);
   const [panelLabels, setPanelLabels] = useState<string[] | undefined>(
@@ -444,6 +471,9 @@ export function App() {
       setImageStem(pageStem(imageFile.name));
       fallbackWidth = el.naturalWidth;
       fallbackHeight = el.naturalHeight;
+      // A dropped file has no data-directory path, so there is no road map to offer.
+      setShowRoadMap(false);
+      setRoadMapSrc(null);
     }
 
     if (jsonFile) {
@@ -473,6 +503,14 @@ export function App() {
         setImageStem(pageStem(imageFile));
         fallbackWidth = el.naturalWidth;
         fallbackHeight = el.naturalHeight;
+        // Offer the road-probability map toggle when a sibling map exists.
+        setShowRoadMap(false);
+        setRoadMapSrc(null);
+        const probPath = roadProbPath(imageFile);
+        if (probPath) {
+          const probUrl = resolveDataUrl(probPath);
+          if (await roadMapExists(probUrl)) setRoadMapSrc(probUrl);
+        }
       }
 
       if (jsonFile) {
@@ -546,6 +584,9 @@ export function App() {
       <ImageColumn
         mode={mode}
         imageSrc={imageSrc}
+        roadMapSrc={roadMapSrc}
+        showRoadMap={showRoadMap}
+        setShowRoadMap={setShowRoadMap}
         jsonWidth={overlayWidth}
         jsonHeight={overlayHeight}
         streets={streets}

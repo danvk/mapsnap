@@ -21,6 +21,11 @@ export type Mode =
 interface ImageColumnProps {
   mode: Mode;
   imageSrc: string;
+  /** URL of this page's road-probability map, when one exists; enables the toggle below. */
+  roadMapSrc: string | null;
+  /** When true (and roadMapSrc is set), show the road-probability map instead of the image. */
+  showRoadMap: boolean;
+  setShowRoadMap: (value: boolean) => void;
   jsonWidth: number;
   jsonHeight: number;
   streets: Street[];
@@ -55,6 +60,9 @@ export function ImageColumn(props: ImageColumnProps) {
   const {
     mode,
     imageSrc,
+    roadMapSrc,
+    showRoadMap,
+    setShowRoadMap,
     jsonWidth,
     jsonHeight,
     streets,
@@ -141,7 +149,7 @@ export function ImageColumn(props: ImageColumnProps) {
         >
           <img
             ref={imgRef}
-            src={imageSrc}
+            src={showRoadMap && roadMapSrc ? roadMapSrc : imageSrc}
             style={{ aspectRatio: `${jsonWidth} / ${jsonHeight}` }}
           />
           {detectionsMode && (
@@ -192,6 +200,18 @@ export function ImageColumn(props: ImageColumnProps) {
       ) : (
         <div className={`drop-placeholder${dragOver ? ' drag-over' : ''}`}>
           Drop image here
+        </div>
+      )}
+
+      {roadMapSrc && (
+        <div className="image-controls">
+          <input
+            type="checkbox"
+            id="show-road-map"
+            checked={showRoadMap}
+            onChange={(e) => setShowRoadMap(e.target.checked)}
+          />
+          <label htmlFor="show-road-map">Show P(road) map</label>
         </div>
       )}
 
