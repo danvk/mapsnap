@@ -1141,6 +1141,362 @@ def cmd_sweep_arbitrate(volume: Path) -> None:
             print("      " + "  ".join(details[:10]))
 
 
+# Volume-level train/holdout split for the refinement-margin sweep (#153).
+# The dev-4 volumes tuned every other constant, so they stay on the train
+# side; NO-1896's truth is known-noisy, so it trains rather than judges;
+# chicago balances the split at 6/6.
+REFINE_SWEEP_TRAIN = {
+    "chicago_il_1950_vol_1",
+    "detroit_mich_1929_vol_11",
+    "hudson_co_nj_1950_vol_9",
+    "los_angeles_ca_1949_vol_14",
+    "new_orleans_la_1896_vol_2",
+    "washington_dc_1916_vol_2",
+}
+REFINE_SWEEP_MARGINS = [0.0, 0.05, 0.1, 0.15, 0.2, 0.3, 0.4]
+# Band-aware margins: below the incumbent-verification edge the incumbent is
+# weakly supported (a low margin is safe); above it the incumbent is already
+# well-verified and a higher bar protects it from churn. inf = never refine.
+REFINE_SWEEP_BAND_EDGES = [0.25, 0.5, 0.75, 1.0]
+REFINE_SWEEP_BAND_MARGINS = [0.0, 0.05, 0.1, 0.2, 0.4, math.inf]
+
+
+def truth_item_land_weights(volume: Path) -> dict[str, float]:
+    """Land-weighted area (m^2) for every truth item, split panels included.
+
+    Unlike truth_land_weights (whole pages only, for the rescue sweeps), this
+    keys every truth item by its own page key — the region-graded scorer
+    grades split panels individually, so the refinement sweep needs their
+    individual weights.
+    """
+    from shapely.geometry import Polygon
+
+    from mapsnap.score import (
+        LocalFrame,
+        land_fraction,
+        street_tree,
+        truth_footprint_ring,
+    )
+    from mapsnap.utils import source_id_to_page_key
+
+    items = json.loads((volume / "main.iiif.json").read_text()).get("items", [])
+    centerlines = default_centerlines(volume)
+    weights: dict[str, float] = {}
+    frame: LocalFrame | None = None
+    tree = None
+    for item in items:
+        ring = truth_footprint_ring(item)
+        if not ring:
+            continue
+        if frame is None:
+            frame = LocalFrame(ring[0][0], ring[0][1])
+            assert centerlines is not None
+            tree = street_tree(centerlines, frame)
+        polygon = Polygon([frame.to_xy(lon, lat) for lon, lat in ring]).buffer(0)
+        if polygon.is_empty or polygon.area <= 0:
+            continue
+        assert tree is not None
+        key = source_id_to_page_key(
+            item.get("target", {}).get("source", {}).get("id"), item.get("label", "")
+        )
+        land = polygon.area * land_fraction(polygon, tree)
+        weights[key] = weights.get(key, 0.0) + land
+    return weights
+
+
+def refine_eligible_features(records: list[dict]) -> dict[str, dict]:
+    """Per-target features for every fitted page refinement could ever adopt.
+
+    Eligibility mirrors cmd_select's arbitrate branch with the margin removed:
+    fitted, not claimed by arbitration, and carrying an agreeing top
+    challenger with a verification head-to-head available. The sweep applies
+    margin rules to these features in-process.
+    """
+    eligible: dict[str, dict] = {}
+    for record in records:
+        if record.get("fit_state") != "fitted":
+            continue
+        if arbitrate_challenge(record, PRODUCTION_ARBITRATE_GATE) is not None:
+            continue
+        adoption = refine_adoption(record, margin=-math.inf)
+        if adoption is None:
+            continue
+        incumbent = record["incumbent"]
+        top = record["candidates"][0]
+        eligible[record["target"]] = {
+            "incumbent_verification": incumbent["verification"],
+            "challenger_verification": top["verification"],
+            "incumbent_name": (incumbent.get("name") or {}).get("score") or 0.0,
+            "challenger_name": (top.get("name") or {}).get("score") or 0.0,
+            "disagreement_ft": adoption["disagreement_ft"],
+            "incumbent_rmse_ft": incumbent.get("rmse_ft"),
+            "challenger_rmse_ft": top.get("rmse_ft"),
+        }
+    return eligible
+
+
+def build_hybrid_iiif(volume: Path, output: Path) -> None:
+    """Build the osm-first hybrid IIIF for the volume's current sidecars."""
+    import subprocess
+
+    georef_glob = f"{volume / '*.georef-osm.json'},{volume / '*.georef.json'}"
+    subprocess.run(
+        [
+            "mapsnap",
+            "iiif",
+            str(volume / "main.iiif.json"),
+            georef_glob,
+            "--output",
+            str(output),
+        ],
+        check=True,
+        capture_output=True,
+    )
+
+
+def grade_refine_variants(volume: Path, recompute: bool = False) -> dict:
+    """Grade every truth item with refinement fully off and fully on.
+
+    Materializes two sidecar variants (refine_margin +inf / -inf), builds the
+    hybrid IIIF for each, and grades both through the real region-graded
+    scorer (compare_pages) so the sweep is exactly faithful to `mapsnap
+    score`. Restores the production selection afterwards. Cached in
+    artifacts/osm_snap/refine_sweep.json.
+    """
+    from mapsnap.compare_iiif_georef import compare_pages
+
+    cache_path = artifacts_dir(volume) / "refine_sweep.json"
+    candidates_path = artifacts_dir(volume) / "candidates.jsonl"
+    if (
+        cache_path.exists()
+        and not recompute
+        and cache_path.stat().st_mtime >= candidates_path.stat().st_mtime
+    ):
+        return canonicalize_refine_keys(json.loads(cache_path.read_text()))
+
+    records = load_candidates(volume)
+    eligible = refine_eligible_features(records)
+    graded: dict[str, dict[str, dict]] = {}
+    try:
+        for variant, margin in (("none", math.inf), ("all", -math.inf)):
+            cmd_select(
+                volume,
+                "arbitrate",
+                PRODUCTION_GATE_SCORE,
+                PRODUCTION_GATE_MARGIN,
+                PRODUCTION_ARBITRATE_GATE,
+                refine_margin=margin,
+            )
+            cmd_materialize(volume, "arbitrate")
+            variant_iiif = volume / f"refine-sweep-{variant}.iiif.json"
+            build_hybrid_iiif(volume, variant_iiif)
+            rows, missing = compare_pages(volume / "main.iiif.json", variant_iiif)
+            variant_iiif.unlink()
+            by_key: dict[str, dict] = {}
+            for row in rows:
+                by_key.setdefault(
+                    row["page_key"],
+                    {"gen_key": row["gen_page_key"], "rmse_ft": row["rmse_ft"]},
+                )
+            for row in missing:
+                by_key.setdefault(row["page_key"], {"gen_key": None, "rmse_ft": None})
+            graded[variant] = by_key
+    finally:
+        # Leave the volume's sidecars and selection in the production state.
+        cmd_select(
+            volume,
+            "arbitrate",
+            PRODUCTION_GATE_SCORE,
+            PRODUCTION_GATE_MARGIN,
+            PRODUCTION_ARBITRATE_GATE,
+        )
+        cmd_materialize(volume, "arbitrate")
+
+    weights = truth_item_land_weights(volume)
+    none_rows, all_rows = graded["none"], graded["all"]
+    items = []
+    total_land = 0.0
+    for key in sorted(none_rows):
+        weight = weights.get(key)
+        if weight is None:
+            continue
+        total_land += weight
+        none_row = none_rows[key]
+        all_row = all_rows.get(key, none_row)
+        items.append(
+            {
+                "key": key,
+                "gen_key": none_row["gen_key"],
+                "land_m2": weight,
+                "rmse_none": none_row["rmse_ft"],
+                "rmse_all": all_row["rmse_ft"],
+            }
+        )
+    result = canonicalize_refine_keys(
+        {
+            "volume": volume.name,
+            "eligible": eligible,
+            "total_land_m2": total_land,
+            "items": items,
+        }
+    )
+    cache_path.write_text(json.dumps(result))
+    return result
+
+
+def canonicalize_refine_keys(result: dict) -> dict:
+    """Join sidecar-cased targets with truth-cased gen keys, in place.
+
+    Sidecar stems are lowercase for some volumes (chicago p101w) while the
+    truth annotations carry the case (p101W); compare's gen_page_key uses the
+    truth's casing, so without this remap those pages' adoptions silently
+    fall out of every margin rule's outcome. Idempotent.
+    """
+    canonical = {target.lower(): target for target in result["eligible"]}
+    for item in result["items"]:
+        gen_key = item.get("gen_key")
+        if gen_key is not None:
+            item["gen_key"] = canonical.get(gen_key.lower(), gen_key)
+    return result
+
+
+def refine_bucket(rmse_ft: float | None) -> int:
+    """Score-bucket value of one truth item: +1 good, -1 disaster, else 0."""
+    if rmse_ft is None:
+        return 0
+    if rmse_ft <= 25.0:
+        return 1
+    if rmse_ft >= 200.0:
+        return -1
+    return 0
+
+
+def refine_adopt_set(
+    eligible: dict[str, dict],
+    margin: float,
+    name_parity: bool = False,
+    band: tuple[float, float, float] | None = None,
+) -> set[str]:
+    """Targets a margin rule adopts.
+
+    band=(edge, low, high) overrides margin: low applies below the
+    incumbent-verification edge, high above it. name_parity additionally
+    requires the challenger's name score to be at least the incumbent's.
+    """
+    adopted = set()
+    for target, features in eligible.items():
+        rule_margin = margin
+        if band is not None:
+            edge, low, high = band
+            rule_margin = low if features["incumbent_verification"] < edge else high
+        head_to_head = (
+            features["challenger_verification"] - features["incumbent_verification"]
+        )
+        if head_to_head <= rule_margin:
+            continue
+        if name_parity and features["challenger_name"] < features["incumbent_name"]:
+            continue
+        adopted.add(target)
+    return adopted
+
+
+def refine_rule_outcome(
+    volume_data: dict, adopted: set[str]
+) -> tuple[float, float, int, int]:
+    """(Δland_m2 vs no refinement, total land_m2, bucket gains, losses)."""
+    delta = 0.0
+    gains = losses = 0
+    for item in volume_data["items"]:
+        if item["gen_key"] not in adopted:
+            continue
+        before = refine_bucket(item["rmse_none"])
+        after = refine_bucket(item["rmse_all"])
+        if after == before:
+            continue
+        delta += (after - before) * item["land_m2"]
+        if after > before:
+            gains += 1
+        else:
+            losses += 1
+    return delta, volume_data["total_land_m2"], gains, losses
+
+
+def cmd_sweep_refine(volumes: list[Path], recompute: bool = False) -> None:
+    """Sweep the refinement margin (#153) against the region-graded scorer."""
+    data = [grade_refine_variants(volume, recompute) for volume in volumes]
+    mismatched = sum(
+        1
+        for d in data
+        for item in d["items"]
+        if item["gen_key"] not in d["eligible"]
+        and item["rmse_none"] != item["rmse_all"]
+    )
+    if mismatched:
+        print(f"WARNING: {mismatched} non-eligible item(s) changed between variants")
+    train = [d for d in data if d["volume"] in REFINE_SWEEP_TRAIN]
+    holdout = [d for d in data if d["volume"] not in REFINE_SWEEP_TRAIN]
+    n_eligible = sum(len(d["eligible"]) for d in data)
+    print(
+        f"{n_eligible} refinement-eligible pages across {len(data)} volume(s)"
+        f" ({len(train)} train, {len(holdout)} holdout)"
+    )
+
+    def evaluate(
+        subset: list[dict],
+        margin: float,
+        name_parity: bool = False,
+        band: tuple[float, float, float] | None = None,
+    ) -> tuple[float, int, int, int]:
+        delta = land = 0.0
+        adopted_total = gains = losses = 0
+        for volume_data in subset:
+            adopted = refine_adopt_set(
+                volume_data["eligible"], margin, name_parity, band
+            )
+            adopted_total += len(adopted)
+            vol_delta, vol_land, vol_gains, vol_losses = refine_rule_outcome(
+                volume_data, adopted
+            )
+            delta += vol_delta
+            land += vol_land
+            gains += vol_gains
+            losses += vol_losses
+        return (delta / land if land else 0.0), adopted_total, gains, losses
+
+    def print_row(
+        label: str,
+        margin: float,
+        name_parity: bool = False,
+        band: tuple[float, float, float] | None = None,
+    ) -> None:
+        cells = [f"  {label:<24}"]
+        for subset, name in ((train, "train"), (holdout, "hold"), (data, "all")):
+            net, adopted, gains, losses = evaluate(subset, margin, name_parity, band)
+            cells.append(
+                f"{name} {net * 100:+5.2f}% ({adopted:>3}a {gains:>3}g {losses:>2}l)"
+            )
+        print("  ".join(cells))
+
+    print("== global margin sweep (a=adopted pages, g/l=bucket gains/losses) ==")
+    for margin in REFINE_SWEEP_MARGINS:
+        print_row(f"margin {margin:.2f}", margin)
+    print("== + name parity (challenger name score >= incumbent's) ==")
+    for margin in REFINE_SWEEP_MARGINS:
+        print_row(f"margin {margin:.2f} +name", margin, name_parity=True)
+    print("== band-aware margins, top 10 by train Δnet ==")
+    combos = []
+    for edge in REFINE_SWEEP_BAND_EDGES:
+        for low in REFINE_SWEEP_BAND_MARGINS:
+            for high in REFINE_SWEEP_BAND_MARGINS:
+                band = (edge, low, high)
+                train_net, _, _, train_losses = evaluate(train, 0.0, band=band)
+                combos.append((train_net, -train_losses, band))
+    combos.sort(reverse=True)
+    for train_net, _, band in combos[:10]:
+        edge, low, high = band
+        print_row(f"edge {edge:.2f} lo {low:g} hi {high:g}", 0.0, band=band)
+
+
 # The frozen production gates (dev-swept; `mapsnap snap` uses these): the
 # per-page rescue score/margin gates, the volume-energy conservative elbow,
 # and the arbitration score gate.
@@ -1165,19 +1521,29 @@ INCUMBENT_DEFENSIBLE_VERIFICATION = 0.1
 # pose is chamfer-locked to the street grid, so when the two agree on the
 # lock, the snap is simply the more precise estimator (25-50ft incumbents:
 # challenger closer to truth 93% of the time, median 33ft -> 12ft). The
-# margin protects already-good incumbents from churn; 0.1 is the dev elbow
-# (47 bucket gains / 2 losses on the dev volumes).
-REFINE_VER_MARGIN = 0.1
+# margin protects already-good incumbents from churn. 0.05 is the
+# `report --sweep-refine` elbow on the region-graded scorer (#153), 6/6
+# volume train/holdout split: it beats the original dev-elbow 0.1 on BOTH
+# sides (train +9.66 vs +9.40, holdout +8.39 vs +7.81) and creates no
+# disasters (every loss at any margin is a <50ft threshold slide). Margin 0
+# admits 7 train losses, so the protection is real but 0.1 was over-tight.
+# Rejected by the same sweep: name parity (incumbent name scores come from
+# the labels RANSAC fitted on, so the requirement is circular and costs ~3
+# points everywhere) and band-aware margins (their edge over flat 0.05 is
+# one train loss; zero holdout benefit for the extra shape).
+REFINE_VER_MARGIN = 0.05
 
 
-def refine_adoption(record: dict) -> dict | None:
+def refine_adoption(record: dict, margin: float = REFINE_VER_MARGIN) -> dict | None:
     """Adopt an agreeing challenger as a precision refinement, or None.
 
     The complement of arbitrate_challenge: same head-to-head evidence, but for
     challengers that AGREE with the incumbent (within the arbitration
     disagreement floor) and beat its verification by a clear margin. This is
     what reaches the 25-100ft mid-tier that arbitration structurally cannot
-    touch (a correct challenger agrees with those incumbents).
+    touch (a correct challenger agrees with those incumbents). The margin
+    override exists for the sweep harness (`report --sweep-refine`): -inf
+    adopts every agreeing challenger, +inf adopts none.
     """
     incumbent = record.get("incumbent")
     candidates = record.get("candidates") or []
@@ -1190,7 +1556,7 @@ def refine_adoption(record: dict) -> dict | None:
     top_verification = top.get("verification")
     if incumbent_verification is None or top_verification is None:
         return None
-    if top_verification <= incumbent_verification + REFINE_VER_MARGIN:
+    if top_verification <= incumbent_verification + margin:
         return None
     disagreement = grid_rmse_ft_between(
         np.array(incumbent["world_affine"]),
@@ -1503,6 +1869,7 @@ def cmd_select(
     gate_score: float,
     gate_margin: float,
     arbitrate_gate: float = 2.0,
+    refine_margin: float | None = None,
 ) -> None:
     """Pick one candidate (or abstain) per page; write selection_<mode>.jsonl."""
     records = load_candidates(volume)
@@ -1527,7 +1894,9 @@ def cmd_select(
                 selections.append(challenge)
                 challenged += 1
                 continue
-            refinement = refine_adoption(record)
+            refinement = refine_adoption(
+                record, REFINE_VER_MARGIN if refine_margin is None else refine_margin
+            )
             if refinement is not None:
                 selections.append(refinement)
                 refined += 1
@@ -2150,7 +2519,7 @@ def main() -> None:
     p_cand.add_argument("--no-vis", action="store_true", help="skip contact sheets")
 
     p_rep = sub.add_parser("report", help="ranking diagnostics vs truth")
-    p_rep.add_argument("volume", type=Path)
+    p_rep.add_argument("volume", type=Path, nargs="+")
     p_rep.add_argument(
         "--sweep", action="store_true", help="grid the gates, print simulated Δnet"
     )
@@ -2158,6 +2527,19 @@ def main() -> None:
         "--sweep-arbitrate",
         action="store_true",
         help="grid the arbitration gate over fitted-page challenges",
+    )
+    p_rep.add_argument(
+        "--sweep-refine",
+        action="store_true",
+        help=(
+            "sweep the refinement margin against the region-graded scorer "
+            "(#153); accepts multiple volumes for the train/holdout split"
+        ),
+    )
+    p_rep.add_argument(
+        "--recompute",
+        action="store_true",
+        help="rebuild the cached refine-sweep gradings",
     )
 
     p_sel = sub.add_parser("select", help="pick candidates / abstain per page")
@@ -2199,12 +2581,14 @@ def main() -> None:
             vis=not args.no_vis,
         )
     elif args.command == "report":
-        if args.sweep_arbitrate:
-            cmd_sweep_arbitrate(args.volume)
+        if args.sweep_refine:
+            cmd_sweep_refine(args.volume, args.recompute)
+        elif args.sweep_arbitrate:
+            cmd_sweep_arbitrate(args.volume[0])
         elif args.sweep:
-            cmd_sweep(args.volume)
+            cmd_sweep(args.volume[0])
         else:
-            cmd_report(args.volume)
+            cmd_report(args.volume[0])
     elif args.command == "select":
         cmd_select(
             args.volume,
