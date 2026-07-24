@@ -222,7 +222,6 @@ def test_split_regions_correct_whole_page_credits_every_panel(tmp_path):
             },
         }
 
-
     truth = {"items": [item("x p7 [1]"), item("x p7 [2]")]}
     gen = {"items": [item("x p7")]}
     (tmp_path / "oim").mkdir(exist_ok=True)
@@ -243,6 +242,25 @@ def test_split_regions_correct_whole_page_credits_every_panel(tmp_path):
     assert missing == []
     assert sorted(r["page_key"] for r in rows) == ["p7__1", "p7__2"]
     assert all(r["rmse_ft"] < 25.0 for r in rows)
+
+
+def test_truth_region_grid_densifies_l_shapes():
+    from shapely.geometry import Polygon
+
+    from mapsnap.compare_iiif_georef import truth_region_grid
+
+    # A rectangle keeps its full 7x7 lattice.
+    rect = Polygon([(0, 0), (400, 0), (400, 200), (0, 200)])
+    assert len(truth_region_grid(rect)) == 49
+    # An L filling ~57% of its bounds densifies until it has at least the
+    # same effective sample count as a rectangle, all inside the polygon.
+    ell = Polygon([(0, 0), (400, 0), (400, 100), (100, 100), (100, 400), (0, 400)])
+    points = truth_region_grid(ell)
+    assert len(points) >= 49
+    assert all(
+        ell.contains(__import__("shapely.geometry", fromlist=["Point"]).Point(p))
+        for p in points
+    )
 
 
 def test_parse_svg_polygon():

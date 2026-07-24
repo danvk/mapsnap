@@ -252,23 +252,34 @@ def sample_grid(width: float, height: float, n: int = 7) -> list[tuple[float, fl
     return [(f_x * width, f_y * height) for f_y in fracs for f_x in fracs]
 
 
-def truth_region_grid(polygon: ShapelyPolygon, n: int = 7) -> list[tuple[float, float]]:
+def truth_region_grid(
+    polygon: ShapelyPolygon, n: int = 7, min_points: int = 49
+) -> list[tuple[float, float]]:
     """Grid sample points inside a truth panel's polygon (canvas pixels).
 
-    Samples an n×n lattice over the polygon's bounds (with the same
-    corner-avoiding fractions as sample_grid) and keeps the interior points,
-    so a split panel is graded over ITS OWN region rather than the whole
-    canvas. Falls back to the full lattice for degenerate slivers that
-    contain fewer than five lattice points.
+    Samples a lattice over the polygon's bounds (with the same corner-avoiding
+    fractions as sample_grid) and keeps the interior points, so a split panel
+    is graded over ITS OWN region rather than the whole canvas. Non-convex
+    panels (L-shapes) fill only part of their bounds, so the lattice is
+    densified until at least ``min_points`` land inside — a rectangle's 7×7
+    grid keeps all 49, and an L deserves the same effective density (at 7×7,
+    Champaign p21's L keeps only 24 points and understates its converged RMSE
+    by ~6%). Falls back to the last lattice for degenerate slivers containing
+    fewer than five points at any density.
     """
     min_x, min_y, max_x, max_y = polygon.bounds
-    fracs = [(k + 1) / (n + 1) for k in range(n)]
-    lattice = [
-        (min_x + f_x * (max_x - min_x), min_y + f_y * (max_y - min_y))
-        for f_y in fracs
-        for f_x in fracs
-    ]
-    inside = [p for p in lattice if polygon.contains(ShapelyPoint(p))]
+    lattice: list[tuple[float, float]] = []
+    inside: list[tuple[float, float]] = []
+    for lattice_n in (n, 11, 15, 21, 31):
+        fracs = [(k + 1) / (lattice_n + 1) for k in range(lattice_n)]
+        lattice = [
+            (min_x + f_x * (max_x - min_x), min_y + f_y * (max_y - min_y))
+            for f_y in fracs
+            for f_x in fracs
+        ]
+        inside = [p for p in lattice if polygon.contains(ShapelyPoint(p))]
+        if len(inside) >= min_points:
+            return inside
     return inside if len(inside) >= 5 else lattice
 
 
