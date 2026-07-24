@@ -497,8 +497,10 @@ def rotation_priors_for(
         priors.extend(label_osm_rotations(features, block_index, search_centers[0]))
     base = panel_base(unit.stem)
     if base is not None:
-        # A fitted sibling panel is the same physical sheet: its rotation is
-        # the most reliable directed prior a panel can get.
+        # A fitted sibling panel's rotation, as one rung of the ladder. Split
+        # sheets are usually inset composites whose insets can be rotated
+        # differently on the paper, so this is a useful hint, not a certainty
+        # — the mask sweep below covers the disagreeing cases.
         for sibling in vctx.panel_units:
             if (
                 sibling.stem != unit.stem
@@ -1262,13 +1264,22 @@ def arbitrate_challenge(record: dict, arbitrate_gate: float) -> dict | None:
     }
 
 
-# Sheet-integrity gate for split panels: every panel is a rigid crop of one
-# sheet, so a panel placement determines the WHOLE sheet's placement exactly
-# (the crop is a pure translation). Two placements of the same sheet — from a
-# candidate and a fitted sibling, or from two co-accepted candidates — must
-# agree to within this corner tolerance. Correct fits agree to ~10-30 m;
-# LA p1408__2's along-the-cut-line alias disagreed by 258 m while still
-# touching its sibling, which is why mere contiguity was not enough.
+# Sheet-agreement gate for split panels. The GEOMETRY is exact: a panel jpg
+# is a bbox crop of the base jpg (pure translation), so one panel's pose
+# determines the whole base image's implied placement. The original intent
+# was that siblings of one sheet must imply the SAME placement — but that
+# premise assumes the sheet is one contiguous map cut into pieces, and
+# measured against every fitted sibling pair in the 12 truth volumes, real
+# Sanborn split pages are INSET COMPOSITES instead: separate neighborhood
+# maps pasted onto one sheet of paper, whose implied sheets disagree by
+# 233-2143 m. In practice, therefore, this gate acts as a conservative
+# BLANKET BLOCK: a panel with a reliably-fitted sibling effectively has no
+# agreeing candidates and is not rescued at all (that block is what stopped
+# KC's four would-be panel disasters, e.g. p555__2 at 753 ft with select
+# 2.58 — a score no threshold would have caught); accepted panels reach the
+# iiif through the solo-score or mutual paths instead. The honest redesign —
+# per-inset gating instead of the sheet fiction — is tracked in the PR's
+# next steps; the behavior here is what the 12-volume scores validated.
 SHEET_AGREE_TOL_M = 60.0
 # A fitted sibling anchors the sheet-agreement gate only when its own fit has
 # real evidence: eff>=3 panels measure <=57ft everywhere truth exists, while
@@ -1621,11 +1632,13 @@ def select_volume(
     reward. Connected components solve exhaustively when small, else ICM from
     several greedy orderings.
 
-    Panels additionally face rigid-sheet constraints: options whose implied
-    full-sheet placement disagrees with a reliable fitted sibling's are
-    dropped up front, co-accepted sibling picks must imply the same sheet
+    Panels additionally face the sheet-agreement machinery: options whose
+    implied full-sheet placement disagrees with a reliable fitted sibling's
+    are dropped up front, co-accepted sibling picks must imply the same sheet
     (the pairwise sheets_agree term), and an accepted panel with no reliable
-    anchor needs a co-accepted sibling or a PANEL_SOLO_GATE score.
+    anchor needs a co-accepted sibling or a PANEL_SOLO_GATE score. NOTE:
+    real split sheets are inset composites (see SHEET_AGREE_TOL_M), so in
+    practice the first two conditions blanket-block rather than discriminate.
     """
     from shapely.geometry import Polygon
 
