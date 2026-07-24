@@ -297,6 +297,90 @@ def detected_pairs(volume: Path) -> set[frozenset[int]]:
     return pairs
 
 
+def keymap_region_adjacency(
+    volume: Path, gap_m: float = 40.0
+) -> tuple[set[frozenset[int]], dict[int, tuple[float, float]]]:
+    """Candidate adjacency pairs from key-map region proximity, and region centroids.
+
+    A key map draws one colored block per page; two pages whose blocks nearly
+    touch (segmented-region polygon distance <= ``gap_m``) are candidate
+    neighbors. Unlike printed-number adjacency this needs no OCR and covers
+    every page the key map places, so it is far denser (LA: ~58% of truth pairs
+    at 40m vs the printed graph's ~21%). Returns the pair set and each page
+    number's region centroid (world lon/lat), used to derive the anchor-side
+    direction the printed number would otherwise supply.
+    """
+    from shapely.geometry import Polygon
+    from shapely.geometry.base import BaseGeometry
+    from shapely.ops import unary_union
+
+    from mapsnap.keymap.locate import KeymapLocator
+
+    keymaps = sorted((volume / "raw").glob("*.keymap.json"))
+    if not keymaps:
+        return set(), {}
+    regions = KeymapLocator.from_keymaps(keymaps).regions
+    if not regions:
+        return set(), {}
+    all_pts = [pt for rings in regions.values() for ring in rings for pt in ring]
+    lon0 = sum(p[0] for p in all_pts) / len(all_pts)
+    lat0 = sum(p[1] for p in all_pts) / len(all_pts)
+    kx = 111_320.0 * math.cos(math.radians(lat0))
+    ky = 110_540.0
+    shapes: dict[int, BaseGeometry] = {}
+    centroids: dict[int, tuple[float, float]] = {}
+    for number, rings in regions.items():
+        polys = [
+            Polygon(
+                [((lon - lon0) * kx, (lat - lat0) * ky) for lon, lat in ring]
+            ).buffer(0)
+            for ring in rings
+            if len(ring) >= 3
+        ]
+        polys = [p for p in polys if not p.is_empty]
+        if not polys:
+            continue
+        shape = unary_union(polys)
+        shapes[number] = shape
+        centroids[number] = (lon0 + shape.centroid.x / kx, lat0 + shape.centroid.y / ky)
+    numbers = sorted(shapes)
+    pairs: set[frozenset[int]] = set()
+    for i, a in enumerate(numbers):
+        for b in numbers[i + 1 :]:
+            if shapes[a].distance(shapes[b]) <= gap_m:
+                pairs.add(frozenset((a, b)))
+    return pairs, centroids
+
+
+def keymap_anchor_side(
+    anchor_affine: np.ndarray,
+    anchor_centroid: tuple[float, float],
+    target_centroid: tuple[float, float],
+) -> tuple[float, float] | None:
+    """Anchor-side direction (unit vector in anchor page pixels) toward the target.
+
+    The printed reciprocal-side claim pins the world bearing anchor->target in
+    the anchor's own image frame (see ``run_join``); the key map's region
+    centroids give the same bearing without OCR. Maps the world centroid
+    delta back through the anchor pose's linear part.
+    """
+    linear = anchor_affine[:, :2]
+    delta = np.array(
+        [
+            target_centroid[0] - anchor_centroid[0],
+            target_centroid[1] - anchor_centroid[1],
+        ]
+    )
+    try:
+        pixel_dir = np.linalg.solve(linear, delta)
+    except np.linalg.LinAlgError:
+        return None
+    norm = float(np.linalg.norm(pixel_dir))
+    if norm < 1e-9:
+        return None
+    return (float(pixel_dir[0] / norm), float(pixel_dir[1] / norm))
+
+
 def truth_pairs_by_number(volume: Path) -> set[frozenset[int]]:
     """Truth-derived adjacency: page footprints within TRUTH_ADJACENT_GAP_M."""
     from shapely.geometry import Polygon
@@ -539,12 +623,12 @@ def cmd_infer(volume: Path) -> None:
     import torch  # noqa: F401  (import check before loading model)
 
     from mapsnap.keymap.number_model import select_device
-    from mapsnap.road_model import load_model, predict_page
+    from mapsnap.road_model import ROAD_MODEL_PATH, load_model, predict_page
 
     out_dir = volume / "artifacts" / "edge_join" / "roadprob"
     out_dir.mkdir(parents=True, exist_ok=True)
     device = select_device()
-    model = load_model(Path("models/road_unet.pt"), device)
+    model = load_model(ROAD_MODEL_PATH, device)
     jpgs = [p for p in sorted(volume.glob("p*.jpg")) if "__" not in p.stem]
     done = 0
     for jpg in jpgs:
@@ -711,58 +795,9 @@ def cmd_sanity(volume: Path, limit: int | None) -> None:
     print(f"contact sheets in {out_dir}")
 
 
-@dataclass
-class FrameSpec:
-    """A pair-local raster frame: equirectangular metres, north-up rows.
-
-    col = (x - x_min) / res, row = (y_max - y) / res, where (x, y) are metres
-    east/north of `origin`. Page images map into the raster without reflection.
-    """
-
-    origin: tuple[float, float]  # lon, lat
-    x_min: float
-    y_max: float
-    res_m: float
-    shape: tuple[int, int]  # rows, cols
-
-    def metre_scales(self) -> tuple[float, float]:
-        kx = 111_320.0 * math.cos(math.radians(self.origin[1]))
-        return kx, 110_540.0
-
-    def lonlat_to_raster(self, lon: float, lat: float) -> tuple[float, float]:
-        kx, ky = self.metre_scales()
-        x = (lon - self.origin[0]) * kx
-        y = (lat - self.origin[1]) * ky
-        return (x - self.x_min) / self.res_m, (self.y_max - y) / self.res_m
-
-    def page_to_raster_affine(self, affine_local: np.ndarray) -> np.ndarray:
-        """2x3 mapping page px -> raster px given a page px -> lon/lat affine."""
-        kx, ky = self.metre_scales()
-        a = affine_local
-        metres = np.array(
-            [
-                [a[0, 0] * kx, a[0, 1] * kx, (a[0, 2] - self.origin[0]) * kx],
-                [a[1, 0] * ky, a[1, 1] * ky, (a[1, 2] - self.origin[1]) * ky],
-            ]
-        )
-        to_frame = np.array(
-            [
-                [1 / self.res_m, 0, -self.x_min / self.res_m],
-                [0, -1 / self.res_m, self.y_max / self.res_m],
-            ]
-        )
-        return edge_join.compose(to_frame, metres)
-
-    def raster_pose_to_world_affine(self, pose: np.ndarray) -> np.ndarray:
-        """2x3 mapping page px -> (lon, lat) given a page px -> raster px pose."""
-        kx, ky = self.metre_scales()
-        from_raster = np.array(
-            [
-                [self.res_m / kx, 0, self.origin[0] + self.x_min / kx],
-                [0, -self.res_m / ky, self.origin[1] + self.y_max / ky],
-            ]
-        )
-        return edge_join.compose(from_raster, pose)
+# The frame class moved to the truth-free matcher library; re-exported here
+# because the harness's artifacts and callers refer to it by this module.
+FrameSpec = edge_join.FrameSpec
 
 
 def build_frame(
@@ -1848,7 +1883,11 @@ def synthetic_anchor_affine(
 
 
 def collect_graph_measurements(
-    volume: Path, units: list[PageUnit], limit: int | None = None
+    volume: Path,
+    units: list[PageUnit],
+    limit: int | None = None,
+    extra_pairs: set[frozenset[int]] | None = None,
+    keymap_centroids: dict[int, tuple[float, float]] | None = None,
 ) -> list[dict]:
     """Run the matcher over every measurable mutual-adjacency edge.
 
@@ -1857,9 +1896,16 @@ def collect_graph_measurements(
     neither fitted -> both directions with synthetic keymap-posed anchors
     (these island edges are what the pose graph adds over greedy chaining).
     No verification gate here — sub-gate joins are kept as loose evidence.
+
+    ``extra_pairs`` supplies additional candidate pairs (e.g. from key-map
+    region adjacency) beyond the printed-number graph; for those, the printed
+    reciprocal side is unavailable, so the anchor-side direction gate is fed
+    from ``keymap_centroids`` (the region-centroid bearing) instead.
     """
     by_number = {u.number: u for u in units}
     pairs = detected_pairs(volume)
+    if extra_pairs:
+        pairs = pairs | extra_pairs
     params = edge_join.MatchParams()
     scale = volume_median_scale(units)
     adjacency = load_adjacency(volume)
@@ -1924,6 +1970,19 @@ def collect_graph_measurements(
         expected = (directions.get(anchor.number) or (None, 0.0))[0]
         anchor_dirs = image_neighbor_directions(adjacency, anchor.stem)
         anchor_side = (anchor_dirs.get(target.number) or (None, 0.0))[0]
+        # Key-map-derived pairs have no printed reciprocal claim; substitute the
+        # region-centroid bearing so the swing-killing anchor-side gate still fires.
+        if (
+            anchor_side is None
+            and keymap_centroids is not None
+            and anchor.number in keymap_centroids
+            and target.number in keymap_centroids
+        ):
+            anchor_side = keymap_anchor_side(
+                anchor_affine,
+                keymap_centroids[anchor.number],
+                keymap_centroids[target.number],
+            )
         exclusion = None
         if not synthetic:
             exclusion = [
@@ -1973,30 +2032,6 @@ def effective_gcp_count(volume: Path, stem: str) -> int:
     return count_from_georef(json.loads((volume / f"{stem}.georef.json").read_text()))
 
 
-DIRECTIONAL_SUFFIXES = {
-    "NORTH",
-    "SOUTH",
-    "EAST",
-    "WEST",
-    "NORTHEAST",
-    "NORTHWEST",
-    "SOUTHEAST",
-    "SOUTHWEST",
-}
-
-
-def street_base_name(name: str) -> str:
-    """A street name with any trailing directional word removed.
-
-    "K STREET SOUTHEAST" and "K STREET NORTHWEST" are quadrant segments of
-    one physical street, not two candidate matches.
-    """
-    words = name.split()
-    if len(words) > 1 and words[-1] in DIRECTIONAL_SUFFIXES:
-        return " ".join(words[:-1])
-    return name
-
-
 def build_line_factors(
     volume: Path,
     vframe,
@@ -2029,7 +2064,7 @@ def build_line_factors(
         geometry_segments,
         segment_point_distance_m,
     )
-    from mapsnap.streets import build_block_index
+    from mapsnap.streets import build_block_index, street_base_name
     from mapsnap.utils import default_centerlines
 
     centerlines_path = default_centerlines(volume)
@@ -2147,6 +2182,8 @@ def cmd_posegraph(
     remeasure: bool,
     limit: int | None,
     street_factors: bool = False,
+    keymap_adjacency: bool = False,
+    keymap_gap_m: float = 40.0,
 ) -> None:
     """Global pose-graph solve over all edge-join measurements.
 
@@ -2157,6 +2194,11 @@ def cmd_posegraph(
     wrong locks. Writes posegraph_all.jsonl (every grounded node, for
     `report --chain-source posegraph_all`) and posegraph.jsonl (previously
     unfitted nodes only, for `materialize --source posegraph`).
+
+    With ``keymap_adjacency`` the candidate pair set is augmented with key-map
+    region-adjacency pairs that involve a not-yet-fitted page (the printed graph
+    misses these on 4-digit-page volumes like LA); outputs get a ``_kmadj``
+    suffix so the printed-graph baseline is preserved for comparison.
     """
     from mapsnap.edge_join_graph import (
         AbsolutePrior,
@@ -2169,14 +2211,45 @@ def cmd_posegraph(
     units = load_page_units(volume)
     by_stem = {u.stem: u for u in units}
     out_dir = volume / "artifacts" / "edge_join"
-    meas_path = out_dir / "measurements.jsonl"
+    suffix = "_kmadj" if keymap_adjacency else ""
+    meas_path = out_dir / f"measurements{suffix}.jsonl"
+
+    extra_pairs: set[frozenset[int]] | None = None
+    keymap_centroids: dict[int, tuple[float, float]] | None = None
+    if keymap_adjacency:
+        km_pairs, keymap_centroids = keymap_region_adjacency(volume, keymap_gap_m)
+        real_numbers = {u.number for u in units}
+        fitted_numbers = {
+            u.number
+            for u in units
+            if u.fit_state == "fitted" and u.gen_affine is not None
+        }
+        detected = detected_pairs(volume)
+        # Keep only pairs between two real volume pages (the key map also reads
+        # stray lot/scale numbers) that connect a not-yet-fitted page and aren't
+        # already in the printed graph — fitted-fitted pairs would only re-refine
+        # already-placed sheets.
+        extra_pairs = {
+            pair
+            for pair in km_pairs
+            if pair <= real_numbers
+            and pair not in detected
+            and not pair <= fitted_numbers
+        }
+        print(
+            f"keymap region adjacency (gap<={keymap_gap_m:g}m): {len(km_pairs)} pairs,"
+            f" {len(extra_pairs)} new real pairs involving an unfitted page"
+        )
+
     if meas_path.exists() and not remeasure:
         records = [
             json.loads(line) for line in meas_path.read_text().splitlines() if line
         ]
         print(f"loaded {len(records)} cached measurements from {meas_path}")
     else:
-        records = collect_graph_measurements(volume, units, limit)
+        records = collect_graph_measurements(
+            volume, units, limit, extra_pairs, keymap_centroids
+        )
         meas_path.write_text("\n".join(json.dumps(r) for r in records))
         print(f"wrote {len(records)} measurements to {meas_path}")
 
@@ -2450,19 +2523,19 @@ def cmd_posegraph(
         for s in sorted(grounded, key=lambda s: by_stem[s].number)
         if incident.get(s) and (is_fitted(by_stem[s]) or supported(s))
     ]
-    (out_dir / "posegraph_all.jsonl").write_text(
+    (out_dir / f"posegraph_all{suffix}.jsonl").write_text(
         "\n".join(json.dumps(r) for r in all_records)
     )
     new_records = [r for r in all_records if not is_fitted(by_stem[r["target"]])]
-    (out_dir / "posegraph.jsonl").write_text(
+    (out_dir / f"posegraph{suffix}.jsonl").write_text(
         "\n".join(json.dumps(r) for r in new_records)
     )
     print(
-        f"\nwrote {len(all_records)} records to posegraph_all.jsonl,"
-        f" {len(new_records)} previously-unfitted to posegraph.jsonl"
+        f"\nwrote {len(all_records)} records to posegraph_all{suffix}.jsonl,"
+        f" {len(new_records)} previously-unfitted to posegraph{suffix}.jsonl"
     )
     print()
-    cmd_report(volume, "posegraph_all")
+    cmd_report(volume, f"posegraph_all{suffix}")
 
 
 def cmd_materialize(volume: Path, source: str) -> None:
@@ -2551,6 +2624,17 @@ def main() -> None:
         action="store_true",
         help="posegraph: refine with street-label line factors",
     )
+    parser.add_argument(
+        "--keymap-adjacency",
+        action="store_true",
+        help="posegraph: add key-map region-adjacency candidate pairs (writes *_kmadj)",
+    )
+    parser.add_argument(
+        "--keymap-gap-m",
+        type=float,
+        default=40.0,
+        help="posegraph: key-map region distance for adjacency (default: %(default)s)",
+    )
     args = parser.parse_args()
     if args.command == "stats":
         cmd_stats(args.volume)
@@ -2578,7 +2662,14 @@ def main() -> None:
             seeds=args.seeds,
         )
     elif args.command == "posegraph":
-        cmd_posegraph(args.volume, args.remeasure, args.limit, args.street_factors)
+        cmd_posegraph(
+            args.volume,
+            args.remeasure,
+            args.limit,
+            args.street_factors,
+            args.keymap_adjacency,
+            args.keymap_gap_m,
+        )
     elif args.command == "materialize":
         cmd_materialize(args.volume, args.source)
     elif args.command == "report":

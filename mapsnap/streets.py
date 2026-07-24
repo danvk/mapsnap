@@ -255,6 +255,30 @@ def normalize_street(text: str) -> str:
     return " ".join(words)
 
 
+DIRECTIONAL_SUFFIXES = {
+    "NORTH",
+    "SOUTH",
+    "EAST",
+    "WEST",
+    "NORTHEAST",
+    "NORTHWEST",
+    "SOUTHEAST",
+    "SOUTHWEST",
+}
+
+
+def street_base_name(name: str) -> str:
+    """A street name with any trailing directional word removed.
+
+    "K STREET SOUTHEAST" and "K STREET NORTHWEST" are quadrant segments of
+    one physical street, not two candidate matches.
+    """
+    words = name.split()
+    if len(words) > 1 and words[-1] in DIRECTIONAL_SUFFIXES:
+        return " ".join(words[:-1])
+    return name
+
+
 def is_number_only(text: str) -> bool:
     """Return True if text contains no alphabetic characters (e.g. block numbers)."""
     return not bool(re.search(r"[a-zA-Z]", text))

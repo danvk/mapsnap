@@ -713,6 +713,20 @@ def compare_pages(
         source = truth_items[0]["target"]["source"]
         source_dims = (float(source["width"]), float(source["height"]))
         truth_polygons = load_split_polygons(oim_dir / f"{page_key}.panels.json")
+        if not truth_polygons:
+            # Without OIM's panel polygons NO placement of this page can ever
+            # be matched to its truth splits — every one scores as unplaced,
+            # silently understating the volume (KC sat ~4 net points low this
+            # way). Loud warning rather than assertion: the fix is a data run
+            # (`mapsnap oim-split-truth`), and comparison of the other pages
+            # is still meaningful in the meantime.
+            print(
+                f"Warning: {page_key} has {len(truth_splits)} truth split(s) but "
+                f"{oim_dir / f'{page_key}.panels.json'} is missing; its placements "
+                "will score as unplaced. Run `mapsnap oim-split-truth` (see its "
+                "docstring for the required raw/ and oim/ images).",
+                file=sys.stderr,
+            )
         gen_polygons = load_split_polygons(
             gen_dir / f"{page_key}.panels.json", source_dims
         )

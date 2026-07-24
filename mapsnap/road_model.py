@@ -217,6 +217,10 @@ def predict_page(
     return probabilities / weights
 
 
+# The shipped checkpoint, anchored to the repo so commands work from any CWD.
+ROAD_MODEL_PATH = Path(__file__).resolve().parent.parent / "models" / "road_unet.pt"
+
+
 def load_model(model_path: Path, device) -> "UNet":
     """Load a trained road UNet from a checkpoint, moved to ``device`` and set to eval mode.
 

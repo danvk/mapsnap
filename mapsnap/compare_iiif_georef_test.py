@@ -342,3 +342,46 @@ def test_compare_pages_ignores_skeletons_with_full_color_counterparts(tmp_path):
     # it must not count as a missing page.
     assert [r["page_key"] for r in rows] == ["p153"]
     assert missing == []
+
+
+def test_compare_pages_warns_on_truth_splits_without_oim_panels(tmp_path, capsys):
+    from mapsnap.compare_iiif_georef import compare_pages
+
+    def item(page_id: str, label: str) -> dict:
+        return {
+            "label": label,
+            "target": {
+                "source": {
+                    "id": f"https://loc.gov/x/g123-{page_id}/info.json",
+                    "width": 1000,
+                    "height": 1000,
+                },
+            },
+            "body": {
+                "transformation": {"type": "polynomial", "options": {"order": 1}},
+                "features": [
+                    {
+                        "properties": {"resourceCoords": [x, y]},
+                        "geometry": {
+                            "coordinates": [-74.0 + x * 1e-6, 40.0 + y * 1e-6]
+                        },
+                    }
+                    for x, y in [(0, 0), (900, 0), (0, 900)]
+                ],
+            },
+        }
+
+    # Truth split items but no oim/p52.panels.json: the generated placement can
+    # never be matched — that silent gap once understated KC by ~4 net points,
+    # so compare (and through it `mapsnap score`) must say so out loud.
+    truth = {"items": [item("0052", "x p52 [1]"), item("0052", "x p52 [2]")]}
+    generated = {"items": [item("0052", "x p52")]}
+    truth_path = tmp_path / "main.iiif.json"
+    gen_path = tmp_path / "gen.iiif.json"
+    truth_path.write_text(json.dumps(truth))
+    gen_path.write_text(json.dumps(generated))
+    rows, missing = compare_pages(truth_path, gen_path)
+    assert rows == []
+    assert len(missing) == 2
+    err = capsys.readouterr().err
+    assert "p52" in err and "oim-split-truth" in err
