@@ -10,7 +10,6 @@ from mapsnap.compare_iiif_georef import (
     annotation_split_index,
     annotations_by_source,
     load_split_polygons,
-    match_split_pairs,
     page_label,
     parse_svg_polygon,
     polygon_iou,
@@ -106,79 +105,144 @@ def test_load_split_polygons_scales_generated_panels(tmp_path):
     assert gen[1].bounds == (0.0, 0.0, 400.0, 800.0)
 
 
-def test_match_split_pairs_associates_by_polygon_overlap_ignoring_numbering():
-    # Truth split 1 is the left half, split 2 the right half (canvas coords).
-    truth_polygons = {1: _square(0, 0, 100), 2: _square(100, 0, 100)}
-    truth_items = [{"label": "P [1]"}, {"label": "P [2]"}]
-    # Our numbering is reversed: gen __1 sits on the right, __2 on the left.
-    gen_items = [
-        {"id": "http://x/p__1/georef"},
-        {"id": "http://x/p__2/georef"},
-    ]
-    gen_polygons = {1: _square(100, 0, 100), 2: _square(0, 0, 100)}
+def _split_volume(tmp_path, gen_items, gen_panels=None):
+    """Write a truth file with two split panels at DIFFERENT transforms.
 
-    pairs, unmatched = match_split_pairs(
-        truth_items, gen_items, truth_polygons, gen_polygons
+    Truth p7 [1] covers the left half of a 400x200 canvas; p7 [2] the right
+    half, georeferenced ~0.01 deg (~1km) away — an inset composite. Returns
+    (truth_path, gen_path).
+    """
+
+    def features(origin_lon):
+        return [
+            {
+                "properties": {"resourceCoords": [x, y]},
+                "geometry": {"coordinates": [origin_lon + x * 1e-6, 40.0 + y * 1e-6]},
+            }
+            for x, y in [(0, 0), (150, 0), (0, 150)]
+        ]
+
+    def item(label, origin_lon, item_id="https://x/p7/georef"):
+        return {
+            "id": item_id,
+            "label": label,
+            "target": {
+                "source": {
+                    "id": "https://loc.gov/x/g123-0007/info.json",
+                    "width": 400,
+                    "height": 200,
+                },
+            },
+            "body": {
+                "transformation": {"type": "polynomial", "options": {"order": 1}},
+                "features": features(origin_lon),
+            },
+        }
+
+    truth = {"items": [item("x p7 [1]", -74.0), item("x p7 [2]", -73.99)]}
+    (tmp_path / "oim").mkdir(exist_ok=True)
+    _write_panels(
+        tmp_path / "oim" / "p7.panels.json",
+        400,
+        200,
+        [
+            [[0, 0], [200, 0], [200, 200], [0, 200]],
+            [[200, 0], [400, 0], [400, 200], [200, 200]],
+        ],
     )
+    gen = {"items": [item(*args) for args in gen_items]}
+    if gen_panels is not None:
+        _write_panels(tmp_path / "p7.panels.json", 400, 200, gen_panels)
+    truth_path = tmp_path / "main.iiif.json"
+    gen_path = tmp_path / "gen.iiif.json"
+    truth_path.write_text(json.dumps(truth))
+    gen_path.write_text(json.dumps(gen))
+    return truth_path, gen_path
 
-    assert unmatched == []
-    paired = {t["label"]: g["id"] for t, g in pairs}
-    assert paired == {"P [1]": "http://x/p__2/georef", "P [2]": "http://x/p__1/georef"}
+
+def test_split_regions_whole_page_on_one_inset_is_a_disaster(tmp_path):
+    # Scenario A: our splitter failed and the whole page georeferenced onto
+    # truth panel 1's location. Panel 1's region grades well — but panel 2's
+    # imagery is DISPLAYED ~1km from where it belongs, and grading its region
+    # under the same transform must expose that as a huge error rather than
+    # scoring identically to an honest abstention.
+    from mapsnap.compare_iiif_georef import compare_pages
+
+    truth_path, gen_path = _split_volume(tmp_path, [("x p7", -74.0)])
+    rows, missing = compare_pages(truth_path, gen_path)
+    assert missing == []
+    by_key = {r["page_key"]: r for r in rows}
+    assert by_key["p7__1"]["rmse_ft"] < 25.0
+    assert by_key["p7__2"]["rmse_ft"] > 1000.0
 
 
-def test_match_split_pairs_unsplit_page_matches_largest_truth_split():
-    # OIM split the page into 3 panels of different sizes; we kept it whole, so the
-    # generated annotation has no split index and stands in as the full canvas.
-    truth_polygons = {
-        1: _square(0, 0, 100),  # area 10_000
-        2: _square(0, 0, 200),  # area 40_000 — largest
-        3: _square(0, 0, 50),  # area 2_500 — below MIN_SPLIT_IOU vs the canvas
-    }
-    truth_items = [{"label": "P [3]"}, {"label": "P [2]"}, {"label": "P [1]"}]
-    gen_items = [{"id": "http://x/p3/georef"}]  # no __N → unsplit page
-    canvas = _square(0, 0, 300)  # area 90_000
+def test_split_regions_honest_abstention_is_merely_missing(tmp_path):
+    # Scenario B: we split correctly, placed panel 1, declined panel 2.
+    from mapsnap.compare_iiif_georef import compare_pages
 
-    pairs, unmatched = match_split_pairs(
-        truth_items, gen_items, truth_polygons, {}, canvas_polygon=canvas
+    truth_path, gen_path = _split_volume(
+        tmp_path,
+        [("x p7 [1]", -74.0, "https://x/p7__1/georef")],
+        gen_panels=[[[0, 0], [200, 0], [200, 200], [0, 200]]],
     )
-
-    assert len(pairs) == 1
-    truth, gen = pairs[0]
-    assert truth["label"] == "P [2]"  # the largest split
-    assert gen["id"] == "http://x/p3/georef"
-    assert {t["label"] for t in unmatched} == {"P [1]", "P [3]"}
+    rows, missing = compare_pages(truth_path, gen_path)
+    assert [r["page_key"] for r in rows] == ["p7__1"]
+    assert rows[0]["rmse_ft"] < 25.0
+    assert len(missing) == 1
 
 
-def test_match_split_pairs_unmatched_when_no_gen_polygon():
-    truth_polygons = {1: _square(0, 0, 100)}
-    truth_items = [{"label": "P [1]"}]
-    pairs, unmatched = match_split_pairs(truth_items, [], truth_polygons, {})
-    assert pairs == []
-    assert unmatched == truth_items
+def test_split_regions_correct_whole_page_credits_every_panel(tmp_path):
+    # A contiguous split placed correctly as a whole page: BOTH truth panels
+    # grade well (the old largest-split stand-in rule credited only one).
+    from mapsnap.compare_iiif_georef import compare_pages
+
+    def features(origin_lon):
+        return [
+            {
+                "properties": {"resourceCoords": [x, y]},
+                "geometry": {"coordinates": [origin_lon + x * 1e-6, 40.0 + y * 1e-6]},
+            }
+            for x, y in [(0, 0), (150, 0), (0, 150)]
+        ]
+
+    def item(label):
+        return {
+            "id": "https://x/p7/georef",
+            "label": label,
+            "target": {
+                "source": {
+                    "id": "https://loc.gov/x/g123-0007/info.json",
+                    "width": 400,
+                    "height": 200,
+                },
+            },
+            "body": {
+                "transformation": {"type": "polynomial", "options": {"order": 1}},
+                "features": features(-74.0),
+            },
+        }
 
 
-def test_match_split_pairs_picks_best_overlap_not_file_order():
-    # The single generated panel overlaps truth [1] strongly; truth [3], listed first,
-    # only grazes it. The grazing split must not claim the generated panel ahead of the
-    # real match (regression for the champaign p4__3 mismatch).
-    truth_polygons = {
-        1: _square(0, 0, 100),
-        2: _square(200, 0, 100),
-        3: _square(99, 0, 2),  # tiny overlap with the generated panel's right edge
-    }
-    truth_items = [{"label": "P [3]"}, {"label": "P [2]"}, {"label": "P [1]"}]
-    gen_items = [{"id": "http://x/p__1/georef"}]
-    gen_polygons = {1: _square(0, 0, 100)}
-
-    pairs, unmatched = match_split_pairs(
-        truth_items, gen_items, truth_polygons, gen_polygons
+    truth = {"items": [item("x p7 [1]"), item("x p7 [2]")]}
+    gen = {"items": [item("x p7")]}
+    (tmp_path / "oim").mkdir(exist_ok=True)
+    _write_panels(
+        tmp_path / "oim" / "p7.panels.json",
+        400,
+        200,
+        [
+            [[0, 0], [200, 0], [200, 200], [0, 200]],
+            [[200, 0], [400, 0], [400, 200], [200, 200]],
+        ],
     )
-
-    assert len(pairs) == 1
-    truth, gen = pairs[0]
-    assert truth["label"] == "P [1]"
-    assert gen["id"] == "http://x/p__1/georef"
-    assert {t["label"] for t in unmatched} == {"P [2]", "P [3]"}
+    truth_path = tmp_path / "main.iiif.json"
+    gen_path = tmp_path / "gen.iiif.json"
+    truth_path.write_text(json.dumps(truth))
+    gen_path.write_text(json.dumps(gen))
+    rows, missing = compare_pages(truth_path, gen_path)
+    assert missing == []
+    assert sorted(r["page_key"] for r in rows) == ["p7__1", "p7__2"]
+    assert all(r["rmse_ft"] < 25.0 for r in rows)
 
 
 def test_parse_svg_polygon():

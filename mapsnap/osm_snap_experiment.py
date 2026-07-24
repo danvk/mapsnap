@@ -150,11 +150,11 @@ def attach_missing_truth(volume: Path, units: list[PageUnit]) -> int:
     rmse, so the gate sweep was blind to them) even though `mapsnap score`
     scores their placements: (1) unsplit truth items whose page key differs
     from the jpg stem only in letter case (Chicago 'p51N' vs 'p51n'); (2)
-    pages whose truth exists only as split items — a whole-page placement of
-    such a sheet is scored against its LARGEST truth split (the whole-canvas
-    stand-in rule in match_split_pairs), so that split's transform is the
-    right truth here, with rmse sampled over the full canvas exactly like
-    analyze_pair's whole-page grid.
+    pages whose truth exists only as split items. The scorer now grades each
+    truth panel over its own region; for this harness's page-level
+    diagnostics we approximate with the LARGEST truth split's transform
+    (rmse over the full canvas), which matches the scorer for the panel a
+    whole-page placement actually fits.
     """
     from mapsnap.compare_iiif_georef import (
         annotation_transform_type,
