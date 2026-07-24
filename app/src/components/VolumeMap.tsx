@@ -477,6 +477,34 @@ export function VolumeMap(props: VolumeMapProps) {
     }
   }, [selectedItemIndex, pages, missingPages, truthPages, mapReady]);
 
+  // Bring a newly-selected page into view when it isn't already fully visible. Keyed on the
+  // selected stem, not the item index, so switching annotation files within a volume (which
+  // keeps the stem) leaves the viewport alone; a genuine selection change brings the page in.
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !mapReady || props.selectedStem === null) return;
+    const page =
+      pagesRef.current.find((p) => p.stem === props.selectedStem) ??
+      missingPagesRef.current.find((p) => p.stem === props.selectedStem);
+    const ring =
+      page && (page.clipRing.length >= 3 ? page.clipRing : page.rectRing);
+    if (!ring || ring.length < 3) return;
+    const pageBounds = new maplibregl.LngLatBounds();
+    for (const [lng, lat] of ring) pageBounds.extend([lng, lat]);
+    const view = map.getBounds();
+    const fullyVisible =
+      view.contains(pageBounds.getNorthEast()) &&
+      view.contains(pageBounds.getSouthWest());
+    if (fullyVisible) return;
+    // maxZoom = current zoom keeps the zoom level when the page fits (just pans), and only
+    // zooms out when the page is larger than the viewport.
+    map.fitBounds(pageBounds, {
+      padding: 60,
+      maxZoom: map.getZoom(),
+      duration: 600,
+    });
+  }, [props.selectedStem, mapReady]);
+
   // Also depends on `annotation`: newly added maps start at full opacity, so
   // the current value must be reapplied after each volume load. Animation is
   // disabled so scrubbing the slider tracks instantly instead of queueing
