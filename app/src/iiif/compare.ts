@@ -20,6 +20,10 @@ export interface PageCompareStats {
   rotationErrorDegrees: number;
   /** Scale difference in percent (generated relative to truth). */
   scaleErrorPercent: number;
+  /** Shear angle in degrees, when the table reports it; else undefined. */
+  skewDegrees?: number;
+  /** Anisotropy (x/y scale ratio, 1 = isotropic), when reported; else undefined. */
+  anisotropy?: number;
 }
 
 /** RMSE quality bucket, shared by the page table and the map color-coding. */
@@ -64,6 +68,8 @@ export function statsByItemIndex(
       translationFt: row.translationFt,
       rotationErrorDegrees: row.rotationErrorDegrees,
       scaleErrorPercent: row.scaleErrorPercent,
+      skewDegrees: row.skewDegrees,
+      anisotropy: row.anisotropy,
     });
   }
   return stats;

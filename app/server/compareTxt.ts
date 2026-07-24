@@ -21,6 +21,10 @@ export interface ComparePageStats {
   translationFt: number;
   rotationErrorDegrees: number;
   scaleErrorPercent: number;
+  /** Shear angle in degrees, when the table reports it (skew° column); else undefined. */
+  skewDegrees?: number;
+  /** Anisotropy (x/y scale ratio, 1 = isotropic), when reported (aniso column); else undefined. */
+  anisotropy?: number;
 }
 
 /** Response of GET /iiif-api/compare — paired-page stats plus the table's summary footer. */
@@ -65,6 +69,9 @@ function parseRow(line: string): ComparePageStats | null {
   ) {
     return null;
   }
+  // Skew/aniso are the last two columns; absent in older tables, so they don't gate the row.
+  const skewDegrees = Number(numeric[11]);
+  const anisotropy = Number(numeric[12]);
   const genPageKey =
     (disagree ? (genKeyOverride ?? tokens[0]) : tokens[0]) ?? '';
   return {
@@ -74,6 +81,8 @@ function parseRow(line: string): ComparePageStats | null {
     translationFt,
     rotationErrorDegrees,
     scaleErrorPercent,
+    ...(Number.isFinite(skewDegrees) ? { skewDegrees } : {}),
+    ...(Number.isFinite(anisotropy) ? { anisotropy } : {}),
   };
 }
 

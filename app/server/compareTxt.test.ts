@@ -40,7 +40,20 @@ describe('parseCompareTxt', () => {
       translationFt: 15.4,
       rotationErrorDegrees: 0.34,
       scaleErrorPercent: 2.88,
+      skewDegrees: 0.73,
+      anisotropy: 1.03,
     });
+  });
+
+  it('omits skew/aniso when the table has no such columns', () => {
+    const noSkew =
+      'Page  n_t n_g  str  int  t.px/ft  g.px/ft   rmse_ft    max_ft   trans_ft   rot_err  scale_%\n' +
+      '-'.repeat(60) +
+      '\np1  5   2    5    6     6.02     5.85      18.2      22.7       15.4     +0.34    +2.88';
+    const [row] = parseCompareTxt(noSkew);
+    expect(row?.rmseFt).toBe(18.2);
+    expect(row?.skewDegrees).toBeUndefined();
+    expect(row?.anisotropy).toBeUndefined();
   });
 
   it('takes the generated key from the trailing parens when numbering disagrees', () => {

@@ -15,7 +15,15 @@ interface PageListProps {
   onSelectPage: (itemIndex: number | null) => void;
 }
 
-type SortKey = 'page' | 'rmse' | 'rot' | 'scale' | 'rotErr' | 'scaleErr';
+type SortKey =
+  | 'page'
+  | 'rmse'
+  | 'rot'
+  | 'scale'
+  | 'rotErr'
+  | 'scaleErr'
+  | 'skew'
+  | 'aniso';
 
 // Natural sort key for page keys: number, then letter suffix, then split index.
 function pageSortKey(pageKey: string): [number, string, number] {
@@ -49,6 +57,16 @@ function sortValue(
       return stats ? Math.abs(stats.rotationErrorDegrees) : undefined;
     case 'scaleErr':
       return stats ? Math.abs(stats.scaleErrorPercent) : undefined;
+    case 'skew':
+      // Magnitude of shear: most-skewed pages sort to the top.
+      return stats?.skewDegrees === undefined
+        ? undefined
+        : Math.abs(stats.skewDegrees);
+    case 'aniso':
+      // Distance from isotropic (1.0): most-anisotropic pages sort to the top.
+      return stats?.anisotropy === undefined
+        ? undefined
+        : Math.abs(stats.anisotropy - 1);
   }
 }
 
@@ -67,10 +85,22 @@ export function PageList(props: PageListProps) {
   });
 
   const hasTruth = stats !== null;
-  const effectiveSort =
-    !hasTruth && ['rmse', 'rotErr', 'scaleErr'].includes(sort.key)
-      ? { key: 'page' as SortKey, descending: false }
-      : sort;
+  // Skew/aniso are only in newer compare tables; show those columns only when some page has them.
+  const hasSkewAniso =
+    stats !== null &&
+    [...stats.values()].some(
+      (s) => s.skewDegrees !== undefined || s.anisotropy !== undefined,
+    );
+  // A column that isn't shown can't stay the active sort; fall back to page order.
+  function columnShown(key: SortKey): boolean {
+    if (key === 'skew' || key === 'aniso') return hasSkewAniso;
+    if (key === 'rmse' || key === 'rotErr' || key === 'scaleErr')
+      return hasTruth;
+    return true;
+  }
+  const effectiveSort = columnShown(sort.key)
+    ? sort
+    : { key: 'page' as SortKey, descending: false };
 
   // Missing (un-fitted) pages carry a negative synthetic itemIndex and have no
   // truth stats, so they blank out the RMSE/Δ columns and sink under those sorts.
@@ -131,6 +161,18 @@ export function PageList(props: PageListProps) {
               header('rotErr', 'Rot Δ', 'Rotation error vs truth (°)')}
             {hasTruth &&
               header('scaleErr', 'Scale Δ', 'Scale error vs truth (%)')}
+            {hasSkewAniso &&
+              header(
+                'skew',
+                'Skew',
+                'Shear angle in the truth vs generated fit (°)',
+              )}
+            {hasSkewAniso &&
+              header(
+                'aniso',
+                'Aniso',
+                'Anisotropy (x/y scale ratio, 1 = isotropic)',
+              )}
           </tr>
         </thead>
         <tbody>
@@ -196,6 +238,20 @@ export function PageList(props: PageListProps) {
                   <td className="numeric">
                     {pageStats
                       ? `${pageStats.scaleErrorPercent.toFixed(1)}%`
+                      : ''}
+                  </td>
+                )}
+                {hasSkewAniso && (
+                  <td className="numeric">
+                    {pageStats?.skewDegrees !== undefined
+                      ? `${pageStats.skewDegrees.toFixed(2)}°`
+                      : ''}
+                  </td>
+                )}
+                {hasSkewAniso && (
+                  <td className="numeric">
+                    {pageStats?.anisotropy !== undefined
+                      ? pageStats.anisotropy.toFixed(3)
                       : ''}
                   </td>
                 )}
