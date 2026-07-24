@@ -20,7 +20,7 @@ import {
   type VolumeInfo,
 } from './iiifAnnotations.ts';
 import { jpegDimensions } from './jpegDimensions.ts';
-import { parseCompareTxt } from './compareTxt.ts';
+import { parseCompareFooter, parseCompareTxt } from './compareTxt.ts';
 
 const require = createRequire(import.meta.url);
 const iiif = require('express-iiif').default;
@@ -169,9 +169,10 @@ export function registerIiifApi(
       relativePath.replace(/\.iiif\.json$/, '.txt'),
     );
     try {
-      return { pages: parseCompareTxt(await readFile(txtPath, 'utf8')) };
+      const text = await readFile(txtPath, 'utf8');
+      return { pages: parseCompareTxt(text), footer: parseCompareFooter(text) };
     } catch {
-      return { pages: [] };
+      return { pages: [], footer: '' };
     }
   });
 
@@ -216,5 +217,32 @@ export function registerIiifApi(
       }
     }
     return { failed };
+  });
+
+  // A volume's key-map sheets and which visualization sidecars each has, so the viewer can link
+  // to them. Key maps are `raw/<stem>.keymap.json`; siblings <stem>.regions.panels.json and
+  // <stem>.georef.json are the region and georef views. ?volume=<dir> → { keymaps: [...] }.
+  router.get('/iiif-api/keymaps', async (_params, request) => {
+    const { volume } = request.query;
+    if (!isSafeName(volume)) {
+      throw new HTTPError(400, `invalid volume: ${volume}`);
+    }
+    let files: string[];
+    try {
+      files = await readdir(join(dataDir, volume, 'raw'));
+    } catch {
+      return { keymaps: [] }; // no raw/ directory: volume has no key maps
+    }
+    const present = new Set(files);
+    const keymaps = files
+      .filter((file) => file.endsWith('.keymap.json'))
+      .map((file) => file.slice(0, -'.keymap.json'.length))
+      .sort()
+      .map((stem) => ({
+        stem,
+        hasRegions: present.has(`${stem}.regions.panels.json`),
+        hasGeoref: present.has(`${stem}.georef.json`),
+      }));
+    return { keymaps };
   });
 }

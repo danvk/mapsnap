@@ -59,6 +59,21 @@ export interface FailedGeorefsResponse {
   failed: Record<string, string>;
 }
 
+/** One key-map sheet in a volume's `raw/` directory and which sidecars it has. */
+export interface KeymapInfo {
+  /** Key-map image stem, e.g. "p0" (has a `raw/<stem>.keymap.json`). */
+  stem: string;
+  /** Whether a `raw/<stem>.regions.panels.json` region-segmentation sidecar exists. */
+  hasRegions: boolean;
+  /** Whether a `raw/<stem>.georef.json` sidecar exists. */
+  hasGeoref: boolean;
+}
+
+/** Response of GET /iiif-api/keymaps — a volume's key-map sheets, for the info-panel links. */
+export interface KeymapsResponse {
+  keymaps: KeymapInfo[];
+}
+
 /** Query naming one page of one volume. */
 export interface NoteTarget {
   volume: string;
@@ -101,6 +116,9 @@ export interface API {
   };
   '/iiif-api/adjacency': {
     get: GetEndpoint<AdjacencyResponse, VolumeQuery>;
+  };
+  '/iiif-api/keymaps': {
+    get: GetEndpoint<KeymapsResponse, VolumeQuery>;
   };
   '/api/images': {
     get: GetEndpoint<KeymapImagesResponse>;

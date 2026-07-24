@@ -42,6 +42,15 @@ interface VolumeMapProps {
    * filled; claims on other pages draw as a dashed outline, as if underneath it.
    */
   selectedStem: string | null;
+  /** Initial viewport from the URL, applied at creation; null → default center + fit to bounds. */
+  initialViewport: { center: [number, number]; zoom: number } | null;
+  /**
+   * The current volume name. The map fits to the annotation's bounds when this changes (a new
+   * volume) but keeps the viewport when only the annotation file changes within a volume.
+   */
+  fitVolumeKey: string | null;
+  /** Called when the map settles after a move, with the new center/zoom (for the URL). */
+  onViewportChange: (center: [number, number], zoom: number) => void;
   /** Called with per-page add results whenever a new annotation is shown. */
   onLoadResult?: (result: { loaded: number; failed: number }) => void;
 }
@@ -158,6 +167,17 @@ export function VolumeMap(props: VolumeMapProps) {
     onLoadResultRef.current = onLoadResult;
   }, [onLoadResult]);
 
+  // The volume the map was last fit to. Pre-seeded when the URL supplied a viewport, so the
+  // first annotation load keeps that viewport instead of refitting over it.
+  const fittedVolumeRef = useRef<string | null>(
+    props.initialViewport ? props.fitVolumeKey : null,
+  );
+  // Latest viewport callback for the move-end handler, installed once with the map.
+  const onViewportChangeRef = useRef(props.onViewportChange);
+  useEffect(() => {
+    onViewportChangeRef.current = props.onViewportChange;
+  }, [props.onViewportChange]);
+
   useEffect(() => {
     if (!containerRef.current) return;
     const map = new maplibregl.Map({
@@ -175,12 +195,17 @@ export function VolumeMap(props: VolumeMapProps) {
         },
         layers: [{ id: 'osm', type: 'raster', source: 'osm' }],
       },
-      center: [-73.99, 40.7],
-      zoom: 13,
+      center: props.initialViewport?.center ?? [-73.99, 40.7],
+      zoom: props.initialViewport?.zoom ?? 13,
       // WarpedMapLayer does not support pitch.
       maxPitch: 0,
     });
     mapRef.current = map;
+    // Report the viewport whenever the map settles after a pan/zoom, so the URL can track it.
+    map.on('moveend', () => {
+      const center = map.getCenter();
+      onViewportChangeRef.current([center.lng, center.lat], map.getZoom());
+    });
     // Debug/e2e handle in the spirit of window.mapsnap: lets automated tests
     // drive the map, e.g. mapsnapVolumeMap.fire('click', {lngLat: {lng, lat}}).
     (window as { mapsnapVolumeMap?: maplibregl.Map }).mapsnapVolumeMap = map;
@@ -399,8 +424,13 @@ export function VolumeMap(props: VolumeMapProps) {
     });
     const failed = results.filter((r) => r instanceof Error).length;
     onLoadResultRef.current?.({ loaded: results.length - failed, failed });
+    // Fit to bounds only when the volume changes; switching annotation files within a volume
+    // (or restoring a viewport from the URL) keeps the current view.
     const bounds = layer.getBounds();
-    if (bounds) map.fitBounds(bounds, { padding: 40, animate: false });
+    if (bounds && props.fitVolumeKey !== fittedVolumeRef.current) {
+      map.fitBounds(bounds, { padding: 40, animate: false });
+    }
+    fittedVolumeRef.current = props.fitVolumeKey;
     setPositioned(true);
   }, [annotation, mapReady]);
 
@@ -446,6 +476,34 @@ export function VolumeMap(props: VolumeMapProps) {
       frontOrderRef.current.push(page.itemIndex);
     }
   }, [selectedItemIndex, pages, missingPages, truthPages, mapReady]);
+
+  // Bring a newly-selected page into view when it isn't already fully visible. Keyed on the
+  // selected stem, not the item index, so switching annotation files within a volume (which
+  // keeps the stem) leaves the viewport alone; a genuine selection change brings the page in.
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !mapReady || props.selectedStem === null) return;
+    const page =
+      pagesRef.current.find((p) => p.stem === props.selectedStem) ??
+      missingPagesRef.current.find((p) => p.stem === props.selectedStem);
+    const ring =
+      page && (page.clipRing.length >= 3 ? page.clipRing : page.rectRing);
+    if (!ring || ring.length < 3) return;
+    const pageBounds = new maplibregl.LngLatBounds();
+    for (const [lng, lat] of ring) pageBounds.extend([lng, lat]);
+    const view = map.getBounds();
+    const fullyVisible =
+      view.contains(pageBounds.getNorthEast()) &&
+      view.contains(pageBounds.getSouthWest());
+    if (fullyVisible) return;
+    // maxZoom = current zoom keeps the zoom level when the page fits (just pans), and only
+    // zooms out when the page is larger than the viewport.
+    map.fitBounds(pageBounds, {
+      padding: 60,
+      maxZoom: map.getZoom(),
+      duration: 600,
+    });
+  }, [props.selectedStem, mapReady]);
 
   // Also depends on `annotation`: newly added maps start at full opacity, so
   // the current value must be reapplied after each volume load. Animation is

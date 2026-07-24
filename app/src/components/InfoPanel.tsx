@@ -1,3 +1,5 @@
+import type { ReactElement } from 'react';
+import type { KeymapInfo } from '../../server/api';
 import type { SkippedItem } from '../../server/iiifAnnotations';
 import type { PageCompareStats } from '../iiif/compare';
 import type { PageGeo } from '../iiif/pages';
@@ -25,6 +27,10 @@ interface InfoPanelProps {
   selectedNote: string | null;
   /** Whether the volume has adjacency data (adds an adjacency-view link). */
   hasAdjacency: boolean;
+  /** The compare table's summary footer, shown in the no-selection view; "" if none. */
+  compareFooter: string;
+  /** The volume's key-map sheets, linked to their visualizations in the no-selection view. */
+  keymaps: KeymapInfo[];
   /** Volume directory name, e.g. "brooklyn_ny_1906_vol_6". */
   volume: string;
   onClose: () => void;
@@ -37,6 +43,50 @@ function median(values: number[]): number {
   return sorted.length % 2
     ? sorted[mid]!
     : (sorted[mid - 1]! + sorted[mid]!) / 2;
+}
+
+// One key map's visualization links, e.g. "p0 (regions, georef)". The stem links to the
+// key-map detection view; each present sidecar links to its own view via the `?files=` deep link.
+function KeymapLinks({
+  keymap,
+  volume,
+}: {
+  keymap: KeymapInfo;
+  volume: string;
+}): ReactElement {
+  const base = `data/${volume}/raw/${keymap.stem}`;
+  const extras: ReactElement[] = [];
+  if (keymap.hasRegions) {
+    extras.push(
+      <a key="regions" href={`?files=${base}.jpg,${base}.regions.panels.json`}>
+        regions
+      </a>,
+    );
+  }
+  if (keymap.hasGeoref) {
+    extras.push(
+      <a key="georef" href={`?files=${base}.jpg,${base}.georef.json`}>
+        georef
+      </a>,
+    );
+  }
+  return (
+    <span>
+      <a href={`?files=${base}.jpg,${base}.keymap.json`}>{keymap.stem}</a>
+      {extras.length > 0 && (
+        <>
+          {' ('}
+          {extras.map((link, i) => (
+            <span key={i}>
+              {i > 0 && ', '}
+              {link}
+            </span>
+          ))}
+          {')'}
+        </>
+      )}
+    </span>
+  );
 }
 
 // Fit-type counts like "70 polynomial, 7 helmert", most common first.
@@ -74,6 +124,8 @@ export function InfoPanel(props: InfoPanelProps) {
     selectedStats,
     selectedNote,
     hasAdjacency,
+    compareFooter,
+    keymaps,
     volume,
     onClose,
   } = props;
@@ -205,6 +257,20 @@ export function InfoPanel(props: InfoPanelProps) {
           {median(pages.map((p) => p.scalePixelsPerFoot)).toFixed(2)} px/ft
         </dd>
       </dl>
+      {keymaps.length > 0 && (
+        <div className="page-info-keymaps">
+          Keymaps:{' '}
+          {keymaps.map((keymap, i) => (
+            <span key={keymap.stem}>
+              {i > 0 && ', '}
+              <KeymapLinks keymap={keymap} volume={volume} />
+            </span>
+          ))}
+        </div>
+      )}
+      {compareFooter && (
+        <pre className="page-info-compare-footer">{compareFooter}</pre>
+      )}
       <p className="page-info-hint">Click a page for details.</p>
     </div>
   );

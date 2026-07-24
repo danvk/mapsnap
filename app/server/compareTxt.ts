@@ -21,11 +21,17 @@ export interface ComparePageStats {
   translationFt: number;
   rotationErrorDegrees: number;
   scaleErrorPercent: number;
+  /** Shear angle in degrees, when the table reports it (skew° column); else undefined. */
+  skewDegrees?: number;
+  /** Anisotropy (x/y scale ratio, 1 = isotropic), when reported (aniso column); else undefined. */
+  anisotropy?: number;
 }
 
-/** Response of GET /iiif-api/compare — paired-page stats from the sidecar table. */
+/** Response of GET /iiif-api/compare — paired-page stats plus the table's summary footer. */
 export interface CompareResponse {
   pages: ComparePageStats[];
+  /** The summary block below the table ("N/M = …% pages georeferenced", RMSE stats, …); "" if none. */
+  footer: string;
 }
 
 // Whether a line is a header/rule row of the compare table (not a data row).
@@ -63,6 +69,9 @@ function parseRow(line: string): ComparePageStats | null {
   ) {
     return null;
   }
+  // Skew/aniso are the last two columns; absent in older tables, so they don't gate the row.
+  const skewDegrees = Number(numeric[11]);
+  const anisotropy = Number(numeric[12]);
   const genPageKey =
     (disagree ? (genKeyOverride ?? tokens[0]) : tokens[0]) ?? '';
   return {
@@ -72,6 +81,8 @@ function parseRow(line: string): ComparePageStats | null {
     translationFt,
     rotationErrorDegrees,
     scaleErrorPercent,
+    ...(Number.isFinite(skewDegrees) ? { skewDegrees } : {}),
+    ...(Number.isFinite(anisotropy) ? { anisotropy } : {}),
   };
 }
 
@@ -97,4 +108,22 @@ export function parseCompareTxt(text: string): ComparePageStats[] {
     if (row) pages.push(row);
   }
   return pages;
+}
+
+/**
+ * The summary block a `mapsnap compare` table prints below its data rows — the
+ * "N/M = …% pages georeferenced" line and the RMSE/translation/rotation stats.
+ *
+ * It is the text after the table's closing `---` rule (the second separator),
+ * with surrounding blank lines trimmed. Returns "" when the text has no such
+ * footer (e.g. an unrelated `.txt` or a table without a closing rule).
+ */
+export function parseCompareFooter(text: string): string {
+  const lines = text.split('\n');
+  const separators = lines.flatMap((line, i) => (isSeparator(line) ? [i] : []));
+  if (separators.length < 2) return '';
+  return lines
+    .slice(separators[1]! + 1)
+    .join('\n')
+    .trim();
 }
