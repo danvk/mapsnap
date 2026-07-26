@@ -6,8 +6,8 @@
  * shape) and the browser calls it with `typedApi<API>()` (requests are checked
  * against the same types). See https://github.com/danvk/crosswalk.
  *
- * Binary endpoints (the `/iiif` image service, `/api/keymaps/:name` JPEGs, and
- * the `/mapsnap` static build) are not JSON and are served as plain Express
+ * Binary endpoints (the `/iiif` image service, `/api/keymaps/*` key-map images,
+ * and the `/mapsnap` static build) are not JSON and are served as plain Express
  * middleware in server.ts, so they are not part of this interface.
  */
 
@@ -17,7 +17,11 @@ import type {
   VolumeListResponse,
 } from './iiifAnnotations.ts';
 import type { CompareResponse } from './compareTxt.ts';
-import type { ImageInfo, LabelsJson } from '../src/keymap/types.ts';
+import type {
+  ImageInfo,
+  LabelsJson,
+  LabelsWriteRequest,
+} from '../src/keymap/types.ts';
 import type { AdjacencyData } from '../src/types.ts';
 
 /** Response of GET /iiif-api/adjacency — the volume's adjacency.json, or null when absent. */
@@ -35,10 +39,15 @@ export interface KeymapImagesResponse {
   images: ImageInfo[];
 }
 
-/** GET /api/labels/:name — the sidecar, or a marker that none exists yet. */
+/** Query naming one key-map page, e.g. `{ id: "queens_1950/vol2/p0" }`. */
+export interface KeymapTarget {
+  id: string;
+}
+
+/** GET /api/labels — the sidecar, or a marker that none exists yet. */
 export type LabelsResponse = LabelsJson | { exists: false };
 
-/** Response of PUT /api/labels/:name. */
+/** Response of PUT /api/labels. */
 export interface LabelsWriteResponse {
   ok: boolean;
 }
@@ -123,9 +132,9 @@ export interface API {
   '/api/images': {
     get: GetEndpoint<KeymapImagesResponse>;
   };
-  '/api/labels/:name': {
-    get: GetEndpoint<LabelsResponse>;
-    put: Endpoint<LabelsJson, LabelsWriteResponse>;
+  '/api/labels': {
+    get: GetEndpoint<LabelsResponse, KeymapTarget>;
+    put: Endpoint<LabelsWriteRequest, LabelsWriteResponse, KeymapTarget>;
   };
   '/notes-api/notes': {
     get: GetEndpoint<NotesResponse, VolumeQuery>;
