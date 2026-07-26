@@ -7,6 +7,8 @@ import numpy as np
 
 from mapsnap.georef_from_labels import (
     _FT_PER_DEG_LAT,
+    IntersectionGCP,
+    LabelFeature,
     _angle_diff_abs,
     _cluster_geo_coords,
     _distinct_pixel_gcps,
@@ -17,10 +19,8 @@ from mapsnap.georef_from_labels import (
     confidence_relaxed_threshold,
     correct_square_feature_dirs,
     dominant_axis_near,
-    IntersectionGCP,
     is_rotation_outlier,
     label_features,
-    LabelFeature,
     project_to_polyline,
     promote_avenue_letters,
     ransac_hybrid,
@@ -490,7 +490,7 @@ def test_project_no_extrapolation_clamps_to_endpoint():
     block = _make_block([(-90.0, 30.0), (-90.0, 30.001)])
     result = project_to_polyline(-90.0, 30.002, [block], extrapolate=False)
     assert result is not None
-    lon, lat, _ = result
+    _lon, lat, _ = result
     assert abs(lat - 30.001) < 1e-9  # clamped to the endpoint
 
 
@@ -501,7 +501,7 @@ def test_project_extrapolation_reaches_within_500ft():
     block = _make_block([(-90.0, 30.0), (-90.0, end_lat)])
     result = project_to_polyline(-90.0, end_lat + deg_300ft, [block], extrapolate=True)
     assert result is not None
-    lon, lat, _ = result
+    _lon, lat, _ = result
     assert abs(lat - (end_lat + deg_300ft)) < 1e-7  # projected to the query point
 
 
@@ -513,7 +513,7 @@ def test_project_extrapolation_capped_at_500ft():
     block = _make_block([(-90.0, 30.0), (-90.0, end_lat)])
     result = project_to_polyline(-90.0, end_lat + deg_800ft, [block], extrapolate=True)
     assert result is not None
-    lon, lat, _ = result
+    _lon, lat, _ = result
     # Should be at most 500 ft past the endpoint, not 800 ft.
     assert lat < end_lat + deg_800ft - 1e-8
     assert abs(lat - (end_lat + deg_500ft)) < 1e-7
@@ -529,7 +529,7 @@ def test_project_extrapolation_start_terminal_capped():
         -90.0, start_lat - deg_800ft, [block], extrapolate=True
     )
     assert result is not None
-    lon, lat, _ = result
+    _lon, lat, _ = result
     assert lat > start_lat - deg_800ft + 1e-8
     assert abs(lat - (start_lat - deg_500ft)) < 1e-7
 

@@ -57,7 +57,7 @@ def box_center(box: Box) -> Point:
 
 def load_seeds(keymap_path: Path) -> tuple[list[Box], list[str]]:
     """Page-number bounding boxes and their texts from a ``<stem>.keymap.json``."""
-    streets = json.load(open(keymap_path)).get("streets", [])
+    streets = json.loads(keymap_path.read_text()).get("streets", [])
     boxes: list[Box] = []
     texts: list[str] = []
     for street in streets:
@@ -427,10 +427,10 @@ def scale_boxes(
     height, width = shape[:2]
     return [
         (
-            max(0, int(round(box[0] * scale))),
-            max(0, int(round(box[1] * scale))),
-            min(width - 1, int(round(box[2] * scale))),
-            min(height - 1, int(round(box[3] * scale))),
+            max(0, round(box[0] * scale)),
+            max(0, round(box[1] * scale)),
+            min(width - 1, round(box[2] * scale)),
+            min(height - 1, round(box[3] * scale)),
         )
         for box in seeds
     ]
@@ -498,7 +498,7 @@ def working_geometry(
     """
     scale = working_scale(image_shape, params.target_long_side)
     spacing = nearest_neighbor_distance([box_center(box) for box in seeds]) * scale
-    line_smooth_size = max(3, int(round(params.line_smooth_frac * spacing)) | 1)
+    line_smooth_size = max(3, round(params.line_smooth_frac * spacing) | 1)
     return scale, line_smooth_size
 
 

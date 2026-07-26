@@ -1,4 +1,4 @@
-from typing import Any, Literal, TypedDict, Union
+from typing import Any, Literal, TypedDict
 
 
 class OsmElementBase(TypedDict):
@@ -18,7 +18,7 @@ class OsmWay(OsmElementBase):
 
 
 class RelationMember(TypedDict):
-    type: Union[Literal["way"], Literal["node"], Literal["relation"]]
+    type: Literal["way", "node", "relation"]
     ref: int
     role: str
 
@@ -28,4 +28,4 @@ class OsmRelation(OsmElementBase):
     members: list[RelationMember]
 
 
-OsmElement = Union[OsmNode, OsmWay, OsmRelation]
+OsmElement = OsmNode | OsmWay | OsmRelation

@@ -3,7 +3,6 @@
 import json
 
 import pytest
-
 from shapely.geometry import Polygon as ShapelyPolygon
 
 from mapsnap.compare_iiif_georef import (

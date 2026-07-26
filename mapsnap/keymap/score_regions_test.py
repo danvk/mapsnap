@@ -1,5 +1,8 @@
 from pathlib import Path
 
+from shapely.geometry import Polygon
+from shapely.geometry.base import BaseGeometry
+
 from mapsnap.keymap.score_regions import (
     default_truth_path,
     greedy_match,
@@ -7,8 +10,6 @@ from mapsnap.keymap.score_regions import (
     scale_to,
     score_regions,
 )
-from shapely.geometry import Polygon
-from shapely.geometry.base import BaseGeometry
 
 
 def square(x: float, y: float, size: float = 100.0) -> list[list[float]]:

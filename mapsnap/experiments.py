@@ -84,6 +84,7 @@ def git_head_info(cwd: Path) -> dict:
                 stdout=subprocess.PIPE,
                 stderr=subprocess.DEVNULL,
                 text=True,
+                check=False,
             )
         except FileNotFoundError:
             return None

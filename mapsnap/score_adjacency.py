@@ -156,7 +156,7 @@ def main() -> None:
     for path in (adjacency_path, truth_path):
         if not path.exists():
             sys.exit(f"Not found: {path}")
-    doc = json.load(open(adjacency_path))
+    doc = json.loads(adjacency_path.read_text())
     shapes = truth_shapes(truth_polygons_by_page(truth_path))
     if not shapes:
         sys.exit(f"No usable truth footprints in {truth_path}.")

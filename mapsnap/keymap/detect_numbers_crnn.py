@@ -21,14 +21,13 @@ import argparse
 import json
 import sys
 from collections import Counter
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import cast
 
 import numpy as np
 import torch
 from PIL import Image
-
 
 from mapsnap.keymap.crnn_model import (
     build_crnn,
@@ -339,7 +338,7 @@ def detect_and_read(
     doc = {
         "width": width,
         "height": height,
-        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "timestamp": datetime.now(UTC).isoformat(),
         "command": filter_args(sys.argv[:], image_path),
         "streets": detections,
     }

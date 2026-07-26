@@ -6,7 +6,7 @@ import math
 import multiprocessing
 import sys
 from collections.abc import Iterator
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -617,7 +617,7 @@ def detect_text(
         boxes_doc = {
             "width": orig_width,
             "height": orig_height,
-            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "timestamp": datetime.now(UTC).isoformat(),
             "command": filter_args(sys.argv[:], image_path),
             "boxes": angle_boxes,
         }
@@ -659,7 +659,7 @@ def detect_text(
     streets_doc = {
         "width": orig_width,
         "height": orig_height,
-        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "timestamp": datetime.now(UTC).isoformat(),
         "command": filter_args(sys.argv[:], image_path),
         "paper": paper,
         "streets": all_detections,
@@ -945,7 +945,7 @@ def main() -> None:
         args.centerlines = str(centerlines)
         print(f"Using centerlines: {args.centerlines}", file=sys.stderr)
 
-    geojson = json.load(open(args.centerlines))
+    geojson = json.loads(Path(args.centerlines).read_text())
     block_index = build_block_index(geojson)
     vocab_strings = generate_vocab_strings(set(block_index.keys()))
     print(

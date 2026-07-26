@@ -169,7 +169,7 @@ def frame_around(
     center_lonlat: tuple[float, float], *, half_m: float, res_m: float = OSM_RES_M
 ) -> FrameSpec:
     """A square FrameSpec of ±half_m metres about a lon/lat center."""
-    size = int(round(2 * half_m / res_m))
+    size = round(2 * half_m / res_m)
     return FrameSpec(
         origin=center_lonlat,
         x_min=-half_m,
@@ -209,7 +209,7 @@ def osm_rasters(
     skeleton = np.zeros((rows, cols), np.uint8)
     min_lon, max_lon, min_lat, max_lat = frame_bounds_lonlat(frame)
     kx, ky = frame.metre_scales()
-    thickness = max(2, int(round(width_m / frame.res_m)))
+    thickness = max(2, round(width_m / frame.res_m))
     for feature in features:
         geometry = feature.get("geometry") or {}
         if geometry.get("type") == "LineString":
@@ -649,7 +649,7 @@ def evaluate_pose(
         "inlier_frac": round(inlier_frac, 4),
         "chamfer_mean_m": round(chamfer_mean, 2),
         "ncc_fine": round(ncc_fine, 4),
-        "n_points": int(len(sampled)),
+        "n_points": len(sampled),
     }
     if ctx.label_features and ctx.block_index:
         name = name_alignment(ctx.label_features, ctx.block_index, world_affine)
@@ -690,7 +690,7 @@ def snap_page(
     half_m = ctx.radius_m + page_diag_m / 2 + 100.0
     points = skeleton_points(ctx.prob, params.mask_threshold, params.mask_min_area)
     sigma_px = max(params.blur_sigma_m / res, 0.5)
-    border_px = max(1, int(round(REFINE_SHIFT_MAX_M / res)))
+    border_px = max(1, round(REFINE_SHIFT_MAX_M / res))
     page_center = np.array([ctx.width / 2.0, ctx.height / 2.0, 1.0])
 
     collected: list[SnapCandidate] = []

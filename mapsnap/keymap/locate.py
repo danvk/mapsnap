@@ -8,6 +8,7 @@ dropping false matches (e.g. a second "Canal St" across town) and, for OCR, driv
 recognizer confidence on the correct names.
 """
 
+import itertools
 import json
 import math
 from dataclasses import dataclass, field
@@ -22,7 +23,7 @@ Point = tuple[float, float]
 M_PER_DEG_LAT = 110540.0
 M_PER_DEG_LON_EQUATOR = 111320.0
 
-__all__ = ["KeymapLocator", "page_number", "discover_keymaps", "resolve_keymaps"]
+__all__ = ["KeymapLocator", "discover_keymaps", "page_number", "resolve_keymaps"]
 
 
 def keymap_georef_path(keymap_json: Path) -> Path:
@@ -89,7 +90,7 @@ def load_regions(
     regions_path = keymap_regions_path(keymap_json)
     if not regions_path.exists():
         return {}
-    doc = json.load(open(regions_path))
+    doc = json.loads(regions_path.read_text())
     scale_x = width / doc["width"]
     scale_y = height / doc["height"]
     regions: dict[int, list[list[Point]]] = {}
@@ -152,13 +153,11 @@ def geometry_segments(geometry: dict) -> list[tuple[Point, Point]]:
     lines: list[list] = []
     if kind == "LineString":
         lines = [coords]
-    elif kind == "MultiLineString":
-        lines = list(coords)
-    elif kind == "Polygon":
+    elif kind in ("MultiLineString", "Polygon"):
         lines = list(coords)
     segments: list[tuple[Point, Point]] = []
     for line in lines:
-        for a, b in zip(line, line[1:]):
+        for a, b in itertools.pairwise(line):
             segments.append(((a[0], a[1]), (b[0], b[1])))
     return segments
 
@@ -259,7 +258,7 @@ class KeymapLocator:
         cls, keymap_json: Path, radius_m: float | None = None
     ) -> "KeymapLocator":
         """Build a locator from a ``<stem>.keymap.json`` and its sibling ``<stem>.georef.json``."""
-        doc = json.load(open(keymap_georef_path(keymap_json)))
+        doc = json.loads(keymap_georef_path(keymap_json).read_text())
         corners = [(float(c[0]), float(c[1])) for c in doc["corners"]]
         width, height = int(doc["width"]), int(doc["height"])
         locations: dict[int, list[Point]] = {}

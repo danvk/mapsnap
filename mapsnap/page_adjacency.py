@@ -29,7 +29,7 @@ import json
 import math
 import sys
 from collections import defaultdict
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 import numpy as np
@@ -513,7 +513,7 @@ def main() -> None:
 
     edges = mutual_edges(claims_by_page)
     doc = {
-        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "timestamp": datetime.now(UTC).isoformat(),
         "command": sys.argv[:],
         "edge_band": EDGE_BAND,
         "min_height": args.min_height,

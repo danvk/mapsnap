@@ -18,6 +18,7 @@ import argparse
 import json
 import sys
 from collections.abc import Sequence
+from pathlib import Path
 
 
 def point_in_polygon(
@@ -116,13 +117,13 @@ def score(detections: list[dict], labels: list[dict]) -> dict:
 
 def load_detections(path: str) -> list[dict]:
     """Load the detection list from a .streets.json file (wrapped object or bare list)."""
-    doc = json.load(open(path))
+    doc = json.loads(Path(path).read_text())
     return doc["streets"] if isinstance(doc, dict) else doc
 
 
 def load_labels(path: str) -> list[dict]:
     """Load the truth points from a .labels.json file (wrapped object or bare list)."""
-    doc = json.load(open(path))
+    doc = json.loads(Path(path).read_text())
     return doc["labels"] if isinstance(doc, dict) else doc
 
 

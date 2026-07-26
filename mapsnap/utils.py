@@ -6,9 +6,10 @@ import re
 import struct
 import subprocess
 import sys
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from types import FrameType
+from typing import Self
 
 FEET_PER_METER = 3.280839895
 # Earth radius shared across mapsnap. Kept equal to the 20,925,524 ft radius that compare's
@@ -32,7 +33,7 @@ def haversine_m(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
 def run_cmd(cmd: list[str]) -> None:
     """Print and run a subprocess command, exiting with its return code on failure."""
     print("+ " + " ".join(cmd), flush=True)
-    result = subprocess.run(cmd)
+    result = subprocess.run(cmd, check=False)
     if result.returncode != 0:
         sys.exit(result.returncode)
 
@@ -100,7 +101,7 @@ class _StepContext:
         self.saved_trace = sys.gettrace()
         self.frame: FrameType | None = None
 
-    def __enter__(self) -> "_StepContext":
+    def __enter__(self) -> Self:
         if not self.skip:
             return self
         print(f"+ [skip {self.name}: already completed]", flush=True)
@@ -135,7 +136,7 @@ def write_run_record(dir_path: Path, source: str, params: dict[str, str]) -> Non
     record = {
         "source": source,
         "command": [*sys.argv[0].split(), *sys.argv[1:]],
-        "created": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+        "created": datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ"),
         "params": params,
     }
     (dir_path / "mapsnap.json").write_text(json.dumps(record, indent=2))

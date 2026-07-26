@@ -20,8 +20,8 @@ from typing import TypedDict
 
 import cv2
 import numpy as np
-from PIL import Image, ImageDraw
 import shapely.affinity
+from PIL import Image, ImageDraw
 from shapely.geometry import LineString, Point, Polygon, box
 from shapely.ops import polygonize, unary_union
 from skimage.morphology import medial_axis
@@ -605,9 +605,8 @@ def ray_to_boundary(
         if t <= 0:
             continue
         ix, iy = x + t * dx, y + t * dy
-        if -1 <= ix <= w + 1 and -1 <= iy <= h + 1:
-            if best_t is None or t < best_t:
-                best_t = t
+        if (-1 <= ix <= w + 1 and -1 <= iy <= h + 1) and (best_t is None or t < best_t):
+            best_t = t
     if best_t is None or best_t * length > EXTEND_MAX_PX:
         return None
     return x + best_t * dx, y + best_t * dy
@@ -866,11 +865,10 @@ def segment_thickness(
     length = int(np.hypot(x1 - x0, y1 - y0))
     if length < 2:
         return 0.0
-    h, w = dist.shape
     widths = []
     for t in np.linspace(0.0, 1.0, length):
-        x = int(round(x0 + t * (x1 - x0)))
-        y = int(round(y0 + t * (y1 - y0)))
+        x = round(x0 + t * (x1 - x0))
+        y = round(y0 + t * (y1 - y0))
         window = dist[max(0, y - 4) : y + 5, max(0, x - 4) : x + 5]
         if window.size:
             widths.append(2.0 * float(window.max()))
@@ -990,7 +988,7 @@ def write_panels(image_path: Path, panels: list, base: str) -> list[Path]:
     for i, panel in enumerate(ordered, start=1):
         mask = np.zeros((h, w), dtype=np.uint8)
         ring = np.array(
-            [[int(round(x)), int(round(y))] for x, y in panel.exterior.coords],
+            [[round(x), round(y)] for x, y in panel.exterior.coords],
             dtype=np.int32,
         )
         cv2.fillPoly(mask, [ring], 255)
@@ -998,7 +996,7 @@ def write_panels(image_path: Path, panels: list, base: str) -> list[Path]:
         masked[mask == 0] = 255
         minx, miny, maxx, maxy = panel.bounds
         x0, y0 = max(0, int(minx)), max(0, int(miny))
-        x1, y1 = min(w, int(round(maxx))), min(h, int(round(maxy)))
+        x1, y1 = min(w, round(maxx)), min(h, round(maxy))
         out_path = image_path.parent / f"{base}__{i}.jpg"
         Image.fromarray(masked[y0:y1, x0:x1]).save(out_path, quality=92)
         out_paths.append(out_path)
