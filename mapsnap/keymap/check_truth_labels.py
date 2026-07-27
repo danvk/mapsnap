@@ -175,8 +175,10 @@ def format_report(report: VolumeReport) -> str:
     n_labels = sum(f.n_labels for f in report.files)
     lines = [
         report.volume.name,
-        f"  {len(report.files)} truth file(s), {n_labels} labels "
-        f"vs {report.n_sheets} page images",
+        (
+            f"  {len(report.files)} truth file(s), {n_labels} labels "
+            f"vs {report.n_sheets} page images"
+        ),
     ]
     for file_report in report.files:
         stem = file_report.labels_path.name.replace(".labels.json", "")
