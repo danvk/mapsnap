@@ -11,9 +11,11 @@ Both are consumed by `python -m mapsnap.keymap.detect_numbers_crnn` (and the loc
 
 ## Training data
 
-Both models train on the hand-labeled key maps in `data/keymaps/`: each `<stem>.jpg` paired with a `<stem>.labels.json` of point labels (`{image, width, height, labels: [{x, y, text}]}`) produced by the labeler tool (`app/`, `npm run keymap`). Mixed scan resolutions are handled automatically — `keymap_patches.working_scale` brings full scans (max side ≥ 4000 px) and already-25% scans to a common working size, so just point the trainers at the directory.
+Both models train on every hand-labeled key map under `data/**/raw/truth/*.labels.json` — the full-resolution sheet `<volume>/raw/<stem>.jpg` paired with the point labels the labeler tool writes (`app/`, keymap.html). Discovery is `keymap_patches.labelled_keymaps`, so nested volumes are found; mixed scan DPIs are normalised by `keymap_patches.working_scale` (a plain 1.0 or 0.25 when that lands near the 1950 px working long side, else scaled to it).
 
-One image is held out for validation via `--val-image` (default `chicago-p0b`) so the reported metric reflects generalization to an unseen scan.
+One key map is held out via `--val-image` (a `<volume>/<stem>` key; bare stems are ambiguous — ten volumes have a `p0`) for validation and best-checkpoint selection. `--exclude` removes whole volumes from training entirely, for leave-one-volume-out evaluation without letting the held-out volume drive checkpoint selection.
+
+The current weights (2026-07-27) were trained on 25 key maps / ~1,610 labels (detector: 6,440 patches; CRNN: 2,412 strips) with `--val-image hudson_co_nj_1950_vol_9/p0`; CRNN val exact-match 0.986, detector val AP ≈ 0.99. Leave-one-volume-out spot checks: held-out asheville reads 18% → 49% exact vs the previous weights; localizer recall on held-out asheville 60% → 91%.
 
 ## Retraining
 
@@ -22,18 +24,18 @@ Run both from the repo root. Each writes its `.pt` to `models/` (override with `
 ### 1. Localizer → `number_detector.pt`
 
 ```sh
-uv run python -m mapsnap.keymap.train_number_detector --val-image chicago-p0b
+uv run python -m mapsnap.keymap.train_number_detector --val-image hudson_co_nj_1950_vol_9/p0
 ```
 
-Fine-tunes a pretrained MobileNetV3-small on positive (label-centered) vs negative (sampled-away) patches; saves the best weights by validation average precision. Defaults: `--epochs 20`, `--batch-size 64`, `--lr 3e-4`, `--data-dir data/keymaps`. Runs on the GPU (`select_device()` prefers MPS, then CUDA, then CPU).
+Fine-tunes a pretrained MobileNetV3-small on positive (label-centered) vs negative (sampled-away) patches; saves the best weights by validation average precision. Defaults: `--epochs 20`, `--batch-size 64`, `--lr 3e-4`, `--data-dir data`. Runs on the GPU (`select_device()` prefers MPS, then CUDA, then CPU).
 
 ### 2. Recognizer → `number_crnn.pt`
 
 ```sh
-uv run python -m mapsnap.keymap.train_crnn --val-image chicago-p0b --epochs 250
+uv run python -m mapsnap.keymap.train_crnn --val-image hudson_co_nj_1950_vol_9/p0 --epochs 250
 ```
 
-Crops a fixed strip around each labeled number (plus empty-target "no-number" negatives so the model learns to reject the localizer's false positives) and trains the CRNN with CTC, saving the best weights by exact-match accuracy. Defaults: `--epochs 40`, `--batch-size 64`, `--lr 1e-3`, `--negative-ratio 0.5`, `--seed 0`, `--data-dir data/keymaps`.
+Crops a fixed strip around each labeled number (plus empty-target "no-number" negatives so the model learns to reject the localizer's false positives) and trains the CRNN with CTC, saving the best weights by exact-match accuracy. Defaults: `--epochs 40`, `--batch-size 64`, `--lr 1e-3`, `--negative-ratio 0.5`, `--seed 0`, `--data-dir data`.
 
 Two things to know:
 
@@ -45,11 +47,11 @@ Two things to know:
 Regenerate detections on the held-out page and score against its labels:
 
 ```sh
-uv run python -m mapsnap.keymap.detect_numbers_crnn --pages 1-112 data/keymaps/chicago-p0b.jpg
+uv run python -m mapsnap.keymap.detect_numbers_crnn --pages 1-112 data/chicago_il_1950_vol_1/raw/p0.jpg
 uv run python -m mapsnap.keymap.score_keymap_labels \
-    data/keymaps/chicago-p0b.keymap.json data/keymaps/chicago-p0b.labels.json
+    data/chicago_il_1950_vol_1/raw/p0.keymap.json data/chicago_il_1950_vol_1/raw/truth/p0.labels.json
 ```
 
 ## Note on these binaries
 
-`data/` is gitignored, so these weights live here (outside it) to ship with the repo and keep the pipeline runnable on a fresh clone. They are regenerable from `data/keymaps/` with the commands above; if the history bloat becomes a concern, move them to Git LFS or a release asset.
+`data/` is gitignored, so these weights live here (outside it) to ship with the repo and keep the pipeline runnable on a fresh clone. They are regenerable from the truth data with the commands above; if the history bloat becomes a concern, move them to Git LFS or a release asset.
