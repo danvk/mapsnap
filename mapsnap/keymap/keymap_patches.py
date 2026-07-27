@@ -19,21 +19,44 @@ import numpy as np
 # PATCH_SIZE window captures the number plus its block context.
 SCALE = 0.25
 
-# A scan whose larger side is below this is assumed to already be at SCALE (25%); a
-# larger one is full resolution and must be downscaled by SCALE to reach working res.
-FULL_SCALE_THRESHOLD = 4000
+# Working long side the models are trained at. Every key map in the dev corpus lands
+# in 1831-2106 px under the plain SCALE rule, so a number is ~40px across all of them.
+TARGET_LONG_SIDE = 1950
+
+# How far off TARGET_LONG_SIDE a plain SCALE (or 1.0) may land and still be used as-is.
+# The band spans 1658-2243 px, comfortably covering the corpus's own spread.
+LONG_SIDE_TOLERANCE = 0.15
 
 
 def working_scale(
-    width: int, height: int, *, full_threshold: int = FULL_SCALE_THRESHOLD
+    width: int,
+    height: int,
+    *,
+    target_long_side: int = TARGET_LONG_SIDE,
+    tolerance: float = LONG_SIDE_TOLERANCE,
 ) -> float:
     """Factor to bring an image (and its label coords) to working resolution.
 
-    Returns SCALE for a full-resolution scan (larger side >= full_threshold) and 1.0 for
-    one already downscaled to ~25%, so both reach the same ~40px-per-number working size.
+    Page numbers are only legible to the models at the size they were trained on, so
+    what matters is the WORKING long side, not the scan's own resolution. A plain 1.0
+    (already downscaled) or SCALE (full-resolution scan) is preferred when it lands
+    near ``target_long_side`` — that is every scan in the dev corpus, and resampling
+    them would be pointless churn. A scan at an unexpected DPI, where neither lands in
+    the band, is normalised to ``target_long_side`` instead: Asheville's 4400x5400 key
+    map is only 1350px at SCALE, which put its numbers at ~28px and left them unread.
+
     Label coordinates live in the image's own pixel space, so the same factor applies.
     """
-    return SCALE if max(width, height) >= full_threshold else 1.0
+    long_side = max(width, height)
+    if long_side <= 0:
+        return 1.0
+    for candidate in (1.0, SCALE):  # prefer not resampling at all
+        if (
+            abs(long_side * candidate - target_long_side)
+            <= tolerance * target_long_side
+        ):
+            return candidate
+    return target_long_side / long_side
 
 
 # Side length (px, at SCALE) of the square patches fed to the CNN.

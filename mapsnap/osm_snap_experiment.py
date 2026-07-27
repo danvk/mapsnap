@@ -394,7 +394,16 @@ def georef_variant_mtime(volume: Path, stem: str) -> int | None:
 
 
 def candidates_record_fresh(record: dict, unit: PageUnit, mtime: int | None) -> bool:
-    """Whether a cached candidates record still matches the page's fit state."""
+    """Whether a cached candidates record still matches the page's fit state.
+
+    Only a successful record is ever fresh. A failure ('no_prob', 'no_keymap')
+    turns on inputs this check does not track — the P(road) cache and the key
+    map's own sidecars — so caching one would pin the page behind a stale
+    failure even after the input is fixed. Recomputing a failure is cheap: it
+    fails at the same gate before any matching work.
+    """
+    if record.get("status") != "ok":
+        return False
     return (
         record.get("fit_state") == unit.fit_state
         and record.get("georef_mtime") == mtime
@@ -835,12 +844,16 @@ def cmd_candidates(
         targets = [u for u in targets if u.stem in wanted]
     if limit is not None:
         targets = targets[:limit]
+    # Every target needs a P(road) map, whole pages included. (This once
+    # inferred only "__" panels, on the assumption that whole-page maps already
+    # existed from an edge-join `infer` run — true of the dev volumes, false of
+    # any new volume, which then had every whole page rejected as 'no_prob'.)
     ensure_probs(
         volume,
         [
             u.stem
             for u in targets
-            if "__" in u.stem and (u.stem not in existing or recompute or pages)
+            if load_prob(volume, u.stem) is None or recompute or pages
         ],
     )
 
