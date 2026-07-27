@@ -487,7 +487,7 @@ def coverage_report(
         "targets_reachable": len(reachable_targets),
         "hop_histogram": {
             h: sum(1 for t in reachable_targets if hops[t] == h)
-            for h in sorted(set(hops[t] for t in reachable_targets))
+            for h in sorted({hops[t] for t in reachable_targets})
         }
         if reachable_targets
         else {},
@@ -765,7 +765,7 @@ def cmd_sanity(volume: Path, limit: int | None) -> None:
                 "mean_p_a": round(float(wa[both].mean()), 3),
                 "mean_p_b": round(float(wb[both].mean()), 3),
                 "strip_skeleton_px": int(skel.sum()),
-                "strip_junctions": int(len(junctions)),
+                "strip_junctions": len(junctions),
             }
         )
         # Contact sheet: red = A, green = B, strip region brightened.

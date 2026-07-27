@@ -722,7 +722,13 @@ def compare_pages(
         # A generated annotation with no split index displays the whole canvas.
         canvas_polygon = box(0.0, 0.0, source_dims[0], source_dims[1])
 
-        def generated_region(gen: dict) -> ShapelyPolygon | None:
+        def generated_region(
+            gen: dict,
+            gen_polygons: dict[int, ShapelyPolygon] = gen_polygons,
+            canvas_polygon: ShapelyPolygon = canvas_polygon,
+        ) -> ShapelyPolygon | None:
+            # The polygons are bound as defaults rather than captured: this page's
+            # values must not be re-read on a later loop iteration.
             gen_index = annotation_split_index(gen)
             if gen_index is not None:
                 return gen_polygons.get(gen_index)

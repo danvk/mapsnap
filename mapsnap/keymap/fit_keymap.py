@@ -159,7 +159,7 @@ def load_georef_pages(volume: Path) -> tuple[list[GeorefPage], Point]:
         number = page_number(stem)
         if number is None or stem in dead:
             continue
-        corners = json.load(open(path))["corners"]
+        corners = json.loads(path.read_text())["corners"]
         by_number.setdefault(number, []).append((stem, corners))
 
     all_corners = [c for pieces in by_number.values() for _, cs in pieces for c in cs]
@@ -182,7 +182,7 @@ def load_georef_pages(volume: Path) -> tuple[list[GeorefPage], Point]:
 
 def load_detections(keymap_path: Path) -> list[Detection]:
     """Load key-map page-number detections (numeric text only) with pixel centroids."""
-    streets = json.load(open(keymap_path))["streets"]
+    streets = json.loads(keymap_path.read_text())["streets"]
     detections: list[Detection] = []
     for street in streets:
         text = str(street["text"])

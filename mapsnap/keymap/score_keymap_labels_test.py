@@ -42,7 +42,7 @@ def test_match_is_one_to_one_highest_confidence_first():
     labels = [{"x": 5, "y": 5, "text": "high"}]
     matches = match_detections(dets, labels)
     assert len(matches) == 1
-    di, li = matches[0]
+    di, _li = matches[0]
     assert dets[di]["text"] == "high"
 
 

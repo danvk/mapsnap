@@ -201,7 +201,7 @@ def test_merge_cluster_families_merges_interleaved_mottle():
     labels = np.full((100, 100), 3, dtype=np.int32)
     rows, cols = np.mgrid[0:40, 0:40]
     labels[10:50, 10:50] = np.where((rows + cols) % 2 == 0, 0, 1)  # interleaved phases
-    merged, new_background, count = merge_cluster_families(
+    merged, _new_background, count = merge_cluster_families(
         labels, background, centers, RegionParams()
     )
     assert count == 3  # rose family + yellow + paper
@@ -213,7 +213,7 @@ def test_merge_cluster_families_keeps_bordering_light_dark_fills():
     labels = np.full((100, 100), 3, dtype=np.int32)
     labels[10:90, 10:50] = 0  # light rose block
     labels[10:90, 50:90] = 1  # dark rose block, touching along one border
-    merged, new_background, count = merge_cluster_families(
+    merged, _new_background, _count = merge_cluster_families(
         labels, background, centers, RegionParams()
     )
     assert merged[50, 30] != merged[50, 70]  # contact too low -> stay distinct
@@ -228,7 +228,7 @@ def test_merge_cluster_families_excludes_ink():
     labels[10:50, 10:50] = np.where(
         (rows + cols) % 2 == 0, 0, 1
     )  # tint + ink interleaved
-    merged, _, count = merge_cluster_families(labels, {2}, centers, RegionParams())
+    merged, _, _count = merge_cluster_families(labels, {2}, centers, RegionParams())
     assert merged[10, 10] != merged[10, 11]  # ink stays its own cluster
 
 
@@ -237,7 +237,7 @@ def test_merge_cluster_families_never_merges_across_hue():
     labels = np.full((100, 100), 3, dtype=np.int32)
     rows, cols = np.mgrid[0:40, 0:40]
     labels[10:50, 10:50] = np.where((rows + cols) % 2 == 0, 0, 2)  # rose + yellow mix
-    merged, new_background, count = merge_cluster_families(
+    merged, _new_background, _count = merge_cluster_families(
         labels, background, centers, RegionParams()
     )
     assert merged[10, 10] != merged[10, 11]  # different hue: not a family

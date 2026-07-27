@@ -18,7 +18,7 @@ import argparse
 import json
 import sys
 from collections.abc import Sequence
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import cast
 
@@ -213,7 +213,7 @@ def write_cnn_debug(
     doc = {
         "width": width,
         "height": height,
-        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "timestamp": datetime.now(UTC).isoformat(),
         "command": filter_args(sys.argv[:], image_path),
         "streets": detections,
     }

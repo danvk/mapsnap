@@ -82,7 +82,7 @@ def truth_footprints(iiif_path: Path) -> list[tuple[str, list[list[float]]]]:
 
     Splits are separate annotations and so yield separate footprints.
     """
-    data = json.load(open(iiif_path))
+    data = json.loads(iiif_path.read_text())
     items = data["items"] if isinstance(data, dict) and "items" in data else data
     footprints: list[tuple[str, list[list[float]]]] = []
     for item in items:

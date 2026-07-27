@@ -11,12 +11,12 @@ from mapsnap.detect_text import (
     _merge_vocab_passes,
     _nms_bboxes,
     annotate_backgrounds,
-    lab_to_hex,
-    page_lab,
-    region_color,
     filter_args,
     has_split_panels,
+    lab_to_hex,
+    page_lab,
     page_vocabs,
+    region_color,
 )
 from mapsnap.keymap.locate import KeymapLocator
 from mapsnap.streets import (

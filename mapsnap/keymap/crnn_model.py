@@ -268,7 +268,7 @@ def locate_number(
     sx_hi = (last_t + 1) * cell
 
     col0 = max(0, int(sx_lo))
-    col1 = min(width, int(round(sx_hi)))
+    col1 = min(width, round(sx_hi))
     sub = strip[:, col0:col1] if col1 > col0 else strip
     _, ink = cv2.threshold(sub, 0, 255, cv2.THRESH_BINARY_INV | cv2.THRESH_OTSU)
     center = ink_row_center(ink.sum(axis=1) / 255)

@@ -44,7 +44,7 @@ def test_footprint_on_other_keymap_is_dropped():
 def test_footprint_mostly_inside_is_kept_mostly_outside_dropped():
     # 80% of the area inside the left edge: kept. Only 20% inside: dropped.
     truth = {7: [world_square(-0.02, 0.4)], 8: [world_square(-0.08, 0.4)]}
-    polygons, labels = project_truth_regions(GEOREF, truth)
+    _polygons, labels = project_truth_regions(GEOREF, truth)
     assert labels == ["7"]
 
 

@@ -213,7 +213,9 @@ def attach_missing_truth(volume: Path, units: list[PageUnit]) -> int:
             )
             panels = load_split_polygons(panels_path) if panels_path else {}
 
-            def panel_area(split_item: dict) -> float:
+            # `panels` is bound as a default rather than captured, so this
+            # page's polygons cannot be re-read on a later loop iteration.
+            def panel_area(split_item: dict, panels: dict = panels) -> float:
                 index = label_split_index(split_item)
                 polygon = panels.get(index) if index is not None else None
                 return polygon.area if polygon is not None else 0.0
@@ -1775,8 +1777,10 @@ def append_snap_logs(
         choice = by_target.get(stem)
         lines = [
             SNAP_LOG_BEGIN,
-            f"mode: {mode}   status: {record['status']}   "
-            f"fit_state: {record['fit_state']}",
+            (
+                f"mode: {mode}   status: {record['status']}   "
+                f"fit_state: {record['fit_state']}"
+            ),
         ]
         priors = record.get("priors", {}).get("rotation", [])
         if priors:
@@ -2248,7 +2252,11 @@ def select_volume(
         for choices in choices_per_stem:
             size *= len(choices)
 
-        def total_energy(assign: dict[str, int | None]) -> float:
+        # `component` is bound as a default rather than captured: every caller
+        # below scores THIS component, and a later iteration must not rebind it.
+        def total_energy(
+            assign: dict[str, int | None], component: list[str] = component
+        ) -> float:
             energy = sum(unary(s, assign[s]) for s in component)
             for i, sa in enumerate(component):
                 for sb in component[i + 1 :]:

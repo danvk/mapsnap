@@ -274,7 +274,7 @@ def chamfer_refine(
         return pose.copy(), {
             "chamfer_mean_m": math.inf,
             "inlier_frac": 0.0,
-            "n_points": int(len(points_page)),
+            "n_points": len(points_page),
             "jtj_min_eig": 0.0,
             "jtj_eig_ratio": 0.0,
             "scale_adjust": 1.0,
@@ -345,7 +345,7 @@ def chamfer_refine(
     diagnostics = {
         "chamfer_mean_m": float(final.mean()),
         "inlier_frac": float(inliers.mean()),
-        "n_points": int(len(final)),
+        "n_points": len(final),
         "jtj_min_eig": float(eigenvalues[0]),
         "jtj_eig_ratio": float(eigenvalues[0] / max(eigenvalues[-1], 1e-12)),
         "scale_adjust": float(math.exp(result.x[3])) if solve_scale else 1.0,

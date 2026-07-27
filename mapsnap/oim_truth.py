@@ -25,7 +25,6 @@ from PIL import Image
 from mapsnap.split import PanelsJson, panels_json_path
 from mapsnap.utils import label_to_page_key
 
-
 WHITE_THRESHOLD = 250  # pixels at or above this are masked-out (not part of the panel)
 CLOSE_KERNEL_PX = 25  # close small holes/noise in the panel mask before contouring
 APPROX_EPS_FRAC = 0.003  # Douglas-Peucker tolerance as a fraction of contour perimeter

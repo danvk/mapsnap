@@ -55,7 +55,7 @@ def volume_pages(volume: Path, min_effective_gcps: int) -> list[tuple[Path, dict
         image = volume / f"{stem}.jpg"
         if not image.exists():
             continue
-        georef = json.load(open(path))
+        georef = json.loads(path.read_text())
         if effective_gcp_count(georef) < min_effective_gcps:
             continue
         pages.append((image, georef))
@@ -232,7 +232,7 @@ def main() -> None:
 
     train_set: list[tuple[Path, dict, list[dict]]] = []
     for volume in args.volumes:
-        features = json.load(open(volume / "centerlines.geojson"))["features"]
+        features = json.loads((volume / "centerlines.geojson").read_text())["features"]
         pages = volume_pages(volume, args.min_effective_gcps)
         if args.limit_pages:
             pages = pages[: args.limit_pages]
@@ -240,7 +240,9 @@ def main() -> None:
         print(f"  {volume.name}: {len(pages)} pages", file=sys.stderr)
     print(f"training pages: {len(train_set)}", file=sys.stderr)
 
-    val_features = json.load(open(args.val / "centerlines.geojson"))["features"]
+    val_features = json.loads((args.val / "centerlines.geojson").read_text())[
+        "features"
+    ]
     all_val_pages = volume_pages(args.val, args.min_effective_gcps)
     val_pages_meta = all_val_pages[:: max(1, len(all_val_pages) // args.val_pages)]
     val_pages = []

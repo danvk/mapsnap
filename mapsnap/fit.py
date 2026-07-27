@@ -160,7 +160,7 @@ def main() -> None:
     if truth.exists():
         cmd = ["mapsnap", "compare", str(truth), str(output_iiif)]
         print("+ " + " ".join(cmd), flush=True)
-        result = subprocess.run(cmd, stdout=subprocess.PIPE, text=True)
+        result = subprocess.run(cmd, stdout=subprocess.PIPE, text=True, check=False)
         sys.stdout.write(result.stdout)
         compare_txt = dir_path / f"{run_id}.txt"
         compare_txt.write_text(result.stdout)

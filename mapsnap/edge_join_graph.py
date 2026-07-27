@@ -265,7 +265,7 @@ def solve_pose_graph(
     final = residuals(result.x)
     diagnostics = {
         "cost": float(result.cost),
-        "n_residuals": int(len(final)),
+        "n_residuals": len(final),
         "rms_normalized": float(np.sqrt((final**2).mean())),
         "nfev": int(result.nfev),
     }

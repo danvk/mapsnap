@@ -52,7 +52,7 @@ def should_drop(tags: dict[str, str]) -> bool:
 
 def osm_to_centerlines(osm_json: str) -> dict:
     """Convert an OSM JSON dump to a GeoJSON FeatureCollection of street centerlines."""
-    data = json.load(open(osm_json))
+    data = json.loads(Path(osm_json).read_text())
     elements = data["elements"]
 
     id_to_node = {el["id"]: el for el in elements if el["type"] == "node"}

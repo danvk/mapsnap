@@ -108,7 +108,7 @@ def main() -> None:
     if not keymaps:
         sys.exit(f"No georeferenced key map found for {args.volume}.")
     for keymap in keymaps:
-        georef = json.load(open(keymap_georef_path(keymap)))
+        georef = json.loads(keymap_georef_path(keymap).read_text())
         polygons, labels = project_truth_regions(georef, truth_by_page)
         image_name = keymap_image_path(keymap).name
         doc = regions_panels_doc(

@@ -770,7 +770,7 @@ def _dedupe_crossings_by_pixel(
     each cluster. Coincident crossings from genuine duplicate labels become one GCP; crossings
     more than ``tol_px`` apart survive as separate GCPs for RANSAC to choose between.
     """
-    clusters: list[list["IntersectionGCP"]] = []
+    clusters: list[list[IntersectionGCP]] = []
     for candidate in candidates:
         for cluster in clusters:
             if any(
@@ -1705,7 +1705,7 @@ def promote_avenue_letters(
 
     for hint in type_hints:
         hint_dir = hint.get("dir_pix", 0.0)
-        hint_bucket = int(round(hint_dir / bucket_size)) % 12
+        hint_bucket = round(hint_dir / bucket_size) % 12
         cos_d = math.cos(hint_dir)
         sin_d = math.sin(hint_dir)
 
@@ -1722,7 +1722,7 @@ def promote_avenue_letters(
                 continue
 
             det_dir = det.get("dir_pix", 0.0)
-            det_bucket = int(round(det_dir / bucket_size)) % 12
+            det_bucket = round(det_dir / bucket_size) % 12
             if det_bucket != hint_bucket:
                 continue
 
@@ -1885,7 +1885,7 @@ def assemble_multiword_streets(
         if i in used:
             continue
         a_dir = a.get("dir_pix", 0.0)
-        a_bucket = int(round(a_dir / bucket_size)) % 12
+        a_bucket = round(a_dir / bucket_size) % 12
         cos_d, sin_d = math.cos(a_dir), math.sin(a_dir)
         a_cx, a_cy = center(a["polygon"])
         a_perp = -a_cx * sin_d + a_cy * cos_d
@@ -1894,7 +1894,7 @@ def assemble_multiword_streets(
             if j == i or j in used:
                 continue
             b_dir = b.get("dir_pix", 0.0)
-            if int(round(b_dir / bucket_size)) % 12 != a_bucket:
+            if round(b_dir / bucket_size) % 12 != a_bucket:
                 continue
             angle_a, angle_b = a.get("angle"), b.get("angle")
             if angle_a is not None and angle_b is not None and angle_a != angle_b:
@@ -1996,7 +1996,7 @@ def derive_paths(image_path: str) -> tuple[str, str, str]:
 
 def load_detections(labels_path: str) -> list[dict]:
     """Load cached label detections from a <stem>.streets.json file."""
-    labels_raw = json.load(open(labels_path))
+    labels_raw = json.loads(Path(labels_path).read_text())
     if isinstance(labels_raw, dict):
         return labels_raw.get(
             "streets", labels_raw.get("detections", labels_raw.get("accepted", []))
@@ -2525,7 +2525,7 @@ def drop_collinear_dominated(
         dir_pix = float(det.get("dir_pix", 0.0))
         info.append(
             (
-                int(round(dir_pix / bucket_size)) % 12,
+                round(dir_pix / bucket_size) % 12,
                 -cx * math.sin(dir_pix) + cy * math.cos(dir_pix),
                 float(det.get("short_side", 0.0)),
                 float(det.get("confidence", 0.0)),
@@ -3508,7 +3508,7 @@ def main() -> None:
             )
         force_intersection = (int(parts[0]), int(parts[1]))
 
-    geojson: dict = json.load(open(args.centerlines))
+    geojson: dict = json.loads(Path(args.centerlines).read_text())
     block_index = build_block_index(geojson)
     cos_phi = compute_cos_phi(block_index)
     n_blocks = sum(len(v) for v in block_index.values())

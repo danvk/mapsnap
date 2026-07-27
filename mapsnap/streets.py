@@ -6,7 +6,8 @@ detect_text.py and georef_from_labels.py to build a centerlines index.
 
 import re
 from collections import defaultdict
-from dataclasses import dataclass, field as dataclass_field
+from dataclasses import dataclass
+from dataclasses import field as dataclass_field
 
 import numpy as np
 
@@ -472,9 +473,7 @@ def canonical_street_matches(
         prefix_len = len(normalized) + 1
         matches = []
         for s in normalized_streets:
-            if s == normalized:
-                matches.append(s)
-            elif (
+            if s == normalized or (
                 s.startswith(normalized + " ")
                 and s[prefix_len:].split(" ", 1)[0] in STREET_TYPES
             ):

@@ -132,7 +132,10 @@ def _load_page_color_data(
             scale_x=work_w / georef_w,
             scale_y=work_h / georef_h,
         )
-    except Exception:
+    except Exception:  # noqa: BLE001 — best-effort: any failure means "no colour data"
+        # The colour pass is an optional refinement (the caller counts how many
+        # pages loaded), and it can fail in many ways — unreadable JPEG, missing
+        # georef key, degenerate affine. None of them should abort a run.
         return None
 
 
@@ -277,9 +280,7 @@ def _is_substantial(
     ref_w, ref_h = rx_max - rx_min, ry_max - ry_min
     if ref_w > 0 and (px_max - px_min) < ref_w * min_fraction:
         return False
-    if ref_h > 0 and (py_max - py_min) < ref_h * min_fraction:
-        return False
-    return True
+    return not (ref_h > 0 and py_max - py_min < ref_h * min_fraction)
 
 
 def _remove_spike_vertices(polygon: Polygon, min_turn_deg: float = 170.0) -> Polygon:
@@ -895,7 +896,10 @@ def geo_polygon_to_svg(
         return fallback_rect()
 
     if isinstance(geo_polygon, MultiPolygon):
-        raise ValueError(
+        # ValueError, not TypeError: make_iiif_georef catches ValueError to skip
+        # the offending page with a warning, so narrowing this to the "correct"
+        # exception type would turn a skipped page into a failed run.
+        raise ValueError(  # noqa: TRY004
             "geo_polygon_to_svg received a MultiPolygon; only Polygon is supported."
         )
 

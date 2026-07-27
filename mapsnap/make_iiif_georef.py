@@ -29,7 +29,7 @@ import glob
 import json
 import re
 import sys
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 import numpy as np
@@ -261,8 +261,8 @@ def _load_loc_index(data: dict) -> dict[str, dict]:
         # Resource URL contains e.g. "/full/pct:25/0/default.jpg"; scale up to full res.
         pct_m = re.search(r"/pct:(\d+)/", resource.get("@id", ""))
         scale = 100.0 / int(pct_m.group(1)) if pct_m else 1.0
-        source_width = int(round(resource["width"] * scale))
-        source_height = int(round(resource["height"] * scale))
+        source_width = round(resource["width"] * scale)
+        source_height = round(resource["height"] * scale)
 
         index[page_key] = {
             "label": f"{manifest_label} | {canvas_label}",
@@ -287,9 +287,7 @@ def _georef_metadata(
     split_canvas, when present, gives the sub-image region within the full canvas as
     (x, y, w, h) in canvas pixel coordinates, derived from the panel polygon.
     """
-    n_streets = len(
-        set(s["street"] for s in georef.get("streets", []) if s.get("inlier"))
-    )
+    n_streets = len({s["street"] for s in georef.get("streets", []) if s.get("inlier")})
     n_intersections = sum(1 for i in georef.get("intersections", []) if i.get("inlier"))
     entries: list[dict] = [
         {"label": "streets", "value": str(n_streets)},
@@ -582,7 +580,7 @@ def _load_s3_items(
                 }
             },
         }
-        georef = json.load(open(path))
+        georef = json.loads(Path(path).read_text())
         valid_items.append((page_key, canvas_item, georef, image_path, Path(path)))
 
     valid_items = drop_redundant_skeletons(valid_items)
@@ -608,7 +606,7 @@ def _load_volume_items(
     Returns (valid_items, result_id, label) where valid_items is a list of
     (page_key, canvas_item, georef, raw_path, georef_path) tuples ready for annotation building.
     """
-    source_data: dict = json.load(open(iiif_path))
+    source_data: dict = json.loads(Path(iiif_path).read_text())
 
     georef_paths = expand_georef_globs(georef_glob_pattern)
     if not georef_paths:
@@ -648,7 +646,7 @@ def _load_volume_items(
                 file=sys.stderr,
             )
             continue
-        georef = json.load(open(path))
+        georef = json.loads(Path(path).read_text())
         image_path = Path(path).parent / f"{page_key}.jpg"
         valid_items.append((page_key, canvas_item, georef, image_path, Path(path)))
 
@@ -740,7 +738,7 @@ def main() -> None:
     )
     args = parser.parse_args()
 
-    now = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    now = datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
 
     all_valid_items: list[tuple[str, dict, dict, Path, Path]] = []
     result_id = ""

@@ -42,6 +42,7 @@ a parallelogram's corners reproduces the affine. This most helps the anisotropic
 import argparse
 import contextlib
 import io
+import itertools
 import json
 import math
 import sys
@@ -52,10 +53,10 @@ import cv2
 import numpy as np
 from PIL import Image, ImageDraw
 from scipy.optimize import least_squares
+from shapely.geometry import Point as ShapelyPoint
+from shapely.geometry import Polygon
 from shapely.geometry.base import BaseGeometry
-from shapely.geometry import Point as ShapelyPoint, Polygon
 from shapely.ops import unary_union
-
 
 from mapsnap.compare_iiif_georef import (
     annotation_transform_type,
@@ -66,7 +67,6 @@ from mapsnap.compare_iiif_georef import (
     truth_polygons_by_page,
 )
 from mapsnap.georef_from_labels import LabelFeature, prepare_label_features
-from mapsnap.utils import FEET_PER_METER, haversine_m
 from mapsnap.keymap.fit_keymap import (
     project,
     similarity_apply,
@@ -81,6 +81,7 @@ from mapsnap.keymap.locate import (
 )
 from mapsnap.keymap.page_regions import clean_cluster_mask
 from mapsnap.streets import Block, build_block_index
+from mapsnap.utils import FEET_PER_METER, haversine_m
 
 Point = tuple[float, float]
 Model = tuple[
@@ -603,7 +604,7 @@ def street_soup_metres(
             project(float(lon), float(lat), origin[0], origin[1])
             for lon, lat in block.coords
         ]
-        for first, second in zip(coordinates, coordinates[1:]):
+        for first, second in itertools.pairwise(coordinates):
             starts.append([first[0], first[1]])
             ends.append([second[0], second[1]])
     if not starts:

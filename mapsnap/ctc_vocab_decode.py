@@ -202,7 +202,7 @@ def generate_vocab_strings(normalized_streets: set[str]) -> list[str]:
 
 @dataclass
 class TrieNode:
-    children: dict[str, "TrieNode"] = field(default_factory=dict)
+    children: dict[str, TrieNode] = field(default_factory=dict)
     is_end: bool = False
 
 

@@ -120,9 +120,9 @@ def score_regions(truth_doc: dict, predicted_doc: dict) -> RegionScore:
             if i not in matched_truths:
                 score.ious.append((label, 0.0))
         score.spurious += len(predictions) - len(matched)
-    for label in predicted_by_label:
+    for label, predicted in predicted_by_label.items():
         if label not in truth_by_label:
-            score.spurious += len(predicted_by_label[label])
+            score.spurious += len(predicted)
 
     polygons = [polygon for _, polygon in predicted_panels]
     total = sum(polygon.area for polygon in polygons)
@@ -164,8 +164,8 @@ def main() -> None:
         )
     if not truth_path.exists():
         sys.exit(f"Not found: {truth_path} (run mapsnap.keymap.truth_regions first).")
-    truth_doc = json.load(open(truth_path))
-    predicted_doc = json.load(open(args.regions))
+    truth_doc = json.loads(truth_path.read_text())
+    predicted_doc = json.loads(args.regions.read_text())
     scale_to(truth_doc, predicted_doc)
     score = score_regions(truth_doc, predicted_doc)
 

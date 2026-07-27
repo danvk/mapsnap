@@ -82,7 +82,7 @@ def crop_excludes_numbers(
 
 def load_label_points(path: str) -> tuple[int, int, list[tuple[float, float, str]]]:
     """Read a .labels.json file; return (width, height, [(x, y, text), ...])."""
-    doc = json.load(open(path))
+    doc = json.loads(Path(path).read_text())
     labels = doc["labels"] if isinstance(doc, dict) else doc
     points = [
         (float(label["x"]), float(label["y"]), str(label["text"])) for label in labels

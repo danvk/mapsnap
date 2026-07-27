@@ -204,9 +204,8 @@ def test_step_force_reruns_completed(tmp_path: Path):
 
 def test_step_leaves_no_stamp_when_body_raises(tmp_path: Path):
     step = Step(tmp_path)
-    with pytest.raises(ValueError):
-        with step("osm"):
-            raise ValueError("boom")
+    with pytest.raises(ValueError), step("osm"):
+        raise ValueError("boom")
     assert not step_done(tmp_path, "osm")  # interrupted step re-runs next time
 
 
