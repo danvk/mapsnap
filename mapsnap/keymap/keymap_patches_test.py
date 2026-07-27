@@ -1,6 +1,7 @@
 import numpy as np
 
 from mapsnap.keymap.keymap_patches import (
+    TARGET_LONG_SIDE,
     build_image_patches,
     crop_excludes_numbers,
     crop_patch,
@@ -25,11 +26,28 @@ def test_crop_excludes_numbers():
     )
 
 
-def test_working_scale_full_vs_quarter():
-    assert working_scale(5866, 7323) == 0.25  # full-res scan
-    assert working_scale(1446, 2038) == 1.0  # already 25%
-    assert working_scale(3999, 3999) == 1.0  # both sides below threshold
-    assert working_scale(4000, 100) == 0.25  # one side at threshold
+def test_working_scale_prefers_plain_factors_in_band():
+    # Every dev-corpus key map: SCALE lands near the target, so use it as-is.
+    assert working_scale(5866, 7323) == 0.25  # chicago, working 1831
+    assert working_scale(6091, 8422) == 0.25  # washington dc, working 2106
+    # Already downscaled to ~25%: no resampling at all.
+    assert working_scale(1446, 2038) == 1.0
+
+
+def test_working_scale_normalises_unexpected_resolutions():
+    # Asheville: 4400x5400 is only 1350px at SCALE, far below the trained size,
+    # so it is normalised to the target instead.
+    assert working_scale(4400, 5400) == TARGET_LONG_SIDE / 5400
+    assert round(5400 * working_scale(4400, 5400)) == TARGET_LONG_SIDE
+    # Neither 1.0 nor SCALE lands in the band for these either.
+    assert working_scale(3999, 3999) == TARGET_LONG_SIDE / 3999
+    assert working_scale(4000, 100) == TARGET_LONG_SIDE / 4000
+    # A thumbnail well under the target is scaled up to it.
+    assert working_scale(1100, 1350) == TARGET_LONG_SIDE / 1350
+
+
+def test_working_scale_degenerate():
+    assert working_scale(0, 0) == 1.0
 
 
 def test_scale_points():

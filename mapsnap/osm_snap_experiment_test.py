@@ -231,7 +231,7 @@ def make_unit(fit_state: str) -> PageUnit:
 
 
 def test_candidates_record_fresh_tracks_fit_changes():
-    record = {"fit_state": "fitted", "georef_mtime": 111}
+    record = {"fit_state": "fitted", "georef_mtime": 111, "status": "ok"}
     assert candidates_record_fresh(record, make_unit("fitted"), 111)
     # A re-run georef rewrote the sidecar: the cached incumbent is stale.
     assert not candidates_record_fresh(record, make_unit("fitted"), 222)
@@ -239,8 +239,17 @@ def test_candidates_record_fresh_tracks_fit_changes():
     assert not candidates_record_fresh(record, make_unit("nofit"), 111)
     # Legacy records (no georef_mtime) always recompute once.
     assert not candidates_record_fresh(
-        {"fit_state": "fitted"}, make_unit("fitted"), 111
+        {"fit_state": "fitted", "status": "ok"}, make_unit("fitted"), 111
     )
+    # Failures are always retried: they turn on the P(road) cache and the key
+    # map's sidecars, which this check does not track, so caching one would pin
+    # the page behind a stale failure even after that input is fixed.
+    base = {"fit_state": "fitted", "georef_mtime": 111}
+    for status in ("no_prob", "no_keymap", "implausible"):
+        assert not candidates_record_fresh(
+            {**base, "status": status}, make_unit("fitted"), 111
+        )
+    assert candidates_record_fresh({**base, "status": "ok"}, make_unit("fitted"), 111)
 
 
 def test_append_snap_logs_is_idempotent(tmp_path):
