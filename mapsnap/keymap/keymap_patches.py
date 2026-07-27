@@ -187,6 +187,40 @@ def build_image_patches(
 
 
 def labels_path_for(image_path: str) -> Path:
-    """Path of the .labels.json sidecar for an image."""
+    """Path of the .labels.json truth file for a key-map image.
+
+    Truth lives in a ``truth/`` directory beside the key map it labels — the
+    layout the labeler writes: ``<volume>/raw/p0.jpg`` is labelled by
+    ``<volume>/raw/truth/p0.labels.json``.
+    """
     p = Path(image_path)
-    return p.parent / (p.name.split(".")[0] + ".labels.json")
+    return p.parent / "truth" / (p.name.split(".")[0] + ".labels.json")
+
+
+def keymap_key(image_path: Path) -> str:
+    """A key map's id across the corpus: ``"<volume>/<stem>"``.
+
+    Stems repeat — ten volumes have a ``p0`` — so a bare stem cannot name one
+    key map. This matches the ids the labeler and check_truth_labels use.
+    """
+    # <volume>/raw/<stem>.jpg
+    return f"{image_path.parent.parent.name}/{image_path.stem}"
+
+
+def labelled_keymaps(root: Path = Path("data")) -> list[tuple[Path, Path]]:
+    """(image, truth file) for every hand-labelled key map under ``root``.
+
+    Finds ``<volume>/raw/truth/*.labels.json`` at any depth, since volumes may
+    be nested (``data/queens_1950/vol2/raw/``), and pairs each with the key-map
+    image it labels. Truth with no surviving image is skipped.
+    """
+    pairs: list[tuple[Path, Path]] = []
+    for labels_path in sorted(root.glob("**/raw/truth/*.labels.json")):
+        stem = labels_path.name.split(".")[0]
+        raw_dir = labels_path.parent.parent
+        for extension in (".jpg", ".jpeg", ".png"):
+            image = raw_dir / (stem + extension)
+            if image.exists():
+                pairs.append((image, labels_path))
+                break
+    return pairs
