@@ -7,8 +7,14 @@ volume, every sheet should be labelled once, and the volume's own page images
 are the ground truth for both. This reports the three ways that can break:
 
   UNKNOWN     a label naming no page image ("35A?", "3S" for "35")
-  MISSING     a page image no label names (a number skipped on the key map)
+  MISSING     a page image NO truth file labels
   DUPLICATED  a label used twice for a sheet that is not split into panels
+
+UNKNOWN and DUPLICATED are per-file, since each is a slip made on one sheet.
+MISSING is per-volume: a volume's key maps divide the city between them (Los
+Angeles has pa and pb, Brooklyn a SW and a NE half), so a sheet drawn on one
+key map is not missing just because the other does not show it. It is only
+reported when no truth file in the volume names it.
 
 A split sheet is exempt from the duplicate check: the key map draws one region
 per panel, so a legitimately split page carries one label per panel.
@@ -48,20 +54,37 @@ class VolumePages:
 
 
 @dataclass
-class Report:
-    """What a single truth file got wrong, relative to the volume's images."""
+class FileReport:
+    """What one truth file got wrong on its own key map."""
 
     labels_path: Path
-    volume: Path
     n_labels: int
-    n_sheets: int
     unknown: list[tuple[str, str | None]] = field(default_factory=list)
-    missing: list[str] = field(default_factory=list)
     duplicated: list[tuple[str, int]] = field(default_factory=list)
 
     @property
     def ok(self) -> bool:
-        return not (self.unknown or self.missing or self.duplicated)
+        return not (self.unknown or self.duplicated)
+
+
+@dataclass
+class VolumeReport:
+    """A volume's truth files, plus the sheets none of them label."""
+
+    volume: Path
+    files: list[FileReport] = field(default_factory=list)
+    n_sheets: int = 0
+    missing: list[str] = field(default_factory=list)
+
+    @property
+    def n_problems(self) -> int:
+        return len(self.missing) + sum(
+            len(f.unknown) + len(f.duplicated) for f in self.files
+        )
+
+    @property
+    def ok(self) -> bool:
+        return self.n_problems == 0
 
 
 def sheet_label(stem: str) -> tuple[str, int | None] | None:
@@ -114,70 +137,82 @@ def suggest(label: str, known: set[str]) -> str | None:
     return stripped if stripped != label and stripped in known else None
 
 
-def check_truth_file(labels_path: Path, volume: Path) -> Report:
-    """Compare one <stem>.labels.json against its volume's page images."""
+def read_labels(labels_path: Path) -> list[str]:
+    """The non-empty label texts of one truth file, normalized."""
     doc = json.loads(labels_path.read_text())
-    texts = [
-        normalize_label(entry.get("text", ""))
-        for entry in doc.get("labels", [])
-        if normalize_label(entry.get("text", ""))
-    ]
+    texts = (normalize_label(e.get("text", "")) for e in doc.get("labels", []))
+    return [text for text in texts if text]
+
+
+def check_volume(volume: Path, labels_paths: list[Path]) -> VolumeReport:
+    """Check every truth file of one volume against its page images."""
     pages = volume_pages(volume)
     known = set(pages.stems)
-    counts = Counter(texts)
+    report = VolumeReport(volume=volume, n_sheets=len(known - pages.keymaps))
 
-    report = Report(
-        labels_path=labels_path,
-        volume=volume,
-        n_labels=len(texts),
-        n_sheets=len(known - pages.keymaps),
-    )
-    for label in sorted(set(texts) - known):
-        report.unknown.append((label, suggest(label, known)))
-    report.missing = sorted(known - set(texts) - pages.keymaps)
-    for label, count in sorted(counts.items()):
-        # A split sheet is drawn once per panel, so repeats are expected there.
-        if count > 1 and label in known and not pages.panels[label]:
-            report.duplicated.append((label, count))
+    labelled: set[str] = set()
+    for labels_path in labels_paths:
+        texts = read_labels(labels_path)
+        labelled.update(texts)
+        counts = Counter(texts)
+        file_report = FileReport(labels_path=labels_path, n_labels=len(texts))
+        for label in sorted(set(texts) - known):
+            file_report.unknown.append((label, suggest(label, known)))
+        for label, count in sorted(counts.items()):
+            # A split sheet is drawn once per panel, so repeats are expected.
+            if count > 1 and label in known and not pages.panels[label]:
+                file_report.duplicated.append((label, count))
+        report.files.append(file_report)
+
+    # Volume-wide: a sheet drawn on one key map is not missing from the volume
+    # just because another key map does not show it.
+    report.missing = sorted(known - labelled - pages.keymaps)
     return report
 
 
-def format_report(report: Report) -> str:
-    """Render one report as human-readable lines."""
+def format_report(report: VolumeReport) -> str:
+    """Render one volume's report as human-readable lines."""
+    n_labels = sum(f.n_labels for f in report.files)
     lines = [
-        f"{report.volume.name} / {report.labels_path.stem.replace('.labels', '')}",
-        f"  {report.n_labels} labels vs {report.n_sheets} page images",
+        report.volume.name,
+        f"  {len(report.files)} truth file(s), {n_labels} labels "
+        f"vs {report.n_sheets} page images",
     ]
-    if report.ok:
-        lines.append("  OK — every sheet labelled exactly once")
-        return "\n".join(lines)
-    if report.unknown:
-        lines.append(f"  UNKNOWN ({len(report.unknown)}) — label names no page image:")
-        for label, hint in report.unknown:
+    for file_report in report.files:
+        stem = file_report.labels_path.name.replace(".labels.json", "")
+        lines.append(f"  {stem} ({file_report.n_labels} labels)")
+        if file_report.ok:
+            lines.append("    no bad labels")
+        for label, hint in file_report.unknown:
             suffix = f"   (did you mean {hint}?)" if hint else ""
-            lines.append(f"    {label!r}{suffix}")
+            lines.append(f"    UNKNOWN {label!r} — names no page image{suffix}")
+        for label, count in file_report.duplicated:
+            lines.append(
+                f"    DUPLICATED {label} x{count} — repeated, but not a split sheet"
+            )
     if report.missing:
         lines.append(
-            f"  MISSING ({len(report.missing)}) — page image has no label: "
+            f"  MISSING ({len(report.missing)}) — labelled by no truth file: "
             + ", ".join(report.missing)
         )
-    if report.duplicated:
-        lines.append(
-            f"  DUPLICATED ({len(report.duplicated)}) — repeated, but not a split sheet:"
-        )
-        for label, count in report.duplicated:
-            lines.append(f"    {label} x{count}")
+    elif report.ok:
+        lines.append("  OK — every sheet labelled, no bad labels")
     return "\n".join(lines)
 
 
-def truth_files(target: Path) -> list[tuple[Path, Path]]:
-    """(labels file, volume) pairs for a volume directory or a labels file."""
-    if target.is_dir():
-        return [
-            (path, target) for path in sorted(target.glob("raw/truth/*.labels.json"))
-        ]
+def volume_of(target: Path) -> Path:
+    """The volume a target names, whether it is the directory or a labels file."""
     # <volume>/raw/truth/<stem>.labels.json
-    return [(target, target.parent.parent.parent)]
+    return target if target.is_dir() else target.parent.parent.parent
+
+
+def truth_files(volume: Path) -> list[Path]:
+    """Every truth file of a volume, sorted.
+
+    Always all of them, even when the caller named just one: the MISSING check
+    is only meaningful across a volume's whole set of key maps.
+    """
+    return sorted(volume.glob("raw/truth/*.labels.json"))
 
 
 def main() -> None:
@@ -189,24 +224,30 @@ def main() -> None:
         nargs="+",
         type=Path,
         metavar="VOLUME_OR_LABELS",
-        help="Volume directory (checks every raw/truth/*.labels.json) or a labels file.",
+        help=(
+            "Volume directory, or a labels file (its whole volume is checked "
+            "either way, since a volume's key maps share the sheets between them)."
+        ),
     )
     args = parser.parse_args()
 
-    pairs: list[tuple[Path, Path]] = []
+    volumes: list[Path] = []
     for target in args.targets:
-        found = truth_files(target)
-        if not found:
-            print(f"{target}: no raw/truth/*.labels.json found", file=sys.stderr)
-        pairs.extend(found)
+        volume = volume_of(target)
+        if volume not in volumes:
+            volumes.append(volume)
 
     problems = 0
-    for labels_path, volume in pairs:
-        report = check_truth_file(labels_path, volume)
+    for volume in volumes:
+        labels_paths = truth_files(volume)
+        if not labels_paths:
+            print(f"{volume}: no raw/truth/*.labels.json found", file=sys.stderr)
+            continue
+        report = check_volume(volume, labels_paths)
         print(format_report(report))
-        problems += len(report.unknown) + len(report.missing) + len(report.duplicated)
+        problems += report.n_problems
     if problems:
-        print(f"\n{problems} suspicious label(s) across {len(pairs)} file(s)")
+        print(f"\n{problems} suspicious label(s) across {len(volumes)} volume(s)")
     sys.exit(1 if problems else 0)
 
 

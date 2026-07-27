@@ -657,7 +657,7 @@ def redundant_skeleton_keys(truth_keys: set[str], generated_keys: set[str]) -> s
 
 
 def compare_pages(
-    truth_path: Path, generated_path: Path
+    truth_path: Path, generated_path: Path, oim_dir: Path | None = None
 ) -> tuple[list[dict], list[dict]]:
     """Compute per-page comparison rows for a truth/generated IIIF pair.
 
@@ -668,7 +668,11 @@ def compare_pages(
     """
     truth_by_source = annotations_by_source(truth_path)
     gen_by_source = annotations_by_source(generated_path)
-    oim_dir = truth_path.parent / "oim"
+    # OIM's split-panel polygons live in the VOLUME's oim/ directory. That is
+    # normally the truth file's own sibling, but a truth set kept elsewhere (an
+    # archived one under oim/, say) would otherwise send this looking in
+    # oim/oim/ and silently score every split panel as unplaced.
+    oim_dir = oim_dir if oim_dir is not None else truth_path.parent / "oim"
     gen_dir = generated_path.parent
 
     # Skeleton rule: a skeleton sheet ('s' suffix) and its full-color page map

@@ -4,11 +4,12 @@ from pathlib import Path
 import pytest
 
 from mapsnap.keymap.check_truth_labels import (
-    check_truth_file,
+    check_volume,
     normalize_label,
     sheet_label,
     suggest,
     truth_files,
+    volume_of,
     volume_pages,
 )
 
@@ -51,8 +52,8 @@ def volume(tmp_path: Path) -> Path:
     return tmp_path
 
 
-def write_truth(volume: Path, texts: list[str]) -> Path:
-    path = volume / "raw" / "truth" / "p0.labels.json"
+def write_truth(volume: Path, texts: list[str], stem: str = "p0") -> Path:
+    path = volume / "raw" / "truth" / f"{stem}.labels.json"
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(
         json.dumps({"labels": [{"x": 0, "y": 0, "text": t} for t in texts]})
@@ -72,34 +73,64 @@ def test_volume_pages_indexes_sheets_panels_and_keymaps(volume: Path):
 def test_clean_truth_reports_nothing(volume: Path):
     # The key map does not label itself, and the split sheet is drawn per panel.
     path = write_truth(volume, ["1", "2", "3A", "4", "4"])
-    report = check_truth_file(path, volume)
+    report = check_volume(volume, [path])
     assert report.ok
     assert report.n_sheets == 4  # p0 excluded as a key map
 
 
 def test_unknown_label_is_reported_with_a_suggestion(volume: Path):
     path = write_truth(volume, ["1", "2", "3A?", "4", "4"])
-    report = check_truth_file(path, volume)
-    assert report.unknown == [("3A?", "3A")]
+    report = check_volume(volume, [path])
+    assert report.files[0].unknown == [("3A?", "3A")]
     # The sheet it was meant to name is now also unlabelled.
     assert report.missing == ["3A"]
 
 
 def test_missing_page_is_reported(volume: Path):
     path = write_truth(volume, ["1", "3A", "4", "4"])
-    report = check_truth_file(path, volume)
+    report = check_volume(volume, [path])
     assert report.missing == ["2"]
-    assert not report.unknown
+    assert not report.files[0].unknown
 
 
 def test_duplicate_is_reported_only_for_unsplit_sheets(volume: Path):
     path = write_truth(volume, ["1", "1", "2", "3A", "4", "4", "4"])
-    report = check_truth_file(path, volume)
+    report = check_volume(volume, [path])
     # p1 is not split, so twice is a mistake; p4 has panels, so three times is fine.
-    assert report.duplicated == [("1", 2)]
+    assert report.files[0].duplicated == [("1", 2)]
 
 
-def test_truth_files_accepts_a_volume_or_a_labels_file(volume: Path):
+def test_missing_is_volume_wide_across_several_key_maps(volume: Path):
+    # Two key maps divide the sheets between them (Los Angeles pa/pb): a sheet
+    # drawn on one is not missing just because the other does not show it.
+    (volume / "raw" / "pb.keymap.json").write_text("{}")
+    (volume / "pb.jpg").write_bytes(b"jpeg")
+    a = write_truth(volume, ["1", "2"], stem="p0")
+    b = write_truth(volume, ["3A", "4", "4"], stem="pb")
+    report = check_volume(volume, [a, b])
+    assert report.missing == []  # every sheet is labelled by ONE of the two
+    assert [f.n_labels for f in report.files] == [2, 3]
+    # A sheet neither key map labels is still reported, once.
+    c = write_truth(volume, ["1"], stem="p0")
+    report = check_volume(volume, [c, b])
+    assert report.missing == ["2"]
+
+
+def test_duplicates_stay_per_file(volume: Path):
+    # The same sheet appearing on both key maps is legitimate (overlapping
+    # coverage at a boundary); repeating it on ONE key map is the slip.
+    a = write_truth(volume, ["1", "2"], stem="p0")
+    (volume / "raw" / "pb.keymap.json").write_text("{}")
+    (volume / "pb.jpg").write_bytes(b"jpeg")
+    b = write_truth(volume, ["1", "3A", "4", "4"], stem="pb")
+    report = check_volume(volume, [a, b])
+    assert all(not f.duplicated for f in report.files)
+
+
+def test_volume_of_and_truth_files(volume: Path):
     path = write_truth(volume, ["1"])
-    assert truth_files(volume) == [(path, volume)]
-    assert truth_files(path) == [(path, volume)]
+    assert volume_of(volume) == volume
+    assert volume_of(path) == volume
+    # Naming one file still checks the volume's whole set.
+    other = write_truth(volume, ["2"], stem="pb")
+    assert truth_files(volume) == sorted([path, other])

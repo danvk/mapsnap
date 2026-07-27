@@ -162,23 +162,32 @@ def land_fraction(
 
 
 def volume_page_scores(
-    generated_iiif: Path, *, street_near_m: float = STREET_NEAR_M
+    generated_iiif: Path,
+    *,
+    street_near_m: float = STREET_NEAR_M,
+    truth: Path | None = None,
 ) -> list[PageScore]:
     """Per-truth-page scores for one volume's generated annotation file.
 
     Matching and RMSE come from ``compare_pages`` (identical to ``mapsnap
     compare``, including the skeleton rule); footprints and land fractions are
     computed here from the truth items and the volume's centerlines.
+
+    ``truth`` overrides the volume's own main.iiif.json, so a revised truth set
+    can be scored against the same generated pages as the one it replaces. Note
+    that the truth defines the denominator as well as the per-page RMSE, so two
+    truth sets are only comparable when they cover the same sheets.
     """
     volume = generated_iiif.parent
-    truth_path = volume / "main.iiif.json"
+    truth_path = truth if truth is not None else volume / "main.iiif.json"
     if not truth_path.exists():
-        sys.exit(f"{volume} has no main.iiif.json truth data.")
+        sys.exit(f"No truth data at {truth_path}.")
     centerlines = default_centerlines(volume)
     if centerlines is None:
         sys.exit(f"{volume} has no centerlines.geojson (needed for land weights).")
 
-    rows, missing = compare_pages(truth_path, generated_iiif)
+    # The panels live with the volume, not with whichever truth file is in use.
+    rows, missing = compare_pages(truth_path, generated_iiif, oim_dir=volume / "oim")
     rmse_by_key: dict[str, float | None] = {}
     for row in missing:
         rmse_by_key.setdefault(row["page_key"], None)
@@ -291,9 +300,28 @@ def main() -> None:
         help="Footprint counts as land within this range of a street (default: %(default)s)",
     )
     parser.add_argument(
+        "--truth",
+        metavar="IIIF",
+        type=Path,
+        help=(
+            "Truth AnnotationPage to score against, instead of the "
+            "main.iiif.json in the generated file's own directory. Truth is "
+            "per-volume, so this may only be used with generated file(s) from "
+            "a single volume — handy for measuring what a truth revision moved."
+        ),
+    )
+    parser.add_argument(
         "--csv", metavar="FILE", help="Also write per-page scores to a CSV file"
     )
     args = parser.parse_args()
+
+    if args.truth is not None:
+        volumes = {Path(p).parent for p in args.generated}
+        if len(volumes) > 1:
+            sys.exit(
+                "--truth applies to one volume, but the generated files span "
+                + ", ".join(sorted(str(v) for v in volumes))
+            )
 
     header = (
         f"{'volume':<30} {'pages':>5} {'placed':>6} "
@@ -305,7 +333,9 @@ def main() -> None:
     all_pages: list[tuple[str, PageScore]] = []
     for path in args.generated:
         generated = Path(path)
-        pages = volume_page_scores(generated, street_near_m=args.street_near_m)
+        pages = volume_page_scores(
+            generated, street_near_m=args.street_near_m, truth=args.truth
+        )
         all_pages.extend((generated.parent.name, p) for p in pages)
         s = summarize(pages, good_ft=args.good_ft, disaster_ft=args.disaster_ft)
         print(
