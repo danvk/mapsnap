@@ -56,6 +56,11 @@ export function AdjacencyApp() {
   const dirtyRef = useRef(false);
   // Mirror of `labels` so click handlers always see the latest list.
   const labelsRef = useRef<Label[]>([]);
+  // Set by the "Next page" button so the incoming page's first text box takes
+  // focus once its rows render — finishing a page is then tab+enter+type.
+  // Deliberately NOT set by the n/p/j/k shortcuts: moving focus into a text
+  // box would swallow the next keypress as typed text.
+  const focusFirstOnLoadRef = useRef(false);
 
   // Load the volume list once.
   useEffect(() => {
@@ -97,6 +102,17 @@ export function AdjacencyApp() {
         dirtyRef.current = false;
         labelsRef.current = entry?.labels ?? [];
         setLabels(labelsRef.current);
+        if (focusFirstOnLoadRef.current) {
+          focusFirstOnLoadRef.current = false;
+          // After React commits the new rows; the top row is the newest label.
+          requestAnimationFrame(() => {
+            document
+              .querySelector<HTMLInputElement>(
+                '#detections-table input.label-text-input',
+              )
+              ?.focus();
+          });
+        }
       })
       .catch(console.error);
     return () => {
@@ -309,7 +325,14 @@ export function AdjacencyApp() {
           onSelect={setSelectedIndex}
           onChangeText={handleChangeText}
           onDelete={handleDelete}
-          onNextPage={hasNextPage ? () => stepPage(1) : undefined}
+          onNextPage={
+            hasNextPage
+              ? () => {
+                  focusFirstOnLoadRef.current = true;
+                  stepPage(1);
+                }
+              : undefined
+          }
         />
       </div>
     </div>
