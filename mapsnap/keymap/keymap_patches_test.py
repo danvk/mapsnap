@@ -1,3 +1,5 @@
+from pathlib import Path
+
 import numpy as np
 
 from mapsnap.keymap.keymap_patches import (
@@ -103,3 +105,50 @@ def test_build_image_patches_counts_and_labels():
     assert len(patches) == len(labels)
     assert all(p.shape == (64, 64, 3) for p in patches)
     assert labels.count(0) > 0  # some negatives sampled
+
+
+def test_labels_path_for_uses_the_truth_directory():
+    from mapsnap.keymap.keymap_patches import labels_path_for
+
+    assert labels_path_for("data/vol/raw/p0.jpg") == Path(
+        "data/vol/raw/truth/p0.labels.json"
+    )
+    # Compound extensions collapse to the stem, as the labeler writes them.
+    assert labels_path_for("data/vol/raw/p35B.jpeg") == Path(
+        "data/vol/raw/truth/p35B.labels.json"
+    )
+
+
+def test_keymap_key_is_volume_qualified():
+    from mapsnap.keymap.keymap_patches import keymap_key
+
+    # Ten volumes have a "p0", so the stem alone cannot name a key map.
+    assert keymap_key(Path("data/chicago_il_1950_vol_1/raw/p0.jpg")) == (
+        "chicago_il_1950_vol_1/p0"
+    )
+    assert keymap_key(Path("data/los_angeles_ca_1949_vol_14/raw/pa.jpg")) == (
+        "los_angeles_ca_1949_vol_14/pa"
+    )
+
+
+def test_labelled_keymaps_finds_truth_at_any_depth(tmp_path):
+    from mapsnap.keymap.keymap_patches import labelled_keymaps
+
+    def make(volume: str, stem: str, *, image: bool = True) -> None:
+        raw = tmp_path / volume / "raw"
+        (raw / "truth").mkdir(parents=True, exist_ok=True)
+        (raw / "truth" / f"{stem}.labels.json").write_text("{}")
+        if image:
+            (raw / f"{stem}.jpg").write_bytes(b"jpeg")
+
+    make("champaign", "p1")
+    make("queens_1950/vol2", "p0")  # a nested volume
+    make("detroit", "p0", image=False)  # truth whose image is gone
+    pairs = labelled_keymaps(tmp_path)
+    assert [str(i.relative_to(tmp_path)) for i, _ in pairs] == [
+        "champaign/raw/p1.jpg",
+        "queens_1950/vol2/raw/p0.jpg",
+    ]
+    # Each image is paired with the truth file that labels it.
+    for image, labels in pairs:
+        assert labels == image.parent / "truth" / f"{image.stem}.labels.json"

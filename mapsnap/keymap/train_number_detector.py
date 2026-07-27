@@ -20,6 +20,7 @@ from torch.utils.data import DataLoader, Dataset
 
 from mapsnap.keymap.keymap_patches import (
     build_image_patches,
+    labelled_keymaps,
     labels_path_for,
     load_label_points,
     scale_points,
@@ -42,19 +43,6 @@ def load_scaled_image(image_path: str, scale: float) -> np.ndarray:
         new_size = (round(rgb.width * scale), round(rgb.height * scale))
         rgb = rgb.resize(new_size, Image.Resampling.LANCZOS)
         return np.asarray(rgb)
-
-
-def labeled_images(data_dir: Path) -> list[Path]:
-    """Image files in ``data_dir`` that have a sibling .labels.json."""
-    images = []
-    for label_file in sorted(data_dir.glob("*.labels.json")):
-        stem = label_file.name.split(".")[0]
-        for ext in (".jpg", ".jpeg", ".png"):
-            candidate = data_dir / (stem + ext)
-            if candidate.exists():
-                images.append(candidate)
-                break
-    return images
 
 
 class PatchDataset(Dataset):
@@ -107,7 +95,12 @@ def evaluate(model: nn.Module, loader: DataLoader, device: torch.device) -> floa
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Train the page-number localizer CNN.")
-    parser.add_argument("--data-dir", type=Path, default=Path("data/keymaps"))
+    parser.add_argument(
+        "--data-dir",
+        type=Path,
+        default=Path("data"),
+        help="Corpus root; truth is found at <volume>/raw/truth/*.labels.json.",
+    )
     parser.add_argument(
         "--val-image",
         default="chicago-p0b",
@@ -124,7 +117,7 @@ def main() -> None:
     rng = np.random.default_rng(args.seed)
     device = select_device()
 
-    images = labeled_images(args.data_dir)
+    images = [image for image, _ in labelled_keymaps(args.data_dir)]
     val_images = [p for p in images if image_stem(str(p)) == args.val_image]
     train_images = [p for p in images if image_stem(str(p)) != args.val_image]
     if not val_images:

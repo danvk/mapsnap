@@ -6,7 +6,7 @@ interface ImageListProps {
   onSelect: (name: string) => void;
 }
 
-/** Left-column list of available key map images, with their label counts. */
+/** Left-column list of available key map pages, with their label counts. */
 export function ImageList(props: ImageListProps) {
   const { images, selectedName, onSelect } = props;
   return (
@@ -18,8 +18,17 @@ export function ImageList(props: ImageListProps) {
             key={info.name}
             className={info.name === selectedName ? 'selected' : undefined}
             onClick={() => onSelect(info.name)}
+            title={
+              info.hasKeymap
+                ? info.name
+                : `${info.name} (no keymap.json; listed because it has truth labels)`
+            }
           >
-            <span className="image-name">{info.name}</span>
+            <span
+              className={info.hasKeymap ? 'image-name' : 'image-name no-keymap'}
+            >
+              {info.name}
+            </span>
             {info.labelCount !== null && (
               <span className="label-count">{info.labelCount}</span>
             )}

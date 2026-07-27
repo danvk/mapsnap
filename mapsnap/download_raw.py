@@ -9,34 +9,39 @@ Usage:
 """
 
 import argparse
-import json
+from dataclasses import replace
 from pathlib import Path
 
-from mapsnap.download_loc_iiif import canvas_to_page_key, process_canvas
+from mapsnap.download_loc_iiif import (
+    CanvasTarget,
+    disambiguate_keys,
+    load_targets,
+    process_canvas,
+)
 
 
-def find_canvas(canvases: list[dict], page_key: str) -> dict:
-    """Return the canvas whose derived page key matches page_key."""
-    for canvas in canvases:
-        canvas_id: str = canvas.get("@id", "")
-        label: str = canvas.get("label", "unknown")
-        if canvas_to_page_key(canvas_id, label) == page_key:
-            return canvas
+def find_target(targets: list[CanvasTarget], page_key: str) -> CanvasTarget:
+    """The canvas written as ``<page_key>.jpg``, or raise.
+
+    Matched on the disambiguated key, so a scaled p0a.jpg finds the first of the
+    two page-0 canvases a multi-volume manifest carries rather than failing.
+    """
+    for target in targets:
+        if target.page_key == page_key:
+            return target
     raise ValueError(f"No canvas found for page key {page_key!r}")
 
 
 def download_raw(jpg_path: Path, dry_run: bool = False) -> Path:
     """Download the full-resolution counterpart of a scaled-down LOC page JPG."""
     output_dir = jpg_path.parent
-    manifest_path = output_dir / "manifest.json"
-    data: dict = json.load(manifest_path.open())
-    canvases: list[dict] = data["sequences"][0]["canvases"]
-
-    canvas = find_canvas(canvases, jpg_path.stem)
+    targets = load_targets(output_dir / "manifest.json")
+    disambiguate_keys(targets)
+    target = find_target(targets, jpg_path.stem)
 
     raw_dir = output_dir / "raw"
     raw_dir.mkdir(exist_ok=True)
-    return process_canvas(canvas, raw_dir, scale="full", dry_run=dry_run)
+    return process_canvas(replace(target, output_dir=raw_dir), "full", dry_run)
 
 
 def main() -> None:

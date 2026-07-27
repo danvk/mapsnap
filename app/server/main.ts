@@ -15,7 +15,7 @@
  * here; a production build (`npm run build`) is served standalone at /mapsnap.
  */
 
-import { join, resolve } from 'path';
+import { resolve } from 'path';
 import express from 'express';
 import { TypedRouter } from 'crosswalk';
 import type { API } from './api.ts';
@@ -24,7 +24,6 @@ import { registerKeymapApi, registerKeymapImages } from './keymapRoutes.ts';
 import { registerNotesApi } from './notesRoutes.ts';
 
 const dataDir = resolve(process.argv[2] ?? '../data');
-const keymapsDir = join(dataDir, 'keymaps');
 const port = parseInt(process.argv[3] ?? '8182', 10);
 
 const app = express();
@@ -40,15 +39,15 @@ app.use((req, res, next) => {
   next();
 });
 
-// Binary endpoints (raw Express): the IIIF image service and key-map JPEGs.
+// Binary endpoints (raw Express): the IIIF image service and key-map images.
 // Registered before the typed router so their more specific paths win.
 registerIiifImages(app, dataDir);
-registerKeymapImages(app, keymapsDir);
+registerKeymapImages(app, dataDir);
 
 // The typed JSON API (crosswalk), defined by the API interface in ./api.
 const router = new TypedRouter<API>(app);
 registerIiifApi(router, dataDir);
-registerKeymapApi(router, keymapsDir);
+registerKeymapApi(router, dataDir);
 registerNotesApi(router, dataDir);
 
 // Serve the data directory under the app base so `?files=data/...` deep links
@@ -60,6 +59,5 @@ app.use('/mapsnap', express.static(resolve('dist')));
 app.listen(port, () => {
   console.error(`mapsnap server running at http://localhost:${port}`);
   console.error(`  data:    ${dataDir}`);
-  console.error(`  keymaps: ${keymapsDir}`);
   console.error(`  UI (after build): http://localhost:${port}/mapsnap/`);
 });

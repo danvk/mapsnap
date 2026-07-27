@@ -5,7 +5,7 @@ image's native resolution; see mapsnap.keymap.crnn_model.number_strip) paired wi
 digit string, holds out one whole image for validation, and trains the CRNN with CTC.
 Runs on CPU (the model and data are small, and CTC loss is most portable there).
 
-    uv run python -m mapsnap.keymap.train_crnn --val-image chicago-p0b
+    uv run python -m mapsnap.keymap.train_crnn --val-image chicago_il_1950_vol_1/p0
 """
 
 import argparse
@@ -32,11 +32,12 @@ from mapsnap.keymap.crnn_model import (
 )
 from mapsnap.keymap.keymap_patches import (
     crop_excludes_numbers,
+    keymap_key,
+    labelled_keymaps,
     labels_path_for,
     load_label_points,
     working_scale,
 )
-from mapsnap.utils import image_stem
 
 # Default empty-target negative strips sampled per positive, so the CRNN learns to emit
 # nothing (-> rejected) on the localizer's false positives instead of inventing a number.
@@ -45,19 +46,6 @@ DEFAULT_NEGATIVE_RATIO = 0.5
 # Fraction of negatives drawn from the most colorful (high-saturation) safe locations —
 # the pastel gaps between numbers where the localizer tends to false-positive.
 COLORFUL_FRAC = 0.6
-
-
-def labeled_images(data_dir: Path) -> list[Path]:
-    """Image files in ``data_dir`` that have a sibling .labels.json."""
-    images = []
-    for label_file in sorted(data_dir.glob("*.labels.json")):
-        stem = label_file.name.split(".")[0]
-        for ext in (".jpg", ".jpeg", ".png"):
-            candidate = data_dir / (stem + ext)
-            if candidate.exists():
-                images.append(candidate)
-                break
-    return images
 
 
 def sample_negative_strips(
@@ -193,8 +181,20 @@ def main() -> None:
     parser = argparse.ArgumentParser(
         description="Train the CRNN page-number recognizer."
     )
-    parser.add_argument("--data-dir", type=Path, default=Path("data/keymaps"))
-    parser.add_argument("--val-image", default="chicago-p0b")
+    parser.add_argument(
+        "--data-dir",
+        type=Path,
+        default=Path("data"),
+        help="Corpus root; truth is found at <volume>/raw/truth/*.labels.json.",
+    )
+    parser.add_argument(
+        "--val-image",
+        default="chicago_il_1950_vol_1/p0",
+        help=(
+            "Key map to hold out, as <volume>/<stem>. A bare stem cannot "
+            "name one key map: ten volumes have a p0."
+        ),
+    )
     parser.add_argument("--epochs", type=int, default=40)
     parser.add_argument("--batch-size", type=int, default=64)
     parser.add_argument("--lr", type=float, default=1e-3)
@@ -212,11 +212,14 @@ def main() -> None:
     rng = np.random.default_rng(args.seed)
     device = torch.device("cpu")
 
-    images = labeled_images(args.data_dir)
-    val_images = [p for p in images if image_stem(str(p)) == args.val_image]
-    train_images = [p for p in images if image_stem(str(p)) != args.val_image]
+    images = [image for image, _ in labelled_keymaps(args.data_dir)]
+    val_images = [p for p in images if keymap_key(p) == args.val_image]
+    train_images = [p for p in images if keymap_key(p) != args.val_image]
     if not val_images:
-        sys.exit(f"--val-image {args.val_image!r} not found")
+        sys.exit(
+            f"--val-image {args.val_image!r} not found; have "
+            + ", ".join(keymap_key(p) for p in images)
+        )
 
     train_strips, train_texts = build_split(
         train_images, negative_ratio=args.negative_ratio, rng=rng
