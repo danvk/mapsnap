@@ -32,10 +32,10 @@ from mapsnap.keymap.crnn_model import (
 )
 from mapsnap.keymap.keymap_patches import (
     crop_excludes_numbers,
-    keymap_key,
     labelled_keymaps,
     labels_path_for,
     load_label_points,
+    split_train_val,
     working_scale,
 )
 
@@ -195,6 +195,16 @@ def main() -> None:
             "name one key map: ten volumes have a p0."
         ),
     )
+    parser.add_argument(
+        "--exclude",
+        default="",
+        metavar="KEYS",
+        help=(
+            "Comma-separated <volume>/<stem> key maps to exclude from training "
+            "entirely (a leave-one-volume-out fold; distinct from --val-image, "
+            "which drives best-checkpoint selection)."
+        ),
+    )
     parser.add_argument("--epochs", type=int, default=40)
     parser.add_argument("--batch-size", type=int, default=64)
     parser.add_argument("--lr", type=float, default=1e-3)
@@ -213,13 +223,11 @@ def main() -> None:
     device = torch.device("cpu")
 
     images = [image for image, _ in labelled_keymaps(args.data_dir)]
-    val_images = [p for p in images if keymap_key(p) == args.val_image]
-    train_images = [p for p in images if keymap_key(p) != args.val_image]
-    if not val_images:
-        sys.exit(
-            f"--val-image {args.val_image!r} not found; have "
-            + ", ".join(keymap_key(p) for p in images)
-        )
+    excluded = {k.strip() for k in args.exclude.split(",") if k.strip()}
+    try:
+        train_images, val_images = split_train_val(images, args.val_image, excluded)
+    except ValueError as exc:
+        sys.exit(str(exc))
 
     train_strips, train_texts = build_split(
         train_images, negative_ratio=args.negative_ratio, rng=rng

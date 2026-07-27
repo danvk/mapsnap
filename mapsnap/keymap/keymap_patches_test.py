@@ -152,3 +152,32 @@ def test_labelled_keymaps_finds_truth_at_any_depth(tmp_path):
     # Each image is paired with the truth file that labels it.
     for image, labels in pairs:
         assert labels == image.parent / "truth" / f"{image.stem}.labels.json"
+
+
+def test_split_train_val_partitions_and_excludes():
+    from mapsnap.keymap.keymap_patches import split_train_val
+
+    images = [
+        Path("data/chicago_il_1950_vol_1/raw/p0.jpg"),
+        Path("data/grand_rapids_mi_1953_vol7/raw/p0a.jpg"),
+        Path("data/grand_rapids_mi_1953_vol7/raw/p0b.jpg"),
+        Path("data/hudson_co_nj_1950_vol_9/raw/p0.jpg"),
+    ]
+    # A leave-one-volume-out fold: BOTH grand rapids sheets leave training,
+    # and neither may serve as the selection-val image.
+    train, val = split_train_val(
+        images,
+        "hudson_co_nj_1950_vol_9/p0",
+        {"grand_rapids_mi_1953_vol7/p0a", "grand_rapids_mi_1953_vol7/p0b"},
+    )
+    assert [str(p) for p in train] == ["data/chicago_il_1950_vol_1/raw/p0.jpg"]
+    assert len(val) == 1
+
+    import pytest
+
+    with pytest.raises(ValueError, match="unknown key map"):
+        split_train_val(images, "hudson_co_nj_1950_vol_9/p0", {"typo/p0"})
+    with pytest.raises(ValueError, match="excluded set"):
+        split_train_val(
+            images, "chicago_il_1950_vol_1/p0", {"chicago_il_1950_vol_1/p0"}
+        )

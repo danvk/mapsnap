@@ -230,6 +230,31 @@ def keymap_key(image_path: Path) -> str:
     return f"{image_path.parent.parent.name}/{image_path.stem}"
 
 
+def split_train_val(
+    images: list[Path],
+    val_key: str,
+    exclude_keys: frozenset[str] | set[str] = frozenset(),
+) -> tuple[list[Path], list[Path]]:
+    """Partition key-map images into (train, val) by their <volume>/<stem> keys.
+
+    ``exclude_keys`` are removed entirely — used for leave-one-volume-out
+    training, where the held-out volume must not appear in EITHER split (the
+    val image drives best-checkpoint selection, so evaluating on it would leak).
+    Raises ValueError on a key that names no image, so a typo cannot silently
+    train on a fold it was meant to hold out.
+    """
+    by_key = {keymap_key(image): image for image in images}
+    unknown = ({val_key} | set(exclude_keys)) - set(by_key)
+    if unknown:
+        raise ValueError(f"unknown key map(s) {sorted(unknown)}; have {sorted(by_key)}")
+    if val_key in exclude_keys:
+        raise ValueError(f"val image {val_key!r} is in the excluded set")
+    kept = [i for i in images if keymap_key(i) not in exclude_keys]
+    val = [i for i in kept if keymap_key(i) == val_key]
+    train = [i for i in kept if keymap_key(i) != val_key]
+    return train, val
+
+
 def labelled_keymaps(root: Path = Path("data")) -> list[tuple[Path, Path]]:
     """(image, truth file) for every hand-labelled key map under ``root``.
 
