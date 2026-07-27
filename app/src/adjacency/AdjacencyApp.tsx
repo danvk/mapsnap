@@ -1,30 +1,46 @@
 import { useEffect, useRef, useState } from 'react';
-import './keymap.css';
+import '../keymap/keymap.css';
 import { pointInPolygon } from '../geometry';
+import { isTypingTarget } from '../keyboard';
 import { useElementSize } from '../hooks/useElementSize';
 import { loadImage } from '../loadImage';
-import { fetchImages, fetchLabels, imageUrl, saveLabels } from './api';
+import { BoxSizeControls } from '../keymap/BoxSizeControls';
+import { ImageList } from '../keymap/ImageList';
+import { LabelsOverlay } from '../keymap/LabelsOverlay';
+import { LabelsTable } from '../keymap/LabelsTable';
+import { createLabelsJson, labelBox } from '../keymap/labels';
+import type { ImageInfo, Label } from '../keymap/types';
 import {
-  createLabelsJson,
-  labelBox,
-  DEFAULT_BOX_HEIGHT,
-  DEFAULT_BOX_WIDTH,
-} from './labels';
-import { BoxSizeControls } from './BoxSizeControls';
-import { ImageList } from './ImageList';
-import { LabelsOverlay } from './LabelsOverlay';
-import { LabelsTable } from './LabelsTable';
-import type { ImageInfo, Label } from './types';
+  fetchLabels,
+  fetchPages,
+  fetchVolumes,
+  pageImageUrl,
+  saveLabels,
+} from './api';
 
 type SaveStatus = 'idle' | 'saving' | 'saved' | 'error';
 
 /**
- * Key map truth-data labeler: pick an image, click to drop labels, type the
- * text for each, and have the labels.json sidecar saved automatically.
+ * Default label-box size for adjacency labels, in image pixels. The volume-root
+ * pages are 25%-scale scans and the printed neighbor numbers along sheet edges
+ * are small, so the box starts at half the key-map default; the sliders adjust
+ * it live.
  */
-export function KeymapApp() {
-  const [images, setImages] = useState<ImageInfo[]>([]);
-  const [selectedName, setSelectedName] = useState<string | null>(null);
+const ADJACENCY_BOX_WIDTH = 80;
+const ADJACENCY_BOX_HEIGHT = 54;
+
+/**
+ * Adjacency truth labeler: pick a volume, pick a page, click the centers of
+ * the printed neighbor-page numbers along its edges, and type each number's
+ * text. Labels save automatically to the volume's adjacency-truth.json.
+ */
+export function AdjacencyApp() {
+  const [volumes, setVolumes] = useState<
+    { name: string; pageCount: number; labeledPages: number }[]
+  >([]);
+  const [volume, setVolume] = useState<string | null>(null);
+  const [pages, setPages] = useState<ImageInfo[]>([]);
+  const [selectedPage, setSelectedPage] = useState<string | null>(null);
   const [imageEl, setImageEl] = useState<HTMLImageElement | null>(null);
   const [imageWidth, setImageWidth] = useState(0);
   const [imageHeight, setImageHeight] = useState(0);
@@ -32,62 +48,78 @@ export function KeymapApp() {
   const [selectedIndex, setSelectedIndex] = useState<number | null>(null);
   const [saveStatus, setSaveStatus] = useState<SaveStatus>('idle');
   const [showOnlyUnlabeled, setShowOnlyUnlabeled] = useState(false);
-  // Visualization only: the box drawn around each label point and cropped for
-  // its preview. Kept across image selections so the size a sheet's numbers
-  // want is set once, not per page.
-  const [boxWidth, setBoxWidth] = useState(DEFAULT_BOX_WIDTH);
-  const [boxHeight, setBoxHeight] = useState(DEFAULT_BOX_HEIGHT);
+  const [boxWidth, setBoxWidth] = useState(ADJACENCY_BOX_WIDTH);
+  const [boxHeight, setBoxHeight] = useState(ADJACENCY_BOX_HEIGHT);
 
   const [imgRef, imgSize] = useElementSize<HTMLImageElement>();
   // Only persist labels that changed via user edits, not freshly loaded ones.
   const dirtyRef = useRef(false);
-  // Mirror of `labels` so click handlers always see the latest list, even when
-  // several edits happen before React re-renders.
+  // Mirror of `labels` so click handlers always see the latest list.
   const labelsRef = useRef<Label[]>([]);
 
-  // Load the list of available images once.
+  // Load the volume list once.
   useEffect(() => {
-    fetchImages().then(setImages).catch(console.error);
+    fetchVolumes().then(setVolumes).catch(console.error);
   }, []);
 
-  // Load the selected image and its existing labels.
+  // Load the selected volume's page list.
   useEffect(() => {
-    if (!selectedName) return;
+    if (!volume) return;
+    let cancelled = false;
+    setPages([]);
+    setSelectedPage(null);
+    fetchPages(volume)
+      .then((next) => {
+        if (!cancelled) setPages(next);
+      })
+      .catch(console.error);
+    return () => {
+      cancelled = true;
+    };
+  }, [volume]);
+
+  // Load the selected page's image and existing labels.
+  useEffect(() => {
+    if (!volume || !selectedPage) return;
     let cancelled = false;
     dirtyRef.current = false;
     setSelectedIndex(null);
     setSaveStatus('idle');
-    Promise.all([loadImage(imageUrl(selectedName)), fetchLabels(selectedName)])
-      .then(([el, sidecar]) => {
+    Promise.all([
+      loadImage(pageImageUrl(volume, selectedPage)),
+      fetchLabels(volume, selectedPage),
+    ])
+      .then(([el, entry]) => {
         if (cancelled) return;
         setImageEl(el);
-        setImageWidth(sidecar?.width ?? el.naturalWidth);
-        setImageHeight(sidecar?.height ?? el.naturalHeight);
+        setImageWidth(entry?.width ?? el.naturalWidth);
+        setImageHeight(entry?.height ?? el.naturalHeight);
         dirtyRef.current = false;
-        labelsRef.current = sidecar?.labels ?? [];
+        labelsRef.current = entry?.labels ?? [];
         setLabels(labelsRef.current);
       })
       .catch(console.error);
     return () => {
       cancelled = true;
     };
-  }, [selectedName]);
+  }, [volume, selectedPage]);
 
-  // Persist edits to the sidecar (debounced). Skipped for freshly loaded data.
+  // Persist edits (debounced). Skipped for freshly loaded data.
   useEffect(() => {
-    if (!dirtyRef.current || !selectedName) return;
+    if (!dirtyRef.current || !volume || !selectedPage) return;
     const handle = setTimeout(async () => {
       setSaveStatus('saving');
       try {
         await saveLabels(
-          selectedName,
+          volume,
+          selectedPage,
           createLabelsJson(imageWidth, imageHeight, labels),
         );
         setSaveStatus('saved');
         const withText = labels.filter((l) => l.text.trim()).length;
-        setImages((prev) =>
+        setPages((prev) =>
           prev.map((info) =>
-            info.name === selectedName
+            info.name === selectedPage
               ? { ...info, withText, withoutText: labels.length - withText }
               : info,
           ),
@@ -98,9 +130,42 @@ export function KeymapApp() {
       }
     }, 500);
     return () => clearTimeout(handle);
-  }, [labels, selectedName, imageWidth, imageHeight]);
+  }, [labels, volume, selectedPage, imageWidth, imageHeight]);
 
-  // Apply a user edit to the labels and mark them dirty so they get saved.
+  // Step to an adjacent page in the list, clamped at the ends.
+  function stepPage(delta: number): void {
+    if (!pages.length) return;
+    const index = pages.findIndex((info) => info.name === selectedPage);
+    const next =
+      index === -1
+        ? delta > 0
+          ? 0
+          : pages.length - 1
+        : Math.min(pages.length - 1, Math.max(0, index + delta));
+    setSelectedPage(pages[next]!.name);
+  }
+  const pageIndex = pages.findIndex((info) => info.name === selectedPage);
+  const hasNextPage = pageIndex !== -1 && pageIndex < pages.length - 1;
+
+  // n/j and p/k step through the page list while no text field is focused.
+  useEffect(() => {
+    function onKeyDown(e: KeyboardEvent) {
+      if (isTypingTarget(e.target) || e.metaKey || e.ctrlKey || e.altKey)
+        return;
+      const delta =
+        e.key === 'n' || e.key === 'j'
+          ? 1
+          : e.key === 'p' || e.key === 'k'
+            ? -1
+            : 0;
+      if (!delta) return;
+      e.preventDefault();
+      stepPage(delta);
+    }
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  });
+
   function editLabels(next: Label[]): void {
     dirtyRef.current = true;
     labelsRef.current = next;
@@ -109,7 +174,7 @@ export function KeymapApp() {
 
   // Add a label at the click point, or select an existing one if clicked.
   function handleImageClick(e: React.MouseEvent): void {
-    if (!selectedName || !imgSize.width || !imgSize.height) return;
+    if (!selectedPage || !imgSize.width || !imgSize.height) return;
     const rect = e.currentTarget.getBoundingClientRect();
     const x = ((e.clientX - rect.left) * imageWidth) / imgSize.width;
     const y = ((e.clientY - rect.top) * imageHeight) / imgSize.height;
@@ -151,14 +216,29 @@ export function KeymapApp() {
 
   return (
     <div className="keymap-container">
-      <ImageList
-        images={images}
-        selectedName={selectedName}
-        onSelect={setSelectedName}
-      />
+      <div className="image-list-column">
+        <select
+          className="volume-select"
+          value={volume ?? ''}
+          onChange={(e) => setVolume(e.target.value || null)}
+        >
+          <option value="">Select a volume…</option>
+          {volumes.map((v) => (
+            <option key={v.name} value={v.name}>
+              {v.name} ({v.labeledPages}/{v.pageCount})
+            </option>
+          ))}
+        </select>
+        <ImageList
+          heading="Pages"
+          images={pages}
+          selectedName={selectedPage}
+          onSelect={setSelectedPage}
+        />
+      </div>
 
       <div className="keymap-center">
-        {selectedName ? (
+        {volume && selectedPage ? (
           <div
             className="image-wrapper"
             style={{ cursor: 'crosshair' }}
@@ -166,7 +246,7 @@ export function KeymapApp() {
           >
             <img
               ref={imgRef}
-              src={imageUrl(selectedName)}
+              src={pageImageUrl(volume, selectedPage)}
               className="keymap-image"
               style={
                 imageWidth && imageHeight
@@ -186,13 +266,17 @@ export function KeymapApp() {
             />
           </div>
         ) : (
-          <div className="keymap-empty">Select a key map to begin labeling</div>
+          <div className="keymap-empty">
+            {volume
+              ? 'Select a page to label its printed neighbor numbers'
+              : 'Select a volume to begin'}
+          </div>
         )}
       </div>
 
       <div className="keymap-right">
         <div className="keymap-status">
-          {selectedName && (
+          {selectedPage && (
             <>
               <span>{labels.length} labels</span>
               <span className={`save-status save-${saveStatus}`}>
@@ -225,6 +309,7 @@ export function KeymapApp() {
           onSelect={setSelectedIndex}
           onChangeText={handleChangeText}
           onDelete={handleDelete}
+          onNextPage={hasNextPage ? () => stepPage(1) : undefined}
         />
       </div>
     </div>

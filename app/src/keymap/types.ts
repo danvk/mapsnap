@@ -24,8 +24,11 @@ export type LabelsWriteRequest = Omit<LabelsJson, 'image'>;
 export interface ImageInfo {
   /** Page id: volume path and stem, e.g. "queens_1950/vol2/p0". */
   name: string;
-  /** Number of labels in the sidecar, or null if no sidecar exists yet. */
-  labelCount: number | null;
-  /** Whether the page has a keymap.json sidecar (vs. being listed for its truth). */
-  hasKeymap: boolean;
+  /** Labels whose text has been entered (blue badge; hidden when zero). */
+  withText: number;
+  /** Labels still awaiting text (orange badge; hidden when zero). */
+  withoutText: number;
+  /** Whether the page has a keymap.json sidecar (vs. being listed for its truth).
+   * Absent for lists where the notion does not apply (adjacency pages). */
+  hasKeymap?: boolean;
 }

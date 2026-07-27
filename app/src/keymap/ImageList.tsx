@@ -4,14 +4,16 @@ interface ImageListProps {
   images: ImageInfo[];
   selectedName: string | null;
   onSelect: (name: string) => void;
+  /** Column heading; the adjacency labeler reuses this list for volume pages. */
+  heading?: string;
 }
 
 /** Left-column list of available key map pages, with their label counts. */
 export function ImageList(props: ImageListProps) {
-  const { images, selectedName, onSelect } = props;
+  const { images, selectedName, onSelect, heading = 'Key maps' } = props;
   return (
     <div className="image-list">
-      <h2>Key maps</h2>
+      <h2>{heading}</h2>
       <ul>
         {images.map((info) => (
           <li
@@ -19,18 +21,30 @@ export function ImageList(props: ImageListProps) {
             className={info.name === selectedName ? 'selected' : undefined}
             onClick={() => onSelect(info.name)}
             title={
-              info.hasKeymap
-                ? info.name
-                : `${info.name} (no keymap.json; listed because it has truth labels)`
+              info.hasKeymap === false
+                ? `${info.name} (no keymap.json; listed because it has truth labels)`
+                : info.name
             }
           >
             <span
-              className={info.hasKeymap ? 'image-name' : 'image-name no-keymap'}
+              className={
+                info.hasKeymap === false ? 'image-name no-keymap' : 'image-name'
+              }
             >
               {info.name}
             </span>
-            {info.labelCount !== null && (
-              <span className="label-count">{info.labelCount}</span>
+            {info.withText > 0 && (
+              <span className="label-count" title="labels with text">
+                {info.withText}
+              </span>
+            )}
+            {info.withoutText > 0 && (
+              <span
+                className="label-count label-count-empty"
+                title="labels without text"
+              >
+                {info.withoutText}
+              </span>
             )}
           </li>
         ))}

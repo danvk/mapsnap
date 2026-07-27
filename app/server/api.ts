@@ -57,6 +57,25 @@ export interface VolumeQuery {
   volume: string;
 }
 
+/** Response of GET /api/adjacency-volumes. */
+export interface AdjacencyVolumesResponse {
+  volumes: { name: string; pageCount: number; labeledPages: number }[];
+}
+
+/** Response of GET /api/adjacency-pages. */
+export interface AdjacencyPagesResponse {
+  pages: ImageInfo[];
+}
+
+/** Query naming one page of one volume for adjacency truth. */
+export interface AdjacencyTruthTarget {
+  volume: string;
+  page: string;
+}
+
+/** GET /api/adjacency-labels — the page's entry, or a marker that none exists. */
+export type AdjacencyLabelsResponse = LabelsWriteRequest | { exists: false };
+
 /**
  * Response of GET /iiif-api/failed-georefs — page stem → failure kind.
  *
@@ -135,6 +154,20 @@ export interface API {
   '/api/labels': {
     get: GetEndpoint<LabelsResponse, KeymapTarget>;
     put: Endpoint<LabelsWriteRequest, LabelsWriteResponse, KeymapTarget>;
+  };
+  '/api/adjacency-volumes': {
+    get: GetEndpoint<AdjacencyVolumesResponse>;
+  };
+  '/api/adjacency-pages': {
+    get: GetEndpoint<AdjacencyPagesResponse, VolumeQuery>;
+  };
+  '/api/adjacency-labels': {
+    get: GetEndpoint<AdjacencyLabelsResponse, AdjacencyTruthTarget>;
+    put: Endpoint<
+      LabelsWriteRequest,
+      LabelsWriteResponse,
+      AdjacencyTruthTarget
+    >;
   };
   '/notes-api/notes': {
     get: GetEndpoint<NotesResponse, VolumeQuery>;

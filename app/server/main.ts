@@ -20,6 +20,7 @@ import express from 'express';
 import { TypedRouter } from 'crosswalk';
 import type { API } from './api.ts';
 import { registerIiifApi, registerIiifImages } from './iiifRoutes.ts';
+import { registerAdjacencyTruthApi } from './adjacencyRoutes.ts';
 import { registerKeymapApi, registerKeymapImages } from './keymapRoutes.ts';
 import { registerNotesApi } from './notesRoutes.ts';
 
@@ -48,6 +49,7 @@ registerKeymapImages(app, dataDir);
 const router = new TypedRouter<API>(app);
 registerIiifApi(router, dataDir);
 registerKeymapApi(router, dataDir);
+registerAdjacencyTruthApi(router, dataDir);
 registerNotesApi(router, dataDir);
 
 // Serve the data directory under the app base so `?files=data/...` deep links

@@ -4,7 +4,7 @@ import { join } from 'path';
 import { beforeAll, describe, expect, it } from 'vitest';
 import {
   findKeymapPages,
-  readLabelCount,
+  readLabelCounts,
   resolveKeymapPage,
 } from './keymapPages.ts';
 
@@ -97,14 +97,20 @@ describe('resolveKeymapPage', () => {
   });
 });
 
-describe('readLabelCount', () => {
-  it('counts labels, and reports null when there is no sidecar', async () => {
+describe('readLabelCounts', () => {
+  it('splits counts by entered text, zeros when there is no sidecar', async () => {
+    // p1's fixture has three labels with no text entered.
     expect(
-      await readLabelCount(join(dataDir, 'champaign/raw/truth/p1.labels.json')),
-    ).toBe(3);
+      await readLabelCounts(
+        join(dataDir, 'champaign/raw/truth/p1.labels.json'),
+      ),
+    ).toEqual({ withText: 0, withoutText: 3 });
     expect(
-      await readLabelCount(join(dataDir, 'detroit/raw/truth/p0.labels.json')),
-    ).toBe(0);
-    expect(await readLabelCount(join(dataDir, 'nope.labels.json'))).toBeNull();
+      await readLabelCounts(join(dataDir, 'detroit/raw/truth/p0.labels.json')),
+    ).toEqual({ withText: 0, withoutText: 0 });
+    expect(await readLabelCounts(join(dataDir, 'nope.labels.json'))).toEqual({
+      withText: 0,
+      withoutText: 0,
+    });
   });
 });
