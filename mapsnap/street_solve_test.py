@@ -9,8 +9,9 @@ from mapsnap.keymap.align_page_region import (
 from mapsnap.street_solve import (
     StreetGates,
     bearing_spread,
-    consensus_pose,
+    consensus_poses,
     distinct_lines,
+    extend_terminal_segments,
     psi_from_theta,
     psi_votes,
     residuals_at,
@@ -233,16 +234,16 @@ def test_bearing_spread_measures_the_widest_pair():
     assert 85.0 < spread <= 90.0
 
 
-def test_consensus_returns_none_without_a_diverse_pair():
+def test_consensus_returns_nothing_without_a_diverse_pair():
     parallel = [
         constraint_for(TRUE_POSE, "A", (200.0, 300.0), 25.0),
         constraint_for(TRUE_POSE, "B", (500.0, 300.0), 25.0),
     ]
     assert (
-        consensus_pose(
+        consensus_poses(
             parallel, TRUE_POSE[2], [(LOG_SCALE, "prior")], SIZE, StreetGates()
         )
-        is None
+        == []
     )
 
 
@@ -306,3 +307,34 @@ def test_abstains_when_only_two_streets_support_the_pose():
         psi_priors=[(TRUE_POSE[2], "label-pair-exact")],
     )
     assert result.pose is None and result.abstain == "no-consensus"
+
+
+def test_extends_only_the_open_ends_of_a_polyline():
+    starts, ends = street_along((0.0, 0.0), 0.0, length_m=600.0)
+    before = float(np.sum(np.linalg.norm(ends - starts, axis=1)))
+    new_starts, new_ends = extend_terminal_segments(starts, ends, 80.0)
+    after = float(np.sum(np.linalg.norm(new_ends - new_starts, axis=1)))
+    # Both ends grow by the allowance; the interior joins are untouched.
+    assert abs((after - before) - 160.0) < 1e-6
+    assert np.allclose(new_starts[1:], starts[1:])
+    assert np.allclose(new_ends[:-1], ends[:-1])
+
+
+def test_street_ending_short_still_constrains_the_page():
+    # New Orleans p181's SOUTH MIRO: the label sits on the street's line but 49 m
+    # past where OSM stops drawing it. Without the allowance that reads as a 49 m
+    # position error, and the solver moves the page to "fix" it.
+    world = pose_world_of(TRUE_POSE, (500.0, 200.0), SIZE)
+    starts, ends = street_along((world[0], world[1] - 90.0), 0.0, length_m=100.0)
+    stub = (
+        (500.0, 200.0),
+        math.radians((0.0 - TRUE_POSE[2] - 90.0) % 180.0),
+        "SHORT",
+        starts,
+        ends,
+    )
+    before, _ = residuals_at(TRUE_POSE, stub, SIZE)
+    extended = (*stub[:3], *extend_terminal_segments(starts, ends, 80.0))
+    after, _ = residuals_at(TRUE_POSE, extended, SIZE)
+    assert before > 35.0  # measured to the polyline's end
+    assert after < 1.0  # measured across to its line, where the label actually sits

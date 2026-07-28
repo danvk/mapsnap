@@ -201,6 +201,7 @@ def solve_page(
         prior=prior,
         label_size=label_size,
         working_size=size,
+        scale_px_per_m=scale_px_per_m or 1.0,
         gates=gates,
     )
     record["n_constraints"] = len(constraints)
@@ -594,6 +595,7 @@ def cmd_materialize(args: argparse.Namespace) -> None:
             prior=prior,
             label_size=label_size,
             working_size=size,
+            scale_px_per_m=scale or 1.0,
             gates=gates,
         )
         psi_priors = psi_votes(constraints, gates) + psi_priors_for(
