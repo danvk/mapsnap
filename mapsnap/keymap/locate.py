@@ -17,6 +17,7 @@ from pathlib import Path
 
 import numpy as np
 
+from mapsnap.feature_index import FeatureIndex
 from mapsnap.keymap.fit_keymap import key_stem, load_detections, page_key, page_number
 
 Point = tuple[float, float]
@@ -263,6 +264,19 @@ class KeymapLocator:
     # Page key -> world (lon, lat) rings of the colored block(s) drawn around that number
     # on the key map (from page_regions segmentation) — the page's approximate ground footprint.
     regions: dict[str, list[list[Point]]] = field(default_factory=dict)
+    # Spatial index over the last feature list the cull methods were handed, kept
+    # because callers pass the same volume-wide centerlines list once per page and
+    # rebuilding the tree every time would cost what the scan it replaces cost. The
+    # strong reference keeps that list alive, so its identity can never be reused.
+    index_cache: tuple[list[dict], FeatureIndex] | None = field(
+        default=None, repr=False, compare=False
+    )
+
+    def feature_index(self, features: list[dict]) -> FeatureIndex:
+        """Spatial index over ``features``, reused across calls with the same list."""
+        if self.index_cache is None or self.index_cache[0] is not features:
+            self.index_cache = (features, FeatureIndex(features))
+        return self.index_cache[1]
 
     @classmethod
     def from_keymap(
@@ -413,7 +427,7 @@ class KeymapLocator:
             )
         return [
             feature
-            for feature in features
+            for feature in self.feature_index(features).near_bboxes(boxes)
             if any(
                 min_lon <= lon <= max_lon and min_lat <= lat <= max_lat
                 for (min_lon, max_lon, min_lat, max_lat) in boxes
@@ -433,7 +447,7 @@ class KeymapLocator:
         if not centers:
             return None
         kept = []
-        for feature in features:
+        for feature in self.feature_index(features).near_points(centers, self.radius_m):
             segments = geometry_segments(feature.get("geometry", {}))
             if any(
                 segment_point_distance_m(segment, center) <= self.radius_m

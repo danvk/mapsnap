@@ -37,6 +37,7 @@ from mapsnap.edge_join import (
     rotation_candidates,
     skeleton_points,
 )
+from mapsnap.feature_index import FeatureIndex
 from mapsnap.georef_from_labels import LabelFeature, project_to_polyline
 from mapsnap.streets import Block, street_base_name
 from mapsnap.utils import haversine_m
@@ -194,7 +195,7 @@ def frame_bounds_lonlat(frame: FrameSpec) -> tuple[float, float, float, float]:
 
 
 def osm_rasters(
-    frame: FrameSpec, features: list[dict], *, width_m: float = OSM_WIDTH_M
+    frame: FrameSpec, features: FeatureIndex, *, width_m: float = OSM_WIDTH_M
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     """(prob, valid, skeleton) rasters of OSM centerlines in the frame.
 
@@ -203,14 +204,19 @@ def osm_rasters(
     same polylines at 1 px: the exact centerline (no thinning needed), which
     the chamfer distance transform is built from. valid is all-true — OSM
     knowledge covers the whole frame, unlike an edge-join anchor page.
+
+    The index pre-culls to the features whose bounding box reaches the frame;
+    the per-line bbox test below still runs on every one of them, so what gets
+    drawn is exactly what a scan of the whole volume would draw.
     """
     rows, cols = frame.shape
     prob = np.zeros((rows, cols), np.float32)
     skeleton = np.zeros((rows, cols), np.uint8)
-    min_lon, max_lon, min_lat, max_lat = frame_bounds_lonlat(frame)
+    bounds = frame_bounds_lonlat(frame)
+    min_lon, max_lon, min_lat, max_lat = bounds
     kx, ky = frame.metre_scales()
     thickness = max(2, round(width_m / frame.res_m))
-    for feature in features:
+    for feature in features.near_bbox(bounds):
         geometry = feature.get("geometry") or {}
         if geometry.get("type") == "LineString":
             lines = [geometry["coordinates"]]
@@ -589,7 +595,7 @@ def region_containment_frac(
 
 def evaluate_pose(
     ctx: PageContext,
-    features: list[dict],
+    features: FeatureIndex,
     world_affine: np.ndarray,
     params: MatchParams = OSM_MATCH_PARAMS,
 ) -> dict | None:
@@ -663,7 +669,7 @@ def evaluate_pose(
 
 def snap_page(
     ctx: PageContext,
-    features: list[dict],
+    features: FeatureIndex,
     params: MatchParams = OSM_MATCH_PARAMS,
 ) -> list[SnapCandidate]:
     """Candidate placements of a page against OSM around its keymap location.

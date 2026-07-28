@@ -12,6 +12,7 @@ import cv2
 import numpy as np
 
 from mapsnap.edge_join import MatchParams
+from mapsnap.feature_index import FeatureIndex
 from mapsnap.georef_from_labels import LabelFeature
 from mapsnap.osm_snap import (
     CHAMFER_CLAMP_M,
@@ -78,6 +79,11 @@ def grid_features() -> list[dict]:
     return features
 
 
+def grid_index() -> FeatureIndex:
+    """The synthetic grid, spatially indexed as the matcher consumes it."""
+    return FeatureIndex(grid_features())
+
+
 def extract_page(
     world: np.ndarray, pose: np.ndarray, size: tuple[int, int]
 ) -> np.ndarray:
@@ -110,7 +116,9 @@ def test_frame_roundtrip() -> None:
 
 def test_osm_raster_geometry() -> None:
     frame = frame_around((LON0, LAT0), half_m=200.0)
-    prob, valid, skeleton = osm_rasters(frame, [street("A", [(0, -300), (0, 300)])])
+    prob, valid, skeleton = osm_rasters(
+        frame, FeatureIndex([street("A", [(0, -300), (0, 300)])])
+    )
     assert valid.all()
     rows, cols = frame.shape
     center_col = cols // 2
@@ -292,7 +300,7 @@ def make_world_and_page(
 ) -> tuple[np.ndarray, np.ndarray, tuple[float, float]]:
     """(page P(road), truth page->lonlat affine, page-center lonlat)."""
     world_frame = frame_around((LON0, LAT0), half_m=1200.0)
-    world_prob, _, _ = osm_rasters(world_frame, grid_features())
+    world_prob, _, _ = osm_rasters(world_frame, grid_index())
     width, height = page_size
     center_m = (20.0, 30.0)  # metres east/north of the origin
     center_px = world_frame.lonlat_to_raster(*lonlat(*center_m))
@@ -341,7 +349,7 @@ def test_snap_recovers_synthetic_pose() -> None:
     params = MatchParams(
         min_overlap_m2=30_000.0, max_overlap_frac=1.0, top_k=8, mask_min_area=200
     )
-    candidates = snap_page(ctx, grid_features(), params)
+    candidates = snap_page(ctx, grid_index(), params)
     assert candidates, "the matcher must produce candidates"
     best = candidates[0]
     assert best.plausible
@@ -369,7 +377,7 @@ def test_snap_flipped_prior_recovered_by_mask_sweep() -> None:
     params = MatchParams(
         min_overlap_m2=30_000.0, max_overlap_frac=1.0, top_k=8, mask_min_area=200
     )
-    candidates = snap_page(ctx, grid_features(), params)
+    candidates = snap_page(ctx, grid_index(), params)
     assert candidates
     best = candidates[0]
     assert abs(wrap_deg(best.theta_deg - theta_true)) < 1.5
@@ -391,10 +399,10 @@ def test_evaluate_pose_truth_beats_shifted() -> None:
         rotation_priors=[],
         scale_priors=[ScalePrior(1.0, 0.05, "volume-median")],
     )
-    good = evaluate_pose(ctx, grid_features(), truth_affine)
+    good = evaluate_pose(ctx, grid_index(), truth_affine)
     shifted_affine = truth_affine.copy()
     shifted_affine[0, 2] += 60.0 / KX  # slide 60 m east
-    bad = evaluate_pose(ctx, grid_features(), shifted_affine)
+    bad = evaluate_pose(ctx, grid_index(), shifted_affine)
     assert good is not None and bad is not None
     assert good["verification"] > bad["verification"]
     assert good["inlier_frac"] > bad["inlier_frac"]

@@ -32,6 +32,7 @@ from mapsnap.edge_join_experiment import (
     load_prob,
     volume_median_scale,
 )
+from mapsnap.feature_index import FeatureIndex
 from mapsnap.georef_from_labels import LabelFeature, prepare_label_features
 from mapsnap.keymap.align_page_region import (
     image_neighbor_directions,
@@ -72,6 +73,7 @@ class VolumeContext:
     units: list[PageUnit]
     panel_units: list[PageUnit]
     features: list[dict]
+    feature_index: FeatureIndex  # the same features, spatially indexed
     locator: KeymapLocator | None
     volume_m_per_px: float
     adjacency: dict
@@ -430,6 +432,7 @@ def load_volume_context(
         units=units,
         panel_units=load_panel_units(volume),
         features=features,
+        feature_index=FeatureIndex(features),
         locator=locator,
         volume_m_per_px=volume_median_scale(units),
         adjacency=load_adjacency(volume),
@@ -720,7 +723,7 @@ def page_record(vctx: VolumeContext, unit: PageUnit) -> dict:
     if unit.fit_state == "fitted" and unit.gen_affine is not None:
         # Arbitration head-to-head: score the incumbent RANSAC pose with the
         # same evidence the challenger candidates carry.
-        incumbent = evaluate_pose(ctx, vctx.features, unit.gen_affine)
+        incumbent = evaluate_pose(ctx, vctx.feature_index, unit.gen_affine)
         if incumbent is not None:
             incumbent["world_affine"] = [
                 [float(v) for v in row] for row in unit.gen_affine
@@ -729,7 +732,7 @@ def page_record(vctx: VolumeContext, unit: PageUnit) -> dict:
             if unit.rmse_ft is not None:
                 incumbent["rmse_ft"] = round(unit.rmse_ft, 1)
             record["incumbent"] = incumbent
-    candidates = snap_page(ctx, vctx.features)
+    candidates = snap_page(ctx, vctx.feature_index)
     if not candidates:
         record["status"] = "no_candidates"
         return record
@@ -757,7 +760,7 @@ def write_contact_sheet(
         center = (candidate["center"][0], candidate["center"][1])
         diag_m = math.hypot(unit.width, unit.height) * candidate["scale_m_per_px"] / 2
         frame = frame_around(center, half_m=diag_m + 100.0)
-        osm_prob, _, _ = osm_rasters(frame, vctx.features)
+        osm_prob, _, _ = osm_rasters(frame, vctx.feature_index)
         pose = frame.page_to_raster_affine(world)
         warped = cv2.warpAffine(prob, pose, (frame.shape[1], frame.shape[0]))
         rgb = np.zeros((*frame.shape, 3), np.uint8)
