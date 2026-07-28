@@ -35,6 +35,7 @@ from mapsnap.compare_iiif_georef import (
     annotation_transform_type,
     extract_gcps,
     fit_transform,
+    truth_polygons_by_page,
 )
 from mapsnap.edge_join_experiment import (
     PageUnit,
@@ -47,9 +48,11 @@ from mapsnap.edge_join_experiment import (
 from mapsnap.georef_from_labels import LabelFeature, prepare_label_features
 from mapsnap.keymap.align_page_region import (
     pose_corners_world,
+    pose_world_of,
     volume_filter_params,
     volume_median_scale_px_per_m,
 )
+from mapsnap.keymap.fit_keymap import project, unproject
 from mapsnap.keymap.locate import KeymapLocator, discover_keymaps
 from mapsnap.osm_snap import dedupe_thetas, label_osm_rotations
 from mapsnap.street_solve import (
@@ -59,6 +62,7 @@ from mapsnap.street_solve import (
     assemble_constraints,
     psi_from_theta,
     psi_votes,
+    residuals_at,
     solve_streets_pose,
 )
 from mapsnap.streets import build_block_index
@@ -299,6 +303,144 @@ def attach_case_folded_truth(volume: Path, units: list[PageUnit]) -> int:
     return fixed
 
 
+def street_records(
+    constraints: list,
+    pose,
+    size: tuple[int, int],
+    origin: tuple[float, float],
+    gates: StreetGates,
+    label_scale: tuple[float, float],
+) -> list[dict]:
+    """Every considered detection under a pose, in the .georef.json street schema.
+
+    Adds the diagnostics this channel turns on — the distance and angle to the
+    matched centerline, and the point it snapped to — so the debugger can draw the
+    residual that decided inlier or outlier.
+    """
+    records = []
+    for constraint in constraints:
+        center_px, dir_pix, name, starts, ends = constraint
+        position_m, angle_deg = residuals_at(pose, constraint, size)
+        world = pose_world_of(pose, center_px, size)
+        lon, lat = unproject(float(world[0]), float(world[1]), origin[0], origin[1])
+        step = 20.0
+        tip_px = (
+            center_px[0] + step * math.cos(dir_pix),
+            center_px[1] + step * math.sin(dir_pix),
+        )
+        tip = pose_world_of(pose, tip_px, size)
+        tip_lon, tip_lat = unproject(float(tip[0]), float(tip[1]), origin[0], origin[1])
+        norm = math.hypot(tip_lon - lon, tip_lat - lat) or 1.0
+        snapped = nearest_point_on(world, starts, ends)
+        snap_lon, snap_lat = unproject(
+            float(snapped[0]), float(snapped[1]), origin[0], origin[1]
+        )
+        records.append(
+            {
+                "street": name,
+                "x": round(center_px[0] / label_scale[0]),
+                "y": round(center_px[1] / label_scale[1]),
+                "lat": round(lat, 7),
+                "lon": round(lon, 7),
+                "dir_x": round(math.cos(dir_pix), 6),
+                "dir_y": round(math.sin(dir_pix), 6),
+                "dir_lon": round((tip_lon - lon) / norm, 6),
+                "dir_lat": round((tip_lat - lat) / norm, 6),
+                "inlier": position_m <= gates.position_gate_m
+                and abs(angle_deg) <= gates.angle_gate_deg,
+                "position_m": round(position_m, 1),
+                "angle_deg": round(angle_deg, 2),
+                "snap_lon": round(snap_lon, 7),
+                "snap_lat": round(snap_lat, 7),
+            }
+        )
+    return records
+
+
+def nearest_point_on(point, starts, ends):
+    """The closest point to ``point`` on a segment soup (metre frame)."""
+    delta = ends - starts
+    length_sq = (delta * delta).sum(axis=1)
+    t = np.clip(
+        ((point - starts) * delta).sum(axis=1) / np.maximum(length_sq, 1e-9), 0, 1
+    )
+    projected = starts + t[:, None] * delta
+    return projected[int(np.linalg.norm(point - projected, axis=1).argmin())]
+
+
+def truth_pose_for(unit: PageUnit, origin: tuple[float, float]):
+    """The truth transform expressed as a StreetPose in the prior's metre frame."""
+    if unit.truth is None:
+        return None
+    affine = unit.truth.affine_local
+
+    def world(px: float, py: float):
+        lon, lat = affine @ np.array([px, py, 1.0])
+        return np.array(project(float(lon), float(lat), origin[0], origin[1]))
+
+    center = world(unit.width / 2, unit.height / 2)
+    up = world(unit.width / 2, unit.height / 2 - 1.0) - center
+    psi = math.degrees(math.atan2(up[0], up[1]))
+    return (
+        float(center[0]),
+        float(center[1]),
+        psi,
+        math.log(1.0 / float(np.linalg.norm(up))),
+    )
+
+
+def truth_rings(volume: Path, unit: PageUnit) -> list | None:
+    """The page's human footprint ring(s) as [lon, lat] lists, if truth exists."""
+    truth_path = volume / "main.iiif.json"
+    if not truth_path.exists():
+        return None
+    polygons = truth_polygons_by_page(truth_path).get(unit.number)
+    if not polygons:
+        return None
+    return [[[float(x), float(y)] for x, y in ring] for ring in polygons]
+
+
+def write_georef_streets(
+    volume: Path,
+    unit: PageUnit,
+    prior: PriorLocation,
+    constraints: list,
+    pose,
+    gates: StreetGates,
+    label_size: tuple[int, int],
+    suffix: str,
+    extra: dict,
+) -> Path:
+    """Write one <stem>.georef-streets*.json in the pipeline's sidecar schema."""
+    size = (unit.width, unit.height)
+    label_scale = (size[0] / label_size[0], size[1] / label_size[1])
+    doc = {
+        "width": label_size[0],
+        "height": label_size[1],
+        "corners": pose_corners_world(pose, size, prior.center),
+        "streets": street_records(
+            constraints, pose, size, prior.center, gates, label_scale
+        ),
+        "intersections": [],
+        "keymap": {
+            "lat": round(prior.center[1], 7),
+            "lon": round(prior.center[0], 7),
+            "radius_m": round(prior.radius_m, 1),
+            "centers": [[round(c[0], 7), round(c[1], 7)] for c in prior.centers],
+            "source": prior.source,
+        },
+        "street_solve": extra,
+    }
+    rings = truth_rings(volume, unit)
+    if rings:
+        # The human footprint, so one file shows where the page belongs beside where
+        # this fit put it.
+        doc["truth"] = rings
+    path = volume / f"{unit.stem}.georef-{suffix}.json"
+    path.write_text(json.dumps(doc, indent=2) + "\n")
+    return path
+
+
 def volume_context(volume: Path):
     """(locator, centerlines, filter params, volume scale) for a volume."""
     keymaps = discover_keymaps([str(volume / "p1.jpg")])
@@ -425,6 +567,112 @@ def cmd_report(args: argparse.Namespace) -> None:
         print(f"  {reason:<32} {count}")
 
 
+def cmd_materialize(args: argparse.Namespace) -> None:
+    """Write .georef-streets.json (and the truth-pose twin) for chosen pages."""
+    volume = Path(args.volume)
+    locator, centerlines, filter_params, scale = volume_context(volume)
+    gates = StreetGates(**parse_gate_overrides(args.gates))
+    units = load_page_units(volume)
+    attach_case_folded_truth(volume, units)
+    wanted = set(args.pages.split(","))
+    for unit in units:
+        if unit.stem not in wanted:
+            continue
+        prior = page_prior(unit, locator, allow_truth=args.truth_prior)
+        if prior is None:
+            print(f"{unit.stem}: no prior", file=sys.stderr)
+            continue
+        prepared = page_features(volume, unit, prior, centerlines, filter_params)
+        if prepared is None:
+            print(f"{unit.stem}: no vocabulary", file=sys.stderr)
+            continue
+        features, block_index, label_size = prepared
+        size = (unit.width, unit.height)
+        constraints = assemble_constraints(
+            features,
+            block_index,
+            prior=prior,
+            label_size=label_size,
+            working_size=size,
+            gates=gates,
+        )
+        psi_priors = psi_votes(constraints, gates) + psi_priors_for(
+            features, block_index, prior
+        )
+        result = solve_streets_pose(
+            constraints,
+            size=size,
+            prior_log_scale=math.log(scale) if scale else 0.0,
+            psi_priors=psi_priors,
+            gates=gates,
+            prior_radius_m=prior.radius_m,
+        )
+        written = []
+        if result.pose is not None:
+            rmse = (
+                round(
+                    grid_rmse_ft_between(
+                        corners_to_affine(
+                            pose_corners_world(result.pose, size, prior.center), size
+                        ),
+                        unit.truth.affine_local,
+                        unit.width,
+                        unit.height,
+                    ),
+                    1,
+                )
+                if unit.truth is not None
+                else None
+            )
+            written.append(
+                write_georef_streets(
+                    volume,
+                    unit,
+                    prior,
+                    constraints,
+                    result.pose,
+                    gates,
+                    label_size,
+                    "streets",
+                    {
+                        "pose": [round(v, 6) for v in result.pose],
+                        "psi_source": result.psi_source,
+                        "scale_source": result.scale_source,
+                        "n_inliers": result.n_inliers,
+                        "n_constraints": len(constraints),
+                        "rmse_ft": rmse,
+                        "ransac_rmse_ft": (
+                            None if unit.rmse_ft is None else round(unit.rmse_ft, 1)
+                        ),
+                    },
+                )
+            )
+        else:
+            print(f"{unit.stem}: abstained ({result.abstain})", file=sys.stderr)
+        truth_pose = truth_pose_for(unit, prior.center)
+        if truth_pose is not None:
+            written.append(
+                write_georef_streets(
+                    volume,
+                    unit,
+                    prior,
+                    constraints,
+                    truth_pose,
+                    gates,
+                    label_size,
+                    "streets-truth",
+                    {
+                        "pose": [round(v, 6) for v in truth_pose],
+                        "source": "truth",
+                        "n_constraints": len(constraints),
+                        "note": "detections scored against the human georeference",
+                    },
+                )
+            )
+        for path in written:
+            print(path)
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=(__doc__ or "").split("\n")[0])
     sub = parser.add_subparsers(dest="command", required=True)
@@ -439,6 +687,15 @@ def main() -> None:
         help="Allow the truth-centroid prior rung (experiment ceiling only).",
     )
     candidates.set_defaults(func=cmd_candidates)
+
+    materialize = sub.add_parser(
+        "materialize", help="Write .georef-streets.json sidecars for chosen pages."
+    )
+    materialize.add_argument("volume")
+    materialize.add_argument("--pages", required=True)
+    materialize.add_argument("--gates")
+    materialize.add_argument("--truth-prior", action="store_true")
+    materialize.set_defaults(func=cmd_materialize)
 
     report = sub.add_parser("report", help="Head-to-head vs RANSAC.")
     report.add_argument("volumes", nargs="+")
