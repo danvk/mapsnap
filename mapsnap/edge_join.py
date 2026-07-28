@@ -158,15 +158,22 @@ def rotation_candidates(
     target_prob: np.ndarray,
     jitter_deg: tuple[float, ...] = (0.0,),
     fixed_valid: np.ndarray | None = None,
+    *,
+    target_dir: float | None = None,
 ) -> list[float]:
     """cv2-convention rotations aligning the target's road grid to the frame's.
 
     The array-frame rotation mapping target directions onto fixed directions is
     fixed_dir - target_dir (mod 90); cv2.getRotationMatrix2D uses the opposite
     sign, so candidates are -(delta) + k*90 (+ jitter) for k in 0..3.
+
+    ``target_dir`` supplies an already-measured target orientation — the same
+    target is often swept against several frames, and the measurement depends
+    only on the target.
     """
     fixed_dir = dominant_orientation_deg(fixed_prob, fixed_valid)
-    target_dir = dominant_orientation_deg(target_prob)
+    if target_dir is None:
+        target_dir = dominant_orientation_deg(target_prob)
     delta = fixed_dir - target_dir
     return [
         (-delta + 90.0 * k + j + 180.0) % 360.0 - 180.0

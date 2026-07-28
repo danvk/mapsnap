@@ -31,6 +31,7 @@ from mapsnap.edge_join import (
     FrameSpec,
     JoinCandidate,
     MatchParams,
+    dominant_orientation_deg,
     match_at_rotation,
     pose_ncc,
     refine_and_rank,
@@ -164,6 +165,27 @@ class PageContext:
     keymap_regions: list[list[list[float]]] | None = None  # world rings
     label_features: list[LabelFeature] | None = None
     block_index: dict[str, list[Block]] | None = None
+    # Memos of the maps derived from `prob`. The road skeleton (a Zhang
+    # thinning pass) is needed by both evaluate_pose and snap_page, and the
+    # dominant road orientation is re-derived once per search center. Each is a
+    # pure function of `prob`, so a reuse is identical to a recompute.
+    road_points_cache: dict[tuple[float, int], np.ndarray] = field(
+        default_factory=dict, repr=False
+    )
+    orientation_cache: float | None = field(default=None, repr=False)
+
+    def road_points(self, params: MatchParams) -> np.ndarray:
+        """The page's road-skeleton points (x, y in page pixels), thinned once per page."""
+        key = (params.mask_threshold, params.mask_min_area)
+        if key not in self.road_points_cache:
+            self.road_points_cache[key] = skeleton_points(self.prob, *key)
+        return self.road_points_cache[key]
+
+    def road_orientation_deg(self) -> float:
+        """The page's dominant road direction folded to [0, 90), measured once per page."""
+        if self.orientation_cache is None:
+            self.orientation_cache = dominant_orientation_deg(self.prob)
+        return self.orientation_cache
 
 
 def frame_around(
@@ -630,7 +652,7 @@ def evaluate_pose(
         return None
     distance = osm_distance_m(skeleton, res)
     pose = frame.page_to_raster_affine(world_affine)
-    points = skeleton_points(ctx.prob, params.mask_threshold, params.mask_min_area)
+    points = ctx.road_points(params)
     if len(points) < 10:
         return None
     if len(points) > 3000:
@@ -694,7 +716,7 @@ def snap_page(
     if params.min_overlap_m2 > 0.5 * page_area_m2:
         params = dataclasses.replace(params, min_overlap_m2=0.5 * page_area_m2)
     half_m = ctx.radius_m + page_diag_m / 2 + 100.0
-    points = skeleton_points(ctx.prob, params.mask_threshold, params.mask_min_area)
+    points = ctx.road_points(params)
     sigma_px = max(params.blur_sigma_m / res, 0.5)
     border_px = max(1, round(REFINE_SHIFT_MAX_M / res))
     page_center = np.array([ctx.width / 2.0, ctx.height / 2.0, 1.0])
@@ -719,7 +741,11 @@ def snap_page(
         # theta set is never empty and covers any 180-flip a prior missed.
         thetas = dedupe_thetas(ctx.rotation_priors)
         for theta in rotation_candidates(
-            osm_prob, ctx.prob, params.jitter_deg, fixed_valid=valid
+            osm_prob,
+            ctx.prob,
+            params.jitter_deg,
+            fixed_valid=valid,
+            target_dir=ctx.road_orientation_deg(),
         ):
             if not any(
                 abs(wrap_deg(theta - k.theta_deg)) <= THETA_DEDUPE_DEG for k in thetas

@@ -328,6 +328,44 @@ def affine_corner_error_m(a: np.ndarray, b: np.ndarray, size: tuple[int, int]) -
     return worst
 
 
+def test_page_context_memos_match_a_fresh_computation() -> None:
+    """The per-page memos must answer exactly what recomputing would."""
+    from mapsnap.edge_join import dominant_orientation_deg, skeleton_points
+
+    page, _, _ = make_world_and_page(25.0)
+    ctx = PageContext(
+        stem="p1",
+        number=1,
+        width=300,
+        height=420,
+        prob=page,
+        search_centers=[(LON0, LAT0)],
+        radius_m=300.0,
+        rotation_priors=[],
+        scale_priors=[ScalePrior(1.0, 0.05, "volume-median")],
+    )
+    params = MatchParams(mask_min_area=200)
+    expected = skeleton_points(page, params.mask_threshold, params.mask_min_area)
+    assert np.array_equal(ctx.road_points(params), expected)
+    assert ctx.road_points(params) is ctx.road_points(params)  # memoized
+    # A different mask setting is a different question, not a cache hit.
+    coarse = MatchParams(mask_min_area=5000)
+    assert ctx.road_points(coarse) is not ctx.road_points(params)
+    assert ctx.road_orientation_deg() == dominant_orientation_deg(page)
+
+
+def test_rotation_candidates_target_dir_matches_measuring_it() -> None:
+    from mapsnap.edge_join import dominant_orientation_deg, rotation_candidates
+
+    page, _, _ = make_world_and_page(25.0)
+    frame = frame_around((LON0, LAT0), half_m=1200.0)
+    world_prob, _, _ = osm_rasters(frame, grid_index())
+    supplied = rotation_candidates(
+        world_prob, page, target_dir=dominant_orientation_deg(page)
+    )
+    assert supplied == rotation_candidates(world_prob, page)
+
+
 def test_snap_recovers_synthetic_pose() -> None:
     theta_true = 25.0
     page, truth_affine, center = make_world_and_page(theta_true)
