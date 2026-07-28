@@ -35,6 +35,7 @@ from mapsnap.compare_iiif_georef import (
 from mapsnap.keymap.fit_keymap import (
     Model,
     build_correspondences,
+    key_stem,
     load_detections,
     load_georef_pages,
     ransac,
@@ -130,7 +131,8 @@ def region_features(
     features: list[dict] = []
     for index, pixel_polygon in polygons.items():
         text = texts[index]
-        number = int(text) if text.isdigit() else None
+        stem = key_stem(text)
+        number = int(stem) if stem.isdigit() else None
         ring = [
             list(unproject(*similarity_apply(model, vertex), lon0, lat0))
             for vertex in pixel_polygon

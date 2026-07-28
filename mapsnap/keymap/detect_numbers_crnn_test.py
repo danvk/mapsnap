@@ -3,6 +3,7 @@ from mapsnap.keymap.detect_numbers_crnn import (
     choose_reread,
     levenshtein,
     snap_to_pages,
+    volume_pages_for,
 )
 
 # A reread result triple is (polygon, text, confidence); the polygon is irrelevant to the gate.
@@ -23,6 +24,26 @@ def test_snap_to_pages_repairs_within_distance():
     assert snap_to_pages("21", ["1", "21", "64"]) == "21"  # exact stays
     # "521" is one substitution from "520" and >=2 from the others, so it snaps to "520".
     assert snap_to_pages("521", ["518", "520", "530"], max_distance=1) == "520"
+
+
+def test_snap_to_pages_letters_from_unique_key():
+    # A digit-only read one edit from a single lettered key adopts it — the
+    # letter comes from the page vocabulary (chicago prints 51, disk has 51N).
+    assert snap_to_pages("51", ["50", "51N", "52"]) == "51N"
+    assert snap_to_pages("1499", ["1498", "1499A"]) == "1499A"
+
+
+def test_snap_to_pages_leading_digit_completion():
+    # A 2-digit read on a 3-digit sheet ties with many pages at distance 1, but
+    # only one completes it on the left (the truncated leading digit).
+    assert snap_to_pages("14", ["113", "114", "124", "144", "146"]) == "114"
+
+
+def test_snap_to_pages_ambiguous_family_keeps_raw():
+    # Several keys tie at the minimum distance: adopting one would be a
+    # valid-but-wrong key, so the raw read is kept.
+    assert snap_to_pages("35", ["35A", "35B", "35C"]) == "35"
+    assert snap_to_pages("480", ["481", "489"]) == "480"
 
 
 def test_snap_to_pages_keeps_far_text():
@@ -111,3 +132,14 @@ def test_duplicate_reread_allows_same_length_relabel():
     chosen = choose_duplicate_reread("30", [_reread("80"), _reread("80")], {"80"})
     assert chosen is not None
     assert chosen[1] == "80"
+
+
+def test_volume_pages_for_derives_from_raw_parent(tmp_path):
+    volume = tmp_path / "vol"
+    (volume / "raw").mkdir(parents=True)
+    for name in ("p0.jpg", "p1.jpg", "p35a.jpg", "p35b.jpg", "p6__1.jpg"):
+        (volume / name).touch()
+    (volume / "raw" / "p0.jpg").touch()
+    # page 0 (the key map itself) is excluded; letters kept; splits collapse
+    assert volume_pages_for(str(volume / "raw" / "p0.jpg")) == ["1", "6", "35A", "35B"]
+    assert volume_pages_for(str(volume / "p0.jpg")) == ["1", "6", "35A", "35B"]

@@ -33,6 +33,7 @@ from tqdm import tqdm
 from mapsnap.compare_iiif_georef import truth_distortion, truth_polygons_by_page
 from mapsnap.keymap.locate import (
     KeymapLocator,
+    page_key,
     page_number,
     region_scale_m_per_px,
     resolve_keymaps,
@@ -2241,7 +2242,8 @@ def _process_one_image(image_path: str) -> tuple[str, ProcessResult]:
     truth_polygons = (
         truth_by_page.get(number) if truth_by_page and number is not None else None
     )
-    keymap = locator.page_keymap(number) if locator is not None else None
+    key = page_key(image_stem(image_path))
+    keymap = locator.page_keymap(key) if locator is not None else None
 
     def run(
         block_index: dict, cos_phi: float, size_fraction: float = 1.0
@@ -2278,7 +2280,7 @@ def _process_one_image(image_path: str) -> tuple[str, ProcessResult]:
             # Tier 1: match only against the page's own key-map neighborhood — tight and
             # unambiguous, so far-away same-name streets can't produce spurious GCPs.
             restricted = locator.restricted_features(
-                page_number(image_stem(image_path)), _worker_state["geojson_features"]
+                page_key(image_stem(image_path)), _worker_state["geojson_features"]
             )
             if restricted:
                 near = build_block_index(
@@ -3552,7 +3554,7 @@ def main() -> None:
             rectangle_index = (rectangle_bi, compute_cos_phi(rectangle_bi))
         rect_streets = len(rectangle_index[0]) if rectangle_index else 0
         print(
-            f"Key map places {len(locator.located_numbers())} page numbers; matching within "
+            f"Key map places {len(locator.located_keys())} page numbers; matching within "
             f"{locator.radius_m:.0f} m of each, then a {rect_streets}-street key-map-rectangle "
             f"fallback (vs {len(block_index)} full).",
             file=sys.stderr,
@@ -3565,7 +3567,7 @@ def main() -> None:
     if locator is not None:
         region_priors = []
         for prior_image_path in args.images:
-            entry = locator.page_keymap(page_number(image_stem(prior_image_path)))
+            entry = locator.page_keymap(page_key(image_stem(prior_image_path)))
             if entry is not None and entry.get("regions"):
                 prior = region_prior_px_per_ft(
                     entry,

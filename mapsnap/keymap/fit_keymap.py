@@ -48,6 +48,23 @@ def page_number(stem: str) -> int | None:
     return int(match.group()) if match else None
 
 
+def page_key(stem: str) -> str | None:
+    """Canonical page key from a page id or printed text: digits plus letter suffix.
+
+    ``p133s`` -> ``133S``, ``p1499a`` -> ``1499A``, ``35F`` -> ``35F``, ``p12`` -> ``12``.
+    Keys are uppercased so lowercase disk stems and printed capitals compare equal.
+    Returns None when there is no digit (letter-only ids like ``pa``).
+    """
+    match = re.search(r"\d+[A-Za-z]{0,2}", stem)
+    return match.group().upper() if match else None
+
+
+def key_stem(key: str) -> str:
+    """The digit stem of a page key (``35F`` -> ``35``; a bare stem is its own stem)."""
+    match = re.match(r"\d+", key)
+    return match.group() if match else key
+
+
 def project(lon: float, lat: float, lon0: float, lat0: float) -> Point:
     """Equirectangular projection of (lon, lat) to local metres about (lon0, lat0)."""
     x = (lon - lon0) * math.cos(math.radians(lat0)) * METERS_PER_DEGREE
@@ -115,10 +132,11 @@ class GeorefPage:
 
 @dataclass
 class Detection:
-    """A key-map page-number detection: its number and pixel centroid."""
+    """A key-map page-number detection: its page key, number, and pixel centroid."""
 
     number: int
     pixel: Point
+    key: str = ""
 
 
 def polygon_centroid(polygon: list[list[float]]) -> Point:
@@ -181,14 +199,22 @@ def load_georef_pages(volume: Path) -> tuple[list[GeorefPage], Point]:
 
 
 def load_detections(keymap_path: Path) -> list[Detection]:
-    """Load key-map page-number detections (numeric text only) with pixel centroids."""
+    """Load key-map page-number detections (page-key texts) with pixel centroids.
+
+    A text must be a page key — digits with an optional letter suffix (``51``,
+    ``35F``) — anything else (a stray street-name read) is skipped. ``number``
+    holds the digit stem for numeric consumers; ``key`` the full canonical key.
+    """
     streets = json.loads(keymap_path.read_text())["streets"]
     detections: list[Detection] = []
     for street in streets:
         text = str(street["text"])
-        if not text.isdigit():
+        if not re.fullmatch(r"\d+[A-Za-z]{0,2}", text):
             continue
-        detections.append(Detection(int(text), polygon_centroid(street["polygon"])))
+        key = text.upper()
+        detections.append(
+            Detection(int(key_stem(key)), polygon_centroid(street["polygon"]), key)
+        )
     return detections
 
 
@@ -283,6 +309,21 @@ def volume_page_numbers(volume: Path) -> set[int]:
         if number is not None:
             numbers.add(number)
     return numbers
+
+
+def volume_page_keys(volume: Path) -> set[str]:
+    """All page keys present in the volume, letter suffixes included.
+
+    The full-string analogue of :func:`volume_page_numbers`: ``p35f.jpg``
+    contributes ``35F``, not ``35`` — so a key map's printed ``35`` can be
+    matched to the lettered pages that actually exist on disk.
+    """
+    keys: set[str] = set()
+    for image in volume.glob("p*.jpg"):
+        key = page_key(image.name.split(".")[0].split("__")[0])
+        if key is not None:
+            keys.add(key)
+    return keys
 
 
 def main() -> None:

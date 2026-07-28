@@ -9,6 +9,7 @@ from mapsnap.keymap.locate import (
     geometry_segments,
     geometry_vertices,
     meters_between,
+    page_key,
     page_number,
     resolve_keymaps,
 )
@@ -62,12 +63,12 @@ def test_meters_between_is_symmetric_and_scaled():
 
 def test_estimate_radius_is_twice_page_spacing():
     # Three pages spaced 0.001 deg lat (~110.5 m) apart in a line -> radius ~2 * 110.5.
-    locations = {1: [(0.0, 0.0)], 2: [(0.0, 0.001)], 3: [(0.0, 0.002)]}
+    locations = {"1": [(0.0, 0.0)], "2": [(0.0, 0.001)], "3": [(0.0, 0.002)]}
     assert math.isclose(estimate_radius(locations), 2 * 110.54, rel_tol=1e-2)
 
 
 def test_restricted_features_none_when_unplaced_else_nearby():
-    locator = KeymapLocator(locations={61: [(0.0, 0.0)]}, radius_m=150.0)
+    locator = KeymapLocator(locations={"61": [(0.0, 0.0)]}, radius_m=150.0)
     features = [
         {"geometry": {"type": "Point", "coordinates": [0.0, 0.0]}, "id": "near"},
         {
@@ -83,7 +84,7 @@ def test_restricted_features_none_when_unplaced_else_nearby():
 def test_restricted_features_keeps_through_street_with_no_vertex_inside():
     # A street whose endpoints (~222 m away) both fall outside the 150 m radius but whose
     # segment crosses the page center: segment distance keeps it; a vertex test would drop it.
-    locator = KeymapLocator(locations={61: [(0.0, 0.0)]}, radius_m=150.0)
+    locator = KeymapLocator(locations={"61": [(0.0, 0.0)]}, radius_m=150.0)
     features = [
         {
             "geometry": {
@@ -101,19 +102,48 @@ def test_restricted_features_keeps_through_street_with_no_vertex_inside():
     assert kept is not None and [f["id"] for f in kept] == ["through"]
 
 
-def test_located_numbers_and_page_number():
+def test_located_keys_and_page_keys():
     locator = KeymapLocator(
-        locations={1: [(0.0, 0.0)], 61: [(1.0, 1.0)]}, radius_m=100.0
+        locations={"1": [(0.0, 0.0)], "61": [(1.0, 1.0)]}, radius_m=100.0
     )
-    assert locator.located_numbers() == {1, 61}
+    assert locator.located_keys() == {"1", "61"}
     assert page_number("p61w") == 61 and page_number("p9n") == 9
+    assert page_key("p61w") == "61W" and page_key("p1499a") == "1499A"
+
+
+def test_string_key_lookup_prefers_exact_then_family():
+    locator = KeymapLocator(
+        locations={"35A": [(0.0, 0.0)], "35B": [(1.0, 1.0)], "36": [(2.0, 2.0)]},
+        radius_m=100.0,
+    )
+    # exact key -> only that entry; unknown member or bare int -> whole family
+    assert locator.centers_for("35A") == [(0.0, 0.0)]
+    assert sorted(locator.centers_for(35)) == [(0.0, 0.0), (1.0, 1.0)]
+    assert sorted(locator.centers_for("35")) == [(0.0, 0.0), (1.0, 1.0)]
+    # a lettered lookup against a bare-printed key map falls back to the stem
+    bare = KeymapLocator(locations={"51": [(3.0, 3.0)]}, radius_m=100.0)
+    assert bare.centers_for("51N") == [(3.0, 3.0)]
+    assert locator.centers_for(None) == []
+
+
+def test_regions_by_number_merges_families():
+    ring_a = [(0.0, 0.0), (1.0, 0.0), (1.0, 1.0)]
+    ring_b = [(2.0, 2.0), (3.0, 2.0), (3.0, 3.0)]
+    locator = KeymapLocator(
+        locations={},
+        radius_m=100.0,
+        regions={"35A": [ring_a], "35B": [ring_b]},
+    )
+    assert locator.regions_by_number() == {35: [ring_a, ring_b]}
+    assert locator.regions_for(35) == [ring_a, ring_b]
+    assert locator.regions_for("35A") == [ring_a]
 
 
 def test_page_keymap_entry():
     # Two detections of page 61 (e.g. a split sheet, one block per panel): lat/lon is
     # their mean (compatibility), centers carries each detection.
     locator = KeymapLocator(
-        locations={61: [(-87.5, 41.9), (-87.6, 41.7)]}, radius_m=300.0
+        locations={"61": [(-87.5, 41.9), (-87.6, 41.7)]}, radius_m=300.0
     )
     assert locator.page_keymap(61) == {
         "lat": 41.8,
@@ -127,9 +157,9 @@ def test_page_keymap_entry():
 
 def test_page_keymap_includes_regions_as_lon_lat_rings():
     locator = KeymapLocator(
-        locations={7: [(0.5, 0.5)], 8: [(0.9, 0.9)]},
+        locations={"7": [(0.5, 0.5)], "8": [(0.9, 0.9)]},
         radius_m=100.0,
-        regions={7: [[(0.4, 0.6), (0.6, 0.6), (0.6, 0.4), (0.4, 0.4)]]},
+        regions={"7": [[(0.4, 0.6), (0.6, 0.6), (0.6, 0.4), (0.4, 0.4)]]},
     )
     entry = locator.page_keymap(7)
     assert entry is not None
@@ -177,8 +207,8 @@ def test_load_regions_maps_pixels_to_world(tmp_path):
     keymap_json = tmp_path / "km.keymap.json"
     (tmp_path / "km.regions.panels.json").write_text(json.dumps(regions_doc))
     regions = load_regions(keymap_json, CORNERS, 1000, 500)
-    assert set(regions) == {61}
-    ring = regions[61][0]
+    assert set(regions) == {"61"}
+    ring = regions["61"][0]
     assert ring[0] == (0.0, 3.0)  # top-left corner
     lon, lat = ring[2]
     assert math.isclose(lon, 0.5) and math.isclose(lat, 2.5)  # image center
@@ -189,7 +219,7 @@ def test_load_regions_maps_pixels_to_world(tmp_path):
 def test_rectangle_features_covers_whole_keymap_box():
     # Key map spanning lon 0..0.01, lat 0..0.01 (~1.1 km); tiny margin from radius_m.
     locator = KeymapLocator(
-        locations={1: [(0.0, 0.0)]},
+        locations={"1": [(0.0, 0.0)]},
         radius_m=50.0,
         rectangles=[[(0.0, 0.01), (0.01, 0.01), (0.01, 0.0), (0.0, 0.0)]],
     )

@@ -45,8 +45,9 @@ from mapsnap.keymap.detect_numbers_cnn import (
     detect_candidate_centers,
 )
 from mapsnap.keymap.detect_numbers_crnn import read_candidates, snap_to_pages
-from mapsnap.keymap.fit_keymap import page_number, volume_page_numbers
+from mapsnap.keymap.fit_keymap import page_number, volume_page_keys
 from mapsnap.keymap.number_model import build_model, select_device
+from mapsnap.keymap.records import page_key_sort
 from mapsnap.utils import image_stem
 
 DEFAULT_CNN_WEIGHTS = Path("models/number_detector.pt")
@@ -75,10 +76,11 @@ def is_letter_page(stem: str) -> bool:
 
 
 def volume_valid_pages(volume: Path) -> list[str]:
-    """The volume's real page numbers as strings (positive, from its ``p*.jpg`` images)."""
-    return [
-        str(number) for number in sorted(volume_page_numbers(volume)) if number >= 1
-    ]
+    """The volume's real page keys (positive, letters included, from its ``p*.jpg`` images)."""
+    return sorted(
+        (key for key in volume_page_keys(volume) if page_key_sort(key)[0] >= 1),
+        key=page_key_sort,
+    )
 
 
 def candidate_keys(volume: Path) -> list[str]:

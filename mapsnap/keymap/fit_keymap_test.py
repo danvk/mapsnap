@@ -1,3 +1,5 @@
+import json
+
 import numpy as np
 
 from mapsnap.keymap.fit_keymap import (
@@ -7,6 +9,9 @@ from mapsnap.keymap.fit_keymap import (
     describe_model,
     georef_variant,
     inlier_pages,
+    key_stem,
+    load_detections,
+    page_key,
     page_number,
     polygon_centroid,
     project,
@@ -15,6 +20,7 @@ from mapsnap.keymap.fit_keymap import (
     similarity_fit,
     superseded_stems,
     unproject,
+    volume_page_keys,
 )
 
 
@@ -125,3 +131,32 @@ def test_superseded_stems(tmp_path):
     for name in ["p239.jpg", "p239__1.jpg", "p239__2.jpg", "p133.jpg", "p133s.jpg"]:
         (tmp_path / name).touch()
     assert superseded_stems(tmp_path) == {"p239"}
+
+
+def test_page_key_and_key_stem():
+    assert page_key("p61w") == "61W"
+    assert page_key("p1499a") == "1499A"
+    assert page_key("35F") == "35F"
+    assert page_key("p12") == "12"
+    assert page_key("pa") is None
+    assert key_stem("35F") == "35" and key_stem("12") == "12"
+
+
+def test_volume_page_keys_includes_letters(tmp_path):
+    for name in ("p1.jpg", "p35a.jpg", "p35b.jpg", "p6__2.jpg", "pa.jpg"):
+        (tmp_path / name).touch()
+    assert volume_page_keys(tmp_path) == {"1", "35A", "35B", "6"}
+
+
+def test_load_detections_keeps_lettered_keys(tmp_path):
+    doc = {
+        "streets": [
+            {"text": "35a", "polygon": [[0, 0], [2, 0], [2, 2], [0, 2]]},
+            {"text": "51", "polygon": [[4, 4], [6, 4], [6, 6], [4, 6]]},
+            {"text": "MAIN", "polygon": [[8, 8], [9, 8], [9, 9], [8, 9]]},
+        ]
+    }
+    path = tmp_path / "p0.keymap.json"
+    path.write_text(json.dumps(doc))
+    detections = load_detections(path)
+    assert [(d.key, d.number) for d in detections] == [("35A", 35), ("51", 51)]

@@ -11,19 +11,31 @@ recognizer confidence on the correct names.
 import itertools
 import json
 import math
+import re
 from dataclasses import dataclass, field
 from pathlib import Path
 
 import numpy as np
 
-from mapsnap.keymap.fit_keymap import load_detections, page_number
+from mapsnap.keymap.fit_keymap import key_stem, load_detections, page_key, page_number
 
 Point = tuple[float, float]
 
 M_PER_DEG_LAT = 110540.0
 M_PER_DEG_LON_EQUATOR = 111320.0
 
-__all__ = ["KeymapLocator", "discover_keymaps", "page_number", "resolve_keymaps"]
+__all__ = [
+    "KeymapLocator",
+    "discover_keymaps",
+    "page_key",
+    "page_number",
+    "resolve_keymaps",
+]
+
+
+def canonical_page_key(text: str) -> str | None:
+    """Uppercase page key from a printed/decoded text, or None if not a page key."""
+    return text.upper() if re.fullmatch(r"\d+[A-Za-z]{0,2}", text) else None
 
 
 def keymap_georef_path(keymap_json: Path) -> Path:
@@ -80,12 +92,12 @@ def keymap_regions_path(keymap_json: Path) -> Path:
 
 def load_regions(
     keymap_json: Path, corners: list[Point], width: int, height: int
-) -> dict[int, list[list[Point]]]:
+) -> dict[str, list[list[Point]]]:
     """World-space page-region polygons from a key map's ``<stem>.regions.panels.json``.
 
     Each panel's pixel ring is mapped to (lon, lat) via the key map's georeferenced corners.
     Rings are scaled if the regions file was computed at a different resolution than the
-    georef. Returns page number -> list of rings; empty if no regions sidecar exists.
+    georef. Returns page key -> list of rings; empty if no regions sidecar exists.
     """
     regions_path = keymap_regions_path(keymap_json)
     if not regions_path.exists():
@@ -93,15 +105,16 @@ def load_regions(
     doc = json.loads(regions_path.read_text())
     scale_x = width / doc["width"]
     scale_y = height / doc["height"]
-    regions: dict[int, list[list[Point]]] = {}
+    regions: dict[str, list[list[Point]]] = {}
     for ring, label in zip(doc["panels"], doc["labels"]):
-        if not str(label).isdigit():
+        key = canonical_page_key(str(label))
+        if key is None:
             continue
         world_ring = [
             bilinear_pixel_to_world(corners, width, height, (x * scale_x, y * scale_y))
             for x, y in ring
         ]
-        regions.setdefault(int(label), []).append(world_ring)
+        regions.setdefault(key, []).append(world_ring)
     return regions
 
 
@@ -218,7 +231,7 @@ def region_scale_m_per_px(
     return math.sqrt(total / (width_px * height_px))
 
 
-def estimate_radius(locations: dict[int, list[Point]]) -> float:
+def estimate_radius(locations: dict[str, list[Point]]) -> float:
     """A neighborhood radius (metres) ~2x the key map's page-to-page spacing.
 
     Uses one representative point per page number (the mean of its detections); the median
@@ -240,18 +253,16 @@ def estimate_radius(locations: dict[int, list[Point]]) -> float:
 
 @dataclass
 class KeymapLocator:
-    """Per-page-number world locations read off a georeferenced key map."""
+    """Per-page-key world locations read off a georeferenced key map."""
 
-    locations: dict[
-        int, list[Point]
-    ]  # page number -> world (lon, lat) of each detection
+    locations: dict[str, list[Point]]  # page key -> world (lon, lat) of each detection
     radius_m: float
     # One image-corner quad (lon/lat) per key map; a volume can have several key maps whose
     # rectangles together cover it (e.g. Brooklyn's p0 = SW half, p0b = NE half).
     rectangles: list[list[Point]] = field(default_factory=list)
-    # Page number -> world (lon, lat) rings of the colored block(s) drawn around that number
+    # Page key -> world (lon, lat) rings of the colored block(s) drawn around that number
     # on the key map (from page_regions segmentation) — the page's approximate ground footprint.
-    regions: dict[int, list[list[Point]]] = field(default_factory=dict)
+    regions: dict[str, list[list[Point]]] = field(default_factory=dict)
 
     @classmethod
     def from_keymap(
@@ -261,10 +272,12 @@ class KeymapLocator:
         doc = json.loads(keymap_georef_path(keymap_json).read_text())
         corners = [(float(c[0]), float(c[1])) for c in doc["corners"]]
         width, height = int(doc["width"]), int(doc["height"])
-        locations: dict[int, list[Point]] = {}
+        locations: dict[str, list[Point]] = {}
         for detection in load_detections(keymap_json):
             world = bilinear_pixel_to_world(corners, width, height, detection.pixel)
-            locations.setdefault(detection.number, []).append(world)
+            locations.setdefault(detection.key or str(detection.number), []).append(
+                world
+            )
         return cls(
             locations,
             radius_m if radius_m is not None else estimate_radius(locations),
@@ -278,20 +291,20 @@ class KeymapLocator:
     ) -> "KeymapLocator":
         """Combine several key maps of one volume into a single locator.
 
-        A page number is placed by whichever key map(s) detect it (locations are unioned), and
+        A page key is placed by whichever key map(s) detect it (locations are unioned), and
         the fallback rectangle is the union of all the key maps' rectangles. The radius is the
         median of the per-key-map estimates unless overridden.
         """
         locators = [cls.from_keymap(path) for path in keymap_jsons]
-        locations: dict[int, list[Point]] = {}
+        locations: dict[str, list[Point]] = {}
         rectangles: list[list[Point]] = []
-        regions: dict[int, list[list[Point]]] = {}
+        regions: dict[str, list[list[Point]]] = {}
         for locator in locators:
-            for number, points in locator.locations.items():
-                locations.setdefault(number, []).extend(points)
+            for key, points in locator.locations.items():
+                locations.setdefault(key, []).extend(points)
             rectangles.extend(locator.rectangles)
-            for number, rings in locator.regions.items():
-                regions.setdefault(number, []).extend(rings)
+            for key, rings in locator.regions.items():
+                regions.setdefault(key, []).extend(rings)
         radius = (
             radius_m
             if radius_m is not None
@@ -299,15 +312,57 @@ class KeymapLocator:
         )
         return cls(locations, radius, rectangles, regions)
 
-    def located_numbers(self) -> set[int]:
-        """The page numbers the key map places."""
+    def located_keys(self) -> set[str]:
+        """The page keys the key map places."""
         return set(self.locations)
 
-    def page_keymap(self, number: int | None) -> dict | None:
+    def matching_keys(self, page: int | str | None, mapping: dict) -> list[str]:
+        """The stored keys that answer a lookup for ``page``.
+
+        A string key matches exactly when stored; otherwise — and always for a
+        bare int — it falls back to the key's whole stem family. The family
+        fallback bridges the two mismatch directions: a key map that printed
+        bare ``35`` serving disk page ``35A``, and a key map read as ``51N``
+        serving a caller that only knows the number 51.
+        """
+        if page is None:
+            return []
+        key = canonical_page_key(str(page))
+        if key is None:
+            return []
+        if key in mapping:
+            return [key]
+        stem = key_stem(key)
+        return [stored for stored in mapping if key_stem(stored) == stem]
+
+    def centers_for(self, page: int | str | None) -> list[Point]:
+        """Every key-map detection location answering a lookup for ``page``."""
+        return [
+            point
+            for key in self.matching_keys(page, self.locations)
+            for point in self.locations[key]
+        ]
+
+    def regions_for(self, page: int | str | None) -> list[list[Point]]:
+        """The segmented region rings answering a lookup for ``page``."""
+        return [
+            ring
+            for key in self.matching_keys(page, self.regions)
+            for ring in self.regions[key]
+        ]
+
+    def regions_by_number(self) -> dict[int, list[list[Point]]]:
+        """Regions re-keyed by page number, letter families merged (int-consumer view)."""
+        merged: dict[int, list[list[Point]]] = {}
+        for key, rings in self.regions.items():
+            merged.setdefault(int(key_stem(key)), []).extend(rings)
+        return merged
+
+    def page_keymap(self, page: int | str | None) -> dict | None:
         """The georef.json ``keymap`` entry: ``{lat, lon, radius_m, centers[, regions]}``.
 
-        ``centers`` holds every key-map detection of the page number as [lon, lat] —
-        authoritative for display and matching. A number can legitimately appear twice
+        ``centers`` holds every key-map detection of the page as [lon, lat] —
+        authoritative for display and matching. A page can legitimately appear twice
         (a split sheet has one block per panel), and the blocks can be far apart, so
         lat/lon — their mean, kept for compatibility — can land between them, inside
         neither; prefer ``centers``. radius_m is the neighborhood radius the page's
@@ -315,7 +370,7 @@ class KeymapLocator:
         is the page's segmented block(s) as world-space rings of [lon, lat] pairs,
         GeoJSON-style. None if unplaced.
         """
-        centers = self.locations.get(number) if number is not None else None
+        centers = self.centers_for(page)
         if not centers:
             return None
         entry: dict = {
@@ -324,7 +379,7 @@ class KeymapLocator:
             "radius_m": round(self.radius_m, 1),
             "centers": [[round(c[0], 7), round(c[1], 7)] for c in centers],
         }
-        rings = self.regions.get(number) if number is not None else None
+        rings = self.regions_for(page)
         if rings:
             entry["regions"] = [
                 [[round(lon, 7), round(lat, 7)] for lon, lat in ring] for ring in rings
@@ -367,14 +422,14 @@ class KeymapLocator:
         ]
 
     def restricted_features(
-        self, number: int | None, features: list[dict]
+        self, page: int | str | None, features: list[dict]
     ) -> list[dict] | None:
-        """Features with a vertex within ``radius_m`` of page ``number``'s location(s).
+        """Features with a vertex within ``radius_m`` of page ``page``'s location(s).
 
-        Returns None if the key map does not place ``number`` (the caller should fall back to
+        Returns None if the key map does not place ``page`` (the caller should fall back to
         the full vocabulary), or a possibly-empty list of nearby features otherwise.
         """
-        centers = self.locations.get(number) if number is not None else None
+        centers = self.centers_for(page)
         if not centers:
             return None
         kept = []

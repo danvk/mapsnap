@@ -6,15 +6,18 @@ center. Because the box stays centered on the candidate (no CRAFT box-tightening
 off), recall tracks the localizer and recognition is the learned CRNN — which handles the
 ornate / low-resolution fonts that defeated CRAFT+EasyOCR.
 
-Writes the same ``<stem>.keymap.json`` schema as the other detectors. ``--pages`` is
-optional but recommended: if given, each decode is snapped to the nearest valid page number
-within edit distance 1, and the narrow-detection minimum-width re-read (which recovers a
-multi-digit number the wide strip squished to one digit) is enabled — the re-read only fires
-when it can validate the longer number against this page set, since ungated it hallucinates a
-second digit onto genuine single-digit pages. Without ``--pages`` the raw CRNN output is kept
-and no re-read is done.
+Writes the same ``<stem>.keymap.json`` schema as the other detectors. The valid page
+set is derived from each image's own volume (its ``p*.jpg`` stems, letter suffixes
+included); ``--pages`` overrides it. Each decode is snapped to the page key it denotes —
+exact match, the unique letter-suffixed key sharing its digits (chicago's printed ``51``
+when only ``51N`` exists), or the unique key within edit distance 1 (see snap_to_pages) —
+and the narrow-detection minimum-width re-read (which recovers a multi-digit number the
+wide strip squished to one digit) is enabled — the re-read only fires when it can validate
+the longer number against the page set, since ungated it hallucinates a second digit onto
+genuine single-digit pages. If no page set can be derived (a volume with no page images)
+the raw CRNN output is kept and no re-read is done.
 
-    uv run python -m mapsnap.keymap.detect_numbers_crnn data/keymaps/chicago-p0b.jpg --pages 1-112
+    uv run python -m mapsnap.keymap.detect_numbers_crnn data/chicago_il_1950_vol_1/raw/p0.jpg
 """
 
 import argparse
@@ -47,13 +50,31 @@ from mapsnap.keymap.detect_numbers_cnn import (
     detect_candidate_centers,
     nms_peaks,
 )
+from mapsnap.keymap.fit_keymap import key_stem, volume_page_keys
 from mapsnap.keymap.number_model import build_model, select_device
 from mapsnap.keymap.records import (
     detection_record,
     filter_args,
     keymap_path,
+    page_key_sort,
     parse_page_spec,
 )
+
+
+def volume_pages_for(image_path: str) -> list[str]:
+    """The valid page keys for a key-map image, derived from its volume's page images.
+
+    The key map's volume is its parent directory (or grandparent when the image
+    sits under ``raw/``); its ``p*.jpg`` stems, letter suffixes included, are the
+    page keys reads snap to. Page 0 and its variants (the key map's own sheet)
+    are excluded. Empty when the volume has no page images.
+    """
+    from mapsnap.keymap.pipeline import keymap_volume_dir
+
+    keys = volume_page_keys(keymap_volume_dir(Path(image_path)))
+    return sorted(
+        (key for key in keys if page_key_sort(key)[0] >= 1), key=page_key_sort
+    )
 
 
 def levenshtein(a: str, b: str) -> int:
@@ -72,11 +93,38 @@ def levenshtein(a: str, b: str) -> int:
 
 
 def snap_to_pages(text: str, pages: list[str], max_distance: int = 1) -> str:
-    """Nearest valid page number to ``text`` within ``max_distance``, else ``text``."""
+    """The valid page key ``text`` denotes, else ``text`` unchanged.
+
+    Three rules, in order:
+      1. an exact match wins outright;
+      2. a digit-only read whose stem names exactly ONE page key adopts that
+         key — the letter comes from the vocabulary (chicago's printed ``51``
+         when only ``51N`` exists on disk). With several lettered variants
+         (asheville's ``35A``–``35F``) the read is ambiguous and kept raw;
+      3. otherwise the nearest key within ``max_distance`` repairs a misread —
+         adopted when it is the sole key at that distance, or the sole one
+         completing the read's missing leading digit ('14' on a 113–223 sheet
+         can only be '114'). Any other tie would be a valid-but-wrong key, so
+         the raw read is kept.
+    """
     if not text or not pages:
         return text
-    best = min(pages, key=lambda p: levenshtein(text, p))
-    return best if levenshtein(text, best) <= max_distance else text
+    if text in pages:
+        return text
+    if text.isdigit():
+        family = [p for p in pages if p != text and key_stem(p) == text]
+        if len(family) == 1:
+            return family[0]
+        if family:
+            return text  # ambiguous lettered family: never guess a letter
+    best_distance = min(levenshtein(text, p) for p in pages)
+    if best_distance > max_distance:
+        return text
+    nearest = [p for p in pages if levenshtein(text, p) == best_distance]
+    if len(nearest) == 1:
+        return nearest[0]
+    completions = [p for p in nearest if p.endswith(text)]
+    return completions[0] if len(completions) == 1 else text
 
 
 @torch.no_grad()
@@ -359,7 +407,10 @@ def main() -> None:
     parser.add_argument(
         "--pages",
         metavar="SPEC",
-        help="Optional valid page set (e.g. '1-111'); snaps decodes within edit distance 1.",
+        help=(
+            "Valid page keys (e.g. '1-111' or '1-33,33A,33B'), overriding the set "
+            "derived from each image's volume (its p*.jpg stems)."
+        ),
     )
     parser.add_argument(
         "--cnn-weights", type=Path, default=Path("models/number_detector.pt")
@@ -385,8 +436,17 @@ def main() -> None:
     crnn.load_state_dict(torch.load(args.crnn_weights, map_location=device))
     crnn.to(device)
 
-    pages = [str(n) for n in parse_page_spec(args.pages)] if args.pages else []
+    override = parse_page_spec(args.pages) if args.pages else None
     for image_path in args.images:
+        # Derived per image, so one invocation spanning volumes never mixes
+        # their page sets.
+        pages = override if override is not None else volume_pages_for(image_path)
+        if not pages:
+            print(
+                f"{Path(image_path).name}: no page keys found in its volume; "
+                "keeping raw decodes (pass --pages to snap them).",
+                file=sys.stderr,
+            )
         detect_and_read(
             image_path,
             cnn,

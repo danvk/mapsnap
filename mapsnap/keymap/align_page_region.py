@@ -699,7 +699,7 @@ def stamp_constraints(
     seen: set[int] = set()
     for detection in page_doc.get("detections", []):
         number = detection.get("number")
-        rings = locator.regions.get(number) if number is not None else None
+        rings = locator.regions_for(number) or None
         if (
             number not in reciprocated
             or not detection.get("claim")
@@ -980,7 +980,7 @@ def align_page(
     # key-map pages), so every projection the locator makes — target region, neighbor directions,
     # stamps — inherits the anisotropy/skew correction with no refit here.
     locator = KeymapLocator.from_keymaps(keymaps)
-    region_rings = locator.regions.get(number, [])
+    region_rings = locator.regions_for(number)
     if not region_rings:
         return PageResult(number, "no-region", stem=stem)
 
@@ -992,7 +992,7 @@ def align_page(
     directions = image_neighbor_directions(adjacency, stem)
     pairs: list[tuple[Point, Point, float]] = []
     for neighbor, (image_direction, confidence) in directions.items():
-        rings = locator.regions.get(neighbor)
+        rings = locator.regions_for(neighbor)
         if not rings:
             continue
         neighbor_centroid = project(*ring_centroid(rings[0]), origin[0], origin[1])
@@ -1237,7 +1237,7 @@ def discover_pages(volume: Path, only_unfit: bool) -> list[str]:
     for image_path in image_paths:
         stem = image_path.stem
         number = page_number(stem)
-        if number is None or stem in keymap_stems or number not in locator.regions:
+        if number is None or stem in keymap_stems or not locator.regions_for(number):
             continue
         if only_unfit and (volume / f"{stem}.georef.json").exists():
             continue
