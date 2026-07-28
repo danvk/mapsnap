@@ -280,6 +280,22 @@ def street_base_name(name: str) -> str:
     return name
 
 
+def street_name_family(name: str) -> str:
+    """The distinctive core a street's name variants share.
+
+    Strips a leading or trailing directional word and a trailing type word, so
+    "NORTH BONNIE BEACH PLACE", "SOUTH BONNIE BEACH PLACE" and "BONNIE BEACH PLACE"
+    all reduce to "BONNIE BEACH". Variants that reduce alike are halves or renamings
+    of one street; variants that do not (VAN BRUNT vs VAN DYKE) are different streets.
+    """
+    words = street_base_name(name).split()
+    if len(words) > 1 and words[0] in DIRECTIONAL_SUFFIXES:
+        words = words[1:]
+    if len(words) > 1 and words[-1] in STREET_TYPES:
+        words = words[:-1]
+    return " ".join(words)
+
+
 def is_number_only(text: str) -> bool:
     """Return True if text contains no alphabetic characters (e.g. block numbers)."""
     return not bool(re.search(r"[a-zA-Z]", text))
