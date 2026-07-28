@@ -8,6 +8,17 @@ interface ImageListProps {
   heading?: string;
 }
 
+/** Hover text: why a page is listed, when it is not listed for the usual reason. */
+function pageTitle(info: ImageInfo): string {
+  if (info.hasKeymap === false) {
+    return `${info.name} (no keymap.json; listed because it has truth labels)`;
+  }
+  if (info.supersededBySplit) {
+    return `${info.name} (split into panels; listed because it still has labels of its own)`;
+  }
+  return info.name;
+}
+
 /** Left-column list of available key map pages, with their label counts. */
 export function ImageList(props: ImageListProps) {
   const { images, selectedName, onSelect, heading = 'Key maps' } = props;
@@ -20,15 +31,13 @@ export function ImageList(props: ImageListProps) {
             key={info.name}
             className={info.name === selectedName ? 'selected' : undefined}
             onClick={() => onSelect(info.name)}
-            title={
-              info.hasKeymap === false
-                ? `${info.name} (no keymap.json; listed because it has truth labels)`
-                : info.name
-            }
+            title={pageTitle(info)}
           >
             <span
               className={
-                info.hasKeymap === false ? 'image-name no-keymap' : 'image-name'
+                info.hasKeymap === false || info.supersededBySplit
+                  ? 'image-name listed-for-labels'
+                  : 'image-name'
               }
             >
               {info.name}
