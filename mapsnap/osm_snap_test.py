@@ -24,8 +24,10 @@ from mapsnap.osm_snap import (
     affine_theta_deg,
     calibrated_radius_m,
     cluster_rotation,
+    confident_theta_deg,
     dedupe_thetas,
     frame_around,
+    frame_thetas,
     label_osm_rotations,
     merge_candidates,
     name_alignment,
@@ -158,6 +160,75 @@ def test_dedupe_thetas_keeps_first_of_near_duplicates() -> None:
         "label-osm-mod180",
         "mask-mod90",
     ]
+
+
+def test_confident_theta_needs_agreeing_label_pairs() -> None:
+    def exact(theta: float) -> RotationPrior:
+        return RotationPrior(theta, 4.0, "label-pair-exact")
+
+    # A lone pair is a hypothesis, not corroboration.
+    assert confident_theta_deg([exact(20.0)]) is None
+    # Two pairs that agree pin the rotation.
+    assert confident_theta_deg([exact(20.0), exact(23.0)]) == 20.0
+    # One dissenting pair means the matcher still has to arbitrate.
+    assert confident_theta_deg([exact(20.0), exact(23.0), exact(-60.0)]) is None
+    # Other rungs never confer confidence, however many agree.
+    assert (
+        confident_theta_deg(
+            [
+                RotationPrior(20.0, 6.0, "ransac-neighbor"),
+                RotationPrior(20.5, 12.0, "adjacency-keymap"),
+                RotationPrior(20.0, 4.0, "label-osm-mod180"),
+            ]
+        )
+        is None
+    )
+    # Agreement is measured mod 360: a pair reading -179 and one reading 179
+    # are 2 degrees apart, not 358.
+    assert confident_theta_deg([exact(179.0), exact(-179.0)]) == 179.0
+
+
+def test_frame_thetas_prunes_only_under_confidence() -> None:
+    page, _, _ = make_world_and_page(25.0)
+    frame = frame_around((LON0, LAT0), half_m=1200.0)
+    osm_prob, valid, _ = osm_rasters(frame, grid_index())
+    params = MatchParams(mask_min_area=200)
+
+    def context(priors: list[RotationPrior]) -> PageContext:
+        return PageContext(
+            stem="p1",
+            number=1,
+            width=300,
+            height=420,
+            prob=page,
+            search_centers=[(LON0, LAT0)],
+            radius_m=300.0,
+            rotation_priors=priors,
+            scale_priors=[ScalePrior(1.0, 0.05, "volume-median")],
+        )
+
+    agreeing = [
+        RotationPrior(25.0, 4.0, "label-pair-exact"),
+        RotationPrior(26.0, 4.0, "label-pair-exact"),
+        RotationPrior(-70.0, 12.0, "adjacency-keymap"),
+    ]
+    ctx = context(agreeing)
+    pruned = frame_thetas(ctx, confident_theta_deg(agreeing), (osm_prob, valid), params)
+    assert [p.source for p in pruned] == ["label-pair-exact"]
+
+    # The same ladder with the pairs disagreeing keeps everything and appends
+    # the mask sweep.
+    disagreeing = [
+        RotationPrior(25.0, 4.0, "label-pair-exact"),
+        RotationPrior(-40.0, 4.0, "label-pair-exact"),
+        RotationPrior(-70.0, 12.0, "adjacency-keymap"),
+    ]
+    ctx = context(disagreeing)
+    full = frame_thetas(
+        ctx, confident_theta_deg(disagreeing), (osm_prob, valid), params
+    )
+    assert len(full) > len(pruned)
+    assert "mask-mod90" in {p.source for p in full}
 
 
 def test_cluster_rotation_rejects_outlier() -> None:
