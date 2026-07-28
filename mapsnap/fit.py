@@ -11,6 +11,20 @@ from mapsnap import experiments
 from mapsnap.utils import default_centerlines, list_pages, run_cmd
 
 
+def worker_flag(georef_extra: list[str]) -> list[str]:
+    """The ``--num-workers N`` pair out of the georef passthrough, or nothing.
+
+    Accepts either spelling argparse does (``--num-workers 4`` or
+    ``--num-workers=4``) and normalizes to the two-token form.
+    """
+    for i, token in enumerate(georef_extra):
+        if token == "--num-workers" and i + 1 < len(georef_extra):
+            return [token, georef_extra[i + 1]]
+        if token.startswith("--num-workers="):
+            return ["--num-workers", token.split("=", 1)[1]]
+    return []
+
+
 def find_centerlines(dir_path: Path) -> Path:
     """Return the centerlines GeoJSON, checking dir then parent dir."""
     centerlines = default_centerlines(dir_path)
@@ -133,7 +147,9 @@ def main() -> None:
     # OSM contradicts, refine mid-tier fits. Its pN.georef-osm.json sidecars
     # take priority in the hybrid glob below.
     if not args.no_snap:
-        run_cmd(["mapsnap", "snap", str(dir_path)])
+        # Both passes are per-page and CPU-bound, so one --num-workers governs
+        # both; the rest of the georef passthrough is georef-only.
+        run_cmd(["mapsnap", "snap", str(dir_path), *worker_flag(georef_extra)])
 
     output_iiif = dir_path / f"{run_id}.iiif.json"
     # Pass the glob as a literal string; make_iiif_georef does its own glob

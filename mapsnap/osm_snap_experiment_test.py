@@ -5,20 +5,27 @@ RANSAC fit — the riskiest action in the pipeline — so their gates are pinned
 here with the failure modes that motivated them (see the osm-snap PR).
 """
 
+import dataclasses
+
 import numpy as np
 
+from mapsnap import osm_snap_experiment
 from mapsnap.edge_join_experiment import PageUnit
+from mapsnap.feature_index import FeatureIndex
 from mapsnap.osm_snap_experiment import (
     SNAP_LOG_BEGIN,
     SNAP_LOG_END,
+    VolumeContext,
     append_snap_logs,
     arbitrate_challenge,
     candidates_record_fresh,
     canonicalize_refine_keys,
+    init_worker,
     refine_adopt_set,
     refine_adoption,
     refine_eligible_features,
     refine_rule_outcome,
+    snap_one_page,
 )
 
 # A page-local degree scale of ~0.6 m/px at the test latitude.
@@ -250,6 +257,42 @@ def test_candidates_record_fresh_tracks_fit_changes():
             {**base, "status": status}, make_unit("fitted"), 111
         )
     assert candidates_record_fresh({**base, "status": "ok"}, make_unit("fitted"), 111)
+
+
+def test_init_worker_indexes_pages_and_panels(monkeypatch, tmp_path):
+    """snap_one_page must reach panels too, and never rebuild a context it was given."""
+    panel = dataclasses.replace(make_unit("nofit"), stem="p1__1")
+    context = VolumeContext(
+        volume=tmp_path,
+        units=[make_unit("fitted")],
+        panel_units=[panel],
+        features=[],
+        feature_index=FeatureIndex([]),
+        locator=None,
+        volume_m_per_px=0.6,
+        adjacency={},
+        region_centroids={},
+        filter_params={},
+        radius_m=150.0,
+        radius_source="calibrated",
+        median_theta_deg=None,
+    )
+
+    def fail(_volume):
+        raise AssertionError("a supplied context must not be rebuilt")
+
+    monkeypatch.setattr(osm_snap_experiment, "load_volume_context", fail)
+    init_worker(tmp_path, context)
+    assert set(osm_snap_experiment.worker_state["units"]) == {"p1", "p1__1"}
+
+    seen = []
+    monkeypatch.setattr(
+        osm_snap_experiment,
+        "page_record",
+        lambda vctx, unit: seen.append(unit.stem) or {"target": unit.stem},
+    )
+    assert snap_one_page("p1__1") == ("p1__1", {"target": "p1__1"})
+    assert seen == ["p1__1"]
 
 
 def test_append_snap_logs_is_idempotent(tmp_path):

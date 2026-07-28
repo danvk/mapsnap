@@ -329,7 +329,7 @@ The four arguments here are:
   - `mapsnap iiif`: produces a IIIF Georeference Extension with clipping masks. You can find examples of these in the `gallery` directory. View them on Allmaps.
   - `mapsnap compare`: compares the generated IIIF file with the human-generated one from OIM, producing a report on the accuracy of the fit.
 
-`mapsnap ocr` is typically the slowest step. The first `mapsnap snap` run on a volume also takes a while (road-UNet inference plus grid matching, roughly 10–30 minutes); its candidates are cached and later runs take seconds. The other steps under `mapsnap fit` run relatively quickly. You can run `mapsnap fit` yourself to experiment.
+`mapsnap ocr` is typically the slowest step. The first `mapsnap snap` run on a volume also takes a while (road-UNet inference plus grid matching); its candidates are cached and later runs take seconds. Both `georef` and `snap` fit one page at a time and take `--num-workers N` to spread that across processes (default 1); `mapsnap fit` passes the flag to both. Each snap worker rebuilds the volume's street index, so budget roughly a gigabyte of memory apiece on a large volume. The other steps under `mapsnap fit` run relatively quickly. You can run `mapsnap fit` yourself to experiment.
 
 The end result is a IIIF file pointing at Library of Congress imagery that you can view in Allmaps, along with a text file comparing Mapsnap's results against OIM's.
 

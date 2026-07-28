@@ -16,9 +16,11 @@ import contextlib
 import io
 import json
 import math
+import multiprocessing
 import sys
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Any
 
 import cv2
 import numpy as np
@@ -801,6 +803,37 @@ def ensure_probs(volume: Path, stems: list[str]) -> None:
     print(f"  inferred {len(missing)} P(road) maps")
 
 
+# Module-level state populated by init_worker and read by snap_one_page. Each
+# multiprocessing worker gets its own copy; at --num-workers=1 the main process
+# fills it directly instead of spawning a pool.
+worker_state: dict[str, Any] = {}
+
+
+def init_worker(volume: Path, vctx: VolumeContext | None = None) -> None:
+    """Give this process the volume context snap_one_page reads.
+
+    A pool worker receives only the volume path and rebuilds the context
+    itself: the centerlines run to hundreds of thousands of features and
+    pickling them to every worker costs far more than re-reading the file
+    (~1 s), and the rebuild is deterministic — it reads the same sidecars. The
+    sequential path passes the context the caller already built.
+    """
+    context = load_volume_context(volume) if vctx is None else vctx
+    worker_state["vctx"] = context
+    worker_state["units"] = {
+        unit.stem: unit for unit in list(context.units) + list(context.panel_units)
+    }
+
+
+def snap_one_page(stem: str) -> tuple[str, dict]:
+    """Generate one page's candidates record from worker_state.
+
+    Runs the same way whether dispatched to a pool worker or called directly,
+    so a page's record is identical either way.
+    """
+    return stem, page_record(worker_state["vctx"], worker_state["units"][stem])
+
+
 def cmd_candidates(
     volume: Path,
     pages: list[str] | None,
@@ -808,6 +841,8 @@ def cmd_candidates(
     limit: int | None,
     recompute: bool,
     vis: bool,
+    *,
+    num_workers: int = 1,
 ) -> None:
     """Generate candidates.jsonl for the volume's rescue targets."""
     out_dir = artifacts_dir(volume)
@@ -868,25 +903,25 @@ def cmd_candidates(
     vis_dir = out_dir / "vis"
     if vis:
         vis_dir.mkdir(exist_ok=True)
-    done = 0
-    for unit in targets:
-        cached = existing.get(unit.stem)
-        if (
-            cached is not None
-            and not recompute
-            and not pages
-            and candidates_record_fresh(
-                cached, unit, georef_variant_mtime(volume, unit.stem)
-            )
-        ):
-            continue
-        record = page_record(vctx, unit)
-        existing[unit.stem] = record
-        done += 1
+    stale = [
+        unit
+        for unit in targets
+        if recompute
+        or pages
+        or (cached := existing.get(unit.stem)) is None
+        or not candidates_record_fresh(
+            cached, unit, georef_variant_mtime(volume, unit.stem)
+        )
+    ]
+    by_stem = {unit.stem: unit for unit in targets}
+
+    def record_done(stem: str, record: dict) -> None:
+        """Log one finished page, draw its contact sheet, and checkpoint the file."""
+        existing[stem] = record
         best = (record.get("candidates") or [{}])[0]
         rmse = best.get("rmse_ft")
         print(
-            f"  {unit.stem:<8} {record['status']:<14}"
+            f"  {stem:<8} {record['status']:<14}"
             f" cands={len(record.get('candidates', []))}"
             + (f" best_rmse={rmse:.0f}ft" if rmse is not None else "")
             + (
@@ -896,12 +931,29 @@ def cmd_candidates(
             )
         )
         if vis and record.get("candidates"):
-            write_contact_sheet(vctx, unit, record, vis_dir)
+            write_contact_sheet(vctx, by_stem[stem], record, vis_dir)
         # Rewrite after every page so an interrupted run keeps its progress.
         with out_path.open("w") as handle:
-            for stem in sorted(existing):
-                handle.write(json.dumps(existing[stem]) + "\n")
-    print(f"{done} pages computed; {len(existing)} total in {out_path}")
+            for target in sorted(existing):
+                handle.write(json.dumps(existing[target]) + "\n")
+
+    if num_workers > 1 and len(stale) > 1:
+        # Matching is independent per page and CPU-bound. Workers rebuild the
+        # volume context from disk rather than receive it pickled, so start-up
+        # costs about a second each; results are consumed as they land so the
+        # checkpoint file keeps pace with an interrupted run.
+        with multiprocessing.Pool(
+            num_workers, initializer=init_worker, initargs=(volume,)
+        ) as pool:
+            for stem, record in pool.imap_unordered(
+                snap_one_page, [unit.stem for unit in stale]
+            ):
+                record_done(stem, record)
+    else:
+        init_worker(volume, vctx)
+        for unit in stale:
+            record_done(*snap_one_page(unit.stem))
+    print(f"{len(stale)} pages computed; {len(existing)} total in {out_path}")
 
 
 def load_candidates(volume: Path) -> list[dict]:
@@ -2541,6 +2593,13 @@ def main() -> None:
     p_cand.add_argument("--limit", type=int, default=None)
     p_cand.add_argument("--recompute", action="store_true")
     p_cand.add_argument("--no-vis", action="store_true", help="skip contact sheets")
+    p_cand.add_argument(
+        "--num-workers",
+        type=int,
+        default=1,
+        metavar="N",
+        help="worker processes for the per-page matching pass (default: %(default)s)",
+    )
 
     p_rep = sub.add_parser("report", help="ranking diagnostics vs truth")
     p_rep.add_argument("volume", type=Path, nargs="+")
@@ -2603,6 +2662,7 @@ def main() -> None:
             args.limit,
             args.recompute,
             vis=not args.no_vis,
+            num_workers=args.num_workers,
         )
     elif args.command == "report":
         if args.sweep_refine:
