@@ -292,6 +292,13 @@ def chamfer_refine(
     homogeneous = np.column_stack([points_page, np.ones(len(points_page))])
 
     height, width = distance_m.shape
+    # sample() is the matcher's hottest loop — least_squares evaluates the
+    # residuals ~115 times per candidate, and a volume runs ~200 candidates per
+    # page. Gathering from a flat view off one precomputed corner offset costs
+    # about half what four 2D fancy-index gathers do. The bilinear expression
+    # below keeps the original operand order and association, so every value it
+    # produces is bit-for-bit what the four-gather form produced.
+    flat_distance = distance_m.reshape(-1)
 
     def sample(pts: np.ndarray) -> np.ndarray:
         x = np.clip(pts[:, 0], 0, width - 1.001)
@@ -300,11 +307,14 @@ def chamfer_refine(
         y0 = y.astype(int)
         fx = x - x0
         fy = y - y0
+        corner = y0 * width + x0
+        one_minus_fx = 1 - fx
+        one_minus_fy = 1 - fy
         d = (
-            distance_m[y0, x0] * (1 - fx) * (1 - fy)
-            + distance_m[y0, x0 + 1] * fx * (1 - fy)
-            + distance_m[y0 + 1, x0] * (1 - fx) * fy
-            + distance_m[y0 + 1, x0 + 1] * fx * fy
+            flat_distance[corner] * one_minus_fx * one_minus_fy
+            + flat_distance[corner + 1] * fx * one_minus_fy
+            + flat_distance[corner + width] * one_minus_fx * fy
+            + flat_distance[corner + width + 1] * fx * fy
         )
         return d
 
