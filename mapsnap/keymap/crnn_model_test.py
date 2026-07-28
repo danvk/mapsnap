@@ -8,6 +8,7 @@ from mapsnap.keymap.crnn_model import (
     build_crnn,
     central_group,
     ctc_greedy_decode,
+    ctc_log_likelihood,
     decode_batch,
     encode_text,
     greedy_paths,
@@ -117,3 +118,23 @@ def test_ink_row_center_is_robust_to_speckle():
 
 def test_ink_row_center_empty():
     assert ink_row_center(np.zeros(48)) is None
+
+
+def test_ctc_log_likelihood_prefers_the_emitted_digit():
+    # Synthetic window: blank, strong "5" (index 6), blank.
+    log_probs = np.full((3, 11), -10.0)
+    log_probs[0, 0] = -0.01
+    log_probs[1, 6] = -0.01
+    log_probs[2, 0] = -0.01
+    assert ctc_log_likelihood(log_probs, "5") > ctc_log_likelihood(log_probs, "4")
+    # A two-digit string cannot be emitted in this window without a big penalty.
+    assert ctc_log_likelihood(log_probs, "5") > ctc_log_likelihood(log_probs, "55")
+
+
+def test_ctc_log_likelihood_two_digits():
+    # "47": 4 fires at t0-1, 7 at t3-4, blank between.
+    log_probs = np.full((5, 11), -12.0)
+    for t_step, idx in ((0, 5), (1, 5), (2, 0), (3, 8), (4, 8)):
+        log_probs[t_step, idx] = -0.01
+    assert ctc_log_likelihood(log_probs, "47") > ctc_log_likelihood(log_probs, "4")
+    assert ctc_log_likelihood(log_probs, "47") > ctc_log_likelihood(log_probs, "48")

@@ -53,6 +53,40 @@ def ctc_greedy_decode(indices: list[int]) -> str:
     return "".join(out)
 
 
+def ctc_log_likelihood(log_probs: np.ndarray, digits: str) -> float:
+    """Log P(digit string | window) under the standard CTC forward algorithm.
+
+    ``log_probs`` is a (T, classes) slice of the CRNN's output (blank at index
+    0, digit d at index d+1). Unlike the greedy decode, this scores an
+    *arbitrary* digit string against the window, so competing page numbers can
+    be compared on likelihood — the evidence behind the conflict-repair pass.
+    """
+    labels = [int(c) + 1 for c in digits]
+    extended = [BLANK_INDEX]
+    for label in labels:
+        extended.extend((label, BLANK_INDEX))
+    T, n = log_probs.shape[0], len(extended)
+    NEG = -1e30
+    alpha = np.full(n, NEG)
+    alpha[0] = log_probs[0, extended[0]]
+    if n > 1:
+        alpha[1] = log_probs[0, extended[1]]
+    for t in range(1, T):
+        previous = alpha
+        alpha = np.full(n, NEG)
+        for s in range(n):
+            best = previous[s]
+            if s >= 1:
+                best = np.logaddexp(best, previous[s - 1])
+            if s >= 2 and extended[s] != BLANK_INDEX and extended[s] != extended[s - 2]:
+                best = np.logaddexp(best, previous[s - 2])
+            alpha[s] = best + log_probs[t, extended[s]]
+    result = alpha[n - 1]
+    if n > 1:
+        result = np.logaddexp(result, alpha[n - 2])
+    return float(result)
+
+
 def strip_crop_box(
     width: int,
     height: int,
