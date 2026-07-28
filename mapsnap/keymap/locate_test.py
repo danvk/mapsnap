@@ -102,6 +102,18 @@ def test_restricted_features_keeps_through_street_with_no_vertex_inside():
     assert kept is not None and [f["id"] for f in kept] == ["through"]
 
 
+def test_feature_index_is_cached_per_feature_list():
+    """The cull's index is reused for the same list and rebuilt for a different one."""
+    locator = KeymapLocator(locations={"61": [(0.0, 0.0)]}, radius_m=150.0)
+    features = [{"geometry": {"type": "Point", "coordinates": [0.0, 0.0]}, "id": "a"}]
+    first = locator.feature_index(features)
+    assert locator.feature_index(features) is first
+    other = [{"geometry": {"type": "Point", "coordinates": [1.0, 1.0]}, "id": "b"}]
+    rebuilt = locator.feature_index(other)
+    assert rebuilt is not first
+    assert [f["id"] for f in rebuilt.near_bbox((0.9, 1.1, 0.9, 1.1))] == ["b"]
+
+
 def test_located_keys_and_page_keys():
     locator = KeymapLocator(
         locations={"1": [(0.0, 0.0)], "61": [(1.0, 1.0)]}, radius_m=100.0
