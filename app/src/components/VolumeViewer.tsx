@@ -104,6 +104,9 @@ export function VolumeViewer() {
   const [compareRows, setCompareRows] = useState<ComparePageStats[] | null>(
     null,
   );
+  // Truth page keys the compare table marks `(no fit)` — the misses it counts, which is
+  // what the missing rows show, so the two never disagree.
+  const [compareMissing, setCompareMissing] = useState<string[]>([]);
   // The compare table's summary footer ("N/M pages georeferenced", RMSE stats), or "" if none.
   const [compareFooter, setCompareFooter] = useState<string>('');
   // The selected volume's adjacency.json (per-page claims + mutual graph), or null when absent.
@@ -148,13 +151,16 @@ export function VolumeViewer() {
     setCompareRows(null);
     setCompareFooter('');
     fetchCompare(selectedPath)
-      .then(({ pages, footer }) => {
+      .then(({ pages, missing, footer }) => {
         if (cancelled) return;
         setCompareRows(pages);
+        setCompareMissing(missing);
         setCompareFooter(footer);
       })
       .catch(() => {
-        if (!cancelled) setCompareRows([]);
+        if (cancelled) return;
+        setCompareRows([]);
+        setCompareMissing([]);
       });
 
     // Truth annotation, rewritten into the same local pixel frame, for the missing-page
@@ -262,8 +268,8 @@ export function VolumeViewer() {
   );
   // Truth pages the run never georeferenced, shown as "missing" rows/footprints.
   const missingPages = useMemo(
-    () => (truthPages ? missingTruthPages(pages, truthPages) : []),
-    [pages, truthPages],
+    () => (truthPages ? missingTruthPages(truthPages, compareMissing) : []),
+    [truthPages, compareMissing],
   );
 
   // Adjacency claim boxes, mapped into geo through each page's georeference: the fitted pages,

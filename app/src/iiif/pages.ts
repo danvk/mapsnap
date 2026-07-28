@@ -12,7 +12,11 @@ import type {
   GeorefAnnotationPage,
   GcpFeature,
 } from '../../server/iiifAnnotations';
-import { computeCorners, projectThroughCorners } from '../geometry';
+import {
+  computeCorners,
+  pointInPolygon,
+  projectThroughCorners,
+} from '../geometry';
 import type { Corners, Street } from '../types';
 
 const FEET_PER_METER = 3.28084;
@@ -185,32 +189,27 @@ function gcpPoints(features: GcpFeature[]): PageGcp[] {
 }
 
 /**
- * Truth pages that the loaded run never georeferenced, ready to show as
- * "missing" rows and footprints.
+ * Truth pages the loaded run never placed, ready to show as "missing" rows and
+ * footprints.
  *
- * A truth page is missing when its page key is absent from the fitted pages.
- * Results are deduped by page key (a split parent has one truth item per panel;
- * we keep the first) and given negative `itemIndex` selection ids so they never
- * collide with the fitted pages' array indices.
+ * `missingKeys` comes from the compare sidecar's `(no fit)` rows, so this list is the
+ * one the "N/M pages georeferenced" line counts — including split panels, which is
+ * what the previous parent-key rule hid: a page whose sibling panel was fitted showed
+ * no miss at all (Champaign reported four while showing none), and several missing
+ * panels of one sheet collapsed into a single parent row (Hudson's p92__1, the largest
+ * single miss in the corpus, was invisible).
+ *
+ * Negative `itemIndex` selection ids keep these clear of the fitted pages' array indices.
  */
 export function missingTruthPages(
-  fitPages: PageGeo[],
   truthPages: PageGeo[],
+  missingKeys: readonly string[],
 ): PageGeo[] {
-  const fitKeys = new Set(fitPages.map((page) => page.pageKey));
-  const seen = new Set<string>();
+  const wanted = new Set(missingKeys.map((key) => key.toLowerCase()));
   const missing: PageGeo[] = [];
   for (const truthPage of truthPages) {
-    if (fitKeys.has(truthPage.pageKey) || seen.has(truthPage.pageKey)) continue;
-    seen.add(truthPage.pageKey);
-    // The whole page is missing (no panel was fitted), so label it by the parent
-    // key rather than the first truth panel's split stem.
-    missing.push({
-      ...truthPage,
-      itemIndex: -(missing.length + 1),
-      splitIndex: null,
-      stem: truthPage.pageKey,
-    });
+    if (!wanted.has(truthPage.stem.toLowerCase())) continue;
+    missing.push({ ...truthPage, itemIndex: -(missing.length + 1) });
   }
   return missing;
 }

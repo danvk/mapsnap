@@ -20,7 +20,11 @@ import {
   type VolumeInfo,
 } from './iiifAnnotations.ts';
 import { jpegDimensions } from './jpegDimensions.ts';
-import { parseCompareFooter, parseCompareTxt } from './compareTxt.ts';
+import {
+  parseCompareFooter,
+  parseCompareTxt,
+  parseMissingTruthKeys,
+} from './compareTxt.ts';
 
 const require = createRequire(import.meta.url);
 const iiif = require('express-iiif').default;
@@ -170,9 +174,13 @@ export function registerIiifApi(
     );
     try {
       const text = await readFile(txtPath, 'utf8');
-      return { pages: parseCompareTxt(text), footer: parseCompareFooter(text) };
+      return {
+        pages: parseCompareTxt(text),
+        missing: parseMissingTruthKeys(text),
+        footer: parseCompareFooter(text),
+      };
     } catch {
-      return { pages: [], footer: '' };
+      return { pages: [], missing: [], footer: '' };
     }
   });
 
