@@ -52,7 +52,7 @@ from mapsnap.keymap.align_page_region import (
     pose_world_of,
     solve_pose,
 )
-from mapsnap.streets import Block
+from mapsnap.streets import Block, street_name_family
 
 Point = tuple[float, float]
 
@@ -64,6 +64,8 @@ class StreetGates:
     angle_gate_deg: float = 8.0  # inlier: |label bearing - street bearing| at the pose
     position_gate_m: float = 80.0  # inlier: label center to street distance (G3)
     min_inliers: int = 3
+    min_inlier_fraction: float = 0.6  # a right pose explains most of what the page says
+    min_distinct_streets: int = 3  # two streets determine the pose with no redundancy
     bearing_diversity_deg: float = 30.0  # two inlier bearings must differ by this much
     min_aspect: float = 2.0  # near-square boxes carry no usable long axis
     parallel_tolerance_deg: float = 10.0  # bearings this close count as parallel
@@ -250,6 +252,11 @@ def is_inlier(
     return position <= gates.position_gate_m and abs(angle) <= gates.angle_gate_deg
 
 
+def distinct_streets(constraints: list[StreetSegments]) -> int:
+    """How many different streets a constraint set speaks for (variants count once)."""
+    return len({street_name_family(c[2]) for c in constraints})
+
+
 def bearing_spread(pose: StreetPose, constraints: list[StreetSegments]) -> float:
     """The largest angular gap (mod 180) between any two constraints' bearings."""
     bearings = [constraint_bearing(pose, c[1]) for c in constraints]
@@ -395,6 +402,12 @@ def consensus_pose(
                             c for c in constraints if is_inlier(pose, c, size, gates)
                         ]
                         if len(inliers) < gates.min_inliers:
+                            continue
+                        if len(inliers) < gates.min_inlier_fraction * len(constraints):
+                            # Kansas City p576 slid a block on two streets while four
+                            # others disagreed; a correct pose explains most of them.
+                            continue
+                        if distinct_streets(inliers) < gates.min_distinct_streets:
                             continue
                         if bearing_spread(pose, inliers) < gates.bearing_diversity_deg:
                             continue

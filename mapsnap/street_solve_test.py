@@ -268,3 +268,41 @@ def test_psi_votes_outvote_a_single_wrong_street():
     planted[-1] = (planted[-1][0], math.radians(0.0), "ROGUE", *planted[-1][3:])
     votes = psi_votes(planted)
     assert any(abs(v - TRUE_POSE[2]) < 1.0 for v, _ in votes[:2])
+
+
+def test_abstains_when_most_constraints_disagree():
+    # Kansas City p576: a pose that satisfied two streets while four others said no,
+    # 1080 ft from truth. Explaining half the page is not enough.
+    disagreeing = scene() + [
+        constraint_for(
+            TRUE_POSE,
+            f"OTHER{i}",
+            (200.0 + 90 * i, 250.0),
+            25.0,
+            offset_m=(260.0 + 40 * i, 190.0),
+        )
+        for i in range(4)
+    ]
+    result = solve_streets_pose(
+        disagreeing,
+        size=SIZE,
+        prior_log_scale=LOG_SCALE,
+        psi_priors=[(TRUE_POSE[2], "label-pair-exact")],
+    )
+    assert result.pose is None, f"posed with {result.n_inliers}/{len(disagreeing)}"
+
+
+def test_abstains_when_only_two_streets_support_the_pose():
+    # Two streets fix the pose exactly, leaving nothing to check it against.
+    two_streets = [
+        constraint_for(TRUE_POSE, "FIRST", (250.0, 400.0), 25.0),
+        constraint_for(TRUE_POSE, "FIRST", (250.0, 600.0), 25.0),
+        constraint_for(TRUE_POSE, "CROSS", (500.0, 1100.0), 115.0),
+    ]
+    result = solve_streets_pose(
+        two_streets,
+        size=SIZE,
+        prior_log_scale=LOG_SCALE,
+        psi_priors=[(TRUE_POSE[2], "label-pair-exact")],
+    )
+    assert result.pose is None and result.abstain == "no-consensus"
