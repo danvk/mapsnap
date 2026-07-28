@@ -93,11 +93,12 @@ class StreetGates:
     max_proposals: int = 6  # distinct placements polished per bearing, best cost wins
     # A street whose OSM data stops short of the label still constrains it: the label
     # sits on the street's line, and the sheet simply drew more of the street than
-    # today's data holds. Terminal ends are extended this far so that shortfall is not
-    # read as position error. project_to_polyline allows 500 ft for the same reason;
-    # here that much lets an over-extended street claim labels it should not, and 80 m
-    # measured best (swept against sigma_line over twenty diagnosed pages).
-    terminal_extrapolation_m: float = 80.0
+    # today's data holds -- on Detroit's east side, hundreds of metres more, since the
+    # streets themselves are gone. The allowance is therefore generous and the position
+    # gate does the rejecting: a label that still does not fit is an outlier, which is
+    # the honest test. Detroit p5's labels sit 1-5 m from their streets' lines and 170
+    # to 400 m past where OSM stops drawing them (282 ft -> 17 ft at this distance).
+    terminal_extrapolation_m: float = 500.0
 
 
 DEFAULT_GATES = StreetGates()
