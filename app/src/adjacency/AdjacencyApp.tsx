@@ -148,6 +148,36 @@ export function AdjacencyApp() {
     return () => clearTimeout(handle);
   }, [labels, volume, selectedPage, imageWidth, imageHeight]);
 
+  // Save any pending (debounced, not-yet-fired) edit for the current page NOW.
+  // Leaving the page cancels the debounce timer and the load effect clears the
+  // dirty flag, so without this an edit made within the debounce window of a
+  // page switch would be silently dropped.
+  function flushPendingSave(): void {
+    if (!dirtyRef.current || !volume || !selectedPage) return;
+    dirtyRef.current = false;
+    const snapshot = labelsRef.current;
+    const withText = snapshot.filter((l) => l.text.trim()).length;
+    const page = selectedPage;
+    setPages((prev) =>
+      prev.map((info) =>
+        info.name === page
+          ? { ...info, withText, withoutText: snapshot.length - withText }
+          : info,
+      ),
+    );
+    saveLabels(
+      volume,
+      page,
+      createLabelsJson(imageWidth, imageHeight, snapshot),
+    ).catch(console.error);
+  }
+
+  // Select a page, saving the current page's pending edits first.
+  function selectPage(name: string): void {
+    flushPendingSave();
+    setSelectedPage(name);
+  }
+
   // Step to an adjacent page in the list, clamped at the ends.
   function stepPage(delta: number): void {
     if (!pages.length) return;
@@ -158,7 +188,7 @@ export function AdjacencyApp() {
           ? 0
           : pages.length - 1
         : Math.min(pages.length - 1, Math.max(0, index + delta));
-    setSelectedPage(pages[next]!.name);
+    selectPage(pages[next]!.name);
   }
   const pageIndex = pages.findIndex((info) => info.name === selectedPage);
   const hasNextPage = pageIndex !== -1 && pageIndex < pages.length - 1;
@@ -236,7 +266,10 @@ export function AdjacencyApp() {
         <select
           className="volume-select"
           value={volume ?? ''}
-          onChange={(e) => setVolume(e.target.value || null)}
+          onChange={(e) => {
+            flushPendingSave();
+            setVolume(e.target.value || null);
+          }}
         >
           <option value="">Select a volume…</option>
           {volumes.map((v) => (
@@ -249,7 +282,7 @@ export function AdjacencyApp() {
           heading="Pages"
           images={pages}
           selectedName={selectedPage}
-          onSelect={setSelectedPage}
+          onSelect={selectPage}
         />
       </div>
 
