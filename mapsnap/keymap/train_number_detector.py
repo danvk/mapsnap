@@ -5,7 +5,7 @@ centered on labels, negatives sampled away from them; see mapsnap.keymap.keymap_
 out one whole image for validation (so the metric reflects generalization to an unseen
 scan), fine-tunes a pretrained MobileNetV3-small, and saves the best weights.
 
-    uv run python -m mapsnap.keymap.train_number_detector --val-image chicago-p0b
+    uv run python -m mapsnap.keymap.train_number_detector --val-image chicago_il_1950_vol_1/p0
 """
 
 import argparse
@@ -20,10 +20,12 @@ from torch.utils.data import DataLoader, Dataset
 
 from mapsnap.keymap.keymap_patches import (
     build_image_patches,
+    keymap_key,
     labelled_keymaps,
     labels_path_for,
     load_label_points,
     scale_points,
+    split_train_val,
     working_scale,
 )
 from mapsnap.keymap.number_model import (
@@ -33,7 +35,6 @@ from mapsnap.keymap.number_model import (
     select_device,
     train_transform,
 )
-from mapsnap.utils import image_stem
 
 
 def load_scaled_image(image_path: str, scale: float) -> np.ndarray:
@@ -103,8 +104,21 @@ def main() -> None:
     )
     parser.add_argument(
         "--val-image",
-        default="chicago-p0b",
-        help="Stem of the image to hold out for validation (default: %(default)s).",
+        default="chicago_il_1950_vol_1/p0",
+        help=(
+            "Key map (<volume>/<stem>) held out for validation and "
+            "best-checkpoint selection (default: %(default)s)."
+        ),
+    )
+    parser.add_argument(
+        "--exclude",
+        default="",
+        metavar="KEYS",
+        help=(
+            "Comma-separated <volume>/<stem> key maps to exclude from training "
+            "entirely (a leave-one-volume-out fold; distinct from --val-image, "
+            "which drives best-checkpoint selection)."
+        ),
     )
     parser.add_argument("--epochs", type=int, default=20)
     parser.add_argument("--batch-size", type=int, default=64)
@@ -118,15 +132,14 @@ def main() -> None:
     device = select_device()
 
     images = [image for image, _ in labelled_keymaps(args.data_dir)]
-    val_images = [p for p in images if image_stem(str(p)) == args.val_image]
-    train_images = [p for p in images if image_stem(str(p)) != args.val_image]
-    if not val_images:
-        sys.exit(
-            f"--val-image {args.val_image!r} not found among {len(images)} labeled images"
-        )
+    excluded = {k.strip() for k in args.exclude.split(",") if k.strip()}
+    try:
+        train_images, val_images = split_train_val(images, args.val_image, excluded)
+    except ValueError as exc:
+        sys.exit(str(exc))
     print(
-        f"device={device}  train images={[image_stem(str(p)) for p in train_images]}  "
-        f"val={args.val_image}",
+        f"device={device}  train={[keymap_key(p) for p in train_images]}  "
+        f"val={args.val_image}  excluded={sorted(excluded)}",
         file=sys.stderr,
     )
 
