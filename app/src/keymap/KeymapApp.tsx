@@ -84,10 +84,11 @@ export function KeymapApp() {
           createLabelsJson(imageWidth, imageHeight, labels),
         );
         setSaveStatus('saved');
+        const withText = labels.filter((l) => l.text.trim()).length;
         setImages((prev) =>
           prev.map((info) =>
             info.name === selectedName
-              ? { ...info, labelCount: labels.length }
+              ? { ...info, withText, withoutText: labels.length - withText }
               : info,
           ),
         );

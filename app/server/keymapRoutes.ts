@@ -16,7 +16,7 @@ import { HTTPError, type TypedRouter } from 'crosswalk';
 import type { API, KeymapImagesResponse } from './api.ts';
 import {
   findKeymapPages,
-  readLabelCount,
+  readLabelCounts,
   resolveKeymapPage,
 } from './keymapPages.ts';
 import type { ImageInfo } from '../src/keymap/types.ts';
@@ -46,7 +46,7 @@ export function registerKeymapApi(
     const images: ImageInfo[] = await Promise.all(
       pages.map(async (page) => ({
         name: page.id,
-        labelCount: await readLabelCount(page.labelsPath),
+        ...(await readLabelCounts(page.labelsPath)),
         hasKeymap: page.hasKeymap,
       })),
     );

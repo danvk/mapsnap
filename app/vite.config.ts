@@ -84,6 +84,7 @@ export default defineConfig({
       input: {
         main: 'index.html',
         keymap: 'keymap.html',
+        adjacency: 'adjacency.html',
       },
     },
   },

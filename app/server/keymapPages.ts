@@ -169,14 +169,21 @@ export async function resolveKeymapPage(
   return pageFor(volume, rawDir, new Set(rawFiles), stem);
 }
 
-/** Number of labels in a page's truth sidecar, or null when it has none. */
-export async function readLabelCount(
+/** Label counts in a page's truth sidecar, split by whether text was entered.
+
+Zeros when the sidecar is missing or unreadable — visually equivalent, since
+a zero count draws no badge. */
+export async function readLabelCounts(
   labelsPath: string,
-): Promise<number | null> {
+): Promise<{ withText: number; withoutText: number }> {
   try {
     const data = JSON.parse(await readFile(labelsPath, 'utf8'));
-    return Array.isArray(data.labels) ? data.labels.length : 0;
+    const labels: { text?: unknown }[] = Array.isArray(data.labels)
+      ? data.labels
+      : [];
+    const withText = labels.filter((l) => String(l.text ?? '').trim()).length;
+    return { withText, withoutText: labels.length - withText };
   } catch {
-    return null; // missing or unreadable sidecar
+    return { withText: 0, withoutText: 0 };
   }
 }

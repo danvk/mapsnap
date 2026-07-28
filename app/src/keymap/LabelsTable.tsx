@@ -12,6 +12,12 @@ interface LabelsTableProps {
   onSelect: (index: number) => void;
   onChangeText: (index: number, text: string) => void;
   onDelete: (index: number) => void;
+  /**
+   * When set, renders a "Next page" button after the table. It is the next
+   * element in tab order after the last text box (delete buttons are
+   * tab-skipped), so finishing the last label is tab+enter to the next page.
+   */
+  onNextPage?: () => void;
 }
 
 /**
@@ -33,6 +39,7 @@ export function LabelsTable(props: LabelsTableProps) {
     onSelect,
     onChangeText,
     onDelete,
+    onNextPage,
   } = props;
 
   const rows = labels
@@ -100,6 +107,11 @@ export function LabelsTable(props: LabelsTableProps) {
           ))}
         </tbody>
       </table>
+      {onNextPage && (
+        <button type="button" className="next-page-button" onClick={onNextPage}>
+          Next page ▸
+        </button>
+      )}
     </div>
   );
 }
