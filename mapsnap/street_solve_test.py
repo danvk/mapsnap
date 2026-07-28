@@ -12,6 +12,7 @@ from mapsnap.street_solve import (
     consensus_pose,
     distinct_lines,
     psi_from_theta,
+    psi_votes,
     residuals_at,
     solve_streets_pose,
 )
@@ -248,3 +249,22 @@ def test_consensus_returns_none_without_a_diverse_pair():
 def test_init_pose_from_model_is_importable_for_convention_checks():
     # Guards the refactor: the region placer's seed helper stays public.
     assert callable(init_pose_from_model)
+
+
+def test_psi_votes_finds_the_true_bearing():
+    # Every correct constraint votes for the page's bearing; the flip is a separate
+    # candidate rather than being averaged in (they differ by 180, not by noise).
+    votes = psi_votes(scene())
+    assert votes, "no bearing votes"
+    best = votes[0][0]
+    assert min(abs(best - TRUE_POSE[2]), abs(best - (TRUE_POSE[2] + 180))) < 1.0
+    assert any(abs(v - TRUE_POSE[2]) < 1.0 for v, _ in votes)
+
+
+def test_psi_votes_outvote_a_single_wrong_street():
+    # Three streets agree on the bearing, one rogue is 30 degrees off: the majority
+    # cluster wins, and the rogue survives only as a lower-ranked seed.
+    planted = scene() + [constraint_for(TRUE_POSE, "ROGUE", (400.0, 800.0), 55.0)]
+    planted[-1] = (planted[-1][0], math.radians(0.0), "ROGUE", *planted[-1][3:])
+    votes = psi_votes(planted)
+    assert any(abs(v - TRUE_POSE[2]) < 1.0 for v, _ in votes[:2])

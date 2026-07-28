@@ -77,6 +77,8 @@ class StreetGates:
     sigma_angle_deg: float = 3.0  # angles are the reliable signal
     sigma_log_scale: float = 0.05  # G5: soft scale prior (bounded in solve_pose)
     sigma_centroid_m: float = 400.0  # the location prior is a neighborhood, not a fix
+    max_psi_seeds: int = 8  # bearing clusters tried per page (evidence, not a sweep)
+    max_scale_seeds: int = 5  # distinct scale proposals tried per bearing
 
 
 DEFAULT_GATES = StreetGates()
@@ -173,6 +175,55 @@ def distinct_lines(
     return lines
 
 
+def wrap_degrees(value: float) -> float:
+    """An angle folded into (-180, 180]."""
+    return (value + 180.0) % 360.0 - 180.0
+
+
+def circular_mean_deg(angles: list[float]) -> float:
+    """Mean of full-circle angles, in [0, 360)."""
+    x = float(np.mean([math.cos(math.radians(a)) for a in angles]))
+    y = float(np.mean([math.sin(math.radians(a)) for a in angles]))
+    return math.degrees(math.atan2(y, x)) % 360.0
+
+
+def psi_votes(
+    constraints: list[StreetSegments], gates: StreetGates = DEFAULT_GATES
+) -> list[tuple[float, str]]:
+    """Page bearings implied by the constraints themselves, most-supported first.
+
+    Every constraint votes: its label's long axis runs along its street, so each
+    straight line in that street's soup implies psi = bearing - 90 - label angle (and
+    the 180-degree flip). A correct constraint votes for the true bearing; wrong ones
+    scatter, so the largest cluster is the page's rotation. This is the same evidence
+    ``osm_snap.label_osm_rotations`` uses, but read off the locality-trimmed soup each
+    constraint actually carries, which matters where a street curves away from the
+    prior — the tangent a kilometre off is not the tangent under the label.
+    """
+    votes: list[float] = []
+    for _center, dir_pix, _name, starts, ends in constraints:
+        for _point, direction in distinct_lines(starts, ends):
+            bearing = math.degrees(math.atan2(direction[0], direction[1])) % 180.0
+            base = (bearing - 90.0 - math.degrees(dir_pix)) % 360.0
+            # A street's bearing is undirected, so each vote admits both page-up
+            # senses; the pose's own bearing is not (the page has a top), so the two
+            # stay separate candidates rather than averaging into a meaningless middle.
+            votes.extend((base, (base + 180.0) % 360.0))
+    clusters: list[list[float]] = []
+    for vote in sorted(votes):
+        for cluster in clusters:
+            if abs(wrap_degrees(vote - cluster[0])) <= 2.0:
+                cluster.append(vote)
+                break
+        else:
+            clusters.append([vote])
+    clusters.sort(key=len, reverse=True)
+    return [
+        (circular_mean_deg(cluster), "constraint-vote")
+        for cluster in clusters[: gates.max_psi_seeds]
+    ]
+
+
 def constraint_bearing(pose: StreetPose, dir_pix: float) -> float:
     """The world bearing (mod 180) a label's long axis claims under ``pose``."""
     return (pose[2] + 90.0 + math.degrees(dir_pix)) % 180.0
@@ -214,6 +265,7 @@ def bearing_spread(pose: StreetPose, constraints: list[StreetSegments]) -> float
 
 def scale_candidates(
     constraints: list[StreetSegments],
+    lines: list[list[tuple[np.ndarray, np.ndarray]]],
     psi_deg: float,
     prior_log_scale: float,
     size: tuple[int, int],
@@ -228,13 +280,12 @@ def scale_candidates(
     """
     candidates: list[tuple[float, str]] = [(prior_log_scale, "prior")]
     for i, first in enumerate(constraints):
-        for second in constraints[i + 1 :]:
+        for j in range(i + 1, len(constraints)):
+            second = constraints[j]
             if first[2] == second[2]:
                 continue  # same street: spacing is zero by construction
-            lines_a = distinct_lines(first[3], first[4])
-            lines_b = distinct_lines(second[3], second[4])
-            for point_a, direction_a in lines_a:
-                for point_b, direction_b in lines_b:
+            for point_a, direction_a in lines[i]:
+                for point_b, direction_b in lines[j]:
                     bearing_a = math.degrees(math.atan2(*direction_a)) % 180.0
                     bearing_b = math.degrees(math.atan2(*direction_b)) % 180.0
                     if (
@@ -257,7 +308,20 @@ def scale_candidates(
                     candidates.append(
                         (math.log(pixel_spacing / spacing), "parallel-pair")
                     )
-    return candidates
+    return dedupe_scales(candidates, gates.max_scale_seeds)
+
+
+def dedupe_scales(
+    candidates: list[tuple[float, str]], cap: int
+) -> list[tuple[float, str]]:
+    """Collapse log-scale proposals that agree within a percent, keeping the first."""
+    kept: list[tuple[float, str]] = []
+    for value, source in candidates:
+        if all(abs(value - existing) > 0.01 for existing, _ in kept):
+            kept.append((value, source))
+        if len(kept) >= cap:
+            break
+    return kept
 
 
 def propose_translation(
@@ -303,10 +367,12 @@ def consensus_pose(
     log_scales: list[tuple[float, str]],
     size: tuple[int, int],
     gates: StreetGates,
+    lines: list[list[tuple[np.ndarray, np.ndarray]]] | None = None,
 ) -> tuple[StreetPose, list[StreetSegments], str] | None:
     """Best (pose, inliers, scale source) over all constraint-pair/line/scale proposals."""
     best: tuple[tuple[int, float], StreetPose, list[StreetSegments], str] | None = None
-    lines = [distinct_lines(c[3], c[4]) for c in constraints]
+    if lines is None:
+        lines = [distinct_lines(c[3], c[4]) for c in constraints]
     for log_scale, scale_source in log_scales:
         for i, first in enumerate(constraints):
             for j in range(i + 1, len(constraints)):
@@ -386,14 +452,18 @@ def solve_streets_pose(
     )
     ring = synthetic_ring()
     best: tuple[tuple[int, float], StreetSolveResult] | None = None
+    # Segment soups collapse to a handful of straight lines; computing that once per
+    # page (not per bearing seed, per pair) is what keeps the search tractable.
+    lines = [distinct_lines(c[3], c[4]) for c in constraints]
 
-    for psi, psi_source in psi_priors:
+    for psi, psi_source in psi_priors[: gates.max_psi_seeds]:
         proposal = consensus_pose(
             constraints,
             psi,
-            scale_candidates(constraints, psi, prior_log_scale, size, gates),
+            scale_candidates(constraints, lines, psi, prior_log_scale, size, gates),
             size,
             gates,
+            lines,
         )
         if proposal is None:
             continue
@@ -433,7 +503,10 @@ def solve_streets_pose(
             spread = bearing_spread(pose, inliers)
             shift, rotate = (
                 leave_one_out_spread(pose, inliers, size, prior_log_scale, sigmas, ring)
-                if len(inliers) > gates.min_inliers
+                # Needs real redundancy: dropping one of four leaves an exactly
+                # determined three, which moves for sound reasons, so the check would
+                # reject good fits (LA p1467 at 34 ft) rather than fragile ones.
+                if len(inliers) >= gates.min_inliers + 2
                 else (0.0, 0.0)
             )
             attempt.bearing_spread_deg = spread
