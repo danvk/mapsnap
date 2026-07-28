@@ -62,7 +62,11 @@ class StreetGates:
     """Every tunable of the streets-only solver, in one sweepable place."""
 
     angle_gate_deg: float = 8.0  # inlier: |label bearing - street bearing| at the pose
-    position_gate_m: float = 80.0  # inlier: label center to street distance (G3)
+    # Inlier: label centre to street distance (G3). Below a downtown block: at 80 m
+    # Nashville's numbered-avenue grid let poses slide half a block and still agree
+    # with every street (five fits over 200 ft); at 50 m those vanish and no genuine
+    # fit is lost -- the inliers of every correct fit measured sit under 46 m.
+    position_gate_m: float = 50.0
     min_inliers: int = 3
     min_inlier_fraction: float = 0.6  # a right pose explains most of what the page says
     min_distinct_streets: int = 3  # two streets determine the pose with no redundancy
