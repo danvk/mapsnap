@@ -263,3 +263,11 @@ describe('missingTruthPages', () => {
     expect(missingTruthPages([pageGeo('p1', 0)], [])).toEqual([]);
   });
 });
+
+describe('missingTruthPages resilience', () => {
+  it('reports nothing when the response carries no missing field', () => {
+    // An older server, or a compare sidecar predating the field: no misses beats a
+    // crashed page.
+    expect(missingTruthPages([pageGeo('p1', 0)], undefined)).toEqual([]);
+  });
+});

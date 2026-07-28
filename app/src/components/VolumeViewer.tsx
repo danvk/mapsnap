@@ -154,7 +154,7 @@ export function VolumeViewer() {
       .then(({ pages, missing, footer }) => {
         if (cancelled) return;
         setCompareRows(pages);
-        setCompareMissing(missing);
+        setCompareMissing(missing ?? []);
         setCompareFooter(footer);
       })
       .catch(() => {

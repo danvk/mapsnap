@@ -203,9 +203,11 @@ function gcpPoints(features: GcpFeature[]): PageGcp[] {
  */
 export function missingTruthPages(
   truthPages: PageGeo[],
-  missingKeys: readonly string[],
+  missingKeys: readonly string[] | undefined,
 ): PageGeo[] {
-  const wanted = new Set(missingKeys.map((key) => key.toLowerCase()));
+  // A compare sidecar written before this field existed, or a server still serving
+  // the older response, simply reports no misses rather than taking the page down.
+  const wanted = new Set((missingKeys ?? []).map((key) => key.toLowerCase()));
   const missing: PageGeo[] = [];
   for (const truthPage of truthPages) {
     if (!wanted.has(truthPage.stem.toLowerCase())) continue;
