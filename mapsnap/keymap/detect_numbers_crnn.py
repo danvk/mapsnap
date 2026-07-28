@@ -36,6 +36,7 @@ from mapsnap.keymap.crnn_model import (
     build_crnn,
     central_group,
     ctc_greedy_decode,
+    ctc_log_likelihood,
     eval_transform,
     greedy_paths,
     locate_number,
@@ -251,6 +252,199 @@ def choose_duplicate_reread(
     return max(different, key=lambda r: r[2])
 
 
+# Conflict-repair gates (measured on the 23-sheet truth corpus, 2026-07-28: +19
+# key-correct, zero regressions; each gate is load-bearing — see the PR).
+REPAIR_FLOOR = -1.5  # min margin for adopting a missing page
+ADOPT_DELTA = 1.0  # adopted margin must come within this of the read's own margin
+SPATIAL_NEIGHBORS = 4  # nearest detections consulted for the plausibility gate
+SPATIAL_GATE = 6.0  # adopted stem within this multiple of the median neighbor delta
+WINDOW_PAD = 2  # timesteps of context around the central group when scoring
+
+
+@torch.no_grad()
+def stem_margins(
+    image: np.ndarray,
+    center: tuple[float, float],
+    factor: float,
+    crnn: torch.nn.Module,
+    device,
+    stems: list[str],
+) -> dict[str, float]:
+    """CTC-margin score per digit stem for the crop(s) around ``center``.
+
+    Each stem is scored in the central-group window of the wide strip and both
+    narrow re-read strips: margin = log P(stem | window) minus the window's
+    best-path log-probability, so scores compare across windows; a stem's
+    margin is its best across the windows. ~0 means the stem explains the ink
+    as well as anything can; strongly negative means it does not fit.
+    """
+    cx, cy = center
+    margins: dict[str, float] = {}
+    for half_w in (None, *REREAD_HALF_WIDTHS_WORKING):
+        kwargs = {} if half_w is None else {"half_w_working": half_w}
+        strip = number_strip(image, cx, cy, factor, **kwargs)
+        tensor = cast(torch.Tensor, eval_transform()(strip)).unsqueeze(0).to(device)
+        log_probs = crnn(tensor)[:, 0, :].cpu().numpy().astype(np.float64)
+        path = log_probs.argmax(axis=1).tolist()
+        group = central_group(path)
+        if group is None:
+            continue
+        t0 = max(0, group[0] - WINDOW_PAD)
+        t1 = min(len(path) - 1, group[1] + WINDOW_PAD)
+        window = log_probs[t0 : t1 + 1]
+        best_path = float(window.max(axis=1).sum())
+        for stem in stems:
+            margin = ctc_log_likelihood(window, stem) - best_path
+            if stem not in margins or margin > margins[stem]:
+                margins[stem] = margin
+    return margins
+
+
+def plan_repairs(
+    texts: list[str],
+    centers: list[tuple[float, float]],
+    margins: list[dict[str, float]],
+    pages: list[str],
+) -> list[tuple[int, str]]:
+    """Which detections to relabel to which missing pages (pure decision logic).
+
+    A detection is suspect when its text duplicates another detection's (the
+    weakest-margin instances of the group) or is no page key at all. Each
+    suspect adopts the best-margin *missing* page that clears every gate:
+    margin above REPAIR_FLOOR, within ADOPT_DELTA of the read's own margin (a
+    read that strongly IS its text stays a duplicate — one instance is right),
+    a different digit stem (same-stem alternatives score identically, so there
+    is no evidence to move on), and a stem plausible among the spatial
+    neighbors' stems. Returns (index, new text) pairs.
+    """
+    valid = set(pages)
+    stems_in_vocab = {key_stem(p) for p in pages}
+
+    def own_margin(i: int) -> float:
+        return margins[i].get(key_stem(texts[i]), -1e9)
+
+    # Spatial context: median |stem delta| between nearby detections.
+    def neighbor_stems(i: int) -> list[int]:
+        distances = sorted(
+            (
+                (centers[j][0] - centers[i][0]) ** 2
+                + (centers[j][1] - centers[i][1]) ** 2,
+                j,
+            )
+            for j in range(len(texts))
+            if j != i
+        )
+        stems = []
+        for _, j in distances[:SPATIAL_NEIGHBORS]:
+            stem = key_stem(texts[j])
+            if stem.isdigit():
+                stems.append(int(stem))
+        return stems
+
+    deltas = []
+    for i in range(len(texts)):
+        stem = key_stem(texts[i])
+        if not stem.isdigit():
+            continue
+        deltas.extend(abs(int(stem) - n) for n in neighbor_stems(i))
+    median_delta = max(1.0, float(np.median(deltas))) if deltas else 1.0
+
+    def spatially_ok(i: int, page: str) -> bool:
+        stems = neighbor_stems(i)
+        if not stems:
+            return True
+        return (
+            abs(int(key_stem(page)) - float(np.median(stems)))
+            <= SPATIAL_GATE * median_delta
+        )
+
+    counts = Counter(texts)
+    missing = [p for p in pages if counts[p] == 0]
+    groups: dict[str, list[int]] = {}
+    for i, text in enumerate(texts):
+        groups.setdefault(text, []).append(i)
+
+    repairs: list[tuple[int, str]] = []
+    for text, members in sorted(groups.items()):
+        if text not in valid and key_stem(text) not in stems_in_vocab:
+            suspects = members  # not a page key: every instance is suspect
+        elif len(members) > 1 and text in valid:
+            keeper = max(members, key=own_margin)
+            suspects = [i for i in members if i != keeper]
+        else:
+            continue
+        for i in suspects:
+            options = [
+                (margins[i].get(key_stem(page), -1e9), page)
+                for page in missing
+                if key_stem(page) != key_stem(text)
+                and margins[i].get(key_stem(page), -1e9) > REPAIR_FLOOR
+                and spatially_ok(i, page)
+            ]
+            if not options:
+                continue
+            best_margin, best_page = max(options)
+            if text in valid and best_margin < own_margin(i) - ADOPT_DELTA:
+                continue
+            repairs.append((i, best_page))
+            missing.remove(best_page)
+    return repairs
+
+
+def repair_conflicts(
+    image: np.ndarray,
+    crnn: torch.nn.Module,
+    device,
+    found: list[tuple[list[list[int]], str, float]],
+    *,
+    factor: float,
+    pages: list[str],
+    image_name: str,
+) -> list[tuple[list[list[int]], str, float]]:
+    """Relabel duplicated / invalid reads to missing pages by CTC-margin evidence.
+
+    Runs after resolve_duplicate_labels: that pass relabels only when two
+    narrow re-reads agree, which misses conflicts whose evidence sits in the
+    wide window (KC's 478 read as a duplicate '470': narrow crops disagree,
+    but '478' is the wide window's best interpretation by a wide margin).
+    This pass scores every still-missing page's stem directly against the
+    CRNN's own likelihoods and adopts under plan_repairs' gates.
+    """
+    if not found:
+        return found
+    texts = [text for _, text, _ in found]
+    centers = [
+        (sum(p[0] for p in poly) / len(poly), sum(p[1] for p in poly) / len(poly))
+        for poly, _, _ in found
+    ]
+    counts = Counter(texts)
+    valid = set(pages)
+    stems_in_vocab = {key_stem(p) for p in pages}
+
+    # Margins are only needed for detections in a conflicted group.
+    def conflicted(text: str) -> bool:
+        if text not in valid and key_stem(text) not in stems_in_vocab:
+            return True
+        return counts[text] > 1 and text in valid
+
+    stems = sorted({key_stem(p) for p in pages})
+    margins: list[dict[str, float]] = [
+        stem_margins(image, centers[i], factor, crnn, device, stems)
+        if conflicted(texts[i])
+        else {}
+        for i in range(len(found))
+    ]
+    repaired = list(found)
+    for i, new_text in plan_repairs(texts, centers, margins, pages):
+        polygon, old_text, confidence = found[i]
+        print(
+            f"{image_name}: conflict repair {old_text!r} -> {new_text!r}",
+            file=sys.stderr,
+        )
+        repaired[i] = (polygon, new_text, confidence)
+    return repaired
+
+
 def resolve_duplicate_labels(
     image: np.ndarray,
     crnn: torch.nn.Module,
@@ -301,12 +495,14 @@ def detect_and_read(
     nms_dist: float,
     pages: list[str],
     disable_reread: bool = False,
+    disable_repair: bool = False,
 ) -> list[dict]:
     """CNN-localize then CRNN-read one image; write <stem>.keymap.json.
 
     ``disable_reread`` turns off the tight-crop re-reads (the narrow-detection
-    minimum-width re-read and the duplicate-label re-read; an ablation switch for
-    measuring those steps' effect); they are on by default.
+    minimum-width re-read and the duplicate-label re-read) and ``disable_repair``
+    the CTC-margin conflict repair — ablation switches for measuring those
+    steps' effect; all are on by default.
     """
     image = np.asarray(Image.open(image_path).convert("RGB"))
     height, width = image.shape[:2]
@@ -378,6 +574,19 @@ def detect_and_read(
             image_name=Path(image_path).name,
         )
 
+    # Remaining duplicated or invalid reads: adopt a missing page when the CRNN's
+    # own likelihoods say it is the better interpretation (see repair_conflicts).
+    if valid_pages and not disable_repair:
+        found = repair_conflicts(
+            image,
+            crnn,
+            device,
+            found,
+            factor=factor,
+            pages=pages,
+            image_name=Path(image_path).name,
+        )
+
     detections = [
         detection_record(cast(list, polygon), text, confidence)
         for polygon, text, confidence in found
@@ -426,6 +635,11 @@ def main() -> None:
         action="store_true",
         help="Turn off the narrow-detection and duplicate-label re-reads (ablation).",
     )
+    parser.add_argument(
+        "--disable-repair",
+        action="store_true",
+        help="Turn off the CTC-margin conflict repair of duplicated/invalid reads (ablation).",
+    )
     args = parser.parse_args()
 
     device = select_device()
@@ -457,6 +671,7 @@ def main() -> None:
             nms_dist=args.nms_dist,
             pages=pages,
             disable_reread=args.disable_reread,
+            disable_repair=args.disable_repair,
         )
 
 

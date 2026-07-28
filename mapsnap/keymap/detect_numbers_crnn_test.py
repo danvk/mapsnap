@@ -2,6 +2,7 @@ from mapsnap.keymap.detect_numbers_crnn import (
     choose_duplicate_reread,
     choose_reread,
     levenshtein,
+    plan_repairs,
     snap_to_pages,
     volume_pages_for,
 )
@@ -143,3 +144,80 @@ def test_volume_pages_for_derives_from_raw_parent(tmp_path):
     # page 0 (the key map itself) is excluded; letters kept; splits collapse
     assert volume_pages_for(str(volume / "raw" / "p0.jpg")) == ["1", "6", "35A", "35B"]
     assert volume_pages_for(str(volume / "p0.jpg")) == ["1", "6", "35A", "35B"]
+
+
+# plan_repairs — the CTC-margin conflict-repair decision logic ------------------------------
+
+# A 3x3 grid of consecutive pages; margins default to "reads as its own text".
+GRID_PAGES = [str(n) for n in range(470, 479)]
+
+
+def grid(texts, margin_overrides=None):
+    centers = [(100.0 * (i % 3), 100.0 * (i // 3)) for i in range(len(texts))]
+    margins = []
+    for i, text in enumerate(texts):
+        m = {text: 0.0} if text.isdigit() else {}
+        m.update((margin_overrides or {}).get(i, {}))
+        margins.append(m)
+    return texts, centers, margins
+
+
+def test_plan_repairs_duplicate_loser_adopts_missing_page():
+    # The KC scenario: two '470' reads; the one at 478's spot scores '478' best.
+    texts, centers, margins = grid(
+        ["470", "471", "472", "473", "474", "475", "476", "477", "470"],
+        {8: {"470": -2.2, "478": 0.59}},
+    )
+    assert plan_repairs(texts, centers, margins, GRID_PAGES) == [(8, "478")]
+
+
+def test_plan_repairs_keeper_is_best_own_margin():
+    # The stronger '470' stays; the weaker one moves.
+    texts, centers, margins = grid(
+        ["470", "471", "472", "473", "474", "475", "476", "477", "470"],
+        {0: {"470": -2.2, "478": 0.5}, 8: {"470": 0.1}},
+    )
+    assert plan_repairs(texts, centers, margins, GRID_PAGES) == [(0, "478")]
+
+
+def test_plan_repairs_respects_adopt_delta():
+    # The loser reads solidly as its own text and no missing page comes close.
+    texts, centers, margins = grid(
+        ["470", "471", "472", "473", "474", "475", "476", "477", "470"],
+        {8: {"470": 0.0, "478": -1.4}},
+    )
+    assert plan_repairs(texts, centers, margins, GRID_PAGES) == []
+
+
+def test_plan_repairs_floor_blocks_weak_adoptions():
+    texts, centers, margins = grid(
+        ["470", "471", "472", "473", "474", "475", "476", "477", "470"],
+        {8: {"470": -5.0, "478": -2.0}},
+    )
+    assert plan_repairs(texts, centers, margins, GRID_PAGES) == []
+
+
+def test_plan_repairs_never_same_stem():
+    # '35' duplicated with lettered variants missing: same stem, no evidence.
+    pages = ["35", "35A", "35B", "36", "37"]
+    texts, centers, margins = grid(["35", "36", "37", "35"], {3: {"35": 0.0}})
+    assert plan_repairs(texts, centers, margins, pages) == []
+
+
+def test_plan_repairs_out_of_vocab_read_is_suspect():
+    # '81' is no page key on a 470-478 sheet; it adopts the strong missing page.
+    texts, centers, margins = grid(
+        ["470", "471", "472", "473", "474", "475", "476", "477", "81"],
+        {8: {"478": 0.3, "81": 0.9}},
+    )
+    assert plan_repairs(texts, centers, margins, GRID_PAGES) == [(8, "478")]
+
+
+def test_plan_repairs_spatial_gate_blocks_distant_stems():
+    # Neighbors sit near 470; a missing page numerically far away is implausible.
+    pages = [*GRID_PAGES, "600"]
+    texts, centers, margins = grid(
+        ["470", "471", "472", "473", "474", "475", "476", "477", "470"],
+        {8: {"470": -2.2, "600": 0.9}},
+    )
+    assert plan_repairs(texts, centers, margins, pages) == []
