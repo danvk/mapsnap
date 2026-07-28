@@ -319,7 +319,7 @@ def keymap_region_adjacency(
     keymaps = sorted((volume / "raw").glob("*.keymap.json"))
     if not keymaps:
         return set(), {}
-    regions = KeymapLocator.from_keymaps(keymaps).regions
+    regions = KeymapLocator.from_keymaps(keymaps).regions_by_number()
     if not regions:
         return set(), {}
     all_pts = [pt for rings in regions.values() for ring in rings for pt in ring]

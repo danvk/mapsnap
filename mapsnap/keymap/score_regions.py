@@ -14,6 +14,7 @@ map, so predicted overlap is impossible ink and a direct measure of segmentation
 
 import argparse
 import json
+import re
 import sys
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -21,6 +22,8 @@ from pathlib import Path
 from shapely.geometry import Polygon
 from shapely.geometry.base import BaseGeometry
 from shapely.validation import make_valid
+
+from mapsnap.keymap.records import page_key_sort
 
 
 def default_truth_path(regions: Path) -> Path:
@@ -43,7 +46,7 @@ def panel_polygons(doc: dict) -> list[tuple[str, BaseGeometry]]:
     """
     out: list[tuple[str, BaseGeometry]] = []
     for ring, label in zip(doc["panels"], doc["labels"]):
-        if len(ring) < 4 or not str(label).isdigit():
+        if len(ring) < 4 or not re.fullmatch(r"\d+[A-Za-z]{0,2}", str(label)):
             continue
         polygon = make_valid(Polygon([(x, y) for x, y in ring]))
         if polygon.area > 0:
@@ -180,7 +183,9 @@ def main() -> None:
         f"     >=0.5: {sum(1 for v in values if v >= 0.5)}/{n}   "
         f"missed (IoU 0): {sum(1 for v in values if v == 0.0)}"
     )
-    missed_pages = sorted({int(label) for label, iou in score.ious if iou == 0.0})
+    missed_pages = sorted(
+        {label for label, iou in score.ious if iou == 0.0}, key=page_key_sort
+    )
     if missed_pages:
         print(f"missed pages: {', '.join(str(page) for page in missed_pages)}")
     print(f"spurious predicted regions: {score.spurious}")

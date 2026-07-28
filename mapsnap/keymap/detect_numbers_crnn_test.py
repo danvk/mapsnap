@@ -25,6 +25,26 @@ def test_snap_to_pages_repairs_within_distance():
     assert snap_to_pages("521", ["518", "520", "530"], max_distance=1) == "520"
 
 
+def test_snap_to_pages_letters_from_unique_key():
+    # A digit-only read one edit from a single lettered key adopts it — the
+    # letter comes from the page vocabulary (chicago prints 51, disk has 51N).
+    assert snap_to_pages("51", ["50", "51N", "52"]) == "51N"
+    assert snap_to_pages("1499", ["1498", "1499A"]) == "1499A"
+
+
+def test_snap_to_pages_leading_digit_completion():
+    # A 2-digit read on a 3-digit sheet ties with many pages at distance 1, but
+    # only one completes it on the left (the truncated leading digit).
+    assert snap_to_pages("14", ["113", "114", "124", "144", "146"]) == "114"
+
+
+def test_snap_to_pages_ambiguous_family_keeps_raw():
+    # Several keys tie at the minimum distance: adopting one would be a
+    # valid-but-wrong key, so the raw read is kept.
+    assert snap_to_pages("35", ["35A", "35B", "35C"]) == "35"
+    assert snap_to_pages("480", ["481", "489"]) == "480"
+
+
 def test_snap_to_pages_keeps_far_text():
     pages = [str(n) for n in range(1, 65)]
     # "999" is far from any 1-64 page -> unchanged.

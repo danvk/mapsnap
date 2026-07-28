@@ -8,16 +8,30 @@ from mapsnap.keymap.records import (
 
 
 def test_parse_page_spec_range():
-    assert parse_page_spec("1-5") == [1, 2, 3, 4, 5]
+    assert parse_page_spec("1-5") == ["1", "2", "3", "4", "5"]
 
 
 def test_parse_page_spec_mixed():
-    assert parse_page_spec("1,3,5-8") == [1, 3, 5, 6, 7, 8]
+    assert parse_page_spec("1,3,5-8") == ["1", "3", "5", "6", "7", "8"]
 
 
 def test_parse_page_spec_high_range():
     pages = parse_page_spec("451-577")
-    assert pages[0] == 451 and pages[-1] == 577 and len(pages) == 127
+    assert pages[0] == "451" and pages[-1] == "577" and len(pages) == 127
+
+
+def test_parse_page_spec_lettered_tokens():
+    # Lettered keys ride alongside ranges, uppercased, in (stem, suffix) order.
+    assert parse_page_spec("33a,1-3,33B") == ["1", "2", "3", "33A", "33B"]
+
+
+def test_parse_page_spec_rejects_junk():
+    try:
+        parse_page_spec("33A-33D")  # lettered ranges are not supported
+    except ValueError:
+        pass
+    else:
+        raise AssertionError("expected ValueError")
 
 
 def test_detection_record_horizontal_box():

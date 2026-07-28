@@ -42,7 +42,7 @@ def test_page_vocabs_no_keymap_returns_full_vocab():
 
 def test_page_vocabs_placed_page_uses_neighborhood_with_rectangle_fallback():
     # Page 61 sits at (0, 0). MAIN runs through the neighborhood; FAR is across the volume.
-    locator = KeymapLocator(locations={61: [(0.0, 0.0)]}, radius_m=150.0)
+    locator = KeymapLocator(locations={"61": [(0.0, 0.0)]}, radius_m=150.0)
     features = [
         _street_feature("MAIN STREET", [[0.0, 0.0], [0.001, 0.0]]),
         _street_feature("FAR STREET", [[10.0, 10.0], [10.001, 10.0]]),
@@ -55,7 +55,7 @@ def test_page_vocabs_placed_page_uses_neighborhood_with_rectangle_fallback():
 
 def test_page_vocabs_unplaced_page_uses_rectangle_only():
     # Page 999 is not placed by the key map: rectangle vocab alone, no fallback pass.
-    locator = KeymapLocator(locations={61: [(0.0, 0.0)]}, radius_m=150.0)
+    locator = KeymapLocator(locations={"61": [(0.0, 0.0)]}, radius_m=150.0)
     features = [_street_feature("MAIN STREET", [[0.0, 0.0], [0.001, 0.0]])]
     assert page_vocabs("p999.jpg", locator, features, ["FULL"], ["RECT"]) == (
         ["RECT"],

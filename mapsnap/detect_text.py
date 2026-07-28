@@ -17,7 +17,7 @@ from PIL import Image
 from tqdm import tqdm
 
 from mapsnap.ctc_vocab_decode import HINT_STRINGS, generate_vocab_strings
-from mapsnap.keymap.locate import KeymapLocator, page_number, resolve_keymaps
+from mapsnap.keymap.locate import KeymapLocator, page_key, resolve_keymaps
 from mapsnap.streets import build_block_index, polygon_side_lengths
 from mapsnap.utils import default_centerlines, image_stem
 
@@ -735,7 +735,7 @@ def page_vocabs(
     if locator is None:
         return vocab_strings, None
     restricted = locator.restricted_features(
-        page_number(image_stem(image_path)), geojson_features
+        page_key(image_stem(image_path)), geojson_features
     )
     if not restricted:
         # Unplaced (None) or placed with no nearby features ([]): rectangle is the tightest.
@@ -974,7 +974,7 @@ def main() -> None:
                 generate_vocab_strings(set(rectangle_index.keys())) or vocab_strings
             )
         print(
-            f"Key map places {len(locator.located_numbers())} page numbers; restricting vocab "
+            f"Key map places {len(locator.located_keys())} page numbers; restricting vocab "
             f"to streets within {locator.radius_m:.0f} m of each, with a "
             f"{len(rectangle_vocab)}-form key-map-rectangle fallback (vs {len(vocab_strings)} "
             "full).",

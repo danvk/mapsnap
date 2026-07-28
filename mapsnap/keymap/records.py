@@ -5,6 +5,7 @@ mapsnap.detect_text (so the debugger app loads them); these helpers build that s
 parse the volume's valid page-number set.
 """
 
+import re
 from pathlib import Path
 
 import numpy as np
@@ -13,9 +14,21 @@ from mapsnap.streets import polygon_side_lengths
 from mapsnap.utils import image_stem
 
 
-def parse_page_spec(spec: str) -> list[int]:
-    """Parse a page-number spec like '1-64', '451-577', or '1,3,5-8' into a sorted list."""
-    numbers: set[int] = set()
+def page_key_sort(key: str) -> tuple[int, str]:
+    """Sort key for page keys: numeric stem first, then letter suffix (35 < 35A < 36)."""
+    match = re.match(r"(\d+)([A-Za-z]*)", key)
+    if not match:
+        return (1 << 31, key)
+    return (int(match.group(1)), match.group(2))
+
+
+def parse_page_spec(spec: str) -> list[str]:
+    """Parse a page spec like '1-64', '1,3,5-8', or '1-33,33A,33B' into sorted page keys.
+
+    Ranges expand over bare numbers; a lettered token (``33A``) names one page key.
+    Keys are uppercased, so specs built from lowercase disk stems match printed text.
+    """
+    keys: set[str] = set()
     for part in spec.split(","):
         part = part.strip()
         if not part:
@@ -23,10 +36,12 @@ def parse_page_spec(spec: str) -> list[int]:
         if "-" in part:
             lo_str, hi_str = part.split("-", 1)
             lo, hi = int(lo_str), int(hi_str)
-            numbers.update(range(min(lo, hi), max(lo, hi) + 1))
+            keys.update(str(n) for n in range(min(lo, hi), max(lo, hi) + 1))
         else:
-            numbers.add(int(part))
-    return sorted(numbers)
+            if not re.fullmatch(r"\d+[A-Za-z]{0,2}", part):
+                raise ValueError(f"invalid page token: {part!r}")
+            keys.add(part.upper())
+    return sorted(keys, key=page_key_sort)
 
 
 def keymap_path(image_path: str) -> str:

@@ -32,25 +32,37 @@ import sys
 from collections.abc import Iterable
 from pathlib import Path
 
-from mapsnap.keymap.fit_keymap import volume_page_numbers
-from mapsnap.keymap.records import keymap_path
+from mapsnap.keymap.fit_keymap import volume_page_keys
+from mapsnap.keymap.records import keymap_path, page_key_sort
 from mapsnap.utils import default_centerlines, run_cmd
 
 
-def format_page_spec(numbers: Iterable[int]) -> str:
-    """Collapse page numbers into a compact spec like ``"1-3,5,7-9"`` (a parse_page_spec input)."""
-    ordered = sorted(set(numbers))
-    if not ordered:
-        return ""
+def format_page_spec(keys: Iterable[int | str]) -> str:
+    """Collapse page keys into a compact spec like ``"1-3,5,7-9,33A"`` (a parse_page_spec input).
+
+    Bare numbers collapse into ranges; letter-suffixed keys are emitted as
+    individual tokens after the ranges.
+    """
+    numbers: set[int] = set()
+    lettered: set[str] = set()
+    for key in keys:
+        text = str(key)
+        if text.isdigit():
+            numbers.add(int(text))
+        else:
+            lettered.add(text.upper())
+    ordered = sorted(numbers)
     ranges: list[str] = []
-    start = previous = ordered[0]
-    for number in ordered[1:]:
-        if number == previous + 1:
-            previous = number
-            continue
+    if ordered:
+        start = previous = ordered[0]
+        for number in ordered[1:]:
+            if number == previous + 1:
+                previous = number
+                continue
+            ranges.append(str(start) if start == previous else f"{start}-{previous}")
+            start = previous = number
         ranges.append(str(start) if start == previous else f"{start}-{previous}")
-        start = previous = number
-    ranges.append(str(start) if start == previous else f"{start}-{previous}")
+    ranges.extend(sorted(lettered, key=page_key_sort))
     return ",".join(ranges)
 
 
@@ -66,16 +78,17 @@ def keymap_volume_dir(image_path: Path) -> Path:
 
 
 def valid_page_spec(keymap_images: list[Path]) -> str:
-    """A ``--pages`` spec of the volume's real page numbers, for the CRNN reader.
+    """A ``--pages`` spec of the volume's real page keys, for the CRNN reader.
 
-    Unions the page numbers found across each key map's volume (from its ``p*.jpg`` page images),
-    drops any non-positive number (a ``p0b`` key map's own "page 0"), and formats the result as a
-    compact range spec. Returns "" when no page numbers are found.
+    Unions the page keys found across each key map's volume (from its ``p*.jpg`` page
+    images, letter suffixes included), drops page 0 and its variants (a ``p0b`` key
+    map's own sheet), and formats the result as a compact spec. Returns "" when no
+    page keys are found.
     """
-    numbers: set[int] = set()
+    keys: set[str] = set()
     for volume in {keymap_volume_dir(image) for image in keymap_images}:
-        numbers |= volume_page_numbers(volume)
-    return format_page_spec(number for number in numbers if number >= 1)
+        keys |= volume_page_keys(volume)
+    return format_page_spec(key for key in keys if page_key_sort(key)[0] >= 1)
 
 
 def main() -> None:
