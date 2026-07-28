@@ -27,6 +27,7 @@ import io
 import json
 import math
 import sys
+from dataclasses import asdict
 from pathlib import Path
 
 import numpy as np
@@ -47,6 +48,7 @@ from mapsnap.edge_join_experiment import (
 )
 from mapsnap.georef_from_labels import LabelFeature, prepare_label_features
 from mapsnap.keymap.align_page_region import (
+    angle_difference_mod180,
     pose_corners_world,
     pose_world_of,
     volume_filter_params,
@@ -311,6 +313,7 @@ def street_records(
     origin: tuple[float, float],
     gates: StreetGates,
     label_scale: tuple[float, float],
+    raw_soups: dict | None = None,
 ) -> list[dict]:
     """Every considered detection under a pose, in the .georef.json street schema.
 
@@ -336,26 +339,62 @@ def street_records(
         snap_lon, snap_lat = unproject(
             float(snapped[0]), float(snapped[1]), origin[0], origin[1]
         )
-        records.append(
-            {
-                "street": name,
-                "x": round(center_px[0] / label_scale[0]),
-                "y": round(center_px[1] / label_scale[1]),
-                "lat": round(lat, 7),
-                "lon": round(lon, 7),
-                "dir_x": round(math.cos(dir_pix), 6),
-                "dir_y": round(math.sin(dir_pix), 6),
-                "dir_lon": round((tip_lon - lon) / norm, 6),
-                "dir_lat": round((tip_lat - lat) / norm, 6),
-                "inlier": position_m <= gates.position_gate_m
-                and abs(angle_deg) <= gates.angle_gate_deg,
-                "position_m": round(position_m, 1),
-                "angle_deg": round(angle_deg, 2),
-                "snap_lon": round(snap_lon, 7),
-                "snap_lat": round(snap_lat, 7),
-            }
-        )
+        record = {
+            "street": name,
+            "x": round(center_px[0] / label_scale[0]),
+            "y": round(center_px[1] / label_scale[1]),
+            "lat": round(lat, 7),
+            "lon": round(lon, 7),
+            "dir_x": round(math.cos(dir_pix), 6),
+            "dir_y": round(math.sin(dir_pix), 6),
+            "dir_lon": round((tip_lon - lon) / norm, 6),
+            "dir_lat": round((tip_lat - lat) / norm, 6),
+            "inlier": position_m <= gates.position_gate_m
+            and abs(angle_deg) <= gates.angle_gate_deg,
+            "position_m": round(position_m, 1),
+            "angle_deg": round(angle_deg, 2),
+            "snap_lon": round(snap_lon, 7),
+            "snap_lat": round(snap_lat, 7),
+        }
+        if raw_soups is not None:
+            record.update(extension_diagnostics(raw_soups.get(name), world, position_m))
+        records.append(record)
     return records
+
+
+def extension_diagnostics(
+    raw: tuple[np.ndarray, np.ndarray] | None, world: np.ndarray, used_m: float
+) -> dict:
+    """How much this constraint leaned on the terminal extension, and whether it should.
+
+    ``distance_to_drawn_m`` is the distance to the street as OSM actually draws it, so
+    the gap against the reported distance is what extending the open end bought.
+    ``local_bend_deg`` is the widest bearing disagreement among the drawn segments
+    within 100 m of that nearest point: a street that is turning there is one whose
+    straight continuation is a guess, which is the case a fixed allowance cannot see.
+    """
+    if raw is None or not len(raw[0]):
+        return {}
+    starts, ends = raw
+    delta = ends - starts
+    length_sq = (delta * delta).sum(axis=1)
+    t = np.clip(
+        ((world - starts) * delta).sum(axis=1) / np.maximum(length_sq, 1e-9), 0, 1
+    )
+    projected = starts + t[:, None] * delta
+    distances = np.linalg.norm(world - projected, axis=1)
+    nearest = int(distances.argmin())
+    near = np.linalg.norm(projected - projected[nearest], axis=1) <= 100.0
+    bearings = np.degrees(np.arctan2(delta[near, 0], delta[near, 1])) % 180.0
+    bend = 0.0
+    for i, first in enumerate(bearings):
+        for second in bearings[i + 1 :]:
+            bend = max(bend, abs(angle_difference_mod180(float(first), float(second))))
+    return {
+        "distance_to_drawn_m": round(float(distances[nearest]), 1),
+        "extension_gain_m": round(float(distances[nearest]) - round(used_m, 1), 1),
+        "local_bend_deg": round(bend, 1),
+    }
 
 
 def nearest_point_on(point, starts, ends):
@@ -411,6 +450,7 @@ def write_georef_streets(
     label_size: tuple[int, int],
     suffix: str,
     extra: dict,
+    raw_soups: dict | None = None,
 ) -> Path:
     """Write one <stem>.georef-streets*.json in the pipeline's sidecar schema."""
     size = (unit.width, unit.height)
@@ -420,7 +460,7 @@ def write_georef_streets(
         "height": label_size[1],
         "corners": pose_corners_world(pose, size, prior.center),
         "streets": street_records(
-            constraints, pose, size, prior.center, gates, label_scale
+            constraints, pose, size, prior.center, gates, label_scale, raw_soups
         ),
         "intersections": [],
         "keymap": {
@@ -598,6 +638,18 @@ def cmd_materialize(args: argparse.Namespace) -> None:
             scale_px_per_m=scale or 1.0,
             gates=gates,
         )
+        # The same constraints without the terminal extension, so each record can say
+        # what the extension bought and whether the street bends where it was applied.
+        drawn = assemble_constraints(
+            features,
+            block_index,
+            prior=prior,
+            label_size=label_size,
+            working_size=size,
+            scale_px_per_m=scale or 1.0,
+            gates=StreetGates(**{**asdict(gates), "terminal_extrapolation_m": 0.0}),
+        )
+        raw_soups = {c[2]: (c[3], c[4]) for c in drawn}
         psi_priors = psi_votes(constraints, gates) + psi_priors_for(
             features, block_index, prior
         )
@@ -635,7 +687,7 @@ def cmd_materialize(args: argparse.Namespace) -> None:
                     result.pose,
                     gates,
                     label_size,
-                    "streets",
+                    args.suffix,
                     {
                         "pose": [round(v, 6) for v in result.pose],
                         "psi_source": result.psi_source,
@@ -647,6 +699,7 @@ def cmd_materialize(args: argparse.Namespace) -> None:
                             None if unit.rmse_ft is None else round(unit.rmse_ft, 1)
                         ),
                     },
+                    raw_soups,
                 )
             )
         else:
@@ -662,13 +715,14 @@ def cmd_materialize(args: argparse.Namespace) -> None:
                     truth_pose,
                     gates,
                     label_size,
-                    "streets-truth",
+                    f"{args.suffix}-truth",
                     {
                         "pose": [round(v, 6) for v in truth_pose],
                         "source": "truth",
                         "n_constraints": len(constraints),
                         "note": "detections scored against the human georeference",
                     },
+                    raw_soups,
                 )
             )
         for path in written:
@@ -697,6 +751,11 @@ def main() -> None:
     materialize.add_argument("--pages", required=True)
     materialize.add_argument("--gates")
     materialize.add_argument("--truth-prior", action="store_true")
+    materialize.add_argument(
+        "--suffix",
+        default="streets",
+        help="Sidecar suffix: <stem>.georef-<suffix>.json (default: %(default)s).",
+    )
     materialize.set_defaults(func=cmd_materialize)
 
     report = sub.add_parser("report", help="Head-to-head vs RANSAC.")
