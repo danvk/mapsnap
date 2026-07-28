@@ -2603,7 +2603,7 @@ def prepare_label_features(
     min_long_side: float = 250.0,
     min_short_side: float = 60.0,
     min_aspect_ratio: float = 2.0,
-    edge_margin: float = 0.02,
+    edge_margin: float = 0.0,
     high_confidence_size_fraction: float = 0.7,
     keep_labels_on_fill: bool = False,
     collinear_perp_tolerance_px: float = COLLINEAR_PERP_TOLERANCE_PX,
@@ -2783,7 +2783,7 @@ def process_image(
     min_long_side: float = 250.0,
     min_short_side: float = 60.0,
     min_aspect_ratio: float = 2.0,
-    edge_margin: float = 0.02,
+    edge_margin: float = 0.0,
     force_intersection: tuple[int, int] | None = None,
     one_gcp_fits: bool = False,
     debug: bool = False,
@@ -3629,6 +3629,8 @@ def main() -> None:
         "auto_threshold_percentile": args.auto_threshold_percentile,
         "auto_threshold_include_hints": auto_threshold_include_hints,
         "high_confidence_size_fraction": args.high_confidence_size_fraction,
+        "edge_margin": args.edge_margin,
+        "keep_labels_on_fill": args.keep_labels_on_fill,
     }
 
     n_success = 0
