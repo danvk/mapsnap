@@ -307,6 +307,10 @@ def test_georef_path_neighbor_variant():
 def test_georef_path_osm_variant():
     assert georef_path_to_page_key("data/vol/p147.georef-osm.json") == "p147"
     assert georef_path_to_page_key("data/vol/p4l__2.georef-osm.json") == "p4l__2"
+    # A variant absent from the pattern yields no page key, so the glob matches the
+    # file and the annotation silently omits the page -- worth a test per variant.
+    assert georef_path_to_page_key("data/vol/p147.georef-streets.json") == "p147"
+    assert georef_path_to_page_key("data/vol/p4l__2.georef-streets.json") == "p4l__2"
 
 
 def test_georef_path_other_variants_do_not_match():

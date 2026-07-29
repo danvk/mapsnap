@@ -80,7 +80,7 @@ from mapsnap.keymap.locate import (
     page_number,
 )
 from mapsnap.keymap.page_regions import clean_cluster_mask
-from mapsnap.streets import Block, build_block_index
+from mapsnap.streets import Block, build_block_index, street_name_family
 from mapsnap.utils import FEET_PER_METER, haversine_m
 
 Point = tuple[float, float]
@@ -525,21 +525,35 @@ StreetPose = tuple[
     float, float, float, float
 ]  # (east_m, north_m, psi_deg, log_px_per_m)
 
+
 # Street label centers sit tens of metres off their centerlines (the text box is not on the
 # street line), so the point-to-line *position* is only a weak constraint — deliberately loose
 # here. The label *angle*, by contrast, tracks the street bearing to ~1 degree and is what
 # reliably fixes rotation (including region rotation flips), so it is kept tight.
-SIGMA_LINE_M = 60.0  # street point-to-line distance (loose: label centers are offset)
-SIGMA_ANGLE_DEG = (
-    3.0  # street text-angle vs centerline bearing (tight: the reliable signal)
-)
-SIGMA_CONTAIN_M = 9.144  # 30 ft: region vertex outside the page frame
-SIGMA_CENTROID_M = 152.4  # 500 ft: weak page-center vs region-centroid spring
-SIGMA_LOG_SCALE = 0.05  # tight scale prior: the volume-median scale is accurate (~1%)
-SIGMA_STAMP_M = (
-    6.096  # 20 ft: printed neighbor-number stamp outside its neighbor's region
-)
-STAMP_SLACK_M = 4.572  # 15 ft of free play before a stamp is penalized
+@dataclass(frozen=True)
+class PoseSigmas:
+    """Residual normalizers for :func:`pose_residuals`, one per factor family.
+
+    The defaults are the region-align values (salvaged from the earlier ``factor_place``
+    experiment); other callers vary them — a fit driven by streets alone wants a weaker
+    scale prior, since two parallel streets determine scale from their spacing.
+    """
+
+    line_m: float = (
+        60.0  # street point-to-line distance (loose: label centers are offset)
+    )
+    angle_deg: float = (
+        3.0  # street text-angle vs centerline bearing (the reliable signal)
+    )
+    contain_m: float = 9.144  # 30 ft: region vertex outside the page frame
+    centroid_m: float = 152.4  # 500 ft: weak page-center vs region-centroid spring
+    log_scale: float = 0.05  # scale prior; the volume-median scale is accurate to ~1%
+    stamp_m: float = 6.096  # 20 ft: neighbor-number stamp outside its neighbor's region
+    stamp_slack_m: float = 4.572  # 15 ft of free play before a stamp is penalized
+
+
+DEFAULT_SIGMAS = PoseSigmas()
+
 
 # One matchable street label: page-pixel center, long-axis angle, canonical name, and the
 # street's centerline segments as (start, end) arrays in the local East/North metre frame.
@@ -649,23 +663,88 @@ def street_matches(
         features: list[LabelFeature] = prepare_label_features(
             str(streets_path), block_index, label_size, **filter_params
         )
-    scale_x = size[0] / label_size[0]
-    scale_y = size[1] / label_size[1]
-    # A label read as several distinct streets (VAN BRUNT vs VAN DYKE at one box) is ambiguous:
-    # one candidate is wrong and would drag the fit, so drop it from position constraints (this is
-    # factor_place's unambiguous-only rule). Same-name repeats along a street are kept.
-    names_per_center: dict[Point, set[str]] = {}
+    return constraints_from_features(
+        features,
+        block_index,
+        origin=origin,
+        label_size=label_size,
+        working_size=size,
+    )
+
+
+def constraints_from_features(
+    features: list[LabelFeature],
+    block_index: dict[str, list[Block]],
+    *,
+    origin: Point,
+    label_size: tuple[int, int],
+    working_size: tuple[int, int],
+    merge_families: bool = False,
+    locality: tuple[Point, float] | None = None,
+) -> list[StreetSegments]:
+    """Pair accepted label features with their streets' centerline segments (metres).
+
+    A label read as several distinct streets (VAN BRUNT vs VAN DYKE at one box) is
+    ambiguous: one candidate is wrong and would drag the fit, so it is dropped (this is
+    factor_place's unambiguous-only rule). Same-name repeats along a street are kept.
+
+    ``merge_families`` softens that rule where the candidates are only *variants* of one
+    street — "NORTH/SOUTH/BONNIE BEACH PLACE" (see :func:`street_name_family`) — by
+    unioning their segments into a single constraint instead of discarding the label.
+    Without it a volume whose streets carry direction prefixes loses most of its labels.
+
+    ``locality`` is an optional ``(center, radius_m)`` filter on the *segments*: a merged
+    family can span kilometres, and a distant branch would let the label snap to whichever
+    branch the current pose happens to favour. Keeping only segments near the page's prior
+    location bounds that to the neighborhood the page actually sits in.
+    """
+    scale_x = working_size[0] / label_size[0]
+    scale_y = working_size[1] / label_size[1]
+    names_per_center: dict[Point, list[str]] = {}
     for feature in features:
-        names_per_center.setdefault(feature.center, set()).add(feature.text)
+        names = names_per_center.setdefault(feature.center, [])
+        if feature.text not in names:
+            names.append(feature.text)
+
+    def soup_for(names: list[str]) -> tuple[np.ndarray, np.ndarray]:
+        """Union of the named streets' segments, optionally trimmed to the locality."""
+        starts: list[np.ndarray] = []
+        ends: list[np.ndarray] = []
+        for name in names:
+            blocks = block_index.get(name)
+            if not blocks:
+                continue
+            block_starts, block_ends = street_soup_metres(blocks, origin)
+            if len(block_starts):
+                starts.append(block_starts)
+                ends.append(block_ends)
+        if not starts:
+            return np.zeros((0, 2)), np.zeros((0, 2))
+        all_starts, all_ends = np.vstack(starts), np.vstack(ends)
+        if locality is not None:
+            center, radius_m = locality
+            anchor = np.array(center)
+            midpoints = (all_starts + all_ends) / 2
+            near = np.linalg.norm(midpoints - anchor, axis=1) <= radius_m
+            all_starts, all_ends = all_starts[near], all_ends[near]
+        return all_starts, all_ends
+
     matches: list[StreetSegments] = []
+    seen_centers: set[Point] = set()
     for feature in features:
-        blocks = block_index.get(feature.text)
-        if not blocks or len(names_per_center[feature.center]) > 1:
+        if feature.center in seen_centers:
             continue
-        starts, ends = street_soup_metres(blocks, origin)
-        if len(starts):
-            center = (feature.center[0] * scale_x, feature.center[1] * scale_y)
-            matches.append((center, feature.dir_pix, feature.text, starts, ends))
+        names = names_per_center[feature.center]
+        if len(names) > 1 and (
+            not merge_families or len({street_name_family(n) for n in names}) > 1
+        ):
+            continue
+        starts, ends = soup_for(names)
+        if not len(starts):
+            continue
+        seen_centers.add(feature.center)
+        center = (feature.center[0] * scale_x, feature.center[1] * scale_y)
+        matches.append((center, feature.dir_pix, names[0], starts, ends))
     return matches
 
 
@@ -740,6 +819,7 @@ def pose_residuals(
     region_vertices: np.ndarray,
     size: tuple[int, int],
     prior_log_scale: float,
+    sigmas: PoseSigmas = DEFAULT_SIGMAS,
 ) -> np.ndarray:
     """Normalized residual vector for the 4-DOF street + stamp + region + scale-prior factors."""
     east, north, psi, log_scale = pose
@@ -751,10 +831,10 @@ def pose_residuals(
     for center_px, dir_pix, _name, starts, ends in matches:
         world = pose_world_of(pose, center_px, size)
         distance, bearing = point_to_segments(world, starts, ends)
-        residuals.append(distance / SIGMA_LINE_M)
+        residuals.append(distance / sigmas.line_m)
         text_bearing = (psi + 90 + math.degrees(dir_pix)) % 180
         residuals.append(
-            angle_difference_mod180(text_bearing, bearing) / SIGMA_ANGLE_DEG
+            angle_difference_mod180(text_bearing, bearing) / sigmas.angle_deg
         )
     for pixel, neighbor_region in stamps:
         point = ShapelyPoint(pose_world_of(pose, pixel, size))
@@ -763,16 +843,16 @@ def pose_residuals(
             if neighbor_region.contains(point)
             else neighbor_region.boundary.distance(point)
         )
-        residuals.append(max(0.0, outside - STAMP_SLACK_M) / SIGMA_STAMP_M)
+        residuals.append(max(0.0, outside - sigmas.stamp_slack_m) / sigmas.stamp_m)
     for vertex in region_vertices:
         relative = vertex - center
         along = max(0.0, abs(float(relative @ up)) - half_height)
         across = max(0.0, abs(float(relative @ right)) - half_width)
-        residuals.append(math.hypot(along, across) / SIGMA_CONTAIN_M)
+        residuals.append(math.hypot(along, across) / sigmas.contain_m)
     centroid = region_vertices.mean(axis=0)
-    residuals.append((east - centroid[0]) / SIGMA_CENTROID_M)
-    residuals.append((north - centroid[1]) / SIGMA_CENTROID_M)
-    residuals.append((log_scale - prior_log_scale) / SIGMA_LOG_SCALE)
+    residuals.append((east - centroid[0]) / sigmas.centroid_m)
+    residuals.append((north - centroid[1]) / sigmas.centroid_m)
+    residuals.append((log_scale - prior_log_scale) / sigmas.log_scale)
     return np.array(residuals)
 
 
@@ -809,40 +889,68 @@ def refine_pose_with_streets(
         math.log(scale_px_per_m) if scale_px_per_m is not None else initial[3]
     )
     initial = (initial[0], initial[1], initial[2], prior_log_scale)
+    best_pose = initial
+    best_cost = float("inf")
+    for delta_psi in (0.0, 180.0):
+        start = (initial[0], initial[1], initial[2] + delta_psi, initial[3])
+        solved = solve_pose(
+            start,
+            matches,
+            stamps,
+            region_vertices=region_vertices,
+            size=size,
+            prior_log_scale=prior_log_scale,
+        )
+        if solved is not None and solved[1] < best_cost:
+            best_pose, best_cost = solved[0], solved[1]
+    return best_pose
+
+
+def solve_pose(
+    initial: StreetPose,
+    matches: list[StreetSegments],
+    stamps: list[Stamp],
+    *,
+    region_vertices: np.ndarray,
+    size: tuple[int, int],
+    prior_log_scale: float,
+    sigmas: PoseSigmas = DEFAULT_SIGMAS,
+) -> tuple[StreetPose, float] | None:
+    """One robust least-squares solve from ``initial``; (pose, cost) or None if it fails.
+
+    The single-shot primitive behind :func:`refine_pose_with_streets` and the
+    streets-only solver: no bearing sweep, no re-snapping loop — callers that want
+    several starts call this once per start and keep the best cost.
+    """
     # Bound the log-scale to prior +/- log(4); an unbounded scale can run to overflow, giving
     # non-finite residuals that segfault the MINPACK core (this mirrors factor_place's bounds).
     lower = np.array([-np.inf, -np.inf, -np.inf, prior_log_scale - math.log(4)])
     upper = np.array([np.inf, np.inf, np.inf, prior_log_scale + math.log(4)])
-    best_pose = initial
-    best_cost = float("inf")
-    for delta_psi in (0.0, 180.0):
-        start = np.array([initial[0], initial[1], initial[2] + delta_psi, initial[3]])
-        try:
-            result = least_squares(
-                lambda pose: pose_residuals(
-                    (pose[0], pose[1], pose[2], pose[3]),
-                    matches,
-                    stamps,
-                    region_vertices=region_vertices,
-                    size=size,
-                    prior_log_scale=prior_log_scale,
-                ),
-                start,
-                loss="soft_l1",
-                f_scale=1.0,
-                bounds=(lower, upper),
-            )
-        except (ValueError, np.linalg.LinAlgError):
-            continue
-        if result.cost < best_cost:
-            best_cost = float(result.cost)
-            best_pose = (
-                float(result.x[0]),
-                float(result.x[1]),
-                float(result.x[2]),
-                float(result.x[3]),
-            )
-    return best_pose
+    try:
+        result = least_squares(
+            lambda pose: pose_residuals(
+                (pose[0], pose[1], pose[2], pose[3]),
+                matches,
+                stamps,
+                region_vertices=region_vertices,
+                size=size,
+                prior_log_scale=prior_log_scale,
+                sigmas=sigmas,
+            ),
+            np.array(initial),
+            loss="soft_l1",
+            f_scale=1.0,
+            bounds=(lower, upper),
+        )
+    except (ValueError, np.linalg.LinAlgError):
+        return None
+    pose = (
+        float(result.x[0]),
+        float(result.x[1]),
+        float(result.x[2]),
+        float(result.x[3]),
+    )
+    return pose, float(result.cost)
 
 
 def pose_corners_world(
