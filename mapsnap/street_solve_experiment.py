@@ -57,6 +57,7 @@ from mapsnap.keymap.align_page_region import (
 from mapsnap.keymap.fit_keymap import project, unproject
 from mapsnap.keymap.locate import KeymapLocator, discover_keymaps
 from mapsnap.osm_snap import dedupe_thetas, label_osm_rotations
+from mapsnap.road_model import page_world_affine
 from mapsnap.street_solve import (
     PriorLocation,
     StreetGates,
@@ -559,6 +560,135 @@ def parse_gate_overrides(text: str | None) -> dict:
     return overrides
 
 
+# Two poses closer than this are not a disagreement worth refereeing.
+DISAGREE_FT = 25.0
+# The streets pose is adopted only when the referee prefers it by more than this.
+# Swept over all 123 production-incumbent disagreements: every threshold loses
+# zero pages and creates zero disasters, so this only trades how much upside is
+# taken; 0.2 sits in the middle of a flat plateau at ~95% precision.
+ADOPT_GAP = 0.2
+
+
+def incumbent_pose(volume: Path, unit: PageUnit) -> tuple[np.ndarray | None, str]:
+    """(affine, source) of the pose the pipeline publishes for a page.
+
+    Snap's sidecar takes priority in the production glob, so on a page it acted on
+    that -- not the RANSAC fit -- is what a challenger has to beat.
+    """
+    osm_path = volume / f"{unit.stem}.georef-osm.json"
+    if osm_path.exists():
+        try:
+            return page_world_affine(json.loads(osm_path.read_text())), "snap"
+        except (KeyError, TypeError, ValueError):
+            pass
+    return unit.gen_affine, "ransac"
+
+
+def cmd_select(args: argparse.Namespace) -> None:
+    """Adopt the streets pose where an independent referee prefers it.
+
+    Neither channel can say which of the two is right -- their agreement is a coin
+    flip and neither ranks its own fits. `osm_snap.evaluate_pose` can: it scores any
+    pose by road-skeleton chamfer against OSM plus name alignment, evidence derived
+    from neither channel's fitting criterion. Both poses are scored by identical
+    features, and the streets pose is written only when the referee prefers it by
+    ADOPT_GAP. Measured over every disagreement in the twelve truth volumes, that
+    picks the closer pose 86% of the time and never costs a page its <=25 ft
+    placement.
+    """
+    from mapsnap.osm_snap import evaluate_pose
+    from mapsnap.osm_snap_experiment import build_page_context, load_volume_context
+
+    volume = Path(args.volume)
+    locator, centerlines, filter_params, scale = volume_context(volume)
+    gates = StreetGates(**parse_gate_overrides(args.gates))
+    units = load_page_units(volume)
+    attach_case_folded_truth(volume, units)
+    posed = {}
+    path = volume / ARTIFACT_DIR / "candidates.jsonl"
+    if path.exists():
+        for line in path.read_text().splitlines():
+            record = json.loads(line)
+            if record.get("status") == "posed" and record.get("corners"):
+                posed[record["stem"]] = record
+    if not posed:
+        sys.exit(f"no posed candidates in {path}; run `candidates` first")
+
+    for stale in volume.glob("p*.georef-streets.json"):
+        stale.unlink()  # this command owns them; never leave a previous run's pick
+
+    vctx = load_volume_context(volume, units)
+    adopted = 0
+    for unit in units:
+        record = posed.get(unit.stem)
+        if record is None:
+            continue
+        incumbent_affine, source = incumbent_pose(volume, unit)
+        if incumbent_affine is None:
+            continue
+        size = (unit.width, unit.height)
+        streets_affine = corners_to_affine(record["corners"], size)
+        apart = grid_rmse_ft_between(
+            streets_affine, incumbent_affine, unit.width, unit.height
+        )
+        if apart < DISAGREE_FT:
+            continue
+        ctx, _status = build_page_context(vctx, unit)
+        if ctx is None:
+            continue
+        incumbent = evaluate_pose(ctx, vctx.feature_index, incumbent_affine)
+        challenger = evaluate_pose(ctx, vctx.feature_index, streets_affine)
+        if incumbent is None or challenger is None:
+            continue
+        gap = challenger["verification"] - incumbent["verification"]
+        if gap <= args.adopt_gap:
+            continue
+        prior = page_prior(unit, locator)
+        if prior is None:
+            continue
+        prepared = page_features(volume, unit, prior, centerlines, filter_params)
+        if prepared is None:
+            continue
+        features, block_index, label_size = prepared
+        constraints = assemble_constraints(
+            features,
+            block_index,
+            prior=prior,
+            label_size=label_size,
+            working_size=size,
+            scale_px_per_m=scale or 1.0,
+            gates=gates,
+        )
+        write_georef_streets(
+            volume,
+            unit,
+            prior,
+            constraints,
+            tuple(record["pose"]),
+            gates,
+            label_size,
+            "streets",
+            {
+                "pose": record["pose"],
+                "adopted_over": source,
+                "verification": {
+                    "streets": round(challenger["verification"], 4),
+                    "incumbent": round(incumbent["verification"], 4),
+                    "gap": round(gap, 4),
+                },
+                "disagreement_ft": round(apart, 1),
+                "rmse_ft": record.get("street_rmse_ft"),
+            },
+        )
+        adopted += 1
+        print(
+            f"{unit.stem:<10} adopted over {source:<6} gap {gap:+.3f} "
+            f"(apart {apart:.0f} ft)",
+            flush=True,
+        )
+    print(f"\n{adopted} page(s) adopted in {volume.name}")
+
+
 def cmd_report(args: argparse.Namespace) -> None:
     """Head-to-head table: streets-only vs RANSAC, per volume and aggregate."""
     rows: list[dict] = []
@@ -757,6 +887,19 @@ def main() -> None:
         help="Sidecar suffix: <stem>.georef-<suffix>.json (default: %(default)s).",
     )
     materialize.set_defaults(func=cmd_materialize)
+
+    select = sub.add_parser(
+        "select", help="Adopt the streets pose where the referee prefers it."
+    )
+    select.add_argument("volume")
+    select.add_argument("--gates")
+    select.add_argument(
+        "--adopt-gap",
+        type=float,
+        default=ADOPT_GAP,
+        help="Verification margin the streets pose must win by (default: %(default)s).",
+    )
+    select.set_defaults(func=cmd_select)
 
     report = sub.add_parser("report", help="Head-to-head vs RANSAC.")
     report.add_argument("volumes", nargs="+")
