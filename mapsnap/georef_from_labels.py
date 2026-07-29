@@ -3815,7 +3815,19 @@ def main() -> None:
     # Drop georef files whose fitted scale is a major outlier vs the reference —
     # unless the scale agrees with the pages fitted around it (an intermediate local
     # drawing scale, e.g. a downtown sheet, lands in the gap between outlier bands).
-    if ref_scale_px_per_ft is not None and not args.disable_scale_outlier_check:
+    #
+    # Key-map runs are exempt: index sheets are drawn at whatever scale fits their
+    # coverage, so a volume's city-wide index and its downtown inset differ by design
+    # and share no scale family for family_scale to anchor on. Neither can the
+    # neighbor-corroboration escape save them, since a key-map run georeferences no
+    # ordinary pages to be adjacent to. Atlanta 1911 is the case in point: two index
+    # sheets, and the check dropped the accurate one (28 m median against the pages
+    # that later fit from street OCR) in favour of the 355 m one.
+    if (
+        ref_scale_px_per_ft is not None
+        and not args.disable_scale_outlier_check
+        and not args.geocode_keymaps
+    ):
         centers_by_path = dict(location_records)
         n_dropped = 0
         for img_path, px_per_ft in scale_records:
