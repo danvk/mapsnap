@@ -1207,6 +1207,8 @@ def volume_filter_params(volume: Path) -> dict:
         "min_short_side",
         "min_aspect_ratio",
         "high_confidence_size_fraction",
+        "edge_margin",
+        "keep_labels_on_fill",
     )
     for georef_path in sorted(volume.glob("p*.georef.json")):
         parameters = (
