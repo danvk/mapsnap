@@ -31,6 +31,7 @@ __all__ = [
     "page_key",
     "page_number",
     "resolve_keymaps",
+    "usable_keymaps",
 ]
 
 
@@ -44,6 +45,21 @@ def keymap_georef_path(keymap_json: Path) -> Path:
     return keymap_json.with_name(
         keymap_json.name.replace(".keymap.json", ".georef.json")
     )
+
+
+def usable_keymaps(directory: Path) -> list[Path]:
+    """Key-map detections files in one directory that a locator can actually load.
+
+    A key map whose own georeferencing failed leaves a bare ``<stem>.keymap.json``
+    beside a ``-misscale``/``-nofit`` sidecar rather than the ``<stem>.georef.json``
+    :func:`KeymapLocator.from_keymap` reads, so it is skipped here instead of
+    raising when the locator gets around to opening it.
+    """
+    return [
+        keymap_json
+        for keymap_json in sorted(directory.glob("*.keymap.json"))
+        if keymap_georef_path(keymap_json).exists()
+    ]
 
 
 def discover_keymaps(image_paths: list[str]) -> list[Path]:
@@ -62,8 +78,8 @@ def discover_keymaps(image_paths: list[str]) -> list[Path]:
                 directories.append(directory)
     found: list[Path] = []
     for directory in directories:
-        for keymap_json in sorted(directory.glob("*.keymap.json")):
-            if keymap_georef_path(keymap_json).exists() and keymap_json not in found:
+        for keymap_json in usable_keymaps(directory):
+            if keymap_json not in found:
                 found.append(keymap_json)
     return found
 

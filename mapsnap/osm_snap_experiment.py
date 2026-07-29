@@ -41,7 +41,7 @@ from mapsnap.keymap.align_page_region import (
     load_adjacency,
     volume_filter_params,
 )
-from mapsnap.keymap.locate import KeymapLocator
+from mapsnap.keymap.locate import KeymapLocator, usable_keymaps
 from mapsnap.osm_snap import (
     PageContext,
     RotationPrior,
@@ -423,7 +423,7 @@ def load_volume_context(
     if centerlines_path is None:
         sys.exit(f"no centerlines.geojson under {volume}")
     features = json.loads(centerlines_path.read_text())["features"]
-    keymaps = sorted((volume / "raw").glob("*.keymap.json"))
+    keymaps = usable_keymaps(volume / "raw")
     locator = KeymapLocator.from_keymaps(keymaps) if keymaps else None
     _, region_centroids = keymap_region_adjacency(volume)
     residuals = keymap_fit_residuals(units)
