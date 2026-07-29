@@ -1,7 +1,7 @@
 import { useState, type ReactElement } from 'react';
 
 import { rmseBucket, type PageCompareStats } from '../iiif/compare';
-import type { PageGeo } from '../iiif/pages';
+import { hasFootprint, type PageGeo } from '../iiif/pages';
 
 interface PageListProps {
   pages: PageGeo[];
@@ -49,10 +49,12 @@ function sortValue(
       return undefined; // handled by natural key comparison
     case 'rmse':
       return stats?.rmseFt;
+    // Undefined for a footprint-less miss so it sinks under these sorts with the
+    // other valueless rows instead of sorting as a real 0.
     case 'rot':
-      return page.rotationDegrees;
+      return hasFootprint(page) ? page.rotationDegrees : undefined;
     case 'scale':
-      return page.scalePixelsPerFoot;
+      return hasFootprint(page) ? page.scalePixelsPerFoot : undefined;
     case 'rotErr':
       return stats ? Math.abs(stats.rotationErrorDegrees) : undefined;
     case 'scaleErr':
@@ -223,9 +225,16 @@ export function PageList(props: PageListProps) {
                     )}
                   </td>
                 )}
-                <td className="numeric">{page.rotationDegrees.toFixed(1)}°</td>
+                {/* Rotation and scale come from a georeference. A miss known only by
+                    name (a volume with no truth) has none, so 0.0°/0.00 would be a
+                    reading rather than a blank. */}
                 <td className="numeric">
-                  {page.scalePixelsPerFoot.toFixed(2)}
+                  {hasFootprint(page)
+                    ? `${page.rotationDegrees.toFixed(1)}°`
+                    : ''}
+                </td>
+                <td className="numeric">
+                  {hasFootprint(page) ? page.scalePixelsPerFoot.toFixed(2) : ''}
                 </td>
                 {hasTruth && (
                   <td className="numeric">

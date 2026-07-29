@@ -5,6 +5,7 @@ import {
   FILL_YELLOW_HUE_BAND,
   filterDetections,
   isOnBuildingFill,
+  matchesTextQuery,
   previewOrientation,
 } from './detections';
 import type { Detection } from './types';
@@ -122,6 +123,7 @@ describe('filterDetections', () => {
       minShortSide: 0,
       minLongSide: 0,
       showIgnored: true,
+      text: '',
     });
     expect(result.map((r) => r.i)).toEqual([0, 1, 2]);
   });
@@ -132,6 +134,7 @@ describe('filterDetections', () => {
       minShortSide: 20,
       minLongSide: 50,
       showIgnored: true,
+      text: '',
     });
     expect(result.map((r) => r.i)).toEqual([1, 2]);
   });
@@ -142,6 +145,7 @@ describe('filterDetections', () => {
       minShortSide: 0,
       minLongSide: 0,
       showIgnored: false,
+      text: '',
     });
     expect(hidden.map((r) => r.i)).toEqual([0, 1]);
   });
@@ -240,5 +244,50 @@ describe('isOnBuildingFill', () => {
     expect(isOnBuildingFill(withBackground(low))).toBe(false);
     expect(isOnBuildingFill(withBackground(high))).toBe(false);
     expect(isOnBuildingFill(withBackground(low - 0.1))).toBe(true);
+  });
+});
+
+describe('matchesTextQuery', () => {
+  it('matches everything when the query is empty or blank', () => {
+    expect(matchesTextQuery('ELLIOTT ST', '')).toBe(true);
+    expect(matchesTextQuery('ELLIOTT ST', '   ')).toBe(true);
+  });
+
+  it('matches a page number without matching numbers that contain it', () => {
+    // The motivating case: finding page 6 among a key map's 201 reads, where a
+    // substring match would also return 16, 60 and 63.
+    expect(matchesTextQuery('6', '6')).toBe(true);
+    expect(matchesTextQuery('16', '6')).toBe(false);
+    expect(matchesTextQuery('60', '6')).toBe(false);
+    expect(matchesTextQuery('63', '6')).toBe(false);
+  });
+
+  it('treats a letter suffix as part of the page key', () => {
+    // 6S is a different sheet from 6.
+    expect(matchesTextQuery('6S', '6')).toBe(false);
+    expect(matchesTextQuery('6S', '6S')).toBe(true);
+  });
+
+  it('matches a word inside a longer street name', () => {
+    expect(matchesTextQuery('ELLIOTT ST', 'ELLIOTT')).toBe(true);
+    expect(matchesTextQuery('ELLIOTT ST', 'ST')).toBe(true);
+    expect(matchesTextQuery('ELLIOTTS', 'ELLIOTT')).toBe(false);
+  });
+
+  it('ignores case', () => {
+    expect(matchesTextQuery('ELLIOTT ST', 'elliott')).toBe(true);
+  });
+
+  it('ORs comma-separated terms and ignores the spacing', () => {
+    expect(matchesTextQuery('7', '6, 7')).toBe(true);
+    expect(matchesTextQuery('6', '6,7')).toBe(true);
+    expect(matchesTextQuery('8', '6, 7')).toBe(false);
+    // Trailing separators and stray blanks must not turn into a match-nothing term.
+    expect(matchesTextQuery('8', '6, ,')).toBe(false);
+  });
+
+  it('treats regex metacharacters literally', () => {
+    expect(matchesTextQuery('6', '.')).toBe(false);
+    expect(matchesTextQuery('N. MAIN', '.')).toBe(true);
   });
 });

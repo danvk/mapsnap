@@ -31,6 +31,8 @@ interface ImageColumnProps {
   streets: Street[];
   intersections: IntersectionPoint[];
   filteredDetections: IndexedDetection[];
+  /** Detections before any filtering, for the "showing N of M" readout. */
+  detectionCount: number;
   panels: PanelPolygon[];
   panelLabels?: string[];
   boxes: IndexedBox[];
@@ -68,6 +70,7 @@ export function ImageColumn(props: ImageColumnProps) {
     streets,
     intersections,
     filteredDetections,
+    detectionCount,
     panels,
     panelLabels,
     boxes,
@@ -253,6 +256,27 @@ export function ImageColumn(props: ImageColumnProps) {
 
       {streetsMode && (
         <div id="detection-filters">
+          <div className="filter-row">
+            <label htmlFor="filter-text">
+              Text{' '}
+              {filters.text.trim() !== '' && (
+                <span>
+                  {filteredDetections.length} of {detectionCount}
+                </span>
+              )}
+            </label>
+            <input
+              type="search"
+              id="filter-text"
+              placeholder="e.g. 6, 7"
+              title={
+                'Show only detections whose text matches. Terms match whole words, ' +
+                'so "6" finds page 6 but not 16 or 60; separate alternatives with commas.'
+              }
+              value={filters.text}
+              onChange={(e) => setFilters({ ...filters, text: e.target.value })}
+            />
+          </div>
           <div className="filter-row">
             <label htmlFor="filter-confidence">
               Min confidence: <span>{filters.minConfidence.toFixed(3)}</span>

@@ -6,6 +6,8 @@ export interface DetectionFilters {
   minShortSide: number;
   minLongSide: number;
   showIgnored: boolean;
+  /** Text query; empty shows everything. See {@link matchesTextQuery}. */
+  text: string;
 }
 
 /** A detection paired with its index in the original, unfiltered list. */
@@ -85,8 +87,40 @@ export function filterDetections(
         det.confidence >= filters.minConfidence &&
         det.short_side >= filters.minShortSide &&
         det.long_side >= filters.minLongSide &&
-        (!det.ignore || filters.showIgnored),
+        (!det.ignore || filters.showIgnored) &&
+        matchesTextQuery(det.text, filters.text),
     );
+}
+
+// Escape a query term for use inside a RegExp.
+function escapeRegExp(text: string): string {
+  return text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+/**
+ * Whether a detection's text satisfies a filter query.
+ *
+ * Terms match on **word boundaries**, not as bare substrings, because the query that
+ * matters most on a key map is a page number: searching a sheet's 201 reads for "6"
+ * has to find page 6 without also returning 16, 60 and 63. The same rule still lets
+ * "ELLIOTT" find "ELLIOTT ST", since the boundary falls at the space.
+ *
+ * Comma-separated terms are OR-ed ("6, 7" shows both pages), and matching ignores
+ * case. An empty (or whitespace-only) query matches everything.
+ */
+export function matchesTextQuery(text: string, query: string): boolean {
+  const terms = query
+    .split(',')
+    .map((term) => term.trim())
+    .filter(Boolean);
+  if (terms.length === 0) return true;
+  return terms.some((term) => {
+    // \b only sits between a word and a non-word character, so a term that starts or
+    // ends with punctuation would never match beside one. Anchor those edges loosely.
+    const start = /^\w/.test(term) ? '\\b' : '';
+    const end = /\w$/.test(term) ? '\\b' : '';
+    return new RegExp(`${start}${escapeRegExp(term)}${end}`, 'i').test(text);
+  });
 }
 
 /**
