@@ -58,7 +58,9 @@
 }
 
 /* Listed for its truth labels alone: no keymap.json marks it as a key map. */
-.image-list .image-name.no-keymap {
+/* A page listed only because it carries truth labels: no keymap.json of its
+   own, or a sheet whose panels supersede it. */
+.image-list .image-name.listed-for-labels {
   color: #777;
   font-style: italic;
 }

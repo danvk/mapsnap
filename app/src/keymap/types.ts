@@ -31,4 +31,7 @@ export interface ImageInfo {
   /** Whether the page has a keymap.json sidecar (vs. being listed for its truth).
    * Absent for lists where the notion does not apply (adjacency pages). */
   hasKeymap?: boolean;
+  /** Whether this sheet has been split into panels and is listed only because
+   * it still carries labels of its own (adjacency pages). */
+  supersededBySplit?: boolean;
 }

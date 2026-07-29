@@ -3,10 +3,12 @@ import { tmpdir } from 'os';
 import { join } from 'path';
 import { beforeAll, describe, expect, it } from 'vitest';
 import {
+  comparePages,
   findVolumes,
   isSafePage,
   isSafeVolume,
-  pageSortKey,
+  isSupersededSheet,
+  panelParent,
   readTruth,
   truthPath,
   volumePages,
@@ -22,8 +24,18 @@ beforeAll(async () => {
     await mkdir(join(path, '..'), { recursive: true });
     await writeFile(path, contents);
   };
-  // A plain volume with whole sheets, a split panel, and non-page files.
-  for (const name of ['p1.jpg', 'p2.jpg', 'p10.jpg', 'p33B.jpg', 'p6__1.jpg']) {
+  // A plain volume with whole sheets, a split sheet (p6 + its panels), an
+  // orphan panel whose sheet is not on disk, and non-page files.
+  for (const name of [
+    'p1.jpg',
+    'p2.jpg',
+    'p10.jpg',
+    'p33B.jpg',
+    'p6.jpg',
+    'p6__1.jpg',
+    'p6__2.jpg',
+    'p7__1.jpg',
+  ]) {
     await write(`champaign/${name}`);
   }
   await write('champaign/raw/p0.jpg'); // raw/ must not be listed as a volume
@@ -43,10 +55,34 @@ describe('discovery', () => {
     ]);
   });
 
-  it('lists whole-sheet stems in natural order, excluding split panels', async () => {
+  it('keeps a superseded sheet listed when it still carries labels', async () => {
+    // p6 is split, but its own labels must stay reachable in the UI.
+    expect(await volumePages(dataDir, 'champaign', new Set(['p6']))).toEqual([
+      'p1',
+      'p2',
+      'p6',
+      'p6__1',
+      'p6__2',
+      'p7__1',
+      'p10',
+      'p33B',
+    ]);
+  });
+
+  it('flags a sheet whose panels supersede it', async () => {
+    const pages = await volumePages(dataDir, 'champaign', new Set(['p6']));
+    expect(isSupersededSheet('p6', pages)).toBe(true);
+    expect(isSupersededSheet('p1', pages)).toBe(false);
+    expect(isSupersededSheet('p6__1', pages)).toBe(false);
+  });
+
+  it('lists panels instead of the sheets they split, in natural order', async () => {
     expect(await volumePages(dataDir, 'champaign')).toEqual([
       'p1',
       'p2',
+      'p6__1', // p6 itself is not offered: its panels supersede it
+      'p6__2',
+      'p7__1', // a panel whose sheet is absent still stands on its own
       'p10',
       'p33B',
     ]);
@@ -62,19 +98,29 @@ describe('validation', () => {
     }
     expect(isSafePage('p12')).toBe(true);
     expect(isSafePage('p33B')).toBe(true);
-    for (const bad of ['p6__1', '12', 'p12/x', '..', 'adjacency-truth']) {
+    expect(isSafePage('p12__1')).toBe(true);
+    for (const bad of [
+      '12',
+      'p12/x',
+      '..',
+      'adjacency-truth',
+      'p12__',
+      'p12__x',
+    ]) {
       expect(isSafePage(bad)).toBe(false);
     }
   });
 
-  it('natural sort puts p2 before p10', () => {
-    const stems = ['p10', 'p2', 'p33B', 'p33A'];
-    stems.sort((a, b) => {
-      const [na, sa] = pageSortKey(a);
-      const [nb, sb] = pageSortKey(b);
-      return na - nb || sa.localeCompare(sb);
-    });
-    expect(stems).toEqual(['p2', 'p10', 'p33A', 'p33B']);
+  it('natural sort orders numbers, suffixes, then panels', () => {
+    const stems = ['p10', 'p2', 'p33B', 'p33A', 'p10__2', 'p10__1'];
+    stems.sort(comparePages);
+    expect(stems).toEqual(['p2', 'p10', 'p10__1', 'p10__2', 'p33A', 'p33B']);
+  });
+
+  it('panelParent strips a panel index and leaves sheets alone', () => {
+    expect(panelParent('p1401__2')).toBe('p1401');
+    expect(panelParent('p1401')).toBe('p1401');
+    expect(panelParent('p33B')).toBe('p33B');
   });
 });
 

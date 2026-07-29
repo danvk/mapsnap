@@ -13,11 +13,20 @@ import {
   findVolumes,
   isSafePage,
   isSafeVolume,
+  isSupersededSheet,
   readTruth,
   volumePages,
   writePageTruth,
 } from './adjacencyTruth.ts';
+import type { AdjacencyPageTruth } from './adjacencyTruth.ts';
 import type { ImageInfo } from '../src/keymap/types.ts';
+
+/** Stems that already carry labels, so a split sheet's own labels stay reachable. */
+function labeledStems(truth: Record<string, AdjacencyPageTruth>): Set<string> {
+  return new Set(
+    Object.keys(truth).filter((stem) => truth[stem]?.labels?.length),
+  );
+}
 
 /** Register the adjacency-truth endpoints on the shared crosswalk router. */
 export function registerAdjacencyTruthApi(
@@ -28,9 +37,9 @@ export function registerAdjacencyTruthApi(
   router.get('/api/adjacency-volumes', async () => {
     const volumes = [];
     for (const name of await findVolumes(dataDir)) {
-      const pages = await volumePages(dataDir, name);
-      if (!pages.length) continue;
       const truth = await readTruth(dataDir, name);
+      const pages = await volumePages(dataDir, name, labeledStems(truth));
+      if (!pages.length) continue;
       const labeled = pages.filter((p) => truth[p]?.labels?.length).length;
       volumes.push({ name, pageCount: pages.length, labeledPages: labeled });
     }
@@ -44,13 +53,17 @@ export function registerAdjacencyTruthApi(
       throw new HTTPError(400, `invalid volume: ${volume}`);
     }
     const truth = await readTruth(dataDir, volume);
-    const pages: ImageInfo[] = (await volumePages(dataDir, volume)).map(
-      (stem) => {
-        const labels = truth[stem]?.labels ?? [];
-        const withText = labels.filter((l) => l.text.trim()).length;
-        return { name: stem, withText, withoutText: labels.length - withText };
-      },
-    );
+    const stems = await volumePages(dataDir, volume, labeledStems(truth));
+    const pages: ImageInfo[] = stems.map((stem) => {
+      const labels = truth[stem]?.labels ?? [];
+      const withText = labels.filter((l) => l.text.trim()).length;
+      return {
+        name: stem,
+        withText,
+        withoutText: labels.length - withText,
+        supersededBySplit: isSupersededSheet(stem, stems) || undefined,
+      };
+    });
     return { pages };
   });
 
