@@ -12,24 +12,42 @@ import itertools
 import json
 import math
 import re
+import sys
 from dataclasses import dataclass, field
 from pathlib import Path
 
 import numpy as np
 
 from mapsnap.feature_index import FeatureIndex
-from mapsnap.keymap.fit_keymap import key_stem, load_detections, page_key, page_number
+from mapsnap.keymap.fit_keymap import (
+    key_stem,
+    load_detections,
+    page_key,
+    page_number,
+    volume_page_keys,
+)
 
 Point = tuple[float, float]
 
 M_PER_DEG_LAT = 110540.0
 M_PER_DEG_LON_EQUATOR = 111320.0
 
+# Two key maps that index this much of the smaller one's page set are indexing the
+# same volume rather than complementary parts of it. Measured across the seven
+# multi-key-map volumes on hand, the complementary pairs (left/right or north/south
+# halves) share 3-20% of their keys, and the one redundant pair shares 83%.
+REDUNDANT_KEY_OVERLAP = 0.5
+# How much more of a redundant sheet's page set must be foreign to this volume before
+# the other sheet is preferred. Atlanta's multi-volume index reads 48% pages this
+# volume does not have against its counterpart's 0%; no other sheet exceeds 29%.
+FOREIGN_KEY_GAP = 0.2
+
 __all__ = [
     "KeymapLocator",
     "discover_keymaps",
     "page_key",
     "page_number",
+    "redundant_keymaps",
     "resolve_keymaps",
     "usable_keymaps",
 ]
@@ -60,6 +78,57 @@ def usable_keymaps(directory: Path) -> list[Path]:
         for keymap_json in sorted(directory.glob("*.keymap.json"))
         if keymap_georef_path(keymap_json).exists()
     ]
+
+
+def foreign_key_fraction(keys: set[str], volume_keys: set[str]) -> float:
+    """Share of a key map's page numbers that are not pages of this volume."""
+    if not keys:
+        return 0.0
+    return sum(1 for key in keys if key.upper() not in volume_keys) / len(keys)
+
+
+def redundant_keymaps(key_sets: list[set[str]], volume_keys: set[str]) -> set[int]:
+    """Indices of key maps to ignore as redundant duplicates of a better sheet.
+
+    A volume with several key maps normally has *complementary* ones — left/right or
+    north/south halves that each index their own pages. Two sheets that index largely
+    the *same* pages are a different situation: one of them is a multi-volume index,
+    covering this volume plus others, and every page it shares gets a second search
+    centre that may be far from the first. Atlanta 1911 is the case in point: its
+    city-wide sheet placed pages a median 779 m from where they actually fit, against
+    26 m for the volume's own sheet, and dropping it gained eight pages.
+
+    Redundancy alone does not say which sheet to keep — the two disagree, but nothing
+    local says who is right. What does is that a multi-volume index reads page numbers
+    this volume does not have: 48% of Atlanta's foreign against 0% for its counterpart.
+    So a sheet is dropped only when it both duplicates another's page set and is the
+    more foreign of the two by :data:`FOREIGN_KEY_GAP`; ties keep everything.
+
+    Note that *disagreement* deliberately plays no part. Complementary sheets disagree
+    far more than the redundant pair does (5.2 km and 7.4 km medians against Atlanta's
+    445 m), because their handful of shared keys are misreads on opposite sides of a
+    city — so gating on it would reject exactly the wrong sheets.
+
+    Returns an empty set when the volume's page keys are unknown: with nothing to call
+    foreign, there is no evidence to act on.
+    """
+    if not volume_keys:
+        return set()
+    foreign = [foreign_key_fraction(keys, volume_keys) for keys in key_sets]
+    drop: set[int] = set()
+    for i, j in itertools.combinations(range(len(key_sets)), 2):
+        if i in drop or j in drop:
+            continue
+        smaller = min(len(key_sets[i]), len(key_sets[j]))
+        if not smaller:
+            continue
+        if len(key_sets[i] & key_sets[j]) / smaller < REDUNDANT_KEY_OVERLAP:
+            continue  # complementary sheets; both are needed
+        if foreign[i] - foreign[j] >= FOREIGN_KEY_GAP:
+            drop.add(i)
+        elif foreign[j] - foreign[i] >= FOREIGN_KEY_GAP:
+            drop.add(j)
+    return drop
 
 
 def discover_keymaps(image_paths: list[str]) -> list[Path]:
@@ -323,9 +392,31 @@ class KeymapLocator:
 
         A page key is placed by whichever key map(s) detect it (locations are unioned), and
         the fallback rectangle is the union of all the key maps' rectangles. The radius is the
-        median of the per-key-map estimates unless overridden.
+        median of the per-key-map estimates unless overridden. Sheets that
+        :func:`redundant_keymaps` rejects are left out of the union entirely.
         """
+        # Imported here, as volume_pages_for does, to keep the pipeline module out of
+        # this one's import graph.
+        from mapsnap.keymap.pipeline import keymap_volume_dir
+
         locators = [cls.from_keymap(path) for path in keymap_jsons]
+        volume_keys = (
+            volume_page_keys(keymap_volume_dir(keymap_jsons[0]))
+            if keymap_jsons
+            else set()
+        )
+        for index in sorted(
+            redundant_keymaps([set(loc.locations) for loc in locators], volume_keys),
+            reverse=True,
+        ):
+            print(
+                f"Ignoring key map {keymap_jsons[index].name}: it indexes the same pages "
+                "as another sheet in this volume, and more of its page numbers are "
+                "foreign to this volume.",
+                file=sys.stderr,
+            )
+            del locators[index]
+            del keymap_jsons[index]
         locations: dict[str, list[Point]] = {}
         rectangles: list[list[Point]] = []
         regions: dict[str, list[list[Point]]] = {}

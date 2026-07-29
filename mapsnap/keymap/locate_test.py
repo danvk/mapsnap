@@ -11,6 +11,7 @@ from mapsnap.keymap.locate import (
     meters_between,
     page_key,
     page_number,
+    redundant_keymaps,
     resolve_keymaps,
     usable_keymaps,
 )
@@ -335,3 +336,53 @@ def test_resolve_keymaps_explicit_wins_over_discovery(tmp_path: Path):
 def test_resolve_keymaps_falls_back_to_discovery(tmp_path: Path):
     keymap = make_keymap(tmp_path / "raw", "p0")
     assert resolve_keymaps(None, False, [str(tmp_path / "p5.jpg")]) == [keymap]
+
+
+# Volume pages 1-20, as volume_page_keys reports them.
+VOLUME_KEYS = {str(n) for n in range(1, 21)}
+
+
+def test_redundant_keymaps_drops_the_more_foreign_of_two_duplicates():
+    # Atlanta's shape: both sheets index this volume's pages, but one is a
+    # multi-volume index that also carries page numbers from other volumes.
+    own = {"1", "2", "3", "4", "5", "6"}
+    multi = {"1", "2", "3", "4", "5", "6", "154", "823", "7217", "195"}
+    assert redundant_keymaps([own, multi], VOLUME_KEYS) == {1}
+    assert redundant_keymaps([multi, own], VOLUME_KEYS) == {0}
+
+
+def test_redundant_keymaps_keeps_complementary_halves():
+    # The healthy multi-key-map shape: each sheet indexes its own half, so neither
+    # is redundant however different their page counts or foreign-key rates.
+    left = {"1", "2", "3", "4", "5"}
+    right = {"11", "12", "13", "14", "15", "99"}
+    assert redundant_keymaps([left, right], VOLUME_KEYS) == set()
+
+
+def test_redundant_keymaps_keeps_duplicates_that_look_equally_good():
+    # Redundancy alone is not grounds to drop: with nothing to separate them, a
+    # wrong guess would cost half the volume's placements.
+    a = {"1", "2", "3", "4", "5", "6"}
+    b = {"1", "2", "3", "4", "5", "7"}
+    assert redundant_keymaps([a, b], VOLUME_KEYS) == set()
+
+
+def test_redundant_keymaps_needs_the_volume_page_set():
+    # Without it nothing can be called foreign, so there is no evidence to act on.
+    own = {"1", "2", "3", "4", "5", "6"}
+    multi = own | {"154", "823", "7217"}
+    assert redundant_keymaps([own, multi], set()) == set()
+
+
+def test_redundant_keymaps_handles_a_single_or_empty_sheet():
+    assert redundant_keymaps([{"1", "2"}], VOLUME_KEYS) == set()
+    assert redundant_keymaps([], VOLUME_KEYS) == set()
+    assert redundant_keymaps([set(), {"1", "2"}], VOLUME_KEYS) == set()
+
+
+def test_redundant_keymaps_drops_only_one_of_three_duplicates():
+    # Two good sheets and one multi-volume index: the index goes, both others stay.
+    a = {"1", "2", "3", "4", "5", "6"}
+    b = {"1", "2", "3", "4", "5", "6"}
+    multi = a | {"154", "823", "7217", "911"}
+    assert redundant_keymaps([a, b, multi], VOLUME_KEYS) == {2}
