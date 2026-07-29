@@ -59,6 +59,18 @@ def main() -> None:
         action="store_true",
         help="Ignore cached candidates and re-match every target page.",
     )
+    parser.add_argument(
+        "--num-workers",
+        type=int,
+        default=1,
+        metavar="N",
+        help=(
+            "Number of worker processes for the per-page matching pass "
+            "(default: %(default)s, sequential). Matching is CPU-bound and "
+            "independent per page; each worker rebuilds the volume context, "
+            "so expect about a gigabyte of memory apiece on a large volume."
+        ),
+    )
     args = parser.parse_args()
 
     # The production gates are frozen alongside the selection code (see the
@@ -81,6 +93,7 @@ def main() -> None:
         limit=None,
         recompute=args.recompute,
         vis=False,
+        num_workers=args.num_workers,
     )
     cmd_select(
         args.dir,

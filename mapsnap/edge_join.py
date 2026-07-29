@@ -158,15 +158,22 @@ def rotation_candidates(
     target_prob: np.ndarray,
     jitter_deg: tuple[float, ...] = (0.0,),
     fixed_valid: np.ndarray | None = None,
+    *,
+    target_dir: float | None = None,
 ) -> list[float]:
     """cv2-convention rotations aligning the target's road grid to the frame's.
 
     The array-frame rotation mapping target directions onto fixed directions is
     fixed_dir - target_dir (mod 90); cv2.getRotationMatrix2D uses the opposite
     sign, so candidates are -(delta) + k*90 (+ jitter) for k in 0..3.
+
+    ``target_dir`` supplies an already-measured target orientation — the same
+    target is often swept against several frames, and the measurement depends
+    only on the target.
     """
     fixed_dir = dominant_orientation_deg(fixed_prob, fixed_valid)
-    target_dir = dominant_orientation_deg(target_prob)
+    if target_dir is None:
+        target_dir = dominant_orientation_deg(target_prob)
     delta = fixed_dir - target_dir
     return [
         (-delta + 90.0 * k + j + 180.0) % 360.0 - 180.0
@@ -285,6 +292,13 @@ def chamfer_refine(
     homogeneous = np.column_stack([points_page, np.ones(len(points_page))])
 
     height, width = distance_m.shape
+    # sample() is the matcher's hottest loop — least_squares evaluates the
+    # residuals ~115 times per candidate, and a volume runs ~200 candidates per
+    # page. Gathering from a flat view off one precomputed corner offset costs
+    # about half what four 2D fancy-index gathers do. The bilinear expression
+    # below keeps the original operand order and association, so every value it
+    # produces is bit-for-bit what the four-gather form produced.
+    flat_distance = distance_m.reshape(-1)
 
     def sample(pts: np.ndarray) -> np.ndarray:
         x = np.clip(pts[:, 0], 0, width - 1.001)
@@ -293,11 +307,14 @@ def chamfer_refine(
         y0 = y.astype(int)
         fx = x - x0
         fy = y - y0
+        corner = y0 * width + x0
+        one_minus_fx = 1 - fx
+        one_minus_fy = 1 - fy
         d = (
-            distance_m[y0, x0] * (1 - fx) * (1 - fy)
-            + distance_m[y0, x0 + 1] * fx * (1 - fy)
-            + distance_m[y0 + 1, x0] * (1 - fx) * fy
-            + distance_m[y0 + 1, x0 + 1] * fx * fy
+            flat_distance[corner] * one_minus_fx * one_minus_fy
+            + flat_distance[corner + 1] * fx * one_minus_fy
+            + flat_distance[corner + width] * one_minus_fx * fy
+            + flat_distance[corner + width + 1] * fx * fy
         )
         return d
 

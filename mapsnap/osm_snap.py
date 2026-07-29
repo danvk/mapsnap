@@ -31,12 +31,14 @@ from mapsnap.edge_join import (
     FrameSpec,
     JoinCandidate,
     MatchParams,
+    dominant_orientation_deg,
     match_at_rotation,
     pose_ncc,
     refine_and_rank,
     rotation_candidates,
     skeleton_points,
 )
+from mapsnap.feature_index import FeatureIndex
 from mapsnap.georef_from_labels import LabelFeature, project_to_polyline
 from mapsnap.streets import Block, street_base_name
 from mapsnap.utils import haversine_m
@@ -53,6 +55,15 @@ CONTAINMENT_BUFFER_M = 60.0
 RADIUS_SLACK_M = 60.0  # post-refinement slack on the center-distance gate
 THETA_DEDUPE_DEG = 3.0
 MAX_PRIOR_THETAS = 8
+# Rotation-prior confidence, for skipping the rest of the ladder. A
+# label-pair-exact rung is ONE label pair's reading of the page rotation, not
+# the page's: a page usually carries several, and a mis-OCR'd or mis-matched
+# label makes its pair disagree with the rest. Several that all agree is
+# independent corroboration; one on its own is a hypothesis (see
+# confident_theta_deg).
+CONFIDENT_MIN_RUNGS = 2
+CONFIDENT_AGREE_DEG = 8.0
+CONFIDENT_WINDOW_DEG = 12.0
 MERGE_SEPARATION_M = 60.0  # candidates closer than this are the same lock
 CALIBRATED_RADIUS_MARGIN_M = 100.0
 CALIBRATED_RADIUS_MIN_M = 150.0
@@ -163,6 +174,27 @@ class PageContext:
     keymap_regions: list[list[list[float]]] | None = None  # world rings
     label_features: list[LabelFeature] | None = None
     block_index: dict[str, list[Block]] | None = None
+    # Memos of the maps derived from `prob`. The road skeleton (a Zhang
+    # thinning pass) is needed by both evaluate_pose and snap_page, and the
+    # dominant road orientation is re-derived once per search center. Each is a
+    # pure function of `prob`, so a reuse is identical to a recompute.
+    road_points_cache: dict[tuple[float, int], np.ndarray] = field(
+        default_factory=dict, repr=False
+    )
+    orientation_cache: float | None = field(default=None, repr=False)
+
+    def road_points(self, params: MatchParams) -> np.ndarray:
+        """The page's road-skeleton points (x, y in page pixels), thinned once per page."""
+        key = (params.mask_threshold, params.mask_min_area)
+        if key not in self.road_points_cache:
+            self.road_points_cache[key] = skeleton_points(self.prob, *key)
+        return self.road_points_cache[key]
+
+    def road_orientation_deg(self) -> float:
+        """The page's dominant road direction folded to [0, 90), measured once per page."""
+        if self.orientation_cache is None:
+            self.orientation_cache = dominant_orientation_deg(self.prob)
+        return self.orientation_cache
 
 
 def frame_around(
@@ -194,7 +226,7 @@ def frame_bounds_lonlat(frame: FrameSpec) -> tuple[float, float, float, float]:
 
 
 def osm_rasters(
-    frame: FrameSpec, features: list[dict], *, width_m: float = OSM_WIDTH_M
+    frame: FrameSpec, features: FeatureIndex, *, width_m: float = OSM_WIDTH_M
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     """(prob, valid, skeleton) rasters of OSM centerlines in the frame.
 
@@ -203,14 +235,19 @@ def osm_rasters(
     same polylines at 1 px: the exact centerline (no thinning needed), which
     the chamfer distance transform is built from. valid is all-true — OSM
     knowledge covers the whole frame, unlike an edge-join anchor page.
+
+    The index pre-culls to the features whose bounding box reaches the frame;
+    the per-line bbox test below still runs on every one of them, so what gets
+    drawn is exactly what a scan of the whole volume would draw.
     """
     rows, cols = frame.shape
     prob = np.zeros((rows, cols), np.float32)
     skeleton = np.zeros((rows, cols), np.uint8)
-    min_lon, max_lon, min_lat, max_lat = frame_bounds_lonlat(frame)
+    bounds = frame_bounds_lonlat(frame)
+    min_lon, max_lon, min_lat, max_lat = bounds
     kx, ky = frame.metre_scales()
     thickness = max(2, round(width_m / frame.res_m))
-    for feature in features:
+    for feature in features.near_bbox(bounds):
         geometry = feature.get("geometry") or {}
         if geometry.get("type") == "LineString":
             lines = [geometry["coordinates"]]
@@ -282,6 +319,27 @@ def dedupe_thetas(
         if len(kept) >= cap:
             break
     return kept
+
+
+def confident_theta_deg(priors: list[RotationPrior]) -> float | None:
+    """The rotation the page's label pairs unanimously imply, or None.
+
+    Each "label-pair-exact" rung comes from one pair of OCR'd labels on
+    distinct streets, and the ladder normally carries several — a page with
+    four usable labels emits up to six pairs. When they all agree, each pair
+    independently corroborates the others (a mis-read label, or one matched to
+    the wrong street, throws its pairs off by tens of degrees), and no other
+    rung has ever out-scored them in the corpus, so the search can drop the
+    rest of the ladder. A lone rung is just a hypothesis and gets no such
+    trust: pruning to the first rung of a page whose pairs disagree costs real
+    placements (issue #155).
+    """
+    exact = [p.theta_deg for p in priors if p.source == "label-pair-exact"]
+    if len(exact) < CONFIDENT_MIN_RUNGS:
+        return None
+    if max(abs(wrap_deg(theta - exact[0])) for theta in exact) > CONFIDENT_AGREE_DEG:
+        return None
+    return exact[0]
 
 
 def cluster_rotation(
@@ -589,7 +647,7 @@ def region_containment_frac(
 
 def evaluate_pose(
     ctx: PageContext,
-    features: list[dict],
+    features: FeatureIndex,
     world_affine: np.ndarray,
     params: MatchParams = OSM_MATCH_PARAMS,
 ) -> dict | None:
@@ -624,7 +682,7 @@ def evaluate_pose(
         return None
     distance = osm_distance_m(skeleton, res)
     pose = frame.page_to_raster_affine(world_affine)
-    points = skeleton_points(ctx.prob, params.mask_threshold, params.mask_min_area)
+    points = ctx.road_points(params)
     if len(points) < 10:
         return None
     if len(points) > 3000:
@@ -661,9 +719,50 @@ def evaluate_pose(
     return evaluation
 
 
+def frame_thetas(
+    ctx: PageContext,
+    confident_deg: float | None,
+    fixed: tuple[np.ndarray, np.ndarray],
+    params: MatchParams,
+) -> list[RotationPrior]:
+    """The rotation ladder to sweep against one OSM frame (prob, valid).
+
+    Every theta here costs a full masked NCC pass plus params.top_k chamfer
+    refinements, and the refinements are where the matcher spends most of its
+    time — so when the label pairs unanimously pin the rotation, the ladder
+    collapses to a window around them and the mask-mod-90 sweep (four more
+    rotations) is skipped. Without that corroboration the priors are deduped
+    and the sweep is appended, so the set is never empty and always covers a
+    180-flip a prior missed.
+    """
+    if confident_deg is not None:
+        return dedupe_thetas(
+            [
+                prior
+                for prior in ctx.rotation_priors
+                if abs(wrap_deg(prior.theta_deg - confident_deg))
+                <= CONFIDENT_WINDOW_DEG
+            ]
+        )
+    osm_prob, valid = fixed
+    thetas = dedupe_thetas(ctx.rotation_priors)
+    for theta in rotation_candidates(
+        osm_prob,
+        ctx.prob,
+        params.jitter_deg,
+        fixed_valid=valid,
+        target_dir=ctx.road_orientation_deg(),
+    ):
+        if not any(
+            abs(wrap_deg(theta - k.theta_deg)) <= THETA_DEDUPE_DEG for k in thetas
+        ):
+            thetas.append(RotationPrior(theta, 4.0, "mask-mod90"))
+    return thetas
+
+
 def snap_page(
     ctx: PageContext,
-    features: list[dict],
+    features: FeatureIndex,
     params: MatchParams = OSM_MATCH_PARAMS,
 ) -> list[SnapCandidate]:
     """Candidate placements of a page against OSM around its keymap location.
@@ -688,10 +787,11 @@ def snap_page(
     if params.min_overlap_m2 > 0.5 * page_area_m2:
         params = dataclasses.replace(params, min_overlap_m2=0.5 * page_area_m2)
     half_m = ctx.radius_m + page_diag_m / 2 + 100.0
-    points = skeleton_points(ctx.prob, params.mask_threshold, params.mask_min_area)
+    points = ctx.road_points(params)
     sigma_px = max(params.blur_sigma_m / res, 0.5)
     border_px = max(1, round(REFINE_SHIFT_MAX_M / res))
     page_center = np.array([ctx.width / 2.0, ctx.height / 2.0, 1.0])
+    confident = confident_theta_deg(ctx.rotation_priors)
 
     collected: list[SnapCandidate] = []
     for center in ctx.search_centers:
@@ -709,16 +809,7 @@ def snap_page(
         search_center = frame.lonlat_to_raster(*center)
         search_radius_px = ctx.radius_m / res
 
-        # The prior ladder, plus the mask-mod-90 sweep — always appended so the
-        # theta set is never empty and covers any 180-flip a prior missed.
-        thetas = dedupe_thetas(ctx.rotation_priors)
-        for theta in rotation_candidates(
-            osm_prob, ctx.prob, params.jitter_deg, fixed_valid=valid
-        ):
-            if not any(
-                abs(wrap_deg(theta - k.theta_deg)) <= THETA_DEDUPE_DEG for k in thetas
-            ):
-                thetas.append(RotationPrior(theta, 4.0, "mask-mod90"))
+        thetas = frame_thetas(ctx, confident, (osm_prob, valid), params)
 
         candidates: list[JoinCandidate] = []
         provenance: dict[int, tuple[RotationPrior, ScalePrior]] = {}
