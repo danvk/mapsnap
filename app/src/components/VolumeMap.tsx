@@ -4,7 +4,7 @@ import 'maplibre-gl/dist/maplibre-gl.css';
 import { WarpedMapLayer } from '@allmaps/maplibre';
 import type { FeatureCollection } from 'geojson';
 import { pointInPolygon } from '../geometry';
-import type { PageGeo } from '../iiif/pages';
+import { hasFootprint, type PageGeo } from '../iiif/pages';
 import type { AdjacencyClaim } from '../iiif/adjacency';
 
 interface VolumeMapProps {
@@ -455,7 +455,8 @@ export function VolumeMap(props: VolumeMapProps) {
         ? undefined
         : (pages.find((p) => p.itemIndex === selectedItemIndex) ??
           missingPages.find((p) => p.itemIndex === selectedItemIndex));
-    if (!page) {
+    // Nothing to outline for a miss known only by name (a truth-less volume's).
+    if (!page || !hasFootprint(page)) {
       source?.setData(EMPTY_FEATURES);
       return;
     }
@@ -581,11 +582,15 @@ export function VolumeMap(props: VolumeMapProps) {
     }
     source.setData({
       type: 'FeatureCollection',
-      features: missingPages.map((page): FeatureCollection['features'][0] => ({
-        type: 'Feature',
-        properties: { itemIndex: page.itemIndex },
-        geometry: { type: 'Polygon', coordinates: [page.clipRing] },
-      })),
+      // A truth-less volume's misses are known only by name, so they have no
+      // footprint to outline — they are listed but never drawn.
+      features: missingPages
+        .filter(hasFootprint)
+        .map((page): FeatureCollection['features'][0] => ({
+          type: 'Feature',
+          properties: { itemIndex: page.itemIndex },
+          geometry: { type: 'Polygon', coordinates: [page.clipRing] },
+        })),
     });
   }, [missingPages, showMissing, mapReady]);
 

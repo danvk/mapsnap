@@ -2,8 +2,10 @@ import { describe, expect, it } from 'vitest';
 import type { GeorefAnnotationPage } from '../../server/iiifAnnotations';
 import {
   bearingDegrees,
+  hasFootprint,
   missingTruthPages,
   pagesFromAnnotation,
+  unfittedPages,
   svgPolygonPoints,
   type PageGeo,
 } from './pages';
@@ -269,5 +271,47 @@ describe('missingTruthPages resilience', () => {
     // An older server, or a compare sidecar predating the field: no misses beats a
     // crashed page.
     expect(missingTruthPages([pageGeo('p1', 0)], undefined)).toEqual([]);
+  });
+});
+
+describe('unfittedPages', () => {
+  it('lists the volume page images the run never placed', () => {
+    const fit = [pageGeo('p1', 0), pageGeo('p3', 1)];
+    const missing = unfittedPages(fit, ['p1', 'p2', 'p3', 'p4']);
+    expect(missing.map((p) => p.stem)).toEqual(['p2', 'p4']);
+    // Negative ids, matching missingTruthPages, keep these out of the fit id space.
+    expect(missing.map((p) => p.itemIndex)).toEqual([-1, -2]);
+  });
+
+  it('carries no footprint, since nothing says where the page belongs', () => {
+    const [missing] = unfittedPages([], ['p7']);
+    expect(missing && hasFootprint(missing)).toBe(false);
+  });
+
+  it('treats a placed panel as placed and its unplaced sibling as missing', () => {
+    const fit = [pageGeo('p90__1', 0)];
+    expect(
+      unfittedPages(fit, ['p90__1', 'p90__2', 'p90__3']).map((p) => p.stem),
+    ).toEqual(['p90__2', 'p90__3']);
+  });
+
+  it('splits a panel stem into its page key and index', () => {
+    const [missing] = unfittedPages([], ['p90__2']);
+    expect(missing?.pageKey).toBe('p90');
+    expect(missing?.splitIndex).toBe(2);
+  });
+
+  it('leaves splitIndex null for a whole sheet', () => {
+    expect(unfittedPages([], ['p12'])[0]?.splitIndex).toBeNull();
+  });
+
+  it('matches placed stems case-insensitively', () => {
+    // p1499J in the annotation, p1499j on disk: one page, not a miss.
+    expect(unfittedPages([pageGeo('p1499J', 0)], ['p1499j'])).toEqual([]);
+  });
+
+  it('reports nothing when the server sent no page list', () => {
+    // An older server omits `pages`; losing the listing beats a crashed page.
+    expect(unfittedPages([pageGeo('p1', 0)], [])).toEqual([]);
   });
 });

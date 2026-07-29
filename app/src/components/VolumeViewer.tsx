@@ -15,16 +15,20 @@ import type { AdjacencyData } from '../types';
 import {
   fetchAdjacency,
   fetchCompare,
-  fetchFailedGeorefs,
   fetchKeymaps,
   fetchRewrittenAnnotation,
+  fetchVolumePageFiles,
   fetchVolumes,
 } from '../iiif/api';
 import type { KeymapInfo } from '../../server/api';
 import { isTypingTarget } from '../keyboard';
 import { fetchVolumeNotes } from '../notes/api';
 import { adjacencyClaimFeatures } from '../iiif/adjacency';
-import { missingTruthPages, pagesFromAnnotation } from '../iiif/pages';
+import {
+  missingTruthPages,
+  pagesFromAnnotation,
+  unfittedPages,
+} from '../iiif/pages';
 import { InfoPanel } from './InfoPanel';
 import { PageList } from './PageList';
 import { VolumeMap } from './VolumeMap';
@@ -119,6 +123,9 @@ export function VolumeViewer() {
   const [failedGeorefs, setFailedGeorefs] = useState<Map<string, string>>(
     new Map(),
   );
+  // Every page-image stem in the selected volume; the un-fit list for a volume with
+  // no truth annotation is these minus the ones the run placed.
+  const [volumeStems, setVolumeStems] = useState<string[]>([]);
   // The selected volume's key-map sheets (raw/*.keymap.json), for the info-panel links.
   const [keymaps, setKeymaps] = useState<KeymapInfo[]>([]);
 
@@ -211,12 +218,16 @@ export function VolumeViewer() {
       .catch(() => {
         if (!cancelled) setNotes(new Map());
       });
-    fetchFailedGeorefs(volumeName)
-      .then((map) => {
-        if (!cancelled) setFailedGeorefs(map);
+    fetchVolumePageFiles(volumeName)
+      .then(({ stems, failed }) => {
+        if (cancelled) return;
+        setFailedGeorefs(failed);
+        setVolumeStems(stems);
       })
       .catch(() => {
-        if (!cancelled) setFailedGeorefs(new Map());
+        if (cancelled) return;
+        setFailedGeorefs(new Map());
+        setVolumeStems([]);
       });
     setAdjacencyData(null);
     fetchAdjacency(volumeName)
@@ -266,10 +277,16 @@ export function VolumeViewer() {
         : null,
     [compareRows, pages],
   );
-  // Truth pages the run never georeferenced, shown as "missing" rows/footprints.
+  // Pages the run never georeferenced, shown as "missing" rows (and footprints where
+  // truth gives one). With truth the misses come from the comparison, which decides
+  // them per truth page; without it there is nothing to compare against, so they are
+  // the volume's page images minus the ones the annotation placed.
   const missingPages = useMemo(
-    () => (truthPages ? missingTruthPages(truthPages, compareMissing) : []),
-    [truthPages, compareMissing],
+    () =>
+      truthPages
+        ? missingTruthPages(truthPages, compareMissing)
+        : unfittedPages(pages, volumeStems),
+    [truthPages, compareMissing, pages, volumeStems],
   );
 
   // Adjacency claim boxes, mapped into geo through each page's georeference: the fitted pages,

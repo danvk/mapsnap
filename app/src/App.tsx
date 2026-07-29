@@ -198,6 +198,7 @@ export function App() {
     minShortSide: 20,
     minLongSide: 20,
     showIgnored: false,
+    text: '',
   });
 
   const prevObjectUrlRef = useRef<string | null>(null);
@@ -593,6 +594,9 @@ export function App() {
         intersections={intersections}
         filteredDetections={
           mode === 'adjacency' ? adjacencyDetections : filteredDetections
+        }
+        detectionCount={
+          mode === 'adjacency' ? adjacencyDetections.length : detections.length
         }
         panels={panels}
         panelLabels={panelLabels}

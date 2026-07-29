@@ -216,6 +216,57 @@ export function missingTruthPages(
   return missing;
 }
 
+/** Whether a missing-page row knows where on earth its page belongs. */
+export function hasFootprint(page: PageGeo): boolean {
+  return page.clipRing.length >= 3 || page.rectRing.length >= 3;
+}
+
+/**
+ * Un-fit pages of a volume that has no truth annotation, from the stems on disk.
+ *
+ * With truth, a miss is a truth page the run failed to place and its footprint is
+ * known. Without truth there is nothing to compare against, so a miss is simply a
+ * page image the annotation never placed — which is still worth listing, since it is
+ * the only signal a truth-less volume gives about what is not working. These rows
+ * carry no geometry (see {@link hasFootprint}): they appear in the page list, but
+ * there is nowhere on the map to draw them.
+ *
+ * Negative `itemIndex` selection ids keep these clear of the fitted pages' array
+ * indices, matching {@link missingTruthPages}.
+ */
+export function unfittedPages(
+  fitPages: PageGeo[],
+  volumeStems: readonly string[],
+): PageGeo[] {
+  const placed = new Set(fitPages.map((page) => page.stem.toLowerCase()));
+  const missing: PageGeo[] = [];
+  for (const stem of volumeStems) {
+    if (placed.has(stem.toLowerCase())) continue;
+    const [pageKey = stem, panel] = stem.split('__');
+    missing.push({
+      itemIndex: -(missing.length + 1),
+      pageKey,
+      splitIndex: panel === undefined ? null : Number(panel),
+      stem,
+      width: 0,
+      height: 0,
+      corners: [
+        [0, 0],
+        [0, 0],
+        [0, 0],
+        [0, 0],
+      ],
+      rectRing: [],
+      clipRing: [],
+      scalePixelsPerFoot: 0,
+      rotationDegrees: 0,
+      gcps: [],
+      transformationType: '',
+    });
+  }
+  return missing;
+}
+
 // Close a ring in place if its last point differs from its first.
 function closedRing(ring: [number, number][]): [number, number][] {
   if (ring.length === 0) return ring;

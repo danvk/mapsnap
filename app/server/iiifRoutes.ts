@@ -25,6 +25,7 @@ import {
   parseCompareTxt,
   parseMissingTruthKeys,
 } from './compareTxt.ts';
+import { volumePages } from './adjacencyTruth.ts';
 
 const require = createRequire(import.meta.url);
 const iiif = require('express-iiif').default;
@@ -202,9 +203,11 @@ export function registerIiifApi(
     }
   });
 
-  // Page stems with a failed-georef sidecar in a volume, and each one's kind, so
-  // the viewer can link an un-georeferenced page to its georef-<kind>.json file.
-  // ?volume=<dir> → { failed: { "p1452": "nofit", "p1427": "misscale" } }.
+  // A volume's page files: every page-image stem, plus the ones with a failed-georef
+  // sidecar and that sidecar's kind, so the viewer can link an un-georeferenced page to
+  // its georef-<kind>.json file and — for a volume with no truth annotation — work out
+  // which pages went unplaced at all. ?volume=<dir> →
+  // { pages: ["p1", …], failed: { "p1452": "nofit", "p1427": "misscale" } }.
   router.get('/iiif-api/failed-georefs', async (_params, request) => {
     const { volume } = request.query;
     if (!isSafeName(volume)) {
@@ -224,7 +227,9 @@ export function registerIiifApi(
         failed[match[1]] = match[2].toLowerCase();
       }
     }
-    return { failed };
+    // volumePages drops a split sheet in favour of its panels, so a sheet whose panels
+    // all fitted is not reported as an unplaced page.
+    return { failed, pages: await volumePages(dataDir, volume) };
   });
 
   // A volume's key-map sheets and which visualization sidecars each has, so the viewer can link

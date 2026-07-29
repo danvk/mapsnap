@@ -2,7 +2,7 @@ import type { ReactElement } from 'react';
 import type { KeymapInfo } from '../../server/api';
 import type { SkippedItem } from '../../server/iiifAnnotations';
 import type { PageCompareStats } from '../iiif/compare';
-import type { PageGeo } from '../iiif/pages';
+import { hasFootprint, type PageGeo } from '../iiif/pages';
 
 interface InfoPanelProps {
   /** All pages in the loaded annotation, or [] before one is loaded. */
@@ -145,14 +145,20 @@ export function InfoPanel(props: InfoPanelProps) {
             <>
               <dt>Status</dt>
               <dd>not georeferenced</dd>
-              <dt>Truth scale</dt>
-              <dd>{selectedPage.scalePixelsPerFoot.toFixed(2)} px/ft</dd>
-              <dt>Truth rotation</dt>
-              <dd>{selectedPage.rotationDegrees.toFixed(1)}°</dd>
-              <dt>Size</dt>
-              <dd>
-                {selectedPage.width} × {selectedPage.height} px
-              </dd>
+              {/* Everything below comes from the page's truth georeference. A volume
+                  without truth knows only that the page exists and was not placed. */}
+              {hasFootprint(selectedPage) && (
+                <>
+                  <dt>Truth scale</dt>
+                  <dd>{selectedPage.scalePixelsPerFoot.toFixed(2)} px/ft</dd>
+                  <dt>Truth rotation</dt>
+                  <dd>{selectedPage.rotationDegrees.toFixed(1)}°</dd>
+                  <dt>Size</dt>
+                  <dd>
+                    {selectedPage.width} × {selectedPage.height} px
+                  </dd>
+                </>
+              )}
             </>
           ) : (
             <>

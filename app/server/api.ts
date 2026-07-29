@@ -77,14 +77,21 @@ export interface AdjacencyTruthTarget {
 export type AdjacencyLabelsResponse = LabelsWriteRequest | { exists: false };
 
 /**
- * Response of GET /iiif-api/failed-georefs — page stem → failure kind.
+ * Response of GET /iiif-api/failed-georefs — a volume's page files.
  *
- * Maps each page that has a failed-georef sidecar (`<stem>.georef-<kind>.json`,
+ * `failed` maps each page that has a failed-georef sidecar (`<stem>.georef-<kind>.json`,
  * e.g. `p1452.georef-nofit.json`) to its kind ("nofit", "1gcp", "misscale", …),
  * so the volume viewer can link a not-georeferenced page to that debug file.
+ *
+ * `pages` is every page-image stem in the volume, split sheets represented by their
+ * panels. A volume with no truth annotation has no other way to know which pages
+ * exist, so this is what the viewer subtracts the fitted pages from to list the
+ * un-fit ones. Optional so a client talking to an older server degrades to listing
+ * none rather than failing.
  */
 export interface FailedGeorefsResponse {
   failed: Record<string, string>;
+  pages?: string[];
 }
 
 /** One key-map sheet in a volume's `raw/` directory and which sidecars it has. */
