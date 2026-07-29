@@ -12,6 +12,7 @@ from mapsnap.keymap.locate import (
     page_key,
     page_number,
     resolve_keymaps,
+    usable_keymaps,
 )
 
 # A key map georeferenced to an axis-aligned box: 1000x500 px over lon 0..1, lat 2..3
@@ -275,6 +276,19 @@ def make_keymap(directory: Path, stem: str, *, with_georef: bool = True) -> Path
     if with_georef:
         (directory / f"{stem}.georef.json").write_text("{}")
     return keymap
+
+
+def test_usable_keymaps_keeps_only_georeferenced(tmp_path: Path):
+    # Atlanta 1911 has two index sheets and only one georeferenced; the volume
+    # scans that glob raw/*.keymap.json must skip the other, not open a georef
+    # that isn't there.
+    make_keymap(tmp_path, "p0a")
+    make_keymap(tmp_path, "p0b", with_georef=False)
+    assert usable_keymaps(tmp_path) == [tmp_path / "p0a.keymap.json"]
+
+
+def test_usable_keymaps_empty_directory(tmp_path: Path):
+    assert usable_keymaps(tmp_path) == []
 
 
 def test_discover_keymaps_finds_under_raw(tmp_path: Path):

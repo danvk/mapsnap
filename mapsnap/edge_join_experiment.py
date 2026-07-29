@@ -314,9 +314,9 @@ def keymap_region_adjacency(
     from shapely.geometry.base import BaseGeometry
     from shapely.ops import unary_union
 
-    from mapsnap.keymap.locate import KeymapLocator
+    from mapsnap.keymap.locate import KeymapLocator, usable_keymaps
 
-    keymaps = sorted((volume / "raw").glob("*.keymap.json"))
+    keymaps = usable_keymaps(volume / "raw")
     if not keymaps:
         return set(), {}
     regions = KeymapLocator.from_keymaps(keymaps).regions_by_number()

@@ -636,11 +636,8 @@ def cmd_select(args: argparse.Namespace) -> None:
         ctx, _status = build_page_context(vctx, unit)
         if ctx is None:
             continue
-        # The volume's OSM features, as whichever form this checkout's snap wants:
-        # a spatial index where one exists, else the plain feature list.
-        osm_features = getattr(vctx, "feature_index", vctx.features)
-        incumbent = evaluate_pose(ctx, osm_features, incumbent_affine)
-        challenger = evaluate_pose(ctx, osm_features, streets_affine)
+        incumbent = evaluate_pose(ctx, vctx.feature_index, incumbent_affine)
+        challenger = evaluate_pose(ctx, vctx.feature_index, streets_affine)
         if incumbent is None or challenger is None:
             continue
         gap = challenger["verification"] - incumbent["verification"]
