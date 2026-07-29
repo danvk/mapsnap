@@ -30,6 +30,12 @@ export interface ComparePageStats {
 /** Response of GET /iiif-api/compare — paired-page stats plus the table's summary footer. */
 export interface CompareResponse {
   pages: ComparePageStats[];
+  /**
+   * Truth page keys the run never placed — the table's `(no fit)` rows, at the
+   * granularity the comparison itself counts, so the viewer's missing rows and the
+   * "N/M pages georeferenced" line always agree.
+   */
+  missing: string[];
   /** The summary block below the table ("N/M = …% pages georeferenced", RMSE stats, …); "" if none. */
   footer: string;
 }
@@ -37,6 +43,15 @@ export interface CompareResponse {
 // Whether a line is a header/rule row of the compare table (not a data row).
 function isSeparator(line: string): boolean {
   return /^-{3,}$/.test(line.trim());
+}
+
+/** The truth page key of a `(no fit)` row, or null for any other line. */
+export function parseMissingRow(line: string): string | null {
+  const trailing = line.match(/\s+\(no fit\)\s*$/);
+  if (!trailing) return null;
+  const tokens = line.slice(0, trailing.index).trim().split(/\s+/);
+  const key = tokens[0];
+  return key && !isSeparator(key) ? key : null;
 }
 
 // Parse one data row; returns null for `(no fit)` (truth-only) rows and unparseable lines.
@@ -89,9 +104,8 @@ function parseRow(line: string): ComparePageStats | null {
 /**
  * Parse a `mapsnap compare` table, returning the paired pages' error stats.
  *
- * Returns [] when the text is not a compare table (e.g. an unrelated `.txt`). Only rows with a
- * fit are returned; `(no fit)` truth-only rows are dropped (the viewer sources missing pages
- * from the truth annotation instead).
+ * Returns [] when the text is not a compare table (e.g. an unrelated `.txt`).
+ * `(no fit)` truth-only rows are reported separately by {@link parseMissingTruthKeys}.
  */
 export function parseCompareTxt(text: string): ComparePageStats[] {
   const lines = text.split('\n');
@@ -108,6 +122,30 @@ export function parseCompareTxt(text: string): ComparePageStats[] {
     if (row) pages.push(row);
   }
   return pages;
+}
+
+/**
+ * Truth page keys the run never placed: the table's `(no fit)` rows, in table order.
+ *
+ * The comparison already decides this — including which truth split a generated page
+ * matched — so the viewer reads it rather than re-deriving coverage from the two
+ * annotations, which is how its missing rows drifted from the "N/M pages
+ * georeferenced" line the same file reports.
+ */
+export function parseMissingTruthKeys(text: string): string[] {
+  const lines = text.split('\n');
+  const header = lines.find((line) => line.trim() !== '');
+  if (!header || !header.includes('rmse_ft')) return [];
+  const start = lines.findIndex(isSeparator);
+  if (start < 0) return [];
+  const keys: string[] = [];
+  for (let i = start + 1; i < lines.length; i++) {
+    const line = lines[i]!;
+    if (isSeparator(line)) break;
+    const key = parseMissingRow(line);
+    if (key) keys.push(key);
+  }
+  return keys;
 }
 
 /**

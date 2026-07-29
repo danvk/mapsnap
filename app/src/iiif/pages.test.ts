@@ -212,31 +212,62 @@ describe('pagesFromAnnotation', () => {
   });
 });
 
-// A stand-in PageGeo carrying only the fields missingTruthPages reads.
-function pageGeo(pageKey: string, itemIndex: number): PageGeo {
-  return { pageKey, itemIndex } as PageGeo;
+// A stand-in PageGeo carrying the fields missingTruthPages reads.
+function pageGeo(stem: string, itemIndex: number): PageGeo {
+  return {
+    stem,
+    pageKey: stem.split('__')[0]!,
+    itemIndex,
+  } as PageGeo;
 }
 
 describe('missingTruthPages', () => {
-  it('returns truth pages absent from the fit, with negative ids', () => {
-    const fit = [pageGeo('p1', 0), pageGeo('p2', 1)];
+  it('selects the truth pages the comparison marked as unplaced', () => {
     const truth = [pageGeo('p1', 0), pageGeo('p2', 1), pageGeo('p3', 2)];
-    const missing = missingTruthPages(fit, truth);
-    expect(missing.map((p) => p.pageKey)).toEqual(['p3']);
+    const missing = missingTruthPages(truth, ['p3']);
+    expect(missing.map((p) => p.stem)).toEqual(['p3']);
     // Negative id keeps it out of the fit pages' itemIndex space.
     expect(missing[0]!.itemIndex).toBe(-1);
   });
 
-  it('dedupes a split parent that appears once per truth panel', () => {
-    const fit = [pageGeo('p1', 0)];
-    const truth = [pageGeo('p9', 5), pageGeo('p9', 6), pageGeo('p10', 7)];
-    const missing = missingTruthPages(fit, truth);
-    expect(missing.map((p) => p.pageKey)).toEqual(['p9', 'p10']);
+  it('lists each unplaced panel of a sheet under its own stem', () => {
+    // Hudson: both p92 panels are unplaced. The old parent-key rule collapsed them
+    // into one row called "p92", hiding p92__1 -- the largest single miss there is.
+    const truth = [
+      pageGeo('p92__1', 5),
+      pageGeo('p92__2', 6),
+      pageGeo('p91', 7),
+    ];
+    const missing = missingTruthPages(truth, ['p92__1', 'p92__2']);
+    expect(missing.map((p) => p.stem)).toEqual(['p92__1', 'p92__2']);
     expect(missing.map((p) => p.itemIndex)).toEqual([-1, -2]);
   });
 
-  it('returns nothing when every truth page was fitted', () => {
-    const fit = [pageGeo('p1', 0), pageGeo('p2', 1)];
-    expect(missingTruthPages(fit, [pageGeo('p1', 0)])).toEqual([]);
+  it('keeps a panel whose sibling was placed', () => {
+    // Champaign: p4__1 is placed and p4__2 is not. Keying on the parent page counted
+    // the whole sheet as present, so the volume showed no misses against four reported.
+    const truth = [pageGeo('p4__1', 0), pageGeo('p4__2', 1)];
+    expect(missingTruthPages(truth, ['p4__2']).map((p) => p.stem)).toEqual([
+      'p4__2',
+    ]);
+  });
+
+  it('matches keys case-insensitively', () => {
+    // Lettered pages are p1499J in the annotations and p1499j on disk.
+    expect(
+      missingTruthPages([pageGeo('p1499j', 0)], ['p1499J']).map((p) => p.stem),
+    ).toEqual(['p1499j']);
+  });
+
+  it('returns nothing when the comparison reports no misses', () => {
+    expect(missingTruthPages([pageGeo('p1', 0)], [])).toEqual([]);
+  });
+});
+
+describe('missingTruthPages resilience', () => {
+  it('reports nothing when the response carries no missing field', () => {
+    // An older server, or a compare sidecar predating the field: no misses beats a
+    // crashed page.
+    expect(missingTruthPages([pageGeo('p1', 0)], undefined)).toEqual([]);
   });
 });
