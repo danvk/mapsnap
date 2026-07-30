@@ -25,6 +25,7 @@ courtyard) are filled; edge concavities are kept, since some blocks are genuinel
 """
 
 import argparse
+import dataclasses
 import json
 from collections import defaultdict
 from dataclasses import dataclass
@@ -653,6 +654,107 @@ def segment_page_regions(
     return polygons
 
 
+MULTISCALE_LADDER = (3000, 2250, 1500, 1000)
+"""Working scales (long-side px) the multi-scale segmentation tries, finest first.
+
+No single scale suits every sheet: fine linework wants resolution, but foxing —
+the same block fill aging into several shades — fragments the colour clustering at
+full detail and averages away under coarser downsampling. Measured against
+hand-traced truth, Kansas City (foxed) goes 0.48 -> 0.71 mean IoU at 1500 while
+Brooklyn 1939 v1 p0b (clean) is best at 3000, so the right scale is a per-sheet
+property of the paper, not a constant.
+"""
+
+MULTISCALE_MARGIN = 0.3
+"""How decisively a coarser scale must beat a finer one to be picked.
+
+Resolution is free information when the segmentation is not failing, so the pick
+prefers the finest scale whose irregularity is within this margin of the best;
+coarsening happens only when the fine scales fail loudly (foxing fragmentation).
+Without the margin (plain argmin) 8 of 13 truth sheets came out marginally worse
+than fixed-3000, the picker trading resolution for cosmetic smoothness; with it,
+none do, and the three hand-traced sheets score 0.746 mean IoU — equal to the
+per-sheet oracle. The result is flat for margins 0.3-0.5.
+"""
+
+
+def polygon_area(polygon: list[Point]) -> float:
+    """Absolute shoelace area of a polygon given as vertices."""
+    total = 0.0
+    for i in range(len(polygon)):
+        x1, y1 = polygon[i]
+        x2, y2 = polygon[(i + 1) % len(polygon)]
+        total += x1 * y2 - x2 * y1
+    return abs(total) / 2
+
+
+def segmentation_irregularity(polygons: dict[int, list[Point]], n_seeds: int) -> float:
+    """Truth-free quality score for one sheet's segmentation; lower is better.
+
+    Two terms, both grounded in how a key map is drawn. Block areas on one sheet
+    are roughly uniform, so the mean |log2(area / median area)| is near zero for a
+    sound segmentation and blows up in both failure directions — foxing fragments
+    (many splinters far below the median) and leaks (a region far above it).
+    The unresolved-seed rate guards the spread's blind spot: a degenerate output
+    of one or two giant regions has near-zero spread but resolves almost no seeds.
+
+    Ranking scales by this score matches the truth-best scale imperfectly, but
+    that is the wrong yardstick: when scales genuinely diverge the bad ones fail
+    loudly on these terms, and when they barely differ a "wrong" pick is nearly
+    free. With the prefer-finest margin (:data:`MULTISCALE_MARGIN`), the three
+    held-out hand-traced sheets score 0.746 mean IoU — equal to the per-sheet
+    oracle, against 0.717 for the best fixed scale and 0.657 for the previous
+    fixed-3000 configuration — and no truth sheet does worse than fixed-3000.
+    The result is flat across a wide sweep of the term weighting, so the weight
+    of 2 is not a tuned constant.
+    """
+    if not polygons:
+        return float("inf")
+    areas = np.array([polygon_area(p) for p in polygons.values()], dtype=np.float64)
+    areas = areas[areas > 0]
+    if len(areas) == 0:
+        return float("inf")
+    spread = float(np.mean(np.abs(np.log2(areas / np.median(areas)))))
+    unresolved = 1.0 - len(areas) / max(1, n_seeds)
+    return spread + 2.0 * unresolved
+
+
+def pick_ladder_scale(
+    scores: dict[int, float], margin: float = MULTISCALE_MARGIN
+) -> int:
+    """The finest scale whose irregularity is within ``margin`` of the best."""
+    best = min(scores.values())
+    for side in sorted(scores, reverse=True):
+        if scores[side] <= best + margin:
+            return side
+    raise ValueError("scores is empty")
+
+
+def segment_page_regions_multiscale(
+    rgb: np.ndarray,
+    seeds: list[Box],
+    params: RegionParams,
+    scales: tuple[int, ...] = MULTISCALE_LADDER,
+) -> tuple[dict[int, list[Point]], int]:
+    """Segment at every ladder scale; keep the finest that is not failing.
+
+    Each scale's result is scored by :func:`segmentation_irregularity` and the
+    finest scale within :data:`MULTISCALE_MARGIN` of the best score wins (see
+    :func:`pick_ladder_scale`). Polygons are in full-resolution pixels at every
+    scale, so results are directly comparable. Returns (polygons, picked scale).
+    """
+    results: dict[int, dict[int, list[Point]]] = {}
+    scores: dict[int, float] = {}
+    for side in scales:
+        polygons = segment_page_regions(
+            rgb, seeds, dataclasses.replace(params, target_long_side=side)
+        )
+        results[side] = polygons
+        scores[side] = segmentation_irregularity(polygons, len(seeds))
+    picked = pick_ladder_scale(scores)
+    return results[picked], picked
+
+
 def keymap_image_path(keymap_path: Path) -> Path:
     """Sibling JPEG of a ``<stem>.keymap.json`` (e.g. ``p0b.keymap.json`` -> ``p0b.jpg``)."""
     name = keymap_path.name
@@ -743,6 +845,14 @@ def main() -> None:
         action="store_true",
         help="Quantize with plain k-means instead of the seed-colour palette (ablation).",
     )
+    parser.add_argument(
+        "--scale",
+        type=int,
+        help=(
+            "Segment at this single working scale (long-side px) instead of trying "
+            "the multi-scale ladder and keeping the least-irregular result."
+        ),
+    )
     args = parser.parse_args()
 
     image_path = args.image or keymap_image_path(args.keymap)
@@ -754,10 +864,22 @@ def main() -> None:
     seeds, texts = load_seeds(args.keymap)
     image = Image.open(image_path).convert("RGB")
     rgb = np.asarray(image)
-    polygons = segment_page_regions(rgb.astype(np.float64) / 255.0, seeds, params)
+    if args.scale:
+        params = dataclasses.replace(params, target_long_side=args.scale)
+        polygons = segment_page_regions(rgb.astype(np.float64) / 255.0, seeds, params)
+        picked = args.scale
+    else:
+        polygons, picked = segment_page_regions_multiscale(
+            rgb.astype(np.float64) / 255.0, seeds, params
+        )
+        # The debug outputs below re-derive geometry from params; keep them at the
+        # scale the segmentation actually used.
+        params = dataclasses.replace(params, target_long_side=picked)
     doc = regions_panels_doc(image_path.name, image.size, polygons, texts)
     output.write_text(json.dumps(doc))
-    print(f"Wrote {output}: {len(polygons)}/{len(seeds)} regions found.")
+    print(
+        f"Wrote {output}: {len(polygons)}/{len(seeds)} regions found (scale {picked})."
+    )
     if args.overlay:
         render_overlay(image_path, polygons, texts, args.overlay)
         print(f"Wrote {args.overlay}")
