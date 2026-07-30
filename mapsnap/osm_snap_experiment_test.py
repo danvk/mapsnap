@@ -291,7 +291,9 @@ def test_init_worker_indexes_pages_and_panels(monkeypatch, tmp_path):
         "page_record",
         lambda vctx, unit: seen.append(unit.stem) or {"target": unit.stem},
     )
-    assert snap_one_page("p1__1") == ("p1__1", {"target": "p1__1"})
+    stem, record = snap_one_page("p1__1")
+    assert (stem, record["target"]) == ("p1__1", "p1__1")
+    assert record["elapsed_s"] >= 0  # every record carries its own wall-clock cost
     assert seen == ["p1__1"]
 
 

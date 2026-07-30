@@ -18,6 +18,7 @@ import json
 import math
 import multiprocessing
 import sys
+import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -829,9 +830,16 @@ def snap_one_page(stem: str) -> tuple[str, dict]:
     """Generate one page's candidates record from worker_state.
 
     Runs the same way whether dispatched to a pool worker or called directly,
-    so a page's record is identical either way.
+    so a page's record is identical either way. The record carries the page's
+    own wall-clock cost as ``elapsed_s``: matching dominates a fit run, and the
+    per-page number is what distinguishes a uniformly slow volume from a few
+    pathological pages. It is wall time inside one worker, so with
+    ``--num-workers N`` the sum over pages exceeds the run's elapsed time.
     """
-    return stem, page_record(worker_state["vctx"], worker_state["units"][stem])
+    started = time.perf_counter()
+    record = page_record(worker_state["vctx"], worker_state["units"][stem])
+    record["elapsed_s"] = round(time.perf_counter() - started, 2)
+    return stem, record
 
 
 def cmd_candidates(
@@ -927,6 +935,11 @@ def cmd_candidates(
             + (
                 f" score={best['select_score']}"
                 if best.get("select_score") is not None
+                else ""
+            )
+            + (
+                f" [{record['elapsed_s']:.0f}s]"
+                if record.get("elapsed_s") is not None
                 else ""
             )
         )
