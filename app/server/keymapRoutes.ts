@@ -10,7 +10,7 @@
  */
 
 import { mkdir, readFile, writeFile } from 'fs/promises';
-import { basename, dirname } from 'path';
+import { basename, dirname, join } from 'path';
 import type { Express } from 'express';
 import { HTTPError, type TypedRouter } from 'crosswalk';
 import type { API, KeymapImagesResponse } from './api.ts';
@@ -20,6 +20,37 @@ import {
   resolveKeymapPage,
 } from './keymapPages.ts';
 import type { ImageInfo } from '../src/keymap/types.ts';
+import type { KeymapDetection } from '../src/regions/types.ts';
+
+/**
+ * Where a sheet's hand-drawn page regions live.
+ *
+ * Under `raw/truth/` beside the point labels, so hand work stays separate from the
+ * machine outputs in `raw/` — in particular from `<stem>.regions.panels.json`
+ * (page_regions' segmentation) and `<stem>.truth.regions.panels.json` (footprints
+ * projected from OIM fits), both of which this is meant to be scored against. The
+ * schema is identical to those, so `mapsnap.keymap.score_regions --truth` reads it
+ * directly.
+ */
+function regionsPath(page: { imagePath: string; stem: string }): string {
+  return join(
+    dirname(page.imagePath),
+    'truth',
+    `${page.stem}.regions.panels.json`,
+  );
+}
+
+// Centre of a keymap.json detection's box, in image pixels.
+function detectionCentre(street: {
+  polygon: number[][];
+  text?: string;
+}): KeymapDetection | null {
+  const ring = street.polygon;
+  if (!ring?.length) return null;
+  const x = ring.reduce((sum, p) => sum + (p[0] ?? 0), 0) / ring.length;
+  const y = ring.reduce((sum, p) => sum + (p[1] ?? 0), 0) / ring.length;
+  return { text: String(street.text ?? ''), x, y };
+}
 
 /**
  * Mount the raw key-map image endpoint under `/api/keymaps/<page id>`.
@@ -79,5 +110,53 @@ export function registerKeymapApi(
     await mkdir(dirname(page.labelsPath), { recursive: true });
     await writeFile(page.labelsPath, JSON.stringify(sidecar, null, 2) + '\n');
     return { ok: true };
+  });
+
+  // Read a sheet's hand-drawn regions, or report that none exist yet.
+  router.get('/api/regions', async (_params, request) => {
+    const page = await resolveKeymapPage(dataDir, request.query.id);
+    if (!page) throw new HTTPError(400, `no such key map: ${request.query.id}`);
+    try {
+      return JSON.parse(await readFile(regionsPath(page), 'utf8'));
+    } catch {
+      return { exists: false };
+    }
+  });
+
+  // Write a sheet's hand-drawn regions in the panels.json schema, so the result can be
+  // scored against a segmentation without conversion.
+  router.put('/api/regions', async (_params, body, request) => {
+    const page = await resolveKeymapPage(dataDir, request.query.id);
+    if (!page) throw new HTTPError(400, `no such key map: ${request.query.id}`);
+    const target = regionsPath(page);
+    const sidecar = {
+      image: basename(page.imagePath),
+      width: body.width,
+      height: body.height,
+      panels: body.panels,
+      labels: body.labels,
+    };
+    await mkdir(dirname(target), { recursive: true });
+    await writeFile(target, JSON.stringify(sidecar, null, 2) + '\n');
+    return { ok: true };
+  });
+
+  // A sheet's detected page numbers as points, for naming a drawn ring by what it encloses.
+  router.get('/api/keymap-detections', async (_params, request) => {
+    const page = await resolveKeymapPage(dataDir, request.query.id);
+    if (!page) throw new HTTPError(400, `no such key map: ${request.query.id}`);
+    const keymap = join(dirname(page.imagePath), `${page.stem}.keymap.json`);
+    try {
+      const doc = JSON.parse(await readFile(keymap, 'utf8'));
+      const streets: { polygon: number[][]; text?: string }[] =
+        doc.streets ?? [];
+      return {
+        detections: streets
+          .map(detectionCentre)
+          .filter((d): d is KeymapDetection => d !== null),
+      };
+    } catch {
+      return { detections: [] };
+    }
   });
 }
