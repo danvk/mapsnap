@@ -80,6 +80,10 @@ SUBCOMMANDS: dict[str, tuple[str, str]] = {
     ),
     "split-twopage": ("mapsnap.split_twopage", "Split two-page images in half"),
     "split": ("mapsnap.split", "Split map pages into individual panels"),
+    "fix-truth-splits": (
+        "mapsnap.fix_truth_splits",
+        "Repair OIM-exported SvgSelectors for split pages (OIM#402)",
+    ),
     "oim-split-truth": (
         "mapsnap.oim_truth",
         "Locate OIM's manual split regions on the canvas for comparison",
