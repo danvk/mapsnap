@@ -46,7 +46,7 @@ from mapsnap.keymap.page_regions import (
     RegionParams,
     keymap_image_path,
     load_seeds,
-    segment_page_regions,
+    segment_page_regions_multiscale,
 )
 from mapsnap.utils import source_id_to_page_key
 
@@ -127,7 +127,9 @@ def region_features(
     lon0, lat0 = origin
     boxes, texts = load_seeds(keymap_path)
     rgb = np.asarray(Image.open(keymap_image_path(keymap_path)).convert("RGB"))
-    polygons = segment_page_regions(rgb.astype(np.float64) / 255.0, boxes, params)
+    polygons, _scale = segment_page_regions_multiscale(
+        rgb.astype(np.float64) / 255.0, boxes, params
+    )
     features: list[dict] = []
     for index, pixel_polygon in polygons.items():
         text = texts[index]

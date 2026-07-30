@@ -1,6 +1,7 @@
 import numpy as np
 
 from mapsnap.keymap.page_regions import (
+    MULTISCALE_LADDER,
     RegionParams,
     background_clusters,
     box_center,
@@ -12,11 +13,15 @@ from mapsnap.keymap.page_regions import (
     mask_to_polygon,
     merge_cluster_families,
     nearest_neighbor_distance,
+    pick_ladder_scale,
+    polygon_area,
     polygon_bounds,
     regions_panels_doc,
     scale_boxes,
     seed_palette,
     segment_page_regions,
+    segment_page_regions_multiscale,
+    segmentation_irregularity,
     split_component,
     working_scale,
 )
@@ -288,3 +293,49 @@ def test_segment_page_regions_drops_a_runaway_region():
         rgb, seeds, RegionParams(n_clusters=3, max_region_sheet_frac=1.0)
     )
     assert set(uncapped) == {0}
+
+
+def test_polygon_area():
+    assert polygon_area([(0, 0), (10, 0), (10, 10), (0, 10)]) == 100.0
+    assert polygon_area([(0, 0), (4, 0), (0, 3)]) == 6.0
+
+
+def test_segmentation_irregularity_prefers_uniform_resolved_output():
+    ring: list[tuple[float, float]] = [(0, 0), (10, 0), (10, 10), (0, 10)]
+    uniform = {i: ring for i in range(10)}
+    # One region 8x the median blows the spread term.
+    leaked = dict(uniform)
+    leaked[0] = [(0.0, 0.0), (80.0, 0.0), (80.0, 10.0), (0.0, 10.0)]
+    assert segmentation_irregularity(uniform, 10) < segmentation_irregularity(
+        leaked, 10
+    )
+    # A degenerate one-giant-region output has near-zero spread; the
+    # unresolved-seed term is what rejects it.
+    degenerate = {0: [(0.0, 0.0), (100.0, 0.0), (100.0, 100.0), (0.0, 100.0)]}
+    assert segmentation_irregularity(uniform, 10) < segmentation_irregularity(
+        degenerate, 10
+    )
+    assert segmentation_irregularity({}, 10) == float("inf")
+
+
+def test_segment_page_regions_multiscale_matches_single_scale_when_tiny():
+    # On an image smaller than every ladder rung nothing is ever downscaled, so all
+    # rungs produce identical output and the pick must simply return one of them.
+    rgb = np.full((80, 80, 3), 0.85, dtype=np.float64)
+    rgb[30:50, 15:30] = [0.8, 0.1, 0.1]
+    rgb[30:50, 50:65] = [0.1, 0.1, 0.8]
+    seeds = [(18.0, 35.0, 27.0, 45.0), (53.0, 35.0, 62.0, 45.0)]
+    params = RegionParams(n_clusters=3, max_region_sheet_frac=1.0)
+    single = segment_page_regions(rgb, seeds, params)
+    multi, picked = segment_page_regions_multiscale(rgb, seeds, params)
+    assert multi == single
+    assert picked in MULTISCALE_LADDER
+
+
+def test_pick_ladder_scale_prefers_the_finest_within_margin():
+    # 3000 is within the margin of the best (1500), so resolution wins the tie.
+    assert pick_ladder_scale({3000: 0.55, 2250: 0.5, 1500: 0.4, 1000: 0.45}) == 3000
+    # A decisive gap (foxing fragmentation at fine scales) does coarsen.
+    assert pick_ladder_scale({3000: 1.6, 2250: 1.2, 1500: 0.4, 1000: 0.5}) == 1500
+    # Infinite scores (no regions at all) never win.
+    assert pick_ladder_scale({3000: float("inf"), 1500: 0.9}) == 1500
