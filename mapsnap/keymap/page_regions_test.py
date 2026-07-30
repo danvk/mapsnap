@@ -140,7 +140,7 @@ def test_segment_page_regions_two_blocks_and_background_discard():
     rgb = np.full((80, 80, 3), 0.85, dtype=np.float64)
     rgb[30:50, 15:30] = [0.8, 0.1, 0.1]  # red block
     rgb[30:50, 50:65] = [0.1, 0.1, 0.8]  # blue block
-    params = RegionParams(n_clusters=3)
+    params = RegionParams(n_clusters=3, max_region_sheet_frac=1.0)
     seeds = [
         (18.0, 35.0, 27.0, 45.0),  # on the red block
         (53.0, 35.0, 62.0, 45.0),  # on the blue block
@@ -157,7 +157,9 @@ def test_segment_page_regions_splits_shared_block():
     # region swallowing the other.
     rgb = np.full((60, 120, 3), 0.85, dtype=np.float64)
     rgb[20:45, 15:105] = [0.8, 0.1, 0.1]  # a single wide red block
-    params = RegionParams(n_clusters=3, cluster_open_radius=0)
+    params = RegionParams(
+        n_clusters=3, cluster_open_radius=0, max_region_sheet_frac=1.0
+    )
     seeds = [(25.0, 28.0, 33.0, 36.0), (87.0, 28.0, 95.0, 36.0)]
     polygons = segment_page_regions(rgb, seeds, params)
     assert set(polygons) == {0, 1}
@@ -257,10 +259,32 @@ def test_segment_page_regions_pale_block_near_paper():
     rgb[30:50, 20:40] = [0.80, 0.78, 0.72]  # pale tan block, close to the 0.85 paper
     rgb[30:50, 55:75] = [0.1, 0.1, 0.8]  # one saturated block (so k-means has a job)
     seeds = [(25.0, 35.0, 34.0, 45.0), (60.0, 35.0, 69.0, 45.0)]
-    params = RegionParams(n_clusters=2, palette_dedup_distance=4.0)
+    params = RegionParams(
+        n_clusters=2, palette_dedup_distance=4.0, max_region_sheet_frac=1.0
+    )
     seeded = segment_page_regions(rgb, seeds, params)
     assert set(seeded) == {0, 1}  # the pale block is found
     globally = segment_page_regions(
-        rgb, seeds, RegionParams(n_clusters=2, use_global_kmeans=True)
+        rgb,
+        seeds,
+        RegionParams(n_clusters=2, use_global_kmeans=True, max_region_sheet_frac=1.0),
     )
     assert 0 not in globally  # plain k=2 merges the pale block into paper and drops it
+
+
+def test_segment_page_regions_drops_a_runaway_region():
+    """A region covering far more of the sheet than a page's footprint is dropped."""
+    # One block over a quarter of the sheet — well past the 2.5% a real page occupies,
+    # but still a minority of the image so it stays a foreground cluster rather than
+    # becoming the background one.
+    rgb = np.full((80, 80, 3), 0.85, dtype=np.float64)
+    rgb[20:60, 20:60] = [0.8, 0.1, 0.1]
+    seeds = [(36.0, 36.0, 44.0, 44.0)]
+    capped = segment_page_regions(
+        rgb, seeds, RegionParams(n_clusters=3, max_region_sheet_frac=0.025)
+    )
+    assert capped == {}
+    uncapped = segment_page_regions(
+        rgb, seeds, RegionParams(n_clusters=3, max_region_sheet_frac=1.0)
+    )
+    assert set(uncapped) == {0}
