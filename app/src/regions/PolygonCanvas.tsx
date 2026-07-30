@@ -1,12 +1,14 @@
 import { useEffect, useRef, useState } from 'react';
 import {
+  MIN_RECT_DRAG,
   MIN_RING_VERTICES,
   VERTEX_HIT_RADIUS,
+  rectRing,
   regionAt,
   sheetFraction,
   vertexAt,
 } from './polygons';
-import type { KeymapDetection, RegionPolygon } from './types';
+import type { DrawMode, KeymapDetection, RegionPolygon } from './types';
 
 interface PolygonCanvasProps {
   imageSrc: string;
@@ -14,6 +16,8 @@ interface PolygonCanvasProps {
   height: number;
   /** Displayed size = image size x zoom; the container scrolls to pan. */
   zoom: number;
+  /** 'polygon' clicks out vertices; 'rectangle' drags out two corners. */
+  mode: DrawMode;
   regions: RegionPolygon[];
   /** Ring being drawn, or [] when not drawing. */
   draft: [number, number][];
@@ -21,7 +25,14 @@ interface PolygonCanvasProps {
   detections: readonly KeymapDetection[];
   showDetections: boolean;
   onAddVertex: (point: [number, number]) => void;
-  onCloseDraft: () => void;
+  /** Replace the draft outright, as a rectangle drag does on every move. */
+  onSetDraft: (ring: [number, number][]) => void;
+  /**
+   * Finish a region. A rectangle drag passes its ring directly rather than relying on
+   * the draft it just set: a quick drag can put the pointerup in the same tick as the
+   * last pointermove, and React will not have flushed that state yet.
+   */
+  onCloseDraft: (ring?: [number, number][]) => void;
   onSelect: (index: number | null) => void;
   onMoveVertex: (region: number, vertex: number, to: [number, number]) => void;
 }
@@ -74,12 +85,14 @@ export function PolygonCanvas(props: PolygonCanvasProps) {
     width,
     height,
     zoom,
+    mode,
     regions,
     draft,
     selectedIndex,
     detections,
     showDetections,
     onAddVertex,
+    onSetDraft,
     onCloseDraft,
     onSelect,
     onMoveVertex,
@@ -88,6 +101,8 @@ export function PolygonCanvas(props: PolygonCanvasProps) {
   const wrapperRef = useRef<HTMLDivElement>(null);
   const [cursor, setCursor] = useState<[number, number] | null>(null);
   const dragRef = useRef<{ region: number; vertex: number } | null>(null);
+  // Anchor corner of a rectangle drag in progress, in image pixels.
+  const rectAnchorRef = useRef<[number, number] | null>(null);
 
   // Image-pixel position of a pointer event.
   function imagePoint(
@@ -136,6 +151,12 @@ export function PolygonCanvas(props: PolygonCanvasProps) {
       return;
     }
     onSelect(null);
+    if (mode === 'rectangle') {
+      // Anchor a drag rather than dropping a vertex; the ring is built on move.
+      rectAnchorRef.current = [x, y];
+      (event.target as Element).setPointerCapture?.(event.pointerId);
+      return;
+    }
     onAddVertex([x, y]);
   }
 
@@ -143,11 +164,29 @@ export function PolygonCanvas(props: PolygonCanvasProps) {
     const point = imagePoint(event);
     setCursor(point);
     const drag = dragRef.current;
-    if (drag) onMoveVertex(drag.region, drag.vertex, point);
+    if (drag) {
+      onMoveVertex(drag.region, drag.vertex, point);
+      return;
+    }
+    const anchor = rectAnchorRef.current;
+    if (anchor) onSetDraft(rectRing(anchor, point));
   }
 
-  function handlePointerUp(): void {
+  function handlePointerUp(event: React.PointerEvent): void {
     dragRef.current = null;
+    const anchor = rectAnchorRef.current;
+    if (!anchor) return;
+    rectAnchorRef.current = null;
+    const [x, y] = imagePoint(event);
+    const minimum = MIN_RECT_DRAG / zoom;
+    if (
+      Math.abs(x - anchor[0]) < minimum ||
+      Math.abs(y - anchor[1]) < minimum
+    ) {
+      onSetDraft([]); // a click, not a drag
+      return;
+    }
+    onCloseDraft(rectRing(anchor, [x, y]));
   }
 
   // Double-click closes the ring too, which is the habit most drawing tools train.
@@ -255,25 +294,31 @@ export function PolygonCanvas(props: PolygonCanvasProps) {
 
           {draft.length > 0 && (
             <>
+              {/* A rectangle drag already holds every corner, so the rubber-band to
+                  the cursor belongs only to the click-out-vertices mode. */}
               <polyline
-                points={ringPoints(cursor ? [...draft, cursor] : draft, zoom)}
+                points={ringPoints(
+                  mode === 'polygon' && cursor ? [...draft, cursor] : draft,
+                  zoom,
+                )}
                 fill="#ffd400"
                 fillOpacity={0.2}
                 stroke="#ffd400"
                 strokeWidth={2}
                 strokeDasharray="6 4"
               />
-              {draft.map(([x, y], index) => (
-                <circle
-                  key={index}
-                  cx={x * zoom}
-                  cy={y * zoom}
-                  r={index === 0 ? VERTEX_HIT_RADIUS / 2 + 1 : 3}
-                  fill={index === 0 ? '#ffd400' : '#fff'}
-                  stroke="#8a6d00"
-                  strokeWidth={2}
-                />
-              ))}
+              {mode === 'polygon' &&
+                draft.map(([x, y], index) => (
+                  <circle
+                    key={index}
+                    cx={x * zoom}
+                    cy={y * zoom}
+                    r={index === 0 ? VERTEX_HIT_RADIUS / 2 + 1 : 3}
+                    fill={index === 0 ? '#ffd400' : '#fff'}
+                    stroke="#8a6d00"
+                    strokeWidth={2}
+                  />
+                ))}
             </>
           )}
         </svg>

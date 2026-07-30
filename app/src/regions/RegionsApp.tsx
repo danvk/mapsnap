@@ -14,7 +14,7 @@ import {
 import { MIN_RING_VERTICES, autoLabel } from './polygons';
 import { PolygonCanvas } from './PolygonCanvas';
 import { RegionsTable } from './RegionsTable';
-import type { KeymapDetection, RegionPolygon } from './types';
+import type { DrawMode, KeymapDetection, RegionPolygon } from './types';
 
 type SaveStatus = 'idle' | 'saving' | 'saved' | 'error';
 
@@ -43,6 +43,7 @@ export function RegionsApp() {
   const [selectedIndex, setSelectedIndex] = useState<number | null>(null);
   const [detections, setDetections] = useState<KeymapDetection[]>([]);
   const [showDetections, setShowDetections] = useState(true);
+  const [mode, setMode] = useState<DrawMode>('rectangle');
   const [zoom, setZoom] = useState(0.25);
   const [saveStatus, setSaveStatus] = useState<SaveStatus>('idle');
 
@@ -107,8 +108,9 @@ export function RegionsApp() {
     setRegions(next);
   }
 
-  function closeDraft(): void {
-    const ring = draftRef.current;
+  // `ring` is passed by the rectangle drag, which knows its final shape before the
+  // draft state it set has flushed; polygon mode omits it and uses the draft.
+  function closeDraft(ring: [number, number][] = draftRef.current): void {
     if (ring.length < MIN_RING_VERTICES) return;
     const taken = new Set(
       regionsRef.current.map((r) => r.text).filter((t) => t !== ''),
@@ -125,7 +127,14 @@ export function RegionsApp() {
   useEffect(() => {
     function onKeyDown(event: KeyboardEvent): void {
       if (isTypingTarget(event.target)) return;
-      if (event.key === 'Enter') {
+      if (event.key === 'r' || event.key === 'R') {
+        // Both modes get used on one sheet — rectangles for the plain blocks, the
+        // polygon for the ragged ones — so switching wants to be a keystroke.
+        setDraft([]);
+        setMode((current) =>
+          current === 'rectangle' ? 'polygon' : 'rectangle',
+        );
+      } else if (event.key === 'Enter') {
         closeDraft();
       } else if (event.key === 'Escape') {
         setDraft([]);
@@ -188,6 +197,22 @@ export function RegionsApp() {
             />
             <span className="regions-zoom">{(zoom * 100).toFixed(0)}%</span>
           </label>
+          <span className="regions-mode">
+            {(['rectangle', 'polygon'] as DrawMode[]).map((option) => (
+              <label key={option}>
+                <input
+                  type="radio"
+                  name="draw-mode"
+                  checked={mode === option}
+                  onChange={() => {
+                    setDraft([]); // a half-drawn ring does not survive the switch
+                    setMode(option);
+                  }}
+                />
+                {option === 'rectangle' ? 'Rectangle' : 'Polygon'}
+              </label>
+            ))}
+          </span>
           <label>
             <input
               type="checkbox"
@@ -213,10 +238,11 @@ export function RegionsApp() {
         </div>
 
         <p className="regions-help">
-          Click to drop vertices; click the first vertex again, double-click, or
-          press Enter to close. Escape abandons the ring, Backspace removes its
-          last vertex. Click a region to select it, drag its handles to adjust,
-          Delete to remove it.
+          {mode === 'rectangle'
+            ? 'Drag out a rectangle to trace a block. '
+            : 'Click to drop vertices; click the first vertex again, double-click, or press Enter to close. Backspace removes the last vertex. '}
+          Press R to switch modes, Escape to abandon. Click a region to select
+          it, drag its handles to adjust, Delete to remove it.
         </p>
 
         {selectedName && imageWidth > 0 && (
@@ -225,12 +251,14 @@ export function RegionsApp() {
             width={imageWidth}
             height={imageHeight}
             zoom={zoom}
+            mode={mode}
             regions={regions}
             draft={draft}
             selectedIndex={selectedIndex}
             detections={detections}
             showDetections={showDetections}
             onAddVertex={(point) => setDraft([...draftRef.current, point])}
+            onSetDraft={setDraft}
             onCloseDraft={closeDraft}
             onSelect={setSelectedIndex}
             onMoveVertex={(region, vertex, to) => {

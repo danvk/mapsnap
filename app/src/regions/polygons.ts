@@ -15,6 +15,38 @@ export const MIN_RING_VERTICES = 3;
  */
 export const VERTEX_HIT_RADIUS = 9;
 
+/**
+ * Screen pixels a rectangle drag must span before it counts as a rectangle.
+ *
+ * Below this it was a click, not a drag — usually a mis-aimed attempt to select an
+ * existing region — and turning it into a sliver polygon would be worse than nothing.
+ */
+export const MIN_RECT_DRAG = 6;
+
+/**
+ * Axis-aligned ring spanning two opposite corners, clockwise from the top left.
+ *
+ * Key-map blocks are overwhelmingly rectangles aligned with the sheet, so dragging
+ * out two corners beats clicking four. The result is an ordinary four-vertex ring —
+ * nothing downstream knows it was drawn differently, so editing, auto-naming and the
+ * sidecar format are all unchanged.
+ */
+export function rectRing(
+  a: [number, number],
+  b: [number, number],
+): [number, number][] {
+  const x0 = Math.min(a[0], b[0]);
+  const x1 = Math.max(a[0], b[0]);
+  const y0 = Math.min(a[1], b[1]);
+  const y1 = Math.max(a[1], b[1]);
+  return [
+    [x0, y0],
+    [x1, y0],
+    [x1, y1],
+    [x0, y1],
+  ];
+}
+
 /** Ring with its first vertex repeated at the end, as the panels schema wants. */
 export function closedRing(ring: [number, number][]): number[][] {
   if (ring.length === 0) return [];

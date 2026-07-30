@@ -4,6 +4,7 @@ import {
   closedRing,
   createRegionsJson,
   openRing,
+  rectRing,
   regionAt,
   sheetFraction,
   vertexAt,
@@ -191,5 +192,31 @@ describe('sheetFraction', () => {
       ),
     ).toBe(0);
     expect(sheetFraction(SQUARE, 0, 0)).toBe(0);
+  });
+});
+
+describe('rectRing', () => {
+  it('spans two opposite corners clockwise from the top left', () => {
+    expect(rectRing([2, 3], [8, 9])).toEqual([
+      [2, 3],
+      [8, 3],
+      [8, 9],
+      [2, 9],
+    ]);
+  });
+
+  it('normalizes a drag made in any direction', () => {
+    // Dragging up-left must give the same rectangle as dragging down-right.
+    const expected = rectRing([2, 3], [8, 9]);
+    expect(rectRing([8, 9], [2, 3])).toEqual(expected);
+    expect(rectRing([2, 9], [8, 3])).toEqual(expected);
+    expect(rectRing([8, 3], [2, 9])).toEqual(expected);
+  });
+
+  it('produces a ring the rest of the pipeline accepts', () => {
+    const ring = rectRing([0, 0], [10, 20]);
+    expect(ring).toHaveLength(4);
+    expect(sheetFraction(ring, 10, 20)).toBeCloseTo(1.0);
+    expect(closedRing(ring)).toHaveLength(5);
   });
 });

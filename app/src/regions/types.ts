@@ -1,3 +1,11 @@
+/**
+ * How a new region is drawn.
+ *
+ * Both produce an ordinary ring; 'rectangle' just gets there in one drag, which suits
+ * the many key-map blocks that are plain rectangles.
+ */
+export type DrawMode = 'polygon' | 'rectangle';
+
 /** One hand-drawn page region: a closed ring in image-pixel space plus its page key. */
 export interface RegionPolygon {
   /** Ring vertices as [x, y] in image pixels. Stored open; closed on save. */

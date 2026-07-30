@@ -170,3 +170,16 @@
 .regions-table tbody tr.duplicate input {
   background: #ffe0e0;
 }
+
+/* Draw-mode toggle: two radios that read as one control. */
+.regions-mode {
+  display: flex;
+  gap: 10px;
+  padding: 2px 8px;
+  border: 1px solid #ccc;
+  border-radius: 4px;
+}
+
+.regions-mode label {
+  gap: 4px;
+}
