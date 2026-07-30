@@ -109,8 +109,9 @@ def main() -> None:
         "--no-snap",
         action="store_true",
         help=(
-            "Skip the geometry-first OSM snap channel (rescue/arbitrate/"
-            "refine) and build the IIIF from RANSAC georefs alone."
+            "Skip the geometry channels — OSM snap (rescue/arbitrate/refine) "
+            "and the street-constraint solver, whose referee rides on snap's "
+            "machinery — and build the IIIF from RANSAC georefs alone."
         ),
     )
     args, georef_extra = parser.parse_known_args()
@@ -145,19 +146,30 @@ def main() -> None:
 
     # The geometry-first snap channel: rescue unplaced pages, arbitrate fits
     # OSM contradicts, refine mid-tier fits. Its pN.georef-osm.json sidecars
-    # take priority in the hybrid glob below.
+    # take priority over plain georefs in the hybrid glob below.
     if not args.no_snap:
         # Both passes are per-page and CPU-bound, so one --num-workers governs
         # both; the rest of the georef passthrough is georef-only.
         run_cmd(["mapsnap", "snap", str(dir_path), *worker_flag(georef_extra)])
+        # The street-constraint channel: fit key-map-prior pages from their
+        # street labels and adopt a pose only where the independent referee
+        # prefers it over whatever snap/georef published. Its
+        # pN.georef-streets.json sidecars take top priority in the glob. Runs
+        # after snap because the referee judges against (and shares machinery
+        # with) the snap channel; skipped with --no-snap for the same reason.
+        run_cmd(["mapsnap", "street-solve", str(dir_path)])
 
     output_iiif = dir_path / f"{run_id}.iiif.json"
     # Pass the glob as a literal string; make_iiif_georef does its own glob
-    # expansion (first glob wins per page, so snap sidecars take priority).
+    # expansion (first glob wins per page, so the channel priority is
+    # streets, then snap, then plain georefs).
     if args.no_snap:
         georef_glob = str(dir_path / "*.georef.json")
     else:
-        georef_glob = f"{dir_path / '*.georef-osm.json'},{dir_path / '*.georef.json'}"
+        georef_glob = (
+            f"{dir_path / '*.georef-streets.json'},"
+            f"{dir_path / '*.georef-osm.json'},{dir_path / '*.georef.json'}"
+        )
     run_cmd(
         [
             "mapsnap",
