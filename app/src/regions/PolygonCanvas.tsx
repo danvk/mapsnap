@@ -38,6 +38,20 @@ const COLORS = [
   '#800000',
 ];
 
+/**
+ * Shading laid over every traced region, so covered ground reads at a glance.
+ *
+ * One neutral tint for all of them rather than each region's own colour: a key map
+ * is already a field of saturated pastels, and a faint wash of eight different hues
+ * disappears into it, which is exactly what a per-region fill did. A single dark
+ * tint instead mutes what is done and leaves untraced blocks at full brightness.
+ * Each region keeps its colour in its outline, and the selected one still fills
+ * with its own colour so there is no doubt which is being edited.
+ */
+const TRACED_TINT = '#10243f';
+const TRACED_TINT_OPACITY = 0.1;
+const SELECTED_FILL_OPACITY = 0.3;
+
 function ringPoints(ring: [number, number][], zoom: number): string {
   return ring.map(([x, y]) => `${x * zoom},${y * zoom}`).join(' ');
 }
@@ -179,8 +193,10 @@ export function PolygonCanvas(props: PolygonCanvasProps) {
               <g key={index}>
                 <polygon
                   points={ringPoints(region.ring, zoom)}
-                  fill={color}
-                  fillOpacity={selected ? 0.34 : 0.16}
+                  fill={selected ? color : TRACED_TINT}
+                  fillOpacity={
+                    selected ? SELECTED_FILL_OPACITY : TRACED_TINT_OPACITY
+                  }
                   stroke={color}
                   strokeWidth={selected ? 3 : 1.5}
                 />
