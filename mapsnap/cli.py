@@ -47,6 +47,10 @@ SUBCOMMANDS: dict[str, tuple[str, str]] = {
         "mapsnap.snap",
         "Geometry-first OSM snap: rescue unplaced pages, arbitrate and refine fits",
     ),
+    "street-solve": (
+        "mapsnap.street_solve_run",
+        "Street-constraint georeferencing: solve key-map-prior pages, adopt where the referee prefers",
+    ),
     "iiif": (
         "mapsnap.make_iiif_georef",
         "Combine georeferences into a IIIF AnnotationPage",
