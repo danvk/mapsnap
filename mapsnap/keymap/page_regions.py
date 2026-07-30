@@ -117,6 +117,13 @@ class RegionParams:
     max_region_area_factor: a region whose mask exceeds this multiple of the median seed
         spacing squared is dropped as a runaway (leaves room for giant waterfront sheets at
         ~9% of a key map).
+    max_region_sheet_frac: a region covering more than this share of the whole sheet is
+        dropped as a runaway too. The spacing-squared rule alone cannot catch every leak,
+        because seed spacing shrinks as a sheet gets denser: measured over the 25 key maps
+        on hand, the two leaked regions are 192.5x and 59.0x spacing squared while healthy
+        sheets reach 66.7x and 65.0x, so no factor separates them. As a share of the sheet
+        they separate cleanly — 99.9% and 53.7% against a healthy maximum of 11.8% — since
+        a page's footprint is a fixed fraction of the sheet however many pages are on it.
     """
 
     target_long_side: int = 3000
@@ -136,6 +143,7 @@ class RegionParams:
     family_contact_frac: float = 0.10
     family_min_lightness: float = 30.0
     max_region_area_factor: float = 60.0
+    max_region_sheet_frac: float = 0.25
 
 
 def nearest_neighbor_distance(points: list[Point]) -> float:
@@ -606,21 +614,48 @@ def segment_page_regions(
                 region_masks[index] = piece
 
     spacing = nearest_neighbor_distance([box_center(box) for box in seeds]) * scale
-    max_region_area = params.max_region_area_factor * spacing**2
+    sheet_area = float(labels.size)
+
+    def runaway(mask: np.ndarray, filled: np.ndarray) -> bool:
+        """Whether a region is too big to be one page's footprint.
+
+        Two independent caps, measured on different things, because neither catches every
+        leak on its own.
+
+        The spacing-squared cap scales with how densely the sheet is seeded — right for
+        "much bigger than the blocks around it" — and applies to the raw mask, as it
+        always has, so the giant-waterfront regions it was calibrated to allow (~9-11% of
+        a sheet) still pass. It is blind to a sparse sheet whose runaway is a modest
+        multiple of a large spacing: Brooklyn 1939 v1's p0 swallowed 54% of the sheet at
+        only 59x spacing squared, under the 60x cap, while healthy dense sheets reach 67x.
+
+        The sheet-fraction cap catches that, and applies to the *filled* mask, since that
+        is what becomes the polygon. A mask can be thin and still enclose the sheet — an
+        outlined coastline, or the ink lattice tracing every street — and filling it then
+        covers everything, which is how Brooklyn 1906 v6's p0R reached 99.9%.
+        """
+        if spacing > 0 and int(mask.sum()) > params.max_region_area_factor * spacing**2:
+            return True
+        return int(filled.sum()) > params.max_region_sheet_frac * sheet_area
+
+    def fill(mask: np.ndarray) -> np.ndarray:
+        return ndi.binary_fill_holes(mask)  # type: ignore[return-value]
+
     polygons: dict[int, list[Point]] = {}
     for index, mask in region_masks.items():
-        if spacing > 0 and int(mask.sum()) > max_region_area:
-            # Runaway region (a family that swallowed a map-spanning tint): retry with
-            # this seed's unmerged cluster, and drop the seed only if that is huge too.
+        filled = fill(mask)
+        if runaway(mask, filled):
+            # Runaway region (a family that swallowed a map-spanning tint, or a page
+            # number printed in the water with no block of its own): retry with this
+            # seed's unmerged cluster, and drop the seed only if that is huge too.
             fallback = (
                 single_seed_region(*unmerged, scaled_boxes[index], params)
                 if unmerged is not None
                 else None
             )
-            if fallback is None or int(fallback.sum()) > max_region_area:
+            if fallback is None or runaway(fallback, fill(fallback)):
                 continue
-            mask = fallback
-        filled: np.ndarray = ndi.binary_fill_holes(mask)  # type: ignore[assignment]
+            filled = fill(fallback)
         polygon = mask_to_polygon(filled, params.simplify_tolerance)
         if len(polygon) >= 3:
             polygons[index] = [
