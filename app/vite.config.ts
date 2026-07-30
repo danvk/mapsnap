@@ -85,6 +85,7 @@ export default defineConfig({
         main: 'index.html',
         keymap: 'keymap.html',
         adjacency: 'adjacency.html',
+        regions: 'regions.html',
       },
     },
   },

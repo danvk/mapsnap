@@ -1,0 +1,172 @@
+/* Key-map page-region labeler: sheet list, tracing canvas, region table. */
+
+.regions-app {
+  display: flex;
+  height: 100vh;
+  font:
+    13px/1.4 system-ui,
+    sans-serif;
+  overflow: hidden;
+}
+
+.regions-sidebar {
+  width: 240px;
+  flex-shrink: 0;
+  overflow-y: auto;
+  border-right: 1px solid #ddd;
+}
+
+.regions-main {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.regions-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 6px 10px;
+  border-bottom: 1px solid #ddd;
+  flex-wrap: wrap;
+}
+
+.regions-toolbar label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  white-space: nowrap;
+}
+
+.regions-title {
+  font-weight: 600;
+}
+
+.regions-zoom {
+  width: 3.5em;
+  text-align: right;
+  color: #555;
+}
+
+.regions-count {
+  color: #555;
+}
+
+.regions-save {
+  margin-left: auto;
+  min-width: 6em;
+  text-align: right;
+}
+.regions-save-saved {
+  color: #2a7;
+}
+.regions-save-error {
+  color: #c33;
+}
+
+.regions-help {
+  margin: 0;
+  padding: 4px 10px;
+  color: #666;
+  border-bottom: 1px solid #eee;
+}
+
+/* The scroll container is the viewport; the wrapper is the full zoomed sheet, so
+   native scrollbars do the panning. */
+.polygon-scroll {
+  flex: 1;
+  overflow: auto;
+  background: #f4f4f4;
+}
+
+.polygon-wrapper {
+  position: relative;
+  cursor: crosshair;
+  user-select: none;
+}
+
+.polygon-wrapper img {
+  display: block;
+  pointer-events: none;
+}
+
+.polygon-overlay {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+
+.polygon-label {
+  font:
+    600 13px system-ui,
+    sans-serif;
+  fill: #111;
+  paint-order: stroke;
+  stroke: #fff;
+  stroke-width: 3px;
+  text-anchor: middle;
+  dominant-baseline: middle;
+}
+
+.polygon-detection {
+  font:
+    11px system-ui,
+    sans-serif;
+  fill: #111;
+  paint-order: stroke;
+  stroke: #fff;
+  stroke-width: 3px;
+}
+
+.polygon-hint {
+  position: absolute;
+  padding: 1px 5px;
+  background: #ffd400;
+  border: 1px solid #8a6d00;
+  border-radius: 3px;
+  font-size: 11px;
+  white-space: nowrap;
+  pointer-events: none;
+}
+
+.regions-panel {
+  width: 260px;
+  flex-shrink: 0;
+  overflow-y: auto;
+  border-left: 1px solid #ddd;
+}
+
+.regions-table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.regions-table th,
+.regions-table td {
+  padding: 2px 6px;
+  border-bottom: 1px solid #eee;
+  text-align: left;
+}
+
+.regions-table th.numeric,
+.regions-table td.numeric {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.regions-table tbody tr {
+  cursor: pointer;
+}
+
+.regions-table tbody tr.selected {
+  background: #e8f0fe;
+}
+
+.regions-table tbody tr.unlabeled input {
+  background: #fff6e0;
+}
+
+.regions-table tbody tr.duplicate input {
+  background: #ffe0e0;
+}

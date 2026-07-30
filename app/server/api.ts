@@ -22,6 +22,11 @@ import type {
   LabelsJson,
   LabelsWriteRequest,
 } from '../src/keymap/types.ts';
+import type {
+  KeymapDetection,
+  RegionsJson,
+  RegionsWriteRequest,
+} from '../src/regions/types.ts';
 import type { AdjacencyData } from '../src/types.ts';
 
 /** Response of GET /iiif-api/adjacency — the volume's adjacency.json, or null when absent. */
@@ -50,6 +55,20 @@ export type LabelsResponse = LabelsJson | { exists: false };
 /** Response of PUT /api/labels. */
 export interface LabelsWriteResponse {
   ok: boolean;
+}
+
+/** GET /api/regions — the hand-drawn page regions, or a marker that none exist yet. */
+export type RegionsResponse = RegionsJson | { exists: false };
+
+/**
+ * GET /api/keymap-detections — the sheet's detected page numbers as points.
+ *
+ * The region labeler uses these to name a freshly drawn ring by whichever number it
+ * encloses, so a sheet can be traced without typing 40 page keys. Empty when the sheet
+ * has no `<stem>.keymap.json`.
+ */
+export interface KeymapDetectionsResponse {
+  detections: KeymapDetection[];
 }
 
 /** Query naming a volume directory. */
@@ -161,6 +180,13 @@ export interface API {
   '/api/labels': {
     get: GetEndpoint<LabelsResponse, KeymapTarget>;
     put: Endpoint<LabelsWriteRequest, LabelsWriteResponse, KeymapTarget>;
+  };
+  '/api/regions': {
+    get: GetEndpoint<RegionsResponse, KeymapTarget>;
+    put: Endpoint<RegionsWriteRequest, LabelsWriteResponse, KeymapTarget>;
+  };
+  '/api/keymap-detections': {
+    get: GetEndpoint<KeymapDetectionsResponse, KeymapTarget>;
   };
   '/api/adjacency-volumes': {
     get: GetEndpoint<AdjacencyVolumesResponse>;
