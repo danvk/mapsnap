@@ -49,7 +49,7 @@ const COLORS = [
  * with its own colour so there is no doubt which is being edited.
  */
 const TRACED_TINT = '#10243f';
-const TRACED_TINT_OPACITY = 0.1;
+const TRACED_TINT_OPACITY = 0.25;
 const SELECTED_FILL_OPACITY = 0.3;
 
 function ringPoints(ring: [number, number][], zoom: number): string {
@@ -198,7 +198,7 @@ export function PolygonCanvas(props: PolygonCanvasProps) {
                     selected ? SELECTED_FILL_OPACITY : TRACED_TINT_OPACITY
                   }
                   stroke={color}
-                  strokeWidth={selected ? 3 : 1.5}
+                  strokeWidth={selected ? 4 : 3}
                 />
                 {selected &&
                   region.ring.map(([x, y], vertex) => (
