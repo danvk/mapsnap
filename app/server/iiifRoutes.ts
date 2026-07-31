@@ -23,6 +23,7 @@ import { jpegDimensions } from './jpegDimensions.ts';
 import {
   parseCompareFooter,
   parseCompareTxt,
+  parseLandByPage,
   parseMissingTruthKeys,
 } from './compareTxt.ts';
 import { volumePages } from './adjacencyTruth.ts';
@@ -178,6 +179,9 @@ export function registerIiifApi(
       return {
         pages: parseCompareTxt(text),
         missing: parseMissingTruthKeys(text),
+        ...((land) => (land ? { landKm2ByPage: land } : {}))(
+          parseLandByPage(text),
+        ),
         footer: parseCompareFooter(text),
       };
     } catch {

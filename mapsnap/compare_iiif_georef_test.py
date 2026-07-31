@@ -466,3 +466,41 @@ def test_compare_pages_warns_on_truth_splits_without_oim_panels(tmp_path, capsys
     assert len(missing) == 2
     err = capsys.readouterr().err
     assert "p52" in err and "oim-split-truth" in err
+
+
+def test_attach_land_annotates_rows_and_strips_rings(tmp_path):
+    import json
+
+    from mapsnap.compare_iiif_georef import attach_land
+
+    # A 200m x 200m square footprint at the origin, one street through it.
+    ring = [[0.0, 0.0], [0.002, 0.0], [0.002, 0.0018], [0.0, 0.0018], [0.0, 0.0]]
+    centerlines = tmp_path / "centerlines.geojson"
+    centerlines.write_text(
+        json.dumps(
+            {
+                "type": "FeatureCollection",
+                "features": [
+                    {
+                        "type": "Feature",
+                        "properties": {"name": "MAIN ST"},
+                        "geometry": {
+                            "type": "LineString",
+                            "coordinates": [[0.0, 0.0009], [0.002, 0.0009]],
+                        },
+                    }
+                ],
+            }
+        )
+    )
+    rows = [{"page_key": "p1", "rmse_ft": 10.0, "truth_ring": ring}]
+    missing = [{"page_key": "p2", "truth_ring": ring}]
+    attach_land(rows, missing, centerlines)
+    for row in rows + missing:
+        assert "truth_ring" not in row
+        assert row["area_m2"] is not None and row["area_m2"] > 30000
+        assert 0 < row["land_m2"] <= row["area_m2"]
+    # No centerlines: columns are None, rings still stripped.
+    rows2 = [{"page_key": "p1", "truth_ring": ring}]
+    attach_land(rows2, [], tmp_path / "absent.geojson")
+    assert rows2[0]["area_m2"] is None and "truth_ring" not in rows2[0]

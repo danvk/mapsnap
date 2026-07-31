@@ -25,6 +25,10 @@ export interface ComparePageStats {
   skewDegrees?: number;
   /** Anisotropy (x/y scale ratio, 1 = isotropic), when reported (aniso column); else undefined. */
   anisotropy?: number;
+  /** Truth footprint area in km², when the table carries land columns; else undefined. */
+  areaKm2?: number;
+  /** Usable-land area in km² (street-proximity weighted) — the score's per-page weight. */
+  landKm2?: number;
 }
 
 /** Response of GET /iiif-api/compare — paired-page stats plus the table's summary footer. */
@@ -38,6 +42,13 @@ export interface CompareResponse {
   missing: string[];
   /** The summary block below the table ("N/M = …% pages georeferenced", RMSE stats, …); "" if none. */
   footer: string;
+  /**
+   * Usable-land km² per truth page key, covering BOTH placed and `(no fit)` rows,
+   * when the table carries land columns. With `pages[].rmseFt` this is enough to
+   * compute the land-weighted score client-side:
+   * (Σ land where rmse ≤ 25 − Σ land where rmse ≥ 200) / Σ land over every key here.
+   */
+  landKm2ByPage?: Record<string, number>;
 }
 
 // Whether a line is a header/rule row of the compare table (not a data row).
@@ -52,6 +63,38 @@ export function parseMissingRow(line: string): string | null {
   const tokens = line.slice(0, trailing.index).trim().split(/\s+/);
   const key = tokens[0];
   return key && !isSeparator(key) ? key : null;
+}
+
+/**
+ * Usable-land km² per page key over every table row (placed and `(no fit)`),
+ * or null when the table predates the land columns. The header is the
+ * authority: without `land_km2` there, a row's trailing numeric pair is
+ * skew/aniso and must not be misread as land.
+ */
+export function parseLandByPage(text: string): Record<string, number> | null {
+  const lines = text.split('\n');
+  if (!lines.some((line) => /area_km2\s+land_km2/.test(line))) return null;
+  const land: Record<string, number> = {};
+  for (const line of lines) {
+    const entry = parseRowLandKm2(line);
+    if (entry) land[entry[0]] = entry[1];
+  }
+  return Object.keys(land).length > 0 ? land : null;
+}
+
+// The land pair of one row; only meaningful when the header carries land columns.
+function parseRowLandKm2(line: string): [string, number] | null {
+  let body = line;
+  const trailing = body.match(/\s+\(([^)]*)\)\s*$/);
+  if (trailing) body = body.slice(0, trailing.index);
+  const tokens = body.trim().split(/\s+/);
+  const key = tokens[0];
+  if (!key || isSeparator(key) || tokens.length < 3) return null;
+  const land = Number(tokens[tokens.length - 1]);
+  const area = Number(tokens[tokens.length - 2]);
+  // Land columns always travel as a pair; a lone numeric tail is another column.
+  if (!Number.isFinite(land) || !Number.isFinite(area)) return null;
+  return [key.toLowerCase(), land];
 }
 
 // Parse one data row; returns null for `(no fit)` (truth-only) rows and unparseable lines.
@@ -84,9 +127,12 @@ function parseRow(line: string): ComparePageStats | null {
   ) {
     return null;
   }
-  // Skew/aniso are the last two columns; absent in older tables, so they don't gate the row.
+  // Skew/aniso and the land columns trail the table; absent in older tables,
+  // so they never gate the row.
   const skewDegrees = Number(numeric[11]);
   const anisotropy = Number(numeric[12]);
+  const areaKm2 = Number(numeric[13]);
+  const landKm2 = Number(numeric[14]);
   const genPageKey =
     (disagree ? (genKeyOverride ?? tokens[0]) : tokens[0]) ?? '';
   return {
@@ -98,6 +144,8 @@ function parseRow(line: string): ComparePageStats | null {
     scaleErrorPercent,
     ...(Number.isFinite(skewDegrees) ? { skewDegrees } : {}),
     ...(Number.isFinite(anisotropy) ? { anisotropy } : {}),
+    ...(Number.isFinite(areaKm2) ? { areaKm2 } : {}),
+    ...(Number.isFinite(landKm2) ? { landKm2 } : {}),
   };
 }
 
