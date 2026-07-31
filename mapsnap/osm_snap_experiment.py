@@ -1735,7 +1735,39 @@ RUNG_NAME_FLOOR = -0.10
 RUNG_SELECT_MIN = 0.9
 
 
-def rung_flip(record: dict) -> dict | None:
+def printed_note_ratios(volume: Path, records: list[dict]) -> dict[str, float]:
+    """expected/incumbent scale ratio per fitted page whose printed note read.
+
+    Calibrates metres-per-pixel-per-printed-ft from the volume's own fitted
+    note-bearing pages (the scan resolution, measured), then converts each
+    page's note into an expected scale. See mapsnap.printed_scale.
+    """
+    from mapsnap.printed_scale import printed_scale_ft
+
+    notes: dict[str, int] = {}
+    inc_scale: dict[str, float] = {}
+    for record in records:
+        incumbent = record.get("incumbent") or {}
+        affine = incumbent.get("world_affine")
+        if not affine:
+            continue
+        note = printed_scale_ft(volume / f"{record['target']}.streets.json")
+        if note is None:
+            continue
+        notes[record["target"]] = note[0]
+        inc_scale[record["target"]] = math.hypot(affine[1][0], affine[1][1])
+    samples = sorted(inc_scale[t] / notes[t] for t in notes)
+    if len(samples) < 3:
+        return {}
+    unit = samples[len(samples) // 2]  # median deg-per-px per printed ft
+    return {target: (unit * notes[target]) / inc_scale[target] for target in notes}
+
+
+RUNG_NOTE_BAND = (0.80, 1.25)
+"""How closely a scale must match the page's printed note to claim its authority."""
+
+
+def rung_flip(record: dict, note_ratio: float | None = None) -> dict | None:
     """Adopt a double-scale candidate over a half-scale incumbent, or None.
 
     Calibrated offline over all 1228 rung-band candidate pairs in the twelve
@@ -1758,6 +1790,14 @@ def rung_flip(record: dict) -> dict | None:
     if inc_scale <= 0 or incumbent_verification is None:
         return None
     incumbent_name = (incumbent.get("name") or {}).get("score")
+    # The printed scale note (#196), where read, is authority rather than
+    # inference: note_ratio is expected/incumbent scale. An incumbent that
+    # contradicts its own page's note by ~a rung forfeits the up-only
+    # protection, so a note-matching candidate may flip DOWN as well -- the
+    # direction verification alone cannot referee (small-footprint bias).
+    note_condemns = note_ratio is not None and not (
+        1 / RUNG_NOTE_BAND[1] <= note_ratio <= 1 / RUNG_NOTE_BAND[0]
+    )
     best_index = None
     best_margin = 0.0
     for index, candidate in enumerate(candidates):
@@ -1767,7 +1807,14 @@ def rung_flip(record: dict) -> dict | None:
         if not affine or verification is None or score is None:
             continue
         ratio = math.hypot(affine[1][0], affine[1][1]) / inc_scale
-        if not (RUNG_UP_BAND[0] <= ratio <= RUNG_UP_BAND[1]):
+        in_up_band = RUNG_UP_BAND[0] <= ratio <= RUNG_UP_BAND[1]
+        in_down_band = 1 / RUNG_UP_BAND[1] <= ratio <= 1 / RUNG_UP_BAND[0]
+        note_endorses = (
+            note_condemns
+            and note_ratio is not None
+            and RUNG_NOTE_BAND[0] <= ratio / note_ratio <= RUNG_NOTE_BAND[1]
+        )
+        if not (in_up_band or (in_down_band and note_endorses)):
             continue
         if score < RUNG_SELECT_MIN:
             continue
@@ -2053,6 +2100,7 @@ def cmd_select(
     elif mode == "arbitrate":
         # The union rescue selection, plus challenges to placed RANSAC fits.
         selections = select_union(volume, rescue, gate_score, gate_margin, allowed)
+        note_ratios = printed_note_ratios(volume, records)
         challenged = refined = flipped = 0
         for record in records:
             if record.get("fit_state") != "fitted":
@@ -2069,7 +2117,7 @@ def cmd_select(
                 selections.append(refinement)
                 refined += 1
                 continue
-            flip = rung_flip(record)
+            flip = rung_flip(record, note_ratio=note_ratios.get(record["target"]))
             if flip is not None:
                 selections.append(flip)
                 flipped += 1
