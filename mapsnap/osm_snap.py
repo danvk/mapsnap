@@ -197,6 +197,41 @@ class PageContext:
         return self.orientation_cache
 
 
+def cluster_search_centers(
+    centers: list[tuple[float, float]], link_m: float
+) -> list[tuple[float, float]]:
+    """Merge search centers whose discs largely overlap (single linkage, centroid).
+
+    A page whose key-map number is printed many times (LA's lettered p1499
+    sheets inherit ~20 detections of "1499") searches every center with a full
+    NCC+refine pass; centers closer than ``link_m`` cover mostly the same
+    ground, so one centroid search suffices. Corpus timing showed center
+    multiplicity is the strongest cost correlate (r=+0.62) while sheet size is
+    not (r=+0.08); see issue #155.
+    """
+    if len(centers) <= 1:
+        return list(centers)
+    kx = 111_320.0 * math.cos(math.radians(centers[0][1]))
+    clusters: list[list[tuple[float, float]]] = []
+    for lon, lat in centers:
+        for cluster in clusters:
+            if any(
+                math.hypot((lon - a) * kx, (lat - b) * 110_540.0) <= link_m
+                for a, b in cluster
+            ):
+                cluster.append((lon, lat))
+                break
+        else:
+            clusters.append([(lon, lat)])
+    return [
+        (
+            sum(c[0] for c in cluster) / len(cluster),
+            sum(c[1] for c in cluster) / len(cluster),
+        )
+        for cluster in clusters
+    ]
+
+
 def frame_around(
     center_lonlat: tuple[float, float], *, half_m: float, res_m: float = OSM_RES_M
 ) -> FrameSpec:

@@ -50,6 +50,7 @@ from mapsnap.osm_snap import (
     adjacency_keymap_rotations,
     affine_theta_deg,
     calibrated_radius_m,
+    cluster_search_centers,
     evaluate_pose,
     frame_around,
     label_osm_rotations,
@@ -61,6 +62,10 @@ from mapsnap.streets import Block, build_block_index
 from mapsnap.utils import default_centerlines, haversine_m
 
 # Pages the rescue channel may place: everything the iiif glob does not see.
+LOCAL_CHALLENGE_RADIUS_M = 150.0
+"""Search radius when challenging a defensible incumbent: covers refinement
+(<100 ft agreement) and rung flips (co-located) with margin, nothing more."""
+
 RESCUE_STATES = {"nofit", "misscale", "1gcp", "outlier", "none"}
 
 
@@ -615,6 +620,8 @@ def build_page_context(
         scales = page_scale_priors(
             vctx.volume_m_per_px, regions, unit.width, unit.height
         )
+    # Overlapping discs are one search; see cluster_search_centers.
+    centers = cluster_search_centers(centers, 0.75 * radius)
     ctx = PageContext(
         stem=unit.stem,
         number=unit.number,
@@ -735,6 +742,34 @@ def page_record(vctx: VolumeContext, unit: PageUnit) -> dict:
             if unit.rmse_ft is not None:
                 incumbent["rmse_ft"] = round(unit.rmse_ft, 1)
             record["incumbent"] = incumbent
+            # A defensible incumbent can only be improved LOCALLY: refinement
+            # requires <100 ft agreement and a rung flip is co-located by
+            # construction, while arbitration (the only rule that moves a page
+            # far) demands an indefensible incumbent. So the challenge search
+            # collapses to one center at the incumbent with a small radius --
+            # the 29-center hunts on LA's lettered sheets were 87% of corpus
+            # snap time spent challenging healthy fits (issue #155).
+            if (
+                incumbent.get("verification") is not None
+                and incumbent["verification"] >= INCUMBENT_DEFENSIBLE_VERIFICATION
+            ):
+                lon_c = float(
+                    unit.gen_affine[0, 0] * unit.width / 2
+                    + unit.gen_affine[0, 1] * unit.height / 2
+                    + unit.gen_affine[0, 2]
+                )
+                lat_c = float(
+                    unit.gen_affine[1, 0] * unit.width / 2
+                    + unit.gen_affine[1, 1] * unit.height / 2
+                    + unit.gen_affine[1, 2]
+                )
+                ctx.search_centers = [(lon_c, lat_c)]
+                ctx.radius_m = min(ctx.radius_m, LOCAL_CHALLENGE_RADIUS_M)
+                record["search"] = {
+                    "centers": [[round(lon_c, 7), round(lat_c, 7)]],
+                    "radius_m": round(ctx.radius_m, 1),
+                    "radius_source": "local-challenge",
+                }
     candidates = snap_page(ctx, vctx.feature_index)
     if not candidates:
         record["status"] = "no_candidates"
