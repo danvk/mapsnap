@@ -17,15 +17,15 @@
       "metadata": [
         {
           "label": "streets",
-          "value": "3"
+          "value": "0"
         },
         {
           "label": "intersections",
-          "value": "1"
+          "value": "0"
         }
       ],
-      "created": "2026-07-18T02:42:26Z",
-      "modified": "2026-07-18T02:42:26Z",
+      "created": "2026-07-30T23:53:33Z",
+      "modified": "2026-07-30T23:53:33Z",
       "creator": [
         {
           "id": "https://oldinsurancemaps.net/profile/danvk",
@@ -44,7 +44,7 @@
         },
         "selector": {
           "type": "SvgSelector",
-          "value": "<svg><polygon points=\"-0.0,6732.3 0.0,0.0 4016.2,0.0 5109.2,733.6 5609.4,765.5 5681.8,6161.9 5250.0,6155.3 5281.9,6684.5 4704.1,6708.0 -0.0,6732.3\" /></svg>"
+          "value": "<svg><polygon points=\"-0.0,6902.4 -0.0,0.0 4467.0,0.0 4478.0,460.3 5085.3,858.2 5593.5,893.0 5668.6,6356.2 5229.8,6347.4 5261.7,6873.0 -0.0,6902.4\" /></svg>"
         }
       },
       "body": {
@@ -73,8 +73,8 @@
             "geometry": {
               "type": "Point",
               "coordinates": [
-                -86.78418395211922,
-                36.168499104831575
+                -86.78415274197828,
+                36.1685593903496
               ]
             }
           },
@@ -94,8 +94,8 @@
             "geometry": {
               "type": "Point",
               "coordinates": [
-                -86.78073249285357,
-                36.16992610190361
+                -86.78076499811696,
+                36.16997749166741
               ]
             }
           },
@@ -115,8 +115,8 @@
             "geometry": {
               "type": "Point",
               "coordinates": [
-                -86.77858027872998,
-                36.1665301261288
+                -86.77864011795216,
+                36.1666223751157
               ]
             }
           },
@@ -136,29 +136,8 @@
             "geometry": {
               "type": "Point",
               "coordinates": [
-                -86.78203173799562,
-                36.16510312905676
-              ]
-            }
-          },
-          {
-            "type": "Feature",
-            "properties": {
-              "resourceCoords": [
-                5620.0,
-                2136.0
-              ],
-              "creator": {
-                "id": "https://oldinsurancemaps.net/profile/danvk",
-                "type": "Person"
-              },
-              "type": "gcp"
-            },
-            "geometry": {
-              "type": "Point",
-              "coordinates": [
-                -86.7806732,
-                36.168812
+                -86.78202786181348,
+                36.16520427379789
               ]
             }
           }
@@ -176,15 +155,15 @@
       "metadata": [
         {
           "label": "streets",
-          "value": "5"
+          "value": "0"
         },
         {
           "label": "intersections",
-          "value": "4"
+          "value": "0"
         }
       ],
-      "created": "2026-07-18T02:42:26Z",
-      "modified": "2026-07-18T02:42:26Z",
+      "created": "2026-07-30T23:53:33Z",
+      "modified": "2026-07-30T23:53:33Z",
       "creator": [
         {
           "id": "https://oldinsurancemaps.net/profile/danvk",
@@ -203,34 +182,37 @@
         },
         "selector": {
           "type": "SvgSelector",
-          "value": "<svg><polygon points=\"1457.8,6606.5 1376.9,1950.8 945.3,1925.2 -0.0,1299.8 -0.0,0.0 6600.0,0.0 6600.0,8040.0 4084.1,8040.0 3987.5,6536.1 1457.8,6606.5\" /></svg>"
+          "value": "<svg><polygon points=\"1035.7,6776.4 1095.9,1598.6 592.7,1552.1 -0.0,1143.2 -0.0,0.0 6600.0,0.0 6600.0,8040.0 4034.8,8040.0 3988.3,6778.3 3933.3,6773.9 1035.7,6776.4\" /></svg>"
         }
       },
       "body": {
         "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd396m:g3964m:g3964nm:g3964nm_g08356195701A:08356_01A_1957-0011/gcps",
         "type": "FeatureCollection",
         "transformation": {
-          "type": "helmert"
+          "type": "polynomial",
+          "options": {
+            "order": 1
+          }
         },
         "features": [
           {
             "type": "Feature",
             "properties": {
               "resourceCoords": [
-                3024.0,
-                3124.0
+                0.0,
+                0.0
               ],
               "creator": {
                 "id": "https://oldinsurancemaps.net/profile/danvk",
                 "type": "Person"
               },
-              "type": "gcp"
+              "type": "corner"
             },
             "geometry": {
               "type": "Point",
               "coordinates": [
-                -86.7796837,
-                36.1692225
+                -86.78205117467492,
+                36.16980436758476
               ]
             }
           },
@@ -238,20 +220,62 @@
             "type": "Feature",
             "properties": {
               "resourceCoords": [
-                3024.0,
-                1200.0
+                6600.0,
+                0.0
               ],
               "creator": {
                 "id": "https://oldinsurancemaps.net/profile/danvk",
                 "type": "Person"
               },
-              "type": "gcp"
+              "type": "corner"
             },
             "geometry": {
               "type": "Point",
               "coordinates": [
-                -86.780276,
-                36.1701663
+                -86.778678677953,
+                36.171299880459415
+              ]
+            }
+          },
+          {
+            "type": "Feature",
+            "properties": {
+              "resourceCoords": [
+                6600.0,
+                8040.0
+              ],
+              "creator": {
+                "id": "https://oldinsurancemaps.net/profile/danvk",
+                "type": "Person"
+              },
+              "type": "corner"
+            },
+            "geometry": {
+              "type": "Point",
+              "coordinates": [
+                -86.77643777187346,
+                36.16795991278198
+              ]
+            }
+          },
+          {
+            "type": "Feature",
+            "properties": {
+              "resourceCoords": [
+                0.0,
+                8040.0
+              ],
+              "creator": {
+                "id": "https://oldinsurancemaps.net/profile/danvk",
+                "type": "Person"
+              },
+              "type": "corner"
+            },
+            "geometry": {
+              "type": "Point",
+              "coordinates": [
+                -86.77981026859538,
+                36.166464399907326
               ]
             }
           }
@@ -269,15 +293,15 @@
       "metadata": [
         {
           "label": "streets",
-          "value": "5"
+          "value": "0"
         },
         {
           "label": "intersections",
-          "value": "6"
+          "value": "0"
         }
       ],
-      "created": "2026-07-18T02:42:26Z",
-      "modified": "2026-07-18T02:42:26Z",
+      "created": "2026-07-30T23:53:33Z",
+      "modified": "2026-07-30T23:53:33Z",
       "creator": [
         {
           "id": "https://oldinsurancemaps.net/profile/danvk",
@@ -296,34 +320,37 @@
         },
         "selector": {
           "type": "SvgSelector",
-          "value": "<svg><polygon points=\"1770.9,6475.6 1778.2,8040.0 -0.0,8040.0 -0.0,352.1 4988.7,771.8 2439.3,6478.0 1770.9,6475.6\" /></svg>"
+          "value": "<svg><polygon points=\"1796.2,8040.0 -0.0,8040.0 -0.0,416.1 4951.9,854.8 4974.2,5881.2 3994.3,5876.6 3991.6,6475.6 1785.4,6458.8 1796.2,8040.0\" /></svg>"
         }
       },
       "body": {
         "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd396m:g3964m:g3964nm:g3964nm_g08356195701A:08356_01A_1957-0013/gcps",
         "type": "FeatureCollection",
         "transformation": {
-          "type": "helmert"
+          "type": "polynomial",
+          "options": {
+            "order": 1
+          }
         },
         "features": [
           {
             "type": "Feature",
             "properties": {
               "resourceCoords": [
-                1756.0,
-                3508.0
+                0.0,
+                0.0
               ],
               "creator": {
                 "id": "https://oldinsurancemaps.net/profile/danvk",
                 "type": "Person"
               },
-              "type": "gcp"
+              "type": "corner"
             },
             "geometry": {
               "type": "Point",
               "coordinates": [
-                -86.7989413,
-                36.1569371
+                -86.80089728511139,
+                36.15793168761354
               ]
             }
           },
@@ -331,20 +358,2960 @@
             "type": "Feature",
             "properties": {
               "resourceCoords": [
-                5000.0,
-                5876.0
+                6600.0,
+                0.0
               ],
               "creator": {
                 "id": "https://oldinsurancemaps.net/profile/danvk",
                 "type": "Person"
               },
-              "type": "gcp"
+              "type": "corner"
             },
             "geometry": {
               "type": "Point",
               "coordinates": [
-                -86.7966284,
-                36.156783
+                -86.79761095710356,
+                36.159566916161545
+              ]
+            }
+          },
+          {
+            "type": "Feature",
+            "properties": {
+              "resourceCoords": [
+                6600.0,
+                8040.0
+              ],
+              "creator": {
+                "id": "https://oldinsurancemaps.net/profile/danvk",
+                "type": "Person"
+              },
+              "type": "corner"
+            },
+            "geometry": {
+              "type": "Point",
+              "coordinates": [
+                -86.79516106531472,
+                36.15631179848918
+              ]
+            }
+          },
+          {
+            "type": "Feature",
+            "properties": {
+              "resourceCoords": [
+                0.0,
+                8040.0
+              ],
+              "creator": {
+                "id": "https://oldinsurancemaps.net/profile/danvk",
+                "type": "Person"
+              },
+              "type": "corner"
+            },
+            "geometry": {
+              "type": "Point",
+              "coordinates": [
+                -86.79844739332255,
+                36.154676569941174
+              ]
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd396m:g3964m:g3964nm:g3964nm_g08356195701A:08356_01A_1957-0015/georef",
+      "type": "Annotation",
+      "@context": [
+        "http://iiif.io/api/extension/georef/1/context.json",
+        "http://iiif.io/api/presentation/3/context.json"
+      ],
+      "label": "Nashville, Tenn. | 1957 | Vol. 1a p15",
+      "metadata": [
+        {
+          "label": "streets",
+          "value": "0"
+        },
+        {
+          "label": "intersections",
+          "value": "0"
+        }
+      ],
+      "created": "2026-07-30T23:53:33Z",
+      "modified": "2026-07-30T23:53:33Z",
+      "creator": [
+        {
+          "id": "https://oldinsurancemaps.net/profile/danvk",
+          "type": "Person"
+        }
+      ],
+      "motivation": "georeferencing",
+      "target": {
+        "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd396m:g3964m:g3964nm:g3964nm_g08356195701A:08356_01A_1957-0015/selector",
+        "type": "SpecificResource",
+        "source": {
+          "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd396m:g3964m:g3964nm:g3964nm_g08356195701A:08356_01A_1957-0015/info.json",
+          "type": "ImageService2",
+          "height": 8040,
+          "width": 6600
+        },
+        "selector": {
+          "type": "SvgSelector",
+          "value": "<svg><polygon points=\"746.8,1717.0 6600.0,1456.7 6600.0,7050.2 5672.1,7043.3 3044.5,8040.0 -0.0,8040.0 -0.0,6758.1 746.8,1717.0\" /></svg>"
+        }
+      },
+      "body": {
+        "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd396m:g3964m:g3964nm:g3964nm_g08356195701A:08356_01A_1957-0015/gcps",
+        "type": "FeatureCollection",
+        "transformation": {
+          "type": "polynomial",
+          "options": {
+            "order": 1
+          }
+        },
+        "features": [
+          {
+            "type": "Feature",
+            "properties": {
+              "resourceCoords": [
+                0.0,
+                0.0
+              ],
+              "creator": {
+                "id": "https://oldinsurancemaps.net/profile/danvk",
+                "type": "Person"
+              },
+              "type": "corner"
+            },
+            "geometry": {
+              "type": "Point",
+              "coordinates": [
+                -86.79677431413279,
+                36.15638987767294
+              ]
+            }
+          },
+          {
+            "type": "Feature",
+            "properties": {
+              "resourceCoords": [
+                6600.0,
+                0.0
+              ],
+              "creator": {
+                "id": "https://oldinsurancemaps.net/profile/danvk",
+                "type": "Person"
+              },
+              "type": "corner"
+            },
+            "geometry": {
+              "type": "Point",
+              "coordinates": [
+                -86.79336412130294,
+                36.157876222405555
+              ]
+            }
+          },
+          {
+            "type": "Feature",
+            "properties": {
+              "resourceCoords": [
+                6600.0,
+                8040.0
+              ],
+              "creator": {
+                "id": "https://oldinsurancemaps.net/profile/danvk",
+                "type": "Person"
+              },
+              "type": "corner"
+            },
+            "geometry": {
+              "type": "Point",
+              "coordinates": [
+                -86.79113732703736,
+                36.15449835484699
+              ]
+            }
+          },
+          {
+            "type": "Feature",
+            "properties": {
+              "resourceCoords": [
+                0.0,
+                8040.0
+              ],
+              "creator": {
+                "id": "https://oldinsurancemaps.net/profile/danvk",
+                "type": "Person"
+              },
+              "type": "corner"
+            },
+            "geometry": {
+              "type": "Point",
+              "coordinates": [
+                -86.79454751986721,
+                36.15301201011438
+              ]
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd396m:g3964m:g3964nm:g3964nm_g08356195701A:08356_01A_1957-0016/georef",
+      "type": "Annotation",
+      "@context": [
+        "http://iiif.io/api/extension/georef/1/context.json",
+        "http://iiif.io/api/presentation/3/context.json"
+      ],
+      "label": "Nashville, Tenn. | 1957 | Vol. 1a p16",
+      "metadata": [
+        {
+          "label": "streets",
+          "value": "0"
+        },
+        {
+          "label": "intersections",
+          "value": "0"
+        }
+      ],
+      "created": "2026-07-30T23:53:33Z",
+      "modified": "2026-07-30T23:53:33Z",
+      "creator": [
+        {
+          "id": "https://oldinsurancemaps.net/profile/danvk",
+          "type": "Person"
+        }
+      ],
+      "motivation": "georeferencing",
+      "target": {
+        "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd396m:g3964m:g3964nm:g3964nm_g08356195701A:08356_01A_1957-0016/selector",
+        "type": "SpecificResource",
+        "source": {
+          "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd396m:g3964m:g3964nm:g3964nm_g08356195701A:08356_01A_1957-0016/info.json",
+          "type": "ImageService2",
+          "height": 8040,
+          "width": 6600
+        },
+        "selector": {
+          "type": "SvgSelector",
+          "value": "<svg><polygon points=\"937.7,6971.4 907.7,1319.6 5605.7,1028.3 5896.2,3233.4 5936.7,6982.0 937.7,6971.4\" /></svg>"
+        }
+      },
+      "body": {
+        "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd396m:g3964m:g3964nm:g3964nm_g08356195701A:08356_01A_1957-0016/gcps",
+        "type": "FeatureCollection",
+        "transformation": {
+          "type": "polynomial",
+          "options": {
+            "order": 1
+          }
+        },
+        "features": [
+          {
+            "type": "Feature",
+            "properties": {
+              "resourceCoords": [
+                0.0,
+                0.0
+              ],
+              "creator": {
+                "id": "https://oldinsurancemaps.net/profile/danvk",
+                "type": "Person"
+              },
+              "type": "corner"
+            },
+            "geometry": {
+              "type": "Point",
+              "coordinates": [
+                -86.79378425822718,
+                36.157614166146054
+              ]
+            }
+          },
+          {
+            "type": "Feature",
+            "properties": {
+              "resourceCoords": [
+                6600.0,
+                0.0
+              ],
+              "creator": {
+                "id": "https://oldinsurancemaps.net/profile/danvk",
+                "type": "Person"
+              },
+              "type": "corner"
+            },
+            "geometry": {
+              "type": "Point",
+              "coordinates": [
+                -86.79039969005568,
+                36.159070560486825
+              ]
+            }
+          },
+          {
+            "type": "Feature",
+            "properties": {
+              "resourceCoords": [
+                6600.0,
+                8040.0
+              ],
+              "creator": {
+                "id": "https://oldinsurancemaps.net/profile/danvk",
+                "type": "Person"
+              },
+              "type": "corner"
+            },
+            "geometry": {
+              "type": "Point",
+              "coordinates": [
+                -86.78821773690925,
+                36.1557181201732
+              ]
+            }
+          },
+          {
+            "type": "Feature",
+            "properties": {
+              "resourceCoords": [
+                0.0,
+                8040.0
+              ],
+              "creator": {
+                "id": "https://oldinsurancemaps.net/profile/danvk",
+                "type": "Person"
+              },
+              "type": "corner"
+            },
+            "geometry": {
+              "type": "Point",
+              "coordinates": [
+                -86.79160230508074,
+                36.15426172583243
+              ]
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd396m:g3964m:g3964nm:g3964nm_g08356195701A:08356_01A_1957-0017/georef",
+      "type": "Annotation",
+      "@context": [
+        "http://iiif.io/api/extension/georef/1/context.json",
+        "http://iiif.io/api/presentation/3/context.json"
+      ],
+      "label": "Nashville, Tenn. | 1957 | Vol. 1a p17",
+      "metadata": [
+        {
+          "label": "streets",
+          "value": "0"
+        },
+        {
+          "label": "intersections",
+          "value": "0"
+        }
+      ],
+      "created": "2026-07-30T23:53:33Z",
+      "modified": "2026-07-30T23:53:33Z",
+      "creator": [
+        {
+          "id": "https://oldinsurancemaps.net/profile/danvk",
+          "type": "Person"
+        }
+      ],
+      "motivation": "georeferencing",
+      "target": {
+        "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd396m:g3964m:g3964nm:g3964nm_g08356195701A:08356_01A_1957-0017/selector",
+        "type": "SpecificResource",
+        "source": {
+          "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd396m:g3964m:g3964nm:g3964nm_g08356195701A:08356_01A_1957-0017/info.json",
+          "type": "ImageService2",
+          "height": 8040,
+          "width": 6600
+        },
+        "selector": {
+          "type": "SvgSelector",
+          "value": "<svg><polygon points=\"6177.1,6991.6 486.5,6992.7 443.0,3254.2 151.6,1055.1 6160.6,717.1 6177.1,6991.6\" /></svg>"
+        }
+      },
+      "body": {
+        "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd396m:g3964m:g3964nm:g3964nm_g08356195701A:08356_01A_1957-0017/gcps",
+        "type": "FeatureCollection",
+        "transformation": {
+          "type": "polynomial",
+          "options": {
+            "order": 1
+          }
+        },
+        "features": [
+          {
+            "type": "Feature",
+            "properties": {
+              "resourceCoords": [
+                0.0,
+                0.0
+              ],
+              "creator": {
+                "id": "https://oldinsurancemaps.net/profile/danvk",
+                "type": "Person"
+              },
+              "type": "corner"
+            },
+            "geometry": {
+              "type": "Point",
+              "coordinates": [
+                -86.79099514726114,
+                36.15883024193177
+              ]
+            }
+          },
+          {
+            "type": "Feature",
+            "properties": {
+              "resourceCoords": [
+                6600.0,
+                0.0
+              ],
+              "creator": {
+                "id": "https://oldinsurancemaps.net/profile/danvk",
+                "type": "Person"
+              },
+              "type": "corner"
+            },
+            "geometry": {
+              "type": "Point",
+              "coordinates": [
+                -86.78760000843698,
+                36.16028826189029
+              ]
+            }
+          },
+          {
+            "type": "Feature",
+            "properties": {
+              "resourceCoords": [
+                6600.0,
+                8040.0
+              ],
+              "creator": {
+                "id": "https://oldinsurancemaps.net/profile/danvk",
+                "type": "Person"
+              },
+              "type": "corner"
+            },
+            "geometry": {
+              "type": "Point",
+              "coordinates": [
+                -86.7854155883564,
+                36.15692539968641
+              ]
+            }
+          },
+          {
+            "type": "Feature",
+            "properties": {
+              "resourceCoords": [
+                0.0,
+                8040.0
+              ],
+              "creator": {
+                "id": "https://oldinsurancemaps.net/profile/danvk",
+                "type": "Person"
+              },
+              "type": "corner"
+            },
+            "geometry": {
+              "type": "Point",
+              "coordinates": [
+                -86.78881072718056,
+                36.15546737972789
+              ]
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd396m:g3964m:g3964nm:g3964nm_g08356195701A:08356_01A_1957-0018/georef",
+      "type": "Annotation",
+      "@context": [
+        "http://iiif.io/api/extension/georef/1/context.json",
+        "http://iiif.io/api/presentation/3/context.json"
+      ],
+      "label": "Nashville, Tenn. | 1957 | Vol. 1a p18",
+      "metadata": [
+        {
+          "label": "streets",
+          "value": "0"
+        },
+        {
+          "label": "intersections",
+          "value": "0"
+        }
+      ],
+      "created": "2026-07-30T23:53:33Z",
+      "modified": "2026-07-30T23:53:33Z",
+      "creator": [
+        {
+          "id": "https://oldinsurancemaps.net/profile/danvk",
+          "type": "Person"
+        }
+      ],
+      "motivation": "georeferencing",
+      "target": {
+        "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd396m:g3964m:g3964nm:g3964nm_g08356195701A:08356_01A_1957-0018/selector",
+        "type": "SpecificResource",
+        "source": {
+          "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd396m:g3964m:g3964nm:g3964nm_g08356195701A:08356_01A_1957-0018/info.json",
+          "type": "ImageService2",
+          "height": 8040,
+          "width": 6600
+        },
+        "selector": {
+          "type": "SvgSelector",
+          "value": "<svg><polygon points=\"-0.0,6963.7 -0.0,642.0 6169.3,462.5 6180.4,6994.4 -0.0,6963.7\" /></svg>"
+        }
+      },
+      "body": {
+        "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd396m:g3964m:g3964nm:g3964nm_g08356195701A:08356_01A_1957-0018/gcps",
+        "type": "FeatureCollection",
+        "transformation": {
+          "type": "polynomial",
+          "options": {
+            "order": 1
+          }
+        },
+        "features": [
+          {
+            "type": "Feature",
+            "properties": {
+              "resourceCoords": [
+                0.0,
+                0.0
+              ],
+              "creator": {
+                "id": "https://oldinsurancemaps.net/profile/danvk",
+                "type": "Person"
+              },
+              "type": "corner"
+            },
+            "geometry": {
+              "type": "Point",
+              "coordinates": [
+                -86.78780520761408,
+                36.16015739636004
+              ]
+            }
+          },
+          {
+            "type": "Feature",
+            "properties": {
+              "resourceCoords": [
+                6600.0,
+                0.0
+              ],
+              "creator": {
+                "id": "https://oldinsurancemaps.net/profile/danvk",
+                "type": "Person"
+              },
+              "type": "corner"
+            },
+            "geometry": {
+              "type": "Point",
+              "coordinates": [
+                -86.78444001931277,
+                36.16161173515242
+              ]
+            }
+          },
+          {
+            "type": "Feature",
+            "properties": {
+              "resourceCoords": [
+                6600.0,
+                8040.0
+              ],
+              "creator": {
+                "id": "https://oldinsurancemaps.net/profile/danvk",
+                "type": "Person"
+              },
+              "type": "corner"
+            },
+            "geometry": {
+              "type": "Point",
+              "coordinates": [
+                -86.78226107727853,
+                36.158278595514105
+              ]
+            }
+          },
+          {
+            "type": "Feature",
+            "properties": {
+              "resourceCoords": [
+                0.0,
+                8040.0
+              ],
+              "creator": {
+                "id": "https://oldinsurancemaps.net/profile/danvk",
+                "type": "Person"
+              },
+              "type": "corner"
+            },
+            "geometry": {
+              "type": "Point",
+              "coordinates": [
+                -86.78562626557984,
+                36.15682425672173
+              ]
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd396m:g3964m:g3964nm:g3964nm_g08356195701A:08356_01A_1957-0019/georef",
+      "type": "Annotation",
+      "@context": [
+        "http://iiif.io/api/extension/georef/1/context.json",
+        "http://iiif.io/api/presentation/3/context.json"
+      ],
+      "label": "Nashville, Tenn. | 1957 | Vol. 1a p19",
+      "metadata": [
+        {
+          "label": "streets",
+          "value": "0"
+        },
+        {
+          "label": "intersections",
+          "value": "0"
+        }
+      ],
+      "created": "2026-07-30T23:53:33Z",
+      "modified": "2026-07-30T23:53:33Z",
+      "creator": [
+        {
+          "id": "https://oldinsurancemaps.net/profile/danvk",
+          "type": "Person"
+        }
+      ],
+      "motivation": "georeferencing",
+      "target": {
+        "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd396m:g3964m:g3964nm:g3964nm_g08356195701A:08356_01A_1957-0019/selector",
+        "type": "SpecificResource",
+        "source": {
+          "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd396m:g3964m:g3964nm:g3964nm_g08356195701A:08356_01A_1957-0019/info.json",
+          "type": "ImageService2",
+          "height": 8040,
+          "width": 6600
+        },
+        "selector": {
+          "type": "SvgSelector",
+          "value": "<svg><polygon points=\"6046.3,7526.7 1001.1,7478.8 989.7,5730.3 -0.0,5727.2 -0.0,5124.7 985.7,5124.9 942.0,0.0 3950.8,0.0 3939.4,261.6 4689.7,305.2 6046.3,7526.7\" /></svg>"
+        }
+      },
+      "body": {
+        "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd396m:g3964m:g3964nm:g3964nm_g08356195701A:08356_01A_1957-0019/gcps",
+        "type": "FeatureCollection",
+        "transformation": {
+          "type": "polynomial",
+          "options": {
+            "order": 1
+          }
+        },
+        "features": [
+          {
+            "type": "Feature",
+            "properties": {
+              "resourceCoords": [
+                0.0,
+                0.0
+              ],
+              "creator": {
+                "id": "https://oldinsurancemaps.net/profile/danvk",
+                "type": "Person"
+              },
+              "type": "corner"
+            },
+            "geometry": {
+              "type": "Point",
+              "coordinates": [
+                -86.79865869644998,
+                36.15861048074028
+              ]
+            }
+          },
+          {
+            "type": "Feature",
+            "properties": {
+              "resourceCoords": [
+                6600.0,
+                0.0
+              ],
+              "creator": {
+                "id": "https://oldinsurancemaps.net/profile/danvk",
+                "type": "Person"
+              },
+              "type": "corner"
+            },
+            "geometry": {
+              "type": "Point",
+              "coordinates": [
+                -86.79538249034111,
+                36.16022412724172
+              ]
+            }
+          },
+          {
+            "type": "Feature",
+            "properties": {
+              "resourceCoords": [
+                6600.0,
+                8040.0
+              ],
+              "creator": {
+                "id": "https://oldinsurancemaps.net/profile/danvk",
+                "type": "Person"
+              },
+              "type": "corner"
+            },
+            "geometry": {
+              "type": "Point",
+              "coordinates": [
+                -86.79296490780558,
+                36.15697906872079
+              ]
+            }
+          },
+          {
+            "type": "Feature",
+            "properties": {
+              "resourceCoords": [
+                0.0,
+                8040.0
+              ],
+              "creator": {
+                "id": "https://oldinsurancemaps.net/profile/danvk",
+                "type": "Person"
+              },
+              "type": "corner"
+            },
+            "geometry": {
+              "type": "Point",
+              "coordinates": [
+                -86.79624111391443,
+                36.155365422219354
+              ]
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd396m:g3964m:g3964nm:g3964nm_g08356195701A:08356_01A_1957-0020/georef",
+      "type": "Annotation",
+      "@context": [
+        "http://iiif.io/api/extension/georef/1/context.json",
+        "http://iiif.io/api/presentation/3/context.json"
+      ],
+      "label": "Nashville, Tenn. | 1957 | Vol. 1a p20",
+      "metadata": [
+        {
+          "label": "streets",
+          "value": "0"
+        },
+        {
+          "label": "intersections",
+          "value": "0"
+        }
+      ],
+      "created": "2026-07-30T23:53:33Z",
+      "modified": "2026-07-30T23:53:33Z",
+      "creator": [
+        {
+          "id": "https://oldinsurancemaps.net/profile/danvk",
+          "type": "Person"
+        }
+      ],
+      "motivation": "georeferencing",
+      "target": {
+        "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd396m:g3964m:g3964nm:g3964nm_g08356195701A:08356_01A_1957-0020/selector",
+        "type": "SpecificResource",
+        "source": {
+          "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd396m:g3964m:g3964nm:g3964nm_g08356195701A:08356_01A_1957-0020/info.json",
+          "type": "ImageService2",
+          "height": 8040,
+          "width": 6600
+        },
+        "selector": {
+          "type": "SvgSelector",
+          "value": "<svg><polygon points=\"1818.8,7560.6 451.0,390.0 5448.1,618.5 5171.5,1839.4 5118.2,2982.5 5455.3,7555.4 1818.8,7560.6\" /></svg>"
+        }
+      },
+      "body": {
+        "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd396m:g3964m:g3964nm:g3964nm_g08356195701A:08356_01A_1957-0020/gcps",
+        "type": "FeatureCollection",
+        "transformation": {
+          "type": "polynomial",
+          "options": {
+            "order": 1
+          }
+        },
+        "features": [
+          {
+            "type": "Feature",
+            "properties": {
+              "resourceCoords": [
+                0.0,
+                0.0
+              ],
+              "creator": {
+                "id": "https://oldinsurancemaps.net/profile/danvk",
+                "type": "Person"
+              },
+              "type": "corner"
+            },
+            "geometry": {
+              "type": "Point",
+              "coordinates": [
+                -86.79658222687506,
+                36.15968214661709
+              ]
+            }
+          },
+          {
+            "type": "Feature",
+            "properties": {
+              "resourceCoords": [
+                6600.0,
+                0.0
+              ],
+              "creator": {
+                "id": "https://oldinsurancemaps.net/profile/danvk",
+                "type": "Person"
+              },
+              "type": "corner"
+            },
+            "geometry": {
+              "type": "Point",
+              "coordinates": [
+                -86.79327891481304,
+                36.16129888112253
+              ]
+            }
+          },
+          {
+            "type": "Feature",
+            "properties": {
+              "resourceCoords": [
+                6600.0,
+                8040.0
+              ],
+              "creator": {
+                "id": "https://oldinsurancemaps.net/profile/danvk",
+                "type": "Person"
+              },
+              "type": "corner"
+            },
+            "geometry": {
+              "type": "Point",
+              "coordinates": [
+                -86.79085667333538,
+                36.15802701819849
+              ]
+            }
+          },
+          {
+            "type": "Feature",
+            "properties": {
+              "resourceCoords": [
+                0.0,
+                8040.0
+              ],
+              "creator": {
+                "id": "https://oldinsurancemaps.net/profile/danvk",
+                "type": "Person"
+              },
+              "type": "corner"
+            },
+            "geometry": {
+              "type": "Point",
+              "coordinates": [
+                -86.7941599853974,
+                36.15641028369305
+              ]
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd396m:g3964m:g3964nm:g3964nm_g08356195701A:08356_01A_1957-0021/georef",
+      "type": "Annotation",
+      "@context": [
+        "http://iiif.io/api/extension/georef/1/context.json",
+        "http://iiif.io/api/presentation/3/context.json"
+      ],
+      "label": "Nashville, Tenn. | 1957 | Vol. 1a p21",
+      "metadata": [
+        {
+          "label": "streets",
+          "value": "0"
+        },
+        {
+          "label": "intersections",
+          "value": "0"
+        }
+      ],
+      "created": "2026-07-30T23:53:33Z",
+      "modified": "2026-07-30T23:53:33Z",
+      "creator": [
+        {
+          "id": "https://oldinsurancemaps.net/profile/danvk",
+          "type": "Person"
+        }
+      ],
+      "motivation": "georeferencing",
+      "target": {
+        "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd396m:g3964m:g3964nm:g3964nm_g08356195701A:08356_01A_1957-0021/selector",
+        "type": "SpecificResource",
+        "source": {
+          "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd396m:g3964m:g3964nm:g3964nm_g08356195701A:08356_01A_1957-0021/info.json",
+          "type": "ImageService2",
+          "height": 8040,
+          "width": 6600
+        },
+        "selector": {
+          "type": "SvgSelector",
+          "value": "<svg><polygon points=\"1778.7,7244.6 1350.4,2629.1 1382.3,1472.8 1638.4,233.5 5356.9,340.1 5921.3,7137.5 1778.7,7244.6\" /></svg>"
+        }
+      },
+      "body": {
+        "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd396m:g3964m:g3964nm:g3964nm_g08356195701A:08356_01A_1957-0021/gcps",
+        "type": "FeatureCollection",
+        "transformation": {
+          "type": "polynomial",
+          "options": {
+            "order": 1
+          }
+        },
+        "features": [
+          {
+            "type": "Feature",
+            "properties": {
+              "resourceCoords": [
+                0.0,
+                0.0
+              ],
+              "creator": {
+                "id": "https://oldinsurancemaps.net/profile/danvk",
+                "type": "Person"
+              },
+              "type": "corner"
+            },
+            "geometry": {
+              "type": "Point",
+              "coordinates": [
+                -86.79455678867687,
+                36.16047562211533
+              ]
+            }
+          },
+          {
+            "type": "Feature",
+            "properties": {
+              "resourceCoords": [
+                6600.0,
+                0.0
+              ],
+              "creator": {
+                "id": "https://oldinsurancemaps.net/profile/danvk",
+                "type": "Person"
+              },
+              "type": "corner"
+            },
+            "geometry": {
+              "type": "Point",
+              "coordinates": [
+                -86.79125235799279,
+                36.16202421781651
+              ]
+            }
+          },
+          {
+            "type": "Feature",
+            "properties": {
+              "resourceCoords": [
+                6600.0,
+                8040.0
+              ],
+              "creator": {
+                "id": "https://oldinsurancemaps.net/profile/danvk",
+                "type": "Person"
+              },
+              "type": "corner"
+            },
+            "geometry": {
+              "type": "Point",
+              "coordinates": [
+                -86.7889321808438,
+                36.15875127982871
+              ]
+            }
+          },
+          {
+            "type": "Feature",
+            "properties": {
+              "resourceCoords": [
+                0.0,
+                8040.0
+              ],
+              "creator": {
+                "id": "https://oldinsurancemaps.net/profile/danvk",
+                "type": "Person"
+              },
+              "type": "corner"
+            },
+            "geometry": {
+              "type": "Point",
+              "coordinates": [
+                -86.79223661152788,
+                36.15720268412752
+              ]
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd396m:g3964m:g3964nm:g3964nm_g08356195701A:08356_01A_1957-0022/georef",
+      "type": "Annotation",
+      "@context": [
+        "http://iiif.io/api/extension/georef/1/context.json",
+        "http://iiif.io/api/presentation/3/context.json"
+      ],
+      "label": "Nashville, Tenn. | 1957 | Vol. 1a p22",
+      "metadata": [
+        {
+          "label": "streets",
+          "value": "0"
+        },
+        {
+          "label": "intersections",
+          "value": "0"
+        }
+      ],
+      "created": "2026-07-30T23:53:33Z",
+      "modified": "2026-07-30T23:53:33Z",
+      "creator": [
+        {
+          "id": "https://oldinsurancemaps.net/profile/danvk",
+          "type": "Person"
+        }
+      ],
+      "motivation": "georeferencing",
+      "target": {
+        "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd396m:g3964m:g3964nm:g3964nm_g08356195701A:08356_01A_1957-0022/selector",
+        "type": "SpecificResource",
+        "source": {
+          "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd396m:g3964m:g3964nm:g3964nm_g08356195701A:08356_01A_1957-0022/info.json",
+          "type": "ImageService2",
+          "height": 8040,
+          "width": 6600
+        },
+        "selector": {
+          "type": "SvgSelector",
+          "value": "<svg><polygon points=\"526.5,341.8 6600.0,573.9 6600.0,7190.5 916.3,7073.0 526.5,341.8\" /></svg>"
+        }
+      },
+      "body": {
+        "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd396m:g3964m:g3964nm:g3964nm_g08356195701A:08356_01A_1957-0022/gcps",
+        "type": "FeatureCollection",
+        "transformation": {
+          "type": "polynomial",
+          "options": {
+            "order": 1
+          }
+        },
+        "features": [
+          {
+            "type": "Feature",
+            "properties": {
+              "resourceCoords": [
+                0.0,
+                0.0
+              ],
+              "creator": {
+                "id": "https://oldinsurancemaps.net/profile/danvk",
+                "type": "Person"
+              },
+              "type": "corner"
+            },
+            "geometry": {
+              "type": "Point",
+              "coordinates": [
+                -86.79214162286007,
+                36.16160240770952
+              ]
+            }
+          },
+          {
+            "type": "Feature",
+            "properties": {
+              "resourceCoords": [
+                6600.0,
+                0.0
+              ],
+              "creator": {
+                "id": "https://oldinsurancemaps.net/profile/danvk",
+                "type": "Person"
+              },
+              "type": "corner"
+            },
+            "geometry": {
+              "type": "Point",
+              "coordinates": [
+                -86.7888639685691,
+                36.163228187245764
+              ]
+            }
+          },
+          {
+            "type": "Feature",
+            "properties": {
+              "resourceCoords": [
+                6600.0,
+                8040.0
+              ],
+              "creator": {
+                "id": "https://oldinsurancemaps.net/profile/danvk",
+                "type": "Person"
+              },
+              "type": "corner"
+            },
+            "geometry": {
+              "type": "Point",
+              "coordinates": [
+                -86.78642811077088,
+                36.15998182415089
+              ]
+            }
+          },
+          {
+            "type": "Feature",
+            "properties": {
+              "resourceCoords": [
+                0.0,
+                8040.0
+              ],
+              "creator": {
+                "id": "https://oldinsurancemaps.net/profile/danvk",
+                "type": "Person"
+              },
+              "type": "corner"
+            },
+            "geometry": {
+              "type": "Point",
+              "coordinates": [
+                -86.78970576506185,
+                36.15835604461465
+              ]
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd396m:g3964m:g3964nm:g3964nm_g08356195701A:08356_01A_1957-0023/georef",
+      "type": "Annotation",
+      "@context": [
+        "http://iiif.io/api/extension/georef/1/context.json",
+        "http://iiif.io/api/presentation/3/context.json"
+      ],
+      "label": "Nashville, Tenn. | 1957 | Vol. 1a p23",
+      "metadata": [
+        {
+          "label": "streets",
+          "value": "0"
+        },
+        {
+          "label": "intersections",
+          "value": "0"
+        }
+      ],
+      "created": "2026-07-30T23:53:33Z",
+      "modified": "2026-07-30T23:53:33Z",
+      "creator": [
+        {
+          "id": "https://oldinsurancemaps.net/profile/danvk",
+          "type": "Person"
+        }
+      ],
+      "motivation": "georeferencing",
+      "target": {
+        "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd396m:g3964m:g3964nm:g3964nm_g08356195701A:08356_01A_1957-0023/selector",
+        "type": "SpecificResource",
+        "source": {
+          "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd396m:g3964m:g3964nm:g3964nm_g08356195701A:08356_01A_1957-0023/info.json",
+          "type": "ImageService2",
+          "height": 8040,
+          "width": 6600
+        },
+        "selector": {
+          "type": "SvgSelector",
+          "value": "<svg><polygon points=\"398.1,8040.0 -0.0,8040.0 -0.0,0.0 6600.0,0.0 6600.0,6766.7 5418.5,6811.3 5419.4,6881.7 339.2,6647.3 398.1,8040.0\" /></svg>"
+        }
+      },
+      "body": {
+        "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd396m:g3964m:g3964nm:g3964nm_g08356195701A:08356_01A_1957-0023/gcps",
+        "type": "FeatureCollection",
+        "transformation": {
+          "type": "polynomial",
+          "options": {
+            "order": 1
+          }
+        },
+        "features": [
+          {
+            "type": "Feature",
+            "properties": {
+              "resourceCoords": [
+                0.0,
+                0.0
+              ],
+              "creator": {
+                "id": "https://oldinsurancemaps.net/profile/danvk",
+                "type": "Person"
+              },
+              "type": "corner"
+            },
+            "geometry": {
+              "type": "Point",
+              "coordinates": [
+                -86.8027813371755,
+                36.1603831738826
+              ]
+            }
+          },
+          {
+            "type": "Feature",
+            "properties": {
+              "resourceCoords": [
+                6600.0,
+                0.0
+              ],
+              "creator": {
+                "id": "https://oldinsurancemaps.net/profile/danvk",
+                "type": "Person"
+              },
+              "type": "corner"
+            },
+            "geometry": {
+              "type": "Point",
+              "coordinates": [
+                -86.79948865515921,
+                36.16186987346257
+              ]
+            }
+          },
+          {
+            "type": "Feature",
+            "properties": {
+              "resourceCoords": [
+                6600.0,
+                8040.0
+              ],
+              "creator": {
+                "id": "https://oldinsurancemaps.net/profile/danvk",
+                "type": "Person"
+              },
+              "type": "corner"
+            },
+            "geometry": {
+              "type": "Point",
+              "coordinates": [
+                -86.79726121468786,
+                36.15860857060842
+              ]
+            }
+          },
+          {
+            "type": "Feature",
+            "properties": {
+              "resourceCoords": [
+                0.0,
+                8040.0
+              ],
+              "creator": {
+                "id": "https://oldinsurancemaps.net/profile/danvk",
+                "type": "Person"
+              },
+              "type": "corner"
+            },
+            "geometry": {
+              "type": "Point",
+              "coordinates": [
+                -86.80055389670416,
+                36.15712187102845
+              ]
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd396m:g3964m:g3964nm:g3964nm_g08356195701A:08356_01A_1957-0025/georef",
+      "type": "Annotation",
+      "@context": [
+        "http://iiif.io/api/extension/georef/1/context.json",
+        "http://iiif.io/api/presentation/3/context.json"
+      ],
+      "label": "Nashville, Tenn. | 1957 | Vol. 1a p25",
+      "metadata": [
+        {
+          "label": "streets",
+          "value": "0"
+        },
+        {
+          "label": "intersections",
+          "value": "0"
+        }
+      ],
+      "created": "2026-07-30T23:53:33Z",
+      "modified": "2026-07-30T23:53:33Z",
+      "creator": [
+        {
+          "id": "https://oldinsurancemaps.net/profile/danvk",
+          "type": "Person"
+        }
+      ],
+      "motivation": "georeferencing",
+      "target": {
+        "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd396m:g3964m:g3964nm:g3964nm_g08356195701A:08356_01A_1957-0025/selector",
+        "type": "SpecificResource",
+        "source": {
+          "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd396m:g3964m:g3964nm:g3964nm_g08356195701A:08356_01A_1957-0025/info.json",
+          "type": "ImageService2",
+          "height": 8040,
+          "width": 6600
+        },
+        "selector": {
+          "type": "SvgSelector",
+          "value": "<svg><polygon points=\"-0.0,7034.3 0.0,0.0 4597.7,0.0 4600.0,672.7 6600.0,709.3 6600.0,5021.1 5967.5,7071.6 -0.0,7034.3\" /></svg>"
+        }
+      },
+      "body": {
+        "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd396m:g3964m:g3964nm:g3964nm_g08356195701A:08356_01A_1957-0025/gcps",
+        "type": "FeatureCollection",
+        "transformation": {
+          "type": "polynomial",
+          "options": {
+            "order": 1
+          }
+        },
+        "features": [
+          {
+            "type": "Feature",
+            "properties": {
+              "resourceCoords": [
+                0.0,
+                0.0
+              ],
+              "creator": {
+                "id": "https://oldinsurancemaps.net/profile/danvk",
+                "type": "Person"
+              },
+              "type": "corner"
+            },
+            "geometry": {
+              "type": "Point",
+              "coordinates": [
+                -86.7985265727976,
+                36.16229084737991
+              ]
+            }
+          },
+          {
+            "type": "Feature",
+            "properties": {
+              "resourceCoords": [
+                6600.0,
+                0.0
+              ],
+              "creator": {
+                "id": "https://oldinsurancemaps.net/profile/danvk",
+                "type": "Person"
+              },
+              "type": "corner"
+            },
+            "geometry": {
+              "type": "Point",
+              "coordinates": [
+                -86.7952690755616,
+                36.16374185263215
+              ]
+            }
+          },
+          {
+            "type": "Feature",
+            "properties": {
+              "resourceCoords": [
+                6600.0,
+                8040.0
+              ],
+              "creator": {
+                "id": "https://oldinsurancemaps.net/profile/danvk",
+                "type": "Person"
+              },
+              "type": "corner"
+            },
+            "geometry": {
+              "type": "Point",
+              "coordinates": [
+                -86.79309506598244,
+                36.16051547042905
+              ]
+            }
+          },
+          {
+            "type": "Feature",
+            "properties": {
+              "resourceCoords": [
+                0.0,
+                8040.0
+              ],
+              "creator": {
+                "id": "https://oldinsurancemaps.net/profile/danvk",
+                "type": "Person"
+              },
+              "type": "corner"
+            },
+            "geometry": {
+              "type": "Point",
+              "coordinates": [
+                -86.79635256321843,
+                36.15906446517681
+              ]
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd396m:g3964m:g3964nm:g3964nm_g08356195701A:08356_01A_1957-0005/georef",
+      "type": "Annotation",
+      "@context": [
+        "http://iiif.io/api/extension/georef/1/context.json",
+        "http://iiif.io/api/presentation/3/context.json"
+      ],
+      "label": "Nashville, Tenn. | 1957 | Vol. 1a p5",
+      "metadata": [
+        {
+          "label": "streets",
+          "value": "0"
+        },
+        {
+          "label": "intersections",
+          "value": "0"
+        }
+      ],
+      "created": "2026-07-30T23:53:33Z",
+      "modified": "2026-07-30T23:53:33Z",
+      "creator": [
+        {
+          "id": "https://oldinsurancemaps.net/profile/danvk",
+          "type": "Person"
+        }
+      ],
+      "motivation": "georeferencing",
+      "target": {
+        "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd396m:g3964m:g3964nm:g3964nm_g08356195701A:08356_01A_1957-0005/selector",
+        "type": "SpecificResource",
+        "source": {
+          "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd396m:g3964m:g3964nm:g3964nm_g08356195701A:08356_01A_1957-0005/info.json",
+          "type": "ImageService2",
+          "height": 8040,
+          "width": 6600
+        },
+        "selector": {
+          "type": "SvgSelector",
+          "value": "<svg><polygon points=\"5641.6,7028.1 2088.0,7144.4 1669.7,538.6 728.5,575.4 790.5,0.0 6135.2,0.0 6129.8,533.4 5656.1,522.1 5641.6,7028.1\" /></svg>"
+        }
+      },
+      "body": {
+        "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd396m:g3964m:g3964nm:g3964nm_g08356195701A:08356_01A_1957-0005/gcps",
+        "type": "FeatureCollection",
+        "transformation": {
+          "type": "polynomial",
+          "options": {
+            "order": 1
+          }
+        },
+        "features": [
+          {
+            "type": "Feature",
+            "properties": {
+              "resourceCoords": [
+                0.0,
+                0.0
+              ],
+              "creator": {
+                "id": "https://oldinsurancemaps.net/profile/danvk",
+                "type": "Person"
+              },
+              "type": "corner"
+            },
+            "geometry": {
+              "type": "Point",
+              "coordinates": [
+                -86.7896951831479,
+                36.16285406783172
+              ]
+            }
+          },
+          {
+            "type": "Feature",
+            "properties": {
+              "resourceCoords": [
+                6600.0,
+                0.0
+              ],
+              "creator": {
+                "id": "https://oldinsurancemaps.net/profile/danvk",
+                "type": "Person"
+              },
+              "type": "corner"
+            },
+            "geometry": {
+              "type": "Point",
+              "coordinates": [
+                -86.78629889282593,
+                36.16430763094927
+              ]
+            }
+          },
+          {
+            "type": "Feature",
+            "properties": {
+              "resourceCoords": [
+                6600.0,
+                8040.0
+              ],
+              "creator": {
+                "id": "https://oldinsurancemaps.net/profile/danvk",
+                "type": "Person"
+              },
+              "type": "corner"
+            },
+            "geometry": {
+              "type": "Point",
+              "coordinates": [
+                -86.78412103177862,
+                36.160943810848416
+              ]
+            }
+          },
+          {
+            "type": "Feature",
+            "properties": {
+              "resourceCoords": [
+                0.0,
+                8040.0
+              ],
+              "creator": {
+                "id": "https://oldinsurancemaps.net/profile/danvk",
+                "type": "Person"
+              },
+              "type": "corner"
+            },
+            "geometry": {
+              "type": "Point",
+              "coordinates": [
+                -86.7875173221006,
+                36.159490247730865
+              ]
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd396m:g3964m:g3964nm:g3964nm_g08356195701A:08356_01A_1957-0051/georef",
+      "type": "Annotation",
+      "@context": [
+        "http://iiif.io/api/extension/georef/1/context.json",
+        "http://iiif.io/api/presentation/3/context.json"
+      ],
+      "label": "Nashville, Tenn. | 1957 | Vol. 1a p51",
+      "metadata": [
+        {
+          "label": "streets",
+          "value": "0"
+        },
+        {
+          "label": "intersections",
+          "value": "0"
+        }
+      ],
+      "created": "2026-07-30T23:53:33Z",
+      "modified": "2026-07-30T23:53:33Z",
+      "creator": [
+        {
+          "id": "https://oldinsurancemaps.net/profile/danvk",
+          "type": "Person"
+        }
+      ],
+      "motivation": "georeferencing",
+      "target": {
+        "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd396m:g3964m:g3964nm:g3964nm_g08356195701A:08356_01A_1957-0051/selector",
+        "type": "SpecificResource",
+        "source": {
+          "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd396m:g3964m:g3964nm:g3964nm_g08356195701A:08356_01A_1957-0051/info.json",
+          "type": "ImageService2",
+          "height": 8040,
+          "width": 6600
+        },
+        "selector": {
+          "type": "SvgSelector",
+          "value": "<svg><polygon points=\"-0.0,13.7 6600.0,204.6 6600.0,5893.4 6323.1,6465.9 5915.2,6884.2 4849.8,7337.3 3733.4,7340.8 3723.0,8040.0 -0.0,8040.0 -0.0,13.7\" /></svg>"
+        }
+      },
+      "body": {
+        "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd396m:g3964m:g3964nm:g3964nm_g08356195701A:08356_01A_1957-0051/gcps",
+        "type": "FeatureCollection",
+        "transformation": {
+          "type": "polynomial",
+          "options": {
+            "order": 1
+          }
+        },
+        "features": [
+          {
+            "type": "Feature",
+            "properties": {
+              "resourceCoords": [
+                0.0,
+                0.0
+              ],
+              "creator": {
+                "id": "https://oldinsurancemaps.net/profile/danvk",
+                "type": "Person"
+              },
+              "type": "corner"
+            },
+            "geometry": {
+              "type": "Point",
+              "coordinates": [
+                -86.79329146762969,
+                36.1541657732566
+              ]
+            }
+          },
+          {
+            "type": "Feature",
+            "properties": {
+              "resourceCoords": [
+                6600.0,
+                0.0
+              ],
+              "creator": {
+                "id": "https://oldinsurancemaps.net/profile/danvk",
+                "type": "Person"
+              },
+              "type": "corner"
+            },
+            "geometry": {
+              "type": "Point",
+              "coordinates": [
+                -86.78990145219171,
+                36.1556837341907
+              ]
+            }
+          },
+          {
+            "type": "Feature",
+            "properties": {
+              "resourceCoords": [
+                6600.0,
+                8040.0
+              ],
+              "creator": {
+                "id": "https://oldinsurancemaps.net/profile/danvk",
+                "type": "Person"
+              },
+              "type": "corner"
+            },
+            "geometry": {
+              "type": "Point",
+              "coordinates": [
+                -86.78762735155678,
+                36.152325764145246
+              ]
+            }
+          },
+          {
+            "type": "Feature",
+            "properties": {
+              "resourceCoords": [
+                0.0,
+                8040.0
+              ],
+              "creator": {
+                "id": "https://oldinsurancemaps.net/profile/danvk",
+                "type": "Person"
+              },
+              "type": "corner"
+            },
+            "geometry": {
+              "type": "Point",
+              "coordinates": [
+                -86.79101736699475,
+                36.150807803211144
+              ]
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd396m:g3964m:g3964nm:g3964nm_g08356195701A:08356_01A_1957-0052/georef",
+      "type": "Annotation",
+      "@context": [
+        "http://iiif.io/api/extension/georef/1/context.json",
+        "http://iiif.io/api/presentation/3/context.json"
+      ],
+      "label": "Nashville, Tenn. | 1957 | Vol. 1a p52",
+      "metadata": [
+        {
+          "label": "streets",
+          "value": "0"
+        },
+        {
+          "label": "intersections",
+          "value": "0"
+        }
+      ],
+      "created": "2026-07-30T23:53:33Z",
+      "modified": "2026-07-30T23:53:33Z",
+      "creator": [
+        {
+          "id": "https://oldinsurancemaps.net/profile/danvk",
+          "type": "Person"
+        }
+      ],
+      "motivation": "georeferencing",
+      "target": {
+        "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd396m:g3964m:g3964nm:g3964nm_g08356195701A:08356_01A_1957-0052/selector",
+        "type": "SpecificResource",
+        "source": {
+          "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd396m:g3964m:g3964nm:g3964nm_g08356195701A:08356_01A_1957-0052/info.json",
+          "type": "ImageService2",
+          "height": 8040,
+          "width": 6600
+        },
+        "selector": {
+          "type": "SvgSelector",
+          "value": "<svg><polygon points=\"1455.8,5857.2 1326.8,305.8 5887.1,248.8 5929.4,6732.9 1071.4,6745.5 1455.8,5857.2\" /></svg>"
+        }
+      },
+      "body": {
+        "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd396m:g3964m:g3964nm:g3964nm_g08356195701A:08356_01A_1957-0052/gcps",
+        "type": "FeatureCollection",
+        "transformation": {
+          "type": "polynomial",
+          "options": {
+            "order": 1
+          }
+        },
+        "features": [
+          {
+            "type": "Feature",
+            "properties": {
+              "resourceCoords": [
+                0.0,
+                0.0
+              ],
+              "creator": {
+                "id": "https://oldinsurancemaps.net/profile/danvk",
+                "type": "Person"
+              },
+              "type": "corner"
+            },
+            "geometry": {
+              "type": "Point",
+              "coordinates": [
+                -86.79060455850825,
+                36.15542653466902
+              ]
+            }
+          },
+          {
+            "type": "Feature",
+            "properties": {
+              "resourceCoords": [
+                6600.0,
+                0.0
+              ],
+              "creator": {
+                "id": "https://oldinsurancemaps.net/profile/danvk",
+                "type": "Person"
+              },
+              "type": "corner"
+            },
+            "geometry": {
+              "type": "Point",
+              "coordinates": [
+                -86.78719471961662,
+                36.15687035443674
+              ]
+            }
+          },
+          {
+            "type": "Feature",
+            "properties": {
+              "resourceCoords": [
+                6600.0,
+                8040.0
+              ],
+              "creator": {
+                "id": "https://oldinsurancemaps.net/profile/danvk",
+                "type": "Person"
+              },
+              "type": "corner"
+            },
+            "geometry": {
+              "type": "Point",
+              "coordinates": [
+                -86.78503164279596,
+                36.15349282512756
+              ]
+            }
+          },
+          {
+            "type": "Feature",
+            "properties": {
+              "resourceCoords": [
+                0.0,
+                8040.0
+              ],
+              "creator": {
+                "id": "https://oldinsurancemaps.net/profile/danvk",
+                "type": "Person"
+              },
+              "type": "corner"
+            },
+            "geometry": {
+              "type": "Point",
+              "coordinates": [
+                -86.78844148168758,
+                36.152049005359835
+              ]
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd396m:g3964m:g3964nm:g3964nm_g08356195701A:08356_01A_1957-0054/georef",
+      "type": "Annotation",
+      "@context": [
+        "http://iiif.io/api/extension/georef/1/context.json",
+        "http://iiif.io/api/presentation/3/context.json"
+      ],
+      "label": "Nashville, Tenn. | 1957 | Vol. 1a p54",
+      "metadata": [
+        {
+          "label": "streets",
+          "value": "0"
+        },
+        {
+          "label": "intersections",
+          "value": "0"
+        }
+      ],
+      "created": "2026-07-30T23:53:33Z",
+      "modified": "2026-07-30T23:53:33Z",
+      "creator": [
+        {
+          "id": "https://oldinsurancemaps.net/profile/danvk",
+          "type": "Person"
+        }
+      ],
+      "motivation": "georeferencing",
+      "target": {
+        "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd396m:g3964m:g3964nm:g3964nm_g08356195701A:08356_01A_1957-0054/selector",
+        "type": "SpecificResource",
+        "source": {
+          "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd396m:g3964m:g3964nm:g3964nm_g08356195701A:08356_01A_1957-0054/info.json",
+          "type": "ImageService2",
+          "height": 8040,
+          "width": 6600
+        },
+        "selector": {
+          "type": "SvgSelector",
+          "value": "<svg><polygon points=\"3060.3,4950.7 1815.5,4948.4 1796.5,3915.8 1488.7,3715.6 1394.5,3006.9 1094.9,2722.8 1089.5,797.8 1353.3,187.4 5613.0,178.8 5608.3,7515.8 3051.5,7556.3 3060.3,4950.7\" /></svg>"
+        }
+      },
+      "body": {
+        "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd396m:g3964m:g3964nm:g3964nm_g08356195701A:08356_01A_1957-0054/gcps",
+        "type": "FeatureCollection",
+        "transformation": {
+          "type": "polynomial",
+          "options": {
+            "order": 1
+          }
+        },
+        "features": [
+          {
+            "type": "Feature",
+            "properties": {
+              "resourceCoords": [
+                0.0,
+                0.0
+              ],
+              "creator": {
+                "id": "https://oldinsurancemaps.net/profile/danvk",
+                "type": "Person"
+              },
+              "type": "corner"
+            },
+            "geometry": {
+              "type": "Point",
+              "coordinates": [
+                -86.78505149828197,
+                36.15775813279745
+              ]
+            }
+          },
+          {
+            "type": "Feature",
+            "properties": {
+              "resourceCoords": [
+                6600.0,
+                0.0
+              ],
+              "creator": {
+                "id": "https://oldinsurancemaps.net/profile/danvk",
+                "type": "Person"
+              },
+              "type": "corner"
+            },
+            "geometry": {
+              "type": "Point",
+              "coordinates": [
+                -86.78163401528484,
+                36.15919175066449
+              ]
+            }
+          },
+          {
+            "type": "Feature",
+            "properties": {
+              "resourceCoords": [
+                6600.0,
+                8040.0
+              ],
+              "creator": {
+                "id": "https://oldinsurancemaps.net/profile/danvk",
+                "type": "Person"
+              },
+              "type": "corner"
+            },
+            "geometry": {
+              "type": "Point",
+              "coordinates": [
+                -86.77948617922166,
+                36.15580671800082
+              ]
+            }
+          },
+          {
+            "type": "Feature",
+            "properties": {
+              "resourceCoords": [
+                0.0,
+                8040.0
+              ],
+              "creator": {
+                "id": "https://oldinsurancemaps.net/profile/danvk",
+                "type": "Person"
+              },
+              "type": "corner"
+            },
+            "geometry": {
+              "type": "Point",
+              "coordinates": [
+                -86.7829036622188,
+                36.154373100133775
+              ]
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd396m:g3964m:g3964nm:g3964nm_g08356195701A:08356_01A_1957-0055/georef",
+      "type": "Annotation",
+      "@context": [
+        "http://iiif.io/api/extension/georef/1/context.json",
+        "http://iiif.io/api/presentation/3/context.json"
+      ],
+      "label": "Nashville, Tenn. | 1957 | Vol. 1a p55",
+      "metadata": [
+        {
+          "label": "streets",
+          "value": "0"
+        },
+        {
+          "label": "intersections",
+          "value": "0"
+        }
+      ],
+      "created": "2026-07-30T23:53:33Z",
+      "modified": "2026-07-30T23:53:33Z",
+      "creator": [
+        {
+          "id": "https://oldinsurancemaps.net/profile/danvk",
+          "type": "Person"
+        }
+      ],
+      "motivation": "georeferencing",
+      "target": {
+        "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd396m:g3964m:g3964nm:g3964nm_g08356195701A:08356_01A_1957-0055/selector",
+        "type": "SpecificResource",
+        "source": {
+          "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd396m:g3964m:g3964nm:g3964nm_g08356195701A:08356_01A_1957-0055/info.json",
+          "type": "ImageService2",
+          "height": 8040,
+          "width": 6600
+        },
+        "selector": {
+          "type": "SvgSelector",
+          "value": "<svg><polygon points=\"1337.7,290.1 5576.1,333.7 5618.8,7381.8 1409.4,6219.3 1262.0,6753.0 1337.7,290.1\" /></svg>"
+        }
+      },
+      "body": {
+        "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd396m:g3964m:g3964nm:g3964nm_g08356195701A:08356_01A_1957-0055/gcps",
+        "type": "FeatureCollection",
+        "transformation": {
+          "type": "polynomial",
+          "options": {
+            "order": 1
+          }
+        },
+        "features": [
+          {
+            "type": "Feature",
+            "properties": {
+              "resourceCoords": [
+                0.0,
+                0.0
+              ],
+              "creator": {
+                "id": "https://oldinsurancemaps.net/profile/danvk",
+                "type": "Person"
+              },
+              "type": "corner"
+            },
+            "geometry": {
+              "type": "Point",
+              "coordinates": [
+                -86.78287099587006,
+                36.15872558754309
+              ]
+            }
+          },
+          {
+            "type": "Feature",
+            "properties": {
+              "resourceCoords": [
+                6600.0,
+                0.0
+              ],
+              "creator": {
+                "id": "https://oldinsurancemaps.net/profile/danvk",
+                "type": "Person"
+              },
+              "type": "corner"
+            },
+            "geometry": {
+              "type": "Point",
+              "coordinates": [
+                -86.77944699088175,
+                36.160200233047306
+              ]
+            }
+          },
+          {
+            "type": "Feature",
+            "properties": {
+              "resourceCoords": [
+                6600.0,
+                8040.0
+              ],
+              "creator": {
+                "id": "https://oldinsurancemaps.net/profile/danvk",
+                "type": "Person"
+              },
+              "type": "corner"
+            },
+            "geometry": {
+              "type": "Point",
+              "coordinates": [
+                -86.7772376436656,
+                36.15680880761794
+              ]
+            }
+          },
+          {
+            "type": "Feature",
+            "properties": {
+              "resourceCoords": [
+                0.0,
+                8040.0
+              ],
+              "creator": {
+                "id": "https://oldinsurancemaps.net/profile/danvk",
+                "type": "Person"
+              },
+              "type": "corner"
+            },
+            "geometry": {
+              "type": "Point",
+              "coordinates": [
+                -86.7806616486539,
+                36.155334162113725
+              ]
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd396m:g3964m:g3964nm:g3964nm_g08356195701A:08356_01A_1957-0057/georef",
+      "type": "Annotation",
+      "@context": [
+        "http://iiif.io/api/extension/georef/1/context.json",
+        "http://iiif.io/api/presentation/3/context.json"
+      ],
+      "label": "Nashville, Tenn. | 1957 | Vol. 1a p57",
+      "metadata": [
+        {
+          "label": "streets",
+          "value": "0"
+        },
+        {
+          "label": "intersections",
+          "value": "0"
+        }
+      ],
+      "created": "2026-07-30T23:53:33Z",
+      "modified": "2026-07-30T23:53:33Z",
+      "creator": [
+        {
+          "id": "https://oldinsurancemaps.net/profile/danvk",
+          "type": "Person"
+        }
+      ],
+      "motivation": "georeferencing",
+      "target": {
+        "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd396m:g3964m:g3964nm:g3964nm_g08356195701A:08356_01A_1957-0057/selector",
+        "type": "SpecificResource",
+        "source": {
+          "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd396m:g3964m:g3964nm:g3964nm_g08356195701A:08356_01A_1957-0057/info.json",
+          "type": "ImageService2",
+          "height": 8040,
+          "width": 6600
+        },
+        "selector": {
+          "type": "SvgSelector",
+          "value": "<svg><polygon points=\"5372.5,3443.8 5270.7,7278.0 1377.0,7271.8 1458.8,3843.8 3834.6,3894.1 3849.9,3418.0 5372.5,3443.8\" /></svg>"
+        }
+      },
+      "body": {
+        "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd396m:g3964m:g3964nm:g3964nm_g08356195701A:08356_01A_1957-0057/gcps",
+        "type": "FeatureCollection",
+        "transformation": {
+          "type": "polynomial",
+          "options": {
+            "order": 1
+          }
+        },
+        "features": [
+          {
+            "type": "Feature",
+            "properties": {
+              "resourceCoords": [
+                0.0,
+                0.0
+              ],
+              "creator": {
+                "id": "https://oldinsurancemaps.net/profile/danvk",
+                "type": "Person"
+              },
+              "type": "corner"
+            },
+            "geometry": {
+              "type": "Point",
+              "coordinates": [
+                -86.77810866356944,
+                36.16089800409347
+              ]
+            }
+          },
+          {
+            "type": "Feature",
+            "properties": {
+              "resourceCoords": [
+                6600.0,
+                0.0
+              ],
+              "creator": {
+                "id": "https://oldinsurancemaps.net/profile/danvk",
+                "type": "Person"
+              },
+              "type": "corner"
+            },
+            "geometry": {
+              "type": "Point",
+              "coordinates": [
+                -86.77477047862313,
+                36.16241367157428
+              ]
+            }
+          },
+          {
+            "type": "Feature",
+            "properties": {
+              "resourceCoords": [
+                6600.0,
+                8040.0
+              ],
+              "creator": {
+                "id": "https://oldinsurancemaps.net/profile/danvk",
+                "type": "Person"
+              },
+              "type": "corner"
+            },
+            "geometry": {
+              "type": "Point",
+              "coordinates": [
+                -86.77249962827506,
+                36.15910731233055
+              ]
+            }
+          },
+          {
+            "type": "Feature",
+            "properties": {
+              "resourceCoords": [
+                0.0,
+                8040.0
+              ],
+              "creator": {
+                "id": "https://oldinsurancemaps.net/profile/danvk",
+                "type": "Person"
+              },
+              "type": "corner"
+            },
+            "geometry": {
+              "type": "Point",
+              "coordinates": [
+                -86.77583781322139,
+                36.15759164484974
+              ]
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd396m:g3964m:g3964nm:g3964nm_g08356195701A:08356_01A_1957-0006/georef",
+      "type": "Annotation",
+      "@context": [
+        "http://iiif.io/api/extension/georef/1/context.json",
+        "http://iiif.io/api/presentation/3/context.json"
+      ],
+      "label": "Nashville, Tenn. | 1957 | Vol. 1a p6",
+      "metadata": [
+        {
+          "label": "streets",
+          "value": "0"
+        },
+        {
+          "label": "intersections",
+          "value": "0"
+        }
+      ],
+      "created": "2026-07-30T23:53:33Z",
+      "modified": "2026-07-30T23:53:33Z",
+      "creator": [
+        {
+          "id": "https://oldinsurancemaps.net/profile/danvk",
+          "type": "Person"
+        }
+      ],
+      "motivation": "georeferencing",
+      "target": {
+        "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd396m:g3964m:g3964nm:g3964nm_g08356195701A:08356_01A_1957-0006/selector",
+        "type": "SpecificResource",
+        "source": {
+          "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd396m:g3964m:g3964nm:g3964nm_g08356195701A:08356_01A_1957-0006/info.json",
+          "type": "ImageService2",
+          "height": 8040,
+          "width": 6600
+        },
+        "selector": {
+          "type": "SvgSelector",
+          "value": "<svg><polygon points=\"0.0,0.0 6600.0,0.0 6600.0,3471.4 3067.4,7162.7 1110.9,7167.6 0.0,0.0\" /></svg>"
+        }
+      },
+      "body": {
+        "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd396m:g3964m:g3964nm:g3964nm_g08356195701A:08356_01A_1957-0006/gcps",
+        "type": "FeatureCollection",
+        "transformation": {
+          "type": "polynomial",
+          "options": {
+            "order": 1
+          }
+        },
+        "features": [
+          {
+            "type": "Feature",
+            "properties": {
+              "resourceCoords": [
+                0.0,
+                0.0
+              ],
+              "creator": {
+                "id": "https://oldinsurancemaps.net/profile/danvk",
+                "type": "Person"
+              },
+              "type": "corner"
+            },
+            "geometry": {
+              "type": "Point",
+              "coordinates": [
+                -86.78737751251822,
+                36.16395270635226
+              ]
+            }
+          },
+          {
+            "type": "Feature",
+            "properties": {
+              "resourceCoords": [
+                6600.0,
+                0.0
+              ],
+              "creator": {
+                "id": "https://oldinsurancemaps.net/profile/danvk",
+                "type": "Person"
+              },
+              "type": "corner"
+            },
+            "geometry": {
+              "type": "Point",
+              "coordinates": [
+                -86.7839376138141,
+                36.16538281593041
+              ]
+            }
+          },
+          {
+            "type": "Feature",
+            "properties": {
+              "resourceCoords": [
+                6600.0,
+                8040.0
+              ],
+              "creator": {
+                "id": "https://oldinsurancemaps.net/profile/danvk",
+                "type": "Person"
+              },
+              "type": "corner"
+            },
+            "geometry": {
+              "type": "Point",
+              "coordinates": [
+                -86.78179489016763,
+                36.16197580887204
+              ]
+            }
+          },
+          {
+            "type": "Feature",
+            "properties": {
+              "resourceCoords": [
+                0.0,
+                8040.0
+              ],
+              "creator": {
+                "id": "https://oldinsurancemaps.net/profile/danvk",
+                "type": "Person"
+              },
+              "type": "corner"
+            },
+            "geometry": {
+              "type": "Point",
+              "coordinates": [
+                -86.78523478887175,
+                36.1605456992939
+              ]
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd396m:g3964m:g3964nm:g3964nm_g08356195701A:08356_01A_1957-0062/georef",
+      "type": "Annotation",
+      "@context": [
+        "http://iiif.io/api/extension/georef/1/context.json",
+        "http://iiif.io/api/presentation/3/context.json"
+      ],
+      "label": "Nashville, Tenn. | 1957 | Vol. 1a p62",
+      "metadata": [
+        {
+          "label": "streets",
+          "value": "0"
+        },
+        {
+          "label": "intersections",
+          "value": "0"
+        }
+      ],
+      "created": "2026-07-30T23:53:33Z",
+      "modified": "2026-07-30T23:53:33Z",
+      "creator": [
+        {
+          "id": "https://oldinsurancemaps.net/profile/danvk",
+          "type": "Person"
+        }
+      ],
+      "motivation": "georeferencing",
+      "target": {
+        "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd396m:g3964m:g3964nm:g3964nm_g08356195701A:08356_01A_1957-0062/selector",
+        "type": "SpecificResource",
+        "source": {
+          "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd396m:g3964m:g3964nm:g3964nm_g08356195701A:08356_01A_1957-0062/info.json",
+          "type": "ImageService2",
+          "height": 8040,
+          "width": 6600
+        },
+        "selector": {
+          "type": "SvgSelector",
+          "value": "<svg><polygon points=\"-0.0,-0.0 5104.8,0.0 5519.4,630.2 6600.0,0.0 6600.0,372.4 5732.6,959.3 6418.6,2019.0 4198.6,3451.8 5646.3,5603.2 4384.4,6530.5 4018.6,7319.5 3517.4,7561.9 3203.8,8040.0 2506.2,8040.0 2381.5,7126.6 716.5,7446.7 801.5,4789.6 1193.1,4271.6 1364.2,1344.3 0.0,1261.6 -0.0,-0.0\" /></svg>"
+        }
+      },
+      "body": {
+        "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd396m:g3964m:g3964nm:g3964nm_g08356195701A:08356_01A_1957-0062/gcps",
+        "type": "FeatureCollection",
+        "transformation": {
+          "type": "polynomial",
+          "options": {
+            "order": 1
+          }
+        },
+        "features": [
+          {
+            "type": "Feature",
+            "properties": {
+              "resourceCoords": [
+                0.0,
+                0.0
+              ],
+              "creator": {
+                "id": "https://oldinsurancemaps.net/profile/danvk",
+                "type": "Person"
+              },
+              "type": "corner"
+            },
+            "geometry": {
+              "type": "Point",
+              "coordinates": [
+                -86.78366733089771,
+                36.15344922677333
+              ]
+            }
+          },
+          {
+            "type": "Feature",
+            "properties": {
+              "resourceCoords": [
+                6600.0,
+                0.0
+              ],
+              "creator": {
+                "id": "https://oldinsurancemaps.net/profile/danvk",
+                "type": "Person"
+              },
+              "type": "corner"
+            },
+            "geometry": {
+              "type": "Point",
+              "coordinates": [
+                -86.78328806024476,
+                36.156517141942246
+              ]
+            }
+          },
+          {
+            "type": "Feature",
+            "properties": {
+              "resourceCoords": [
+                6600.0,
+                8040.0
+              ],
+              "creator": {
+                "id": "https://oldinsurancemaps.net/profile/danvk",
+                "type": "Person"
+              },
+              "type": "corner"
+            },
+            "geometry": {
+              "type": "Point",
+              "coordinates": [
+                -86.77869185842962,
+                36.15614146224729
+              ]
+            }
+          },
+          {
+            "type": "Feature",
+            "properties": {
+              "resourceCoords": [
+                0.0,
+                8040.0
+              ],
+              "creator": {
+                "id": "https://oldinsurancemaps.net/profile/danvk",
+                "type": "Person"
+              },
+              "type": "corner"
+            },
+            "geometry": {
+              "type": "Point",
+              "coordinates": [
+                -86.77907112908258,
+                36.15307354707838
+              ]
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd396m:g3964m:g3964nm:g3964nm_g08356195701A:08356_01A_1957-0063/georef",
+      "type": "Annotation",
+      "@context": [
+        "http://iiif.io/api/extension/georef/1/context.json",
+        "http://iiif.io/api/presentation/3/context.json"
+      ],
+      "label": "Nashville, Tenn. | 1957 | Vol. 1a p63",
+      "metadata": [
+        {
+          "label": "streets",
+          "value": "0"
+        },
+        {
+          "label": "intersections",
+          "value": "0"
+        }
+      ],
+      "created": "2026-07-30T23:53:33Z",
+      "modified": "2026-07-30T23:53:33Z",
+      "creator": [
+        {
+          "id": "https://oldinsurancemaps.net/profile/danvk",
+          "type": "Person"
+        }
+      ],
+      "motivation": "georeferencing",
+      "target": {
+        "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd396m:g3964m:g3964nm:g3964nm_g08356195701A:08356_01A_1957-0063/selector",
+        "type": "SpecificResource",
+        "source": {
+          "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd396m:g3964m:g3964nm:g3964nm_g08356195701A:08356_01A_1957-0063/info.json",
+          "type": "ImageService2",
+          "height": 8040,
+          "width": 6600
+        },
+        "selector": {
+          "type": "SvgSelector",
+          "value": "<svg><polygon points=\"1353.7,3500.7 745.9,2968.6 404.7,2100.7 -0.0,573.0 0.0,0.0 4547.8,0.0 5870.0,4575.4 6600.0,4390.3 6600.0,7564.0 5930.7,7341.4 5561.6,7521.4 3870.7,6210.9 3791.9,5593.5 1568.2,5183.7 1789.0,4512.5 1428.3,4059.6 1353.7,3500.7\" /></svg>"
+        }
+      },
+      "body": {
+        "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd396m:g3964m:g3964nm:g3964nm_g08356195701A:08356_01A_1957-0063/gcps",
+        "type": "FeatureCollection",
+        "transformation": {
+          "type": "polynomial",
+          "options": {
+            "order": 1
+          }
+        },
+        "features": [
+          {
+            "type": "Feature",
+            "properties": {
+              "resourceCoords": [
+                0.0,
+                0.0
+              ],
+              "creator": {
+                "id": "https://oldinsurancemaps.net/profile/danvk",
+                "type": "Person"
+              },
+              "type": "corner"
+            },
+            "geometry": {
+              "type": "Point",
+              "coordinates": [
+                -86.78043080656627,
+                36.15641706608818
+              ]
+            }
+          },
+          {
+            "type": "Feature",
+            "properties": {
+              "resourceCoords": [
+                6600.0,
+                0.0
+              ],
+              "creator": {
+                "id": "https://oldinsurancemaps.net/profile/danvk",
+                "type": "Person"
+              },
+              "type": "corner"
+            },
+            "geometry": {
+              "type": "Point",
+              "coordinates": [
+                -86.77677492209116,
+                36.15707449885936
+              ]
+            }
+          },
+          {
+            "type": "Feature",
+            "properties": {
+              "resourceCoords": [
+                6600.0,
+                8040.0
+              ],
+              "creator": {
+                "id": "https://oldinsurancemaps.net/profile/danvk",
+                "type": "Person"
+              },
+              "type": "corner"
+            },
+            "geometry": {
+              "type": "Point",
+              "coordinates": [
+                -86.77578998573546,
+                36.15345323750067
+              ]
+            }
+          },
+          {
+            "type": "Feature",
+            "properties": {
+              "resourceCoords": [
+                0.0,
+                8040.0
+              ],
+              "creator": {
+                "id": "https://oldinsurancemaps.net/profile/danvk",
+                "type": "Person"
+              },
+              "type": "corner"
+            },
+            "geometry": {
+              "type": "Point",
+              "coordinates": [
+                -86.77944587021057,
+                36.15279580472949
+              ]
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd396m:g3964m:g3964nm:g3964nm_g08356195701A:08356_01A_1957-0065/georef",
+      "type": "Annotation",
+      "@context": [
+        "http://iiif.io/api/extension/georef/1/context.json",
+        "http://iiif.io/api/presentation/3/context.json"
+      ],
+      "label": "Nashville, Tenn. | 1957 | Vol. 1a p65",
+      "metadata": [
+        {
+          "label": "streets",
+          "value": "0"
+        },
+        {
+          "label": "intersections",
+          "value": "0"
+        }
+      ],
+      "created": "2026-07-30T23:53:33Z",
+      "modified": "2026-07-30T23:53:33Z",
+      "creator": [
+        {
+          "id": "https://oldinsurancemaps.net/profile/danvk",
+          "type": "Person"
+        }
+      ],
+      "motivation": "georeferencing",
+      "target": {
+        "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd396m:g3964m:g3964nm:g3964nm_g08356195701A:08356_01A_1957-0065/selector",
+        "type": "SpecificResource",
+        "source": {
+          "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd396m:g3964m:g3964nm:g3964nm_g08356195701A:08356_01A_1957-0065/info.json",
+          "type": "ImageService2",
+          "height": 8040,
+          "width": 6600
+        },
+        "selector": {
+          "type": "SvgSelector",
+          "value": "<svg><polygon points=\"792.7,6673.2 811.0,1219.6 4662.2,1126.5 6148.1,1294.6 6177.1,4280.4 6401.2,4932.6 6082.6,5494.9 6074.1,6508.5 6600.0,6503.5 6600.0,8040.0 3139.1,8040.0 -0.0,8040.0 -0.0,6984.1 791.0,6990.3 791.5,6912.1 792.7,6673.2\" /></svg>"
+        }
+      },
+      "body": {
+        "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd396m:g3964m:g3964nm:g3964nm_g08356195701A:08356_01A_1957-0065/gcps",
+        "type": "FeatureCollection",
+        "transformation": {
+          "type": "polynomial",
+          "options": {
+            "order": 1
+          }
+        },
+        "features": [
+          {
+            "type": "Feature",
+            "properties": {
+              "resourceCoords": [
+                0.0,
+                0.0
+              ],
+              "creator": {
+                "id": "https://oldinsurancemaps.net/profile/danvk",
+                "type": "Person"
+              },
+              "type": "corner"
+            },
+            "geometry": {
+              "type": "Point",
+              "coordinates": [
+                -86.77611066256533,
+                36.15855835502053
+              ]
+            }
+          },
+          {
+            "type": "Feature",
+            "properties": {
+              "resourceCoords": [
+                6600.0,
+                0.0
+              ],
+              "creator": {
+                "id": "https://oldinsurancemaps.net/profile/danvk",
+                "type": "Person"
+              },
+              "type": "corner"
+            },
+            "geometry": {
+              "type": "Point",
+              "coordinates": [
+                -86.77268930739761,
+                36.160019079532
+              ]
+            }
+          },
+          {
+            "type": "Feature",
+            "properties": {
+              "resourceCoords": [
+                6600.0,
+                8040.0
+              ],
+              "creator": {
+                "id": "https://oldinsurancemaps.net/profile/danvk",
+                "type": "Person"
+              },
+              "type": "corner"
+            },
+            "geometry": {
+              "type": "Point",
+              "coordinates": [
+                -86.7705008298791,
+                36.15663025865463
+              ]
+            }
+          },
+          {
+            "type": "Feature",
+            "properties": {
+              "resourceCoords": [
+                0.0,
+                8040.0
+              ],
+              "creator": {
+                "id": "https://oldinsurancemaps.net/profile/danvk",
+                "type": "Person"
+              },
+              "type": "corner"
+            },
+            "geometry": {
+              "type": "Point",
+              "coordinates": [
+                -86.77392218504681,
+                36.15516953414316
+              ]
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd396m:g3964m:g3964nm:g3964nm_g08356195701A:08356_01A_1957-0066/georef",
+      "type": "Annotation",
+      "@context": [
+        "http://iiif.io/api/extension/georef/1/context.json",
+        "http://iiif.io/api/presentation/3/context.json"
+      ],
+      "label": "Nashville, Tenn. | 1957 | Vol. 1a p66",
+      "metadata": [
+        {
+          "label": "streets",
+          "value": "0"
+        },
+        {
+          "label": "intersections",
+          "value": "0"
+        }
+      ],
+      "created": "2026-07-30T23:53:33Z",
+      "modified": "2026-07-30T23:53:33Z",
+      "creator": [
+        {
+          "id": "https://oldinsurancemaps.net/profile/danvk",
+          "type": "Person"
+        }
+      ],
+      "motivation": "georeferencing",
+      "target": {
+        "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd396m:g3964m:g3964nm:g3964nm_g08356195701A:08356_01A_1957-0066/selector",
+        "type": "SpecificResource",
+        "source": {
+          "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd396m:g3964m:g3964nm:g3964nm_g08356195701A:08356_01A_1957-0066/info.json",
+          "type": "ImageService2",
+          "height": 8040,
+          "width": 6600
+        },
+        "selector": {
+          "type": "SvgSelector",
+          "value": "<svg><polygon points=\"455.5,6438.2 465.8,5364.6 804.0,4769.5 567.5,4078.4 548.1,1672.1 4992.0,1708.2 4996.0,0.0 6600.0,0.0 6600.0,8040.0 1010.4,8040.0 1012.4,6433.6 455.5,6438.2\" /></svg>"
+        }
+      },
+      "body": {
+        "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd396m:g3964m:g3964nm:g3964nm_g08356195701A:08356_01A_1957-0066/gcps",
+        "type": "FeatureCollection",
+        "transformation": {
+          "type": "polynomial",
+          "options": {
+            "order": 1
+          }
+        },
+        "features": [
+          {
+            "type": "Feature",
+            "properties": {
+              "resourceCoords": [
+                0.0,
+                0.0
+              ],
+              "creator": {
+                "id": "https://oldinsurancemaps.net/profile/danvk",
+                "type": "Person"
+              },
+              "type": "corner"
+            },
+            "geometry": {
+              "type": "Point",
+              "coordinates": [
+                -86.77307164162464,
+                36.15962433124804
+              ]
+            }
+          },
+          {
+            "type": "Feature",
+            "properties": {
+              "resourceCoords": [
+                6600.0,
+                0.0
+              ],
+              "creator": {
+                "id": "https://oldinsurancemaps.net/profile/danvk",
+                "type": "Person"
+              },
+              "type": "corner"
+            },
+            "geometry": {
+              "type": "Point",
+              "coordinates": [
+                -86.76984356325477,
+                36.161006781043376
+              ]
+            }
+          },
+          {
+            "type": "Feature",
+            "properties": {
+              "resourceCoords": [
+                6600.0,
+                8040.0
+              ],
+              "creator": {
+                "id": "https://oldinsurancemaps.net/profile/danvk",
+                "type": "Person"
+              },
+              "type": "corner"
+            },
+            "geometry": {
+              "type": "Point",
+              "coordinates": [
+                -86.76777233797814,
+                36.157809429953154
+              ]
+            }
+          },
+          {
+            "type": "Feature",
+            "properties": {
+              "resourceCoords": [
+                0.0,
+                8040.0
+              ],
+              "creator": {
+                "id": "https://oldinsurancemaps.net/profile/danvk",
+                "type": "Person"
+              },
+              "type": "corner"
+            },
+            "geometry": {
+              "type": "Point",
+              "coordinates": [
+                -86.77100041634802,
+                36.15642698015782
               ]
             }
           }
@@ -369,8 +3336,8 @@
           "value": "8"
         }
       ],
-      "created": "2026-07-18T02:42:26Z",
-      "modified": "2026-07-18T02:42:26Z",
+      "created": "2026-07-30T23:53:33Z",
+      "modified": "2026-07-30T23:53:33Z",
       "creator": [
         {
           "id": "https://oldinsurancemaps.net/profile/danvk",
@@ -389,7 +3356,7 @@
         },
         "selector": {
           "type": "SvgSelector",
-          "value": "<svg><polygon points=\"1677.1,0.0 4900.3,0.0 5224.6,1357.5 6159.9,1764.9 5321.4,1763.0 6600.0,7114.9 6600.0,8040.0 -0.0,8040.0 -0.0,1567.6 1677.1,0.0\" /></svg>"
+          "value": "<svg><polygon points=\"-0.0,1615.5 1677.0,0.0 4900.3,0.0 6600.0,7115.0 6600.0,8040.0 -0.0,8040.0 -0.0,1615.5\" /></svg>"
         }
       },
       "body": {
@@ -445,537 +3412,6 @@
       }
     },
     {
-      "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd396m:g3964m:g3964nm:g3964nm_g08356195701A:08356_01A_1957-0015/georef",
-      "type": "Annotation",
-      "@context": [
-        "http://iiif.io/api/extension/georef/1/context.json",
-        "http://iiif.io/api/presentation/3/context.json"
-      ],
-      "label": "Nashville, Tenn. | 1957 | Vol. 1a p15",
-      "metadata": [
-        {
-          "label": "streets",
-          "value": "5"
-        },
-        {
-          "label": "intersections",
-          "value": "6"
-        }
-      ],
-      "created": "2026-07-18T02:42:26Z",
-      "modified": "2026-07-18T02:42:26Z",
-      "creator": [
-        {
-          "id": "https://oldinsurancemaps.net/profile/danvk",
-          "type": "Person"
-        }
-      ],
-      "motivation": "georeferencing",
-      "target": {
-        "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd396m:g3964m:g3964nm:g3964nm_g08356195701A:08356_01A_1957-0015/selector",
-        "type": "SpecificResource",
-        "source": {
-          "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd396m:g3964m:g3964nm:g3964nm_g08356195701A:08356_01A_1957-0015/info.json",
-          "type": "ImageService2",
-          "height": 8040,
-          "width": 6600
-        },
-        "selector": {
-          "type": "SvgSelector",
-          "value": "<svg><polygon points=\"2614.0,6893.4 886.8,6617.9 895.4,1612.0 4604.2,1613.3 5303.2,0.0 5617.9,0.0 5891.0,1634.4 6600.0,1631.0 6600.0,4109.2 5705.3,4110.2 5394.3,8040.0 -0.0,8040.0 -0.0,7802.5 2576.7,7797.7 2614.0,6893.4\" /></svg>"
-        }
-      },
-      "body": {
-        "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd396m:g3964m:g3964nm:g3964nm_g08356195701A:08356_01A_1957-0015/gcps",
-        "type": "FeatureCollection",
-        "transformation": {
-          "type": "helmert"
-        },
-        "features": [
-          {
-            "type": "Feature",
-            "properties": {
-              "resourceCoords": [
-                3664.0,
-                4112.0
-              ],
-              "creator": {
-                "id": "https://oldinsurancemaps.net/profile/danvk",
-                "type": "Person"
-              },
-              "type": "gcp"
-            },
-            "geometry": {
-              "type": "Point",
-              "coordinates": [
-                -86.7937625,
-                36.1554997
-              ]
-            }
-          },
-          {
-            "type": "Feature",
-            "properties": {
-              "resourceCoords": [
-                3664.0,
-                1620.0
-              ],
-              "creator": {
-                "id": "https://oldinsurancemaps.net/profile/danvk",
-                "type": "Person"
-              },
-              "type": "gcp"
-            },
-            "geometry": {
-              "type": "Point",
-              "coordinates": [
-                -86.7945183,
-                36.1565114
-              ]
-            }
-          }
-        ]
-      }
-    },
-    {
-      "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd396m:g3964m:g3964nm:g3964nm_g08356195701A:08356_01A_1957-0016/georef",
-      "type": "Annotation",
-      "@context": [
-        "http://iiif.io/api/extension/georef/1/context.json",
-        "http://iiif.io/api/presentation/3/context.json"
-      ],
-      "label": "Nashville, Tenn. | 1957 | Vol. 1a p16",
-      "metadata": [
-        {
-          "label": "streets",
-          "value": "5"
-        },
-        {
-          "label": "intersections",
-          "value": "1"
-        }
-      ],
-      "created": "2026-07-18T02:42:26Z",
-      "modified": "2026-07-18T02:42:26Z",
-      "creator": [
-        {
-          "id": "https://oldinsurancemaps.net/profile/danvk",
-          "type": "Person"
-        }
-      ],
-      "motivation": "georeferencing",
-      "target": {
-        "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd396m:g3964m:g3964nm:g3964nm_g08356195701A:08356_01A_1957-0016/selector",
-        "type": "SpecificResource",
-        "source": {
-          "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd396m:g3964m:g3964nm:g3964nm_g08356195701A:08356_01A_1957-0016/info.json",
-          "type": "ImageService2",
-          "height": 8040,
-          "width": 6600
-        },
-        "selector": {
-          "type": "SvgSelector",
-          "value": "<svg><polygon points=\"-0.0,8040.0 -0.0,3995.7 891.4,3924.5 696.0,1455.8 5490.1,1034.9 5821.2,3216.3 5936.0,6936.0 2427.6,7004.1 2455.9,8040.0 -0.0,8040.0\" /></svg>"
-        }
-      },
-      "body": {
-        "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd396m:g3964m:g3964nm:g3964nm_g08356195701A:08356_01A_1957-0016/gcps",
-        "type": "FeatureCollection",
-        "transformation": {
-          "type": "polynomial",
-          "options": {
-            "order": 1
-          }
-        },
-        "features": [
-          {
-            "type": "Feature",
-            "properties": {
-              "resourceCoords": [
-                0.0,
-                0.0
-              ],
-              "creator": {
-                "id": "https://oldinsurancemaps.net/profile/danvk",
-                "type": "Person"
-              },
-              "type": "corner"
-            },
-            "geometry": {
-              "type": "Point",
-              "coordinates": [
-                -86.7937869688246,
-                36.15769588165345
-              ]
-            }
-          },
-          {
-            "type": "Feature",
-            "properties": {
-              "resourceCoords": [
-                6600.0,
-                0.0
-              ],
-              "creator": {
-                "id": "https://oldinsurancemaps.net/profile/danvk",
-                "type": "Person"
-              },
-              "type": "corner"
-            },
-            "geometry": {
-              "type": "Point",
-              "coordinates": [
-                -86.79031942007504,
-                36.15909720095
-              ]
-            }
-          },
-          {
-            "type": "Feature",
-            "properties": {
-              "resourceCoords": [
-                6600.0,
-                8040.0
-              ],
-              "creator": {
-                "id": "https://oldinsurancemaps.net/profile/danvk",
-                "type": "Person"
-              },
-              "type": "corner"
-            },
-            "geometry": {
-              "type": "Point",
-              "coordinates": [
-                -86.78820593348084,
-                36.15568539433569
-              ]
-            }
-          },
-          {
-            "type": "Feature",
-            "properties": {
-              "resourceCoords": [
-                0.0,
-                8040.0
-              ],
-              "creator": {
-                "id": "https://oldinsurancemaps.net/profile/danvk",
-                "type": "Person"
-              },
-              "type": "corner"
-            },
-            "geometry": {
-              "type": "Point",
-              "coordinates": [
-                -86.79167348223041,
-                36.15428407503914
-              ]
-            }
-          },
-          {
-            "type": "Feature",
-            "properties": {
-              "resourceCoords": [
-                5936.0,
-                6936.0
-              ],
-              "creator": {
-                "id": "https://oldinsurancemaps.net/profile/danvk",
-                "type": "Person"
-              },
-              "type": "gcp"
-            },
-            "geometry": {
-              "type": "Point",
-              "coordinates": [
-                -86.788845,
-                36.1560129
-              ]
-            }
-          }
-        ]
-      }
-    },
-    {
-      "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd396m:g3964m:g3964nm:g3964nm_g08356195701A:08356_01A_1957-0017/georef",
-      "type": "Annotation",
-      "@context": [
-        "http://iiif.io/api/extension/georef/1/context.json",
-        "http://iiif.io/api/presentation/3/context.json"
-      ],
-      "label": "Nashville, Tenn. | 1957 | Vol. 1a p17",
-      "metadata": [
-        {
-          "label": "streets",
-          "value": "7"
-        },
-        {
-          "label": "intersections",
-          "value": "10"
-        }
-      ],
-      "created": "2026-07-18T02:42:26Z",
-      "modified": "2026-07-18T02:42:26Z",
-      "creator": [
-        {
-          "id": "https://oldinsurancemaps.net/profile/danvk",
-          "type": "Person"
-        }
-      ],
-      "motivation": "georeferencing",
-      "target": {
-        "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd396m:g3964m:g3964nm:g3964nm_g08356195701A:08356_01A_1957-0017/selector",
-        "type": "SpecificResource",
-        "source": {
-          "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd396m:g3964m:g3964nm:g3964nm_g08356195701A:08356_01A_1957-0017/info.json",
-          "type": "ImageService2",
-          "height": 8040,
-          "width": 6600
-        },
-        "selector": {
-          "type": "SvgSelector",
-          "value": "<svg><polygon points=\"6056.4,6991.6 478.3,7048.0 418.8,3269.1 116.1,1049.0 2330.0,903.1 2217.8,0.0 6600.0,0.0 6600.0,629.0 6002.7,653.4 6056.4,6991.6\" /></svg>"
-        }
-      },
-      "body": {
-        "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd396m:g3964m:g3964nm:g3964nm_g08356195701A:08356_01A_1957-0017/gcps",
-        "type": "FeatureCollection",
-        "transformation": {
-          "type": "helmert"
-        },
-        "features": [
-          {
-            "type": "Feature",
-            "properties": {
-              "resourceCoords": [
-                2720.0,
-                3720.0
-              ],
-              "creator": {
-                "id": "https://oldinsurancemaps.net/profile/danvk",
-                "type": "Person"
-              },
-              "type": "gcp"
-            },
-            "geometry": {
-              "type": "Point",
-              "coordinates": [
-                -86.7885815,
-                36.1578752
-              ]
-            }
-          },
-          {
-            "type": "Feature",
-            "properties": {
-              "resourceCoords": [
-                3136.0,
-                6988.0
-              ],
-              "creator": {
-                "id": "https://oldinsurancemaps.net/profile/danvk",
-                "type": "Person"
-              },
-              "type": "gcp"
-            },
-            "geometry": {
-              "type": "Point",
-              "coordinates": [
-                -86.7874961,
-                36.1566099
-              ]
-            }
-          }
-        ]
-      }
-    },
-    {
-      "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd396m:g3964m:g3964nm:g3964nm_g08356195701A:08356_01A_1957-0018/georef",
-      "type": "Annotation",
-      "@context": [
-        "http://iiif.io/api/extension/georef/1/context.json",
-        "http://iiif.io/api/presentation/3/context.json"
-      ],
-      "label": "Nashville, Tenn. | 1957 | Vol. 1a p18",
-      "metadata": [
-        {
-          "label": "streets",
-          "value": "3"
-        },
-        {
-          "label": "intersections",
-          "value": "3"
-        }
-      ],
-      "created": "2026-07-18T02:42:26Z",
-      "modified": "2026-07-18T02:42:26Z",
-      "creator": [
-        {
-          "id": "https://oldinsurancemaps.net/profile/danvk",
-          "type": "Person"
-        }
-      ],
-      "motivation": "georeferencing",
-      "target": {
-        "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd396m:g3964m:g3964nm:g3964nm_g08356195701A:08356_01A_1957-0018/selector",
-        "type": "SpecificResource",
-        "source": {
-          "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd396m:g3964m:g3964nm:g3964nm_g08356195701A:08356_01A_1957-0018/info.json",
-          "type": "ImageService2",
-          "height": 8040,
-          "width": 6600
-        },
-        "selector": {
-          "type": "SvgSelector",
-          "value": "<svg><polygon points=\"-0.0,6935.5 -0.0,753.7 582.7,734.8 587.9,121.4 -0.0,116.4 0.0,0.0 6600.0,0.0 6600.0,566.2 6172.0,548.0 6172.0,6940.0 -0.0,6935.5\" /></svg>"
-        }
-      },
-      "body": {
-        "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd396m:g3964m:g3964nm:g3964nm_g08356195701A:08356_01A_1957-0018/gcps",
-        "type": "FeatureCollection",
-        "transformation": {
-          "type": "helmert"
-        },
-        "features": [
-          {
-            "type": "Feature",
-            "properties": {
-              "resourceCoords": [
-                6172.0,
-                6940.0
-              ],
-              "creator": {
-                "id": "https://oldinsurancemaps.net/profile/danvk",
-                "type": "Person"
-              },
-              "type": "gcp"
-            },
-            "geometry": {
-              "type": "Point",
-              "coordinates": [
-                -86.7827584,
-                36.1586196
-              ]
-            }
-          },
-          {
-            "type": "Feature",
-            "properties": {
-              "resourceCoords": [
-                6172.0,
-                548.0
-              ],
-              "creator": {
-                "id": "https://oldinsurancemaps.net/profile/danvk",
-                "type": "Person"
-              },
-              "type": "gcp"
-            },
-            "geometry": {
-              "type": "Point",
-              "coordinates": [
-                -86.7845343,
-                36.1613251
-              ]
-            }
-          }
-        ]
-      }
-    },
-    {
-      "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd396m:g3964m:g3964nm:g3964nm_g08356195701A:08356_01A_1957-0019/georef",
-      "type": "Annotation",
-      "@context": [
-        "http://iiif.io/api/extension/georef/1/context.json",
-        "http://iiif.io/api/presentation/3/context.json"
-      ],
-      "label": "Nashville, Tenn. | 1957 | Vol. 1a p19",
-      "metadata": [
-        {
-          "label": "streets",
-          "value": "5"
-        },
-        {
-          "label": "intersections",
-          "value": "2"
-        }
-      ],
-      "created": "2026-07-18T02:42:26Z",
-      "modified": "2026-07-18T02:42:26Z",
-      "creator": [
-        {
-          "id": "https://oldinsurancemaps.net/profile/danvk",
-          "type": "Person"
-        }
-      ],
-      "motivation": "georeferencing",
-      "target": {
-        "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd396m:g3964m:g3964nm:g3964nm_g08356195701A:08356_01A_1957-0019/selector",
-        "type": "SpecificResource",
-        "source": {
-          "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd396m:g3964m:g3964nm:g3964nm_g08356195701A:08356_01A_1957-0019/info.json",
-          "type": "ImageService2",
-          "height": 8040,
-          "width": 6600
-        },
-        "selector": {
-          "type": "SvgSelector",
-          "value": "<svg><polygon points=\"-0.0,1523.5 0.0,0.0 3464.4,0.0 6600.0,4638.2 6600.0,7029.0 4284.6,8040.0 2874.9,8040.0 2377.5,6908.6 -0.0,7944.0 -0.0,1627.7 -0.0,1523.5\" /></svg>"
-        }
-      },
-      "body": {
-        "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd396m:g3964m:g3964nm:g3964nm_g08356195701A:08356_01A_1957-0019/gcps",
-        "type": "FeatureCollection",
-        "transformation": {
-          "type": "helmert"
-        },
-        "features": [
-          {
-            "type": "Feature",
-            "properties": {
-              "resourceCoords": [
-                3632.0,
-                300.0
-              ],
-              "creator": {
-                "id": "https://oldinsurancemaps.net/profile/danvk",
-                "type": "Person"
-              },
-              "type": "gcp"
-            },
-            "geometry": {
-              "type": "Point",
-              "coordinates": [
-                -86.796239,
-                36.1596339
-              ]
-            }
-          },
-          {
-            "type": "Feature",
-            "properties": {
-              "resourceCoords": [
-                5716.0,
-                7420.0
-              ],
-              "creator": {
-                "id": "https://oldinsurancemaps.net/profile/danvk",
-                "type": "Person"
-              },
-              "type": "gcp"
-            },
-            "geometry": {
-              "type": "Point",
-              "coordinates": [
-                -86.7945183,
-                36.1565114
-              ]
-            }
-          }
-        ]
-      }
-    },
-    {
       "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd396m:g3964m:g3964nm:g3964nm_g08356195701A:08356_01A_1957-0001__1/georef",
       "type": "Annotation",
       "@context": [
@@ -1009,8 +3445,8 @@
           "value": "8040.0"
         }
       ],
-      "created": "2026-07-18T02:42:26Z",
-      "modified": "2026-07-18T02:42:26Z",
+      "created": "2026-07-30T23:53:33Z",
+      "modified": "2026-07-30T23:53:33Z",
       "creator": [
         {
           "id": "https://oldinsurancemaps.net/profile/danvk",
@@ -1029,7 +3465,7 @@
         },
         "selector": {
           "type": "SvgSelector",
-          "value": "<svg><polygon points=\"2643.2,1022.4 2702.7,6484.4 516.1,7024.0 516.1,932.0 2643.2,1022.4\" /></svg>"
+          "value": "<svg><polygon points=\"516.1,7024.0 510.9,2798.9 516.1,932.0 2643.2,1022.4 2702.7,6484.4 516.1,7024.0\" /></svg>"
         }
       },
       "body": {
@@ -1118,8 +3554,8 @@
           "value": "8040.0"
         }
       ],
-      "created": "2026-07-18T02:42:26Z",
-      "modified": "2026-07-18T02:42:26Z",
+      "created": "2026-07-30T23:53:33Z",
+      "modified": "2026-07-30T23:53:33Z",
       "creator": [
         {
           "id": "https://oldinsurancemaps.net/profile/danvk",
@@ -1138,7 +3574,7 @@
         },
         "selector": {
           "type": "SvgSelector",
-          "value": "<svg><polygon points=\"6212.3,7378.0 3370.4,7197.2 3742.1,668.0 6600.0,143.0 6212.3,7378.0\" /></svg>"
+          "value": "<svg><polygon points=\"6600.0,143.0 6212.3,7378.0 3370.4,7197.2 3742.1,668.0 6600.0,143.0\" /></svg>"
         }
       },
       "body": {
@@ -1211,8 +3647,8 @@
           "value": "3"
         }
       ],
-      "created": "2026-07-18T02:42:26Z",
-      "modified": "2026-07-18T02:42:26Z",
+      "created": "2026-07-30T23:53:33Z",
+      "modified": "2026-07-30T23:53:33Z",
       "creator": [
         {
           "id": "https://oldinsurancemaps.net/profile/danvk",
@@ -1231,7 +3667,7 @@
         },
         "selector": {
           "type": "SvgSelector",
-          "value": "<svg><polygon points=\"1056.5,7406.9 841.4,1024.0 5560.4,894.2 5652.0,7116.0 1056.5,7406.9\" /></svg>"
+          "value": "<svg><polygon points=\"5560.4,894.1 5652.0,7116.0 1056.5,7407.0 841.4,1024.1 5560.4,894.1\" /></svg>"
         }
       },
       "body": {
@@ -1287,292 +3723,13 @@
       }
     },
     {
-      "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd396m:g3964m:g3964nm:g3964nm_g08356195701A:08356_01A_1957-0020/georef",
+      "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd396m:g3964m:g3964nm:g3964nm_g08356195701A:08356_01A_1957-0026/georef",
       "type": "Annotation",
       "@context": [
         "http://iiif.io/api/extension/georef/1/context.json",
         "http://iiif.io/api/presentation/3/context.json"
       ],
-      "label": "Nashville, Tenn. | 1957 | Vol. 1a p20",
-      "metadata": [
-        {
-          "label": "streets",
-          "value": "4"
-        },
-        {
-          "label": "intersections",
-          "value": "2"
-        }
-      ],
-      "created": "2026-07-18T02:42:26Z",
-      "modified": "2026-07-18T02:42:26Z",
-      "creator": [
-        {
-          "id": "https://oldinsurancemaps.net/profile/danvk",
-          "type": "Person"
-        }
-      ],
-      "motivation": "georeferencing",
-      "target": {
-        "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd396m:g3964m:g3964nm:g3964nm_g08356195701A:08356_01A_1957-0020/selector",
-        "type": "SpecificResource",
-        "source": {
-          "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd396m:g3964m:g3964nm:g3964nm_g08356195701A:08356_01A_1957-0020/info.json",
-          "type": "ImageService2",
-          "height": 8040,
-          "width": 6600
-        },
-        "selector": {
-          "type": "SvgSelector",
-          "value": "<svg><polygon points=\"1573.1,5857.3 1297.6,5853.3 1496.7,5411.5 650.0,467.6 5484.5,748.8 5194.8,1931.5 5122.7,3041.2 5367.0,7487.4 1845.7,7449.3 1573.1,5857.3\" /></svg>"
-        }
-      },
-      "body": {
-        "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd396m:g3964m:g3964nm:g3964nm_g08356195701A:08356_01A_1957-0020/gcps",
-        "type": "FeatureCollection",
-        "transformation": {
-          "type": "helmert"
-        },
-        "features": [
-          {
-            "type": "Feature",
-            "properties": {
-              "resourceCoords": [
-                3244.0,
-                7468.0
-              ],
-              "creator": {
-                "id": "https://oldinsurancemaps.net/profile/danvk",
-                "type": "Person"
-              },
-              "type": "gcp"
-            },
-            "geometry": {
-              "type": "Point",
-              "coordinates": [
-                -86.792671,
-                36.1574039
-              ]
-            }
-          },
-          {
-            "type": "Feature",
-            "properties": {
-              "resourceCoords": [
-                2204.0,
-                584.0
-              ],
-              "creator": {
-                "id": "https://oldinsurancemaps.net/profile/danvk",
-                "type": "Person"
-              },
-              "type": "gcp"
-            },
-            "geometry": {
-              "type": "Point",
-              "coordinates": [
-                -86.7954035,
-                36.1599861
-              ]
-            }
-          }
-        ]
-      }
-    },
-    {
-      "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd396m:g3964m:g3964nm:g3964nm_g08356195701A:08356_01A_1957-0021/georef",
-      "type": "Annotation",
-      "@context": [
-        "http://iiif.io/api/extension/georef/1/context.json",
-        "http://iiif.io/api/presentation/3/context.json"
-      ],
-      "label": "Nashville, Tenn. | 1957 | Vol. 1a p21",
-      "metadata": [
-        {
-          "label": "streets",
-          "value": "4"
-        },
-        {
-          "label": "intersections",
-          "value": "2"
-        }
-      ],
-      "created": "2026-07-18T02:42:26Z",
-      "modified": "2026-07-18T02:42:26Z",
-      "creator": [
-        {
-          "id": "https://oldinsurancemaps.net/profile/danvk",
-          "type": "Person"
-        }
-      ],
-      "motivation": "georeferencing",
-      "target": {
-        "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd396m:g3964m:g3964nm:g3964nm_g08356195701A:08356_01A_1957-0021/selector",
-        "type": "SpecificResource",
-        "source": {
-          "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd396m:g3964m:g3964nm:g3964nm_g08356195701A:08356_01A_1957-0021/info.json",
-          "type": "ImageService2",
-          "height": 8040,
-          "width": 6600
-        },
-        "selector": {
-          "type": "SvgSelector",
-          "value": "<svg><polygon points=\"1531.4,2372.4 1657.8,1228.1 2020.7,0.0 6600.0,0.0 6600.0,6401.5 5680.5,6287.3 5680.6,7189.3 1576.2,6981.8 1531.4,2372.4\" /></svg>"
-        }
-      },
-      "body": {
-        "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd396m:g3964m:g3964nm:g3964nm_g08356195701A:08356_01A_1957-0021/gcps",
-        "type": "FeatureCollection",
-        "transformation": {
-          "type": "helmert"
-        },
-        "features": [
-          {
-            "type": "Feature",
-            "properties": {
-              "resourceCoords": [
-                5680.0,
-                3736.0
-              ],
-              "creator": {
-                "id": "https://oldinsurancemaps.net/profile/danvk",
-                "type": "Person"
-              },
-              "type": "gcp"
-            },
-            "geometry": {
-              "type": "Point",
-              "coordinates": [
-                -86.7906744,
-                36.1602998
-              ]
-            }
-          },
-          {
-            "type": "Feature",
-            "properties": {
-              "resourceCoords": [
-                5680.0,
-                7156.0
-              ],
-              "creator": {
-                "id": "https://oldinsurancemaps.net/profile/danvk",
-                "type": "Person"
-              },
-              "type": "gcp"
-            },
-            "geometry": {
-              "type": "Point",
-              "coordinates": [
-                -86.7895437,
-                36.1589722
-              ]
-            }
-          }
-        ]
-      }
-    },
-    {
-      "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd396m:g3964m:g3964nm:g3964nm_g08356195701A:08356_01A_1957-0023/georef",
-      "type": "Annotation",
-      "@context": [
-        "http://iiif.io/api/extension/georef/1/context.json",
-        "http://iiif.io/api/presentation/3/context.json"
-      ],
-      "label": "Nashville, Tenn. | 1957 | Vol. 1a p23",
-      "metadata": [
-        {
-          "label": "streets",
-          "value": "5"
-        },
-        {
-          "label": "intersections",
-          "value": "5"
-        }
-      ],
-      "created": "2026-07-18T02:42:26Z",
-      "modified": "2026-07-18T02:42:26Z",
-      "creator": [
-        {
-          "id": "https://oldinsurancemaps.net/profile/danvk",
-          "type": "Person"
-        }
-      ],
-      "motivation": "georeferencing",
-      "target": {
-        "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd396m:g3964m:g3964nm:g3964nm_g08356195701A:08356_01A_1957-0023/selector",
-        "type": "SpecificResource",
-        "source": {
-          "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd396m:g3964m:g3964nm:g3964nm_g08356195701A:08356_01A_1957-0023/info.json",
-          "type": "ImageService2",
-          "height": 8040,
-          "width": 6600
-        },
-        "selector": {
-          "type": "SvgSelector",
-          "value": "<svg><polygon points=\"0.0,0.0 6600.0,0.0 6600.0,5510.7 5953.0,5272.5 5446.0,6753.5 514.8,6640.7 620.7,8040.0 -0.0,8040.0 0.0,0.0\" /></svg>"
-        }
-      },
-      "body": {
-        "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd396m:g3964m:g3964nm:g3964nm_g08356195701A:08356_01A_1957-0023/gcps",
-        "type": "FeatureCollection",
-        "transformation": {
-          "type": "helmert"
-        },
-        "features": [
-          {
-            "type": "Feature",
-            "properties": {
-              "resourceCoords": [
-                3720.0,
-                3608.0
-              ],
-              "creator": {
-                "id": "https://oldinsurancemaps.net/profile/danvk",
-                "type": "Person"
-              },
-              "type": "gcp"
-            },
-            "geometry": {
-              "type": "Point",
-              "coordinates": [
-                -86.7999356,
-                36.1597506
-              ]
-            }
-          },
-          {
-            "type": "Feature",
-            "properties": {
-              "resourceCoords": [
-                5360.0,
-                3608.0
-              ],
-              "creator": {
-                "id": "https://oldinsurancemaps.net/profile/danvk",
-                "type": "Person"
-              },
-              "type": "gcp"
-            },
-            "geometry": {
-              "type": "Point",
-              "coordinates": [
-                -86.799082,
-                36.1601152
-              ]
-            }
-          }
-        ]
-      }
-    },
-    {
-      "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd396m:g3964m:g3964nm:g3964nm_g08356195701A:08356_01A_1957-0025/georef",
-      "type": "Annotation",
-      "@context": [
-        "http://iiif.io/api/extension/georef/1/context.json",
-        "http://iiif.io/api/presentation/3/context.json"
-      ],
-      "label": "Nashville, Tenn. | 1957 | Vol. 1a p25",
+      "label": "Nashville, Tenn. | 1957 | Vol. 1a p26",
       "metadata": [
         {
           "label": "streets",
@@ -1583,8 +3740,8 @@
           "value": "1"
         }
       ],
-      "created": "2026-07-18T02:42:26Z",
-      "modified": "2026-07-18T02:42:26Z",
+      "created": "2026-07-30T23:53:33Z",
+      "modified": "2026-07-30T23:53:33Z",
       "creator": [
         {
           "id": "https://oldinsurancemaps.net/profile/danvk",
@@ -1593,21 +3750,21 @@
       ],
       "motivation": "georeferencing",
       "target": {
-        "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd396m:g3964m:g3964nm:g3964nm_g08356195701A:08356_01A_1957-0025/selector",
+        "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd396m:g3964m:g3964nm:g3964nm_g08356195701A:08356_01A_1957-0026/selector",
         "type": "SpecificResource",
         "source": {
-          "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd396m:g3964m:g3964nm:g3964nm_g08356195701A:08356_01A_1957-0025/info.json",
+          "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd396m:g3964m:g3964nm:g3964nm_g08356195701A:08356_01A_1957-0026/info.json",
           "type": "ImageService2",
           "height": 8040,
           "width": 6600
         },
         "selector": {
           "type": "SvgSelector",
-          "value": "<svg><polygon points=\"0.0,0.0 6600.0,0.0 6600.0,7557.2 716.0,7072.0 702.6,6739.1 -0.0,6385.2 0.0,0.0\" /></svg>"
+          "value": "<svg><polygon points=\"2179.8,3952.4 1225.9,4058.4 1184.9,3737.0 -0.0,3890.7 0.0,0.0 6600.0,0.0 6600.0,6466.5 2256.0,7032.0 2435.4,6013.0 2179.8,3952.4\" /></svg>"
         }
       },
       "body": {
-        "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd396m:g3964m:g3964nm:g3964nm_g08356195701A:08356_01A_1957-0025/gcps",
+        "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd396m:g3964m:g3964nm:g3964nm_g08356195701A:08356_01A_1957-0026/gcps",
         "type": "FeatureCollection",
         "transformation": {
           "type": "polynomial",
@@ -1632,8 +3789,8 @@
             "geometry": {
               "type": "Point",
               "coordinates": [
-                -86.79893369887475,
-                36.16221053479578
+                -86.79916021110624,
+                36.16618900075175
               ]
             }
           },
@@ -1653,8 +3810,8 @@
             "geometry": {
               "type": "Point",
               "coordinates": [
-                -86.7957346975129,
-                36.163980178380484
+                -86.79194643642806,
+                36.168482427785534
               ]
             }
           },
@@ -1674,8 +3831,8 @@
             "geometry": {
               "type": "Point",
               "coordinates": [
-                -86.7930656998034,
-                36.160832602154805
+                -86.78848746222953,
+                36.16138461721713
               ]
             }
           },
@@ -1695,8 +3852,8 @@
             "geometry": {
               "type": "Point",
               "coordinates": [
-                -86.79626470116524,
-                36.159062958570104
+                -86.79570123690772,
+                36.15909119018335
               ]
             }
           },
@@ -1704,8 +3861,8 @@
             "type": "Feature",
             "properties": {
               "resourceCoords": [
-                716.0,
-                7072.0
+                2256.0,
+                7032.0
               ],
               "creator": {
                 "id": "https://oldinsurancemaps.net/profile/danvk",
@@ -1716,8 +3873,8 @@
             "geometry": {
               "type": "Point",
               "coordinates": [
-                -86.796239,
-                36.1596339
+                -86.7936691,
+                36.160765
               ]
             }
           }
@@ -1742,8 +3899,8 @@
           "value": "3"
         }
       ],
-      "created": "2026-07-18T02:42:26Z",
-      "modified": "2026-07-18T02:42:26Z",
+      "created": "2026-07-30T23:53:33Z",
+      "modified": "2026-07-30T23:53:33Z",
       "creator": [
         {
           "id": "https://oldinsurancemaps.net/profile/danvk",
@@ -1762,7 +3919,7 @@
         },
         "selector": {
           "type": "SvgSelector",
-          "value": "<svg><polygon points=\"5895.8,664.0 5896.0,7276.0 818.5,7348.9 1009.6,590.4 5895.8,664.0\" /></svg>"
+          "value": "<svg><polygon points=\"5895.8,664.0 5896.0,7276.0 818.7,7349.2 1009.8,590.7 5895.8,664.0\" /></svg>"
         }
       },
       "body": {
@@ -1835,8 +3992,8 @@
           "value": "5"
         }
       ],
-      "created": "2026-07-18T02:42:26Z",
-      "modified": "2026-07-18T02:42:26Z",
+      "created": "2026-07-30T23:53:33Z",
+      "modified": "2026-07-30T23:53:33Z",
       "creator": [
         {
           "id": "https://oldinsurancemaps.net/profile/danvk",
@@ -1855,7 +4012,7 @@
         },
         "selector": {
           "type": "SvgSelector",
-          "value": "<svg><polygon points=\"5796.0,6924.0 1087.3,7287.6 796.9,915.9 5576.9,684.8 5796.0,6924.0\" /></svg>"
+          "value": "<svg><polygon points=\"5576.9,684.9 5796.0,6924.0 1087.3,7287.5 796.9,915.9 5576.9,684.9\" /></svg>"
         }
       },
       "body": {
@@ -1928,8 +4085,8 @@
           "value": "4"
         }
       ],
-      "created": "2026-07-18T02:42:26Z",
-      "modified": "2026-07-18T02:42:26Z",
+      "created": "2026-07-30T23:53:33Z",
+      "modified": "2026-07-30T23:53:33Z",
       "creator": [
         {
           "id": "https://oldinsurancemaps.net/profile/danvk",
@@ -1948,7 +4105,7 @@
         },
         "selector": {
           "type": "SvgSelector",
-          "value": "<svg><polygon points=\"629.8,7175.1 849.2,641.2 3966.6,797.0 6048.2,814.8 5696.0,7264.0 629.8,7175.1\" /></svg>"
+          "value": "<svg><polygon points=\"629.7,7175.3 849.2,641.1 6048.4,814.5 5696.0,7264.0 629.7,7175.3\" /></svg>"
         }
       },
       "body": {
@@ -2021,8 +4178,8 @@
           "value": "2"
         }
       ],
-      "created": "2026-07-18T02:42:26Z",
-      "modified": "2026-07-18T02:42:26Z",
+      "created": "2026-07-30T23:53:33Z",
+      "modified": "2026-07-30T23:53:33Z",
       "creator": [
         {
           "id": "https://oldinsurancemaps.net/profile/danvk",
@@ -2041,7 +4198,7 @@
         },
         "selector": {
           "type": "SvgSelector",
-          "value": "<svg><polygon points=\"412.0,7704.0 804.0,1699.8 -0.0,1684.2 -0.0,643.3 6600.0,916.2 6600.0,8040.0 1374.1,8040.0 1389.5,7757.1 412.0,7704.0\" /></svg>"
+          "value": "<svg><polygon points=\"412.0,7704.0 804.0,1699.7 -0.0,1684.2 -0.0,643.3 845.3,706.9 852.3,234.9 6600.0,416.1 6600.0,8040.0 1374.2,8040.0 1389.6,7757.1 412.0,7704.0\" /></svg>"
         }
       },
       "body": {
@@ -2114,8 +4271,8 @@
           "value": "4"
         }
       ],
-      "created": "2026-07-18T02:42:26Z",
-      "modified": "2026-07-18T02:42:26Z",
+      "created": "2026-07-30T23:53:33Z",
+      "modified": "2026-07-30T23:53:33Z",
       "creator": [
         {
           "id": "https://oldinsurancemaps.net/profile/danvk",
@@ -2134,7 +4291,7 @@
         },
         "selector": {
           "type": "SvgSelector",
-          "value": "<svg><polygon points=\"5648.8,7118.6 -0.0,7139.4 0.0,0.0 4507.6,0.0 4516.1,710.0 5667.3,691.3 5648.8,7118.6\" /></svg>"
+          "value": "<svg><polygon points=\"5648.7,7118.5 914.8,7172.2 729.5,6009.9 1008.6,766.9 5667.2,691.2 5648.7,7118.5\" /></svg>"
         }
       },
       "body": {
@@ -2207,8 +4364,8 @@
           "value": "6"
         }
       ],
-      "created": "2026-07-18T02:42:26Z",
-      "modified": "2026-07-18T02:42:26Z",
+      "created": "2026-07-30T23:53:33Z",
+      "modified": "2026-07-30T23:53:33Z",
       "creator": [
         {
           "id": "https://oldinsurancemaps.net/profile/danvk",
@@ -2227,7 +4384,7 @@
         },
         "selector": {
           "type": "SvgSelector",
-          "value": "<svg><polygon points=\"5782.4,7334.5 1064.0,7284.0 1160.4,807.0 -0.0,815.6 0.0,0.0 5106.5,0.0 5102.4,781.4 5868.0,784.0 5782.4,7334.5\" /></svg>"
+          "value": "<svg><polygon points=\"5782.3,7334.5 1064.0,7284.0 1160.5,807.1 -0.0,815.6 0.0,0.0 5106.5,0.0 5102.4,781.4 5868.0,784.0 5782.3,7334.5\" /></svg>"
         }
       },
       "body": {
@@ -2300,8 +4457,8 @@
           "value": "2"
         }
       ],
-      "created": "2026-07-18T02:42:26Z",
-      "modified": "2026-07-18T02:42:26Z",
+      "created": "2026-07-30T23:53:33Z",
+      "modified": "2026-07-30T23:53:33Z",
       "creator": [
         {
           "id": "https://oldinsurancemaps.net/profile/danvk",
@@ -2320,7 +4477,7 @@
         },
         "selector": {
           "type": "SvgSelector",
-          "value": "<svg><polygon points=\"852.0,7228.0 852.0,621.4 5614.6,661.3 5684.5,7192.9 852.0,7228.0\" /></svg>"
+          "value": "<svg><polygon points=\"852.0,7228.0 852.0,621.4 5614.5,661.1 5684.4,7192.7 852.0,7228.0\" /></svg>"
         }
       },
       "body": {
@@ -2393,8 +4550,8 @@
           "value": "2"
         }
       ],
-      "created": "2026-07-18T02:42:26Z",
-      "modified": "2026-07-18T02:42:26Z",
+      "created": "2026-07-30T23:53:33Z",
+      "modified": "2026-07-30T23:53:33Z",
       "creator": [
         {
           "id": "https://oldinsurancemaps.net/profile/danvk",
@@ -2413,7 +4570,7 @@
         },
         "selector": {
           "type": "SvgSelector",
-          "value": "<svg><polygon points=\"1095.2,865.0 5924.0,796.0 5924.0,7332.0 1116.9,7408.7 1095.2,865.0\" /></svg>"
+          "value": "<svg><polygon points=\"1095.3,865.3 5924.0,796.0 5924.0,7332.0 1117.0,7408.9 1095.3,865.3\" /></svg>"
         }
       },
       "body": {
@@ -2486,8 +4643,8 @@
           "value": "6"
         }
       ],
-      "created": "2026-07-18T02:42:26Z",
-      "modified": "2026-07-18T02:42:26Z",
+      "created": "2026-07-30T23:53:33Z",
+      "modified": "2026-07-30T23:53:33Z",
       "creator": [
         {
           "id": "https://oldinsurancemaps.net/profile/danvk",
@@ -2506,7 +4663,7 @@
         },
         "selector": {
           "type": "SvgSelector",
-          "value": "<svg><polygon points=\"740.0,732.0 6600.0,603.6 6600.0,7092.3 807.7,7242.4 740.0,732.0\" /></svg>"
+          "value": "<svg><polygon points=\"740.0,732.0 6600.0,603.2 6600.0,7092.1 807.7,7242.6 740.0,732.0\" /></svg>"
         }
       },
       "body": {
@@ -2579,8 +4736,8 @@
           "value": "2"
         }
       ],
-      "created": "2026-07-18T02:42:26Z",
-      "modified": "2026-07-18T02:42:26Z",
+      "created": "2026-07-30T23:53:33Z",
+      "modified": "2026-07-30T23:53:33Z",
       "creator": [
         {
           "id": "https://oldinsurancemaps.net/profile/danvk",
@@ -2599,7 +4756,7 @@
         },
         "selector": {
           "type": "SvgSelector",
-          "value": "<svg><polygon points=\"788.0,974.0 5549.8,887.7 5611.7,7067.4 788.0,7092.0 788.0,974.0\" /></svg>"
+          "value": "<svg><polygon points=\"788.0,974.0 5549.7,887.6 5611.6,7067.3 788.0,7092.0 788.0,974.0\" /></svg>"
         }
       },
       "body": {
@@ -2672,8 +4829,8 @@
           "value": "2"
         }
       ],
-      "created": "2026-07-18T02:42:26Z",
-      "modified": "2026-07-18T02:42:26Z",
+      "created": "2026-07-30T23:53:33Z",
+      "modified": "2026-07-30T23:53:33Z",
       "creator": [
         {
           "id": "https://oldinsurancemaps.net/profile/danvk",
@@ -2692,7 +4849,7 @@
         },
         "selector": {
           "type": "SvgSelector",
-          "value": "<svg><polygon points=\"5856.0,940.0 5856.0,7028.0 1251.1,6967.4 1299.6,1013.0 5856.0,940.0\" /></svg>"
+          "value": "<svg><polygon points=\"5856.0,940.0 5856.0,7028.0 1251.2,6967.6 1299.7,1013.2 5856.0,940.0\" /></svg>"
         }
       },
       "body": {
@@ -2765,8 +4922,8 @@
           "value": "1"
         }
       ],
-      "created": "2026-07-18T02:42:26Z",
-      "modified": "2026-07-18T02:42:26Z",
+      "created": "2026-07-30T23:53:33Z",
+      "modified": "2026-07-30T23:53:33Z",
       "creator": [
         {
           "id": "https://oldinsurancemaps.net/profile/danvk",
@@ -2785,7 +4942,7 @@
         },
         "selector": {
           "type": "SvgSelector",
-          "value": "<svg><polygon points=\"2578.0,5175.7 3343.8,5172.4 3378.0,3765.1 2590.3,3774.4 2621.3,1825.6 2097.4,1827.8 2101.4,0.0 6600.0,0.0 6600.0,8040.0 6375.3,8040.0 6377.5,6568.9 5403.1,6567.5 5392.3,7545.5 3298.6,7521.8 3298.3,7164.1 2557.7,7076.6 2578.0,5175.7\" /></svg>"
+          "value": "<svg><polygon points=\"444.7,5681.0 441.3,0.0 6600.0,0.0 6600.0,8040.0 2519.1,8040.0 2541.0,5671.9 444.7,5681.0\" /></svg>"
         }
       },
       "body": {
@@ -2814,8 +4971,8 @@
             "geometry": {
               "type": "Point",
               "coordinates": [
-                -86.77995615129157,
-                36.16389474770452
+                -86.77767191782623,
+                36.16444151458576
               ]
             }
           },
@@ -2835,8 +4992,8 @@
             "geometry": {
               "type": "Point",
               "coordinates": [
-                -86.7731165594021,
-                36.16684653120118
+                -86.77596251394706,
+                36.16517924722262
               ]
             }
           },
@@ -2856,8 +5013,8 @@
             "geometry": {
               "type": "Point",
               "coordinates": [
-                -86.76866464407878,
-                36.16011688829404
+                -86.7748498567233,
+                36.16349732264631
               ]
             }
           },
@@ -2877,8 +5034,8 @@
             "geometry": {
               "type": "Point",
               "coordinates": [
-                -86.77550423596826,
-                36.15716510479738
+                -86.77655926060247,
+                36.16275959000945
               ]
             }
           },
@@ -2924,8 +5081,8 @@
           "value": "9"
         }
       ],
-      "created": "2026-07-18T02:42:26Z",
-      "modified": "2026-07-18T02:42:26Z",
+      "created": "2026-07-30T23:53:33Z",
+      "modified": "2026-07-30T23:53:33Z",
       "creator": [
         {
           "id": "https://oldinsurancemaps.net/profile/danvk",
@@ -2944,7 +5101,7 @@
         },
         "selector": {
           "type": "SvgSelector",
-          "value": "<svg><polygon points=\"938.8,7012.0 950.8,782.9 6600.0,705.7 6600.0,5728.9 5622.5,5733.2 5620.0,7012.0 938.8,7012.0\" /></svg>"
+          "value": "<svg><polygon points=\"938.8,7012.0 951.1,782.8 6600.0,705.6 6600.0,5729.0 5622.6,5733.3 5620.0,7012.0 938.8,7012.0\" /></svg>"
         }
       },
       "body": {
@@ -3033,8 +5190,8 @@
           "value": "8040.0"
         }
       ],
-      "created": "2026-07-18T02:42:26Z",
-      "modified": "2026-07-18T02:42:26Z",
+      "created": "2026-07-30T23:53:33Z",
+      "modified": "2026-07-30T23:53:33Z",
       "creator": [
         {
           "id": "https://oldinsurancemaps.net/profile/danvk",
@@ -3053,7 +5210,7 @@
         },
         "selector": {
           "type": "SvgSelector",
-          "value": "<svg><polygon points=\"6600.0,0.0 6456.1,6988.0 3713.5,6988.0 3831.3,0.0 6600.0,0.0\" /></svg>"
+          "value": "<svg><polygon points=\"3713.5,6988.0 3831.5,0.0 6600.0,0.0 6456.1,6988.0 3713.5,6988.0\" /></svg>"
         }
       },
       "body": {
@@ -3126,8 +5283,8 @@
           "value": "4"
         }
       ],
-      "created": "2026-07-18T02:42:26Z",
-      "modified": "2026-07-18T02:42:26Z",
+      "created": "2026-07-30T23:53:33Z",
+      "modified": "2026-07-30T23:53:33Z",
       "creator": [
         {
           "id": "https://oldinsurancemaps.net/profile/danvk",
@@ -3219,8 +5376,8 @@
           "value": "5"
         }
       ],
-      "created": "2026-07-18T02:42:26Z",
-      "modified": "2026-07-18T02:42:26Z",
+      "created": "2026-07-30T23:53:33Z",
+      "modified": "2026-07-30T23:53:33Z",
       "creator": [
         {
           "id": "https://oldinsurancemaps.net/profile/danvk",
@@ -3239,7 +5396,7 @@
         },
         "selector": {
           "type": "SvgSelector",
-          "value": "<svg><polygon points=\"4158.5,7410.8 992.0,7436.0 1220.1,827.5 4982.7,729.7 4158.5,7410.8\" /></svg>"
+          "value": "<svg><polygon points=\"6600.0,7432.5 992.0,7436.0 1220.1,827.5 6600.0,713.6 6600.0,7432.5\" /></svg>"
         }
       },
       "body": {
@@ -3312,8 +5469,8 @@
           "value": "2"
         }
       ],
-      "created": "2026-07-18T02:42:26Z",
-      "modified": "2026-07-18T02:42:26Z",
+      "created": "2026-07-30T23:53:33Z",
+      "modified": "2026-07-30T23:53:33Z",
       "creator": [
         {
           "id": "https://oldinsurancemaps.net/profile/danvk",
@@ -3332,7 +5489,7 @@
         },
         "selector": {
           "type": "SvgSelector",
-          "value": "<svg><polygon points=\"5658.0,148.5 6462.3,6639.6 6204.9,6724.8 -0.0,7434.5 -0.0,817.6 5658.0,148.5\" /></svg>"
+          "value": "<svg><polygon points=\"6462.4,6639.7 2384.4,7161.8 1578.7,630.9 5658.1,148.6 6462.4,6639.7\" /></svg>"
         }
       },
       "body": {
@@ -3405,8 +5562,8 @@
           "value": "3"
         }
       ],
-      "created": "2026-07-18T02:42:26Z",
-      "modified": "2026-07-18T02:42:26Z",
+      "created": "2026-07-30T23:53:33Z",
+      "modified": "2026-07-30T23:53:33Z",
       "creator": [
         {
           "id": "https://oldinsurancemaps.net/profile/danvk",
@@ -3425,7 +5582,7 @@
         },
         "selector": {
           "type": "SvgSelector",
-          "value": "<svg><polygon points=\"672.0,7488.3 679.2,665.6 5636.0,728.0 5636.0,7444.0 672.0,7488.3\" /></svg>"
+          "value": "<svg><polygon points=\"672.0,7488.4 679.3,665.7 5636.0,728.0 5636.0,7444.0 672.0,7488.4\" /></svg>"
         }
       },
       "body": {
@@ -3498,8 +5655,8 @@
           "value": "2"
         }
       ],
-      "created": "2026-07-18T02:42:26Z",
-      "modified": "2026-07-18T02:42:26Z",
+      "created": "2026-07-30T23:53:33Z",
+      "modified": "2026-07-30T23:53:33Z",
       "creator": [
         {
           "id": "https://oldinsurancemaps.net/profile/danvk",
@@ -3518,7 +5675,7 @@
         },
         "selector": {
           "type": "SvgSelector",
-          "value": "<svg><polygon points=\"5884.0,1592.0 5382.0,8040.0 528.3,8040.0 1093.3,1263.3 5884.0,1592.0\" /></svg>"
+          "value": "<svg><polygon points=\"5884.0,1592.0 5382.0,8040.0 526.9,8040.0 1091.9,1263.2 5884.0,1592.0\" /></svg>"
         }
       },
       "body": {
@@ -3547,8 +5704,8 @@
             "geometry": {
               "type": "Point",
               "coordinates": [
-                -86.77889671037964,
-                36.16059562237369
+                -86.77889621631175,
+                36.160595746418025
               ]
             }
           },
@@ -3568,8 +5725,8 @@
             "geometry": {
               "type": "Point",
               "coordinates": [
-                -86.77725995712858,
-                36.16143482418925
+                -86.77725993601794,
+                36.16143470573729
               ]
             }
           },
@@ -3589,8 +5746,8 @@
             "geometry": {
               "type": "Point",
               "coordinates": [
-                -86.77599426287075,
-                36.15982438235518
+                -86.77599460749595,
+                36.15982472925752
               ]
             }
           },
@@ -3610,8 +5767,8 @@
             "geometry": {
               "type": "Point",
               "coordinates": [
-                -86.77763101612183,
-                36.158985180539624
+                -86.77763088778975,
+                36.158985769938255
               ]
             }
           },
@@ -3678,8 +5835,8 @@
           "value": "6"
         }
       ],
-      "created": "2026-07-18T02:42:26Z",
-      "modified": "2026-07-18T02:42:26Z",
+      "created": "2026-07-30T23:53:33Z",
+      "modified": "2026-07-30T23:53:33Z",
       "creator": [
         {
           "id": "https://oldinsurancemaps.net/profile/danvk",
@@ -3698,7 +5855,7 @@
         },
         "selector": {
           "type": "SvgSelector",
-          "value": "<svg><polygon points=\"5576.0,7448.0 737.9,7416.1 677.5,6907.1 800.0,708.0 5719.0,741.3 5576.0,7448.0\" /></svg>"
+          "value": "<svg><polygon points=\"5576.0,7448.0 737.8,7416.2 677.5,6907.2 800.0,708.0 5719.0,741.2 5576.0,7448.0\" /></svg>"
         }
       },
       "body": {
@@ -3771,8 +5928,8 @@
           "value": "4"
         }
       ],
-      "created": "2026-07-18T02:42:26Z",
-      "modified": "2026-07-18T02:42:26Z",
+      "created": "2026-07-30T23:53:33Z",
+      "modified": "2026-07-30T23:53:33Z",
       "creator": [
         {
           "id": "https://oldinsurancemaps.net/profile/danvk",
@@ -3791,7 +5948,7 @@
         },
         "selector": {
           "type": "SvgSelector",
-          "value": "<svg><polygon points=\"1116.0,1452.0 5828.0,1452.0 5814.0,8040.0 1093.9,8040.0 1116.0,1452.0\" /></svg>"
+          "value": "<svg><polygon points=\"1116.0,1452.0 5828.0,1452.0 5813.9,8040.0 1093.8,8040.0 1116.0,1452.0\" /></svg>"
         }
       },
       "body": {
@@ -3864,8 +6021,8 @@
           "value": "7"
         }
       ],
-      "created": "2026-07-18T02:42:26Z",
-      "modified": "2026-07-18T02:42:26Z",
+      "created": "2026-07-30T23:53:33Z",
+      "modified": "2026-07-30T23:53:33Z",
       "creator": [
         {
           "id": "https://oldinsurancemaps.net/profile/danvk",
@@ -3884,7 +6041,7 @@
         },
         "selector": {
           "type": "SvgSelector",
-          "value": "<svg><polygon points=\"784.0,7144.0 759.5,699.3 6600.0,869.0 6600.0,7166.8 784.0,7144.0\" /></svg>"
+          "value": "<svg><polygon points=\"784.0,3968.0 -0.0,3949.7 -0.0,666.7 6600.0,869.0 6600.0,7181.1 784.0,7144.0 784.0,3968.0\" /></svg>"
         }
       },
       "body": {
@@ -3940,99 +6097,6 @@
       }
     },
     {
-      "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd396m:g3964m:g3964nm:g3964nm_g08356195701A:08356_01A_1957-0052/georef",
-      "type": "Annotation",
-      "@context": [
-        "http://iiif.io/api/extension/georef/1/context.json",
-        "http://iiif.io/api/presentation/3/context.json"
-      ],
-      "label": "Nashville, Tenn. | 1957 | Vol. 1a p52",
-      "metadata": [
-        {
-          "label": "streets",
-          "value": "3"
-        },
-        {
-          "label": "intersections",
-          "value": "2"
-        }
-      ],
-      "created": "2026-07-18T02:42:26Z",
-      "modified": "2026-07-18T02:42:26Z",
-      "creator": [
-        {
-          "id": "https://oldinsurancemaps.net/profile/danvk",
-          "type": "Person"
-        }
-      ],
-      "motivation": "georeferencing",
-      "target": {
-        "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd396m:g3964m:g3964nm:g3964nm_g08356195701A:08356_01A_1957-0052/selector",
-        "type": "SpecificResource",
-        "source": {
-          "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd396m:g3964m:g3964nm:g3964nm_g08356195701A:08356_01A_1957-0052/info.json",
-          "type": "ImageService2",
-          "height": 8040,
-          "width": 6600
-        },
-        "selector": {
-          "type": "SvgSelector",
-          "value": "<svg><polygon points=\"946.3,6912.4 -0.0,7339.2 -0.0,406.6 5941.6,405.9 5895.5,6674.6 1218.0,6648.7 946.3,6912.4\" /></svg>"
-        }
-      },
-      "body": {
-        "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd396m:g3964m:g3964nm:g3964nm_g08356195701A:08356_01A_1957-0052/gcps",
-        "type": "FeatureCollection",
-        "transformation": {
-          "type": "helmert"
-        },
-        "features": [
-          {
-            "type": "Feature",
-            "properties": {
-              "resourceCoords": [
-                5888.0,
-                5008.0
-              ],
-              "creator": {
-                "id": "https://oldinsurancemaps.net/profile/danvk",
-                "type": "Person"
-              },
-              "type": "gcp"
-            },
-            "geometry": {
-              "type": "Point",
-              "coordinates": [
-                -86.7862099,
-                36.1546124
-              ]
-            }
-          },
-          {
-            "type": "Feature",
-            "properties": {
-              "resourceCoords": [
-                5888.0,
-                7352.0
-              ],
-              "creator": {
-                "id": "https://oldinsurancemaps.net/profile/danvk",
-                "type": "Person"
-              },
-              "type": "gcp"
-            },
-            "geometry": {
-              "type": "Point",
-              "coordinates": [
-                -86.7855402,
-                36.1536013
-              ]
-            }
-          }
-        ]
-      }
-    },
-    {
       "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd396m:g3964m:g3964nm:g3964nm_g08356195701A:08356_01A_1957-0053/georef",
       "type": "Annotation",
       "@context": [
@@ -4050,8 +6114,8 @@
           "value": "5"
         }
       ],
-      "created": "2026-07-18T02:42:26Z",
-      "modified": "2026-07-18T02:42:26Z",
+      "created": "2026-07-30T23:53:33Z",
+      "modified": "2026-07-30T23:53:33Z",
       "creator": [
         {
           "id": "https://oldinsurancemaps.net/profile/danvk",
@@ -4070,7 +6134,7 @@
         },
         "selector": {
           "type": "SvgSelector",
-          "value": "<svg><polygon points=\"528.0,7240.0 582.2,222.8 6600.0,252.6 6341.2,845.8 6313.2,2726.2 6600.0,3007.2 6600.0,4910.6 5218.4,4906.3 3702.1,8040.0 2754.6,8040.0 2642.0,7264.1 528.0,7240.0\" /></svg>"
+          "value": "<svg><polygon points=\"2642.0,7264.2 528.0,7240.0 582.2,222.8 6600.0,252.9 6341.4,846.0 6313.4,2726.4 6600.0,3007.4 6600.0,4903.7 5876.2,4899.0 3770.5,8040.0 2754.7,8040.0 2642.0,7264.2\" /></svg>"
         }
       },
       "body": {
@@ -4126,192 +6190,6 @@
       }
     },
     {
-      "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd396m:g3964m:g3964nm:g3964nm_g08356195701A:08356_01A_1957-0054/georef",
-      "type": "Annotation",
-      "@context": [
-        "http://iiif.io/api/extension/georef/1/context.json",
-        "http://iiif.io/api/presentation/3/context.json"
-      ],
-      "label": "Nashville, Tenn. | 1957 | Vol. 1a p54",
-      "metadata": [
-        {
-          "label": "streets",
-          "value": "7"
-        },
-        {
-          "label": "intersections",
-          "value": "15"
-        }
-      ],
-      "created": "2026-07-18T02:42:26Z",
-      "modified": "2026-07-18T02:42:26Z",
-      "creator": [
-        {
-          "id": "https://oldinsurancemaps.net/profile/danvk",
-          "type": "Person"
-        }
-      ],
-      "motivation": "georeferencing",
-      "target": {
-        "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd396m:g3964m:g3964nm:g3964nm_g08356195701A:08356_01A_1957-0054/selector",
-        "type": "SpecificResource",
-        "source": {
-          "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd396m:g3964m:g3964nm:g3964nm_g08356195701A:08356_01A_1957-0054/info.json",
-          "type": "ImageService2",
-          "height": 8040,
-          "width": 6600
-        },
-        "selector": {
-          "type": "SvgSelector",
-          "value": "<svg><polygon points=\"1894.5,4912.8 1833.4,3090.6 1408.0,2983.9 1150.8,2725.2 1116.4,820.3 1367.1,210.8 5564.9,114.0 5671.0,7375.0 3152.0,7468.0 3126.2,5312.2 1894.5,4912.8\" /></svg>"
-        }
-      },
-      "body": {
-        "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd396m:g3964m:g3964nm:g3964nm_g08356195701A:08356_01A_1957-0054/gcps",
-        "type": "FeatureCollection",
-        "transformation": {
-          "type": "helmert"
-        },
-        "features": [
-          {
-            "type": "Feature",
-            "properties": {
-              "resourceCoords": [
-                3152.0,
-                2612.0
-              ],
-              "creator": {
-                "id": "https://oldinsurancemaps.net/profile/danvk",
-                "type": "Person"
-              },
-              "type": "gcp"
-            },
-            "geometry": {
-              "type": "Point",
-              "coordinates": [
-                -86.7827243,
-                36.1573212
-              ]
-            }
-          },
-          {
-            "type": "Feature",
-            "properties": {
-              "resourceCoords": [
-                3152.0,
-                7468.0
-              ],
-              "creator": {
-                "id": "https://oldinsurancemaps.net/profile/danvk",
-                "type": "Person"
-              },
-              "type": "gcp"
-            },
-            "geometry": {
-              "type": "Point",
-              "coordinates": [
-                -86.7814528,
-                36.1552396
-              ]
-            }
-          }
-        ]
-      }
-    },
-    {
-      "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd396m:g3964m:g3964nm:g3964nm_g08356195701A:08356_01A_1957-0055/georef",
-      "type": "Annotation",
-      "@context": [
-        "http://iiif.io/api/extension/georef/1/context.json",
-        "http://iiif.io/api/presentation/3/context.json"
-      ],
-      "label": "Nashville, Tenn. | 1957 | Vol. 1a p55",
-      "metadata": [
-        {
-          "label": "streets",
-          "value": "3"
-        },
-        {
-          "label": "intersections",
-          "value": "2"
-        }
-      ],
-      "created": "2026-07-18T02:42:26Z",
-      "modified": "2026-07-18T02:42:26Z",
-      "creator": [
-        {
-          "id": "https://oldinsurancemaps.net/profile/danvk",
-          "type": "Person"
-        }
-      ],
-      "motivation": "georeferencing",
-      "target": {
-        "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd396m:g3964m:g3964nm:g3964nm_g08356195701A:08356_01A_1957-0055/selector",
-        "type": "SpecificResource",
-        "source": {
-          "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd396m:g3964m:g3964nm:g3964nm_g08356195701A:08356_01A_1957-0055/info.json",
-          "type": "ImageService2",
-          "height": 8040,
-          "width": 6600
-        },
-        "selector": {
-          "type": "SvgSelector",
-          "value": "<svg><polygon points=\"1112.1,6027.4 1083.2,444.8 5632.0,388.0 5791.6,7154.3 1198.7,5745.1 1112.1,6027.4\" /></svg>"
-        }
-      },
-      "body": {
-        "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd396m:g3964m:g3964nm:g3964nm_g08356195701A:08356_01A_1957-0055/gcps",
-        "type": "FeatureCollection",
-        "transformation": {
-          "type": "helmert"
-        },
-        "features": [
-          {
-            "type": "Feature",
-            "properties": {
-              "resourceCoords": [
-                3468.0,
-                388.0
-              ],
-              "creator": {
-                "id": "https://oldinsurancemaps.net/profile/danvk",
-                "type": "Person"
-              },
-              "type": "gcp"
-            },
-            "geometry": {
-              "type": "Point",
-              "coordinates": [
-                -86.7809449,
-                36.1593996
-              ]
-            }
-          },
-          {
-            "type": "Feature",
-            "properties": {
-              "resourceCoords": [
-                5632.0,
-                388.0
-              ],
-              "creator": {
-                "id": "https://oldinsurancemaps.net/profile/danvk",
-                "type": "Person"
-              },
-              "type": "gcp"
-            },
-            "geometry": {
-              "type": "Point",
-              "coordinates": [
-                -86.7798865,
-                36.1598307
-              ]
-            }
-          }
-        ]
-      }
-    },
-    {
       "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd396m:g3964m:g3964nm:g3964nm_g08356195701A:08356_01A_1957-0056/georef",
       "type": "Annotation",
       "@context": [
@@ -4322,15 +6200,15 @@
       "metadata": [
         {
           "label": "streets",
-          "value": "3"
+          "value": "4"
         },
         {
           "label": "intersections",
-          "value": "1"
+          "value": "3"
         }
       ],
-      "created": "2026-07-18T02:42:26Z",
-      "modified": "2026-07-18T02:42:26Z",
+      "created": "2026-07-30T23:53:33Z",
+      "modified": "2026-07-30T23:53:33Z",
       "creator": [
         {
           "id": "https://oldinsurancemaps.net/profile/danvk",
@@ -4349,103 +6227,16 @@
         },
         "selector": {
           "type": "SvgSelector",
-          "value": "<svg><polygon points=\"3537.8,8040.0 3568.9,4931.7 768.0,4908.0 772.8,171.0 3611.0,142.0 3571.0,3541.8 5991.7,3368.7 5938.0,8040.0 3537.8,8040.0\" /></svg>"
+          "value": "<svg><polygon points=\"5959.9,8040.0 3553.3,8040.0 3576.6,4923.8 768.0,4908.0 760.9,157.1 3606.7,119.9 3575.2,3528.9 6002.0,3348.4 5959.9,8040.0\" /></svg>"
         }
       },
       "body": {
         "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd396m:g3964m:g3964nm:g3964nm_g08356195701A:08356_01A_1957-0056/gcps",
         "type": "FeatureCollection",
         "transformation": {
-          "type": "polynomial",
-          "options": {
-            "order": 1
-          }
+          "type": "helmert"
         },
         "features": [
-          {
-            "type": "Feature",
-            "properties": {
-              "resourceCoords": [
-                0.0,
-                0.0
-              ],
-              "creator": {
-                "id": "https://oldinsurancemaps.net/profile/danvk",
-                "type": "Person"
-              },
-              "type": "corner"
-            },
-            "geometry": {
-              "type": "Point",
-              "coordinates": [
-                -86.78033383005426,
-                36.159728182840766
-              ]
-            }
-          },
-          {
-            "type": "Feature",
-            "properties": {
-              "resourceCoords": [
-                6600.0,
-                0.0
-              ],
-              "creator": {
-                "id": "https://oldinsurancemaps.net/profile/danvk",
-                "type": "Person"
-              },
-              "type": "corner"
-            },
-            "geometry": {
-              "type": "Point",
-              "coordinates": [
-                -86.77692038205161,
-                36.16121363047895
-              ]
-            }
-          },
-          {
-            "type": "Feature",
-            "properties": {
-              "resourceCoords": [
-                6600.0,
-                8040.0
-              ],
-              "creator": {
-                "id": "https://oldinsurancemaps.net/profile/danvk",
-                "type": "Person"
-              },
-              "type": "corner"
-            },
-            "geometry": {
-              "type": "Point",
-              "coordinates": [
-                -86.77468001208211,
-                36.15785505492193
-              ]
-            }
-          },
-          {
-            "type": "Feature",
-            "properties": {
-              "resourceCoords": [
-                0.0,
-                8040.0
-              ],
-              "creator": {
-                "id": "https://oldinsurancemaps.net/profile/danvk",
-                "type": "Person"
-              },
-              "type": "corner"
-            },
-            "geometry": {
-              "type": "Point",
-              "coordinates": [
-                -86.77809346008476,
-                36.15636960728376
-              ]
-            }
-          },
           {
             "type": "Feature",
             "properties": {
@@ -4466,85 +6257,13 @@
                 36.1578508
               ]
             }
-          }
-        ]
-      }
-    },
-    {
-      "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd396m:g3964m:g3964nm:g3964nm_g08356195701A:08356_01A_1957-0057/georef",
-      "type": "Annotation",
-      "@context": [
-        "http://iiif.io/api/extension/georef/1/context.json",
-        "http://iiif.io/api/presentation/3/context.json"
-      ],
-      "label": "Nashville, Tenn. | 1957 | Vol. 1a p57",
-      "metadata": [
-        {
-          "label": "streets",
-          "value": "5"
-        },
-        {
-          "label": "intersections",
-          "value": "6"
-        }
-      ],
-      "created": "2026-07-18T02:42:26Z",
-      "modified": "2026-07-18T02:42:26Z",
-      "creator": [
-        {
-          "id": "https://oldinsurancemaps.net/profile/danvk",
-          "type": "Person"
-        }
-      ],
-      "motivation": "georeferencing",
-      "target": {
-        "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd396m:g3964m:g3964nm:g3964nm_g08356195701A:08356_01A_1957-0057/selector",
-        "type": "SpecificResource",
-        "source": {
-          "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd396m:g3964m:g3964nm:g3964nm_g08356195701A:08356_01A_1957-0057/info.json",
-          "type": "ImageService2",
-          "height": 8040,
-          "width": 6600
-        },
-        "selector": {
-          "type": "SvgSelector",
-          "value": "<svg><polygon points=\"5273.1,7211.3 1465.7,7297.7 1483.9,3931.0 3808.0,3923.9 3814.4,3456.2 5303.7,3445.3 5273.1,7211.3\" /></svg>"
-        }
-      },
-      "body": {
-        "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd396m:g3964m:g3964nm:g3964nm_g08356195701A:08356_01A_1957-0057/gcps",
-        "type": "FeatureCollection",
-        "transformation": {
-          "type": "helmert"
-        },
-        "features": [
-          {
-            "type": "Feature",
-            "properties": {
-              "resourceCoords": [
-                3788.0,
-                5400.0
-              ],
-              "creator": {
-                "id": "https://oldinsurancemaps.net/profile/danvk",
-                "type": "Person"
-              },
-              "type": "gcp"
-            },
-            "geometry": {
-              "type": "Point",
-              "coordinates": [
-                -86.7746692,
-                36.1595482
-              ]
-            }
           },
           {
             "type": "Feature",
             "properties": {
               "resourceCoords": [
-                2584.0,
-                7312.0
+                5988.0,
+                4908.0
               ],
               "creator": {
                 "id": "https://oldinsurancemaps.net/profile/danvk",
@@ -4555,8 +6274,8 @@
             "geometry": {
               "type": "Point",
               "coordinates": [
-                -86.7747683,
-                36.1584689
+                -86.7758725,
+                36.1590163
               ]
             }
           }
@@ -4581,8 +6300,8 @@
           "value": "4"
         }
       ],
-      "created": "2026-07-18T02:42:26Z",
-      "modified": "2026-07-18T02:42:26Z",
+      "created": "2026-07-30T23:53:33Z",
+      "modified": "2026-07-30T23:53:33Z",
       "creator": [
         {
           "id": "https://oldinsurancemaps.net/profile/danvk",
@@ -4601,7 +6320,7 @@
         },
         "selector": {
           "type": "SvgSelector",
-          "value": "<svg><polygon points=\"0,8040 0,0 6600,0 6600,8040 0,8040\" /></svg>"
+          "value": "<svg><polygon points=\"974.2,3408.4 -0.0,3423.7 -0.0,3423.7 2490.8,3384.6 2538.1,141.7 2090.5,240.1 970.9,257.7 1037.6,0.0 6600.0,0.0 6600.0,8040.0 2452.6,8040.0 2444.2,7331.4 975.3,7174.7 974.2,3408.4\" /></svg>"
         }
       },
       "body": {
@@ -4690,8 +6409,8 @@
           "value": "8040.0"
         }
       ],
-      "created": "2026-07-18T02:42:26Z",
-      "modified": "2026-07-18T02:42:26Z",
+      "created": "2026-07-30T23:53:33Z",
+      "modified": "2026-07-30T23:53:33Z",
       "creator": [
         {
           "id": "https://oldinsurancemaps.net/profile/danvk",
@@ -4710,7 +6429,7 @@
         },
         "selector": {
           "type": "SvgSelector",
-          "value": "<svg><polygon points=\"5017.1,263.2 6446.9,1313.9 6502.0,2804.0 6600.0,2655.5 6600.0,8040.0 -0.0,8040.0 -0.0,624.1 5017.1,263.2\" /></svg>"
+          "value": "<svg><polygon points=\"754.2,8040.0 -0.0,5540.7 -0.0,1077.6 -0.0,624.1 5017.1,263.2 6446.9,1314.0 6600.0,8040.0 754.2,8040.0\" /></svg>"
         }
       },
       "body": {
@@ -4783,8 +6502,8 @@
           "value": "7"
         }
       ],
-      "created": "2026-07-18T02:42:26Z",
-      "modified": "2026-07-18T02:42:26Z",
+      "created": "2026-07-30T23:53:33Z",
+      "modified": "2026-07-30T23:53:33Z",
       "creator": [
         {
           "id": "https://oldinsurancemaps.net/profile/danvk",
@@ -4803,7 +6522,7 @@
         },
         "selector": {
           "type": "SvgSelector",
-          "value": "<svg><polygon points=\"-0.0,8040.0 315.6,2121.9 2124.0,944.3 3463.8,1002.1 6600.0,3087.9 6600.0,4750.9 6106.9,7315.8 6600.0,7357.2 6600.0,8040.0 -0.0,8040.0\" /></svg>"
+          "value": "<svg><polygon points=\"-0.0,8040.0 315.6,2121.9 2124.1,944.4 3521.9,963.5 6600.0,3087.9 6600.0,4751.0 6106.9,7315.7 6600.0,7357.2 6600.0,8040.0 -0.0,8040.0\" /></svg>"
         }
       },
       "body": {
@@ -4876,8 +6595,8 @@
           "value": "10"
         }
       ],
-      "created": "2026-07-18T02:42:26Z",
-      "modified": "2026-07-18T02:42:26Z",
+      "created": "2026-07-30T23:53:33Z",
+      "modified": "2026-07-30T23:53:33Z",
       "creator": [
         {
           "id": "https://oldinsurancemaps.net/profile/danvk",
@@ -4896,7 +6615,7 @@
         },
         "selector": {
           "type": "SvgSelector",
-          "value": "<svg><polygon points=\"0.0,8040.0 0.0,2184.7 127.7,2176.8 138.5,1679.8 2717.4,1511.3 2740.6,2014.3 4407.9,1910.7 4519.3,1615.3 4115.0,1161.0 4067.5,0.0 6600.0,0.0 6600.0,2881.3 6243.6,3412.0 6312.9,6022.8 21.1,7311.9 241.1,8040.0 0.0,8040.0\" /></svg>"
+          "value": "<svg><polygon points=\"0.0,8040.0 0.0,2184.7 127.8,2176.7 138.6,1679.8 2717.3,1511.3 2740.5,2014.3 4407.8,1910.6 4519.1,1615.4 4114.8,1161.1 4067.3,0.0 6600.0,0.0 6600.0,2880.9 6243.2,3412.2 6312.5,6023.0 21.2,7311.9 241.2,8040.0 0.0,8040.0\" /></svg>"
         }
       },
       "body": {
@@ -4952,192 +6671,6 @@
       }
     },
     {
-      "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd396m:g3964m:g3964nm:g3964nm_g08356195701A:08356_01A_1957-0062/georef",
-      "type": "Annotation",
-      "@context": [
-        "http://iiif.io/api/extension/georef/1/context.json",
-        "http://iiif.io/api/presentation/3/context.json"
-      ],
-      "label": "Nashville, Tenn. | 1957 | Vol. 1a p62",
-      "metadata": [
-        {
-          "label": "streets",
-          "value": "5"
-        },
-        {
-          "label": "intersections",
-          "value": "3"
-        }
-      ],
-      "created": "2026-07-18T02:42:26Z",
-      "modified": "2026-07-18T02:42:26Z",
-      "creator": [
-        {
-          "id": "https://oldinsurancemaps.net/profile/danvk",
-          "type": "Person"
-        }
-      ],
-      "motivation": "georeferencing",
-      "target": {
-        "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd396m:g3964m:g3964nm:g3964nm_g08356195701A:08356_01A_1957-0062/selector",
-        "type": "SpecificResource",
-        "source": {
-          "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd396m:g3964m:g3964nm:g3964nm_g08356195701A:08356_01A_1957-0062/info.json",
-          "type": "ImageService2",
-          "height": 8040,
-          "width": 6600
-        },
-        "selector": {
-          "type": "SvgSelector",
-          "value": "<svg><polygon points=\"-0.0,-0.0 5701.8,0.0 6300.9,1248.0 6600.0,1103.2 6600.0,1521.7 6466.8,1586.2 6600.0,2859.9 4661.4,3748.4 5756.4,5988.3 4423.9,6524.5 3884.0,6504.5 4129.0,6889.3 4067.2,7264.1 3830.8,7501.7 3453.7,7563.0 3055.9,8040.0 2420.3,8040.0 2425.2,6990.0 2224.1,7085.1 788.0,7076.0 1228.7,4562.0 1676.1,4120.1 2232.7,1363.4 0.0,910.7 -0.0,-0.0\" /></svg>"
-        }
-      },
-      "body": {
-        "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd396m:g3964m:g3964nm:g3964nm_g08356195701A:08356_01A_1957-0062/gcps",
-        "type": "FeatureCollection",
-        "transformation": {
-          "type": "helmert"
-        },
-        "features": [
-          {
-            "type": "Feature",
-            "properties": {
-              "resourceCoords": [
-                2000.0,
-                7076.0
-              ],
-              "creator": {
-                "id": "https://oldinsurancemaps.net/profile/danvk",
-                "type": "Person"
-              },
-              "type": "gcp"
-            },
-            "geometry": {
-              "type": "Point",
-              "coordinates": [
-                -86.7793984,
-                36.1540195
-              ]
-            }
-          },
-          {
-            "type": "Feature",
-            "properties": {
-              "resourceCoords": [
-                788.0,
-                7076.0
-              ],
-              "creator": {
-                "id": "https://oldinsurancemaps.net/profile/danvk",
-                "type": "Person"
-              },
-              "type": "gcp"
-            },
-            "geometry": {
-              "type": "Point",
-              "coordinates": [
-                -86.7793691,
-                36.1534343
-              ]
-            }
-          }
-        ]
-      }
-    },
-    {
-      "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd396m:g3964m:g3964nm:g3964nm_g08356195701A:08356_01A_1957-0063/georef",
-      "type": "Annotation",
-      "@context": [
-        "http://iiif.io/api/extension/georef/1/context.json",
-        "http://iiif.io/api/presentation/3/context.json"
-      ],
-      "label": "Nashville, Tenn. | 1957 | Vol. 1a p63",
-      "metadata": [
-        {
-          "label": "streets",
-          "value": "6"
-        },
-        {
-          "label": "intersections",
-          "value": "8"
-        }
-      ],
-      "created": "2026-07-18T02:42:26Z",
-      "modified": "2026-07-18T02:42:26Z",
-      "creator": [
-        {
-          "id": "https://oldinsurancemaps.net/profile/danvk",
-          "type": "Person"
-        }
-      ],
-      "motivation": "georeferencing",
-      "target": {
-        "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd396m:g3964m:g3964nm:g3964nm_g08356195701A:08356_01A_1957-0063/selector",
-        "type": "SpecificResource",
-        "source": {
-          "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd396m:g3964m:g3964nm:g3964nm_g08356195701A:08356_01A_1957-0063/info.json",
-          "type": "ImageService2",
-          "height": 8040,
-          "width": 6600
-        },
-        "selector": {
-          "type": "SvgSelector",
-          "value": "<svg><polygon points=\"1584.2,3881.5 1238.9,3777.6 846.6,3961.2 931.4,3455.2 0.0,0.0 4175.5,0.0 5728.3,4788.7 6600.0,4519.6 6600.0,7440.4 5978.0,7265.4 5653.7,7444.8 4077.8,6334.1 3980.9,5778.7 2113.5,5527.3 2191.2,4929.1 1584.2,3881.5\" /></svg>"
-        }
-      },
-      "body": {
-        "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd396m:g3964m:g3964nm:g3964nm_g08356195701A:08356_01A_1957-0063/gcps",
-        "type": "FeatureCollection",
-        "transformation": {
-          "type": "helmert"
-        },
-        "features": [
-          {
-            "type": "Feature",
-            "properties": {
-              "resourceCoords": [
-                5728.0,
-                4788.0
-              ],
-              "creator": {
-                "id": "https://oldinsurancemaps.net/profile/danvk",
-                "type": "Person"
-              },
-              "type": "gcp"
-            },
-            "geometry": {
-              "type": "Point",
-              "coordinates": [
-                -86.7766648,
-                36.1549221
-              ]
-            }
-          },
-          {
-            "type": "Feature",
-            "properties": {
-              "resourceCoords": [
-                3532.0,
-                6504.0
-              ],
-              "creator": {
-                "id": "https://oldinsurancemaps.net/profile/danvk",
-                "type": "Person"
-              },
-              "type": "gcp"
-            },
-            "geometry": {
-              "type": "Point",
-              "coordinates": [
-                -86.7778472,
-                36.1538731
-              ]
-            }
-          }
-        ]
-      }
-    },
-    {
       "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd396m:g3964m:g3964nm:g3964nm_g08356195701A:08356_01A_1957-0064/georef",
       "type": "Annotation",
       "@context": [
@@ -5155,8 +6688,8 @@
           "value": "5"
         }
       ],
-      "created": "2026-07-18T02:42:26Z",
-      "modified": "2026-07-18T02:42:26Z",
+      "created": "2026-07-30T23:53:33Z",
+      "modified": "2026-07-30T23:53:33Z",
       "creator": [
         {
           "id": "https://oldinsurancemaps.net/profile/danvk",
@@ -5175,7 +6708,7 @@
         },
         "selector": {
           "type": "SvgSelector",
-          "value": "<svg><polygon points=\"803.8,7412.7 716.0,7412.0 682.0,443.6 3481.1,423.0 3498.2,3530.1 5896.5,3492.1 5883.8,8040.0 1496.5,8040.0 1694.0,7421.4 803.8,7412.7\" /></svg>"
+          "value": "<svg><polygon points=\"3481.0,423.0 3498.2,3528.8 5896.6,3497.6 5884.0,8040.0 1365.0,8040.0 1531.6,7419.8 803.8,7412.7 681.8,443.6 3481.0,423.0\" /></svg>"
         }
       },
       "body": {
@@ -5231,258 +6764,6 @@
       }
     },
     {
-      "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd396m:g3964m:g3964nm:g3964nm_g08356195701A:08356_01A_1957-0065/georef",
-      "type": "Annotation",
-      "@context": [
-        "http://iiif.io/api/extension/georef/1/context.json",
-        "http://iiif.io/api/presentation/3/context.json"
-      ],
-      "label": "Nashville, Tenn. | 1957 | Vol. 1a p65",
-      "metadata": [
-        {
-          "label": "streets",
-          "value": "5"
-        },
-        {
-          "label": "intersections",
-          "value": "6"
-        }
-      ],
-      "created": "2026-07-18T02:42:26Z",
-      "modified": "2026-07-18T02:42:26Z",
-      "creator": [
-        {
-          "id": "https://oldinsurancemaps.net/profile/danvk",
-          "type": "Person"
-        }
-      ],
-      "motivation": "georeferencing",
-      "target": {
-        "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd396m:g3964m:g3964nm:g3964nm_g08356195701A:08356_01A_1957-0065/selector",
-        "type": "SpecificResource",
-        "source": {
-          "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd396m:g3964m:g3964nm:g3964nm_g08356195701A:08356_01A_1957-0065/info.json",
-          "type": "ImageService2",
-          "height": 8040,
-          "width": 6600
-        },
-        "selector": {
-          "type": "SvgSelector",
-          "value": "<svg><polygon points=\"770.6,6647.0 840.9,1115.1 4732.9,1034.5 6232.5,1210.4 6233.5,4239.2 6453.7,4901.6 6126.5,5470.8 6108.3,6498.9 6600.0,6496.0 6600.0,8040.0 -0.0,8040.0 -0.0,6960.0 765.9,6968.8 767.1,6889.4 770.6,6647.0\" /></svg>"
-        }
-      },
-      "body": {
-        "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd396m:g3964m:g3964nm:g3964nm_g08356195701A:08356_01A_1957-0065/gcps",
-        "type": "FeatureCollection",
-        "transformation": {
-          "type": "helmert"
-        },
-        "features": [
-          {
-            "type": "Feature",
-            "properties": {
-              "resourceCoords": [
-                3160.0,
-                6536.0
-              ],
-              "creator": {
-                "id": "https://oldinsurancemaps.net/profile/danvk",
-                "type": "Person"
-              },
-              "type": "gcp"
-            },
-            "geometry": {
-              "type": "Point",
-              "coordinates": [
-                -86.77269,
-                36.1564939
-              ]
-            }
-          },
-          {
-            "type": "Feature",
-            "properties": {
-              "resourceCoords": [
-                1984.0,
-                1132.0
-              ],
-              "creator": {
-                "id": "https://oldinsurancemaps.net/profile/danvk",
-                "type": "Person"
-              },
-              "type": "gcp"
-            },
-            "geometry": {
-              "type": "Point",
-              "coordinates": [
-                -86.7747683,
-                36.1584689
-              ]
-            }
-          }
-        ]
-      }
-    },
-    {
-      "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd396m:g3964m:g3964nm:g3964nm_g08356195701A:08356_01A_1957-0066/georef",
-      "type": "Annotation",
-      "@context": [
-        "http://iiif.io/api/extension/georef/1/context.json",
-        "http://iiif.io/api/presentation/3/context.json"
-      ],
-      "label": "Nashville, Tenn. | 1957 | Vol. 1a p66",
-      "metadata": [
-        {
-          "label": "streets",
-          "value": "3"
-        },
-        {
-          "label": "intersections",
-          "value": "1"
-        }
-      ],
-      "created": "2026-07-18T02:42:26Z",
-      "modified": "2026-07-18T02:42:26Z",
-      "creator": [
-        {
-          "id": "https://oldinsurancemaps.net/profile/danvk",
-          "type": "Person"
-        }
-      ],
-      "motivation": "georeferencing",
-      "target": {
-        "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd396m:g3964m:g3964nm:g3964nm_g08356195701A:08356_01A_1957-0066/selector",
-        "type": "SpecificResource",
-        "source": {
-          "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd396m:g3964m:g3964nm:g3964nm_g08356195701A:08356_01A_1957-0066/info.json",
-          "type": "ImageService2",
-          "height": 8040,
-          "width": 6600
-        },
-        "selector": {
-          "type": "SvgSelector",
-          "value": "<svg><polygon points=\"665.3,4844.9 459.6,4334.5 445.2,1914.9 4632.6,1956.2 4651.3,0.0 6600.0,0.0 6600.0,8040.0 812.7,7944.4 811.3,6419.5 325.5,6422.7 342.6,5407.3 665.3,4844.9\" /></svg>"
-        }
-      },
-      "body": {
-        "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd396m:g3964m:g3964nm:g3964nm_g08356195701A:08356_01A_1957-0066/gcps",
-        "type": "FeatureCollection",
-        "transformation": {
-          "type": "polynomial",
-          "options": {
-            "order": 1
-          }
-        },
-        "features": [
-          {
-            "type": "Feature",
-            "properties": {
-              "resourceCoords": [
-                0.0,
-                0.0
-              ],
-              "creator": {
-                "id": "https://oldinsurancemaps.net/profile/danvk",
-                "type": "Person"
-              },
-              "type": "corner"
-            },
-            "geometry": {
-              "type": "Point",
-              "coordinates": [
-                -86.77313232728623,
-                36.15977690541481
-              ]
-            }
-          },
-          {
-            "type": "Feature",
-            "properties": {
-              "resourceCoords": [
-                6600.0,
-                0.0
-              ],
-              "creator": {
-                "id": "https://oldinsurancemaps.net/profile/danvk",
-                "type": "Person"
-              },
-              "type": "corner"
-            },
-            "geometry": {
-              "type": "Point",
-              "coordinates": [
-                -86.76970981906221,
-                36.16124868986296
-              ]
-            }
-          },
-          {
-            "type": "Feature",
-            "properties": {
-              "resourceCoords": [
-                6600.0,
-                8040.0
-              ],
-              "creator": {
-                "id": "https://oldinsurancemaps.net/profile/danvk",
-                "type": "Person"
-              },
-              "type": "corner"
-            },
-            "geometry": {
-              "type": "Point",
-              "coordinates": [
-                -86.76749005608002,
-                36.15788119973101
-              ]
-            }
-          },
-          {
-            "type": "Feature",
-            "properties": {
-              "resourceCoords": [
-                0.0,
-                8040.0
-              ],
-              "creator": {
-                "id": "https://oldinsurancemaps.net/profile/danvk",
-                "type": "Person"
-              },
-              "type": "corner"
-            },
-            "geometry": {
-              "type": "Point",
-              "coordinates": [
-                -86.77091256430404,
-                36.15640941528286
-              ]
-            }
-          },
-          {
-            "type": "Feature",
-            "properties": {
-              "resourceCoords": [
-                1632.0,
-                6412.0
-              ],
-              "creator": {
-                "id": "https://oldinsurancemaps.net/profile/danvk",
-                "type": "Person"
-              },
-              "type": "gcp"
-            },
-            "geometry": {
-              "type": "Point",
-              "coordinates": [
-                -86.7705151,
-                36.1574555
-              ]
-            }
-          }
-        ]
-      }
-    },
-    {
       "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd396m:g3964m:g3964nm:g3964nm_g08356195701A:08356_01A_1957-0067/georef",
       "type": "Annotation",
       "@context": [
@@ -5500,8 +6781,8 @@
           "value": "13"
         }
       ],
-      "created": "2026-07-18T02:42:26Z",
-      "modified": "2026-07-18T02:42:26Z",
+      "created": "2026-07-30T23:53:33Z",
+      "modified": "2026-07-30T23:53:33Z",
       "creator": [
         {
           "id": "https://oldinsurancemaps.net/profile/danvk",
@@ -5520,7 +6801,7 @@
         },
         "selector": {
           "type": "SvgSelector",
-          "value": "<svg><polygon points=\"3263.1,0.0 3446.9,580.4 5293.8,1542.1 5615.1,1303.4 6306.1,1401.0 6117.4,0.0 6600.0,0.0 6600.0,8040.0 290.1,8040.0 249.7,205.7 151.2,0.0 3263.1,0.0\" /></svg>"
+          "value": "<svg><polygon points=\"290.0,8040.0 249.6,205.7 157.4,0.0 3263.1,0.0 3446.9,580.4 5293.8,1542.1 5615.1,1303.4 6294.1,1398.9 6038.8,0.0 6600.0,0.0 6600.0,8040.0 290.0,8040.0\" /></svg>"
         }
       },
       "body": {
@@ -5593,8 +6874,8 @@
           "value": "2"
         }
       ],
-      "created": "2026-07-18T02:42:26Z",
-      "modified": "2026-07-18T02:42:26Z",
+      "created": "2026-07-30T23:53:33Z",
+      "modified": "2026-07-30T23:53:33Z",
       "creator": [
         {
           "id": "https://oldinsurancemaps.net/profile/danvk",
@@ -5613,7 +6894,7 @@
         },
         "selector": {
           "type": "SvgSelector",
-          "value": "<svg><polygon points=\"5866.6,717.9 5677.1,7299.3 -0.0,7221.4 -0.0,0.0 3949.8,0.0 3937.6,736.2 5866.6,717.9\" /></svg>"
+          "value": "<svg><polygon points=\"5866.4,717.7 5676.9,7299.1 -0.0,7221.5 0.0,0.0 4164.2,0.0 4151.9,733.8 5866.4,717.7\" /></svg>"
         }
       },
       "body": {
