@@ -7,6 +7,2628 @@
   "label": "Mosaic of main content, Brooklyn, N.Y. | 1939 | Vol. 1",
   "items": [
     {
+      "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd380m:g3804m:g3804bm:g3804bm_g05791193901:05791_01_1939-0014/georef",
+      "type": "Annotation",
+      "@context": [
+        "http://iiif.io/api/extension/georef/1/context.json",
+        "http://iiif.io/api/presentation/3/context.json"
+      ],
+      "label": "Brooklyn, N.Y. | 1939 | Vol. 1 p14",
+      "metadata": [
+        {
+          "label": "streets",
+          "value": "3"
+        },
+        {
+          "label": "intersections",
+          "value": "0"
+        }
+      ],
+      "created": "2026-07-30T21:24:27Z",
+      "modified": "2026-07-30T21:24:27Z",
+      "creator": [
+        {
+          "id": "https://oldinsurancemaps.net/profile/danvk",
+          "type": "Person"
+        }
+      ],
+      "motivation": "georeferencing",
+      "target": {
+        "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd380m:g3804m:g3804bm:g3804bm_g05791193901:05791_01_1939-0014/selector",
+        "type": "SpecificResource",
+        "source": {
+          "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd380m:g3804m:g3804bm:g3804bm_g05791193901:05791_01_1939-0014/info.json",
+          "type": "ImageService2",
+          "height": 8268,
+          "width": 5612
+        },
+        "selector": {
+          "type": "SvgSelector",
+          "value": "<svg><polygon points=\"-0.0,0.0 5612.0,-0.0 5612.0,8268.0 0.0,8268.0 -0.0,0.0\" /></svg>"
+        }
+      },
+      "body": {
+        "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd380m:g3804m:g3804bm:g3804bm_g05791193901:05791_01_1939-0014/gcps",
+        "type": "FeatureCollection",
+        "transformation": {
+          "type": "polynomial",
+          "options": {
+            "order": 1
+          }
+        },
+        "features": [
+          {
+            "type": "Feature",
+            "properties": {
+              "resourceCoords": [
+                0.0,
+                0.0
+              ],
+              "creator": {
+                "id": "https://oldinsurancemaps.net/profile/danvk",
+                "type": "Person"
+              },
+              "type": "corner"
+            },
+            "geometry": {
+              "type": "Point",
+              "coordinates": [
+                -74.0118501,
+                40.6729257
+              ]
+            }
+          },
+          {
+            "type": "Feature",
+            "properties": {
+              "resourceCoords": [
+                5612.0,
+                0.0
+              ],
+              "creator": {
+                "id": "https://oldinsurancemaps.net/profile/danvk",
+                "type": "Person"
+              },
+              "type": "corner"
+            },
+            "geometry": {
+              "type": "Point",
+              "coordinates": [
+                -74.0080533,
+                40.6718436
+              ]
+            }
+          },
+          {
+            "type": "Feature",
+            "properties": {
+              "resourceCoords": [
+                5612.0,
+                8268.0
+              ],
+              "creator": {
+                "id": "https://oldinsurancemaps.net/profile/danvk",
+                "type": "Person"
+              },
+              "type": "corner"
+            },
+            "geometry": {
+              "type": "Point",
+              "coordinates": [
+                -74.0101552,
+                40.6676011
+              ]
+            }
+          },
+          {
+            "type": "Feature",
+            "properties": {
+              "resourceCoords": [
+                0.0,
+                8268.0
+              ],
+              "creator": {
+                "id": "https://oldinsurancemaps.net/profile/danvk",
+                "type": "Person"
+              },
+              "type": "corner"
+            },
+            "geometry": {
+              "type": "Point",
+              "coordinates": [
+                -74.0139519,
+                40.6686832
+              ]
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd380m:g3804m:g3804bm:g3804bm_g05791193901:05791_01_1939-0021/georef",
+      "type": "Annotation",
+      "@context": [
+        "http://iiif.io/api/extension/georef/1/context.json",
+        "http://iiif.io/api/presentation/3/context.json"
+      ],
+      "label": "Brooklyn, N.Y. | 1939 | Vol. 1 p21",
+      "metadata": [
+        {
+          "label": "streets",
+          "value": "0"
+        },
+        {
+          "label": "intersections",
+          "value": "0"
+        }
+      ],
+      "created": "2026-07-30T21:24:27Z",
+      "modified": "2026-07-30T21:24:27Z",
+      "creator": [
+        {
+          "id": "https://oldinsurancemaps.net/profile/danvk",
+          "type": "Person"
+        }
+      ],
+      "motivation": "georeferencing",
+      "target": {
+        "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd380m:g3804m:g3804bm:g3804bm_g05791193901:05791_01_1939-0021/selector",
+        "type": "SpecificResource",
+        "source": {
+          "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd380m:g3804m:g3804bm:g3804bm_g05791193901:05791_01_1939-0021/info.json",
+          "type": "ImageService2",
+          "height": 8268,
+          "width": 5627
+        },
+        "selector": {
+          "type": "SvgSelector",
+          "value": "<svg><polygon points=\"1150.8,0.0 2729.8,0.0 2740.9,208.4 5479.9,232.1 5416.4,4941.9 4730.9,7092.5 4428.2,6309.5 2563.6,7044.6 2167.3,7025.0 1674.8,7215.5 1755.2,7354.4 173.0,7947.5 221.0,186.5 1149.8,194.6 1150.8,0.0\" /></svg>"
+        }
+      },
+      "body": {
+        "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd380m:g3804m:g3804bm:g3804bm_g05791193901:05791_01_1939-0021/gcps",
+        "type": "FeatureCollection",
+        "transformation": {
+          "type": "polynomial",
+          "options": {
+            "order": 1
+          }
+        },
+        "features": [
+          {
+            "type": "Feature",
+            "properties": {
+              "resourceCoords": [
+                0.0,
+                0.0
+              ],
+              "creator": {
+                "id": "https://oldinsurancemaps.net/profile/danvk",
+                "type": "Person"
+              },
+              "type": "corner"
+            },
+            "geometry": {
+              "type": "Point",
+              "coordinates": [
+                -74.010652962033,
+                40.68040606769846
+              ]
+            }
+          },
+          {
+            "type": "Feature",
+            "properties": {
+              "resourceCoords": [
+                5627.0,
+                0.0
+              ],
+              "creator": {
+                "id": "https://oldinsurancemaps.net/profile/danvk",
+                "type": "Person"
+              },
+              "type": "corner"
+            },
+            "geometry": {
+              "type": "Point",
+              "coordinates": [
+                -74.00798379310916,
+                40.682719840565944
+              ]
+            }
+          },
+          {
+            "type": "Feature",
+            "properties": {
+              "resourceCoords": [
+                5627.0,
+                8268.0
+              ],
+              "creator": {
+                "id": "https://oldinsurancemaps.net/profile/danvk",
+                "type": "Person"
+              },
+              "type": "corner"
+            },
+            "geometry": {
+              "type": "Point",
+              "coordinates": [
+                -74.00353300211398,
+                40.67972514733078
+              ]
+            }
+          },
+          {
+            "type": "Feature",
+            "properties": {
+              "resourceCoords": [
+                0.0,
+                8268.0
+              ],
+              "creator": {
+                "id": "https://oldinsurancemaps.net/profile/danvk",
+                "type": "Person"
+              },
+              "type": "corner"
+            },
+            "geometry": {
+              "type": "Point",
+              "coordinates": [
+                -74.00620217103784,
+                40.6774113744633
+              ]
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd380m:g3804m:g3804bm:g3804bm_g05791193901:05791_01_1939-0025/georef",
+      "type": "Annotation",
+      "@context": [
+        "http://iiif.io/api/extension/georef/1/context.json",
+        "http://iiif.io/api/presentation/3/context.json"
+      ],
+      "label": "Brooklyn, N.Y. | 1939 | Vol. 1 p25",
+      "metadata": [
+        {
+          "label": "streets",
+          "value": "0"
+        },
+        {
+          "label": "intersections",
+          "value": "0"
+        }
+      ],
+      "created": "2026-07-30T21:24:27Z",
+      "modified": "2026-07-30T21:24:27Z",
+      "creator": [
+        {
+          "id": "https://oldinsurancemaps.net/profile/danvk",
+          "type": "Person"
+        }
+      ],
+      "motivation": "georeferencing",
+      "target": {
+        "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd380m:g3804m:g3804bm:g3804bm_g05791193901:05791_01_1939-0025/selector",
+        "type": "SpecificResource",
+        "source": {
+          "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd380m:g3804m:g3804bm:g3804bm_g05791193901:05791_01_1939-0025/info.json",
+          "type": "ImageService2",
+          "height": 8268,
+          "width": 5622
+        },
+        "selector": {
+          "type": "SvgSelector",
+          "value": "<svg><polygon points=\"5048.2,1786.0 5158.8,7527.3 2363.5,7621.9 2311.3,6401.7 2804.0,5156.3 2981.1,4671.0 726.2,3818.8 1947.6,619.7 5048.2,1786.0\" /></svg>"
+        }
+      },
+      "body": {
+        "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd380m:g3804m:g3804bm:g3804bm_g05791193901:05791_01_1939-0025/gcps",
+        "type": "FeatureCollection",
+        "transformation": {
+          "type": "polynomial",
+          "options": {
+            "order": 1
+          }
+        },
+        "features": [
+          {
+            "type": "Feature",
+            "properties": {
+              "resourceCoords": [
+                0.0,
+                0.0
+              ],
+              "creator": {
+                "id": "https://oldinsurancemaps.net/profile/danvk",
+                "type": "Person"
+              },
+              "type": "corner"
+            },
+            "geometry": {
+              "type": "Point",
+              "coordinates": [
+                -74.00921660483176,
+                40.679516856478045
+              ]
+            }
+          },
+          {
+            "type": "Feature",
+            "properties": {
+              "resourceCoords": [
+                5622.0,
+                0.0
+              ],
+              "creator": {
+                "id": "https://oldinsurancemaps.net/profile/danvk",
+                "type": "Person"
+              },
+              "type": "corner"
+            },
+            "geometry": {
+              "type": "Point",
+              "coordinates": [
+                -74.00544299753432,
+                40.678399841854606
+              ]
+            }
+          },
+          {
+            "type": "Feature",
+            "properties": {
+              "resourceCoords": [
+                5622.0,
+                8268.0
+              ],
+              "creator": {
+                "id": "https://oldinsurancemaps.net/profile/danvk",
+                "type": "Person"
+              },
+              "type": "corner"
+            },
+            "geometry": {
+              "type": "Point",
+              "coordinates": [
+                -74.0075931189448,
+                40.67416279867534
+              ]
+            }
+          },
+          {
+            "type": "Feature",
+            "properties": {
+              "resourceCoords": [
+                0.0,
+                8268.0
+              ],
+              "creator": {
+                "id": "https://oldinsurancemaps.net/profile/danvk",
+                "type": "Person"
+              },
+              "type": "corner"
+            },
+            "geometry": {
+              "type": "Point",
+              "coordinates": [
+                -74.01136672624224,
+                40.67527981329877
+              ]
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd380m:g3804m:g3804bm:g3804bm_g05791193901:05791_01_1939-0029/georef",
+      "type": "Annotation",
+      "@context": [
+        "http://iiif.io/api/extension/georef/1/context.json",
+        "http://iiif.io/api/presentation/3/context.json"
+      ],
+      "label": "Brooklyn, N.Y. | 1939 | Vol. 1 p29",
+      "metadata": [
+        {
+          "label": "streets",
+          "value": "0"
+        },
+        {
+          "label": "intersections",
+          "value": "0"
+        }
+      ],
+      "created": "2026-07-30T21:24:27Z",
+      "modified": "2026-07-30T21:24:27Z",
+      "creator": [
+        {
+          "id": "https://oldinsurancemaps.net/profile/danvk",
+          "type": "Person"
+        }
+      ],
+      "motivation": "georeferencing",
+      "target": {
+        "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd380m:g3804m:g3804bm:g3804bm_g05791193901:05791_01_1939-0029/selector",
+        "type": "SpecificResource",
+        "source": {
+          "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd380m:g3804m:g3804bm:g3804bm_g05791193901:05791_01_1939-0029/info.json",
+          "type": "ImageService2",
+          "height": 8267,
+          "width": 5490
+        },
+        "selector": {
+          "type": "SvgSelector",
+          "value": "<svg><polygon points=\"2642.2,157.3 2617.5,0.0 3141.5,0.0 3501.2,159.9 5490.0,147.0 5490.0,7728.7 1376.9,7728.2 1271.5,7802.8 195.3,6840.0 183.3,135.9 2642.2,157.3\" /></svg>"
+        }
+      },
+      "body": {
+        "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd380m:g3804m:g3804bm:g3804bm_g05791193901:05791_01_1939-0029/gcps",
+        "type": "FeatureCollection",
+        "transformation": {
+          "type": "polynomial",
+          "options": {
+            "order": 1
+          }
+        },
+        "features": [
+          {
+            "type": "Feature",
+            "properties": {
+              "resourceCoords": [
+                0.0,
+                0.0
+              ],
+              "creator": {
+                "id": "https://oldinsurancemaps.net/profile/danvk",
+                "type": "Person"
+              },
+              "type": "corner"
+            },
+            "geometry": {
+              "type": "Point",
+              "coordinates": [
+                -74.0066291077756,
+                40.677124981072986
+              ]
+            }
+          },
+          {
+            "type": "Feature",
+            "properties": {
+              "resourceCoords": [
+                5490.0,
+                0.0
+              ],
+              "creator": {
+                "id": "https://oldinsurancemaps.net/profile/danvk",
+                "type": "Person"
+              },
+              "type": "corner"
+            },
+            "geometry": {
+              "type": "Point",
+              "coordinates": [
+                -74.00525572989353,
+                40.679969691974954
+              ]
+            }
+          },
+          {
+            "type": "Feature",
+            "properties": {
+              "resourceCoords": [
+                5490.0,
+                8267.0
+              ],
+              "creator": {
+                "id": "https://oldinsurancemaps.net/profile/danvk",
+                "type": "Person"
+              },
+              "type": "corner"
+            },
+            "geometry": {
+              "type": "Point",
+              "coordinates": [
+                -73.99964421939927,
+                40.67838945893789
+              ]
+            }
+          },
+          {
+            "type": "Feature",
+            "properties": {
+              "resourceCoords": [
+                0.0,
+                8267.0
+              ],
+              "creator": {
+                "id": "https://oldinsurancemaps.net/profile/danvk",
+                "type": "Person"
+              },
+              "type": "corner"
+            },
+            "geometry": {
+              "type": "Point",
+              "coordinates": [
+                -74.00101759728132,
+                40.675544748035925
+              ]
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd380m:g3804m:g3804bm:g3804bm_g05791193901:05791_01_1939-0031/georef",
+      "type": "Annotation",
+      "@context": [
+        "http://iiif.io/api/extension/georef/1/context.json",
+        "http://iiif.io/api/presentation/3/context.json"
+      ],
+      "label": "Brooklyn, N.Y. | 1939 | Vol. 1 p31",
+      "metadata": [
+        {
+          "label": "streets",
+          "value": "0"
+        },
+        {
+          "label": "intersections",
+          "value": "0"
+        }
+      ],
+      "created": "2026-07-30T21:24:27Z",
+      "modified": "2026-07-30T21:24:27Z",
+      "creator": [
+        {
+          "id": "https://oldinsurancemaps.net/profile/danvk",
+          "type": "Person"
+        }
+      ],
+      "motivation": "georeferencing",
+      "target": {
+        "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd380m:g3804m:g3804bm:g3804bm_g05791193901:05791_01_1939-0031/selector",
+        "type": "SpecificResource",
+        "source": {
+          "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd380m:g3804m:g3804bm:g3804bm_g05791193901:05791_01_1939-0031/info.json",
+          "type": "ImageService2",
+          "height": 8268,
+          "width": 5589
+        },
+        "selector": {
+          "type": "SvgSelector",
+          "value": "<svg><polygon points=\"5417.9,7743.6 188.4,7784.0 188.3,8268.0 98.8,8268.0 93.6,7784.8 0.0,7785.5 0.0,213.0 5344.9,154.8 5417.9,7743.6\" /></svg>"
+        }
+      },
+      "body": {
+        "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd380m:g3804m:g3804bm:g3804bm_g05791193901:05791_01_1939-0031/gcps",
+        "type": "FeatureCollection",
+        "transformation": {
+          "type": "polynomial",
+          "options": {
+            "order": 1
+          }
+        },
+        "features": [
+          {
+            "type": "Feature",
+            "properties": {
+              "resourceCoords": [
+                0.0,
+                0.0
+              ],
+              "creator": {
+                "id": "https://oldinsurancemaps.net/profile/danvk",
+                "type": "Person"
+              },
+              "type": "corner"
+            },
+            "geometry": {
+              "type": "Point",
+              "coordinates": [
+                -74.00415169345409,
+                40.682341055717245
+              ]
+            }
+          },
+          {
+            "type": "Feature",
+            "properties": {
+              "resourceCoords": [
+                5589.0,
+                0.0
+              ],
+              "creator": {
+                "id": "https://oldinsurancemaps.net/profile/danvk",
+                "type": "Person"
+              },
+              "type": "corner"
+            },
+            "geometry": {
+              "type": "Point",
+              "coordinates": [
+                -74.00272168009951,
+                40.68522512559574
+              ]
+            }
+          },
+          {
+            "type": "Feature",
+            "properties": {
+              "resourceCoords": [
+                5589.0,
+                8268.0
+              ],
+              "creator": {
+                "id": "https://oldinsurancemaps.net/profile/danvk",
+                "type": "Person"
+              },
+              "type": "corner"
+            },
+            "geometry": {
+              "type": "Point",
+              "coordinates": [
+                -73.99713390341819,
+                40.683609298181686
+              ]
+            }
+          },
+          {
+            "type": "Feature",
+            "properties": {
+              "resourceCoords": [
+                0.0,
+                8268.0
+              ],
+              "creator": {
+                "id": "https://oldinsurancemaps.net/profile/danvk",
+                "type": "Person"
+              },
+              "type": "corner"
+            },
+            "geometry": {
+              "type": "Point",
+              "coordinates": [
+                -73.99856391677277,
+                40.68072522830318
+              ]
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd380m:g3804m:g3804bm:g3804bm_g05791193901:05791_01_1939-0033/georef",
+      "type": "Annotation",
+      "@context": [
+        "http://iiif.io/api/extension/georef/1/context.json",
+        "http://iiif.io/api/presentation/3/context.json"
+      ],
+      "label": "Brooklyn, N.Y. | 1939 | Vol. 1 p33",
+      "metadata": [
+        {
+          "label": "streets",
+          "value": "0"
+        },
+        {
+          "label": "intersections",
+          "value": "0"
+        }
+      ],
+      "created": "2026-07-30T21:24:27Z",
+      "modified": "2026-07-30T21:24:27Z",
+      "creator": [
+        {
+          "id": "https://oldinsurancemaps.net/profile/danvk",
+          "type": "Person"
+        }
+      ],
+      "motivation": "georeferencing",
+      "target": {
+        "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd380m:g3804m:g3804bm:g3804bm_g05791193901:05791_01_1939-0033/selector",
+        "type": "SpecificResource",
+        "source": {
+          "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd380m:g3804m:g3804bm:g3804bm_g05791193901:05791_01_1939-0033/info.json",
+          "type": "ImageService2",
+          "height": 8268,
+          "width": 5612
+        },
+        "selector": {
+          "type": "SvgSelector",
+          "value": "<svg><polygon points=\"1065.9,219.4 2100.6,231.0 2099.8,0.0 4183.1,0.0 4181.2,254.3 4738.1,260.5 4753.1,7762.7 637.0,7771.3 1065.9,219.4\" /></svg>"
+        }
+      },
+      "body": {
+        "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd380m:g3804m:g3804bm:g3804bm_g05791193901:05791_01_1939-0033/gcps",
+        "type": "FeatureCollection",
+        "transformation": {
+          "type": "polynomial",
+          "options": {
+            "order": 1
+          }
+        },
+        "features": [
+          {
+            "type": "Feature",
+            "properties": {
+              "resourceCoords": [
+                0.0,
+                0.0
+              ],
+              "creator": {
+                "id": "https://oldinsurancemaps.net/profile/danvk",
+                "type": "Person"
+              },
+              "type": "corner"
+            },
+            "geometry": {
+              "type": "Point",
+              "coordinates": [
+                -74.00180610595875,
+                40.68724584358484
+              ]
+            }
+          },
+          {
+            "type": "Feature",
+            "properties": {
+              "resourceCoords": [
+                5612.0,
+                0.0
+              ],
+              "creator": {
+                "id": "https://oldinsurancemaps.net/profile/danvk",
+                "type": "Person"
+              },
+              "type": "corner"
+            },
+            "geometry": {
+              "type": "Point",
+              "coordinates": [
+                -74.00040176565317,
+                40.69016942145453
+              ]
+            }
+          },
+          {
+            "type": "Feature",
+            "properties": {
+              "resourceCoords": [
+                5612.0,
+                8268.0
+              ],
+              "creator": {
+                "id": "https://oldinsurancemaps.net/profile/danvk",
+                "type": "Person"
+              },
+              "type": "corner"
+            },
+            "geometry": {
+              "type": "Point",
+              "coordinates": [
+                -73.99476124169132,
+                40.6885895083947
+              ]
+            }
+          },
+          {
+            "type": "Feature",
+            "properties": {
+              "resourceCoords": [
+                0.0,
+                8268.0
+              ],
+              "creator": {
+                "id": "https://oldinsurancemaps.net/profile/danvk",
+                "type": "Person"
+              },
+              "type": "corner"
+            },
+            "geometry": {
+              "type": "Point",
+              "coordinates": [
+                -73.99616558199689,
+                40.68566593052501
+              ]
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd380m:g3804m:g3804bm:g3804bm_g05791193901:05791_01_1939-0034/georef",
+      "type": "Annotation",
+      "@context": [
+        "http://iiif.io/api/extension/georef/1/context.json",
+        "http://iiif.io/api/presentation/3/context.json"
+      ],
+      "label": "Brooklyn, N.Y. | 1939 | Vol. 1 p34",
+      "metadata": [
+        {
+          "label": "streets",
+          "value": "0"
+        },
+        {
+          "label": "intersections",
+          "value": "0"
+        }
+      ],
+      "created": "2026-07-30T21:24:27Z",
+      "modified": "2026-07-30T21:24:27Z",
+      "creator": [
+        {
+          "id": "https://oldinsurancemaps.net/profile/danvk",
+          "type": "Person"
+        }
+      ],
+      "motivation": "georeferencing",
+      "target": {
+        "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd380m:g3804m:g3804bm:g3804bm_g05791193901:05791_01_1939-0034/selector",
+        "type": "SpecificResource",
+        "source": {
+          "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd380m:g3804m:g3804bm:g3804bm_g05791193901:05791_01_1939-0034/info.json",
+          "type": "ImageService2",
+          "height": 8268,
+          "width": 5612
+        },
+        "selector": {
+          "type": "SvgSelector",
+          "value": "<svg><polygon points=\"688.2,317.2 4588.8,330.6 4599.1,0.0 5612.0,0.0 5612.0,8268.0 5484.4,8268.0 5524.3,7859.7 767.9,7892.8 688.2,317.2\" /></svg>"
+        }
+      },
+      "body": {
+        "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd380m:g3804m:g3804bm:g3804bm_g05791193901:05791_01_1939-0034/gcps",
+        "type": "FeatureCollection",
+        "transformation": {
+          "type": "polynomial",
+          "options": {
+            "order": 1
+          }
+        },
+        "features": [
+          {
+            "type": "Feature",
+            "properties": {
+              "resourceCoords": [
+                0.0,
+                0.0
+              ],
+              "creator": {
+                "id": "https://oldinsurancemaps.net/profile/danvk",
+                "type": "Person"
+              },
+              "type": "corner"
+            },
+            "geometry": {
+              "type": "Point",
+              "coordinates": [
+                -74.00083080452261,
+                40.68937195251413
+              ]
+            }
+          },
+          {
+            "type": "Feature",
+            "properties": {
+              "resourceCoords": [
+                5612.0,
+                0.0
+              ],
+              "creator": {
+                "id": "https://oldinsurancemaps.net/profile/danvk",
+                "type": "Person"
+              },
+              "type": "corner"
+            },
+            "geometry": {
+              "type": "Point",
+              "coordinates": [
+                -73.9994077953061,
+                40.69225776534815
+              ]
+            }
+          },
+          {
+            "type": "Feature",
+            "properties": {
+              "resourceCoords": [
+                5612.0,
+                8268.0
+              ],
+              "creator": {
+                "id": "https://oldinsurancemaps.net/profile/danvk",
+                "type": "Person"
+              },
+              "type": "corner"
+            },
+            "geometry": {
+              "type": "Point",
+              "coordinates": [
+                -73.99383997383913,
+                40.69065689491532
+              ]
+            }
+          },
+          {
+            "type": "Feature",
+            "properties": {
+              "resourceCoords": [
+                0.0,
+                8268.0
+              ],
+              "creator": {
+                "id": "https://oldinsurancemaps.net/profile/danvk",
+                "type": "Person"
+              },
+              "type": "corner"
+            },
+            "geometry": {
+              "type": "Point",
+              "coordinates": [
+                -73.99526298305564,
+                40.6877710820813
+              ]
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd380m:g3804m:g3804bm:g3804bm_g05791193901:05791_01_1939-0035/georef",
+      "type": "Annotation",
+      "@context": [
+        "http://iiif.io/api/extension/georef/1/context.json",
+        "http://iiif.io/api/presentation/3/context.json"
+      ],
+      "label": "Brooklyn, N.Y. | 1939 | Vol. 1 p35",
+      "metadata": [
+        {
+          "label": "streets",
+          "value": "0"
+        },
+        {
+          "label": "intersections",
+          "value": "0"
+        }
+      ],
+      "created": "2026-07-30T21:24:27Z",
+      "modified": "2026-07-30T21:24:27Z",
+      "creator": [
+        {
+          "id": "https://oldinsurancemaps.net/profile/danvk",
+          "type": "Person"
+        }
+      ],
+      "motivation": "georeferencing",
+      "target": {
+        "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd380m:g3804m:g3804bm:g3804bm_g05791193901:05791_01_1939-0035/selector",
+        "type": "SpecificResource",
+        "source": {
+          "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd380m:g3804m:g3804bm:g3804bm_g05791193901:05791_01_1939-0035/info.json",
+          "type": "ImageService2",
+          "height": 8268,
+          "width": 5612
+        },
+        "selector": {
+          "type": "SvgSelector",
+          "value": "<svg><polygon points=\"5612.0,1846.0 5612.0,4843.4 5408.1,4841.6 5433.9,6702.5 5229.5,6700.6 5229.7,8268.0 0.0,8268.0 -0.0,-0.0 5394.6,0.0 5378.4,1844.0 5612.0,1846.0\" /></svg>"
+        }
+      },
+      "body": {
+        "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd380m:g3804m:g3804bm:g3804bm_g05791193901:05791_01_1939-0035/gcps",
+        "type": "FeatureCollection",
+        "transformation": {
+          "type": "polynomial",
+          "options": {
+            "order": 1
+          }
+        },
+        "features": [
+          {
+            "type": "Feature",
+            "properties": {
+              "resourceCoords": [
+                0.0,
+                0.0
+              ],
+              "creator": {
+                "id": "https://oldinsurancemaps.net/profile/danvk",
+                "type": "Person"
+              },
+              "type": "corner"
+            },
+            "geometry": {
+              "type": "Point",
+              "coordinates": [
+                -74.00576995836045,
+                40.669438595001104
+              ]
+            }
+          },
+          {
+            "type": "Feature",
+            "properties": {
+              "resourceCoords": [
+                5612.0,
+                0.0
+              ],
+              "creator": {
+                "id": "https://oldinsurancemaps.net/profile/danvk",
+                "type": "Person"
+              },
+              "type": "corner"
+            },
+            "geometry": {
+              "type": "Point",
+              "coordinates": [
+                -74.00441054388666,
+                40.6723103795477
+              ]
+            }
+          },
+          {
+            "type": "Feature",
+            "properties": {
+              "resourceCoords": [
+                5612.0,
+                8268.0
+              ],
+              "creator": {
+                "id": "https://oldinsurancemaps.net/profile/danvk",
+                "type": "Person"
+              },
+              "type": "corner"
+            },
+            "geometry": {
+              "type": "Point",
+              "coordinates": [
+                -73.99887142908764,
+                40.67078059951198
+              ]
+            }
+          },
+          {
+            "type": "Feature",
+            "properties": {
+              "resourceCoords": [
+                0.0,
+                8268.0
+              ],
+              "creator": {
+                "id": "https://oldinsurancemaps.net/profile/danvk",
+                "type": "Person"
+              },
+              "type": "corner"
+            },
+            "geometry": {
+              "type": "Point",
+              "coordinates": [
+                -74.00023084356143,
+                40.66790881496538
+              ]
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd380m:g3804m:g3804bm:g3804bm_g05791193901:05791_01_1939-0039/georef",
+      "type": "Annotation",
+      "@context": [
+        "http://iiif.io/api/extension/georef/1/context.json",
+        "http://iiif.io/api/presentation/3/context.json"
+      ],
+      "label": "Brooklyn, N.Y. | 1939 | Vol. 1 p39",
+      "metadata": [
+        {
+          "label": "streets",
+          "value": "0"
+        },
+        {
+          "label": "intersections",
+          "value": "0"
+        }
+      ],
+      "created": "2026-07-30T21:24:27Z",
+      "modified": "2026-07-30T21:24:27Z",
+      "creator": [
+        {
+          "id": "https://oldinsurancemaps.net/profile/danvk",
+          "type": "Person"
+        }
+      ],
+      "motivation": "georeferencing",
+      "target": {
+        "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd380m:g3804m:g3804bm:g3804bm_g05791193901:05791_01_1939-0039/selector",
+        "type": "SpecificResource",
+        "source": {
+          "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd380m:g3804m:g3804bm:g3804bm_g05791193901:05791_01_1939-0039/info.json",
+          "type": "ImageService2",
+          "height": 8268,
+          "width": 5612
+        },
+        "selector": {
+          "type": "SvgSelector",
+          "value": "<svg><polygon points=\"371.4,1191.4 5106.6,1129.8 5215.3,5932.6 5183.1,6617.0 3189.4,6409.7 481.5,6437.0 371.4,1191.4\" /></svg>"
+        }
+      },
+      "body": {
+        "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd380m:g3804m:g3804bm:g3804bm_g05791193901:05791_01_1939-0039/gcps",
+        "type": "FeatureCollection",
+        "transformation": {
+          "type": "polynomial",
+          "options": {
+            "order": 1
+          }
+        },
+        "features": [
+          {
+            "type": "Feature",
+            "properties": {
+              "resourceCoords": [
+                0.0,
+                0.0
+              ],
+              "creator": {
+                "id": "https://oldinsurancemaps.net/profile/danvk",
+                "type": "Person"
+              },
+              "type": "corner"
+            },
+            "geometry": {
+              "type": "Point",
+              "coordinates": [
+                -74.00094920708945,
+                40.67845548475203
+              ]
+            }
+          },
+          {
+            "type": "Feature",
+            "properties": {
+              "resourceCoords": [
+                5612.0,
+                0.0
+              ],
+              "creator": {
+                "id": "https://oldinsurancemaps.net/profile/danvk",
+                "type": "Person"
+              },
+              "type": "corner"
+            },
+            "geometry": {
+              "type": "Point",
+              "coordinates": [
+                -73.99949957343593,
+                40.6813517251926
+              ]
+            }
+          },
+          {
+            "type": "Feature",
+            "properties": {
+              "resourceCoords": [
+                5612.0,
+                8268.0
+              ],
+              "creator": {
+                "id": "https://oldinsurancemaps.net/profile/danvk",
+                "type": "Person"
+              },
+              "type": "corner"
+            },
+            "geometry": {
+              "type": "Point",
+              "coordinates": [
+                -73.99391252213593,
+                40.679720643068116
+              ]
+            }
+          },
+          {
+            "type": "Feature",
+            "properties": {
+              "resourceCoords": [
+                0.0,
+                8268.0
+              ],
+              "creator": {
+                "id": "https://oldinsurancemaps.net/profile/danvk",
+                "type": "Person"
+              },
+              "type": "corner"
+            },
+            "geometry": {
+              "type": "Point",
+              "coordinates": [
+                -73.99536215578945,
+                40.676824402627545
+              ]
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd380m:g3804m:g3804bm:g3804bm_g05791193901:05791_01_1939-0004/georef",
+      "type": "Annotation",
+      "@context": [
+        "http://iiif.io/api/extension/georef/1/context.json",
+        "http://iiif.io/api/presentation/3/context.json"
+      ],
+      "label": "Brooklyn, N.Y. | 1939 | Vol. 1 p4",
+      "metadata": [
+        {
+          "label": "streets",
+          "value": "0"
+        },
+        {
+          "label": "intersections",
+          "value": "0"
+        }
+      ],
+      "created": "2026-07-30T21:24:27Z",
+      "modified": "2026-07-30T21:24:27Z",
+      "creator": [
+        {
+          "id": "https://oldinsurancemaps.net/profile/danvk",
+          "type": "Person"
+        }
+      ],
+      "motivation": "georeferencing",
+      "target": {
+        "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd380m:g3804m:g3804bm:g3804bm_g05791193901:05791_01_1939-0004/selector",
+        "type": "SpecificResource",
+        "source": {
+          "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd380m:g3804m:g3804bm:g3804bm_g05791193901:05791_01_1939-0004/info.json",
+          "type": "ImageService2",
+          "height": 8268,
+          "width": 5599
+        },
+        "selector": {
+          "type": "SvgSelector",
+          "value": "<svg><polygon points=\"0,8268 0,0 5599,0 5599,8268 0,8268\" /></svg>"
+        }
+      },
+      "body": {
+        "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd380m:g3804m:g3804bm:g3804bm_g05791193901:05791_01_1939-0004/gcps",
+        "type": "FeatureCollection",
+        "transformation": {
+          "type": "polynomial",
+          "options": {
+            "order": 1
+          }
+        },
+        "features": [
+          {
+            "type": "Feature",
+            "properties": {
+              "resourceCoords": [
+                0.0,
+                0.0
+              ],
+              "creator": {
+                "id": "https://oldinsurancemaps.net/profile/danvk",
+                "type": "Person"
+              },
+              "type": "corner"
+            },
+            "geometry": {
+              "type": "Point",
+              "coordinates": [
+                -74.0160042372145,
+                40.681997439651376
+              ]
+            }
+          },
+          {
+            "type": "Feature",
+            "properties": {
+              "resourceCoords": [
+                5599.0,
+                0.0
+              ],
+              "creator": {
+                "id": "https://oldinsurancemaps.net/profile/danvk",
+                "type": "Person"
+              },
+              "type": "corner"
+            },
+            "geometry": {
+              "type": "Point",
+              "coordinates": [
+                -74.01343961577352,
+                40.68435601301376
+              ]
+            }
+          },
+          {
+            "type": "Feature",
+            "properties": {
+              "resourceCoords": [
+                5599.0,
+                8268.0
+              ],
+              "creator": {
+                "id": "https://oldinsurancemaps.net/profile/danvk",
+                "type": "Person"
+              },
+              "type": "corner"
+            },
+            "geometry": {
+              "type": "Point",
+              "coordinates": [
+                -74.00887984898229,
+                40.68146430186943
+              ]
+            }
+          },
+          {
+            "type": "Feature",
+            "properties": {
+              "resourceCoords": [
+                0.0,
+                8268.0
+              ],
+              "creator": {
+                "id": "https://oldinsurancemaps.net/profile/danvk",
+                "type": "Person"
+              },
+              "type": "corner"
+            },
+            "geometry": {
+              "type": "Point",
+              "coordinates": [
+                -74.01144447042329,
+                40.67910572850705
+              ]
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd380m:g3804m:g3804bm:g3804bm_g05791193901:05791_01_1939-0040/georef",
+      "type": "Annotation",
+      "@context": [
+        "http://iiif.io/api/extension/georef/1/context.json",
+        "http://iiif.io/api/presentation/3/context.json"
+      ],
+      "label": "Brooklyn, N.Y. | 1939 | Vol. 1 p40",
+      "metadata": [
+        {
+          "label": "streets",
+          "value": "0"
+        },
+        {
+          "label": "intersections",
+          "value": "0"
+        }
+      ],
+      "created": "2026-07-30T21:24:27Z",
+      "modified": "2026-07-30T21:24:27Z",
+      "creator": [
+        {
+          "id": "https://oldinsurancemaps.net/profile/danvk",
+          "type": "Person"
+        }
+      ],
+      "motivation": "georeferencing",
+      "target": {
+        "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd380m:g3804m:g3804bm:g3804bm_g05791193901:05791_01_1939-0040/selector",
+        "type": "SpecificResource",
+        "source": {
+          "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd380m:g3804m:g3804bm:g3804bm_g05791193901:05791_01_1939-0040/info.json",
+          "type": "ImageService2",
+          "height": 8268,
+          "width": 5612
+        },
+        "selector": {
+          "type": "SvgSelector",
+          "value": "<svg><polygon points=\"0.0,1270.4 5612.0,1224.9 5612.0,7413.9 2355.6,7032.5 2419.6,6422.1 1406.2,6277.3 1415.8,6928.7 0.0,6764.6 0.0,1270.4\" /></svg>"
+        }
+      },
+      "body": {
+        "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd380m:g3804m:g3804bm:g3804bm_g05791193901:05791_01_1939-0040/gcps",
+        "type": "FeatureCollection",
+        "transformation": {
+          "type": "polynomial",
+          "options": {
+            "order": 1
+          }
+        },
+        "features": [
+          {
+            "type": "Feature",
+            "properties": {
+              "resourceCoords": [
+                0.0,
+                0.0
+              ],
+              "creator": {
+                "id": "https://oldinsurancemaps.net/profile/danvk",
+                "type": "Person"
+              },
+              "type": "corner"
+            },
+            "geometry": {
+              "type": "Point",
+              "coordinates": [
+                -73.99970195756843,
+                40.68116566779925
+              ]
+            }
+          },
+          {
+            "type": "Feature",
+            "properties": {
+              "resourceCoords": [
+                5612.0,
+                0.0
+              ],
+              "creator": {
+                "id": "https://oldinsurancemaps.net/profile/danvk",
+                "type": "Person"
+              },
+              "type": "corner"
+            },
+            "geometry": {
+              "type": "Point",
+              "coordinates": [
+                -73.99826398436265,
+                40.68406376815667
+              ]
+            }
+          },
+          {
+            "type": "Feature",
+            "properties": {
+              "resourceCoords": [
+                5612.0,
+                8268.0
+              ],
+              "creator": {
+                "id": "https://oldinsurancemaps.net/profile/danvk",
+                "type": "Person"
+              },
+              "type": "corner"
+            },
+            "geometry": {
+              "type": "Point",
+              "coordinates": [
+                -73.99267314833308,
+                40.68244586295928
+              ]
+            }
+          },
+          {
+            "type": "Feature",
+            "properties": {
+              "resourceCoords": [
+                0.0,
+                8268.0
+              ],
+              "creator": {
+                "id": "https://oldinsurancemaps.net/profile/danvk",
+                "type": "Person"
+              },
+              "type": "corner"
+            },
+            "geometry": {
+              "type": "Point",
+              "coordinates": [
+                -73.99411112153886,
+                40.67954776260186
+              ]
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd380m:g3804m:g3804bm:g3804bm_g05791193901:05791_01_1939-0041/georef",
+      "type": "Annotation",
+      "@context": [
+        "http://iiif.io/api/extension/georef/1/context.json",
+        "http://iiif.io/api/presentation/3/context.json"
+      ],
+      "label": "Brooklyn, N.Y. | 1939 | Vol. 1 p41",
+      "metadata": [
+        {
+          "label": "streets",
+          "value": "0"
+        },
+        {
+          "label": "intersections",
+          "value": "0"
+        }
+      ],
+      "created": "2026-07-30T21:24:27Z",
+      "modified": "2026-07-30T21:24:27Z",
+      "creator": [
+        {
+          "id": "https://oldinsurancemaps.net/profile/danvk",
+          "type": "Person"
+        }
+      ],
+      "motivation": "georeferencing",
+      "target": {
+        "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd380m:g3804m:g3804bm:g3804bm_g05791193901:05791_01_1939-0041/selector",
+        "type": "SpecificResource",
+        "source": {
+          "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd380m:g3804m:g3804bm:g3804bm_g05791193901:05791_01_1939-0041/info.json",
+          "type": "ImageService2",
+          "height": 8268,
+          "width": 5612
+        },
+        "selector": {
+          "type": "SvgSelector",
+          "value": "<svg><polygon points=\"1463.6,7707.6 676.9,1570.6 5010.4,969.4 5248.0,3876.2 4573.4,3969.0 4652.3,7666.5 1463.6,7707.6\" /></svg>"
+        }
+      },
+      "body": {
+        "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd380m:g3804m:g3804bm:g3804bm_g05791193901:05791_01_1939-0041/gcps",
+        "type": "FeatureCollection",
+        "transformation": {
+          "type": "polynomial",
+          "options": {
+            "order": 1
+          }
+        },
+        "features": [
+          {
+            "type": "Feature",
+            "properties": {
+              "resourceCoords": [
+                0.0,
+                0.0
+              ],
+              "creator": {
+                "id": "https://oldinsurancemaps.net/profile/danvk",
+                "type": "Person"
+              },
+              "type": "corner"
+            },
+            "geometry": {
+              "type": "Point",
+              "coordinates": [
+                -73.99866851020772,
+                40.68390220160998
+              ]
+            }
+          },
+          {
+            "type": "Feature",
+            "properties": {
+              "resourceCoords": [
+                5612.0,
+                0.0
+              ],
+              "creator": {
+                "id": "https://oldinsurancemaps.net/profile/danvk",
+                "type": "Person"
+              },
+              "type": "corner"
+            },
+            "geometry": {
+              "type": "Point",
+              "coordinates": [
+                -73.9967590721513,
+                40.686637805930125
+              ]
+            }
+          },
+          {
+            "type": "Feature",
+            "properties": {
+              "resourceCoords": [
+                5612.0,
+                8268.0
+              ],
+              "creator": {
+                "id": "https://oldinsurancemaps.net/profile/danvk",
+                "type": "Person"
+              },
+              "type": "corner"
+            },
+            "geometry": {
+              "type": "Point",
+              "coordinates": [
+                -73.99148150105509,
+                40.68448952846099
+              ]
+            }
+          },
+          {
+            "type": "Feature",
+            "properties": {
+              "resourceCoords": [
+                0.0,
+                8268.0
+              ],
+              "creator": {
+                "id": "https://oldinsurancemaps.net/profile/danvk",
+                "type": "Person"
+              },
+              "type": "corner"
+            },
+            "geometry": {
+              "type": "Point",
+              "coordinates": [
+                -73.9933909391115,
+                40.68175392414085
+              ]
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd380m:g3804m:g3804bm:g3804bm_g05791193901:05791_01_1939-0042/georef",
+      "type": "Annotation",
+      "@context": [
+        "http://iiif.io/api/extension/georef/1/context.json",
+        "http://iiif.io/api/presentation/3/context.json"
+      ],
+      "label": "Brooklyn, N.Y. | 1939 | Vol. 1 p42",
+      "metadata": [
+        {
+          "label": "streets",
+          "value": "0"
+        },
+        {
+          "label": "intersections",
+          "value": "0"
+        }
+      ],
+      "created": "2026-07-30T21:24:27Z",
+      "modified": "2026-07-30T21:24:27Z",
+      "creator": [
+        {
+          "id": "https://oldinsurancemaps.net/profile/danvk",
+          "type": "Person"
+        }
+      ],
+      "motivation": "georeferencing",
+      "target": {
+        "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd380m:g3804m:g3804bm:g3804bm_g05791193901:05791_01_1939-0042/selector",
+        "type": "SpecificResource",
+        "source": {
+          "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd380m:g3804m:g3804bm:g3804bm_g05791193901:05791_01_1939-0042/info.json",
+          "type": "ImageService2",
+          "height": 8268,
+          "width": 5612
+        },
+        "selector": {
+          "type": "SvgSelector",
+          "value": "<svg><polygon points=\"212.8,7739.9 195.8,4038.8 872.3,3957.3 683.2,1044.7 4789.7,534.8 5138.0,3446.1 4079.7,3572.9 4096.1,7755.9 212.8,7739.9\" /></svg>"
+        }
+      },
+      "body": {
+        "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd380m:g3804m:g3804bm:g3804bm_g05791193901:05791_01_1939-0042/gcps",
+        "type": "FeatureCollection",
+        "transformation": {
+          "type": "polynomial",
+          "options": {
+            "order": 1
+          }
+        },
+        "features": [
+          {
+            "type": "Feature",
+            "properties": {
+              "resourceCoords": [
+                0.0,
+                0.0
+              ],
+              "creator": {
+                "id": "https://oldinsurancemaps.net/profile/danvk",
+                "type": "Person"
+              },
+              "type": "corner"
+            },
+            "geometry": {
+              "type": "Point",
+              "coordinates": [
+                -73.99724216695672,
+                40.686019686113795
+              ]
+            }
+          },
+          {
+            "type": "Feature",
+            "properties": {
+              "resourceCoords": [
+                5612.0,
+                0.0
+              ],
+              "creator": {
+                "id": "https://oldinsurancemaps.net/profile/danvk",
+                "type": "Person"
+              },
+              "type": "corner"
+            },
+            "geometry": {
+              "type": "Point",
+              "coordinates": [
+                -73.99539420923524,
+                40.688777133024075
+              ]
+            }
+          },
+          {
+            "type": "Feature",
+            "properties": {
+              "resourceCoords": [
+                5612.0,
+                8268.0
+              ],
+              "creator": {
+                "id": "https://oldinsurancemaps.net/profile/danvk",
+                "type": "Person"
+              },
+              "type": "corner"
+            },
+            "geometry": {
+              "type": "Point",
+              "coordinates": [
+                -73.99007435113825,
+                40.68669808388661
+              ]
+            }
+          },
+          {
+            "type": "Feature",
+            "properties": {
+              "resourceCoords": [
+                0.0,
+                8268.0
+              ],
+              "creator": {
+                "id": "https://oldinsurancemaps.net/profile/danvk",
+                "type": "Person"
+              },
+              "type": "corner"
+            },
+            "geometry": {
+              "type": "Point",
+              "coordinates": [
+                -73.99192230885973,
+                40.68394063697633
+              ]
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd380m:g3804m:g3804bm:g3804bm_g05791193901:05791_01_1939-0047/georef",
+      "type": "Annotation",
+      "@context": [
+        "http://iiif.io/api/extension/georef/1/context.json",
+        "http://iiif.io/api/presentation/3/context.json"
+      ],
+      "label": "Brooklyn, N.Y. | 1939 | Vol. 1 p47",
+      "metadata": [
+        {
+          "label": "streets",
+          "value": "0"
+        },
+        {
+          "label": "intersections",
+          "value": "0"
+        }
+      ],
+      "created": "2026-07-30T21:24:27Z",
+      "modified": "2026-07-30T21:24:27Z",
+      "creator": [
+        {
+          "id": "https://oldinsurancemaps.net/profile/danvk",
+          "type": "Person"
+        }
+      ],
+      "motivation": "georeferencing",
+      "target": {
+        "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd380m:g3804m:g3804bm:g3804bm_g05791193901:05791_01_1939-0047/selector",
+        "type": "SpecificResource",
+        "source": {
+          "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd380m:g3804m:g3804bm:g3804bm_g05791193901:05791_01_1939-0047/info.json",
+          "type": "ImageService2",
+          "height": 8268,
+          "width": 5612
+        },
+        "selector": {
+          "type": "SvgSelector",
+          "value": "<svg><polygon points=\"0.0,1293.5 5612.0,120.5 5612.0,7813.7 0.0,7758.7 0.0,1293.5\" /></svg>"
+        }
+      },
+      "body": {
+        "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd380m:g3804m:g3804bm:g3804bm_g05791193901:05791_01_1939-0047/gcps",
+        "type": "FeatureCollection",
+        "transformation": {
+          "type": "polynomial",
+          "options": {
+            "order": 1
+          }
+        },
+        "features": [
+          {
+            "type": "Feature",
+            "properties": {
+              "resourceCoords": [
+                0.0,
+                0.0
+              ],
+              "creator": {
+                "id": "https://oldinsurancemaps.net/profile/danvk",
+                "type": "Person"
+              },
+              "type": "corner"
+            },
+            "geometry": {
+              "type": "Point",
+              "coordinates": [
+                -73.99933858846394,
+                40.67354456682527
+              ]
+            }
+          },
+          {
+            "type": "Feature",
+            "properties": {
+              "resourceCoords": [
+                5612.0,
+                0.0
+              ],
+              "creator": {
+                "id": "https://oldinsurancemaps.net/profile/danvk",
+                "type": "Person"
+              },
+              "type": "corner"
+            },
+            "geometry": {
+              "type": "Point",
+              "coordinates": [
+                -73.99715979564584,
+                40.676208720988384
+              ]
+            }
+          },
+          {
+            "type": "Feature",
+            "properties": {
+              "resourceCoords": [
+                5612.0,
+                8268.0
+              ],
+              "creator": {
+                "id": "https://oldinsurancemaps.net/profile/danvk",
+                "type": "Person"
+              },
+              "type": "corner"
+            },
+            "geometry": {
+              "type": "Point",
+              "coordinates": [
+                -73.99202087341916,
+                40.673757012373066
+              ]
+            }
+          },
+          {
+            "type": "Feature",
+            "properties": {
+              "resourceCoords": [
+                0.0,
+                8268.0
+              ],
+              "creator": {
+                "id": "https://oldinsurancemaps.net/profile/danvk",
+                "type": "Person"
+              },
+              "type": "corner"
+            },
+            "geometry": {
+              "type": "Point",
+              "coordinates": [
+                -73.99419966623725,
+                40.67109285820995
+              ]
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd380m:g3804m:g3804bm:g3804bm_g05791193901:05791_01_1939-0048/georef",
+      "type": "Annotation",
+      "@context": [
+        "http://iiif.io/api/extension/georef/1/context.json",
+        "http://iiif.io/api/presentation/3/context.json"
+      ],
+      "label": "Brooklyn, N.Y. | 1939 | Vol. 1 p48",
+      "metadata": [
+        {
+          "label": "streets",
+          "value": "0"
+        },
+        {
+          "label": "intersections",
+          "value": "0"
+        }
+      ],
+      "created": "2026-07-30T21:24:27Z",
+      "modified": "2026-07-30T21:24:27Z",
+      "creator": [
+        {
+          "id": "https://oldinsurancemaps.net/profile/danvk",
+          "type": "Person"
+        }
+      ],
+      "motivation": "georeferencing",
+      "target": {
+        "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd380m:g3804m:g3804bm:g3804bm_g05791193901:05791_01_1939-0048/selector",
+        "type": "SpecificResource",
+        "source": {
+          "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd380m:g3804m:g3804bm:g3804bm_g05791193901:05791_01_1939-0048/info.json",
+          "type": "ImageService2",
+          "height": 8268,
+          "width": 5612
+        },
+        "selector": {
+          "type": "SvgSelector",
+          "value": "<svg><polygon points=\"4678.2,6922.6 4679.7,7302.6 821.2,7322.3 811.3,867.3 4664.6,847.5 4666.8,2135.9 5612.0,2131.9 5612.0,6914.4 4678.2,6922.6\" /></svg>"
+        }
+      },
+      "body": {
+        "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd380m:g3804m:g3804bm:g3804bm_g05791193901:05791_01_1939-0048/gcps",
+        "type": "FeatureCollection",
+        "transformation": {
+          "type": "polynomial",
+          "options": {
+            "order": 1
+          }
+        },
+        "features": [
+          {
+            "type": "Feature",
+            "properties": {
+              "resourceCoords": [
+                0.0,
+                0.0
+              ],
+              "creator": {
+                "id": "https://oldinsurancemaps.net/profile/danvk",
+                "type": "Person"
+              },
+              "type": "corner"
+            },
+            "geometry": {
+              "type": "Point",
+              "coordinates": [
+                -73.99202620956171,
+                40.67505738336967
+              ]
+            }
+          },
+          {
+            "type": "Feature",
+            "properties": {
+              "resourceCoords": [
+                5612.0,
+                0.0
+              ],
+              "creator": {
+                "id": "https://oldinsurancemaps.net/profile/danvk",
+                "type": "Person"
+              },
+              "type": "corner"
+            },
+            "geometry": {
+              "type": "Point",
+              "coordinates": [
+                -73.98860161921547,
+                40.67338244766921
+              ]
+            }
+          },
+          {
+            "type": "Feature",
+            "properties": {
+              "resourceCoords": [
+                5612.0,
+                8268.0
+              ],
+              "creator": {
+                "id": "https://oldinsurancemaps.net/profile/danvk",
+                "type": "Person"
+              },
+              "type": "corner"
+            },
+            "geometry": {
+              "type": "Point",
+              "coordinates": [
+                -73.99183234595556,
+                40.669528798696014
+              ]
+            }
+          },
+          {
+            "type": "Feature",
+            "properties": {
+              "resourceCoords": [
+                0.0,
+                8268.0
+              ],
+              "creator": {
+                "id": "https://oldinsurancemaps.net/profile/danvk",
+                "type": "Person"
+              },
+              "type": "corner"
+            },
+            "geometry": {
+              "type": "Point",
+              "coordinates": [
+                -73.9952569363018,
+                40.67120373439647
+              ]
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd380m:g3804m:g3804bm:g3804bm_g05791193901:05791_01_1939-0049/georef",
+      "type": "Annotation",
+      "@context": [
+        "http://iiif.io/api/extension/georef/1/context.json",
+        "http://iiif.io/api/presentation/3/context.json"
+      ],
+      "label": "Brooklyn, N.Y. | 1939 | Vol. 1 p49",
+      "metadata": [
+        {
+          "label": "streets",
+          "value": "0"
+        },
+        {
+          "label": "intersections",
+          "value": "0"
+        }
+      ],
+      "created": "2026-07-30T21:24:27Z",
+      "modified": "2026-07-30T21:24:27Z",
+      "creator": [
+        {
+          "id": "https://oldinsurancemaps.net/profile/danvk",
+          "type": "Person"
+        }
+      ],
+      "motivation": "georeferencing",
+      "target": {
+        "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd380m:g3804m:g3804bm:g3804bm_g05791193901:05791_01_1939-0049/selector",
+        "type": "SpecificResource",
+        "source": {
+          "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd380m:g3804m:g3804bm:g3804bm_g05791193901:05791_01_1939-0049/info.json",
+          "type": "ImageService2",
+          "height": 8268,
+          "width": 5612
+        },
+        "selector": {
+          "type": "SvgSelector",
+          "value": "<svg><polygon points=\"5175.6,7366.2 5612.0,7377.8 5612.0,8268.0 264.1,8268.0 375.3,2027.2 5317.1,1096.8 5175.6,7366.2\" /></svg>"
+        }
+      },
+      "body": {
+        "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd380m:g3804m:g3804bm:g3804bm_g05791193901:05791_01_1939-0049/gcps",
+        "type": "FeatureCollection",
+        "transformation": {
+          "type": "polynomial",
+          "options": {
+            "order": 1
+          }
+        },
+        "features": [
+          {
+            "type": "Feature",
+            "properties": {
+              "resourceCoords": [
+                0.0,
+                0.0
+              ],
+              "creator": {
+                "id": "https://oldinsurancemaps.net/profile/danvk",
+                "type": "Person"
+              },
+              "type": "corner"
+            },
+            "geometry": {
+              "type": "Point",
+              "coordinates": [
+                -73.99851332014305,
+                40.67658051395916
+              ]
+            }
+          },
+          {
+            "type": "Feature",
+            "properties": {
+              "resourceCoords": [
+                5612.0,
+                0.0
+              ],
+              "creator": {
+                "id": "https://oldinsurancemaps.net/profile/danvk",
+                "type": "Person"
+              },
+              "type": "corner"
+            },
+            "geometry": {
+              "type": "Point",
+              "coordinates": [
+                -73.99637732681974,
+                40.67929867071314
+              ]
+            }
+          },
+          {
+            "type": "Feature",
+            "properties": {
+              "resourceCoords": [
+                5612.0,
+                8268.0
+              ],
+              "creator": {
+                "id": "https://oldinsurancemaps.net/profile/danvk",
+                "type": "Person"
+              },
+              "type": "corner"
+            },
+            "geometry": {
+              "type": "Point",
+              "coordinates": [
+                -73.99113398503887,
+                40.67689523874753
+              ]
+            }
+          },
+          {
+            "type": "Feature",
+            "properties": {
+              "resourceCoords": [
+                0.0,
+                8268.0
+              ],
+              "creator": {
+                "id": "https://oldinsurancemaps.net/profile/danvk",
+                "type": "Person"
+              },
+              "type": "corner"
+            },
+            "geometry": {
+              "type": "Point",
+              "coordinates": [
+                -73.99326997836218,
+                40.67417708199355
+              ]
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd380m:g3804m:g3804bm:g3804bm_g05791193901:05791_01_1939-0051/georef",
+      "type": "Annotation",
+      "@context": [
+        "http://iiif.io/api/extension/georef/1/context.json",
+        "http://iiif.io/api/presentation/3/context.json"
+      ],
+      "label": "Brooklyn, N.Y. | 1939 | Vol. 1 p51",
+      "metadata": [
+        {
+          "label": "streets",
+          "value": "0"
+        },
+        {
+          "label": "intersections",
+          "value": "0"
+        }
+      ],
+      "created": "2026-07-30T21:24:27Z",
+      "modified": "2026-07-30T21:24:27Z",
+      "creator": [
+        {
+          "id": "https://oldinsurancemaps.net/profile/danvk",
+          "type": "Person"
+        }
+      ],
+      "motivation": "georeferencing",
+      "target": {
+        "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd380m:g3804m:g3804bm:g3804bm_g05791193901:05791_01_1939-0051/selector",
+        "type": "SpecificResource",
+        "source": {
+          "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd380m:g3804m:g3804bm:g3804bm_g05791193901:05791_01_1939-0051/info.json",
+          "type": "ImageService2",
+          "height": 8268,
+          "width": 5612
+        },
+        "selector": {
+          "type": "SvgSelector",
+          "value": "<svg><polygon points=\"4108.4,0.0 5131.9,0.0 5154.9,613.2 4978.3,619.1 5028.4,4008.0 5273.8,3997.5 5383.8,7369.4 1532.1,7229.3 1468.1,8268.0 468.5,8268.0 478.8,8082.9 781.9,8093.9 815.0,7184.1 369.4,7156.0 747.2,753.6 2751.0,682.5 2785.4,681.3 4210.0,643.4 4108.4,0.0\" /></svg>"
+        }
+      },
+      "body": {
+        "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd380m:g3804m:g3804bm:g3804bm_g05791193901:05791_01_1939-0051/gcps",
+        "type": "FeatureCollection",
+        "transformation": {
+          "type": "polynomial",
+          "options": {
+            "order": 1
+          }
+        },
+        "features": [
+          {
+            "type": "Feature",
+            "properties": {
+              "resourceCoords": [
+                0.0,
+                0.0
+              ],
+              "creator": {
+                "id": "https://oldinsurancemaps.net/profile/danvk",
+                "type": "Person"
+              },
+              "type": "corner"
+            },
+            "geometry": {
+              "type": "Point",
+              "coordinates": [
+                -73.9965322421002,
+                40.6786767219269
+              ]
+            }
+          },
+          {
+            "type": "Feature",
+            "properties": {
+              "resourceCoords": [
+                5612.0,
+                0.0
+              ],
+              "creator": {
+                "id": "https://oldinsurancemaps.net/profile/danvk",
+                "type": "Person"
+              },
+              "type": "corner"
+            },
+            "geometry": {
+              "type": "Point",
+              "coordinates": [
+                -73.99457160533635,
+                40.68139065541001
+              ]
+            }
+          },
+          {
+            "type": "Feature",
+            "properties": {
+              "resourceCoords": [
+                5612.0,
+                8268.0
+              ],
+              "creator": {
+                "id": "https://oldinsurancemaps.net/profile/danvk",
+                "type": "Person"
+              },
+              "type": "corner"
+            },
+            "geometry": {
+              "type": "Point",
+              "coordinates": [
+                -73.98933626098261,
+                40.67918459856209
+              ]
+            }
+          },
+          {
+            "type": "Feature",
+            "properties": {
+              "resourceCoords": [
+                0.0,
+                8268.0
+              ],
+              "creator": {
+                "id": "https://oldinsurancemaps.net/profile/danvk",
+                "type": "Person"
+              },
+              "type": "corner"
+            },
+            "geometry": {
+              "type": "Point",
+              "coordinates": [
+                -73.99129689774647,
+                40.67647066507897
+              ]
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd380m:g3804m:g3804bm:g3804bm_g05791193901:05791_01_1939-0058/georef",
+      "type": "Annotation",
+      "@context": [
+        "http://iiif.io/api/extension/georef/1/context.json",
+        "http://iiif.io/api/presentation/3/context.json"
+      ],
+      "label": "Brooklyn, N.Y. | 1939 | Vol. 1 p58",
+      "metadata": [
+        {
+          "label": "streets",
+          "value": "0"
+        },
+        {
+          "label": "intersections",
+          "value": "0"
+        }
+      ],
+      "created": "2026-07-30T21:24:27Z",
+      "modified": "2026-07-30T21:24:27Z",
+      "creator": [
+        {
+          "id": "https://oldinsurancemaps.net/profile/danvk",
+          "type": "Person"
+        }
+      ],
+      "motivation": "georeferencing",
+      "target": {
+        "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd380m:g3804m:g3804bm:g3804bm_g05791193901:05791_01_1939-0058/selector",
+        "type": "SpecificResource",
+        "source": {
+          "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd380m:g3804m:g3804bm:g3804bm_g05791193901:05791_01_1939-0058/info.json",
+          "type": "ImageService2",
+          "height": 8268,
+          "width": 5556
+        },
+        "selector": {
+          "type": "SvgSelector",
+          "value": "<svg><polygon points=\"1413.6,7307.1 0.0,7304.0 0.0,1015.4 2651.2,1021.4 5100.8,806.0 5418.8,4126.7 4140.7,4239.7 4421.9,7255.9 3144.0,7337.8 3237.8,8268.0 1417.7,8268.0 1413.6,7307.1\" /></svg>"
+        }
+      },
+      "body": {
+        "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd380m:g3804m:g3804bm:g3804bm_g05791193901:05791_01_1939-0058/gcps",
+        "type": "FeatureCollection",
+        "transformation": {
+          "type": "polynomial",
+          "options": {
+            "order": 1
+          }
+        },
+        "features": [
+          {
+            "type": "Feature",
+            "properties": {
+              "resourceCoords": [
+                0.0,
+                0.0
+              ],
+              "creator": {
+                "id": "https://oldinsurancemaps.net/profile/danvk",
+                "type": "Person"
+              },
+              "type": "corner"
+            },
+            "geometry": {
+              "type": "Point",
+              "coordinates": [
+                -73.99204459319745,
+                40.67779187024772
+              ]
+            }
+          },
+          {
+            "type": "Feature",
+            "properties": {
+              "resourceCoords": [
+                5556.0,
+                0.0
+              ],
+              "creator": {
+                "id": "https://oldinsurancemaps.net/profile/danvk",
+                "type": "Person"
+              },
+              "type": "corner"
+            },
+            "geometry": {
+              "type": "Point",
+              "coordinates": [
+                -73.98987674190028,
+                40.68039986131314
+              ]
+            }
+          },
+          {
+            "type": "Feature",
+            "properties": {
+              "resourceCoords": [
+                5556.0,
+                8268.0
+              ],
+              "creator": {
+                "id": "https://oldinsurancemaps.net/profile/danvk",
+                "type": "Person"
+              },
+              "type": "corner"
+            },
+            "geometry": {
+              "type": "Point",
+              "coordinates": [
+                -73.984795155143,
+                40.67793602015926
+              ]
+            }
+          },
+          {
+            "type": "Feature",
+            "properties": {
+              "resourceCoords": [
+                0.0,
+                8268.0
+              ],
+              "creator": {
+                "id": "https://oldinsurancemaps.net/profile/danvk",
+                "type": "Person"
+              },
+              "type": "corner"
+            },
+            "geometry": {
+              "type": "Point",
+              "coordinates": [
+                -73.98696300644016,
+                40.67532802909383
+              ]
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd380m:g3804m:g3804bm:g3804bm_g05791193901:05791_01_1939-0061/georef",
+      "type": "Annotation",
+      "@context": [
+        "http://iiif.io/api/extension/georef/1/context.json",
+        "http://iiif.io/api/presentation/3/context.json"
+      ],
+      "label": "Brooklyn, N.Y. | 1939 | Vol. 1 p61",
+      "metadata": [
+        {
+          "label": "streets",
+          "value": "0"
+        },
+        {
+          "label": "intersections",
+          "value": "0"
+        }
+      ],
+      "created": "2026-07-30T21:24:27Z",
+      "modified": "2026-07-30T21:24:27Z",
+      "creator": [
+        {
+          "id": "https://oldinsurancemaps.net/profile/danvk",
+          "type": "Person"
+        }
+      ],
+      "motivation": "georeferencing",
+      "target": {
+        "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd380m:g3804m:g3804bm:g3804bm_g05791193901:05791_01_1939-0061/selector",
+        "type": "SpecificResource",
+        "source": {
+          "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd380m:g3804m:g3804bm:g3804bm_g05791193901:05791_01_1939-0061/info.json",
+          "type": "ImageService2",
+          "height": 8268,
+          "width": 5629
+        },
+        "selector": {
+          "type": "SvgSelector",
+          "value": "<svg><polygon points=\"1870.2,8268.0 1875.1,7278.7 875.0,7276.1 875.9,864.0 4750.3,922.6 4758.4,7298.4 5629.0,7304.3 5629.0,8268.0 1870.2,8268.0\" /></svg>"
+        }
+      },
+      "body": {
+        "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd380m:g3804m:g3804bm:g3804bm_g05791193901:05791_01_1939-0061/gcps",
+        "type": "FeatureCollection",
+        "transformation": {
+          "type": "polynomial",
+          "options": {
+            "order": 1
+          }
+        },
+        "features": [
+          {
+            "type": "Feature",
+            "properties": {
+              "resourceCoords": [
+                0.0,
+                0.0
+              ],
+              "creator": {
+                "id": "https://oldinsurancemaps.net/profile/danvk",
+                "type": "Person"
+              },
+              "type": "corner"
+            },
+            "geometry": {
+              "type": "Point",
+              "coordinates": [
+                -73.988277483819,
+                40.68291091943069
+              ]
+            }
+          },
+          {
+            "type": "Feature",
+            "properties": {
+              "resourceCoords": [
+                5629.0,
+                0.0
+              ],
+              "creator": {
+                "id": "https://oldinsurancemaps.net/profile/danvk",
+                "type": "Person"
+              },
+              "type": "corner"
+            },
+            "geometry": {
+              "type": "Point",
+              "coordinates": [
+                -73.98642257480213,
+                40.68569083472924
+              ]
+            }
+          },
+          {
+            "type": "Feature",
+            "properties": {
+              "resourceCoords": [
+                5629.0,
+                8268.0
+              ],
+              "creator": {
+                "id": "https://oldinsurancemaps.net/profile/danvk",
+                "type": "Person"
+              },
+              "type": "corner"
+            },
+            "geometry": {
+              "type": "Point",
+              "coordinates": [
+                -73.981074852768,
+                40.68360980584073
+              ]
+            }
+          },
+          {
+            "type": "Feature",
+            "properties": {
+              "resourceCoords": [
+                0.0,
+                8268.0
+              ],
+              "creator": {
+                "id": "https://oldinsurancemaps.net/profile/danvk",
+                "type": "Person"
+              },
+              "type": "corner"
+            },
+            "geometry": {
+              "type": "Point",
+              "coordinates": [
+                -73.98292976178486,
+                40.68082989054218
+              ]
+            }
+          }
+        ]
+      }
+    },
+    {
       "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd380m:g3804m:g3804bm:g3804bm_g05791193901:05791_01_1939-0001/georef",
       "type": "Annotation",
       "@context": [
@@ -24,8 +2646,8 @@
           "value": "1"
         }
       ],
-      "created": "2026-07-18T02:30:38Z",
-      "modified": "2026-07-18T02:30:38Z",
+      "created": "2026-07-30T21:24:27Z",
+      "modified": "2026-07-30T21:24:27Z",
       "creator": [
         {
           "id": "https://oldinsurancemaps.net/profile/danvk",
@@ -73,8 +2695,8 @@
             "geometry": {
               "type": "Point",
               "coordinates": [
-                -74.02289018107028,
-                40.67714948768619
+                -74.02289018107355,
+                40.67714948768647
               ]
             }
           },
@@ -94,8 +2716,8 @@
             "geometry": {
               "type": "Point",
               "coordinates": [
-                -74.02016831234491,
-                40.67945579741581
+                -74.02016831234688,
+                40.6794557974172
               ]
             }
           },
@@ -115,8 +2737,8 @@
             "geometry": {
               "type": "Point",
               "coordinates": [
-                -74.01568020824068,
-                40.676406872239305
+                -74.01568020824051,
+                40.676406872239234
               ]
             }
           },
@@ -136,8 +2758,8 @@
             "geometry": {
               "type": "Point",
               "coordinates": [
-                -74.01840207696604,
-                40.67410056250968
+                -74.01840207696718,
+                40.67410056250851
               ]
             }
           },
@@ -183,8 +2805,8 @@
           "value": "2"
         }
       ],
-      "created": "2026-07-18T02:30:38Z",
-      "modified": "2026-07-18T02:30:38Z",
+      "created": "2026-07-30T21:24:27Z",
+      "modified": "2026-07-30T21:24:27Z",
       "creator": [
         {
           "id": "https://oldinsurancemaps.net/profile/danvk",
@@ -203,7 +2825,7 @@
         },
         "selector": {
           "type": "SvgSelector",
-          "value": "<svg><polygon points=\"5372.6,8268.0 5360.7,7293.3 4422.3,7304.7 4411.2,7664.0 0.0,7664.9 0.0,-0.0 5599.0,0.0 5599.0,8268.0 5372.6,8268.0\" /></svg>"
+          "value": "<svg><polygon points=\"5599.0,4786.8 5599.0,8268.0 5421.8,8268.0 5422.9,7335.4 4421.8,7338.9 4411.2,7664.0 0.0,7664.4 -0.0,-0.0 5599.0,0.0 5599.0,4786.8 5599.0,4786.8\" /></svg>"
         }
       },
       "body": {
@@ -276,8 +2898,8 @@
           "value": "2"
         }
       ],
-      "created": "2026-07-18T02:30:38Z",
-      "modified": "2026-07-18T02:30:38Z",
+      "created": "2026-07-30T21:24:27Z",
+      "modified": "2026-07-30T21:24:27Z",
       "creator": [
         {
           "id": "https://oldinsurancemaps.net/profile/danvk",
@@ -296,7 +2918,7 @@
         },
         "selector": {
           "type": "SvgSelector",
-          "value": "<svg><polygon points=\"-0.0,381.8 5031.7,460.5 5064.5,8258.3 -0.0,8268.0 -0.0,381.8\" /></svg>"
+          "value": "<svg><polygon points=\"207.0,468.1 5599.0,462.1 5599.0,8268.0 -0.0,8268.0 -0.0,381.8 206.6,381.4 207.0,468.1\" /></svg>"
         }
       },
       "body": {
@@ -369,8 +2991,8 @@
           "value": "1"
         }
       ],
-      "created": "2026-07-18T02:30:38Z",
-      "modified": "2026-07-18T02:30:38Z",
+      "created": "2026-07-30T21:24:27Z",
+      "modified": "2026-07-30T21:24:27Z",
       "creator": [
         {
           "id": "https://oldinsurancemaps.net/profile/danvk",
@@ -389,7 +3011,7 @@
         },
         "selector": {
           "type": "SvgSelector",
-          "value": "<svg><polygon points=\"5612.0,-0.0 5531.3,226.8 5612.0,373.4 5612.0,8268.0 -0.0,8268.0 -0.0,455.3 5092.8,541.9 5520.6,413.1 5353.4,-0.0 5612.0,-0.0\" /></svg>"
+          "value": "<svg><polygon points=\"0,8268 0,0 5612,0 5612,8268 0,8268\" /></svg>"
         }
       },
       "body": {
@@ -418,8 +3040,8 @@
             "geometry": {
               "type": "Point",
               "coordinates": [
-                -74.01380777799662,
-                40.67443386703624
+                -74.01380777799659,
+                40.674433867036385
               ]
             }
           },
@@ -439,8 +3061,8 @@
             "geometry": {
               "type": "Point",
               "coordinates": [
-                -74.01075662051599,
-                40.672368452884655
+                -74.0107566205145,
+                40.67236845288381
               ]
             }
           },
@@ -460,8 +3082,8 @@
             "geometry": {
               "type": "Point",
               "coordinates": [
-                -74.0147673447663,
-                40.668957980170475
+                -74.01476734476672,
+                40.66895798016801
               ]
             }
           },
@@ -481,8 +3103,8 @@
             "geometry": {
               "type": "Point",
               "coordinates": [
-                -74.01781850224693,
-                40.67102339432206
+                -74.01781850224882,
+                40.671023394320585
               ]
             }
           },
@@ -511,99 +3133,6 @@
       }
     },
     {
-      "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd380m:g3804m:g3804bm:g3804bm_g05791193901:05791_01_1939-0014/georef",
-      "type": "Annotation",
-      "@context": [
-        "http://iiif.io/api/extension/georef/1/context.json",
-        "http://iiif.io/api/presentation/3/context.json"
-      ],
-      "label": "Brooklyn, N.Y. | 1939 | Vol. 1 p14",
-      "metadata": [
-        {
-          "label": "streets",
-          "value": "3"
-        },
-        {
-          "label": "intersections",
-          "value": "4"
-        }
-      ],
-      "created": "2026-07-18T02:30:38Z",
-      "modified": "2026-07-18T02:30:38Z",
-      "creator": [
-        {
-          "id": "https://oldinsurancemaps.net/profile/danvk",
-          "type": "Person"
-        }
-      ],
-      "motivation": "georeferencing",
-      "target": {
-        "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd380m:g3804m:g3804bm:g3804bm_g05791193901:05791_01_1939-0014/selector",
-        "type": "SpecificResource",
-        "source": {
-          "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd380m:g3804m:g3804bm:g3804bm_g05791193901:05791_01_1939-0014/info.json",
-          "type": "ImageService2",
-          "height": 8268,
-          "width": 5612
-        },
-        "selector": {
-          "type": "SvgSelector",
-          "value": "<svg><polygon points=\"5351.8,924.5 -0.0,361.3 -0.0,-0.0 5612.0,0.0 5612.0,684.9 5351.8,924.5\" /></svg>"
-        }
-      },
-      "body": {
-        "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd380m:g3804m:g3804bm:g3804bm_g05791193901:05791_01_1939-0014/gcps",
-        "type": "FeatureCollection",
-        "transformation": {
-          "type": "helmert"
-        },
-        "features": [
-          {
-            "type": "Feature",
-            "properties": {
-              "resourceCoords": [
-                -208.0,
-                336.0
-              ],
-              "creator": {
-                "id": "https://oldinsurancemaps.net/profile/danvk",
-                "type": "Person"
-              },
-              "type": "gcp"
-            },
-            "geometry": {
-              "type": "Point",
-              "coordinates": [
-                -74.0110067,
-                40.6722317
-              ]
-            }
-          },
-          {
-            "type": "Feature",
-            "properties": {
-              "resourceCoords": [
-                5196.0,
-                952.0
-              ],
-              "creator": {
-                "id": "https://oldinsurancemaps.net/profile/danvk",
-                "type": "Person"
-              },
-              "type": "gcp"
-            },
-            "geometry": {
-              "type": "Point",
-              "coordinates": [
-                -74.0092373,
-                40.6717583
-              ]
-            }
-          }
-        ]
-      }
-    },
-    {
       "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd380m:g3804m:g3804bm:g3804bm_g05791193901:05791_01_1939-0019/georef",
       "type": "Annotation",
       "@context": [
@@ -621,8 +3150,8 @@
           "value": "15"
         }
       ],
-      "created": "2026-07-18T02:30:38Z",
-      "modified": "2026-07-18T02:30:38Z",
+      "created": "2026-07-30T21:24:27Z",
+      "modified": "2026-07-30T21:24:27Z",
       "creator": [
         {
           "id": "https://oldinsurancemaps.net/profile/danvk",
@@ -641,7 +3170,7 @@
         },
         "selector": {
           "type": "SvgSelector",
-          "value": "<svg><polygon points=\"5535.6,6829.9 339.7,6829.2 319.0,1618.7 5384.5,1611.6 5370.2,5386.8 5523.3,5644.6 5535.6,6829.9\" /></svg>"
+          "value": "<svg><polygon points=\"5523.3,5644.6 5535.6,6829.9 339.7,6829.2 319.0,1618.7 5384.5,1611.6 5370.2,5386.8 5523.3,5644.6\" /></svg>"
         }
       },
       "body": {
@@ -714,8 +3243,8 @@
           "value": "6"
         }
       ],
-      "created": "2026-07-18T02:30:38Z",
-      "modified": "2026-07-18T02:30:38Z",
+      "created": "2026-07-30T21:24:27Z",
+      "modified": "2026-07-30T21:24:27Z",
       "creator": [
         {
           "id": "https://oldinsurancemaps.net/profile/danvk",
@@ -807,8 +3336,8 @@
           "value": "16"
         }
       ],
-      "created": "2026-07-18T02:30:38Z",
-      "modified": "2026-07-18T02:30:38Z",
+      "created": "2026-07-30T21:24:27Z",
+      "modified": "2026-07-30T21:24:27Z",
       "creator": [
         {
           "id": "https://oldinsurancemaps.net/profile/danvk",
@@ -827,7 +3356,7 @@
         },
         "selector": {
           "type": "SvgSelector",
-          "value": "<svg><polygon points=\"197.3,7342.1 188.0,4776.6 -0.0,4777.8 -0.0,-0.0 1236.7,-0.0 1240.0,916.0 5612.0,916.3 5612.0,4303.3 5213.6,4302.0 5211.5,7334.0 197.3,7342.1\" /></svg>"
+          "value": "<svg><polygon points=\"5211.5,7334.0 197.3,7342.1 188.0,4776.6 -0.0,4777.8 -0.0,-0.0 1236.7,-0.0 1240.0,916.0 5612.0,916.3 5612.0,4303.3 5213.6,4302.0 5211.5,7334.0\" /></svg>"
         }
       },
       "body": {
@@ -883,99 +3412,6 @@
       }
     },
     {
-      "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd380m:g3804m:g3804bm:g3804bm_g05791193901:05791_01_1939-0021/georef",
-      "type": "Annotation",
-      "@context": [
-        "http://iiif.io/api/extension/georef/1/context.json",
-        "http://iiif.io/api/presentation/3/context.json"
-      ],
-      "label": "Brooklyn, N.Y. | 1939 | Vol. 1 p21",
-      "metadata": [
-        {
-          "label": "streets",
-          "value": "11"
-        },
-        {
-          "label": "intersections",
-          "value": "16"
-        }
-      ],
-      "created": "2026-07-18T02:30:38Z",
-      "modified": "2026-07-18T02:30:38Z",
-      "creator": [
-        {
-          "id": "https://oldinsurancemaps.net/profile/danvk",
-          "type": "Person"
-        }
-      ],
-      "motivation": "georeferencing",
-      "target": {
-        "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd380m:g3804m:g3804bm:g3804bm_g05791193901:05791_01_1939-0021/selector",
-        "type": "SpecificResource",
-        "source": {
-          "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd380m:g3804m:g3804bm:g3804bm_g05791193901:05791_01_1939-0021/info.json",
-          "type": "ImageService2",
-          "height": 8268,
-          "width": 5627
-        },
-        "selector": {
-          "type": "SvgSelector",
-          "value": "<svg><polygon points=\"267.7,248.9 1185.4,249.3 1186.4,0.0 2743.9,0.0 2757.6,249.9 5464.0,251.0 5407.2,4901.1 5095.3,5992.7 2591.0,7000.4 2093.4,6979.8 1815.6,7091.1 1586.6,6959.4 1792.6,7312.8 230.1,7911.3 267.7,248.9\" /></svg>"
-        }
-      },
-      "body": {
-        "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd380m:g3804m:g3804bm:g3804bm_g05791193901:05791_01_1939-0021/gcps",
-        "type": "FeatureCollection",
-        "transformation": {
-          "type": "helmert"
-        },
-        "features": [
-          {
-            "type": "Feature",
-            "properties": {
-              "resourceCoords": [
-                2831.5,
-                4184.0
-              ],
-              "creator": {
-                "id": "https://oldinsurancemaps.net/profile/danvk",
-                "type": "Person"
-              },
-              "type": "gcp"
-            },
-            "geometry": {
-              "type": "Point",
-              "coordinates": [
-                -74.007061,
-                40.680042
-              ]
-            }
-          },
-          {
-            "type": "Feature",
-            "properties": {
-              "resourceCoords": [
-                5423.0,
-                1436.0
-              ],
-              "creator": {
-                "id": "https://oldinsurancemaps.net/profile/danvk",
-                "type": "Person"
-              },
-              "type": "gcp"
-            },
-            "geometry": {
-              "type": "Point",
-              "coordinates": [
-                -74.007303,
-                40.682123
-              ]
-            }
-          }
-        ]
-      }
-    },
-    {
       "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd380m:g3804m:g3804bm:g3804bm_g05791193901:05791_01_1939-0022/georef",
       "type": "Annotation",
       "@context": [
@@ -993,8 +3429,8 @@
           "value": "16"
         }
       ],
-      "created": "2026-07-18T02:30:38Z",
-      "modified": "2026-07-18T02:30:38Z",
+      "created": "2026-07-30T21:24:27Z",
+      "modified": "2026-07-30T21:24:27Z",
       "creator": [
         {
           "id": "https://oldinsurancemaps.net/profile/danvk",
@@ -1013,7 +3449,7 @@
         },
         "selector": {
           "type": "SvgSelector",
-          "value": "<svg><polygon points=\"4966.8,5596.2 4988.1,8127.5 4291.9,7601.9 -0.0,5891.8 863.0,3570.2 1070.7,3632.5 1241.5,3639.3 1288.2,3495.4 -0.0,3077.5 -0.0,-0.0 1975.3,0.0 1992.4,432.0 5152.4,412.0 5196.1,5592.7 4966.8,5596.2\" /></svg>"
+          "value": "<svg><polygon points=\"5621.0,4303.3 5621.0,8268.0 5174.1,8268.0 4291.9,7601.9 -0.0,5891.8 863.0,3570.2 1241.4,3639.3 1288.1,3495.3 -0.0,3077.4 -0.0,-0.0 1975.3,0.0 1992.4,432.0 5152.4,412.0 5185.3,4308.0 5621.0,4303.3\" /></svg>"
         }
       },
       "body": {
@@ -1086,8 +3522,8 @@
           "value": "19"
         }
       ],
-      "created": "2026-07-18T02:30:38Z",
-      "modified": "2026-07-18T02:30:38Z",
+      "created": "2026-07-30T21:24:27Z",
+      "modified": "2026-07-30T21:24:27Z",
       "creator": [
         {
           "id": "https://oldinsurancemaps.net/profile/danvk",
@@ -1106,7 +3542,7 @@
         },
         "selector": {
           "type": "SvgSelector",
-          "value": "<svg><polygon points=\"900.4,459.4 2073.9,449.3 2329.4,298.1 4764.0,304.0 4759.3,4109.5 3818.5,4492.8 5275.3,8268.0 -0.0,8268.0 -0.0,5741.6 1131.5,5660.1 1357.9,5740.5 1357.8,5482.4 945.6,5649.6 816.8,5222.7 900.4,459.4\" /></svg>"
+          "value": "<svg><polygon points=\"-0.0,4390.7 -0.0,708.7 891.3,710.1 893.9,461.9 2068.2,449.8 2323.7,298.0 4760.1,299.7 4762.1,4108.0 3821.2,4493.2 4824.3,7094.8 3705.5,7556.9 3535.9,7127.2 2502.4,7531.8 1110.4,3958.1 -0.0,4390.7\" /></svg>"
         }
       },
       "body": {
@@ -1141,7 +3577,7 @@
             "type": "Feature",
             "properties": {
               "resourceCoords": [
-                4764.0,
+                3468.0,
                 304.0
               ],
               "creator": {
@@ -1153,8 +3589,8 @@
             "geometry": {
               "type": "Point",
               "coordinates": [
-                -74.01206,
-                40.675781
+                -74.012687,
+                40.675247
               ]
             }
           }
@@ -1179,8 +3615,8 @@
           "value": "15"
         }
       ],
-      "created": "2026-07-18T02:30:38Z",
-      "modified": "2026-07-18T02:30:38Z",
+      "created": "2026-07-30T21:24:27Z",
+      "modified": "2026-07-30T21:24:27Z",
       "creator": [
         {
           "id": "https://oldinsurancemaps.net/profile/danvk",
@@ -1199,7 +3635,7 @@
         },
         "selector": {
           "type": "SvgSelector",
-          "value": "<svg><polygon points=\"305.1,4609.9 1252.4,4218.1 1236.8,378.4 5612.0,377.9 5612.0,3185.2 3759.4,3183.1 2638.4,3669.8 3559.0,5869.6 1164.9,6816.5 305.1,4609.9\" /></svg>"
+          "value": "<svg><polygon points=\"305.1,4609.9 1252.4,4218.1 1236.8,378.4 5612.0,377.9 5612.0,3185.2 3759.4,3183.1 2638.4,3669.8 3558.9,5869.5 1164.9,6816.5 305.1,4609.9\" /></svg>"
         }
       },
       "body": {
@@ -1255,99 +3691,6 @@
       }
     },
     {
-      "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd380m:g3804m:g3804bm:g3804bm_g05791193901:05791_01_1939-0025/georef",
-      "type": "Annotation",
-      "@context": [
-        "http://iiif.io/api/extension/georef/1/context.json",
-        "http://iiif.io/api/presentation/3/context.json"
-      ],
-      "label": "Brooklyn, N.Y. | 1939 | Vol. 1 p25",
-      "metadata": [
-        {
-          "label": "streets",
-          "value": "10"
-        },
-        {
-          "label": "intersections",
-          "value": "11"
-        }
-      ],
-      "created": "2026-07-18T02:30:38Z",
-      "modified": "2026-07-18T02:30:38Z",
-      "creator": [
-        {
-          "id": "https://oldinsurancemaps.net/profile/danvk",
-          "type": "Person"
-        }
-      ],
-      "motivation": "georeferencing",
-      "target": {
-        "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd380m:g3804m:g3804bm:g3804bm_g05791193901:05791_01_1939-0025/selector",
-        "type": "SpecificResource",
-        "source": {
-          "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd380m:g3804m:g3804bm:g3804bm_g05791193901:05791_01_1939-0025/info.json",
-          "type": "ImageService2",
-          "height": 8268,
-          "width": 5622
-        },
-        "selector": {
-          "type": "SvgSelector",
-          "value": "<svg><polygon points=\"4997.4,2539.3 5622.0,2527.8 5622.0,7427.9 2371.2,7532.0 2313.1,6326.2 2962.0,4615.3 740.6,3775.1 1923.6,612.8 4978.2,1762.7 4997.4,2539.3\" /></svg>"
-        }
-      },
-      "body": {
-        "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd380m:g3804m:g3804bm:g3804bm_g05791193901:05791_01_1939-0025/gcps",
-        "type": "FeatureCollection",
-        "transformation": {
-          "type": "helmert"
-        },
-        "features": [
-          {
-            "type": "Feature",
-            "properties": {
-              "resourceCoords": [
-                2371.2,
-                7532.0
-              ],
-              "creator": {
-                "id": "https://oldinsurancemaps.net/profile/danvk",
-                "type": "Person"
-              },
-              "type": "gcp"
-            },
-            "geometry": {
-              "type": "Point",
-              "coordinates": [
-                -74.0096123,
-                40.6751413
-              ]
-            }
-          },
-          {
-            "type": "Feature",
-            "properties": {
-              "resourceCoords": [
-                1527.5,
-                464.0
-              ],
-              "creator": {
-                "id": "https://oldinsurancemaps.net/profile/danvk",
-                "type": "Person"
-              },
-              "type": "gcp"
-            },
-            "geometry": {
-              "type": "Point",
-              "coordinates": [
-                -74.008302,
-                40.67897
-              ]
-            }
-          }
-        ]
-      }
-    },
-    {
       "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd380m:g3804m:g3804bm:g3804bm_g05791193901:05791_01_1939-0026/georef",
       "type": "Annotation",
       "@context": [
@@ -1365,8 +3708,8 @@
           "value": "3"
         }
       ],
-      "created": "2026-07-18T02:30:38Z",
-      "modified": "2026-07-18T02:30:38Z",
+      "created": "2026-07-30T21:24:27Z",
+      "modified": "2026-07-30T21:24:27Z",
       "creator": [
         {
           "id": "https://oldinsurancemaps.net/profile/danvk",
@@ -1458,8 +3801,8 @@
           "value": "9"
         }
       ],
-      "created": "2026-07-18T02:30:38Z",
-      "modified": "2026-07-18T02:30:38Z",
+      "created": "2026-07-30T21:24:27Z",
+      "modified": "2026-07-30T21:24:27Z",
       "creator": [
         {
           "id": "https://oldinsurancemaps.net/profile/danvk",
@@ -1478,7 +3821,7 @@
         },
         "selector": {
           "type": "SvgSelector",
-          "value": "<svg><polygon points=\"2688.5,7920.0 2689.0,6019.7 0.0,6053.9 0.0,655.7 2690.2,1703.0 2690.7,0.0 5248.1,0.0 5264.8,7861.6 2688.5,7920.0\" /></svg>"
+          "value": "<svg><polygon points=\"2689.0,6115.4 0.0,6150.6 0.0,1725.3 360.6,1725.8 363.5,0.0 1475.0,0.0 1476.4,462.5 2688.5,440.0 2690.7,0.0 5248.0,0.0 5264.6,7861.7 2688.5,7920.0 2689.0,6115.4\" /></svg>"
         }
       },
       "body": {
@@ -1551,8 +3894,8 @@
           "value": "6"
         }
       ],
-      "created": "2026-07-18T02:30:38Z",
-      "modified": "2026-07-18T02:30:38Z",
+      "created": "2026-07-30T21:24:27Z",
+      "modified": "2026-07-30T21:24:27Z",
       "creator": [
         {
           "id": "https://oldinsurancemaps.net/profile/danvk",
@@ -1571,7 +3914,7 @@
         },
         "selector": {
           "type": "SvgSelector",
-          "value": "<svg><polygon points=\"235.9,760.0 5233.7,821.9 5270.3,6865.5 5612.0,7294.9 5612.0,7875.5 5355.1,7755.3 4616.2,7714.5 264.0,7819.2 235.9,760.0\" /></svg>"
+          "value": "<svg><polygon points=\"233.9,246.3 5229.8,178.3 5270.3,6865.5 5612.0,7294.9 5612.0,7875.5 5355.1,7755.3 4616.2,7714.5 264.0,7819.2 233.9,246.3\" /></svg>"
         }
       },
       "body": {
@@ -1627,99 +3970,6 @@
       }
     },
     {
-      "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd380m:g3804m:g3804bm:g3804bm_g05791193901:05791_01_1939-0029/georef",
-      "type": "Annotation",
-      "@context": [
-        "http://iiif.io/api/extension/georef/1/context.json",
-        "http://iiif.io/api/presentation/3/context.json"
-      ],
-      "label": "Brooklyn, N.Y. | 1939 | Vol. 1 p29",
-      "metadata": [
-        {
-          "label": "streets",
-          "value": "6"
-        },
-        {
-          "label": "intersections",
-          "value": "6"
-        }
-      ],
-      "created": "2026-07-18T02:30:38Z",
-      "modified": "2026-07-18T02:30:38Z",
-      "creator": [
-        {
-          "id": "https://oldinsurancemaps.net/profile/danvk",
-          "type": "Person"
-        }
-      ],
-      "motivation": "georeferencing",
-      "target": {
-        "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd380m:g3804m:g3804bm:g3804bm_g05791193901:05791_01_1939-0029/selector",
-        "type": "SpecificResource",
-        "source": {
-          "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd380m:g3804m:g3804bm:g3804bm_g05791193901:05791_01_1939-0029/info.json",
-          "type": "ImageService2",
-          "height": 8267,
-          "width": 5490
-        },
-        "selector": {
-          "type": "SvgSelector",
-          "value": "<svg><polygon points=\"2681.0,196.0 2651.9,0.0 3081.5,0.0 3533.0,202.6 5490.0,199.3 5490.0,1030.1 5490.0,1030.1 5490.0,7679.6 1356.2,7659.5 1250.9,7732.7 192.3,6777.7 242.1,163.3 2681.0,196.0\" /></svg>"
-        }
-      },
-      "body": {
-        "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd380m:g3804m:g3804bm:g3804bm_g05791193901:05791_01_1939-0029/gcps",
-        "type": "FeatureCollection",
-        "transformation": {
-          "type": "helmert"
-        },
-        "features": [
-          {
-            "type": "Feature",
-            "properties": {
-              "resourceCoords": [
-                1440.5,
-                4959.4
-              ],
-              "creator": {
-                "id": "https://oldinsurancemaps.net/profile/danvk",
-                "type": "Person"
-              },
-              "type": "gcp"
-            },
-            "geometry": {
-              "type": "Point",
-              "coordinates": [
-                -74.0028805,
-                40.6769149
-              ]
-            }
-          },
-          {
-            "type": "Feature",
-            "properties": {
-              "resourceCoords": [
-                2681.0,
-                196.0
-              ],
-              "creator": {
-                "id": "https://oldinsurancemaps.net/profile/danvk",
-                "type": "Person"
-              },
-              "type": "gcp"
-            },
-            "geometry": {
-              "type": "Point",
-              "coordinates": [
-                -74.0058614,
-                40.678464
-              ]
-            }
-          }
-        ]
-      }
-    },
-    {
       "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd380m:g3804m:g3804bm:g3804bm_g05791193901:05791_01_1939-0003/georef",
       "type": "Annotation",
       "@context": [
@@ -1737,8 +3987,8 @@
           "value": "8"
         }
       ],
-      "created": "2026-07-18T02:30:38Z",
-      "modified": "2026-07-18T02:30:38Z",
+      "created": "2026-07-30T21:24:27Z",
+      "modified": "2026-07-30T21:24:27Z",
       "creator": [
         {
           "id": "https://oldinsurancemaps.net/profile/danvk",
@@ -1823,15 +4073,15 @@
       "metadata": [
         {
           "label": "streets",
-          "value": "7"
+          "value": "9"
         },
         {
           "label": "intersections",
-          "value": "12"
+          "value": "14"
         }
       ],
-      "created": "2026-07-18T02:30:38Z",
-      "modified": "2026-07-18T02:30:38Z",
+      "created": "2026-07-30T21:24:27Z",
+      "modified": "2026-07-30T21:24:27Z",
       "creator": [
         {
           "id": "https://oldinsurancemaps.net/profile/danvk",
@@ -1850,7 +4100,7 @@
         },
         "selector": {
           "type": "SvgSelector",
-          "value": "<svg><polygon points=\"3890.4,0.0 3892.0,228.0 4972.3,227.7 5011.9,7698.7 516.8,7700.3 490.5,1043.3 490.5,1043.3 487.2,211.5 1197.5,207.5 1373.1,0.0 3890.4,0.0\" /></svg>"
+          "value": "<svg><polygon points=\"4956.7,7687.8 503.9,7712.3 505.4,1050.6 1233.6,197.5 1232.1,641.5 5019.8,653.8 4956.7,7687.8\" /></svg>"
         }
       },
       "body": {
@@ -1864,7 +4114,7 @@
             "type": "Feature",
             "properties": {
               "resourceCoords": [
-                1888.0,
+                3476.0,
                 4992.0
               ],
               "creator": {
@@ -1876,8 +4126,8 @@
             "geometry": {
               "type": "Point",
               "coordinates": [
-                -74.001516,
-                40.679753
+                -74.001122,
+                40.680569
               ]
             }
           },
@@ -1906,99 +4156,6 @@
       }
     },
     {
-      "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd380m:g3804m:g3804bm:g3804bm_g05791193901:05791_01_1939-0031/georef",
-      "type": "Annotation",
-      "@context": [
-        "http://iiif.io/api/extension/georef/1/context.json",
-        "http://iiif.io/api/presentation/3/context.json"
-      ],
-      "label": "Brooklyn, N.Y. | 1939 | Vol. 1 p31",
-      "metadata": [
-        {
-          "label": "streets",
-          "value": "8"
-        },
-        {
-          "label": "intersections",
-          "value": "20"
-        }
-      ],
-      "created": "2026-07-18T02:30:38Z",
-      "modified": "2026-07-18T02:30:38Z",
-      "creator": [
-        {
-          "id": "https://oldinsurancemaps.net/profile/danvk",
-          "type": "Person"
-        }
-      ],
-      "motivation": "georeferencing",
-      "target": {
-        "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd380m:g3804m:g3804bm:g3804bm_g05791193901:05791_01_1939-0031/selector",
-        "type": "SpecificResource",
-        "source": {
-          "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd380m:g3804m:g3804bm:g3804bm_g05791193901:05791_01_1939-0031/info.json",
-          "type": "ImageService2",
-          "height": 8268,
-          "width": 5589
-        },
-        "selector": {
-          "type": "SvgSelector",
-          "value": "<svg><polygon points=\"5374.1,227.1 5343.2,7742.7 0.0,7734.8 0.0,236.0 5374.1,227.1\" /></svg>"
-        }
-      },
-      "body": {
-        "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd380m:g3804m:g3804bm:g3804bm_g05791193901:05791_01_1939-0031/gcps",
-        "type": "FeatureCollection",
-        "transformation": {
-          "type": "helmert"
-        },
-        "features": [
-          {
-            "type": "Feature",
-            "properties": {
-              "resourceCoords": [
-                2768.5,
-                5016.0
-              ],
-              "creator": {
-                "id": "https://oldinsurancemaps.net/profile/danvk",
-                "type": "Person"
-              },
-              "type": "gcp"
-            },
-            "geometry": {
-              "type": "Point",
-              "coordinates": [
-                -74.000048,
-                40.682803
-              ]
-            }
-          },
-          {
-            "type": "Feature",
-            "properties": {
-              "resourceCoords": [
-                1480.3,
-                5016.0
-              ],
-              "creator": {
-                "id": "https://oldinsurancemaps.net/profile/danvk",
-                "type": "Person"
-              },
-              "type": "gcp"
-            },
-            "geometry": {
-              "type": "Point",
-              "coordinates": [
-                -74.000371,
-                40.682133
-              ]
-            }
-          }
-        ]
-      }
-    },
-    {
       "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd380m:g3804m:g3804bm:g3804bm_g05791193901:05791_01_1939-0032/georef",
       "type": "Annotation",
       "@context": [
@@ -2016,8 +4173,8 @@
           "value": "8"
         }
       ],
-      "created": "2026-07-18T02:30:38Z",
-      "modified": "2026-07-18T02:30:38Z",
+      "created": "2026-07-30T21:24:27Z",
+      "modified": "2026-07-30T21:24:27Z",
       "creator": [
         {
           "id": "https://oldinsurancemaps.net/profile/danvk",
@@ -2092,285 +4249,6 @@
       }
     },
     {
-      "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd380m:g3804m:g3804bm:g3804bm_g05791193901:05791_01_1939-0033/georef",
-      "type": "Annotation",
-      "@context": [
-        "http://iiif.io/api/extension/georef/1/context.json",
-        "http://iiif.io/api/presentation/3/context.json"
-      ],
-      "label": "Brooklyn, N.Y. | 1939 | Vol. 1 p33",
-      "metadata": [
-        {
-          "label": "streets",
-          "value": "11"
-        },
-        {
-          "label": "intersections",
-          "value": "24"
-        }
-      ],
-      "created": "2026-07-18T02:30:38Z",
-      "modified": "2026-07-18T02:30:38Z",
-      "creator": [
-        {
-          "id": "https://oldinsurancemaps.net/profile/danvk",
-          "type": "Person"
-        }
-      ],
-      "motivation": "georeferencing",
-      "target": {
-        "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd380m:g3804m:g3804bm:g3804bm_g05791193901:05791_01_1939-0033/selector",
-        "type": "SpecificResource",
-        "source": {
-          "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd380m:g3804m:g3804bm:g3804bm_g05791193901:05791_01_1939-0033/info.json",
-          "type": "ImageService2",
-          "height": 8268,
-          "width": 5612
-        },
-        "selector": {
-          "type": "SvgSelector",
-          "value": "<svg><polygon points=\"5612.0,7758.8 553.6,7724.7 1089.6,175.0 2129.8,196.4 2131.8,0.0 4227.2,0.0 4222.2,239.5 5612.0,268.2 5612.0,7758.8\" /></svg>"
-        }
-      },
-      "body": {
-        "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd380m:g3804m:g3804bm:g3804bm_g05791193901:05791_01_1939-0033/gcps",
-        "type": "FeatureCollection",
-        "transformation": {
-          "type": "helmert"
-        },
-        "features": [
-          {
-            "type": "Feature",
-            "properties": {
-              "resourceCoords": [
-                820.0,
-                3852.0
-              ],
-              "creator": {
-                "id": "https://oldinsurancemaps.net/profile/danvk",
-                "type": "Person"
-              },
-              "type": "gcp"
-            },
-            "geometry": {
-              "type": "Point",
-              "coordinates": [
-                -73.9989348,
-                40.6869431
-              ]
-            }
-          },
-          {
-            "type": "Feature",
-            "properties": {
-              "resourceCoords": [
-                4732.0,
-                5004.0
-              ],
-              "creator": {
-                "id": "https://oldinsurancemaps.net/profile/danvk",
-                "type": "Person"
-              },
-              "type": "gcp"
-            },
-            "geometry": {
-              "type": "Point",
-              "coordinates": [
-                -73.9971968,
-                40.6887645
-              ]
-            }
-          }
-        ]
-      }
-    },
-    {
-      "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd380m:g3804m:g3804bm:g3804bm_g05791193901:05791_01_1939-0034/georef",
-      "type": "Annotation",
-      "@context": [
-        "http://iiif.io/api/extension/georef/1/context.json",
-        "http://iiif.io/api/presentation/3/context.json"
-      ],
-      "label": "Brooklyn, N.Y. | 1939 | Vol. 1 p34",
-      "metadata": [
-        {
-          "label": "streets",
-          "value": "8"
-        },
-        {
-          "label": "intersections",
-          "value": "15"
-        }
-      ],
-      "created": "2026-07-18T02:30:38Z",
-      "modified": "2026-07-18T02:30:38Z",
-      "creator": [
-        {
-          "id": "https://oldinsurancemaps.net/profile/danvk",
-          "type": "Person"
-        }
-      ],
-      "motivation": "georeferencing",
-      "target": {
-        "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd380m:g3804m:g3804bm:g3804bm_g05791193901:05791_01_1939-0034/selector",
-        "type": "SpecificResource",
-        "source": {
-          "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd380m:g3804m:g3804bm:g3804bm_g05791193901:05791_01_1939-0034/info.json",
-          "type": "ImageService2",
-          "height": 8268,
-          "width": 5612
-        },
-        "selector": {
-          "type": "SvgSelector",
-          "value": "<svg><polygon points=\"4648.3,362.7 4663.9,0.0 5612.0,0.0 5612.0,7849.5 1653.4,7835.8 1585.8,325.3 4648.3,362.7\" /></svg>"
-        }
-      },
-      "body": {
-        "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd380m:g3804m:g3804bm:g3804bm_g05791193901:05791_01_1939-0034/gcps",
-        "type": "FeatureCollection",
-        "transformation": {
-          "type": "helmert"
-        },
-        "features": [
-          {
-            "type": "Feature",
-            "properties": {
-              "resourceCoords": [
-                2048.0,
-                2808.0
-              ],
-              "creator": {
-                "id": "https://oldinsurancemaps.net/profile/danvk",
-                "type": "Person"
-              },
-              "type": "gcp"
-            },
-            "geometry": {
-              "type": "Point",
-              "coordinates": [
-                -73.9984232,
-                40.6898645
-              ]
-            }
-          },
-          {
-            "type": "Feature",
-            "properties": {
-              "resourceCoords": [
-                732.0,
-                7840.0
-              ],
-              "creator": {
-                "id": "https://oldinsurancemaps.net/profile/danvk",
-                "type": "Person"
-              },
-              "type": "gcp"
-            },
-            "geometry": {
-              "type": "Point",
-              "coordinates": [
-                -73.9953209,
-                40.6882386
-              ]
-            }
-          }
-        ]
-      }
-    },
-    {
-      "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd380m:g3804m:g3804bm:g3804bm_g05791193901:05791_01_1939-0035/georef",
-      "type": "Annotation",
-      "@context": [
-        "http://iiif.io/api/extension/georef/1/context.json",
-        "http://iiif.io/api/presentation/3/context.json"
-      ],
-      "label": "Brooklyn, N.Y. | 1939 | Vol. 1 p35",
-      "metadata": [
-        {
-          "label": "streets",
-          "value": "5"
-        },
-        {
-          "label": "intersections",
-          "value": "4"
-        }
-      ],
-      "created": "2026-07-18T02:30:38Z",
-      "modified": "2026-07-18T02:30:38Z",
-      "creator": [
-        {
-          "id": "https://oldinsurancemaps.net/profile/danvk",
-          "type": "Person"
-        }
-      ],
-      "motivation": "georeferencing",
-      "target": {
-        "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd380m:g3804m:g3804bm:g3804bm_g05791193901:05791_01_1939-0035/selector",
-        "type": "SpecificResource",
-        "source": {
-          "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd380m:g3804m:g3804bm:g3804bm_g05791193901:05791_01_1939-0035/info.json",
-          "type": "ImageService2",
-          "height": 8268,
-          "width": 5612
-        },
-        "selector": {
-          "type": "SvgSelector",
-          "value": "<svg><polygon points=\"5612.0,1890.4 5612.0,4803.8 5292.6,4801.2 5310.5,6610.0 5110.8,6608.2 5104.2,8268.0 0.0,8268.0 0.0,-0.0 5299.9,0.0 5275.5,1887.6 5612.0,1890.4\" /></svg>"
-        }
-      },
-      "body": {
-        "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd380m:g3804m:g3804bm:g3804bm_g05791193901:05791_01_1939-0035/gcps",
-        "type": "FeatureCollection",
-        "transformation": {
-          "type": "helmert"
-        },
-        "features": [
-          {
-            "type": "Feature",
-            "properties": {
-              "resourceCoords": [
-                1676.0,
-                4784.0
-              ],
-              "creator": {
-                "id": "https://oldinsurancemaps.net/profile/danvk",
-                "type": "Person"
-              },
-              "type": "gcp"
-            },
-            "geometry": {
-              "type": "Point",
-              "coordinates": [
-                -74.0021257,
-                40.6694201
-              ]
-            }
-          },
-          {
-            "type": "Feature",
-            "properties": {
-              "resourceCoords": [
-                2912.0,
-                1868.0
-              ],
-              "creator": {
-                "id": "https://oldinsurancemaps.net/profile/danvk",
-                "type": "Person"
-              },
-              "type": "gcp"
-            },
-            "geometry": {
-              "type": "Point",
-              "coordinates": [
-                -74.0038317,
-                40.670616
-              ]
-            }
-          }
-        ]
-      }
-    },
-    {
       "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd380m:g3804m:g3804bm:g3804bm_g05791193901:05791_01_1939-0036/georef",
       "type": "Annotation",
       "@context": [
@@ -2388,8 +4266,8 @@
           "value": "10"
         }
       ],
-      "created": "2026-07-18T02:30:38Z",
-      "modified": "2026-07-18T02:30:38Z",
+      "created": "2026-07-30T21:24:27Z",
+      "modified": "2026-07-30T21:24:27Z",
       "creator": [
         {
           "id": "https://oldinsurancemaps.net/profile/danvk",
@@ -2408,7 +4286,7 @@
         },
         "selector": {
           "type": "SvgSelector",
-          "value": "<svg><polygon points=\"174.5,3521.4 493.5,3522.7 481.9,613.0 5612.0,508.6 5612.0,680.5 5153.5,677.3 5215.1,3217.7 4938.6,3507.8 5612.0,3516.6 5134.4,4008.9 5137.0,5813.1 4615.3,5815.6 4231.4,8268.0 0.0,8268.0 0.0,5326.8 199.5,5327.8 174.5,3521.4\" /></svg>"
+          "value": "<svg><polygon points=\"174.5,3521.4 373.5,3522.2 373.9,612.4 5612.0,508.6 5612.0,680.5 5153.5,677.3 5215.1,3217.7 4938.6,3507.8 5612.0,3516.6 5134.4,4008.9 5137.0,5813.1 4545.7,5815.9 4016.9,8268.0 0.0,8268.0 0.0,5326.8 199.5,5327.8 174.5,3521.4\" /></svg>"
         }
       },
       "body": {
@@ -2481,8 +4359,8 @@
           "value": "12"
         }
       ],
-      "created": "2026-07-18T02:30:38Z",
-      "modified": "2026-07-18T02:30:38Z",
+      "created": "2026-07-30T21:24:27Z",
+      "modified": "2026-07-30T21:24:27Z",
       "creator": [
         {
           "id": "https://oldinsurancemaps.net/profile/danvk",
@@ -2501,7 +4379,7 @@
         },
         "selector": {
           "type": "SvgSelector",
-          "value": "<svg><polygon points=\"1314.8,1498.7 1313.4,1325.2 3402.8,1371.6 3656.0,1491.2 3658.1,917.9 4405.5,1514.4 5612.0,1433.1 5612.0,6665.1 875.7,6684.1 858.9,4862.7 1344.7,4354.1 657.2,4358.4 934.1,4063.3 851.8,1499.1 1314.8,1498.7\" /></svg>"
+          "value": "<svg><polygon points=\"2105.8,1330.6 3402.8,1371.6 3656.0,1491.2 3658.1,917.9 4405.5,1514.4 5612.0,1433.1 5612.0,6665.1 875.7,6684.1 858.9,4862.7 1344.7,4354.1 657.2,4358.4 934.1,4063.3 851.8,1499.1 1314.8,1498.7 1313.7,1356.4 2105.8,1340.2 2105.8,1330.6\" /></svg>"
         }
       },
       "body": {
@@ -2574,8 +4452,8 @@
           "value": "12"
         }
       ],
-      "created": "2026-07-18T02:30:38Z",
-      "modified": "2026-07-18T02:30:38Z",
+      "created": "2026-07-30T21:24:27Z",
+      "modified": "2026-07-30T21:24:27Z",
       "creator": [
         {
           "id": "https://oldinsurancemaps.net/profile/danvk",
@@ -2594,7 +4472,7 @@
         },
         "selector": {
           "type": "SvgSelector",
-          "value": "<svg><polygon points=\"4611.1,6724.3 4308.7,8268.0 1917.6,8268.0 2157.4,6729.6 1690.2,6730.6 1727.7,1484.6 4593.1,1488.5 4611.1,6724.3\" /></svg>"
+          "value": "<svg><polygon points=\"4593.1,1488.5 4611.1,6724.3 1690.2,6730.6 1727.7,1484.6 4593.1,1488.5\" /></svg>"
         }
       },
       "body": {
@@ -2650,564 +4528,6 @@
       }
     },
     {
-      "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd380m:g3804m:g3804bm:g3804bm_g05791193901:05791_01_1939-0039/georef",
-      "type": "Annotation",
-      "@context": [
-        "http://iiif.io/api/extension/georef/1/context.json",
-        "http://iiif.io/api/presentation/3/context.json"
-      ],
-      "label": "Brooklyn, N.Y. | 1939 | Vol. 1 p39",
-      "metadata": [
-        {
-          "label": "streets",
-          "value": "4"
-        },
-        {
-          "label": "intersections",
-          "value": "4"
-        }
-      ],
-      "created": "2026-07-18T02:30:38Z",
-      "modified": "2026-07-18T02:30:38Z",
-      "creator": [
-        {
-          "id": "https://oldinsurancemaps.net/profile/danvk",
-          "type": "Person"
-        }
-      ],
-      "motivation": "georeferencing",
-      "target": {
-        "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd380m:g3804m:g3804bm:g3804bm_g05791193901:05791_01_1939-0039/selector",
-        "type": "SpecificResource",
-        "source": {
-          "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd380m:g3804m:g3804bm:g3804bm_g05791193901:05791_01_1939-0039/info.json",
-          "type": "ImageService2",
-          "height": 8268,
-          "width": 5612
-        },
-        "selector": {
-          "type": "SvgSelector",
-          "value": "<svg><polygon points=\"412.4,1148.1 5227.0,1142.1 5158.1,6626.6 3158.5,6396.2 437.3,6391.7 412.4,1148.1\" /></svg>"
-        }
-      },
-      "body": {
-        "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd380m:g3804m:g3804bm:g3804bm_g05791193901:05791_01_1939-0039/gcps",
-        "type": "FeatureCollection",
-        "transformation": {
-          "type": "helmert"
-        },
-        "features": [
-          {
-            "type": "Feature",
-            "properties": {
-              "resourceCoords": [
-                3588.0,
-                4064.0
-              ],
-              "creator": {
-                "id": "https://oldinsurancemaps.net/profile/danvk",
-                "type": "Person"
-              },
-              "type": "gcp"
-            },
-            "geometry": {
-              "type": "Point",
-              "coordinates": [
-                -73.9972734,
-                40.6794993
-              ]
-            }
-          },
-          {
-            "type": "Feature",
-            "properties": {
-              "resourceCoords": [
-                3588.0,
-                1144.0
-              ],
-              "creator": {
-                "id": "https://oldinsurancemaps.net/profile/danvk",
-                "type": "Person"
-              },
-              "type": "gcp"
-            },
-            "geometry": {
-              "type": "Point",
-              "coordinates": [
-                -73.9992597,
-                40.6800511
-              ]
-            }
-          }
-        ]
-      }
-    },
-    {
-      "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd380m:g3804m:g3804bm:g3804bm_g05791193901:05791_01_1939-0004/georef",
-      "type": "Annotation",
-      "@context": [
-        "http://iiif.io/api/extension/georef/1/context.json",
-        "http://iiif.io/api/presentation/3/context.json"
-      ],
-      "label": "Brooklyn, N.Y. | 1939 | Vol. 1 p4",
-      "metadata": [
-        {
-          "label": "streets",
-          "value": "4"
-        },
-        {
-          "label": "intersections",
-          "value": "2"
-        }
-      ],
-      "created": "2026-07-18T02:30:38Z",
-      "modified": "2026-07-18T02:30:38Z",
-      "creator": [
-        {
-          "id": "https://oldinsurancemaps.net/profile/danvk",
-          "type": "Person"
-        }
-      ],
-      "motivation": "georeferencing",
-      "target": {
-        "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd380m:g3804m:g3804bm:g3804bm_g05791193901:05791_01_1939-0004/selector",
-        "type": "SpecificResource",
-        "source": {
-          "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd380m:g3804m:g3804bm:g3804bm_g05791193901:05791_01_1939-0004/info.json",
-          "type": "ImageService2",
-          "height": 8268,
-          "width": 5599
-        },
-        "selector": {
-          "type": "SvgSelector",
-          "value": "<svg><polygon points=\"0,8268 0,0 5599,0 5599,8268 0,8268\" /></svg>"
-        }
-      },
-      "body": {
-        "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd380m:g3804m:g3804bm:g3804bm_g05791193901:05791_01_1939-0004/gcps",
-        "type": "FeatureCollection",
-        "transformation": {
-          "type": "helmert"
-        },
-        "features": [
-          {
-            "type": "Feature",
-            "properties": {
-              "resourceCoords": [
-                2687.5,
-                7784.0
-              ],
-              "creator": {
-                "id": "https://oldinsurancemaps.net/profile/danvk",
-                "type": "Person"
-              },
-              "type": "gcp"
-            },
-            "geometry": {
-              "type": "Point",
-              "coordinates": [
-                -74.0104477,
-                40.6804294
-              ]
-            }
-          },
-          {
-            "type": "Feature",
-            "properties": {
-              "resourceCoords": [
-                5243.1,
-                7784.0
-              ],
-              "creator": {
-                "id": "https://oldinsurancemaps.net/profile/danvk",
-                "type": "Person"
-              },
-              "type": "gcp"
-            },
-            "geometry": {
-              "type": "Point",
-              "coordinates": [
-                -74.0091934,
-                40.6815021
-              ]
-            }
-          }
-        ]
-      }
-    },
-    {
-      "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd380m:g3804m:g3804bm:g3804bm_g05791193901:05791_01_1939-0040/georef",
-      "type": "Annotation",
-      "@context": [
-        "http://iiif.io/api/extension/georef/1/context.json",
-        "http://iiif.io/api/presentation/3/context.json"
-      ],
-      "label": "Brooklyn, N.Y. | 1939 | Vol. 1 p40",
-      "metadata": [
-        {
-          "label": "streets",
-          "value": "7"
-        },
-        {
-          "label": "intersections",
-          "value": "15"
-        }
-      ],
-      "created": "2026-07-18T02:30:38Z",
-      "modified": "2026-07-18T02:30:38Z",
-      "creator": [
-        {
-          "id": "https://oldinsurancemaps.net/profile/danvk",
-          "type": "Person"
-        }
-      ],
-      "motivation": "georeferencing",
-      "target": {
-        "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd380m:g3804m:g3804bm:g3804bm_g05791193901:05791_01_1939-0040/selector",
-        "type": "SpecificResource",
-        "source": {
-          "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd380m:g3804m:g3804bm:g3804bm_g05791193901:05791_01_1939-0040/info.json",
-          "type": "ImageService2",
-          "height": 8268,
-          "width": 5612
-        },
-        "selector": {
-          "type": "SvgSelector",
-          "value": "<svg><polygon points=\"5612.0,7446.7 2323.6,7030.6 2394.8,6437.9 1380.1,6255.4 1380.4,6917.5 0.0,6751.9 0.0,1245.5 5612.0,1255.6 5612.0,7446.7\" /></svg>"
-        }
-      },
-      "body": {
-        "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd380m:g3804m:g3804bm:g3804bm_g05791193901:05791_01_1939-0040/gcps",
-        "type": "FeatureCollection",
-        "transformation": {
-          "type": "helmert"
-        },
-        "features": [
-          {
-            "type": "Feature",
-            "properties": {
-              "resourceCoords": [
-                1376.0,
-                4168.0
-              ],
-              "creator": {
-                "id": "https://oldinsurancemaps.net/profile/danvk",
-                "type": "Person"
-              },
-              "type": "gcp"
-            },
-            "geometry": {
-              "type": "Point",
-              "coordinates": [
-                -73.9965238,
-                40.6810573
-              ]
-            }
-          },
-          {
-            "type": "Feature",
-            "properties": {
-              "resourceCoords": [
-                1376.0,
-                1248.0
-              ],
-              "creator": {
-                "id": "https://oldinsurancemaps.net/profile/danvk",
-                "type": "Person"
-              },
-              "type": "gcp"
-            },
-            "geometry": {
-              "type": "Point",
-              "coordinates": [
-                -73.9985089,
-                40.6816069
-              ]
-            }
-          }
-        ]
-      }
-    },
-    {
-      "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd380m:g3804m:g3804bm:g3804bm_g05791193901:05791_01_1939-0041/georef",
-      "type": "Annotation",
-      "@context": [
-        "http://iiif.io/api/extension/georef/1/context.json",
-        "http://iiif.io/api/presentation/3/context.json"
-      ],
-      "label": "Brooklyn, N.Y. | 1939 | Vol. 1 p41",
-      "metadata": [
-        {
-          "label": "streets",
-          "value": "8"
-        },
-        {
-          "label": "intersections",
-          "value": "11"
-        }
-      ],
-      "created": "2026-07-18T02:30:38Z",
-      "modified": "2026-07-18T02:30:38Z",
-      "creator": [
-        {
-          "id": "https://oldinsurancemaps.net/profile/danvk",
-          "type": "Person"
-        }
-      ],
-      "motivation": "georeferencing",
-      "target": {
-        "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd380m:g3804m:g3804bm:g3804bm_g05791193901:05791_01_1939-0041/selector",
-        "type": "SpecificResource",
-        "source": {
-          "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd380m:g3804m:g3804bm:g3804bm_g05791193901:05791_01_1939-0041/info.json",
-          "type": "ImageService2",
-          "height": 8268,
-          "width": 5612
-        },
-        "selector": {
-          "type": "SvgSelector",
-          "value": "<svg><polygon points=\"1440.5,7684.4 676.6,1545.0 5108.2,991.4 5292.1,3901.7 4613.1,3985.7 4622.8,7684.8 1440.5,7684.4\" /></svg>"
-        }
-      },
-      "body": {
-        "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd380m:g3804m:g3804bm:g3804bm_g05791193901:05791_01_1939-0041/gcps",
-        "type": "FeatureCollection",
-        "transformation": {
-          "type": "helmert"
-        },
-        "features": [
-          {
-            "type": "Feature",
-            "properties": {
-              "resourceCoords": [
-                3324.0,
-                4144.0
-              ],
-              "creator": {
-                "id": "https://oldinsurancemaps.net/profile/danvk",
-                "type": "Person"
-              },
-              "type": "gcp"
-            },
-            "geometry": {
-              "type": "Point",
-              "coordinates": [
-                -73.9949023,
-                40.6844304
-              ]
-            }
-          },
-          {
-            "type": "Feature",
-            "properties": {
-              "resourceCoords": [
-                3324.0,
-                7680.0
-              ],
-              "creator": {
-                "id": "https://oldinsurancemaps.net/profile/danvk",
-                "type": "Person"
-              },
-              "type": "gcp"
-            },
-            "geometry": {
-              "type": "Point",
-              "coordinates": [
-                -73.992623,
-                40.683544
-              ]
-            }
-          }
-        ]
-      }
-    },
-    {
-      "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd380m:g3804m:g3804bm:g3804bm_g05791193901:05791_01_1939-0042/georef",
-      "type": "Annotation",
-      "@context": [
-        "http://iiif.io/api/extension/georef/1/context.json",
-        "http://iiif.io/api/presentation/3/context.json"
-      ],
-      "label": "Brooklyn, N.Y. | 1939 | Vol. 1 p42",
-      "metadata": [
-        {
-          "label": "streets",
-          "value": "7"
-        },
-        {
-          "label": "intersections",
-          "value": "16"
-        }
-      ],
-      "created": "2026-07-18T02:30:38Z",
-      "modified": "2026-07-18T02:30:38Z",
-      "creator": [
-        {
-          "id": "https://oldinsurancemaps.net/profile/danvk",
-          "type": "Person"
-        }
-      ],
-      "motivation": "georeferencing",
-      "target": {
-        "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd380m:g3804m:g3804bm:g3804bm_g05791193901:05791_01_1939-0042/selector",
-        "type": "SpecificResource",
-        "source": {
-          "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd380m:g3804m:g3804bm:g3804bm_g05791193901:05791_01_1939-0042/info.json",
-          "type": "ImageService2",
-          "height": 8268,
-          "width": 5612
-        },
-        "selector": {
-          "type": "SvgSelector",
-          "value": "<svg><polygon points=\"196.1,7689.9 238.8,3990.2 919.1,3915.8 776.4,1002.5 4906.5,535.9 5209.2,3449.5 4144.8,3565.2 4093.7,7746.6 196.1,7689.9\" /></svg>"
-        }
-      },
-      "body": {
-        "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd380m:g3804m:g3804bm:g3804bm_g05791193901:05791_01_1939-0042/gcps",
-        "type": "FeatureCollection",
-        "transformation": {
-          "type": "helmert"
-        },
-        "features": [
-          {
-            "type": "Feature",
-            "properties": {
-              "resourceCoords": [
-                3280.0,
-                724.0
-              ],
-              "creator": {
-                "id": "https://oldinsurancemaps.net/profile/danvk",
-                "type": "Person"
-              },
-              "type": "gcp"
-            },
-            "geometry": {
-              "type": "Point",
-              "coordinates": [
-                -73.9957232,
-                40.6873919
-              ]
-            }
-          },
-          {
-            "type": "Feature",
-            "properties": {
-              "resourceCoords": [
-                2796.0,
-                7728.0
-              ],
-              "creator": {
-                "id": "https://oldinsurancemaps.net/profile/danvk",
-                "type": "Person"
-              },
-              "type": "gcp"
-            },
-            "geometry": {
-              "type": "Point",
-              "coordinates": [
-                -73.991332,
-                40.685448
-              ]
-            }
-          }
-        ]
-      }
-    },
-    {
-      "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd380m:g3804m:g3804bm:g3804bm_g05791193901:05791_01_1939-0044/georef",
-      "type": "Annotation",
-      "@context": [
-        "http://iiif.io/api/extension/georef/1/context.json",
-        "http://iiif.io/api/presentation/3/context.json"
-      ],
-      "label": "Brooklyn, N.Y. | 1939 | Vol. 1 p44",
-      "metadata": [
-        {
-          "label": "streets",
-          "value": "3"
-        },
-        {
-          "label": "intersections",
-          "value": "2"
-        }
-      ],
-      "created": "2026-07-18T02:30:38Z",
-      "modified": "2026-07-18T02:30:38Z",
-      "creator": [
-        {
-          "id": "https://oldinsurancemaps.net/profile/danvk",
-          "type": "Person"
-        }
-      ],
-      "motivation": "georeferencing",
-      "target": {
-        "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd380m:g3804m:g3804bm:g3804bm_g05791193901:05791_01_1939-0044/selector",
-        "type": "SpecificResource",
-        "source": {
-          "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd380m:g3804m:g3804bm:g3804bm_g05791193901:05791_01_1939-0044/info.json",
-          "type": "ImageService2",
-          "height": 8268,
-          "width": 5612
-        },
-        "selector": {
-          "type": "SvgSelector",
-          "value": "<svg><polygon points=\"2347.6,1852.5 2401.3,1588.0 2515.3,1671.3 2969.4,1807.2 3267.1,0.0 5612.0,0.0 5612.0,8268.0 -0.0,8268.0 -0.0,-0.0 901.9,0.0 848.5,347.5 661.5,313.0 834.3,458.6 595.7,659.6 1089.5,1167.2 1457.0,1705.8 2347.6,1852.5\" /></svg>"
-        }
-      },
-      "body": {
-        "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd380m:g3804m:g3804bm:g3804bm_g05791193901:05791_01_1939-0044/gcps",
-        "type": "FeatureCollection",
-        "transformation": {
-          "type": "helmert"
-        },
-        "features": [
-          {
-            "type": "Feature",
-            "properties": {
-              "resourceCoords": [
-                956.0,
-                860.0
-              ],
-              "creator": {
-                "id": "https://oldinsurancemaps.net/profile/danvk",
-                "type": "Person"
-              },
-              "type": "gcp"
-            },
-            "geometry": {
-              "type": "Point",
-              "coordinates": [
-                -73.9965417,
-                40.6683659
-              ]
-            }
-          },
-          {
-            "type": "Feature",
-            "properties": {
-              "resourceCoords": [
-                2400.0,
-                1588.0
-              ],
-              "creator": {
-                "id": "https://oldinsurancemaps.net/profile/danvk",
-                "type": "Person"
-              },
-              "type": "gcp"
-            },
-            "geometry": {
-              "type": "Point",
-              "coordinates": [
-                -73.9948535,
-                40.6668553
-              ]
-            }
-          }
-        ]
-      }
-    },
-    {
       "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd380m:g3804m:g3804bm:g3804bm_g05791193901:05791_01_1939-0046/georef",
       "type": "Annotation",
       "@context": [
@@ -3225,8 +4545,8 @@
           "value": "4"
         }
       ],
-      "created": "2026-07-18T02:30:38Z",
-      "modified": "2026-07-18T02:30:38Z",
+      "created": "2026-07-30T21:24:27Z",
+      "modified": "2026-07-30T21:24:27Z",
       "creator": [
         {
           "id": "https://oldinsurancemaps.net/profile/danvk",
@@ -3245,7 +4565,7 @@
         },
         "selector": {
           "type": "SvgSelector",
-          "value": "<svg><polygon points=\"4266.7,8268.0 2263.6,8268.0 1264.4,7221.1 -0.0,6287.5 450.0,5761.2 19.2,5504.8 441.1,5512.8 432.6,4732.7 -0.0,4803.9 -0.0,1402.9 429.2,1403.0 430.3,366.1 4281.3,380.4 4280.7,0.0 5612.0,0.0 5612.0,7944.5 4568.5,7810.8 4288.8,7669.4 4266.7,8268.0\" /></svg>"
+          "value": "<svg><polygon points=\"-0.0,8268.0 -0.0,700.8 430.0,699.8 430.3,366.1 4281.3,380.4 4280.7,0.0 5612.0,0.0 5612.0,8268.0 -0.0,8268.0\" /></svg>"
         }
       },
       "body": {
@@ -3301,285 +4621,6 @@
       }
     },
     {
-      "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd380m:g3804m:g3804bm:g3804bm_g05791193901:05791_01_1939-0047/georef",
-      "type": "Annotation",
-      "@context": [
-        "http://iiif.io/api/extension/georef/1/context.json",
-        "http://iiif.io/api/presentation/3/context.json"
-      ],
-      "label": "Brooklyn, N.Y. | 1939 | Vol. 1 p47",
-      "metadata": [
-        {
-          "label": "streets",
-          "value": "4"
-        },
-        {
-          "label": "intersections",
-          "value": "3"
-        }
-      ],
-      "created": "2026-07-18T02:30:38Z",
-      "modified": "2026-07-18T02:30:38Z",
-      "creator": [
-        {
-          "id": "https://oldinsurancemaps.net/profile/danvk",
-          "type": "Person"
-        }
-      ],
-      "motivation": "georeferencing",
-      "target": {
-        "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd380m:g3804m:g3804bm:g3804bm_g05791193901:05791_01_1939-0047/selector",
-        "type": "SpecificResource",
-        "source": {
-          "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd380m:g3804m:g3804bm:g3804bm_g05791193901:05791_01_1939-0047/info.json",
-          "type": "ImageService2",
-          "height": 8268,
-          "width": 5612
-        },
-        "selector": {
-          "type": "SvgSelector",
-          "value": "<svg><polygon points=\"0.0,1142.0 5612.0,269.1 5612.0,7977.0 0.0,7637.0 0.0,1142.0\" /></svg>"
-        }
-      },
-      "body": {
-        "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd380m:g3804m:g3804bm:g3804bm_g05791193901:05791_01_1939-0047/gcps",
-        "type": "FeatureCollection",
-        "transformation": {
-          "type": "helmert"
-        },
-        "features": [
-          {
-            "type": "Feature",
-            "properties": {
-              "resourceCoords": [
-                4168.0,
-                508.0
-              ],
-              "creator": {
-                "id": "https://oldinsurancemaps.net/profile/danvk",
-                "type": "Person"
-              },
-              "type": "gcp"
-            },
-            "geometry": {
-              "type": "Point",
-              "coordinates": [
-                -73.997447,
-                40.6754
-              ]
-            }
-          },
-          {
-            "type": "Feature",
-            "properties": {
-              "resourceCoords": [
-                516.0,
-                1060.0
-              ],
-              "creator": {
-                "id": "https://oldinsurancemaps.net/profile/danvk",
-                "type": "Person"
-              },
-              "type": "gcp"
-            },
-            "geometry": {
-              "type": "Point",
-              "coordinates": [
-                -73.998388,
-                40.673471
-              ]
-            }
-          }
-        ]
-      }
-    },
-    {
-      "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd380m:g3804m:g3804bm:g3804bm_g05791193901:05791_01_1939-0048/georef",
-      "type": "Annotation",
-      "@context": [
-        "http://iiif.io/api/extension/georef/1/context.json",
-        "http://iiif.io/api/presentation/3/context.json"
-      ],
-      "label": "Brooklyn, N.Y. | 1939 | Vol. 1 p48",
-      "metadata": [
-        {
-          "label": "streets",
-          "value": "5"
-        },
-        {
-          "label": "intersections",
-          "value": "4"
-        }
-      ],
-      "created": "2026-07-18T02:30:38Z",
-      "modified": "2026-07-18T02:30:38Z",
-      "creator": [
-        {
-          "id": "https://oldinsurancemaps.net/profile/danvk",
-          "type": "Person"
-        }
-      ],
-      "motivation": "georeferencing",
-      "target": {
-        "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd380m:g3804m:g3804bm:g3804bm_g05791193901:05791_01_1939-0048/selector",
-        "type": "SpecificResource",
-        "source": {
-          "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd380m:g3804m:g3804bm:g3804bm_g05791193901:05791_01_1939-0048/info.json",
-          "type": "ImageService2",
-          "height": 8268,
-          "width": 5612
-        },
-        "selector": {
-          "type": "SvgSelector",
-          "value": "<svg><polygon points=\"4664.6,6882.0 4665.3,7257.4 864.5,7244.6 863.8,8268.0 -0.0,8268.0 -0.0,7188.9 864.6,7137.1 868.4,867.3 4664.0,880.0 4663.5,2152.9 5612.0,2156.9 5612.0,6881.7 4664.6,6882.0\" /></svg>"
-        }
-      },
-      "body": {
-        "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd380m:g3804m:g3804bm:g3804bm_g05791193901:05791_01_1939-0048/gcps",
-        "type": "FeatureCollection",
-        "transformation": {
-          "type": "helmert"
-        },
-        "features": [
-          {
-            "type": "Feature",
-            "properties": {
-              "resourceCoords": [
-                4664.0,
-                4716.0
-              ],
-              "creator": {
-                "id": "https://oldinsurancemaps.net/profile/danvk",
-                "type": "Person"
-              },
-              "type": "gcp"
-            },
-            "geometry": {
-              "type": "Point",
-              "coordinates": [
-                -73.991023,
-                40.671458
-              ]
-            }
-          },
-          {
-            "type": "Feature",
-            "properties": {
-              "resourceCoords": [
-                4664.0,
-                880.0
-              ],
-              "creator": {
-                "id": "https://oldinsurancemaps.net/profile/danvk",
-                "type": "Person"
-              },
-              "type": "gcp"
-            },
-            "geometry": {
-              "type": "Point",
-              "coordinates": [
-                -73.9895109,
-                40.6732702
-              ]
-            }
-          }
-        ]
-      }
-    },
-    {
-      "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd380m:g3804m:g3804bm:g3804bm_g05791193901:05791_01_1939-0049/georef",
-      "type": "Annotation",
-      "@context": [
-        "http://iiif.io/api/extension/georef/1/context.json",
-        "http://iiif.io/api/presentation/3/context.json"
-      ],
-      "label": "Brooklyn, N.Y. | 1939 | Vol. 1 p49",
-      "metadata": [
-        {
-          "label": "streets",
-          "value": "6"
-        },
-        {
-          "label": "intersections",
-          "value": "11"
-        }
-      ],
-      "created": "2026-07-18T02:30:38Z",
-      "modified": "2026-07-18T02:30:38Z",
-      "creator": [
-        {
-          "id": "https://oldinsurancemaps.net/profile/danvk",
-          "type": "Person"
-        }
-      ],
-      "motivation": "georeferencing",
-      "target": {
-        "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd380m:g3804m:g3804bm:g3804bm_g05791193901:05791_01_1939-0049/selector",
-        "type": "SpecificResource",
-        "source": {
-          "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd380m:g3804m:g3804bm:g3804bm_g05791193901:05791_01_1939-0049/info.json",
-          "type": "ImageService2",
-          "height": 8268,
-          "width": 5612
-        },
-        "selector": {
-          "type": "SvgSelector",
-          "value": "<svg><polygon points=\"510.7,8268.0 389.2,2000.0 5362.1,1138.0 5096.4,7386.7 5612.0,7406.6 5612.0,8268.0 510.7,8268.0\" /></svg>"
-        }
-      },
-      "body": {
-        "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd380m:g3804m:g3804bm:g3804bm_g05791193901:05791_01_1939-0049/gcps",
-        "type": "FeatureCollection",
-        "transformation": {
-          "type": "helmert"
-        },
-        "features": [
-          {
-            "type": "Feature",
-            "properties": {
-              "resourceCoords": [
-                3956.0,
-                4496.0
-              ],
-              "creator": {
-                "id": "https://oldinsurancemaps.net/profile/danvk",
-                "type": "Person"
-              },
-              "type": "gcp"
-            },
-            "geometry": {
-              "type": "Point",
-              "coordinates": [
-                -73.9941559,
-                40.6772043
-              ]
-            }
-          },
-          {
-            "type": "Feature",
-            "properties": {
-              "resourceCoords": [
-                2748.0,
-                1588.0
-              ],
-              "creator": {
-                "id": "https://oldinsurancemaps.net/profile/danvk",
-                "type": "Person"
-              },
-              "type": "gcp"
-            },
-            "geometry": {
-              "type": "Point",
-              "coordinates": [
-                -73.9964751,
-                40.6774341
-              ]
-            }
-          }
-        ]
-      }
-    },
-    {
       "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd380m:g3804m:g3804bm:g3804bm_g05791193901:05791_01_1939-0005/georef",
       "type": "Annotation",
       "@context": [
@@ -3597,8 +4638,8 @@
           "value": "3"
         }
       ],
-      "created": "2026-07-18T02:30:38Z",
-      "modified": "2026-07-18T02:30:38Z",
+      "created": "2026-07-30T21:24:27Z",
+      "modified": "2026-07-30T21:24:27Z",
       "creator": [
         {
           "id": "https://oldinsurancemaps.net/profile/danvk",
@@ -3617,7 +4658,7 @@
         },
         "selector": {
           "type": "SvgSelector",
-          "value": "<svg><polygon points=\"5325.6,7856.0 -0.0,7574.6 0.0,-0.0 5599.0,0.0 5599.0,8268.0 5441.2,8268.0 5325.6,7856.0\" /></svg>"
+          "value": "<svg><polygon points=\"5325.6,7856.1 -0.0,7574.5 -0.0,-0.0 5599.0,0.0 5599.0,8268.0 5441.2,8268.0 5325.6,7856.1\" /></svg>"
         }
       },
       "body": {
@@ -3690,8 +4731,8 @@
           "value": "2"
         }
       ],
-      "created": "2026-07-18T02:30:38Z",
-      "modified": "2026-07-18T02:30:38Z",
+      "created": "2026-07-30T21:24:27Z",
+      "modified": "2026-07-30T21:24:27Z",
       "creator": [
         {
           "id": "https://oldinsurancemaps.net/profile/danvk",
@@ -3710,7 +4751,7 @@
         },
         "selector": {
           "type": "SvgSelector",
-          "value": "<svg><polygon points=\"1986.0,6768.8 1924.8,5717.0 5612.0,5574.4 5612.0,8268.0 2500.4,8268.0 2508.1,6769.7 1986.0,6768.8\" /></svg>"
+          "value": "<svg><polygon points=\"2508.1,6769.7 1653.6,6768.3 1652.5,5689.0 5612.0,5589.9 5612.0,8268.0 2500.4,8268.0 2508.1,6769.7\" /></svg>"
         }
       },
       "body": {
@@ -3766,99 +4807,6 @@
       }
     },
     {
-      "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd380m:g3804m:g3804bm:g3804bm_g05791193901:05791_01_1939-0051/georef",
-      "type": "Annotation",
-      "@context": [
-        "http://iiif.io/api/extension/georef/1/context.json",
-        "http://iiif.io/api/presentation/3/context.json"
-      ],
-      "label": "Brooklyn, N.Y. | 1939 | Vol. 1 p51",
-      "metadata": [
-        {
-          "label": "streets",
-          "value": "6"
-        },
-        {
-          "label": "intersections",
-          "value": "17"
-        }
-      ],
-      "created": "2026-07-18T02:30:38Z",
-      "modified": "2026-07-18T02:30:38Z",
-      "creator": [
-        {
-          "id": "https://oldinsurancemaps.net/profile/danvk",
-          "type": "Person"
-        }
-      ],
-      "motivation": "georeferencing",
-      "target": {
-        "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd380m:g3804m:g3804bm:g3804bm_g05791193901:05791_01_1939-0051/selector",
-        "type": "SpecificResource",
-        "source": {
-          "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd380m:g3804m:g3804bm:g3804bm_g05791193901:05791_01_1939-0051/info.json",
-          "type": "ImageService2",
-          "height": 8268,
-          "width": 5612
-        },
-        "selector": {
-          "type": "SvgSelector",
-          "value": "<svg><polygon points=\"4150.0,647.6 4033.2,0.0 5057.7,0.0 5092.5,592.2 4916.3,602.8 5036.8,3971.9 5281.5,3954.9 5461.4,7305.4 1481.1,7263.0 1464.1,8268.0 576.2,8268.0 581.1,8126.4 981.8,8124.7 978.1,7245.7 451.9,7227.6 695.9,850.1 2694.5,725.6 2770.7,728.5 4150.0,647.6\" /></svg>"
-        }
-      },
-      "body": {
-        "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd380m:g3804m:g3804bm:g3804bm_g05791193901:05791_01_1939-0051/gcps",
-        "type": "FeatureCollection",
-        "transformation": {
-          "type": "helmert"
-        },
-        "features": [
-          {
-            "type": "Feature",
-            "properties": {
-              "resourceCoords": [
-                1744.0,
-                7272.0
-              ],
-              "creator": {
-                "id": "https://oldinsurancemaps.net/profile/danvk",
-                "type": "Person"
-              },
-              "type": "gcp"
-            },
-            "geometry": {
-              "type": "Point",
-              "coordinates": [
-                -73.99137,
-                40.67755
-              ]
-            }
-          },
-          {
-            "type": "Feature",
-            "properties": {
-              "resourceCoords": [
-                3456.0,
-                680.0
-              ],
-              "creator": {
-                "id": "https://oldinsurancemaps.net/profile/danvk",
-                "type": "Person"
-              },
-              "type": "gcp"
-            },
-            "geometry": {
-              "type": "Point",
-              "coordinates": [
-                -73.994889,
-                40.6802
-              ]
-            }
-          }
-        ]
-      }
-    },
-    {
       "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd380m:g3804m:g3804bm:g3804bm_g05791193901:05791_01_1939-0052/georef",
       "type": "Annotation",
       "@context": [
@@ -3876,8 +4824,8 @@
           "value": "12"
         }
       ],
-      "created": "2026-07-18T02:30:38Z",
-      "modified": "2026-07-18T02:30:38Z",
+      "created": "2026-07-30T21:24:27Z",
+      "modified": "2026-07-30T21:24:27Z",
       "creator": [
         {
           "id": "https://oldinsurancemaps.net/profile/danvk",
@@ -3969,8 +4917,8 @@
           "value": "12"
         }
       ],
-      "created": "2026-07-18T02:30:38Z",
-      "modified": "2026-07-18T02:30:38Z",
+      "created": "2026-07-30T21:24:27Z",
+      "modified": "2026-07-30T21:24:27Z",
       "creator": [
         {
           "id": "https://oldinsurancemaps.net/profile/danvk",
@@ -4062,8 +5010,8 @@
           "value": "12"
         }
       ],
-      "created": "2026-07-18T02:30:38Z",
-      "modified": "2026-07-18T02:30:38Z",
+      "created": "2026-07-30T21:24:27Z",
+      "modified": "2026-07-30T21:24:27Z",
       "creator": [
         {
           "id": "https://oldinsurancemaps.net/profile/danvk",
@@ -4082,7 +5030,7 @@
         },
         "selector": {
           "type": "SvgSelector",
-          "value": "<svg><polygon points=\"686.9,668.2 4591.3,679.3 4579.7,7402.0 689.7,7367.2 689.3,6478.9 639.0,6478.7 686.9,668.2\" /></svg>"
+          "value": "<svg><polygon points=\"686.9,668.2 4591.2,679.3 4579.7,7402.0 689.7,7367.2 689.3,6478.9 639.0,6478.7 686.9,668.2\" /></svg>"
         }
       },
       "body": {
@@ -4155,8 +5103,8 @@
           "value": "20"
         }
       ],
-      "created": "2026-07-18T02:30:38Z",
-      "modified": "2026-07-18T02:30:38Z",
+      "created": "2026-07-30T21:24:27Z",
+      "modified": "2026-07-30T21:24:27Z",
       "creator": [
         {
           "id": "https://oldinsurancemaps.net/profile/danvk",
@@ -4248,8 +5196,8 @@
           "value": "12"
         }
       ],
-      "created": "2026-07-18T02:30:38Z",
-      "modified": "2026-07-18T02:30:38Z",
+      "created": "2026-07-30T21:24:27Z",
+      "modified": "2026-07-30T21:24:27Z",
       "creator": [
         {
           "id": "https://oldinsurancemaps.net/profile/danvk",
@@ -4268,7 +5216,7 @@
         },
         "selector": {
           "type": "SvgSelector",
-          "value": "<svg><polygon points=\"768.0,7400.0 796.1,710.7 4977.0,738.4 4968.2,0.0 5612.0,0.0 5612.0,7406.3 768.0,7400.0\" /></svg>"
+          "value": "<svg><polygon points=\"796.1,710.6 4977.0,738.4 4968.2,0.0 5612.0,0.0 5606.8,7406.3 768.0,7400.0 796.1,710.6\" /></svg>"
         }
       },
       "body": {
@@ -4341,8 +5289,8 @@
           "value": "2"
         }
       ],
-      "created": "2026-07-18T02:30:38Z",
-      "modified": "2026-07-18T02:30:38Z",
+      "created": "2026-07-30T21:24:27Z",
+      "modified": "2026-07-30T21:24:27Z",
       "creator": [
         {
           "id": "https://oldinsurancemaps.net/profile/danvk",
@@ -4361,7 +5309,7 @@
         },
         "selector": {
           "type": "SvgSelector",
-          "value": "<svg><polygon points=\"4029.5,726.1 4538.0,775.4 4474.4,1458.3 5476.1,1554.6 5280.9,3702.0 5630.0,3733.7 5630.0,4232.8 4227.8,4129.9 4158.6,4873.4 3525.4,4814.5 3453.5,5795.6 4058.6,5793.3 4039.5,7169.4 3502.0,7168.8 3500.1,8267.0 0.0,8267.0 0.0,0.0 4096.7,-0.0 4029.5,726.1\" /></svg>"
+          "value": "<svg><polygon points=\"4108.1,-0.0 4039.1,727.2 4538.2,775.6 4474.6,1458.4 5476.3,1554.7 5281.0,3702.0 5630.0,3733.8 5630.0,4257.3 4228.7,4120.9 4158.6,4873.4 3648.7,4826.0 3560.6,5795.2 4058.6,5793.3 4039.5,7169.4 3501.9,7168.8 3500.7,7857.0 4036.1,7855.9 4035.6,8267.0 0.0,8267.0 0.0,0.0 4108.1,-0.0\" /></svg>"
         }
       },
       "body": {
@@ -4417,99 +5365,6 @@
       }
     },
     {
-      "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd380m:g3804m:g3804bm:g3804bm_g05791193901:05791_01_1939-0058/georef",
-      "type": "Annotation",
-      "@context": [
-        "http://iiif.io/api/extension/georef/1/context.json",
-        "http://iiif.io/api/presentation/3/context.json"
-      ],
-      "label": "Brooklyn, N.Y. | 1939 | Vol. 1 p58",
-      "metadata": [
-        {
-          "label": "streets",
-          "value": "5"
-        },
-        {
-          "label": "intersections",
-          "value": "5"
-        }
-      ],
-      "created": "2026-07-18T02:30:38Z",
-      "modified": "2026-07-18T02:30:38Z",
-      "creator": [
-        {
-          "id": "https://oldinsurancemaps.net/profile/danvk",
-          "type": "Person"
-        }
-      ],
-      "motivation": "georeferencing",
-      "target": {
-        "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd380m:g3804m:g3804bm:g3804bm_g05791193901:05791_01_1939-0058/selector",
-        "type": "SpecificResource",
-        "source": {
-          "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd380m:g3804m:g3804bm:g3804bm_g05791193901:05791_01_1939-0058/info.json",
-          "type": "ImageService2",
-          "height": 8268,
-          "width": 5556
-        },
-        "selector": {
-          "type": "SvgSelector",
-          "value": "<svg><polygon points=\"1360.8,7108.8 0.0,7082.1 0.0,970.0 2712.7,1023.1 5104.9,855.6 5337.9,4087.1 4089.7,4175.2 4293.9,7110.3 3046.5,7168.1 3131.4,8268.0 1338.1,8268.0 1360.8,7108.8\" /></svg>"
-        }
-      },
-      "body": {
-        "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd380m:g3804m:g3804bm:g3804bm_g05791193901:05791_01_1939-0058/gcps",
-        "type": "FeatureCollection",
-        "transformation": {
-          "type": "helmert"
-        },
-        "features": [
-          {
-            "type": "Feature",
-            "properties": {
-              "resourceCoords": [
-                2828.0,
-                4264.0
-              ],
-              "creator": {
-                "id": "https://oldinsurancemaps.net/profile/danvk",
-                "type": "Person"
-              },
-              "type": "gcp"
-            },
-            "geometry": {
-              "type": "Point",
-              "coordinates": [
-                -73.9882559,
-                40.6778311
-              ]
-            }
-          },
-          {
-            "type": "Feature",
-            "properties": {
-              "resourceCoords": [
-                1412.0,
-                1012.0
-              ],
-              "creator": {
-                "id": "https://oldinsurancemaps.net/profile/danvk",
-                "type": "Person"
-              },
-              "type": "gcp"
-            },
-            "geometry": {
-              "type": "Point",
-              "coordinates": [
-                -73.9908957,
-                40.6781021
-              ]
-            }
-          }
-        ]
-      }
-    },
-    {
       "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd380m:g3804m:g3804bm:g3804bm_g05791193901:05791_01_1939-0059/georef",
       "type": "Annotation",
       "@context": [
@@ -4527,8 +5382,8 @@
           "value": "12"
         }
       ],
-      "created": "2026-07-18T02:30:38Z",
-      "modified": "2026-07-18T02:30:38Z",
+      "created": "2026-07-30T21:24:27Z",
+      "modified": "2026-07-30T21:24:27Z",
       "creator": [
         {
           "id": "https://oldinsurancemaps.net/profile/danvk",
@@ -4547,7 +5402,7 @@
         },
         "selector": {
           "type": "SvgSelector",
-          "value": "<svg><polygon points=\"2069.7,4236.3 2068.0,904.0 5516.0,896.1 5516.0,8268.0 2073.5,8268.0 2072.9,7260.0 776.8,7261.1 782.8,4235.0 2069.7,4236.3\" /></svg>"
+          "value": "<svg><polygon points=\"782.8,4235.0 2069.7,4236.3 2068.0,904.0 5516.0,896.1 5516.0,8268.0 4132.6,8268.0 4130.8,7263.6 3360.0,7264.0 3364.0,8268.0 2073.5,8268.0 2072.9,7260.0 776.8,7261.1 782.8,4235.0\" /></svg>"
         }
       },
       "body": {
@@ -4620,8 +5475,8 @@
           "value": "5"
         }
       ],
-      "created": "2026-07-18T02:30:38Z",
-      "modified": "2026-07-18T02:30:38Z",
+      "created": "2026-07-30T21:24:27Z",
+      "modified": "2026-07-30T21:24:27Z",
       "creator": [
         {
           "id": "https://oldinsurancemaps.net/profile/danvk",
@@ -4713,8 +5568,8 @@
           "value": "12"
         }
       ],
-      "created": "2026-07-18T02:30:38Z",
-      "modified": "2026-07-18T02:30:38Z",
+      "created": "2026-07-30T21:24:27Z",
+      "modified": "2026-07-30T21:24:27Z",
       "creator": [
         {
           "id": "https://oldinsurancemaps.net/profile/danvk",
@@ -4789,99 +5644,6 @@
       }
     },
     {
-      "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd380m:g3804m:g3804bm:g3804bm_g05791193901:05791_01_1939-0061/georef",
-      "type": "Annotation",
-      "@context": [
-        "http://iiif.io/api/extension/georef/1/context.json",
-        "http://iiif.io/api/presentation/3/context.json"
-      ],
-      "label": "Brooklyn, N.Y. | 1939 | Vol. 1 p61",
-      "metadata": [
-        {
-          "label": "streets",
-          "value": "6"
-        },
-        {
-          "label": "intersections",
-          "value": "8"
-        }
-      ],
-      "created": "2026-07-18T02:30:38Z",
-      "modified": "2026-07-18T02:30:38Z",
-      "creator": [
-        {
-          "id": "https://oldinsurancemaps.net/profile/danvk",
-          "type": "Person"
-        }
-      ],
-      "motivation": "georeferencing",
-      "target": {
-        "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd380m:g3804m:g3804bm:g3804bm_g05791193901:05791_01_1939-0061/selector",
-        "type": "SpecificResource",
-        "source": {
-          "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd380m:g3804m:g3804bm:g3804bm_g05791193901:05791_01_1939-0061/info.json",
-          "type": "ImageService2",
-          "height": 8268,
-          "width": 5629
-        },
-        "selector": {
-          "type": "SvgSelector",
-          "value": "<svg><polygon points=\"1871.7,7220.6 876.4,7214.8 933.6,859.8 4789.2,930.1 4741.1,7249.2 5629.0,7258.1 5629.0,8268.0 1857.2,8268.0 1871.7,7220.6\" /></svg>"
-        }
-      },
-      "body": {
-        "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd380m:g3804m:g3804bm:g3804bm_g05791193901:05791_01_1939-0061/gcps",
-        "type": "FeatureCollection",
-        "transformation": {
-          "type": "helmert"
-        },
-        "features": [
-          {
-            "type": "Feature",
-            "properties": {
-              "resourceCoords": [
-                3472.6,
-                4252.0
-              ],
-              "creator": {
-                "id": "https://oldinsurancemaps.net/profile/danvk",
-                "type": "Person"
-              },
-              "type": "gcp"
-            },
-            "geometry": {
-              "type": "Point",
-              "coordinates": [
-                -73.984371,
-                40.6835414
-              ]
-            }
-          },
-          {
-            "type": "Feature",
-            "properties": {
-              "resourceCoords": [
-                4748.8,
-                4252.0
-              ],
-              "creator": {
-                "id": "https://oldinsurancemaps.net/profile/danvk",
-                "type": "Person"
-              },
-              "type": "gcp"
-            },
-            "geometry": {
-              "type": "Point",
-              "coordinates": [
-                -73.9839511,
-                40.6841757
-              ]
-            }
-          }
-        ]
-      }
-    },
-    {
       "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd380m:g3804m:g3804bm:g3804bm_g05791193901:05791_01_1939-0062/georef",
       "type": "Annotation",
       "@context": [
@@ -4899,8 +5661,8 @@
           "value": "8"
         }
       ],
-      "created": "2026-07-18T02:30:38Z",
-      "modified": "2026-07-18T02:30:38Z",
+      "created": "2026-07-30T21:24:27Z",
+      "modified": "2026-07-30T21:24:27Z",
       "creator": [
         {
           "id": "https://oldinsurancemaps.net/profile/danvk",
@@ -4919,7 +5681,7 @@
         },
         "selector": {
           "type": "SvgSelector",
-          "value": "<svg><polygon points=\"675.9,7341.5 666.2,940.4 5549.0,935.4 5549.0,8268.0 1583.9,8268.0 1575.4,7342.2 675.9,7341.5\" /></svg>"
+          "value": "<svg><polygon points=\"675.9,7341.5 666.2,940.4 5549.0,935.4 5549.0,8268.0 1553.9,8268.0 1553.6,7342.2 675.9,7341.5\" /></svg>"
         }
       },
       "body": {
@@ -4992,8 +5754,8 @@
           "value": "2"
         }
       ],
-      "created": "2026-07-18T02:30:38Z",
-      "modified": "2026-07-18T02:30:38Z",
+      "created": "2026-07-30T21:24:27Z",
+      "modified": "2026-07-30T21:24:27Z",
       "creator": [
         {
           "id": "https://oldinsurancemaps.net/profile/danvk",
@@ -5085,8 +5847,8 @@
           "value": "8"
         }
       ],
-      "created": "2026-07-18T02:30:38Z",
-      "modified": "2026-07-18T02:30:38Z",
+      "created": "2026-07-30T21:24:27Z",
+      "modified": "2026-07-30T21:24:27Z",
       "creator": [
         {
           "id": "https://oldinsurancemaps.net/profile/danvk",
@@ -5105,7 +5867,7 @@
         },
         "selector": {
           "type": "SvgSelector",
-          "value": "<svg><polygon points=\"4242.1,7596.7 1044.2,7591.3 1030.5,7153.8 -0.0,7145.6 -0.0,-0.0 4235.0,0.0 4242.1,7596.7\" /></svg>"
+          "value": "<svg><polygon points=\"4242.1,7596.4 1044.2,7591.2 1030.5,7153.8 -0.0,7145.6 -0.0,-0.0 4234.9,0.0 4242.1,7596.4\" /></svg>"
         }
       },
       "body": {
@@ -5178,8 +5940,8 @@
           "value": "3"
         }
       ],
-      "created": "2026-07-18T02:30:38Z",
-      "modified": "2026-07-18T02:30:38Z",
+      "created": "2026-07-30T21:24:27Z",
+      "modified": "2026-07-30T21:24:27Z",
       "creator": [
         {
           "id": "https://oldinsurancemaps.net/profile/danvk",
