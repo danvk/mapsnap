@@ -25,6 +25,7 @@ from mapsnap.osm_snap_experiment import (
     refine_adoption,
     refine_eligible_features,
     refine_rule_outcome,
+    rung_flip,
     snap_one_page,
 )
 
@@ -309,3 +310,54 @@ def test_append_snap_logs_is_idempotent(tmp_path):
     assert text.count(SNAP_LOG_BEGIN) == 1
     assert text.count(SNAP_LOG_END) == 1
     assert "refine: candidate #1 accepted" in text
+
+
+def rung_record(
+    scale_ratio: float,
+    incumbent_ver: float = 0.3,
+    challenger_ver: float = 0.9,
+    select: float = 1.2,
+    incumbent_name: float = 0.3,
+    challenger_name: float = 0.3,
+) -> dict:
+    """A fitted record whose sole candidate differs from the incumbent by scale_ratio."""
+    record = fitted_record(
+        incumbent_ver=incumbent_ver,
+        challenger_ver=challenger_ver,
+        shift_m=15.0,
+        incumbent_name=incumbent_name,
+        challenger_name=challenger_name,
+        select=select,
+    )
+    candidate = record["candidates"][0]
+    candidate["world_affine"] = [
+        [v * scale_ratio for v in row[:2]] + [row[2]]
+        for row in candidate["world_affine"]
+    ]
+    return record
+
+
+def test_rung_flip_adopts_a_doubled_candidate():
+    # The calibrated signature: half-scale incumbent, doubled candidate that
+    # wins verification with name parity and a confident select score.
+    flip = rung_flip(rung_record(2.0))
+    assert flip is not None and flip["rung"] and flip["reason"] == "rung"
+    assert flip["chosen"] == 0
+
+
+def test_rung_flip_never_flips_down():
+    # Verification has a small-footprint bias: every would-be down flip in the
+    # twelve-volume calibration was a break. Direction is the load-bearing gate.
+    assert rung_flip(rung_record(0.5)) is None
+    assert rung_flip(rung_record(0.5, challenger_ver=5.0)) is None
+
+
+def test_rung_flip_requires_margin_parity_and_confidence():
+    # Same-scale candidates are not rung disputes.
+    assert rung_flip(rung_record(1.0)) is None
+    # Verification margin below RUNG_VER_MARGIN keeps the incumbent.
+    assert rung_flip(rung_record(2.0, incumbent_ver=0.85, challenger_ver=0.9)) is None
+    # A name regression beyond the floor keeps the incumbent.
+    assert rung_flip(rung_record(2.0, incumbent_name=0.5, challenger_name=0.2)) is None
+    # An unconfident candidate keeps the incumbent.
+    assert rung_flip(rung_record(2.0, select=0.5)) is None

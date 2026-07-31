@@ -1713,6 +1713,89 @@ def arbitrate_challenge(record: dict, arbitrate_gate: float) -> dict | None:
     }
 
 
+# Rung-flip arbitration: a fit published at HALF its true scale. Ten of the
+# 2026-07-30 corpus's 39 disasters were exact half/double-scale fits with
+# near-perfect rotation, and for several the correct pose already sat in the
+# candidate list — trapped between refinement (needs <100 ft agreement; a rung
+# variant disagrees by 200-700 ft) and arbitration (needs an indefensible
+# incumbent; half-scale fits chamfer well on a gridiron and verify >= 0.1).
+RUNG_UP_BAND = (1.7, 2.3)
+"""Candidate/incumbent scale ratios treated as an up-rung challenge.
+
+UP only, never down: verification carries a small-footprint bias. A half-scale
+candidate explains 1/4 the ground and matches dense OSM cheaply — calibrating
+over every rung-band candidate pair in the twelve truth volumes, every
+would-be DOWN flip that passed any margin was a break (23-98 ft incumbents sent
+to 340-11000 ft: NO-1951 p433/p434/p436, Chicago p61w, Detroit p21, Nashville
+p44, LA p1499o/r), while every fix but one was an up flip. A doubled candidate
+must explain 4x the ground, so verification preferring it is hard-won evidence.
+"""
+RUNG_VER_MARGIN = 0.1
+RUNG_NAME_FLOOR = -0.10
+RUNG_SELECT_MIN = 0.9
+
+
+def rung_flip(record: dict) -> dict | None:
+    """Adopt a double-scale candidate over a half-scale incumbent, or None.
+
+    Calibrated offline over all 1228 rung-band candidate pairs in the twelve
+    truth volumes: these gates flip five pages — four disasters to <=25 ft
+    (Brooklyn p14 403->15, KC p556 289->13, Nashville p4 396->26, DC p153
+    306->12), one disaster to a different disaster (NO-1896 p125), and break
+    nothing. Family/scale priors were tried as the referee first and rejected:
+    the family-rung prior endorses the wrong rung on exactly the contested
+    pages (it was derived from the bad fits), and the volume median breaks
+    legitimate second scale families (Nashville) and oversize sheets (LA
+    p1499*). Direction + verification margin + name parity is the whole rule.
+    """
+    incumbent = record.get("incumbent")
+    candidates = record.get("candidates") or []
+    if not incumbent or not incumbent.get("world_affine") or not candidates:
+        return None
+    inc_affine = incumbent["world_affine"]
+    inc_scale = math.hypot(inc_affine[1][0], inc_affine[1][1])
+    incumbent_verification = incumbent.get("verification")
+    if inc_scale <= 0 or incumbent_verification is None:
+        return None
+    incumbent_name = (incumbent.get("name") or {}).get("score")
+    best_index = None
+    best_margin = 0.0
+    for index, candidate in enumerate(candidates):
+        affine = candidate.get("world_affine")
+        verification = candidate.get("verification")
+        score = candidate.get("select_score")
+        if not affine or verification is None or score is None:
+            continue
+        ratio = math.hypot(affine[1][0], affine[1][1]) / inc_scale
+        if not (RUNG_UP_BAND[0] <= ratio <= RUNG_UP_BAND[1]):
+            continue
+        if score < RUNG_SELECT_MIN:
+            continue
+        margin = verification - incumbent_verification
+        if margin < RUNG_VER_MARGIN:
+            continue
+        candidate_name = (candidate.get("name") or {}).get("score")
+        if (
+            incumbent_name is not None
+            and candidate_name is not None
+            and candidate_name - incumbent_name < RUNG_NAME_FLOOR
+        ):
+            continue
+        if best_index is None or margin > best_margin:
+            best_index, best_margin = index, margin
+    if best_index is None:
+        return None
+    return {
+        "target": record["target"],
+        "chosen": best_index,
+        "reason": "rung",
+        "rung": True,
+        "select_score": candidates[best_index].get("select_score"),
+        "incumbent_verification": incumbent_verification,
+        "challenger_verification": candidates[best_index].get("verification"),
+    }
+
+
 # Sheet-agreement gate for split panels. The GEOMETRY is exact: a panel jpg
 # is a bbox crop of the base jpg (pure translation), so one panel's pose
 # determines the whole base image's implied placement. The original intent
@@ -1970,7 +2053,7 @@ def cmd_select(
     elif mode == "arbitrate":
         # The union rescue selection, plus challenges to placed RANSAC fits.
         selections = select_union(volume, rescue, gate_score, gate_margin, allowed)
-        challenged = refined = 0
+        challenged = refined = flipped = 0
         for record in records:
             if record.get("fit_state") != "fitted":
                 continue
@@ -1985,7 +2068,15 @@ def cmd_select(
             if refinement is not None:
                 selections.append(refinement)
                 refined += 1
-        print(f"{challenged} challenges, {refined} refinements accepted")
+                continue
+            flip = rung_flip(record)
+            if flip is not None:
+                selections.append(flip)
+                flipped += 1
+        print(
+            f"{challenged} challenges, {refined} refinements, "
+            f"{flipped} rung flips accepted"
+        )
     else:
         selections = select_argmax(rescue, gate_score, gate_margin, allowed)
     accepted = sum(1 for s in selections if s.get("chosen") is not None)
