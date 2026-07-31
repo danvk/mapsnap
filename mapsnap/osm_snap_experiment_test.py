@@ -361,3 +361,17 @@ def test_rung_flip_requires_margin_parity_and_confidence():
     assert rung_flip(rung_record(2.0, incumbent_name=0.5, challenger_name=0.2)) is None
     # An unconfident candidate keeps the incumbent.
     assert rung_flip(rung_record(2.0, select=0.5)) is None
+
+
+def test_rung_flip_note_authority_unlocks_down_flips():
+    # A doubled-scale incumbent whose page prints the standard note
+    # (note_ratio = expected/incumbent = 0.5): the matching half-scale
+    # candidate may flip down.
+    record = rung_record(0.5, incumbent_ver=0.3, challenger_ver=0.9)
+    assert rung_flip(record) is None  # no note: down stays blocked
+    flip = rung_flip(record, note_ratio=0.5)
+    assert flip is not None and flip["rung"]
+    # A note that ENDORSES the incumbent changes nothing.
+    assert rung_flip(record, note_ratio=1.0) is None
+    # A condemning note only admits candidates that MATCH it.
+    assert rung_flip(rung_record(0.5), note_ratio=2.0) is None

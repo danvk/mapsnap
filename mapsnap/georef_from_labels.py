@@ -404,6 +404,67 @@ def region_relative_scale(
     return 1.0
 
 
+NOTE_SCALE_BAND = (0.80, 1.25)
+"""A fit within this ratio of its page's printed-note scale is confirmed; outside, condemned."""
+
+
+def printed_scale_verdicts(
+    scale_records: list[tuple[str, float]],
+) -> dict[str, tuple[str, float]]:
+    """Per-page verdicts from printed scale notes: img_path -> (verdict, ratio).
+
+    Pages whose OCR read a printed scale note (#196) get an ABSOLUTE scale
+    check instead of the relative half/double-band heuristic: the volume's
+    px-per-paper-inch is calibrated from the fitted note-bearing pages
+    themselves, so "N ft to one inch" converts to an expected px/ft. A fit
+    within NOTE_SCALE_BAND of its note is "keep" (even where the band test
+    would drop it -- a genuine 300 ft sheet sits at 6x the volume reference,
+    outside every band). A rung-shaped contradiction (~half or ~double the
+    note) is left published for snap's note-informed rung flip to repair,
+    which beats demotion. Only scattered contradictions no rung explains are
+    dropped -- and dropped unconditionally, with no neighbor-corroboration
+    escape: neighbours alias, print does not. Pages without a note are absent
+    from the result and face the usual checks.
+    """
+    from mapsnap.printed_scale import (
+        expected_px_per_ft,
+        printed_scale_ft,
+        volume_px_per_paper_inch,
+    )
+
+    notes: dict[str, int] = {}
+    for img_path, _px_per_ft in scale_records:
+        stem = os.path.splitext(img_path)[0]
+        note = printed_scale_ft(Path(stem + ".streets.json"))
+        if note is not None:
+            notes[img_path] = note[0]
+    calibration = volume_px_per_paper_inch(
+        [(px, notes[img]) for img, px in scale_records if img in notes]
+    )
+    if calibration is None:
+        return {}
+    verdicts: dict[str, tuple[str, float]] = {}
+    for img_path, px_per_ft in scale_records:
+        if img_path not in notes:
+            continue
+        ratio = px_per_ft / expected_px_per_ft(calibration, notes[img_path])
+        if NOTE_SCALE_BAND[0] <= ratio <= NOTE_SCALE_BAND[1]:
+            verdict = "keep"
+        elif (
+            HALF_SCALE_BAND[0] <= ratio <= HALF_SCALE_BAND[1]
+            or DOUBLE_SCALE_BAND[0] <= ratio <= DOUBLE_SCALE_BAND[1]
+        ):
+            # Rung-shaped contradiction: left published on purpose. Snap's
+            # note-informed rung flip (#195) repairs these to a correct fit,
+            # which beats demotion -- a demoted page faces the higher rescue
+            # gate its known-good candidate cannot clear.
+            verdict = "keep"
+        else:
+            verdict = "drop"
+        verdicts[img_path] = (verdict, ratio)
+    return verdicts
+
+
 def is_scale_outlier(ratio: float) -> bool:
     """Whether a fitted-scale / reference-scale ratio should be dropped as a scale outlier.
 
@@ -1594,6 +1655,17 @@ def _finalize_georef(
     }
     if keymap:
         result["keymap"] = keymap
+    # The page's own printed scale note (#196), recorded whether or not any
+    # check acts on it: a reader of this sidecar judging the fit's scale
+    # should see what the sheet itself declares.
+    from mapsnap.printed_scale import printed_scale_ft
+
+    note = printed_scale_ft(Path(labels_path))
+    if note is not None:
+        result["printed_scale"] = {
+            "ft_per_inch": note[0],
+            "confidence": round(note[1], 4),
+        }
     if truth_polygons:
         result["truth"] = truth_polygons
     if gcp_pair_records is not None:
@@ -2422,6 +2494,14 @@ def _process_one_image(image_path: str) -> tuple[str, ProcessResult]:
     ):
         nofit_path = output_path.replace(".georef.json", ".georef-nofit.json")
         nofit: dict = {"keymap": keymap, "streets": [], "intersections": []}
+        from mapsnap.printed_scale import printed_scale_ft as _note_read
+
+        _note = _note_read(Path(derive_paths(image_path)[0]))
+        if _note is not None:
+            nofit["printed_scale"] = {
+                "ft_per_inch": _note[0],
+                "confidence": round(_note[1], 4),
+            }
         if truth_polygons:
             nofit["truth"] = truth_polygons
         with open(nofit_path, "w") as f:
@@ -3829,8 +3909,29 @@ def main() -> None:
         and not args.geocode_keymaps
     ):
         centers_by_path = dict(location_records)
+        note_verdicts = printed_scale_verdicts(scale_records)
         n_dropped = 0
         for img_path, px_per_ft in scale_records:
+            note = note_verdicts.get(img_path)
+            if note is not None:
+                verdict, note_ratio = note
+                if verdict == "keep":
+                    continue  # the printed note confirms this scale outright
+                _, out_path, _ = derive_paths(img_path)
+                misscale_path = out_path.replace(
+                    ".georef.json", ".georef-misscale.json"
+                )
+                if os.path.exists(out_path):
+                    os.rename(out_path, misscale_path)
+                    n_success -= 1
+                    n_dropped += 1
+                    print(
+                        f"Dropped scale outlier {img_path}: {px_per_ft:.4f} px/ft is "
+                        f"{note_ratio:.2f}x the page's PRINTED scale note "
+                        f"-> {misscale_path}",
+                        file=sys.stderr,
+                    )
+                continue
             ratio = px_per_ft / ref_scale_px_per_ft
             if is_scale_outlier(ratio):
                 center = centers_by_path.get(img_path)
