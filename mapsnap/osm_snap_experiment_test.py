@@ -375,3 +375,22 @@ def test_rung_flip_note_authority_unlocks_down_flips():
     assert rung_flip(record, note_ratio=1.0) is None
     # A condemning note only admits candidates that MATCH it.
     assert rung_flip(rung_record(0.5), note_ratio=2.0) is None
+
+
+def test_cluster_search_centers_merges_overlapping_discs():
+    from mapsnap.osm_snap import cluster_search_centers
+
+    # Three centers within 100m of each other and one 2km away.
+    base = (-74.0, 40.0)
+    kx = 111_320.0 * 0.766
+    near = [
+        base,
+        (base[0] + 80 / kx, base[1]),
+        (base[0], base[1] + 80 / 110_540.0),
+    ]
+    far = [(base[0] + 2000 / kx, base[1])]
+    merged = cluster_search_centers(near + far, link_m=120.0)
+    assert len(merged) == 2
+    # Singletons and empties pass through untouched.
+    assert cluster_search_centers(far, 120.0) == far
+    assert cluster_search_centers([], 120.0) == []
