@@ -57,6 +57,23 @@ NON_STREET_TEXT: frozenset[str] = frozenset(
     | {"SM PIPE", "S W PIPE", "S W. PIPE"}
 )
 
+SCALE_NOTE_TEXT: frozenset[str] = frozenset(
+    # The printed scale note on oddly-scaled sheets ("Scale 100 Ft. to One
+    # Inch.") and the scale-bar tick numbers (a 50ft bar reads 50-25-0-50-100,
+    # a 100ft bar 100-50-0-100-200). Only unioned into the trie for the
+    # rotation-0 pass: the note and bar are always horizontal, and keeping the
+    # rotated passes' vocabulary unchanged avoids collateral on vertical
+    # street labels. Reads matching these are tagged ignore, like the pipe
+    # annotations, so they never enter street matching.
+    {"SCALE", "INCH", "ONE INCH", "FT", "FT.", "25", "50", "100", "200", "300"}
+    | {
+        f"SCALE {n} FT. TO ONE INCH"
+        for n in ("50", "100", "IOO", "I00", "200", "2OO", "300", "3OO")
+    }
+    | {f"SCALE {n} FT TO ONE INCH" for n in ("50", "100", "200", "300")}
+    | {f"{n} FT. TO ONE INCH" for n in ("50", "100", "200", "300")}
+)
+
 # How much a detection's box must exceed the page's own paper chroma (CIELAB) before its
 # background colour is recorded rather than treated as paper. 4.0 separates Nashville's building
 # labels (p51 "REP" at 9-14 chroma over 2.2 paper) from its street labels (1.0-3.6).
@@ -426,9 +443,6 @@ def _recognize_pass(
     """
     from mapsnap.ctc_vocab_decode import patch_easyocr_reader
 
-    # Include non-street labels in the trie so they decode correctly rather than being forced
-    # to a random street name.
-    patch_easyocr_reader(reader, sorted(set(vocab) | NON_STREET_TEXT), beam_width)
     recognize_kwargs: dict = {
         "paragraph": False,
         "decoder": "wordbeamsearch",
@@ -440,6 +454,11 @@ def _recognize_pass(
     detections: list[dict] = []
     for angle_data in angle_boxes:
         angle = angle_data["angle"]
+        # Include non-street labels in the trie so they decode correctly rather
+        # than being forced to a random street name. The scale-note terms join
+        # only the rotation-0 pass (the note and bar are always horizontal).
+        extra = NON_STREET_TEXT | (SCALE_NOTE_TEXT if angle == 0 else frozenset())
+        patch_easyocr_reader(reader, sorted(set(vocab) | extra), beam_width)
         horizontal_list = list(angle_data["horizontal_list"])
         free_list = list(angle_data["free_list"])
 
@@ -649,7 +668,7 @@ def detect_text(
         edge_vecs = [pts[(i + 1) % 4] - pts[i] for i in range(4)]
         long_vec = max(edge_vecs, key=np.linalg.norm)
         det["dir_pix"] = round(float(np.arctan2(long_vec[1], long_vec[0])) % np.pi, 4)
-        if det["text"].upper() in NON_STREET_TEXT:
+        if det["text"].upper() in (NON_STREET_TEXT | SCALE_NOTE_TEXT):
             det["ignore"] = True
         elif det["text"].upper() in HINT_STRINGS:
             det["hint"] = True
