@@ -1655,6 +1655,17 @@ def _finalize_georef(
     }
     if keymap:
         result["keymap"] = keymap
+    # The page's own printed scale note (#196), recorded whether or not any
+    # check acts on it: a reader of this sidecar judging the fit's scale
+    # should see what the sheet itself declares.
+    from mapsnap.printed_scale import printed_scale_ft
+
+    note = printed_scale_ft(Path(labels_path))
+    if note is not None:
+        result["printed_scale"] = {
+            "ft_per_inch": note[0],
+            "confidence": round(note[1], 4),
+        }
     if truth_polygons:
         result["truth"] = truth_polygons
     if gcp_pair_records is not None:
@@ -2483,6 +2494,14 @@ def _process_one_image(image_path: str) -> tuple[str, ProcessResult]:
     ):
         nofit_path = output_path.replace(".georef.json", ".georef-nofit.json")
         nofit: dict = {"keymap": keymap, "streets": [], "intersections": []}
+        from mapsnap.printed_scale import printed_scale_ft as _note_read
+
+        _note = _note_read(Path(derive_paths(image_path)[0]))
+        if _note is not None:
+            nofit["printed_scale"] = {
+                "ft_per_inch": _note[0],
+                "confidence": round(_note[1], 4),
+            }
         if truth_polygons:
             nofit["truth"] = truth_polygons
         with open(nofit_path, "w") as f:
