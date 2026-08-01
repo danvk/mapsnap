@@ -7,6 +7,7 @@ from mapsnap.page_adjacency import (
     is_claim,
     mutual_edges,
     polygon_rotation_deg,
+    resolve_page_key,
     single_digit_height_band,
     volume_page_images,
 )
@@ -29,8 +30,10 @@ def make_detection(
     confidence: float = 0.95,
     polygon: list[list[float]] | None = None,
     nearest_box: float | None = 100.0,
+    key: str | None = None,
 ) -> dict:
     return {
+        "key": key if key is not None else str(number),
         "number": number,
         "edge": edge,
         "height": height,
@@ -61,41 +64,39 @@ def test_polygon_rotation_deg():
 
 
 def test_is_claim_accepts_large_edge_number():
-    assert is_claim(make_detection(50), own_number=49)
+    assert is_claim(make_detection(50), own_key="49")
 
 
 def test_is_claim_rejects_own_number_center_small_and_lowconf():
-    assert not is_claim(make_detection(49), own_number=49)  # the sheet's own number
-    assert not is_claim(make_detection(50, edge="center"), own_number=49)
-    assert not is_claim(make_detection(50, height=12.0), own_number=49)
-    assert not is_claim(make_detection(50, confidence=0.01), own_number=49)
+    assert not is_claim(make_detection(49), own_key="49")  # the sheet's own number
+    assert not is_claim(make_detection(50, edge="center"), own_key="49")
+    assert not is_claim(make_detection(50, height=12.0), own_key="49")
+    assert not is_claim(make_detection(50, confidence=0.01), own_key="49")
 
 
 def test_is_claim_rejects_rotated_quads():
     # Every rotated candidate inspected was a misread street name or pipe annotation.
     rotated = make_detection(50, polygon=rotated_polygon(17.0))
-    assert not is_claim(rotated, own_number=49)
+    assert not is_claim(rotated, own_key="49")
 
 
 def test_is_claim_single_digit_confidence_floor():
     # Junk single-digit reads reciprocate by coincidence; require high confidence.
-    assert not is_claim(make_detection(6, confidence=0.5), own_number=49)
-    assert is_claim(make_detection(6, confidence=0.95), own_number=49)
+    assert not is_claim(make_detection(6, confidence=0.5), own_key="49")
+    assert is_claim(make_detection(6, confidence=0.95), own_key="49")
     # Multi-digit numbers keep the permissive floor.
-    assert is_claim(make_detection(50, confidence=0.5), own_number=49)
+    assert is_claim(make_detection(50, confidence=0.5), own_key="49")
 
 
 def test_is_claim_single_digit_height_band():
     band = (30.0, 65.0)
     # A 130px "1" is a frame rule, not a reference; a 45px one matches the printed size.
-    assert not is_claim(
-        make_detection(1, height=130.0), own_number=49, height_band=band
-    )
-    assert is_claim(make_detection(1, height=45.0), own_number=49, height_band=band)
+    assert not is_claim(make_detection(1, height=130.0), own_key="49", height_band=band)
+    assert is_claim(make_detection(1, height=45.0), own_key="49", height_band=band)
     # The band applies only to single digits; multi-digit heights are already trustworthy.
-    assert is_claim(make_detection(50, height=130.0), own_number=49, height_band=band)
+    assert is_claim(make_detection(50, height=130.0), own_key="49", height_band=band)
     # Without a band (no confirmed references), single digits pass on confidence alone.
-    assert is_claim(make_detection(1, height=130.0), own_number=49, height_band=None)
+    assert is_claim(make_detection(1, height=130.0), own_key="49", height_band=None)
 
 
 def test_bbox_gap():
@@ -112,12 +113,12 @@ def test_is_claim_single_digit_isolation():
     # A perfect-glyph, right-sized single digit that touches another box is a fragment
     # of a larger number (p10's "8" torn off a block number), not a sheet reference.
     fragment = make_detection(8, confidence=1.0, nearest_box=0.0)
-    assert not is_claim(fragment, own_number=10, min_gap=14.0)
+    assert not is_claim(fragment, own_key="10", min_gap=14.0)
     isolated = make_detection(8, confidence=1.0, nearest_box=21.6)
-    assert is_claim(isolated, own_number=10, min_gap=14.0)
+    assert is_claim(isolated, own_key="10", min_gap=14.0)
     # Multi-digit claims are exempt; missing gap data (only box on the page) passes.
-    assert is_claim(make_detection(50, nearest_box=0.0), own_number=10, min_gap=14.0)
-    assert is_claim(make_detection(8, nearest_box=None), own_number=10, min_gap=14.0)
+    assert is_claim(make_detection(50, nearest_box=0.0), own_key="10", min_gap=14.0)
+    assert is_claim(make_detection(8, nearest_box=None), own_key="10", min_gap=14.0)
 
 
 def test_single_digit_height_band_from_median():
@@ -132,19 +133,72 @@ def test_single_digit_height_band_empty():
 
 
 def test_mutual_edges_requires_reciprocity():
-    claims = {"p49": {50, 51}, "p50": {49}, "p51": set()}
+    claims = {"p49": {"50", "51"}, "p50": {"49"}, "p51": set()}
     # 49<->50 reciprocate; 49->51 is unreciprocated and produces no edge.
     assert mutual_edges(claims) == [("p49", "p50")]
 
 
 def test_mutual_edges_lettered_stems():
-    # Chicago-style stems: numbers resolve to the lettered page stem.
-    claims = {"p59w": {60}, "p60w": {59}}
+    # Chicago-style stems: a bare-number claim resolves to the lettered page stem
+    # when that number names exactly one sheet.
+    claims = {"p59w": {"60"}, "p60w": {"59"}}
     assert mutual_edges(claims) == [("p59w", "p60w")]
 
 
 def test_mutual_edges_empty_when_one_sided():
-    assert mutual_edges({"p1": {2}, "p2": set()}) == []
+    assert mutual_edges({"p1": {"2"}, "p2": set()}) == []
+
+
+def test_mutual_edges_lettered_keys_do_not_collide():
+    # LA-style: 18 sheets share the number 1499. A lettered claim reaches exactly
+    # its sheet; a bare "1499" claim is ambiguous among them and resolves to nothing.
+    claims = {
+        "p1499a": {"1499B"},
+        "p1499b": {"1499A"},
+        "p1488": {"1499"},
+        "p1499c": {"1488"},
+    }
+    assert mutual_edges(claims) == [("p1499a", "p1499b")]
+
+
+# 1401..1498 plus lettered 1499 sheets (no plain 1499, so a bare read of it
+# must resolve to nothing rather than guess among the lettered variants).
+LA_KEYS = {f"14{i:02d}" for i in range(1, 99)} | {"1499A", "1499G", "1499L"}
+SHORT_KEYS = {str(i) for i in range(1, 93)}  # a Hudson-style 1-2 digit volume
+
+
+def test_resolve_page_key_exact_and_lettered():
+    assert resolve_page_key("1409", "", LA_KEYS) == ("1409", "exact")
+    # The digits pass renders "1499G" as a bare "1499" -- a different, wrong page;
+    # the letters pass reveals the suffix (with I/O look-alike digits normalized).
+    assert resolve_page_key("1499", "1499G", LA_KEYS) == ("1499G", "lettered")
+    assert resolve_page_key("14994", "I499G", LA_KEYS) == ("1499G", "lettered")
+    # A bare "1499" with no letter suffix is not a valid LA key: no guess.
+    assert resolve_page_key("1499", "1499", LA_KEYS) is None
+
+
+def test_resolve_page_key_repairs_long_keys():
+    # Leading digit lost against the sheet trim: unique suffix completion.
+    assert resolve_page_key("409", "", LA_KEYS) == ("1409", "suffix")
+    # 2-digit remnants are house-number fragments (8% precise on the LA truth,
+    # confident enough to reciprocate into false edges): never repaired.
+    assert resolve_page_key("85", "", LA_KEYS) is None
+    # Neighboring ink absorbed into the box: unique embedded key.
+    assert resolve_page_key("14027", "", LA_KEYS) == ("1402", "embedded")
+    assert resolve_page_key("21408", "", LA_KEYS) == ("1408", "embedded")
+    # Ambiguity never resolves: "9" is a suffix of many keys, and a read
+    # containing two valid keys names neither.
+    assert resolve_page_key("9", "", LA_KEYS) is None
+    assert resolve_page_key("14021403", "", LA_KEYS) is None
+
+
+def test_resolve_page_key_is_inert_for_short_key_volumes():
+    # Volumes with 1-2 digit page numbers: short reads are substrings of
+    # everything, so repair would be guesswork. Exact matches only.
+    assert resolve_page_key("21", "", SHORT_KEYS) == ("21", "exact")
+    assert resolve_page_key("214", "", SHORT_KEYS) is None  # no embedded repair
+    assert resolve_page_key("408", "", SHORT_KEYS) is None  # no suffix repair
+    assert resolve_page_key("3", "", SHORT_KEYS) == ("3", "exact")
 
 
 def test_volume_page_images_skips_splits_and_keymaps(tmp_path: Path):
