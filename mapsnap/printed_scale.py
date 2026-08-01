@@ -27,24 +27,54 @@ MIN_CALIBRATION_PAGES = 3
 """Fewest (fit, note) pages that anchor a volume's px-per-paper-inch."""
 
 DEFAULT_PX_PER_PAPER_INCH = 62.5
-"""Cold-start calibration for volumes that cannot self-calibrate.
+"""Last-resort calibration for volumes with no fitted pages at all.
 
-Some volumes print scale notes ONLY on their odd sheets -- exactly the pages
-that fail to fit -- so the self-calibration (which needs note+fit pairs) is
-undefined precisely where the note matters most (Columbus: 0 pairs, while
-p297's 200 ft note read at 0.92). Measured self-calibrations across the truth
-corpus at the standard 25% working scale: Brooklyn 62.3, DC 63, KC ~62 --
-LOC's scan pipeline is uniform (~250 DPI full-res), so a 62.5 default is
-within ~1% of every measured volume. Only valid for the 25% working scale."""
+Measured self-calibrations at the standard 25% working scale: Brooklyn 62.3,
+DC 63, KC ~62 -- but Columbus measures 76.2 (~305 DPI raw vs ~250), so scan
+resolution is NOT uniform across LOC volumes and this constant can run 20%
+hot or cold. Any volume with fitted pages gets the median-rung estimate
+instead. Only valid for the 25% working scale."""
+
+MEDIAN_RUNG_FT = 50
+"""Sanborn's standard detail scale. A volume's median fitted scale is assumed
+to sit on this rung, which calibrates px-per-paper-inch without any note+fit
+pair: Columbus's median-rung estimate lands 0.8% from p297's truth scale
+where the corpus default was 21% off."""
+
+PLAUSIBLE_PX_PER_PAPER_INCH = (45.0, 100.0)
+"""Working-scale calibrations implying ~180-400 DPI raw scans. A median-rung
+estimate outside this band means the volume's median rung is not 50 ft (or
+its fits are junk), so the estimate is discarded rather than trusted."""
+
+
+def median_rung_px_per_paper_inch(median_px_per_ft: float | None) -> float | None:
+    """Calibration assuming the volume's median fitted scale is the 50 ft rung."""
+    if median_px_per_ft is None or median_px_per_ft <= 0:
+        return None
+    estimate = median_px_per_ft * MEDIAN_RUNG_FT
+    low, high = PLAUSIBLE_PX_PER_PAPER_INCH
+    if low <= estimate <= high:
+        return estimate
+    return None
 
 
 def resolve_px_per_paper_inch(
     pairs: list[tuple[float, int]],
+    median_px_per_ft: float | None = None,
 ) -> tuple[float, str]:
-    """(px-per-paper-inch, source): self-calibrated when possible, else the default."""
+    """(px-per-paper-inch, source), by decreasing trust.
+
+    Self-calibration (>=3 note+fit pairs) measures the scan directly;
+    the median-rung estimate assumes the volume's median fitted scale is
+    the 50 ft rung; the corpus default is a last resort for volumes with
+    no fitted pages.
+    """
     measured = volume_px_per_paper_inch(pairs)
     if measured is not None:
         return measured, "self-calibrated"
+    rung = median_rung_px_per_paper_inch(median_px_per_ft)
+    if rung is not None:
+        return rung, "median-rung"
     return DEFAULT_PX_PER_PAPER_INCH, "corpus-default"
 
 

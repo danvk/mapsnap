@@ -575,8 +575,10 @@ def volume_note_calibration(vctx: VolumeContext) -> tuple[float, str]:
     """Per-volume px-per-paper-inch for printed-scale notes (memoized).
 
     Self-calibrates from fitted pages whose notes read; volumes that print
-    notes only on their unfittable odd sheets (Columbus) fall back to the
-    corpus default. Working-scale px per paper inch, matching the 25% images.
+    notes only on their unfittable odd sheets (Columbus) get the median-rung
+    estimate from their own fitted scales instead -- Columbus's scan runs 22%
+    denser than the corpus default assumed, and the median rung absorbs that.
+    Working-scale px per paper inch, matching the 25% images.
     """
     from mapsnap.printed_scale import printed_scale_ft, resolve_px_per_paper_inch
 
@@ -594,7 +596,9 @@ def volume_note_calibration(vctx: VolumeContext) -> tuple[float, str]:
             )
             # px per paper inch = px_per_ft * printed_ft = ft*0.3048/m_per_px...
             pairs.append((0.3048 / m_per_px, note[0]))
-        _note_calibration_cache[key] = resolve_px_per_paper_inch(pairs)
+        _note_calibration_cache[key] = resolve_px_per_paper_inch(
+            pairs, median_px_per_ft=0.3048 / vctx.volume_m_per_px
+        )
     return _note_calibration_cache[key]
 
 

@@ -3,6 +3,7 @@ import json
 from mapsnap.printed_scale import (
     DEFAULT_PX_PER_PAPER_INCH,
     expected_px_per_ft,
+    median_rung_px_per_paper_inch,
     note_m_per_px,
     printed_scale_ft,
     resolve_px_per_paper_inch,
@@ -68,6 +69,29 @@ def test_cold_start_calibration_falls_back_to_the_corpus_default():
     assert source == "self-calibrated" and 300 <= measured <= 312
     fallback, source = resolve_px_per_paper_inch([(6.1, 50)])  # too few pairs
     assert source == "corpus-default" and fallback == DEFAULT_PX_PER_PAPER_INCH
+
+
+def test_median_rung_estimate_beats_the_corpus_default():
+    # Columbus: median fitted scale 0.2001 m/px -> 1.523 px/ft -> 76.2 px/inch,
+    # 22% denser than the corpus default and 0.8% from p297's truth scale.
+    estimate, source = resolve_px_per_paper_inch([], median_px_per_ft=1.523)
+    assert source == "median-rung" and 76.0 <= estimate <= 76.3
+    assert abs(note_m_per_px(200, estimate) - 0.8005) < 0.002
+    # Self-calibration still outranks it.
+    _, source = resolve_px_per_paper_inch(
+        [(6.1, 50), (6.05, 50), (6.2, 50)], median_px_per_ft=1.523
+    )
+    assert source == "self-calibrated"
+
+
+def test_median_rung_estimate_rejects_implausible_scan_resolutions():
+    # A volume whose median rung is 100 ft would imply a ~150 DPI scan: the
+    # 50 ft assumption is wrong there, so the estimate is discarded.
+    assert median_rung_px_per_paper_inch(0.762) is None
+    assert median_rung_px_per_paper_inch(None) is None
+    assert median_rung_px_per_paper_inch(-1.0) is None
+    _, source = resolve_px_per_paper_inch([], median_px_per_ft=0.762)
+    assert source == "corpus-default"
 
 
 def test_note_m_per_px_conversion():

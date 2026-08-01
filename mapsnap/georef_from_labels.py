@@ -441,7 +441,8 @@ def printed_scale_verdicts(
     if not notes:
         return {}
     calibration, calibration_source = resolve_px_per_paper_inch(
-        [(px, notes[img]) for img, px in scale_records if img in notes]
+        [(px, notes[img]) for img, px in scale_records if img in notes],
+        median_px_per_ft=statistics.median(px for _, px in scale_records),
     )
     if calibration_source != "self-calibrated":
         print(
