@@ -429,7 +429,7 @@ def printed_scale_verdicts(
     from mapsnap.printed_scale import (
         expected_px_per_ft,
         printed_scale_ft,
-        volume_px_per_paper_inch,
+        resolve_px_per_paper_inch,
     )
 
     notes: dict[str, int] = {}
@@ -438,11 +438,18 @@ def printed_scale_verdicts(
         note = printed_scale_ft(Path(stem + ".streets.json"))
         if note is not None:
             notes[img_path] = note[0]
-    calibration = volume_px_per_paper_inch(
-        [(px, notes[img]) for img, px in scale_records if img in notes]
-    )
-    if calibration is None:
+    if not notes:
         return {}
+    calibration, calibration_source = resolve_px_per_paper_inch(
+        [(px, notes[img]) for img, px in scale_records if img in notes],
+        median_px_per_ft=statistics.median(px for _, px in scale_records),
+    )
+    if calibration_source != "self-calibrated":
+        print(
+            f"Printed-scale calibration: {calibration:.1f} px/paper-inch "
+            f"({calibration_source})",
+            file=sys.stderr,
+        )
     verdicts: dict[str, tuple[str, float]] = {}
     for img_path, px_per_ft in scale_records:
         if img_path not in notes:

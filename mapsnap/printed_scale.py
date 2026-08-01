@@ -26,6 +26,63 @@ sub-0.1 reads are junk-box conversions."""
 MIN_CALIBRATION_PAGES = 3
 """Fewest (fit, note) pages that anchor a volume's px-per-paper-inch."""
 
+DEFAULT_PX_PER_PAPER_INCH = 62.5
+"""Last-resort calibration for volumes with no fitted pages at all.
+
+Measured self-calibrations at the standard 25% working scale: Brooklyn 62.3,
+DC 63, KC ~62 -- but Columbus measures 76.2 (~305 DPI raw vs ~250), so scan
+resolution is NOT uniform across LOC volumes and this constant can run 20%
+hot or cold. Any volume with fitted pages gets the median-rung estimate
+instead. Only valid for the 25% working scale."""
+
+MEDIAN_RUNG_FT = 50
+"""Sanborn's standard detail scale. A volume's median fitted scale is assumed
+to sit on this rung, which calibrates px-per-paper-inch without any note+fit
+pair: Columbus's median-rung estimate lands 0.8% from p297's truth scale
+where the corpus default was 21% off."""
+
+PLAUSIBLE_PX_PER_PAPER_INCH = (45.0, 100.0)
+"""Working-scale calibrations implying ~180-400 DPI raw scans. A median-rung
+estimate outside this band means the volume's median rung is not 50 ft (or
+its fits are junk), so the estimate is discarded rather than trusted."""
+
+
+def median_rung_px_per_paper_inch(median_px_per_ft: float | None) -> float | None:
+    """Calibration assuming the volume's median fitted scale is the 50 ft rung."""
+    if median_px_per_ft is None or median_px_per_ft <= 0:
+        return None
+    estimate = median_px_per_ft * MEDIAN_RUNG_FT
+    low, high = PLAUSIBLE_PX_PER_PAPER_INCH
+    if low <= estimate <= high:
+        return estimate
+    return None
+
+
+def resolve_px_per_paper_inch(
+    pairs: list[tuple[float, int]],
+    median_px_per_ft: float | None = None,
+) -> tuple[float, str]:
+    """(px-per-paper-inch, source), by decreasing trust.
+
+    Self-calibration (>=3 note+fit pairs) measures the scan directly;
+    the median-rung estimate assumes the volume's median fitted scale is
+    the 50 ft rung; the corpus default is a last resort for volumes with
+    no fitted pages.
+    """
+    measured = volume_px_per_paper_inch(pairs)
+    if measured is not None:
+        return measured, "self-calibrated"
+    rung = median_rung_px_per_paper_inch(median_px_per_ft)
+    if rung is not None:
+        return rung, "median-rung"
+    return DEFAULT_PX_PER_PAPER_INCH, "corpus-default"
+
+
+def note_m_per_px(printed_ft: int, px_per_paper_inch: float) -> float:
+    """The working-scale metres-per-pixel a printed note implies."""
+    return printed_ft * 0.3048 / px_per_paper_inch
+
+
 VALID_PRINTED_FT = (25, 50, 100, 200, 300, 400, 600)
 """Scales Sanborn actually printed; a parse outside this list is a misread."""
 
