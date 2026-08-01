@@ -468,6 +468,47 @@ def test_compare_pages_warns_on_truth_splits_without_oim_panels(tmp_path, capsys
     assert "p52" in err and "oim-split-truth" in err
 
 
+def test_selector_split_polygons_gates_on_gcp_containment():
+    from mapsnap.compare_iiif_georef import selector_split_polygons
+
+    def item(label, points, gcps):
+        return {
+            "label": label,
+            "target": {
+                "source": {"id": None},
+                "selector": {
+                    "type": "SvgSelector",
+                    "value": '<svg><polygon points="'
+                    + " ".join(f"{x},{y}" for x, y in points)
+                    + '" /></svg>',
+                },
+            },
+            "body": {
+                "features": [
+                    {
+                        "properties": {"resourceCoords": [px, py]},
+                        "geometry": {"coordinates": [0.0, 0.0]},
+                    }
+                    for px, py in gcps
+                ]
+            },
+        }
+
+    canvas_frame = item(
+        "X p1 [1]",
+        [(3000, 0), (5000, 0), (5000, 4000), (3000, 4000)],
+        [(4000, 2000), (3500, 1000)],
+    )
+    crop_frame = item(
+        "X p1 [2]",
+        [(0, 0), (2000, 0), (2000, 4000), (0, 4000)],
+        [(4100, 2000), (4600, 300)],
+    )  # GCPs in full frame, selector in crop frame
+    polygons = selector_split_polygons([canvas_frame, crop_frame])
+    assert set(polygons) == {1}  # the frame-mixed panel is refused, not misplaced
+    assert polygons[1].bounds[0] >= 3000 - 1e-6
+
+
 def test_attach_land_annotates_rows_and_strips_rings(tmp_path):
     import json
 

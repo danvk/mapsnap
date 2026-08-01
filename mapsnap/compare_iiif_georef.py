@@ -739,6 +739,36 @@ def redundant_skeleton_keys(truth_keys: set[str], generated_keys: set[str]) -> s
     return drop
 
 
+def selector_split_polygons(
+    truth_splits: list[dict],
+) -> dict[int, ShapelyPolygon]:
+    """Panel polygons from SvgSelectors, gated per annotation on GCP containment.
+
+    The fallback when ``oim/<page>.panels.json`` was never built (its inputs are
+    downloaded images). A selector is only trusted when it contains at least
+    half of its own annotation's GCPs -- the frame test from fix_truth_splits:
+    OIM's export writes some split selectors in the CROP's frame (OIM#402), and
+    a crop-frame polygon used here would grade the panel over its sibling's
+    territory. Panels whose selector fails the gate are simply absent, so they
+    score unplaced rather than wrong.
+    """
+    from mapsnap.fix_truth_splits import gcp_containment
+
+    polygons: dict[int, ShapelyPolygon] = {}
+    for item in truth_splits:
+        index = label_split_index(item)
+        selector = (item.get("target") or {}).get("selector") or {}
+        if index is None or selector.get("type") != "SvgSelector":
+            continue
+        points = parse_svg_polygon(selector.get("value", ""))
+        if len(points) < 3 or gcp_containment(item, points) < 0.5:
+            continue
+        polygon = ShapelyPolygon(points).buffer(0)
+        if not polygon.is_empty:
+            polygons[index] = polygon
+    return polygons
+
+
 def compare_pages(
     truth_path: Path, generated_path: Path, oim_dir: Path | None = None
 ) -> tuple[list[dict], list[dict]]:
@@ -789,6 +819,15 @@ def compare_pages(
         source = truth_items[0]["target"]["source"]
         source_dims = (float(source["width"]), float(source["height"]))
         truth_polygons = load_split_polygons(oim_dir / f"{page_key}.panels.json")
+        if not truth_polygons:
+            truth_polygons = selector_split_polygons(truth_splits)
+            if truth_polygons:
+                print(
+                    f"Note: {page_key} panels from GCP-verified truth selectors "
+                    f"({len(truth_polygons)}/{len(truth_splits)}; no "
+                    f"{page_key}.panels.json).",
+                    file=sys.stderr,
+                )
         if not truth_polygons:
             # Without OIM's panel polygons NO placement of this page can ever
             # be matched to its truth splits — every one scores as unplaced,
