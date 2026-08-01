@@ -1,5 +1,9 @@
 import { describe, expect, it } from 'vitest';
-import { parseCompareFooter, parseCompareTxt } from './compareTxt.ts';
+import {
+  parseCompareFooter,
+  parseCompareTxt,
+  parseLandByPage,
+} from './compareTxt.ts';
 
 const HEADER =
   'Page          n_t n_g  str  int  t.px/ft  g.px/ft   rmse_ft    max_ft   trans_ft   rot_err  scale_%   skew°   aniso';
@@ -86,5 +90,33 @@ describe('parseCompareFooter', () => {
     const noFooter = [HEADER, RULE, TABLE.split('\n')[2]].join('\n');
     expect(parseCompareFooter(noFooter)).toBe('');
     expect(parseCompareFooter('unrelated text file')).toBe('');
+  });
+});
+
+describe('land columns', () => {
+  const header =
+    'Page          n_t n_g  str  int  t.px/ft  g.px/ft   rmse_ft    max_ft   trans_ft   rot_err  scale_%   skew\u00b0   aniso   area_km2   land_km2';
+  const row =
+    'p57             3   2    3    2     4.89     2.64      12.3      20.1        9.4     +0.72   +1.36   -0.56   1.017     0.0622     0.0497';
+  const missingRow =
+    'p50             4   \u2014   \u2014   \u2014  \u2014  \u2014  \u2014  \u2014  \u2014  \u2014  \u2014  +0.78   1.008     0.0622     0.0497  (no fit)';
+
+  it('parses areaKm2/landKm2 from a paired row', () => {
+    const pages = parseCompareTxt([header, '-'.repeat(120), row].join('\n'));
+    expect(pages).toHaveLength(1);
+    expect(pages[0]!.areaKm2).toBeCloseTo(0.0622);
+    expect(pages[0]!.landKm2).toBeCloseTo(0.0497);
+  });
+
+  it('collects land for placed and no-fit rows, gated on the header', () => {
+    const text = [header, '-'.repeat(120), row, missingRow].join('\n');
+    expect(parseLandByPage(text)).toEqual({ p57: 0.0497, p50: 0.0497 });
+    // An old-format table (no land columns) must NOT misread skew/aniso.
+    const oldHeader = header.replace(/\s+area_km2\s+land_km2/, '');
+    const oldRow =
+      'p9              3   2    4    3     4.90     4.67      59.2     103.1       47.3     -2.11    +4.89   +0.25   1.019';
+    expect(
+      parseLandByPage([oldHeader, '-'.repeat(100), oldRow].join('\n')),
+    ).toBeNull();
   });
 });
