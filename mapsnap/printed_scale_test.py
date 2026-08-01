@@ -1,6 +1,9 @@
 import json
 
 from mapsnap.printed_scale import (
+    DEFAULT_PX_PER_PAPER_INCH,
+    note_m_per_px,
+    resolve_px_per_paper_inch,
     expected_px_per_ft,
     printed_scale_ft,
     volume_px_per_paper_inch,
@@ -58,3 +61,16 @@ def test_calibration_and_expected_scale():
     # A 100ft note then implies half the px/ft of a 50ft page.
     assert abs(expected_px_per_ft(px_per_inch, 100) - px_per_inch / 100) < 1e-9
     assert volume_px_per_paper_inch([(6.1, 50)]) is None  # too few to calibrate
+
+
+def test_cold_start_calibration_falls_back_to_the_corpus_default():
+    measured, source = resolve_px_per_paper_inch([(6.1, 50), (6.05, 50), (6.2, 50)])
+    assert source == "self-calibrated" and 300 <= measured <= 312
+    fallback, source = resolve_px_per_paper_inch([(6.1, 50)])  # too few pairs
+    assert source == "corpus-default" and fallback == DEFAULT_PX_PER_PAPER_INCH
+
+
+def test_note_m_per_px_conversion():
+    # A 200 ft note at the corpus default: ~0.98 m/px, ~5x a 50 ft page.
+    assert abs(note_m_per_px(200, 62.5) - 0.9754) < 0.001
+    assert abs(note_m_per_px(50, 62.5) / note_m_per_px(200, 62.5) - 0.25) < 1e-9

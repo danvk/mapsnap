@@ -26,6 +26,33 @@ sub-0.1 reads are junk-box conversions."""
 MIN_CALIBRATION_PAGES = 3
 """Fewest (fit, note) pages that anchor a volume's px-per-paper-inch."""
 
+DEFAULT_PX_PER_PAPER_INCH = 62.5
+"""Cold-start calibration for volumes that cannot self-calibrate.
+
+Some volumes print scale notes ONLY on their odd sheets -- exactly the pages
+that fail to fit -- so the self-calibration (which needs note+fit pairs) is
+undefined precisely where the note matters most (Columbus: 0 pairs, while
+p297's 200 ft note read at 0.92). Measured self-calibrations across the truth
+corpus at the standard 25% working scale: Brooklyn 62.3, DC 63, KC ~62 --
+LOC's scan pipeline is uniform (~250 DPI full-res), so a 62.5 default is
+within ~1% of every measured volume. Only valid for the 25% working scale."""
+
+
+def resolve_px_per_paper_inch(
+    pairs: list[tuple[float, int]],
+) -> tuple[float, str]:
+    """(px-per-paper-inch, source): self-calibrated when possible, else the default."""
+    measured = volume_px_per_paper_inch(pairs)
+    if measured is not None:
+        return measured, "self-calibrated"
+    return DEFAULT_PX_PER_PAPER_INCH, "corpus-default"
+
+
+def note_m_per_px(printed_ft: int, px_per_paper_inch: float) -> float:
+    """The working-scale metres-per-pixel a printed note implies."""
+    return printed_ft * 0.3048 / px_per_paper_inch
+
+
 VALID_PRINTED_FT = (25, 50, 100, 200, 300, 400, 600)
 """Scales Sanborn actually printed; a parse outside this list is a misread."""
 

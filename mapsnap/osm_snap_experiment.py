@@ -568,6 +568,36 @@ def rotation_priors_for(
     return priors
 
 
+_note_calibration_cache: dict[str, tuple[float, str]] = {}
+
+
+def volume_note_calibration(vctx: VolumeContext) -> tuple[float, str]:
+    """Per-volume px-per-paper-inch for printed-scale notes (memoized).
+
+    Self-calibrates from fitted pages whose notes read; volumes that print
+    notes only on their unfittable odd sheets (Columbus) fall back to the
+    corpus default. Working-scale px per paper inch, matching the 25% images.
+    """
+    from mapsnap.printed_scale import printed_scale_ft, resolve_px_per_paper_inch
+
+    key = str(vctx.volume)
+    if key not in _note_calibration_cache:
+        pairs = []
+        for unit in vctx.units:
+            if unit.fit_state != "fitted" or unit.gen_affine is None:
+                continue
+            note = printed_scale_ft(vctx.volume / f"{unit.stem}.streets.json")
+            if note is None:
+                continue
+            m_per_px = (
+                math.hypot(unit.gen_affine[1, 0], unit.gen_affine[1, 1]) * 110_540.0
+            )
+            # px per paper inch = px_per_ft * printed_ft = ft*0.3048/m_per_px...
+            pairs.append((0.3048 / m_per_px, note[0]))
+        _note_calibration_cache[key] = resolve_px_per_paper_inch(pairs)
+    return _note_calibration_cache[key]
+
+
 def build_page_context(
     vctx: VolumeContext, unit: PageUnit
 ) -> tuple[PageContext | None, str]:
@@ -620,6 +650,18 @@ def build_page_context(
         scales = page_scale_priors(
             vctx.volume_m_per_px, regions, unit.width, unit.height
         )
+    # The page's own printed scale note, where read, is the most authoritative
+    # scale rung of all -- Columbus p297 is a 200 ft district sheet in a 50 ft
+    # volume, ~5x the median, a rung no other prior source proposes.
+    from mapsnap.osm_snap import ScalePrior as _ScalePrior
+    from mapsnap.printed_scale import note_m_per_px, printed_scale_ft
+
+    note = printed_scale_ft(vctx.volume / f"{unit.stem}.streets.json")
+    if note is not None:
+        calibration, _source = volume_note_calibration(vctx)
+        implied = note_m_per_px(note[0], calibration)
+        if all(abs(math.log(implied / prior.m_per_px)) > 0.15 for prior in scales):
+            scales = [_ScalePrior(implied, 0.05, "printed-note"), *scales]
     # Overlapping discs are one search; see cluster_search_centers.
     centers = cluster_search_centers(centers, 0.75 * radius)
     ctx = PageContext(
