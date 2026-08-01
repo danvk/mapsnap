@@ -180,6 +180,12 @@ def main() -> None:
             ]
         )
 
+    # Printed adjacent-sheet graph, consumed by fit's snap/rescue channels. Runs after the
+    # keymap step (so identified key-map sheets are skipped) and after ocr (so the CRAFT
+    # boxes it needs are reused instead of re-detected).
+    with step("adjacency"):
+        run_cmd(["mapsnap", "adjacency", str(dir_path), "--reuse-boxes"])
+
     # Locate OIM's manual split regions on the canvas (ground truth for compare).
     with step("oim-split-truth"):
         run_cmd(["mapsnap", "oim-split-truth", str(dir_path / "main.iiif.json")])
