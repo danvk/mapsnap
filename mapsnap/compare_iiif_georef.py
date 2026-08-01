@@ -31,7 +31,12 @@ from shapely.geometry import Point as ShapelyPoint
 from shapely.geometry import Polygon as ShapelyPolygon
 from shapely.geometry import box
 
-from mapsnap.utils import FEET_PER_METER, haversine_m, source_id_to_page_key
+from mapsnap.utils import (
+    FEET_PER_METER,
+    default_centerlines,
+    haversine_m,
+    source_id_to_page_key,
+)
 
 GCP = tuple[tuple[float, float], tuple[float, float]]  # ((px, py), (lon, lat))
 EARTH_RADIUS_FT = 20_925_524.0
@@ -405,6 +410,7 @@ def analyze_pair(
     return {
         "page_key": page_key,
         "gen_page_key": gen_page_key,
+        "truth_ring": truth_ring_of(truth_item),
         "n_truth": len(truth_gcps),
         "n_gen": len(gen_gcps),
         "n_streets": extract_metadata_int(gen_item, "streets"),
@@ -419,6 +425,16 @@ def analyze_pair(
         "skew_deg": skew_deg,
         "aniso": aniso,
     }
+
+
+def truth_ring_of(truth_item: dict) -> list[list[float]] | None:
+    """World footprint ring for land weighting (lazy import: score imports us)."""
+    from mapsnap.score import truth_footprint_ring
+
+    try:
+        return truth_footprint_ring(truth_item)
+    except (KeyError, TypeError, ValueError):
+        return None
 
 
 def analyze_truth_only(truth_item: dict) -> dict:
@@ -436,7 +452,46 @@ def analyze_truth_only(truth_item: dict) -> dict:
         "n_truth": len(truth_gcps),
         "skew_deg": skew_deg,
         "aniso": aniso,
+        "truth_ring": truth_ring_of(truth_item),
     }
+
+
+def attach_land(
+    rows: list[dict], missing: list[dict], centerlines: Path | None
+) -> None:
+    """Annotate every row with area_m2/land_m2 from its truth footprint, in place.
+
+    The land-weighted score (mapsnap score) needs each truth page's usable-land
+    area; carrying it on the comparison rows lets any consumer of this table --
+    the debugger frontend included -- compute the score from the columns alone.
+    Rows keep their ``truth_ring`` key only long enough to compute; pages with
+    no usable footprint (or no centerlines) get None and print as dashes.
+    """
+    from mapsnap.score import LocalFrame, land_fraction, street_tree
+
+    everything = rows + missing
+    rings = [row.get("truth_ring") for row in everything]
+    points = [p for ring in rings if ring for p in ring]
+    tree = None
+    frame = None
+    if centerlines is not None and centerlines.exists() and points:
+        frame = LocalFrame(
+            lon0=sum(p[0] for p in points) / len(points),
+            lat0=sum(p[1] for p in points) / len(points),
+        )
+        tree = street_tree(centerlines, frame)
+    for row, ring in zip(everything, rings):
+        row.pop("truth_ring", None)
+        row["area_m2"] = row["land_m2"] = None
+        if tree is None or frame is None or not ring:
+            continue
+        footprint = ShapelyPolygon([frame.to_xy(lon, lat) for lon, lat in ring]).buffer(
+            0
+        )
+        if footprint.is_empty:
+            continue
+        row["area_m2"] = footprint.area
+        row["land_m2"] = footprint.area * land_fraction(footprint, tree)
 
 
 def split_numbers_disagree(row: dict) -> bool:
@@ -450,6 +505,11 @@ def page_label(row: dict) -> str:
     return f"{row['page_key']} (t)" if split_numbers_disagree(row) else row["page_key"]
 
 
+def fmt_km2(area_m2: float | None) -> str:
+    """A land/area cell in km2, or a dash when land weighting was unavailable."""
+    return "—" if area_m2 is None else f"{area_m2 / 1e6:.4f}"
+
+
 def print_table(rows: list[dict], missing: list[dict]) -> None:
     """Print paired results (sorted by RMSE desc) then missing pages, with summary stats."""
     rows_sorted = sorted(rows, key=lambda r: r["rmse_ft"], reverse=True)
@@ -458,7 +518,8 @@ def print_table(rows: list[dict], missing: list[dict]) -> None:
         f"{'Page':<13} {'n_t':>3} {'n_g':>3} {'str':>4} {'int':>4}  "
         f"{'t.px/ft':>7}  {'g.px/ft':>7}  "
         f"{'rmse_ft':>8}  {'max_ft':>8}  {'trans_ft':>9}  "
-        f"{'rot_err':>8}  {'scale_%':>7}  {'skew°':>6}  {'aniso':>6}"
+        f"{'rot_err':>8}  {'scale_%':>7}  {'skew°':>6}  {'aniso':>6}  "
+        f"{'area_km2':>9}  {'land_km2':>9}"
     )
     sep = "-" * len(header)
     print(header)
@@ -474,7 +535,8 @@ def print_table(rows: list[dict], missing: list[dict]) -> None:
             f"{r['truth_px_per_ft']:>7.2f}  {r['gen_px_per_ft']:>7.2f}  "
             f"{r['rmse_ft']:>8.1f}  {r['max_ft']:>8.1f}  {r['trans_ft']:>9.1f}  "
             f"{r['rot_err']:>+8.2f}  {r['scale_pct']:>+7.2f}  "
-            f"{r['skew_deg']:>+6.2f}  {r['aniso']:>6.3f}{trailing}"
+            f"{r['skew_deg']:>+6.2f}  {r['aniso']:>6.3f}  "
+            f"{fmt_km2(r.get('area_m2')):>9}  {fmt_km2(r.get('land_m2')):>9}{trailing}"
         )
     if missing:
         missing_sorted = sorted(missing, key=lambda r: r["page_key"])
@@ -484,7 +546,8 @@ def print_table(rows: list[dict], missing: list[dict]) -> None:
                 f"{'—':>7}  {'—':>7}  "
                 f"{'—':>8}  {'—':>8}  {'—':>9}  "
                 f"{'—':>8}  {'—':>7}  "
-                f"{r['skew_deg']:>+6.2f}  {r['aniso']:>6.3f}  (no fit)"
+                f"{r['skew_deg']:>+6.2f}  {r['aniso']:>6.3f}  "
+                f"{fmt_km2(r.get('area_m2')):>9}  {fmt_km2(r.get('land_m2')):>9}  (no fit)"
             )
     print(sep)
 
@@ -495,6 +558,26 @@ def print_table(rows: list[dict], missing: list[dict]) -> None:
     print(
         f"\n{n_paired}/{n_truth_total} = {pct:.02f}% pages georeferenced ({n_missing} total losses)"
     )
+
+    landed = [r for r in rows + missing if r.get("land_m2") is not None]
+    total_land = sum(r["land_m2"] for r in landed)
+    if landed and total_land > 0:
+        good = sum(
+            r["land_m2"]
+            for r in landed
+            if r.get("rmse_ft") is not None and r["rmse_ft"] <= 25.0
+        )
+        disaster = sum(
+            r["land_m2"]
+            for r in landed
+            if r.get("rmse_ft") is not None and r["rmse_ft"] >= 200.0
+        )
+        print(
+            f"Score: {100 * (good - disaster) / total_land:.1f}% "
+            f"(<=25ft {100 * good / total_land:.1f}% of land, "
+            f">=200ft {100 * disaster / total_land:.1f}%, "
+            f"total {total_land / 1e6:.2f} km2)"
+        )
 
     if rows:
         rmsers = np.array([r["rmse_ft"] for r in rows])
@@ -656,6 +739,36 @@ def redundant_skeleton_keys(truth_keys: set[str], generated_keys: set[str]) -> s
     return drop
 
 
+def selector_split_polygons(
+    truth_splits: list[dict],
+) -> dict[int, ShapelyPolygon]:
+    """Panel polygons from SvgSelectors, gated per annotation on GCP containment.
+
+    The fallback when ``oim/<page>.panels.json`` was never built (its inputs are
+    downloaded images). A selector is only trusted when it contains at least
+    half of its own annotation's GCPs -- the frame test from fix_truth_splits:
+    OIM's export writes some split selectors in the CROP's frame (OIM#402), and
+    a crop-frame polygon used here would grade the panel over its sibling's
+    territory. Panels whose selector fails the gate are simply absent, so they
+    score unplaced rather than wrong.
+    """
+    from mapsnap.fix_truth_splits import gcp_containment
+
+    polygons: dict[int, ShapelyPolygon] = {}
+    for item in truth_splits:
+        index = label_split_index(item)
+        selector = (item.get("target") or {}).get("selector") or {}
+        if index is None or selector.get("type") != "SvgSelector":
+            continue
+        points = parse_svg_polygon(selector.get("value", ""))
+        if len(points) < 3 or gcp_containment(item, points) < 0.5:
+            continue
+        polygon = ShapelyPolygon(points).buffer(0)
+        if not polygon.is_empty:
+            polygons[index] = polygon
+    return polygons
+
+
 def compare_pages(
     truth_path: Path, generated_path: Path, oim_dir: Path | None = None
 ) -> tuple[list[dict], list[dict]]:
@@ -706,6 +819,15 @@ def compare_pages(
         source = truth_items[0]["target"]["source"]
         source_dims = (float(source["width"]), float(source["height"]))
         truth_polygons = load_split_polygons(oim_dir / f"{page_key}.panels.json")
+        if not truth_polygons:
+            truth_polygons = selector_split_polygons(truth_splits)
+            if truth_polygons:
+                print(
+                    f"Note: {page_key} panels from GCP-verified truth selectors "
+                    f"({len(truth_polygons)}/{len(truth_splits)}; no "
+                    f"{page_key}.panels.json).",
+                    file=sys.stderr,
+                )
         if not truth_polygons:
             # Without OIM's panel polygons NO placement of this page can ever
             # be matched to its truth splits — every one scores as unplaced,
@@ -779,6 +901,15 @@ def main() -> None:
         "truth", metavar="TRUTH_IIIF", help="Human-generated IIIF AnnotationPage"
     )
     parser.add_argument(
+        "--centerlines",
+        metavar="FILE",
+        default=None,
+        help=(
+            "Street centerlines GeoJSON for the land-area columns and the "
+            "land-weighted score footer (default: discovered next to TRUTH)."
+        ),
+    )
+    parser.add_argument(
         "generated", metavar="GEN_IIIF", help="Computer-generated IIIF AnnotationPage"
     )
     parser.add_argument(
@@ -806,6 +937,12 @@ def main() -> None:
     )
 
     rows, missing = compare_pages(Path(args.truth), Path(args.generated))
+    centerlines = (
+        Path(args.centerlines)
+        if args.centerlines
+        else default_centerlines(Path(args.truth).parent)
+    )
+    attach_land(rows, missing, centerlines)
 
     if args.omit_missing:
         missing = []
