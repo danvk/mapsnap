@@ -2,10 +2,10 @@ import json
 
 from mapsnap.printed_scale import (
     DEFAULT_PX_PER_PAPER_INCH,
-    note_m_per_px,
-    resolve_px_per_paper_inch,
     expected_px_per_ft,
+    note_m_per_px,
     printed_scale_ft,
+    resolve_px_per_paper_inch,
     volume_px_per_paper_inch,
 )
 
