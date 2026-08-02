@@ -156,8 +156,11 @@ def resolve_page_key(
                  forms a valid key ("1499G" -> 1499G); checked first because
                  the digits pass renders the same ink as a bare "1499" -- a
                  different, wrong page.
-      exact      the digit read is a valid key as-is (the only method that
-                 applies to keys shorter than ``min_repair_digits``).
+      exact      the digit read is a valid key as-is.
+      number     the digit read matches exactly ONE key's digit part: Chicago
+                 prints a bare "60" for sheet p60w, and Miami "8" for p8s.
+                 A digit part shared by many lettered keys (LA's 18 p1499*
+                 sheets) is ambiguous and never resolved this way.
       suffix     the read lost its leading digit against the sheet trim:
                  exactly one valid key ends with it ("409" -> 1409). Requires
                  a read of >= 3 digits: 2-digit remnants are house-number
@@ -183,6 +186,11 @@ def resolve_page_key(
         return None
     if digits in valid_keys:
         return digits, "exact"
+    same_number = [
+        key for key in valid_keys if "".join(c for c in key if c.isdigit()) == digits
+    ]
+    if len(same_number) == 1:
+        return same_number[0], "number"
     repairable = [
         key for key in valid_keys if key.isdigit() and len(key) >= min_repair_digits
     ]

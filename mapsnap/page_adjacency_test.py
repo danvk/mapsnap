@@ -206,6 +206,15 @@ def test_resolve_page_key_repairs_long_keys():
     assert resolve_page_key("14021403", "", LA_KEYS) is None
 
 
+def test_resolve_page_key_bare_number_reaches_a_unique_lettered_key():
+    # Chicago prints a bare "60" for sheet p60w; Miami "8" for p8s. The read
+    # must resolve at DETECTION time, not just at edge-resolution time.
+    assert resolve_page_key("60", "", {"59W", "60W", "61W"}) == ("60W", "number")
+    assert resolve_page_key("8", "", {"7", "8S", "9"}) == ("8S", "number")
+    # A digit part shared by many lettered sheets stays ambiguous.
+    assert resolve_page_key("1499", "", {"1499A", "1499G", "1499L"}) is None
+
+
 def test_resolve_page_key_is_inert_for_short_key_volumes():
     # Volumes with 1-2 digit page numbers: short reads are substrings of
     # everything, so repair would be guesswork. Exact matches only.
