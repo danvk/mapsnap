@@ -144,6 +144,12 @@ def main() -> None:
         ["mapsnap", "georef", *images, "--centerlines", str(centerlines), *georef_extra]
     )
 
+    # Demote fits that contradict their own printed mutual-adjacency claims
+    # (adjacency edges are ~100% precise, so a contradicted, weakly-supported
+    # fit is wrong). The demotion leaves partner-stamp re-search hints that
+    # snap's rescue picks up, so it runs before snap. No adjacency.json: no-op.
+    run_cmd(["mapsnap", "adjacency-gate", str(dir_path)])
+
     # The geometry-first snap channel: rescue unplaced pages, arbitrate fits
     # OSM contradicts, refine mid-tier fits. Its pN.georef-osm.json sidecars
     # take priority over plain georefs in the hybrid glob below.

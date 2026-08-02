@@ -610,6 +610,17 @@ def build_page_context(
     if prob is None:
         return None, "no_prob"
     centers, regions = page_keymap_data(vctx, unit)
+    # A page the adjacency gate demoted carries its neighbors' printed-claim
+    # positions — world points on the shared seam the page must sit against.
+    # They join the search centers, and stand alone for pages the keymap
+    # never placed.
+    from mapsnap.adjacency_gate import contradiction_centers
+
+    for lon, lat in contradiction_centers(
+        vctx.volume, panel_base(unit.stem) or unit.stem
+    ):
+        if all(haversine_m(lat, lon, b, a) > 50.0 for a, b in centers):
+            centers = centers + [(lon, lat)]
     if unit.fit_state == "fitted" and unit.gen_affine is not None:
         # For arbitration the incumbent pose itself is the natural search
         # init — it also reaches fitted pages the keymap never placed.
