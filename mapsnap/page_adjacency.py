@@ -420,15 +420,14 @@ def is_claim(
     return True
 
 
-def mutual_edges(claims_by_page: dict[str, set[str]]) -> list[tuple[str, str]]:
-    """Reciprocated adjacency edges: A claims B's key and B claims A's key.
+def claim_resolver(claims_by_page: dict[str, set[str]]):
+    """resolve(claim key) -> stems carrying it, shared by both edge builders.
 
-    ``claims_by_page`` maps page stems to claimed page keys. A claimed key resolves to
-    the stem(s) carrying exactly that key; a bare-number claim in a volume whose sheet
-    has a lettered stem (Chicago prints "60" for p60w) falls back to the number, but
-    only when it names a single stem — a number shared by many lettered sheets (LA's
-    p1499a-r) is ambiguous and resolves to nothing. The edge exists only if each side's
-    claims resolve to the other. Returns sorted (stem, stem) pairs, each once.
+    A claimed key resolves to the stem(s) carrying exactly that key; a
+    bare-number claim in a volume whose sheet has a lettered stem (Chicago
+    prints "60" for p60w) falls back to the number, but only when it names a
+    single stem — a number shared by many lettered sheets (LA's p1499a-r) is
+    ambiguous and resolves to nothing.
     """
     stems_by_key: dict[str, list[str]] = defaultdict(list)
     stems_by_number: dict[int, list[str]] = defaultdict(list)
@@ -450,6 +449,17 @@ def mutual_edges(claims_by_page: dict[str, set[str]]) -> list[tuple[str, str]]:
                 return fallback
         return []
 
+    return resolve
+
+
+def mutual_edges(claims_by_page: dict[str, set[str]]) -> list[tuple[str, str]]:
+    """Reciprocated adjacency edges: A claims B's key and B claims A's key.
+
+    ``claims_by_page`` maps page stems to claimed page keys (see claim_resolver
+    for how claims resolve to stems). The edge exists only if each side's
+    claims resolve to the other. Returns sorted (stem, stem) pairs, each once.
+    """
+    resolve = claim_resolver(claims_by_page)
     edges: set[tuple[str, str]] = set()
     for stem, claimed in claims_by_page.items():
         for claim in claimed:
@@ -461,6 +471,27 @@ def mutual_edges(claims_by_page: dict[str, set[str]]) -> list[tuple[str, str]]:
                 ):
                     first, second = sorted((stem, other))
                     edges.add((first, second))
+    return sorted(edges)
+
+
+def one_sided_edges(claims_by_page: dict[str, set[str]]) -> list[tuple[str, str]]:
+    """Directed claims that resolve to a real page but are not reciprocated.
+
+    The lower-trust adjacency tier: measured against the hand-labelled truth,
+    88% of Hudson's and 89% of LA's unreciprocated-but-resolvable claims are
+    genuine printed references whose reciprocal side failed to read (truth
+    itself reciprocates 91-93%). Consumers must treat these as candidates to
+    verify, not facts — a junk read that resolves to a real page lands here.
+    Returns sorted (claimer, target) pairs, excluding mutual edges.
+    """
+    resolve = claim_resolver(claims_by_page)
+    mutual = {frozenset(edge) for edge in mutual_edges(claims_by_page)}
+    edges: set[tuple[str, str]] = set()
+    for stem, claimed in claims_by_page.items():
+        for claim in claimed:
+            for other in resolve(claim):
+                if other != stem and frozenset((stem, other)) not in mutual:
+                    edges.add((stem, other))
     return sorted(edges)
 
 
@@ -623,6 +654,7 @@ def main() -> None:
             )
 
     edges = mutual_edges(claims_by_page)
+    one_sided = one_sided_edges(claims_by_page)
     doc = {
         "timestamp": datetime.now(UTC).isoformat(),
         "command": sys.argv[:],
@@ -634,13 +666,14 @@ def main() -> None:
         "single_digit_min_gap": round(min_gap, 1) if min_gap is not None else None,
         "pages": pages,
         "adjacency": [list(edge) for edge in edges],
+        "one_sided": [list(edge) for edge in one_sided],
     }
     output = args.output or (args.volume / "adjacency.json")
     output.write_text(json.dumps(doc, indent=2))
     total_claims = sum(len(c) for c in claims_by_page.values())
     print(
         f"Wrote {output}: {len(pages)} pages, {total_claims} directed claims, "
-        f"{len(edges)} mutual edges.",
+        f"{len(edges)} mutual edges, {len(one_sided)} one-sided.",
         file=sys.stderr,
     )
 

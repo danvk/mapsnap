@@ -283,18 +283,28 @@ def page_rect_metres(
     return ring
 
 
-def detected_pairs(volume: Path) -> set[frozenset[int]]:
-    """Mutual adjacency edges as unordered page-number pairs, or empty if absent."""
+def adjacency_number_pairs(volume: Path, doc_key: str) -> set[frozenset[int]]:
+    """An adjacency.json edge list as unordered page-number pairs, or empty if absent."""
     path = volume / "adjacency.json"
     if not path.exists():
         return set()
     doc = json.loads(path.read_text())
     pairs: set[frozenset[int]] = set()
-    for a, b in doc.get("adjacency", []):
+    for a, b in doc.get(doc_key, []):
         na, nb = page_number(a), page_number(b)
         if na is not None and nb is not None and na != nb:
             pairs.add(frozenset((na, nb)))
     return pairs
+
+
+def detected_pairs(volume: Path) -> set[frozenset[int]]:
+    """Mutual adjacency edges as unordered page-number pairs, or empty if absent."""
+    return adjacency_number_pairs(volume, "adjacency")
+
+
+def one_sided_pairs(volume: Path) -> set[frozenset[int]]:
+    """Unreciprocated-claim edges (the lower-trust tier), or empty if absent."""
+    return adjacency_number_pairs(volume, "one_sided")
 
 
 def keymap_region_adjacency(
@@ -1818,13 +1828,19 @@ STREET_FACTOR_MIN_CONFIDENCE = 0.7
 STREET_FACTOR_TRUST_M = 15.0
 
 
-def measurement_sigmas(verification: float, synthetic: bool) -> tuple[float, float]:
+def measurement_sigmas(
+    verification: float, synthetic: bool, one_sided: bool = False
+) -> tuple[float, float]:
     """(sigma_pos_m, sigma_theta_rad) for one join measurement.
 
     Calibrated on DC: verification>=1.3 joins are ~5m-class; sub-gate joins
     enter with loose sigmas and rely on the solver's Huber loss to be outvoted
     when wrong. Synthetic-anchor measurements (both pages unfitted, anchor
-    posed at its keymap guess) searched a worse frame, so they get 1.5x.
+    posed at its keymap guess) searched a worse frame, so they get 1.5x;
+    measurements from one-sided-claim pairs (a printed reference whose
+    reciprocal never read — ~90% genuine against the label truth, but junk
+    reads land in the same tier) get the same 1.5x so mutual-edge evidence
+    outvotes them where they disagree.
     """
     if verification >= 1.3:
         pos, theta = 5.0, 0.6
@@ -1835,6 +1851,8 @@ def measurement_sigmas(verification: float, synthetic: bool) -> tuple[float, flo
     else:
         pos, theta = 35.0, 5.0
     factor = 1.5 if synthetic else 1.0
+    if one_sided:
+        factor *= 1.5
     return pos * factor, math.radians(theta * factor)
 
 
@@ -1888,6 +1906,7 @@ def collect_graph_measurements(
     limit: int | None = None,
     extra_pairs: set[frozenset[int]] | None = None,
     keymap_centroids: dict[int, tuple[float, float]] | None = None,
+    loose_pairs: set[frozenset[int]] | None = None,
 ) -> list[dict]:
     """Run the matcher over every measurable mutual-adjacency edge.
 
@@ -1901,6 +1920,9 @@ def collect_graph_measurements(
     region adjacency) beyond the printed-number graph; for those, the printed
     reciprocal side is unavailable, so the anchor-side direction gate is fed
     from ``keymap_centroids`` (the region-centroid bearing) instead.
+    ``loose_pairs`` marks pairs from the lower-trust one-sided-claim tier:
+    their records are tagged ``one_sided_pair`` so the solver widens their
+    sigmas (see measurement_sigmas).
     """
     by_number = {u.number: u for u in units}
     pairs = detected_pairs(volume)
@@ -2008,6 +2030,8 @@ def collect_graph_measurements(
         if record is None:
             continue
         record["synthetic_anchor"] = synthetic
+        if loose_pairs and frozenset((anchor.number, target.number)) in loose_pairs:
+            record["one_sided_pair"] = True
         record["anchor_state"] = anchor.fit_state
         record["target_state"] = target.fit_state
         record["anchor_affine"] = [list(row) for row in anchor_affine]
@@ -2184,6 +2208,7 @@ def cmd_posegraph(
     street_factors: bool = False,
     keymap_adjacency: bool = False,
     keymap_gap_m: float = 40.0,
+    one_sided: bool = False,
 ) -> None:
     """Global pose-graph solve over all edge-join measurements.
 
@@ -2199,6 +2224,12 @@ def cmd_posegraph(
     region-adjacency pairs that involve a not-yet-fitted page (the printed graph
     misses these on 4-digit-page volumes like LA); outputs get a ``_kmadj``
     suffix so the printed-graph baseline is preserved for comparison.
+
+    With ``one_sided`` the pair set is augmented with unreciprocated-claim
+    edges (adjacency.json's lower-trust ``one_sided`` tier — ~90% genuine
+    against the label truth, the reciprocal side simply failed to read).
+    Their measurements are tagged and solved at widened sigmas so mutual-edge
+    evidence outvotes them; outputs get a ``_1sided`` suffix.
     """
     from mapsnap.edge_join_graph import (
         AbsolutePrior,
@@ -2211,34 +2242,49 @@ def cmd_posegraph(
     units = load_page_units(volume)
     by_stem = {u.stem: u for u in units}
     out_dir = volume / "artifacts" / "edge_join"
-    suffix = "_kmadj" if keymap_adjacency else ""
+    suffix = ("_kmadj" if keymap_adjacency else "") + ("_1sided" if one_sided else "")
     meas_path = out_dir / f"measurements{suffix}.jsonl"
 
-    extra_pairs: set[frozenset[int]] | None = None
-    keymap_centroids: dict[int, tuple[float, float]] | None = None
-    if keymap_adjacency:
-        km_pairs, keymap_centroids = keymap_region_adjacency(volume, keymap_gap_m)
-        real_numbers = {u.number for u in units}
-        fitted_numbers = {
-            u.number
-            for u in units
-            if u.fit_state == "fitted" and u.gen_affine is not None
-        }
-        detected = detected_pairs(volume)
+    real_numbers = {u.number for u in units}
+    fitted_numbers = {
+        u.number for u in units if u.fit_state == "fitted" and u.gen_affine is not None
+    }
+    detected = detected_pairs(volume)
+
+    def new_unfitted_pairs(candidates: set[frozenset[int]]) -> set[frozenset[int]]:
         # Keep only pairs between two real volume pages (the key map also reads
         # stray lot/scale numbers) that connect a not-yet-fitted page and aren't
         # already in the printed graph — fitted-fitted pairs would only re-refine
         # already-placed sheets.
-        extra_pairs = {
+        return {
             pair
-            for pair in km_pairs
+            for pair in candidates
             if pair <= real_numbers
             and pair not in detected
             and not pair <= fitted_numbers
         }
+
+    extra_pairs: set[frozenset[int]] | None = None
+    loose_pairs: set[frozenset[int]] | None = None
+    keymap_centroids: dict[int, tuple[float, float]] | None = None
+    if keymap_adjacency:
+        km_pairs, keymap_centroids = keymap_region_adjacency(volume, keymap_gap_m)
+        extra_pairs = new_unfitted_pairs(km_pairs)
         print(
             f"keymap region adjacency (gap<={keymap_gap_m:g}m): {len(km_pairs)} pairs,"
             f" {len(extra_pairs)} new real pairs involving an unfitted page"
+        )
+    if one_sided:
+        os_pairs = one_sided_pairs(volume)
+        loose_pairs = new_unfitted_pairs(os_pairs) - (extra_pairs or set())
+        extra_pairs = (extra_pairs or set()) | loose_pairs
+        # The centroid substitute keeps the anchor-side gate alive when the
+        # anchor is the side whose claim never read.
+        if keymap_centroids is None:
+            _, keymap_centroids = keymap_region_adjacency(volume, keymap_gap_m)
+        print(
+            f"one-sided claims: {len(os_pairs)} pairs,"
+            f" {len(loose_pairs)} new pairs involving an unfitted page"
         )
 
     if meas_path.exists() and not remeasure:
@@ -2248,7 +2294,7 @@ def cmd_posegraph(
         print(f"loaded {len(records)} cached measurements from {meas_path}")
     else:
         records = collect_graph_measurements(
-            volume, units, limit, extra_pairs, keymap_centroids
+            volume, units, limit, extra_pairs, keymap_centroids, loose_pairs
         )
         meas_path.write_text("\n".join(json.dumps(r) for r in records))
         print(f"wrote {len(records)} measurements to {meas_path}")
@@ -2291,7 +2337,9 @@ def cmd_posegraph(
             pose_t = vframe.affine_to_pose(np.array(alternate["world_affine"]))
             dx, dy, dtheta = vframe.relative(pose_a, pose_t)
             sigma_pos, sigma_theta = measurement_sigmas(
-                alternate["verification"], r.get("synthetic_anchor", False)
+                alternate["verification"],
+                r.get("synthetic_anchor", False),
+                r.get("one_sided_pair", False),
             )
             candidates.append(
                 RelativeMeasurement(
@@ -2625,6 +2673,11 @@ def main() -> None:
         help="posegraph: refine with street-label line factors",
     )
     parser.add_argument(
+        "--one-sided",
+        action="store_true",
+        help="posegraph: add unreciprocated-claim pairs at widened sigmas (writes *_1sided)",
+    )
+    parser.add_argument(
         "--keymap-adjacency",
         action="store_true",
         help="posegraph: add key-map region-adjacency candidate pairs (writes *_kmadj)",
@@ -2669,6 +2722,7 @@ def main() -> None:
             args.street_factors,
             args.keymap_adjacency,
             args.keymap_gap_m,
+            args.one_sided,
         )
     elif args.command == "materialize":
         cmd_materialize(args.volume, args.source)

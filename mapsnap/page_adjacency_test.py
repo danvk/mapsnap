@@ -6,6 +6,7 @@ from mapsnap.page_adjacency import (
     classify_edge,
     is_claim,
     mutual_edges,
+    one_sided_edges,
     polygon_rotation_deg,
     resolve_page_key,
     single_digit_height_band,
@@ -147,6 +148,19 @@ def test_mutual_edges_lettered_stems():
 
 def test_mutual_edges_empty_when_one_sided():
     assert mutual_edges({"p1": {"2"}, "p2": set()}) == []
+
+
+def test_one_sided_edges_are_the_unreciprocated_remainder():
+    claims = {"p49": {"50", "51"}, "p50": {"49"}, "p51": set()}
+    # 49<->50 is mutual and excluded; 49->51 resolves but lacks the reciprocal.
+    assert one_sided_edges(claims) == [("p49", "p51")]
+
+
+def test_one_sided_edges_skip_unresolvable_claims():
+    # A claim of a page outside the volume, and an ambiguous bare number among
+    # lettered sheets, resolve to nothing and produce no one-sided edge.
+    claims = {"p1499a": {"1488", "7777"}, "p1488": set(), "p1499b": {"1499"}}
+    assert one_sided_edges(claims) == [("p1499a", "p1488")]
 
 
 def test_mutual_edges_lettered_keys_do_not_collide():
