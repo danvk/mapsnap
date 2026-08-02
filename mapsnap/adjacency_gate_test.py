@@ -103,6 +103,59 @@ def test_structurally_sound_suspect_is_never_demoted(tmp_path):
     assert verdicts == []
 
 
+def test_stamp_gate_accepts_true_pose_and_rejects_the_alias(tmp_path):
+    import numpy as np
+
+    from mapsnap.adjacency_gate import load_stamp_gate
+
+    volume = write_volume(tmp_path, p3_lat_shift=0.003, p3_gcps=1)
+    pages, verdicts = gate(volume)
+    demote(volume, pages["p3"], verdicts[0])
+    stamp_gate = load_stamp_gate(volume, "p3", 1000, 800)
+    assert stamp_gate is not None
+    # p3's own claim of p2 exists, so the strict pairwise check applies.
+    assert stamp_gate.own_claims == [[(0.02 * 1000, 0.5 * 800)]]
+
+    def affine(lon0: float, lat0: float) -> np.ndarray:
+        scale = PAGE_LON_SPAN / 1000
+        return np.array([[scale, 0.0, lon0], [0.0, -0.008 / 800, lat0]])
+
+    true_pose = affine(2 * PAGE_LON_SPAN, LAT0)  # back where p2's stamp says
+    alias = affine(2 * PAGE_LON_SPAN, LAT0 + 0.003)  # the old wrong pose
+    good = stamp_gate.separation_m(true_pose)
+    bad = stamp_gate.separation_m(alias)
+    assert good is not None and good < 100.0
+    assert bad is not None and bad > 100.0
+
+
+def test_stamp_gate_footprint_fallback_when_own_read_missing(tmp_path):
+    import json as json_module
+
+    import numpy as np
+
+    from mapsnap.adjacency_gate import load_stamp_gate
+
+    volume = write_volume(tmp_path, p3_lat_shift=0.003, p3_gcps=1)
+    pages, verdicts = gate(volume)
+    demote(volume, pages["p3"], verdicts[0])
+    # Erase p3's own claim of p2: the neighbor's stamp must then at least
+    # touch the candidate footprint.
+    adjacency = json_module.loads((volume / "adjacency.json").read_text())
+    adjacency["pages"]["p3"]["detections"] = []
+    (volume / "adjacency.json").write_text(json_module.dumps(adjacency))
+    stamp_gate = load_stamp_gate(volume, "p3", 1000, 800)
+    assert stamp_gate is not None and stamp_gate.own_claims == [[]]
+
+    def affine(lon0: float, lat0: float) -> np.ndarray:
+        scale = PAGE_LON_SPAN / 1000
+        return np.array([[scale, 0.0, lon0], [0.0, -0.008 / 800, lat0]])
+
+    touching = stamp_gate.separation_m(affine(2 * PAGE_LON_SPAN, LAT0))
+    far = stamp_gate.separation_m(affine(2 * PAGE_LON_SPAN + 0.05, LAT0))
+    assert touching is not None and touching < 100.0
+    assert far is not None and far > 100.0
+
+
 def test_corroborated_pair_blames_the_edge(tmp_path):
     # p3 gains a compatible neighbor p4: both sides of the contradicted p2~p3
     # edge are vouched for, so the edge is junk and nobody is demoted.

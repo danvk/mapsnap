@@ -141,6 +141,9 @@ class SnapCandidate:
     name: NameAlignment | None = None
     plausible: bool = True
     gate_reasons: list[str] = field(default_factory=list)
+    # Best-partner stamp separation for contradiction-demoted rescue targets
+    # (adjacency_gate.StampGate); None when the page carries no hints.
+    stamp_separation_m: float | None = None
 
     def select_score(self) -> float:
         """The ranking score: matcher verification plus soft evidence bonuses."""

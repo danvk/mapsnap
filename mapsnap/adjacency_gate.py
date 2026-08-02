@@ -269,6 +269,118 @@ def demote(volume: Path, page: FittedPage, verdict: Verdict) -> None:
     (volume / f"{page.stem}.contradiction.json").write_text(json.dumps(hint, indent=2))
 
 
+STAMP_REHOME_M = GATE_STAMP_M
+"""A rescue candidate for a contradiction-demoted page must satisfy the same
+invariant that demoted it: its own printed claim of a hinting neighbor, mapped
+through the CANDIDATE pose, must land within this distance of the neighbor's
+stamp. KC p551's re-adopted alias sits ~150 m from p545's stamp and dies here;
+a true pose passes by construction. Where the page never read that neighbor's
+number, the neighbor's stamp (printed on the shared seam) must at least touch
+the candidate footprint."""
+
+
+@dataclass
+class StampGate:
+    """Re-adoption consistency check for one contradiction-demoted page."""
+
+    width: int
+    height: int
+    # Parallel lists: each hinting partner's stamp (lon, lat) and this page's
+    # own claim pixels of that partner ([] when its read never resolved).
+    partner_stamps: list[tuple[float, float]]
+    own_claims: list[list[tuple[float, float]]]
+
+    def separation_m(self, affine: np.ndarray) -> float | None:
+        """Best-partner stamp separation under a candidate pose, or None.
+
+        The minimum over partners: satisfying ONE genuine seam stamp already
+        pins the pose to within the threshold at that point, and taking the
+        minimum keeps a single junk partner from vetoing the true pose.
+        """
+        corners = [
+            (0.0, 0.0),
+            (float(self.width), 0.0),
+            (float(self.width), float(self.height)),
+            (0.0, float(self.height)),
+        ]
+
+        def world(px: float, py: float) -> tuple[float, float]:
+            return (
+                affine[0, 0] * px + affine[0, 1] * py + affine[0, 2],
+                affine[1, 0] * px + affine[1, 1] * py + affine[1, 2],
+            )
+
+        best: float | None = None
+        for (lon, lat), claims in zip(self.partner_stamps, self.own_claims):
+            if claims:
+                distance = min(
+                    haversine_m(lat, lon, w[1], w[0])
+                    for w in (world(px, py) for px, py in claims)
+                )
+            else:
+                # No read of this neighbor's number: the neighbor's stamp sits
+                # on the shared seam, so it must at least touch the candidate
+                # footprint (corner distance is a conservative proxy).
+                distance = max(
+                    0.0,
+                    min(
+                        haversine_m(lat, lon, w[1], w[0])
+                        for w in (world(px, py) for px, py in corners)
+                    )
+                    - self.footprint_diag_m(affine) / 2.0,
+                )
+            best = distance if best is None else min(best, distance)
+        return best
+
+    def footprint_diag_m(self, affine: np.ndarray) -> float:
+        tl = (affine[0, 2], affine[1, 2])
+        br = (
+            affine[0, 0] * self.width + affine[0, 1] * self.height + affine[0, 2],
+            affine[1, 0] * self.width + affine[1, 1] * self.height + affine[1, 2],
+        )
+        return haversine_m(tl[1], tl[0], br[1], br[0])
+
+
+def load_stamp_gate(
+    volume: Path, stem: str, width: int, height: int
+) -> StampGate | None:
+    """The stamp-consistency gate for a demoted page, or None without hints."""
+    hint_path = volume / f"{stem}.contradiction.json"
+    adjacency_path = volume / "adjacency.json"
+    if not hint_path.exists() or not adjacency_path.exists():
+        return None
+    try:
+        hint = json.loads(hint_path.read_text())
+        adjacency = json.loads(adjacency_path.read_text())
+    except (OSError, ValueError):
+        return None
+    detections = adjacency.get("pages", {}).get(stem, {}).get("detections", [])
+    partner_stamps: list[tuple[float, float]] = []
+    own_claims: list[list[tuple[float, float]]] = []
+    seen: set[str] = set()
+    for partner in hint.get("partners", []):
+        partner_stem = partner.get("stem")
+        stamp = partner.get("stamp")
+        if not isinstance(stamp, list) or len(stamp) != 2:
+            continue
+        want = (page_key(partner_stem or "") or "").upper()
+        claims = [
+            (det["x_frac"] * width, det["y_frac"] * height)
+            for det in detections
+            if det.get("claim")
+            and str(det.get("key") or det.get("number") or "").upper() == want
+        ]
+        marker = f"{partner_stem}:{stamp[0]}:{stamp[1]}"
+        if marker in seen:
+            continue
+        seen.add(marker)
+        partner_stamps.append((float(stamp[0]), float(stamp[1])))
+        own_claims.append(claims)
+    if not partner_stamps:
+        return None
+    return StampGate(width, height, partner_stamps, own_claims)
+
+
 def contradiction_centers(volume: Path, stem: str) -> list[tuple[float, float]]:
     """Partner-stamp search centers for a demoted page, or [] (snap rescue hook).
 
