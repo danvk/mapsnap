@@ -411,7 +411,7 @@ def test_stamp_corroborated_rescue_relaxes_the_gates():
         select_argmax,
     )
 
-    def cand(score, sep=None, center=(-90.0, 30.0), theta=0.0):
+    def cand(score, sep=None, center=(-90.0, 30.0), theta=0.0, median=None):
         c = {
             "select_score": score,
             "center": list(center),
@@ -419,6 +419,7 @@ def test_stamp_corroborated_rescue_relaxes_the_gates():
         }
         if sep is not None:
             c["stamp_separation_m"] = sep
+            c["stamp_median_m"] = median if median is not None else sep
         return c
 
     def rec(candidates, fit_state="nofit"):
@@ -463,3 +464,12 @@ def test_stamp_corroborated_rescue_relaxes_the_gates():
         PRODUCTION_GATE_MARGIN,
     )
     assert choice["chosen"] is None
+
+    # Nashville p8 shape: the wrong pose matches ONE of four scattered junk
+    # stamps (min 66m) but the median partner is far out -- not corroborated.
+    (choice,) = select_argmax(
+        [rec([cand(0.99, sep=66.0, median=420.0)])],
+        PRODUCTION_GATE_SCORE,
+        PRODUCTION_GATE_MARGIN,
+    )
+    assert choice["chosen"] is None and "score" in choice["reason"]

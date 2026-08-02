@@ -17,6 +17,7 @@ import io
 import json
 import math
 import multiprocessing
+import statistics
 import sys
 import time
 from dataclasses import dataclass
@@ -741,6 +742,8 @@ def candidate_record(candidate: SnapCandidate, unit: PageUnit) -> dict:
     }
     if candidate.stamp_separation_m is not None:
         record["stamp_separation_m"] = round(candidate.stamp_separation_m, 1)
+    if candidate.stamp_median_m is not None:
+        record["stamp_median_m"] = round(candidate.stamp_median_m, 1)
     if candidate.region_containment is not None:
         record["region_containment"] = round(candidate.region_containment, 3)
     if candidate.prior_theta_residual_sigma is not None:
@@ -857,8 +860,11 @@ def page_record(vctx: VolumeContext, unit: PageUnit) -> dict:
         stamp_gate = load_stamp_gate(vctx.volume, unit.stem, unit.width, unit.height)
         if stamp_gate is not None:
             for candidate in candidates:
-                separation = stamp_gate.separation_m(candidate.world_affine)
+                separations = stamp_gate.partner_separations_m(candidate.world_affine)
+                separation = min(separations) if separations else None
                 candidate.stamp_separation_m = separation
+                if separations:
+                    candidate.stamp_median_m = float(statistics.median(separations))
                 if separation is not None and separation > STAMP_REHOME_M:
                     candidate.plausible = False
                     candidate.gate_reasons.append(
@@ -2281,11 +2287,18 @@ def cmd_select(
 
 
 def stamp_corroborated(candidate: dict) -> bool:
-    """Whether a candidate record landed within the stamp-consistency bound."""
+    """Whether the hinting neighbors genuinely vouch for a candidate pose.
+
+    Uses the MEDIAN partner separation: genuine hints agree, so a true pose
+    satisfies essentially all of them, while junk hints (single-digit
+    reciprocation) scatter across the volume and no wrong pose can satisfy
+    most. Nashville p8's 325 ft candidate matched one of its four junk stamps
+    at 66 m (the min) and was wrongly adopted; its median was far out.
+    """
     from mapsnap.adjacency_gate import STAMP_REHOME_M
 
-    separation = candidate.get("stamp_separation_m")
-    return separation is not None and separation <= STAMP_REHOME_M
+    median = candidate.get("stamp_median_m")
+    return median is not None and median <= STAMP_REHOME_M
 
 
 def uncorroborated_margin(record: dict) -> float:

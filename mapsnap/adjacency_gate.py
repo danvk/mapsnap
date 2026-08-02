@@ -40,6 +40,7 @@ is a no-op.
 import argparse
 import json
 import math
+import statistics
 import sys
 from collections import defaultdict
 from dataclasses import dataclass, field
@@ -290,13 +291,8 @@ class StampGate:
     partner_stamps: list[tuple[float, float]]
     own_claims: list[list[tuple[float, float]]]
 
-    def separation_m(self, affine: np.ndarray) -> float | None:
-        """Best-partner stamp separation under a candidate pose, or None.
-
-        The minimum over partners: satisfying ONE genuine seam stamp already
-        pins the pose to within the threshold at that point, and taking the
-        minimum keeps a single junk partner from vetoing the true pose.
-        """
+    def partner_separations_m(self, affine: np.ndarray) -> list[float]:
+        """Per-partner stamp separation under a candidate pose."""
         corners = [
             (0.0, 0.0),
             (float(self.width), 0.0),
@@ -310,7 +306,7 @@ class StampGate:
                 affine[1, 0] * px + affine[1, 1] * py + affine[1, 2],
             )
 
-        best: float | None = None
+        separations: list[float] = []
         for (lon, lat), claims in zip(self.partner_stamps, self.own_claims):
             if claims:
                 distance = min(
@@ -329,8 +325,34 @@ class StampGate:
                     )
                     - self.footprint_diag_m(affine) / 2.0,
                 )
-            best = distance if best is None else min(best, distance)
-        return best
+            separations.append(distance)
+        return separations
+
+    def separation_m(self, affine: np.ndarray) -> float | None:
+        """Best-partner stamp separation under a candidate pose, or None.
+
+        The minimum over partners: the permissive HARD-gate statistic. A pose
+        inconsistent with every partner is certainly not where the neighbors
+        say the page belongs, and a single junk partner cannot veto the true
+        pose.
+        """
+        separations = self.partner_separations_m(affine)
+        return min(separations) if separations else None
+
+    def median_separation_m(self, affine: np.ndarray) -> float | None:
+        """Median-partner stamp separation: the strict CORROBORATION statistic.
+
+        Genuine hints agree — a true pose satisfies essentially all of them —
+        while junk hints (single-digit reciprocation) scatter across the
+        volume, so no wrong pose can satisfy most. Nashville p8's 325 ft
+        candidate matched ONE of its four junk stamps at 66 m (min) but its
+        median was far out; requiring the median keeps relaxed adoption from
+        publishing it.
+        """
+        separations = self.partner_separations_m(affine)
+        if not separations:
+            return None
+        return float(statistics.median(separations))
 
     def footprint_diag_m(self, affine: np.ndarray) -> float:
         tl = (affine[0, 2], affine[1, 2])
