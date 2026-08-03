@@ -17,6 +17,7 @@ import io
 import json
 import math
 import multiprocessing
+import statistics
 import sys
 import time
 from dataclasses import dataclass
@@ -403,7 +404,9 @@ def georef_variant_mtime(volume: Path, stem: str) -> int | None:
     return None
 
 
-def candidates_record_fresh(record: dict, unit: PageUnit, mtime: int | None) -> bool:
+def candidates_record_fresh(
+    record: dict, unit: PageUnit, mtime: int | None, hint_mtime: int | None = None
+) -> bool:
     """Whether a cached candidates record still matches the page's fit state.
 
     Only a successful record is ever fresh. A failure ('no_prob', 'no_keymap')
@@ -411,13 +414,26 @@ def candidates_record_fresh(record: dict, unit: PageUnit, mtime: int | None) -> 
     map's own sidecars — so caching one would pin the page behind a stale
     failure even after the input is fixed. Recomputing a failure is cheap: it
     fails at the same gate before any matching work.
+
+    ``hint_mtime`` is the contradiction-hint sidecar's mtime: a page the
+    adjacency gate demoted twice has georef_mtime None both times, and without
+    this key the second snap pass reuses the first pass's candidates —
+    generated before the hint (or the stamp-consistency gate) existed — and
+    re-adopts the very alias the gate demoted (KC p551).
     """
     if record.get("status") != "ok":
         return False
     return (
         record.get("fit_state") == unit.fit_state
         and record.get("georef_mtime") == mtime
+        and record.get("contradiction_mtime") == hint_mtime
     )
+
+
+def contradiction_hint_mtime(volume: Path, stem: str) -> int | None:
+    """mtime of the page's contradiction-hint sidecar, or None for none."""
+    path = volume / f"{stem}.contradiction.json"
+    return int(path.stat().st_mtime) if path.exists() else None
 
 
 def load_volume_context(
@@ -610,6 +626,17 @@ def build_page_context(
     if prob is None:
         return None, "no_prob"
     centers, regions = page_keymap_data(vctx, unit)
+    # A page the adjacency gate demoted carries its neighbors' printed-claim
+    # positions — world points on the shared seam the page must sit against.
+    # They join the search centers, and stand alone for pages the keymap
+    # never placed.
+    from mapsnap.adjacency_gate import contradiction_centers
+
+    for lon, lat in contradiction_centers(
+        vctx.volume, panel_base(unit.stem) or unit.stem
+    ):
+        if all(haversine_m(lat, lon, b, a) > 50.0 for a, b in centers):
+            centers = centers + [(lon, lat)]
     if unit.fit_state == "fitted" and unit.gen_affine is not None:
         # For arbitration the incumbent pose itself is the natural search
         # init — it also reaches fitted pages the keymap never placed.
@@ -713,6 +740,10 @@ def candidate_record(candidate: SnapCandidate, unit: PageUnit) -> dict:
         "plausible": candidate.plausible,
         "gate_reasons": candidate.gate_reasons,
     }
+    if candidate.stamp_separation_m is not None:
+        record["stamp_separation_m"] = round(candidate.stamp_separation_m, 1)
+    if candidate.stamp_median_m is not None:
+        record["stamp_median_m"] = round(candidate.stamp_median_m, 1)
     if candidate.region_containment is not None:
         record["region_containment"] = round(candidate.region_containment, 3)
     if candidate.prior_theta_residual_sigma is not None:
@@ -747,6 +778,7 @@ def page_record(vctx: VolumeContext, unit: PageUnit) -> dict:
         "status": status,
         "fit_state": unit.fit_state,
         "georef_mtime": georef_variant_mtime(vctx.volume, unit.stem),
+        "contradiction_mtime": contradiction_hint_mtime(vctx.volume, unit.stem),
         "width": unit.width,
         "height": unit.height,
         "has_truth": unit.truth is not None,
@@ -817,6 +849,29 @@ def page_record(vctx: VolumeContext, unit: PageUnit) -> dict:
                     "radius_source": "local-challenge",
                 }
     candidates = snap_page(ctx, vctx.feature_index)
+    if unit.fit_state in RESCUE_STATES:
+        # A contradiction-demoted page may only be re-adopted at a pose that
+        # satisfies the invariant that demoted it: its printed claim of a
+        # hinting neighbor must land back on that neighbor's stamp. Without
+        # this, a verification-confident alias simply re-verifies from the
+        # very hints meant to displace it (KC p551, re-adopted 686 -> 692 ft).
+        from mapsnap.adjacency_gate import STAMP_REHOME_M, load_stamp_gate
+
+        stamp_gate = load_stamp_gate(vctx.volume, unit.stem, unit.width, unit.height)
+        if stamp_gate is not None:
+            for candidate in candidates:
+                separations = stamp_gate.partner_separations_m(candidate.world_affine)
+                separation = min(separations) if separations else None
+                candidate.stamp_separation_m = separation
+                if separations:
+                    candidate.stamp_median_m = float(statistics.median(separations))
+                if separation is not None and separation > STAMP_REHOME_M:
+                    candidate.plausible = False
+                    candidate.gate_reasons.append(
+                        f"stamp-inconsistent({separation:.0f}m)"
+                    )
+                    candidate.verification = -math.inf
+            candidates.sort(key=lambda c: -c.select_score())
     if not candidates:
         record["status"] = "no_candidates"
         return record
@@ -999,7 +1054,10 @@ def cmd_candidates(
         or pages
         or (cached := existing.get(unit.stem)) is None
         or not candidates_record_fresh(
-            cached, unit, georef_variant_mtime(volume, unit.stem)
+            cached,
+            unit,
+            georef_variant_mtime(volume, unit.stem),
+            contradiction_hint_mtime(volume, unit.stem),
         )
     ]
     by_stem = {unit.stem: unit for unit in targets}
@@ -1667,6 +1725,18 @@ def cmd_sweep_refine(volumes: list[Path], recompute: bool = False) -> None:
 PRODUCTION_GATE_SCORE = 1.25
 PRODUCTION_GATE_MARGIN = 0.25
 PRODUCTION_ARBITRATE_GATE = 1.5
+
+STAMP_RESCUE_SCORE = 0.7
+"""Relaxed rescue bar for stamp-corroborated candidates.
+
+A contradiction-demoted page's rescue candidate that lands its printed claim
+back on the hinting neighbor's stamp carries external evidence the select
+score cannot see — the neighbor's printed testimony pins the pose at the seam.
+Measured true poses refused by the 1.25 bar: KC p551 at 0.77 (24 ft), GR p828
+at 0.93 (23 ft). Stamp-INconsistent candidates are already implausible, so the
+relaxed bar only ever admits poses the neighbors vouch for; the margin is
+computed against the best non-corroborated rival (NO-1896 p125's true pose at
+1.82 was margin-blocked by its own 16-degree twin)."""
 VOLUME_MODE_GATE = 1.5  # the dev-chosen conservative elbow for the energy mode
 
 # Arbitration: a snap candidate may replace a placed RANSAC fit only when it
@@ -2216,6 +2286,33 @@ def cmd_select(
     print(f"{accepted}/{len(selections)} pages accepted -> {out_path}")
 
 
+def stamp_corroborated(candidate: dict) -> bool:
+    """Whether the hinting neighbors genuinely vouch for a candidate pose.
+
+    Uses the MEDIAN partner separation: genuine hints agree, so a true pose
+    satisfies essentially all of them, while junk hints (single-digit
+    reciprocation) scatter across the volume and no wrong pose can satisfy
+    most. Nashville p8's 325 ft candidate matched one of its four junk stamps
+    at 66 m (the min) and was wrongly adopted; its median was far out.
+    """
+    from mapsnap.adjacency_gate import STAMP_REHOME_M
+
+    median = candidate.get("stamp_median_m")
+    return median is not None and median <= STAMP_REHOME_M
+
+
+def uncorroborated_margin(record: dict) -> float:
+    """Rank-1's select_score lead over the best rival the neighbors don't vouch for."""
+    candidates = record.get("candidates") or []
+    top_score = candidates[0]["select_score"]
+    rivals = [
+        c["select_score"]
+        for c in candidates[1:]
+        if c.get("select_score") is not None and not stamp_corroborated(c)
+    ]
+    return top_score - max(rivals) if rivals else math.inf
+
+
 def select_argmax(
     records: list[dict],
     gate_score: float,
@@ -2251,17 +2348,29 @@ def select_argmax(
             top = record["candidates"][0]
             score = top.get("select_score")
             margin = distinct_margin(record)
+            corroborated = (
+                record.get("fit_state") in RESCUE_STATES
+                and score is not None
+                and stamp_corroborated(top)
+            )
+            if corroborated:
+                # The hinting neighbor's printed testimony pins this pose at
+                # the seam: relax the absolute bar, and measure ambiguity only
+                # against rivals the neighbors do NOT vouch for (a corroborated
+                # twin is the same corridor, not a competing hypothesis).
+                margin = uncorroborated_margin(record)
+            effective_gate = STAMP_RESCUE_SCORE if corroborated else gate_score
             if score is None:
                 choice["reason"] = "implausible"
-            elif score < gate_score:
-                choice["reason"] = f"score {score:.2f} < {gate_score}"
+            elif score < effective_gate:
+                choice["reason"] = f"score {score:.2f} < {effective_gate}"
             elif margin is None or margin < gate_margin:
                 choice["reason"] = f"margin {margin} < {gate_margin}"
             else:
                 choice = {
                     "target": stem,
                     "chosen": 0,
-                    "reason": "accepted",
+                    "reason": "stamp-corroborated" if corroborated else "accepted",
                     "select_score": score,
                     "margin": None if math.isinf(margin) else round(margin, 4),
                 }

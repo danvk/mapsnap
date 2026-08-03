@@ -258,6 +258,14 @@ def test_candidates_record_fresh_tracks_fit_changes():
             {**base, "status": status}, make_unit("fitted"), 111
         )
     assert candidates_record_fresh({**base, "status": "ok"}, make_unit("fitted"), 111)
+    # A contradiction hint appeared (or was rewritten by a re-demotion): the
+    # cached candidates predate the stamp-consistency gate and must recompute.
+    assert not candidates_record_fresh(
+        {**base, "status": "ok"}, make_unit("fitted"), 111, hint_mtime=555
+    )
+    hinted = {**base, "status": "ok", "contradiction_mtime": 555}
+    assert candidates_record_fresh(hinted, make_unit("fitted"), 111, hint_mtime=555)
+    assert not candidates_record_fresh(hinted, make_unit("fitted"), 111, hint_mtime=777)
 
 
 def test_init_worker_indexes_pages_and_panels(monkeypatch, tmp_path):
@@ -394,3 +402,74 @@ def test_cluster_search_centers_merges_overlapping_discs():
     # Singletons and empties pass through untouched.
     assert cluster_search_centers(far, 120.0) == far
     assert cluster_search_centers([], 120.0) == []
+
+
+def test_stamp_corroborated_rescue_relaxes_the_gates():
+    from mapsnap.osm_snap_experiment import (
+        PRODUCTION_GATE_MARGIN,
+        PRODUCTION_GATE_SCORE,
+        select_argmax,
+    )
+
+    def cand(score, sep=None, center=(-90.0, 30.0), theta=0.0, median=None):
+        c = {
+            "select_score": score,
+            "center": list(center),
+            "theta_deg": theta,
+        }
+        if sep is not None:
+            c["stamp_separation_m"] = sep
+            c["stamp_median_m"] = median if median is not None else sep
+        return c
+
+    def rec(candidates, fit_state="nofit"):
+        return {
+            "target": "p9",
+            "status": "ok",
+            "fit_state": fit_state,
+            "candidates": candidates,
+        }
+
+    # KC p551 shape: true pose at 0.77 within the stamp bound, rivals gated
+    # implausible (select_score None) -> adopted under the relaxed bar.
+    (choice,) = select_argmax(
+        [rec([cand(0.77, sep=24.0), {"select_score": None}])],
+        PRODUCTION_GATE_SCORE,
+        PRODUCTION_GATE_MARGIN,
+    )
+    assert choice["chosen"] == 0 and choice["reason"] == "stamp-corroborated"
+
+    # NO p125 shape: a corroborated twin close behind must NOT margin-block,
+    # but an uncorroborated rival within the margin still does.
+    twin = [cand(1.82, sep=30.0), cand(1.61, sep=40.0), cand(1.55, theta=20.0)]
+    (choice,) = select_argmax(
+        [rec(twin)], PRODUCTION_GATE_SCORE, PRODUCTION_GATE_MARGIN
+    )
+    assert choice["chosen"] == 0 and choice["reason"] == "stamp-corroborated"
+    rival = [cand(0.9, sep=30.0), cand(0.8, theta=20.0)]
+    (choice,) = select_argmax(
+        [rec(rival)], PRODUCTION_GATE_SCORE, PRODUCTION_GATE_MARGIN
+    )
+    assert choice["chosen"] is None and "margin" in choice["reason"]
+
+    # Without stamp corroboration the normal bar stands (0.77 < 1.25)...
+    (choice,) = select_argmax(
+        [rec([cand(0.77)])], PRODUCTION_GATE_SCORE, PRODUCTION_GATE_MARGIN
+    )
+    assert choice["chosen"] is None
+    # ...and a fitted page's record never takes the relaxed path.
+    (choice,) = select_argmax(
+        [rec([cand(0.77, sep=24.0)], fit_state="fitted")],
+        PRODUCTION_GATE_SCORE,
+        PRODUCTION_GATE_MARGIN,
+    )
+    assert choice["chosen"] is None
+
+    # Nashville p8 shape: the wrong pose matches ONE of four scattered junk
+    # stamps (min 66m) but the median partner is far out -- not corroborated.
+    (choice,) = select_argmax(
+        [rec([cand(0.99, sep=66.0, median=420.0)])],
+        PRODUCTION_GATE_SCORE,
+        PRODUCTION_GATE_MARGIN,
+    )
+    assert choice["chosen"] is None and "score" in choice["reason"]
