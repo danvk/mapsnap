@@ -217,10 +217,71 @@ def _erase_underlines(
     return img_out
 
 
-def _boxes_path(image_path: str) -> str:
+def boxes_path(image_path: str) -> str:
     """Return the path for the CRAFT boxes cache file (<stem>.boxes.json)."""
     stem = image_stem(image_path)
     return str(Path(image_path).parent / (stem + ".boxes.json"))
+
+
+# Backwards-compatible alias for the pre-`mapsnap craft` private name.
+_boxes_path = boxes_path
+
+
+def craft_hint(image_paths: list[str] | list[Path]) -> str:
+    """The `mapsnap craft` command that would produce the missing boxes.
+
+    CRAFT detection is its own step (`mapsnap craft`), so every consumer of
+    <stem>.boxes.json fails with an actionable message rather than silently
+    re-running the slowest stage of the pipeline under a different command.
+    """
+    parents = {str(Path(p).parent) for p in image_paths}
+    target = f"{next(iter(parents))}/p*.jpg" if len(parents) == 1 else "<images...>"
+    return f"mapsnap craft '{target}'"
+
+
+def missing_boxes(image_paths: list[str]) -> list[str]:
+    """Images with no CRAFT boxes cache, in input order."""
+    return [path for path in image_paths if not Path(boxes_path(path)).exists()]
+
+
+def require_boxes(image_paths: list[str]) -> None:
+    """Exit with the craft command to run when any image lacks its boxes."""
+    absent = missing_boxes(image_paths)
+    if not absent:
+        return
+    names = ", ".join(Path(p).name for p in absent[:5])
+    more = f" (+{len(absent) - 5} more)" if len(absent) > 5 else ""
+    sys.exit(
+        f"No CRAFT boxes for {len(absent)} image(s): {names}{more}\n"
+        f"Run: {craft_hint(absent)}"
+    )
+
+
+def write_craft_boxes(
+    image_path: str,
+    reader: easyocr.Reader,
+    *,
+    min_size: int = 15,
+    link_threshold: float = 0.4,
+    craft_scale: float = 1.0,
+    tile_size: int = 2560,
+) -> dict:
+    """Run CRAFT at 0/90/270 on one image and write <stem>.boxes.json."""
+    img = Image.open(image_path).convert("RGB")
+    width, height = img.size
+    angle_boxes = _craft_detect_all_angles(
+        img, reader, min_size, link_threshold, craft_scale, tile_size
+    )
+    doc = {
+        "width": width,
+        "height": height,
+        "timestamp": datetime.now(UTC).isoformat(),
+        "command": filter_args(sys.argv[:], image_path),
+        "boxes": angle_boxes,
+    }
+    with open(boxes_path(image_path), "w") as f:
+        json.dump(doc, f, indent=2)
+    return doc
 
 
 def _streets_path(image_path: str) -> str:
@@ -545,7 +606,6 @@ def detect_text(
     beam_width: int = 20,
     craft_scale: float = 1.0,
     tile_size: int = 2560,
-    reuse_boxes: bool = False,
     fallback_vocab: list[str] | None = None,
 ) -> list[dict]:
     """Run CRAFT-based text detection at 0°, 90°, and 270° and return all results.
@@ -579,24 +639,20 @@ def detect_text(
     gives ~4× faster detection. Detected bounding boxes are scaled back up to
     original coordinates before recognition, which always runs at full resolution.
     min_size is also scaled proportionally so the same physical text size threshold
-    applies. Ignored when reuse_boxes=True.
+    applies. Applied by `mapsnap craft`, not here.
 
     tile_size splits images whose long side exceeds it into overlapping tiles that CRAFT
     detects at native resolution, avoiding EasyOCR's canvas_size (2560px) downscaling
     that shrinks small labels on oversized sheets (e.g. key maps). Only detection is
     tiled; recognition is unchanged. Set to 0 to disable (single-pass detection, the
-    prior behavior). Default 2560 matches EasyOCR's canvas_size. Ignored when
-    reuse_boxes=True.
+    prior behavior). Default 2560 matches EasyOCR's canvas_size. Applied by
+    `mapsnap craft`, not here.
 
-    reuse_boxes loads CRAFT bounding boxes from the existing <stem>.boxes.json
-    file instead of re-running CRAFT. Useful for iterating on recognition
-    parameters without redoing the (slower) detection step. An image with no
-    .boxes.json falls back to running CRAFT (and writes the file); the CLI
-    gates that fallback behind --allow-missing-boxes.
-
-    Writes <stem>.boxes.json alongside the image whenever CRAFT is run (i.e.
-    when reuse_boxes=False). The file records the image dimensions, a timestamp,
-    the command line, and the per-angle box data.
+    CRAFT detection is NOT run here: <stem>.boxes.json must already exist,
+    written by `mapsnap craft` (see write_craft_boxes). Detection is the
+    slowest stage and is shared by several consumers (`mapsnap adjacency`,
+    the keymap passes), so it is its own pipeline step; a missing boxes file
+    raises rather than silently re-running it under another command.
 
     fallback_vocab, if given, recognizes each box a second time with a broader vocabulary and
     keeps, per box, the higher-confidence read. When the fallback vocabulary wins with a
@@ -626,22 +682,12 @@ def detect_text(
     img = Image.open(image_path).convert("RGB")
     orig_width, orig_height = img.size
 
-    if reuse_boxes and Path(_boxes_path(image_path)).exists():
-        with open(_boxes_path(image_path)) as f:
-            angle_boxes: list[dict] = json.load(f)["boxes"]
-    else:
-        angle_boxes = _craft_detect_all_angles(
-            img, reader, min_size, link_threshold, craft_scale, tile_size
+    cached = Path(boxes_path(image_path))
+    if not cached.exists():
+        raise FileNotFoundError(
+            f"No CRAFT boxes for {image_path}. Run: {craft_hint([image_path])}"
         )
-        boxes_doc = {
-            "width": orig_width,
-            "height": orig_height,
-            "timestamp": datetime.now(UTC).isoformat(),
-            "command": filter_args(sys.argv[:], image_path),
-            "boxes": angle_boxes,
-        }
-        with open(_boxes_path(image_path), "w") as f:
-            json.dump(boxes_doc, f, indent=2)
+    angle_boxes: list[dict] = json.loads(cached.read_text())["boxes"]
 
     def recognize(vocab: list[str]) -> list[dict]:
         return _recognize_pass(
@@ -702,7 +748,6 @@ def _worker_init(
     beam_width: int,
     craft_scale: float,
     tile_size: int,
-    reuse_boxes: bool,
     gpu: bool,
 ) -> None:
     """Initialize per-worker state once per process: create the EasyOCR reader."""
@@ -715,7 +760,6 @@ def _worker_init(
     _worker_state["beam_width"] = beam_width
     _worker_state["craft_scale"] = craft_scale
     _worker_state["tile_size"] = tile_size
-    _worker_state["reuse_boxes"] = reuse_boxes
 
 
 def _process_image(image_path: str) -> str:
@@ -731,7 +775,6 @@ def _process_image(image_path: str) -> str:
         beam_width=_worker_state["beam_width"],
         craft_scale=_worker_state["craft_scale"],
         tile_size=_worker_state["tile_size"],
-        reuse_boxes=_worker_state["reuse_boxes"],
     )
     return image_path
 
@@ -917,25 +960,6 @@ def main() -> None:
             "tiled; recognition is unchanged. Set to 0 to disable (single-pass detection)."
         ),
     )
-    parser.add_argument(
-        "--reuse-boxes",
-        action="store_true",
-        help=(
-            "Reuse CRAFT bounding boxes from existing <stem>.boxes.json files instead "
-            "of re-running CRAFT detection. Useful for iterating on recognition "
-            "parameters without redoing detection. All images must already have a "
-            ".boxes.json file; this flag aborts with an error if any are missing "
-            "(see --allow-missing-boxes)."
-        ),
-    )
-    parser.add_argument(
-        "--allow-missing-boxes",
-        action="store_true",
-        help=(
-            "With --reuse-boxes: images that have no .boxes.json (e.g. freshly split "
-            "panels) run full CRAFT detection instead of aborting the run."
-        ),
-    )
     args = parser.parse_args()
 
     if args.backfill_background:
@@ -1024,21 +1048,7 @@ def main() -> None:
             file=sys.stderr,
         )
 
-    if args.reuse_boxes:
-        missing = [p for p in images if not Path(_boxes_path(p)).exists()]
-        if missing and not args.allow_missing_boxes:
-            for p in missing:
-                print(f"Missing boxes file: {_boxes_path(p)}", file=sys.stderr)
-            sys.exit(
-                f"--reuse-boxes: {len(missing)} image(s) have no .boxes.json file "
-                "(pass --allow-missing-boxes to run CRAFT for them)."
-            )
-        if missing:
-            print(
-                f"--reuse-boxes: {len(missing)}/{len(images)} image(s) have no "
-                ".boxes.json; running full CRAFT detection for those.",
-                file=sys.stderr,
-            )
+    require_boxes(images)
 
     gpu = not args.no_gpu
 
@@ -1059,7 +1069,6 @@ def main() -> None:
             args.beam_width,
             args.craft_scale,
             args.tile_size,
-            args.reuse_boxes,
             gpu,
         )
         with multiprocessing.Pool(
@@ -1090,7 +1099,6 @@ def main() -> None:
                 beam_width=args.beam_width,
                 craft_scale=args.craft_scale,
                 tile_size=args.tile_size,
-                reuse_boxes=args.reuse_boxes,
                 fallback_vocab=fallback_vocab,
             )
 

@@ -11,13 +11,16 @@ Per volume:
   1. verify the volume was set up by a pipeline run (``mapsnap.json`` exists) and has
      ``centerlines.geojson`` — this pipeline never downloads;
   2. ``mapsnap split`` regenerates the split panels (pN__i.jpg + pN.panels.json);
-  3. ``mapsnap keymap-detect`` identifies the key map(s); ``mapsnap keymap --reuse-boxes``
-     rebuilds their sidecars from the full-resolution ``raw/`` scans (a detected key map
-     with no raw scan is skipped with a warning — downloading is out of scope here);
-  4. ``mapsnap ocr --reuse-boxes --allow-missing-boxes`` re-recognizes every page (panels
-     supersede their parent), auto-discovering the georeferenced key maps;
-  5. ``mapsnap adjacency --reuse-boxes`` rebuilds the printed-neighbor adjacency graph;
-  6. ``mapsnap fit --tag <tag>`` georeferences, runs the geometry-first snap
+  3. ``mapsnap keymap-detect`` identifies the key map(s), recording them in ``keymaps.json``;
+  4. ``mapsnap craft --resume`` refreshes the CRAFT boxes every later step recognizes inside;
+  5. ``mapsnap adjacency`` rebuilds the printed-neighbor adjacency graph — before the key-map
+     build, so its mutual edges can repair key-map page-number assignments (#213);
+  6. ``mapsnap keymap`` rebuilds the key-map sidecars from the full-resolution ``raw/`` scans
+     (a detected key map with no raw scan is skipped with a warning — downloading is out of
+     scope here), including that assignment repair;
+  7. ``mapsnap ocr`` re-recognizes every page (panels supersede their parent),
+     auto-discovering the georeferenced key maps;
+  8. ``mapsnap fit --tag <tag>`` georeferences, runs the geometry-first snap
      channel (rescue/arbitrate/refine), builds the IIIF AnnotationPage, and
      compares against truth.
 
@@ -33,6 +36,8 @@ import argparse
 import sys
 from pathlib import Path
 
+from mapsnap.craft import volume_craft_images
+from mapsnap.keymap.records import recorded_keymap_keys
 from mapsnap.utils import Step, list_pages, run_cmd
 
 
@@ -53,23 +58,40 @@ def rerun_volume(volume: Path, tag: str, force: bool) -> None:
         pages = [str(p) for p in sorted(volume.glob("p*.jpg")) if "__" not in p.stem]
         run_cmd(["mapsnap", "split", *pages])
 
-    with step(f"rerun-{tag}-keymap"):
+    with step(f"rerun-{tag}-keymap-detect"):
         from mapsnap.keymap.identify import identify_keymaps
+        from mapsnap.keymap.records import write_keymaps_record
 
-        keymap_keys = identify_keymaps(volume)
-        raw_keymaps = []
-        for key in keymap_keys:
-            raw = volume / "raw" / f"{key}.jpg"
-            if raw.exists():
-                raw_keymaps.append(str(raw))
-            else:
-                print(
-                    f"WARNING: key map {key} has no full-resolution scan at {raw}; "
-                    "skipping its sidecars (fetch it and re-run with --force to use it).",
-                    file=sys.stderr,
-                )
+        write_keymaps_record(volume, identify_keymaps(volume))
+
+    keymap_keys = sorted(recorded_keymap_keys(volume))
+    raw_keymaps = []
+    for key in keymap_keys:
+        raw = volume / "raw" / f"{key}.jpg"
+        if raw.exists():
+            raw_keymaps.append(str(raw))
+        else:
+            print(
+                f"WARNING: key map {key} has no full-resolution scan at {raw}; "
+                "skipping its sidecars (fetch it and re-run with --force to use it).",
+                file=sys.stderr,
+            )
+
+    # CRAFT once for adjacency, the key-map passes and ocr (#132). --resume
+    # keeps existing boxes, which is the whole point of a re-run.
+    with step(f"rerun-{tag}-craft"):
+        run_cmd(
+            ["mapsnap", "craft", "--resume", *volume_craft_images(volume, keymap_keys)]
+        )
+
+    # Adjacency before the key-map build so its mutual edges can repair
+    # key-map page-number assignments (#213).
+    with step(f"rerun-{tag}-adjacency"):
+        run_cmd(["mapsnap", "adjacency", str(volume)])
+
+    with step(f"rerun-{tag}-keymap"):
         if raw_keymaps:
-            run_cmd(["mapsnap", "keymap", "--reuse-boxes", *raw_keymaps])
+            run_cmd(["mapsnap", "keymap", *raw_keymaps])
         else:
             print(f"No usable key map for {volume.name}.", flush=True)
 
@@ -80,16 +102,11 @@ def rerun_volume(volume: Path, tag: str, force: bool) -> None:
                 "mapsnap",
                 "ocr",
                 "--resume",
-                "--reuse-boxes",
-                "--allow-missing-boxes",
                 "--centerlines",
                 str(centerlines),
                 *images,
             ]
         )
-
-    with step(f"rerun-{tag}-adjacency"):
-        run_cmd(["mapsnap", "adjacency", str(volume), "--reuse-boxes"])
 
     # fit resumes itself (an already-archived run id is skipped), so no stamp.
     run_cmd(["mapsnap", "fit", str(volume), "--tag", tag])

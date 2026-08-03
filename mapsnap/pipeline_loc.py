@@ -5,6 +5,8 @@ import glob
 import sys
 from pathlib import Path
 
+from mapsnap.craft import volume_craft_images
+from mapsnap.keymap.records import recorded_keymap_keys
 from mapsnap.utils import Step, list_pages, run_cmd, write_run_record
 
 
@@ -75,13 +77,15 @@ def main() -> None:
             ]
         )
 
-    # Identify the key map(s) from the 25%-scale pages, download just those at full resolution,
-    # and build their sidecars. The subsequent ocr/fit steps then auto-discover raw/*.keymap.json
-    # and restrict each page to its key-map neighborhood.
-    with step("keymap"):
+    # Identify the key map(s) and fetch them at full resolution. Recorded in
+    # keymaps.json so the adjacency scan below can skip them before their
+    # sidecars exist.
+    with step("keymap-detect"):
         from mapsnap.keymap.identify import identify_keymaps
+        from mapsnap.keymap.records import write_keymaps_record
 
         keymap_keys = identify_keymaps(dir_path)
+        write_keymaps_record(dir_path, keymap_keys)
         if keymap_keys:
             print(f"Key map page(s): {', '.join(keymap_keys)}", flush=True)
             # A key confirmed as a split panel (p0__1) has no LOC image of its
@@ -100,10 +104,39 @@ def main() -> None:
             ]
             if split_parents:
                 run_cmd(["mapsnap", "split", *split_parents])
-            raw_keymaps = [str(dir_path / "raw" / f"{key}.jpg") for key in keymap_keys]
-            run_cmd(["mapsnap", "keymap", *raw_keymaps])
         else:
             print("No key map identified; continuing without one.", flush=True)
+
+    # Read the keys back from keymaps.json rather than the step's local: a
+    # resumed run skips the step body entirely, so the local would be unbound.
+    keymap_keys = sorted(recorded_keymap_keys(dir_path))
+
+    # CRAFT once for everything downstream (#132): adjacency, the key-map
+    # passes and ocr all recognize inside these boxes and none of them run
+    # detection themselves.
+    raw_keymaps = [str(dir_path / "raw" / f"{key}.jpg") for key in keymap_keys]
+    with step("craft"):
+        run_cmd(
+            [
+                "mapsnap",
+                "craft",
+                "--resume",
+                *volume_craft_images(dir_path, keymap_keys),
+            ]
+        )
+
+    # Printed adjacent-sheet graph. Runs BEFORE the key-map step so its mutual
+    # edges can repair key-map page-number assignments (#213); key-map sheets
+    # are skipped via keymaps.json.
+    with step("adjacency"):
+        run_cmd(["mapsnap", "adjacency", str(dir_path)])
+
+    # Build the key-map sidecars, including the adjacency-informed assignment
+    # repair. The subsequent ocr/fit steps auto-discover raw/*.keymap.json and
+    # restrict each page to its (now better-placed) key-map neighborhood.
+    with step("keymap"):
+        if raw_keymaps:
+            run_cmd(["mapsnap", "keymap", *raw_keymaps])
 
     # --resume so an OCR interrupted partway resumes per page on the re-run that follows.
     ocr_images = [str(p) for p in list_pages(dir_path)]
@@ -118,12 +151,6 @@ def main() -> None:
                 *ocr_images,
             ]
         )
-
-    # Printed adjacent-sheet graph, consumed by fit's snap/rescue channels. Runs after the
-    # keymap step (so identified key-map sheets are skipped) and after ocr (so the CRAFT
-    # boxes it needs are reused instead of re-detected).
-    with step("adjacency"):
-        run_cmd(["mapsnap", "adjacency", str(dir_path), "--reuse-boxes"])
 
     run_cmd(["mapsnap", "fit", str(dir_path), "--tag", "mapsnap"])
 

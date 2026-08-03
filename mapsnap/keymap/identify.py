@@ -47,7 +47,7 @@ from mapsnap.keymap.detect_numbers_cnn import (
 from mapsnap.keymap.detect_numbers_crnn import read_candidates, snap_to_pages
 from mapsnap.keymap.fit_keymap import page_number, volume_page_keys
 from mapsnap.keymap.number_model import build_model, select_device
-from mapsnap.keymap.records import page_key_sort
+from mapsnap.keymap.records import page_key_sort, write_keymaps_record
 from mapsnap.utils import image_stem
 
 DEFAULT_CNN_WEIGHTS = Path("models/number_detector.pt")
@@ -311,6 +311,7 @@ def main() -> None:
         cnn_weights=args.cnn_weights,
         crnn_weights=args.crnn_weights,
     )
+    write_keymaps_record(args.volume, keys)
     if not keys:
         print(f"No key map identified in {args.volume}.", file=sys.stderr)
         sys.exit(1)
