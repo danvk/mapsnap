@@ -1837,10 +1837,11 @@ def measurement_sigmas(
     enter with loose sigmas and rely on the solver's Huber loss to be outvoted
     when wrong. Synthetic-anchor measurements (both pages unfitted, anchor
     posed at its keymap guess) searched a worse frame, so they get 1.5x;
-    measurements from one-sided-claim pairs (a printed reference whose
-    reciprocal never read — ~90% genuine against the label truth, but junk
-    reads land in the same tier) get the same 1.5x so mutual-edge evidence
-    outvotes them where they disagree.
+    measurements from one-sided-claim pairs get the same 1.5x so mutual-edge
+    evidence outvotes them where they disagree. That tier is only 32-54%
+    genuine against the label truth (vs 96-100% for mutual edges), so the
+    widening is doing real work — the join's own verification is the primary
+    filter, and the solver's Huber loss the backstop.
     """
     if verification >= 1.3:
         pos, theta = 5.0, 0.6
@@ -2226,10 +2227,12 @@ def cmd_posegraph(
     suffix so the printed-graph baseline is preserved for comparison.
 
     With ``one_sided`` the pair set is augmented with unreciprocated-claim
-    edges (adjacency.json's lower-trust ``one_sided`` tier — ~90% genuine
-    against the label truth, the reciprocal side simply failed to read).
-    Their measurements are tagged and solved at widened sigmas so mutual-edge
-    evidence outvotes them; outputs get a ``_1sided`` suffix.
+    edges (adjacency.json's lower-trust ``one_sided`` tier: 32-54% genuine
+    against the label truth, so most are junk reads that resolved to a real
+    page). They are proposals only — the join's verification gate and the
+    solver's Huber loss do the filtering, and their measurements are tagged
+    and solved at widened sigmas so mutual-edge evidence outvotes them.
+    Outputs get a ``_1sided`` suffix.
     """
     from mapsnap.edge_join_graph import (
         AbsolutePrior,

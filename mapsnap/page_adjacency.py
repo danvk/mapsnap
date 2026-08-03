@@ -485,12 +485,16 @@ def mutual_edges(claims_by_page: dict[str, set[str]]) -> list[tuple[str, str]]:
 def one_sided_edges(claims_by_page: dict[str, set[str]]) -> list[tuple[str, str]]:
     """Directed claims that resolve to a real page but are not reciprocated.
 
-    The lower-trust adjacency tier: measured against the hand-labelled truth,
-    88% of Hudson's and 89% of LA's unreciprocated-but-resolvable claims are
-    genuine printed references whose reciprocal side failed to read (truth
-    itself reciprocates 91-93%). Consumers must treat these as candidates to
-    verify, not facts — a junk read that resolves to a real page lands here.
-    Returns sorted (claimer, target) pairs, excluding mutual edges.
+    The lower-trust adjacency tier. Truth itself reciprocates 89-93% of its
+    printed edges, so a one-sided claim CAN be a genuine reference whose
+    reciprocal failed to read — but this tier is where every junk read that
+    resolves to a real page also lands, and reciprocity is precisely the
+    filter that was removing them. Measured against the hand-labelled truth:
+    LA 105/193 = 54%, Hudson 48/98 = 49%, Nashville 52/165 = 32% genuine,
+    tracking each volume's claim precision (79/87/63%). Mutual edges on the
+    same volumes are 96-100%. Consumers must therefore treat these as
+    candidates to verify, never as facts, and weight them well below mutual
+    edges. Returns sorted (claimer, target) pairs, excluding mutual edges.
     """
     resolve = claim_resolver(claims_by_page)
     mutual = {frozenset(edge) for edge in mutual_edges(claims_by_page)}
