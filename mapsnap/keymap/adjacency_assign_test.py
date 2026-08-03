@@ -261,3 +261,115 @@ def test_adjacency_graphs_and_split_multiplicity(tmp_path):
     (tmp_path / "p4.panels.json").write_text(json.dumps({"panels": [[], [], [], []]}))
     (tmp_path / "p9.panels.json").write_text(json.dumps({"panels": []}))
     assert split_multiplicity(tmp_path) == {"4": 4}
+
+
+def keymap_doc(entries: list[tuple[str, float, float]]) -> dict:
+    return {
+        "width": 4000,
+        "height": 4000,
+        "streets": [
+            {
+                "polygon": [
+                    [x - 20, y - 20],
+                    [x + 20, y - 20],
+                    [x + 20, y + 20],
+                    [x - 20, y + 20],
+                ],
+                "text": text,
+                "confidence": 0.99,
+                "angle": 0,
+            }
+            for text, x, y in entries
+        ],
+    }
+
+
+def write_volume(tmp_path, entries, adjacency, one_sided=None, pages=None):
+    raw = tmp_path / "raw"
+    raw.mkdir(exist_ok=True)
+    (raw / "p0.keymap.json").write_text(json.dumps(keymap_doc(entries)))
+    (tmp_path / "adjacency.json").write_text(
+        json.dumps({"adjacency": adjacency, "one_sided": one_sided or []})
+    )
+    for key in pages or []:
+        (tmp_path / f"p{key}.jpg").write_bytes(b"")
+    return tmp_path
+
+
+def test_apply_repairs_rewrites_the_keymap_and_keeps_the_original(tmp_path):
+    from mapsnap.keymap.adjacency_assign import repair_volume
+
+    # Two "2"s: the one among 21/28/29 is really 22. 59 is cited by 27 (mutual)
+    # and 57 (one-sided) but never printed.
+    volume = write_volume(
+        tmp_path,
+        entries=[
+            ("2", 100.0, 100.0),  # the real p2, off on its own
+            ("2", 1000.0, 1000.0),  # the impostor, among 22's neighbours
+            ("21", 1100.0, 1000.0),
+            ("28", 900.0, 1000.0),
+            ("29", 1000.0, 1100.0),
+            ("27", 2000.0, 2000.0),
+            ("57", 2100.0, 2000.0),
+            ("61", 2000.0, 2100.0),
+        ],
+        adjacency=[["p22", "p21"], ["p22", "p28"], ["p22", "p29"], ["p59", "p27"]],
+        one_sided=[["p59", "p57"], ["p59", "p61"]],
+        pages=["2", "21", "22", "27", "28", "29", "57", "59", "61"],
+    )
+    repairs = repair_volume(volume)
+    kinds = {r.reason for r in repairs}
+    assert kinds == {"duplicate-no-support", "gap"}
+
+    doc = json.loads((volume / "raw" / "p0.keymap.json").read_text())
+    texts = [street["text"] for street in doc["streets"]]
+    assert texts.count("22") == 1 and texts.count("2") == 1
+    assert "59" in texts
+    # The synthesized detection is marked and sits between its citations.
+    gap = next(s for s in doc["streets"] if s["text"] == "59")
+    assert gap["via"] == "adjacency-gap" and gap["cited_by"] == ["27", "57", "61"]
+    centre = sum(p[0] for p in gap["polygon"]) / 4
+    assert 2000.0 <= centre <= 2100.0
+    # The relabelled detection is marked with its evidence.
+    fixed = next(s for s in doc["streets"] if s["text"] == "22")
+    assert fixed["via"] == "adjacency-relabel" and "21" in fixed["cited_by"]
+    # Provenance and the untouched original both survive.
+    assert len(doc["assignment_repairs"]) == len(repairs)
+    original = json.loads((volume / "raw" / "p0.keymap-raw.json").read_text())
+    assert [s["text"] for s in original["streets"]].count("2") == 2
+
+    # Re-running must not overwrite the true original with a repaired copy.
+    repair_volume(volume)
+    original_again = json.loads((volume / "raw" / "p0.keymap-raw.json").read_text())
+    assert original_again == original
+
+
+def test_repair_volume_is_a_no_op_without_adjacency(tmp_path):
+    from mapsnap.keymap.adjacency_assign import repair_volume
+
+    raw = tmp_path / "raw"
+    raw.mkdir()
+    (raw / "p0.keymap.json").write_text(json.dumps(keymap_doc([("2", 1.0, 1.0)])))
+    assert repair_volume(tmp_path) == []
+    assert not (raw / "p0.keymap-raw.json").exists()
+
+
+def test_dry_run_writes_nothing(tmp_path):
+    from mapsnap.keymap.adjacency_assign import repair_volume
+
+    volume = write_volume(
+        tmp_path,
+        entries=[
+            ("2", 100.0, 100.0),
+            ("2", 1000.0, 1000.0),
+            ("21", 1100.0, 1000.0),
+            ("28", 900.0, 1000.0),
+            ("29", 1000.0, 1100.0),
+        ],
+        adjacency=[["p22", "p21"], ["p22", "p28"], ["p22", "p29"]],
+        pages=["2", "21", "22", "28", "29"],
+    )
+    before = (volume / "raw" / "p0.keymap.json").read_text()
+    assert repair_volume(volume, dry_run=True)
+    assert (volume / "raw" / "p0.keymap.json").read_text() == before
+    assert not (volume / "raw" / "p0.keymap-raw.json").exists()

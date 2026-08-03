@@ -19,6 +19,13 @@ its key-map neighborhood; that needs three sidecars next to the (raw) key-map im
   * ``<stem>.regions.panels.json`` — the colored block polygon around each page number
     (``mapsnap.keymap.page_regions``), so a page's key-map neighborhood is its own block.
 
+Between the first and the rest, the page-number assignments are repaired against the volume's
+printed adjacency graph (``mapsnap.keymap.adjacency_assign``, issue #213): a number misread as a
+shorter one and a page whose number never read at all are both settled by which pages cite it in
+their margins. The repaired detections BECOME ``<stem>.keymap.json`` (the original is kept as
+``<stem>.keymap-raw.json``), so the corrections flow into the region segmentation below and into
+every downstream consumer of the key map.
+
 They are built in that order for a reason: ``<stem>.keymap.json`` is what identifies a page as a
 key map, and the georef step reads it to decide whether to refit the corners with a full 6-DOF
 affine. Detecting the page numbers after georeferencing would leave a first run with the plain
@@ -32,6 +39,7 @@ import sys
 from collections.abc import Iterable
 from pathlib import Path
 
+from mapsnap.keymap.adjacency_assign import repair_volume
 from mapsnap.keymap.fit_keymap import volume_page_keys
 from mapsnap.keymap.records import keymap_path, page_key_sort
 from mapsnap.utils import default_centerlines, run_cmd
@@ -132,6 +140,14 @@ def main() -> None:
         action="store_true",
         help="Skip the key-map OCR pass for images that already have a .streets.json output.",
     )
+    parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        help=(
+            "Report the adjacency-driven page-number repairs and stop, writing "
+            "nothing (the detection pass still runs)."
+        ),
+    )
     args = parser.parse_args()
 
     images = [Path(image) for image in args.images]
@@ -173,7 +189,26 @@ def main() -> None:
         ]
     )
 
-    # 2. Georeference each key map from its own street labels, exactly like a regular page, so the
+    # 2. Repair the page-number assignments against the printed adjacency graph
+    #    (#213): a number misread as a shorter one (Detroit's 22 read as "2"),
+    #    and a page whose number never read at all, are both settled by which
+    #    pages cite it in their margins. Runs here, before the regions are
+    #    segmented, so the corrected numbers SEED the segmentation -- and it
+    #    reads only <stem>.keymap.json, so a poor segmentation can never
+    #    corrupt a page number. A volume with no adjacency.json is a no-op.
+    volume = keymap_volume_dir(images[0])
+    repairs = repair_volume(volume, dry_run=args.dry_run)
+    for repair in repairs:
+        print(f"  assignment repair: {repair.describe()}", file=sys.stderr)
+    print(
+        f"{len(repairs)} assignment repair(s)"
+        + (" (dry run, nothing written)" if args.dry_run else ""),
+        file=sys.stderr,
+    )
+    if args.dry_run:
+        return
+
+    # 3. Georeference each key map from its own street labels, exactly like a regular page, so the
     #    downstream --keymap flag has a <stem>.georef.json to read. OCR runs at a key-map-
     #    appropriate detector floor and (by default) tiles the oversized sheet at native
     #    resolution; georef must be told to geocode key maps, which it skips by default for a page
@@ -203,7 +238,7 @@ def main() -> None:
         ]
     )
 
-    # 3. Segment the colored block around each page number (one key map at a time).
+    # 4. Segment the colored block around each page number (one key map at a time).
     for image in images:
         run_cmd(
             [

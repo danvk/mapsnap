@@ -630,3 +630,115 @@ def plan_volume_repairs(
             placements.setdefault(sheet.sheet, {})[repair.new] = point
     repairs.extend(plan_cross_sheet_repairs(sheet_panels, mutual, one_sided, splits))
     return repairs, placements
+
+
+RAW_SUFFIX = ".keymap-raw.json"
+"""Where the pre-repair detections are preserved, once per sheet.
+
+The repaired file BECOMES the key map (that is the point -- better numbers
+must drive region segmentation and OCR restriction downstream), so the
+original is kept beside it for inspection. Written only if absent, so
+re-running the repair never overwrites the true original with a repaired one.
+"""
+
+
+def synthetic_detection(
+    key: str, point: tuple[float, float], pitch: float, repair: Repair
+) -> dict:
+    """A detection record for a page the sheet never printed a readable number for.
+
+    Shaped like a CRNN detection so every existing reader (load_seeds,
+    load_detections, the debugger) treats it as one, with ``via`` marking its
+    provenance. The box is a nominal glyph-sized square at the estimated spot:
+    page_regions only uses a seed's box to pick the colour block under it, and
+    the world position downstream comes from the box centre.
+    """
+    half = max(8.0, pitch * 0.06)
+    x, y = point
+    return {
+        "polygon": [
+            [int(x - half), int(y - half)],
+            [int(x + half), int(y - half)],
+            [int(x + half), int(y + half)],
+            [int(x - half), int(y + half)],
+        ],
+        "text": key,
+        "confidence": 0.0,
+        "angle": 0,
+        "long_side": round(2 * half, 1),
+        "short_side": round(2 * half, 1),
+        "dir_pix": 0.0,
+        "via": "adjacency-gap",
+        "support": round(repair.support, 2),
+        "cited_by": list(repair.evidence),
+    }
+
+
+def apply_repairs(
+    volume: Path,
+    repairs: list[Repair],
+    placements: dict[str, dict[str, tuple[float, float]]],
+) -> dict[str, int]:
+    """Rewrite each sheet's keymap.json with its repairs; return per-sheet counts.
+
+    The repaired detections become the key map. The pre-repair file is copied
+    to ``<stem>.keymap-raw.json`` once, and a ``assignment_repairs`` array
+    records every change with its evidence so the reasoning survives in the
+    artifact.
+    """
+    by_sheet: dict[str, list[Repair]] = {}
+    for repair in repairs:
+        by_sheet.setdefault(repair.sheet, []).append(repair)
+
+    counts: dict[str, int] = {}
+    for stem, sheet_repairs in sorted(by_sheet.items()):
+        path = volume / "raw" / f"{stem}.keymap.json"
+        if not path.exists():
+            continue
+        doc = json.loads(path.read_text())
+        streets = doc.get("streets", [])
+        raw_path = volume / "raw" / f"{stem}{RAW_SUFFIX}"
+        if not raw_path.exists():
+            raw_path.write_text(json.dumps(doc, indent=2))
+
+        pitch = page_pitch(detection_centers(streets))
+        stripped: list[int] = []
+        for repair in sheet_repairs:
+            if repair.index is None:
+                point = placements.get(stem, {}).get(repair.new or "")
+                if point is None or repair.new is None:
+                    continue
+                streets.append(synthetic_detection(repair.new, point, pitch, repair))
+            elif repair.new is None:
+                stripped.append(repair.index)
+            elif 0 <= repair.index < len(streets):
+                streets[repair.index]["text"] = repair.new
+                streets[repair.index]["via"] = "adjacency-relabel"
+                streets[repair.index]["cited_by"] = list(repair.evidence)
+        for index in sorted(stripped, reverse=True):
+            if 0 <= index < len(streets):
+                del streets[index]
+
+        doc["streets"] = streets
+        doc.setdefault("assignment_repairs", []).extend(
+            {
+                "index": repair.index,
+                "old": repair.old,
+                "new": repair.new,
+                "reason": repair.reason,
+                "support": round(repair.support, 2),
+                "evidence": list(repair.evidence),
+            }
+            for repair in sheet_repairs
+        )
+        path.write_text(json.dumps(doc, indent=2))
+        counts[stem] = len(sheet_repairs)
+    return counts
+
+
+def repair_volume(volume: Path, dry_run: bool = False) -> list[Repair]:
+    """Plan (and unless ``dry_run``, apply) a volume's assignment repairs."""
+    repairs, placements = plan_volume_repairs(volume)
+    if repairs and not dry_run:
+        apply_repairs(volume, repairs, placements)
+    return repairs
