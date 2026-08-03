@@ -326,6 +326,7 @@ def plan_gap_repairs(
     mutual: dict[str, set[str]],
     one_sided: dict[str, set[str]],
     volume_keys: set[str],
+    missing_keys: set[str] | None = None,
 ) -> list[Repair]:
     """Propose a location for each missing key from the pages that cite it.
 
@@ -335,16 +336,24 @@ def plan_gap_repairs(
     estimate. Requires GAP_MIN_MUTUAL mutual citations and GAP_MIN_SUPPORT in
     total, so a page vouched for only by one-sided claims is never placed.
 
+    ``missing_keys`` narrows the candidates to the volume-wide shortfall. A
+    volume's key maps split the city between them, so a page already drawn on
+    another sheet is not missing at all: filling it here anyway put Brooklyn's
+    9 and 22 on the wrong half, 6970 ft and 1079 ft from truth, while correct
+    copies sat on the other sheet. Absent the argument every key the sheet
+    lacks is fair game, which is right for a single-sheet volume.
+
     The vouching panel indices ride along in ``evidence_indices`` so the caller
     can compute the position and apply its own spatial sanity check.
     """
     assigned = set(sheet.labels)
+    wanted = volume_keys if missing_keys is None else volume_keys & missing_keys
     panels_by_label: dict[str, list[int]] = {}
     for index, label in enumerate(sheet.labels):
         panels_by_label.setdefault(label, []).append(index)
 
     repairs: list[Repair] = []
-    for key in sorted(key for key in volume_keys if key not in assigned):
+    for key in sorted(key for key in wanted if key not in assigned):
         strong = sorted(mutual.get(key, set()) & assigned)
         weak = sorted((one_sided.get(key, set()) - mutual.get(key, set())) & assigned)
         score = len(strong) + ONE_SIDED_WEIGHT * len(weak)
@@ -370,6 +379,23 @@ def plan_gap_repairs(
             )
         )
     return repairs
+
+
+def volume_shortfall(
+    sheets: list[SheetNumbers], volume_keys: set[str], splits: dict[str, int]
+) -> set[str]:
+    """Keys the volume's key maps draw fewer times than the page deserves.
+
+    Counted across every sheet, because a volume's key maps divide the city
+    between them and a page drawn on one is not missing from the volume. A
+    split page is drawn once per panel, so its expected count is its panel
+    count rather than one.
+    """
+    placed: dict[str, int] = {}
+    for sheet in sheets:
+        for label in sheet.labels:
+            placed[label] = placed.get(label, 0) + 1
+    return {key for key in volume_keys if placed.get(key, 0) < splits.get(key, 1)}
 
 
 # --- volume-level inputs ----------------------------------------------------
@@ -611,23 +637,34 @@ def plan_volume_repairs(
 
     repairs: list[Repair] = []
     placements: dict[str, dict[str, tuple[float, float]]] = {}
+    # Gap recovery must see the relabels: a key just recovered from a misread
+    # panel is no longer missing, and proposing it again would place the same
+    # page twice (Detroit's 65 was found both ways). So relabel every sheet
+    # first, then take stock of what the volume is still short of.
+    repaired_sheets: list[SheetNumbers] = []
     for sheet in sheet_panels:
         relabels = plan_sheet_repairs(sheet, mutual, one_sided, volume_keys)
         repairs.extend(relabels)
-        # Gap recovery must see the relabels: a key just recovered from a
-        # misread panel is no longer missing, and proposing it again would
-        # place the same page twice (Detroit's 65 was found both ways).
         repaired = SheetNumbers(sheet.sheet, list(sheet.labels), sheet.contacts)
         for relabel in relabels:
             if relabel.index is not None and relabel.new is not None:
                 repaired.labels[relabel.index] = relabel.new
-        centers, pitch = geometry[sheet.sheet]
-        for repair in plan_gap_repairs(repaired, mutual, one_sided, volume_keys):
+        repaired_sheets.append(repaired)
+
+    missing = volume_shortfall(repaired_sheets, volume_keys, splits)
+    for repaired in repaired_sheets:
+        centers, pitch = geometry[repaired.sheet]
+        for repair in plan_gap_repairs(
+            repaired, mutual, one_sided, volume_keys, missing
+        ):
             point = gap_placement(repair, centers, pitch)
             if point is None or repair.new is None:
                 continue
             repairs.append(repair)
-            placements.setdefault(sheet.sheet, {})[repair.new] = point
+            placements.setdefault(repaired.sheet, {})[repair.new] = point
+            # One fill per shortfall: two sheets that both border the page
+            # must not each grow a copy of it.
+            missing.discard(repair.new)
     repairs.extend(plan_cross_sheet_repairs(sheet_panels, mutual, one_sided, splits))
     return repairs, placements
 

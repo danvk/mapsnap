@@ -14,6 +14,7 @@ from mapsnap.keymap.adjacency_assign import (
     proximity_graph,
     split_multiplicity,
     support_for,
+    volume_shortfall,
 )
 
 
@@ -162,6 +163,30 @@ def test_gap_recovery_never_places_on_one_sided_claims_alone():
     panels = sheet(labels=labels, contacts=[])
     one_sided = graph([("59", label) for label in labels])
     assert plan_gap_repairs(panels, {}, one_sided, {*labels, "59"}) == []
+
+
+def test_gap_recovery_skips_a_key_another_sheet_already_carries():
+    # Brooklyn's two key maps split the city. Page 9 is drawn on the other
+    # sheet, so the pages bordering it here vouch for a page that is not
+    # missing: filling it anyway put 9 on the wrong half, 6970 ft from truth.
+    panels = sheet(labels=["27", "57", "61", "40"], contacts=[])
+    mutual = graph([("9", "27"), ("9", "40")])
+    volume_keys = {"27", "57", "61", "40", "9"}
+    assert plan_gap_repairs(panels, mutual, {}, volume_keys, {"9"})[0].new == "9"
+    assert plan_gap_repairs(panels, mutual, {}, volume_keys, set()) == []
+
+
+def test_volume_shortfall_counts_across_every_sheet():
+    sheets = [
+        SheetNumbers("p0", ["1", "2"], set()),
+        SheetNumbers("p0b", ["3", "4"], set()),
+    ]
+    keys = {"1", "2", "3", "4", "5"}
+    # 3 and 4 live on the other sheet, so only 5 is genuinely missing.
+    assert volume_shortfall(sheets, keys, {}) == {"5"}
+    # A page split into three panels is expected three times, so it is short
+    # while only one is drawn.
+    assert volume_shortfall(sheets, keys, {"1": 3}) == {"1", "5"}
 
 
 def test_gap_placement_averages_the_mutual_citations():
