@@ -43,6 +43,31 @@ def expand_images(patterns: list[str]) -> list[str]:
     return list(seen)
 
 
+def volume_craft_images(
+    volume: Path, keymap_keys: list[str] | None = None
+) -> list[str]:
+    """Every image in a volume that some later step recognizes inside.
+
+    The union matters: ``mapsnap ocr`` reads the *effective* pages (split
+    panels supersede their parent), while ``mapsnap adjacency`` reads the
+    *parent* sheets, because the printed margin references live on the parent
+    even when panels supersede it downstream. Crafting only one of the two
+    lists leaves a split volume's parents (Champaign: p2, p4, p13, p20, p21,
+    p23) without boxes, and adjacency then refuses to run.
+    """
+    from mapsnap.page_adjacency import volume_page_images
+    from mapsnap.utils import list_pages
+
+    seen: dict[str, None] = {}
+    for path in [*list_pages(volume), *volume_page_images(volume)]:
+        seen.setdefault(str(path), None)
+    for key in keymap_keys or []:
+        raw = volume / "raw" / f"{key}.jpg"
+        if raw.exists():
+            seen.setdefault(str(raw), None)
+    return list(seen)
+
+
 def pending_images(images: list[str], resume: bool) -> list[str]:
     """Images still needing CRAFT: all of them, or those without fresh boxes."""
     if not resume:

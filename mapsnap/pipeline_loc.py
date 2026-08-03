@@ -5,6 +5,7 @@ import glob
 import sys
 from pathlib import Path
 
+from mapsnap.craft import volume_craft_images
 from mapsnap.keymap.records import recorded_keymap_keys
 from mapsnap.utils import Step, list_pages, run_cmd, write_run_record
 
@@ -114,9 +115,15 @@ def main() -> None:
     # passes and ocr all recognize inside these boxes and none of them run
     # detection themselves.
     raw_keymaps = [str(dir_path / "raw" / f"{key}.jpg") for key in keymap_keys]
-    craft_images = [str(p) for p in list_pages(dir_path)] + raw_keymaps
     with step("craft"):
-        run_cmd(["mapsnap", "craft", "--resume", *craft_images])
+        run_cmd(
+            [
+                "mapsnap",
+                "craft",
+                "--resume",
+                *volume_craft_images(dir_path, keymap_keys),
+            ]
+        )
 
     # Printed adjacent-sheet graph. Runs BEFORE the key-map step so its mutual
     # edges can repair key-map page-number assignments (#213); key-map sheets

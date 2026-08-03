@@ -62,3 +62,17 @@ def test_require_boxes_exits_with_the_craft_command(tmp_path):
     # With boxes present it is a no-op.
     Path(boxes_path(str(image))).write_text(json.dumps({"boxes": []}))
     require_boxes([str(image)])
+
+
+def test_volume_craft_images_covers_panels_and_split_parents(tmp_path):
+    # ocr reads panels; adjacency reads the parent sheet. Both need boxes.
+    for name in ("p1.jpg", "p2.jpg", "p2__1.jpg", "p2__2.jpg"):
+        (tmp_path / name).write_bytes(b"")
+    (tmp_path / "p2.panels.json").write_text(json.dumps({"panels": [[], []]}))
+    raw = tmp_path / "raw"
+    raw.mkdir()
+    (raw / "p0.jpg").write_bytes(b"")
+    from mapsnap.craft import volume_craft_images
+
+    stems = {Path(p).stem for p in volume_craft_images(tmp_path, ["p0"])}
+    assert {"p1", "p2", "p2__1", "p2__2", "p0"} <= stems

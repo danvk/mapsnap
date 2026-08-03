@@ -36,6 +36,7 @@ import argparse
 import sys
 from pathlib import Path
 
+from mapsnap.craft import volume_craft_images
 from mapsnap.keymap.records import recorded_keymap_keys
 from mapsnap.utils import Step, list_pages, run_cmd
 
@@ -79,8 +80,9 @@ def rerun_volume(volume: Path, tag: str, force: bool) -> None:
     # CRAFT once for adjacency, the key-map passes and ocr (#132). --resume
     # keeps existing boxes, which is the whole point of a re-run.
     with step(f"rerun-{tag}-craft"):
-        images = [str(p) for p in list_pages(volume)] + raw_keymaps
-        run_cmd(["mapsnap", "craft", "--resume", *images])
+        run_cmd(
+            ["mapsnap", "craft", "--resume", *volume_craft_images(volume, keymap_keys)]
+        )
 
     # Adjacency before the key-map build so its mutual edges can repair
     # key-map page-number assignments (#213).
