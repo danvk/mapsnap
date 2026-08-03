@@ -45,6 +45,7 @@ from tqdm import tqdm
 
 from mapsnap.detect_text import craft_hint
 from mapsnap.keymap.locate import page_key, page_number
+from mapsnap.keymap.records import recorded_keymap_keys
 from mapsnap.utils import image_stem
 
 # A detection only counts as an adjacency claim when it sits in the outer EDGE_BAND of the
@@ -96,11 +97,20 @@ def volume_page_images(volume: Path) -> list[Path]:
     live on the parent; the parent is scanned even when panels supersede it for OCR. Key-map
     sheets are excluded: their faces are covered in page numbers, which would all read as
     spurious claims.
+
+    Key maps are recognised either from ``keymaps.json`` (written by
+    ``mapsnap keymap-detect``) or from an existing ``<stem>.keymap.json``
+    sidecar. Both are needed: adjacency now runs BEFORE ``mapsnap keymap``
+    (#132/#213), so the sidecar does not exist yet on a fresh volume, while
+    volumes processed under the old order have no ``keymaps.json``.
     """
+    recorded = recorded_keymap_keys(volume)
     images = []
     for image in sorted(volume.glob("p*.jpg")):
         stem = image_stem(str(image))
         if "__" in stem:
+            continue
+        if stem in recorded:
             continue
         if (volume / f"{stem}.keymap.json").exists() or (
             volume / "raw" / f"{stem}.keymap.json"

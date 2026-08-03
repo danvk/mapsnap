@@ -5,6 +5,7 @@ mapsnap.detect_text (so the debugger app loads them); these helpers build that s
 parse the volume's valid page-number set.
 """
 
+import json
 import re
 from pathlib import Path
 
@@ -76,3 +77,32 @@ def detection_record(bbox: list[list[float]], text: str, confidence: float) -> d
         "short_side": round(min(sides), 1),
         "dir_pix": round(float(np.arctan2(long_vec[1], long_vec[0])) % np.pi, 4),
     }
+
+
+KEYMAPS_FILENAME = "keymaps.json"
+
+
+def write_keymaps_record(volume: Path, keys: list[str]) -> Path:
+    """Record the volume's identified key-map page keys in ``keymaps.json``.
+
+    Consumers that must skip key-map sheets used to test for
+    ``<stem>.keymap.json``, which only exists once ``mapsnap keymap`` has run.
+    Since ``mapsnap adjacency`` now runs BEFORE that (#132/#213), the
+    identification is persisted here, right where ``keymap-detect`` computes it.
+    Lives in this module rather than ``identify`` so light consumers do not
+    import torch to read one JSON file.
+    """
+    path = volume / KEYMAPS_FILENAME
+    path.write_text(json.dumps({"keys": sorted(keys)}, indent=2))
+    return path
+
+
+def recorded_keymap_keys(volume: Path) -> set[str]:
+    """Key-map page keys from ``keymaps.json``, or empty when absent/unreadable."""
+    path = volume / KEYMAPS_FILENAME
+    if not path.exists():
+        return set()
+    try:
+        return {str(key) for key in json.loads(path.read_text()).get("keys", [])}
+    except (OSError, ValueError):
+        return set()

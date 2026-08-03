@@ -249,6 +249,24 @@ def test_volume_page_images_skips_splits_and_keymaps(tmp_path: Path):
     assert names == ["p1.jpg", "p2.jpg"]
 
 
+def test_volume_page_images_skips_keymaps_from_keymaps_json(tmp_path: Path):
+    # Adjacency now runs BEFORE `mapsnap keymap`, so no <stem>.keymap.json
+    # sidecar exists yet; keymap-detect's keymaps.json is the marker.
+    import json as json_module
+
+    for name in ["p0.jpg", "p1.jpg", "p2.jpg"]:
+        (tmp_path / name).write_bytes(b"")
+    (tmp_path / "keymaps.json").write_text(json_module.dumps({"keys": ["p0"]}))
+    assert [p.name for p in volume_page_images(tmp_path)] == ["p1.jpg", "p2.jpg"]
+    # An absent or unreadable keymaps.json falls back to scanning everything.
+    (tmp_path / "keymaps.json").write_text("not json")
+    assert [p.name for p in volume_page_images(tmp_path)] == [
+        "p0.jpg",
+        "p1.jpg",
+        "p2.jpg",
+    ]
+
+
 def test_is_text_veto():
     from mapsnap.page_adjacency import is_text_veto
 
