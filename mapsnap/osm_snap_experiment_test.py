@@ -266,6 +266,15 @@ def test_candidates_record_fresh_tracks_fit_changes():
     hinted = {**base, "status": "ok", "contradiction_mtime": 555}
     assert candidates_record_fresh(hinted, make_unit("fitted"), 111, hint_mtime=555)
     assert not candidates_record_fresh(hinted, make_unit("fitted"), 111, hint_mtime=777)
+    # The key map's sidecars moved (the #213 assignment repair rewrites them
+    # without touching any page's georef): the cached search centers are stale.
+    keyed = {**hinted, "keymap_mtime": 999}
+    assert candidates_record_fresh(
+        keyed, make_unit("fitted"), 111, hint_mtime=555, keymap_mtime=999
+    )
+    assert not candidates_record_fresh(
+        keyed, make_unit("fitted"), 111, hint_mtime=555, keymap_mtime=1000
+    )
 
 
 def test_init_worker_indexes_pages_and_panels(monkeypatch, tmp_path):

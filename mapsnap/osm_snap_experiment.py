@@ -405,7 +405,11 @@ def georef_variant_mtime(volume: Path, stem: str) -> int | None:
 
 
 def candidates_record_fresh(
-    record: dict, unit: PageUnit, mtime: int | None, hint_mtime: int | None = None
+    record: dict,
+    unit: PageUnit,
+    mtime: int | None,
+    hint_mtime: int | None = None,
+    keymap_mtime: int | None = None,
 ) -> bool:
     """Whether a cached candidates record still matches the page's fit state.
 
@@ -420,6 +424,13 @@ def candidates_record_fresh(
     this key the second snap pass reuses the first pass's candidates —
     generated before the hint (or the stamp-consistency gate) existed — and
     re-adopts the very alias the gate demoted (KC p551).
+
+    ``keymap_mtime`` covers the key map's own sidecars, which supply every
+    page's search centers, radius and region rings. The adjacency assignment
+    repair (#213) rewrites them without touching any page's georef, so a
+    page that just gained a key-map location — or had a wrong one corrected —
+    would otherwise keep candidates searched around the old place, or none at
+    all.
     """
     if record.get("status") != "ok":
         return False
@@ -427,7 +438,27 @@ def candidates_record_fresh(
         record.get("fit_state") == unit.fit_state
         and record.get("georef_mtime") == mtime
         and record.get("contradiction_mtime") == hint_mtime
+        and record.get("keymap_mtime") == keymap_mtime
     )
+
+
+def keymap_sidecar_mtime(volume: Path) -> int | None:
+    """Newest mtime across the volume's key-map sidecars, or None when absent.
+
+    One number for the whole volume, since every page's coarse location comes
+    from the same key maps: any change to the numbers or the regions can move
+    any page's search centers.
+    """
+    raw = volume / "raw"
+    if not raw.is_dir():
+        return None
+    mtimes = [
+        int(path.stat().st_mtime)
+        for pattern in ("*.keymap.json", "*.regions.panels.json")
+        for path in raw.glob(pattern)
+        if ".truth." not in path.name
+    ]
+    return max(mtimes) if mtimes else None
 
 
 def contradiction_hint_mtime(volume: Path, stem: str) -> int | None:
@@ -778,6 +809,7 @@ def page_record(vctx: VolumeContext, unit: PageUnit) -> dict:
         "status": status,
         "fit_state": unit.fit_state,
         "georef_mtime": georef_variant_mtime(vctx.volume, unit.stem),
+        "keymap_mtime": keymap_sidecar_mtime(vctx.volume),
         "contradiction_mtime": contradiction_hint_mtime(vctx.volume, unit.stem),
         "width": unit.width,
         "height": unit.height,
@@ -1047,6 +1079,7 @@ def cmd_candidates(
     vis_dir = out_dir / "vis"
     if vis:
         vis_dir.mkdir(exist_ok=True)
+    keymap_mtime = keymap_sidecar_mtime(volume)
     stale = [
         unit
         for unit in targets
@@ -1058,6 +1091,7 @@ def cmd_candidates(
             unit,
             georef_variant_mtime(volume, unit.stem),
             contradiction_hint_mtime(volume, unit.stem),
+            keymap_mtime,
         )
     ]
     by_stem = {unit.stem: unit for unit in targets}
