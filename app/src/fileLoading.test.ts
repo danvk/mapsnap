@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { pageStem, parseDroppedJson } from './fileLoading';
+import { isKeymapJson, pageStem, parseDroppedJson } from './fileLoading';
 
 const fallback = { width: 800, height: 600 };
 
@@ -192,5 +192,22 @@ describe('pageStem', () => {
 
   it('matches split-panel stems', () => {
     expect(pageStem('p86__2.jpg')).toBe('p86__2');
+  });
+});
+
+describe('isKeymapJson', () => {
+  it('recognizes a key map’s own sidecars', () => {
+    expect(isKeymapJson('data/vol/raw/p0__1.keymap.json')).toBe(true);
+    expect(isKeymapJson('p0.keymap-raw.json')).toBe(true);
+    expect(isKeymapJson('/abs/raw/p1b.regions.panels.json')).toBe(true);
+  });
+
+  it('does not mistake a page’s own sidecars for a key map', () => {
+    // A page's streets.json parses identically to a key map's detections, so
+    // this predicate is the only thing separating them.
+    expect(isKeymapJson('data/vol/p49.streets.json')).toBe(false);
+    expect(isKeymapJson('p49.georef.json')).toBe(false);
+    expect(isKeymapJson('p49.panels.json')).toBe(false);
+    expect(isKeymapJson('adjacency.json')).toBe(false);
   });
 });

@@ -242,6 +242,11 @@ def test_synthetic_detection_reads_as_a_detection_and_declares_its_provenance():
     ys = [point[1] for point in detection["polygon"]]
     assert (sum(xs) / 4, sum(ys) / 4) == (500.0, 400.0)
     assert max(xs) - min(xs) == max(ys) - min(ys) == 24
+    # A tightly-pitched sheet still gets a box the debugger's short-side filter
+    # will show, rather than one scaled down into invisibility.
+    tight = synthetic_detection("59", (500.0, 400.0), pitch=60.0, repair=repair)
+    sides = [point[0] for point in tight["polygon"]]
+    assert max(sides) - min(sides) == 20
 
 
 def test_gap_placement_discards_a_far_flung_one_sided_citation():

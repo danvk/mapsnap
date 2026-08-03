@@ -690,6 +690,13 @@ on a different scale (``support``, roughly 1.5-5), so it is not a stand-in.
 What is left is a deliberately low placeholder: low enough to sort below every
 real read, non-zero so the debugger draws it (a 0 renders as invisible)."""
 
+MIN_GAP_SIDE = 20.0
+"""Smallest square a synthesized gap detection may be drawn as, in key-map pixels.
+
+Matches the debugger's default minimum-short-side filter, so a gap detection is
+never hidden by it. Only affects display and the colour-block sample page_regions
+takes underneath -- both indifferent to a few pixels on a sheet thousands wide."""
+
 
 def synthetic_detection(
     key: str, point: tuple[float, float], pitch: float, repair: Repair
@@ -701,8 +708,12 @@ def synthetic_detection(
     provenance. The box is a nominal glyph-sized square at the estimated spot:
     page_regions only uses a seed's box to pick the colour block under it, and
     the world position downstream comes from the box centre.
+
+    The floor keeps the box at least MIN_GAP_SIDE across, since the debugger
+    hides anything whose short side falls under its default slider -- a
+    tightly-pitched sheet would otherwise synthesize invisible boxes.
     """
-    half = max(8.0, pitch * 0.06)
+    half = max(MIN_GAP_SIDE / 2, pitch * 0.06)
     x, y = point
     return {
         "polygon": [
