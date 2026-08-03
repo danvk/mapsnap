@@ -472,6 +472,31 @@ def printed_scale_verdicts(
     return verdicts
 
 
+NOTE_OVERRIDE_MIN_GCPS = 4
+"""Inlier GCPs required before a printed note may overrule a scattered-scale demotion.
+
+A note confirms a page's SCALE; it says nothing about its POSE. Columbus p297
+is the case that motivated this: a 200 ft district sheet whose fit sits at
+0.84x its truth scale -- genuinely consistent with the printed note, so the
+note check confirmed it -- but 621 ft wrong in position, published off two
+GCPs and worth 13.9 points of land. Where the volume's own rung structure
+calls a fit a scattered outlier, the note removes the only check that was
+catching it, so the pose has to stand on its own evidence instead. Two GCPs
+exactly determine a similarity; four leave it over-determined. Pages whose
+scale sits on a recognised rung never reach this gate, so across the twelve
+truth volumes it is exercised by exactly one page (p297, 2 GCPs).
+"""
+
+
+def inlier_gcp_count(georef_path: str) -> int:
+    """Inlier intersection GCPs in a written georef sidecar (0 if absent/unreadable)."""
+    try:
+        doc = json.loads(Path(georef_path).read_text())
+    except (OSError, ValueError):
+        return 0
+    return sum(1 for gcp in doc.get("intersections", []) if gcp.get("inlier"))
+
+
 def is_scale_outlier(ratio: float) -> bool:
     """Whether a fitted-scale / reference-scale ratio should be dropped as a scale outlier.
 
@@ -3923,7 +3948,38 @@ def main() -> None:
             if note is not None:
                 verdict, note_ratio = note
                 if verdict == "keep":
-                    continue  # the printed note confirms this scale outright
+                    if not is_scale_outlier(px_per_ft / ref_scale_px_per_ft):
+                        continue  # scale agrees with the volume's rungs too
+                    # The note confirms the scale of a page the volume's own
+                    # rungs call a scattered outlier, so it is overruling the
+                    # only check on this fit. Scale is not pose: require the
+                    # fit to be over-determined by its own GCPs before the
+                    # note may publish it (see NOTE_OVERRIDE_MIN_GCPS).
+                    _, out_path, _ = derive_paths(img_path)
+                    n_gcps = inlier_gcp_count(out_path)
+                    if n_gcps >= NOTE_OVERRIDE_MIN_GCPS:
+                        print(
+                            f"Keeping scale outlier {img_path}: {px_per_ft:.4f} px/ft "
+                            f"confirmed by its PRINTED note ({note_ratio:.2f}x) on "
+                            f"{n_gcps} inlier GCPs",
+                            file=sys.stderr,
+                        )
+                        continue
+                    misscale_path = out_path.replace(
+                        ".georef.json", ".georef-misscale.json"
+                    )
+                    if os.path.exists(out_path):
+                        os.rename(out_path, misscale_path)
+                        n_success -= 1
+                        n_dropped += 1
+                        print(
+                            f"Dropped scale outlier {img_path}: {px_per_ft:.4f} px/ft "
+                            f"matches its PRINTED note ({note_ratio:.2f}x) but only "
+                            f"{n_gcps} inlier GCP(s) support the pose "
+                            f"-> {misscale_path}",
+                            file=sys.stderr,
+                        )
+                    continue
                 _, out_path, _ = derive_paths(img_path)
                 misscale_path = out_path.replace(
                     ".georef.json", ".georef-misscale.json"
