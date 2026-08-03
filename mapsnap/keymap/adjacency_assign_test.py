@@ -2,11 +2,12 @@ import json
 
 from mapsnap.keymap.adjacency_assign import (
     Repair,
-    SheetPanels,
+    SheetNumbers,
     adjacency_graphs,
+    detection_centers,
     digit_family,
     gap_placement,
-    panel_scale,
+    page_pitch,
     plan_cross_sheet_repairs,
     plan_gap_repairs,
     plan_sheet_repairs,
@@ -24,8 +25,8 @@ def graph(pairs: list[tuple[str, str]]) -> dict[str, set[str]]:
     return out
 
 
-def sheet(labels: list[str], contacts: list[tuple[int, int]]) -> SheetPanels:
-    return SheetPanels("p0", labels, {frozenset(pair) for pair in contacts})
+def sheet(labels: list[str], contacts: list[tuple[int, int]]) -> SheetNumbers:
+    return SheetNumbers("p0", labels, {frozenset(pair) for pair in contacts})
 
 
 def test_digit_family_covers_lost_digits():
@@ -118,8 +119,10 @@ def test_support_for_counts_mutual_and_weights_one_sided():
 def test_cross_sheet_strips_only_the_unsupported_copy():
     # Brooklyn: key 8 drawn on both sheets; only p0b's copy touches 8's
     # neighbours, so p0's copy is stripped.
-    first = SheetPanels("p0", ["8", "40"], {frozenset((0, 1))})
-    second = SheetPanels("p0b", ["8", "7", "9"], {frozenset((0, 1)), frozenset((0, 2))})
+    first = SheetNumbers("p0", ["8", "40"], {frozenset((0, 1))})
+    second = SheetNumbers(
+        "p0b", ["8", "7", "9"], {frozenset((0, 1)), frozenset((0, 2))}
+    )
     mutual = graph([("8", "7"), ("8", "9")])
     repairs = plan_cross_sheet_repairs([first, second], mutual, {})
     assert [(r.sheet, r.index, r.old, r.new) for r in repairs] == [("p0", 0, "8", None)]
@@ -127,8 +130,8 @@ def test_cross_sheet_strips_only_the_unsupported_copy():
 
 def test_cross_sheet_respects_split_multiplicity():
     # A page split into two panels is drawn twice on purpose.
-    first = SheetPanels("p0", ["8", "7"], {frozenset((0, 1))})
-    second = SheetPanels("p0b", ["8", "40"], set())
+    first = SheetNumbers("p0", ["8", "7"], {frozenset((0, 1))})
+    second = SheetNumbers("p0b", ["8", "40"], set())
     mutual = graph([("8", "7")])
     assert plan_cross_sheet_repairs([first, second], mutual, {}, {"8": 2}) == []
     # Beyond the expected multiplicity the asymmetry applies again.
@@ -215,19 +218,30 @@ def test_gap_placement_discards_a_far_flung_one_sided_citation():
     assert gap_placement(repair, centroids, scale=200.0) == (1000.0, 1000.0)
 
 
-def test_proximity_graph_joins_islands_within_a_few_region_widths():
-    # 100px squares: neighbours 150px apart are joined (Detroit's regions are
-    # islands separated by blank paper), one 900px away is not.
-    squares: list[list[list[float]]] = [
-        [[0.0, 0.0], [100.0, 0.0], [100.0, 100.0], [0.0, 100.0], [0.0, 0.0]],
-        [[150.0, 0.0], [250.0, 0.0], [250.0, 100.0], [150.0, 100.0], [150.0, 0.0]],
-        [[900.0, 0.0], [1000.0, 0.0], [1000.0, 100.0], [900.0, 100.0], [900.0, 0.0]],
+def test_page_pitch_and_proximity_use_the_printed_numbers():
+    # Four numbers 100px apart in a row, plus one far away: the pitch is the
+    # median nearest-neighbour step, and proximity spans 1.5 of them.
+    centers: list[tuple[float, float] | None] = [
+        (0.0, 0.0),
+        (100.0, 0.0),
+        (200.0, 0.0),
+        (900.0, 0.0),
     ]
-    assert panel_scale(squares) == 100.0
-    assert proximity_graph(squares) == {frozenset((0, 1))}
-    # Degenerate rings are skipped rather than crashing.
-    assert proximity_graph([[[0.0, 0.0], [1.0, 1.0]]]) == set()
-    assert panel_scale([]) == 0.0
+    assert page_pitch(centers) == 100.0
+    # Radius is 1.5 pitches (150 px): adjacent numbers pair up, the 200 px
+    # skip-one pair does not, and the far number joins nothing.
+    assert proximity_graph(centers) == {frozenset((0, 1)), frozenset((1, 2))}
+    # Detections with no usable polygon are skipped, not crashed on.
+    assert proximity_graph([None, None, (0.0, 0.0)]) == set()
+    assert page_pitch([(0.0, 0.0)]) == 0.0
+
+
+def test_detection_centers_from_polygons():
+    streets = [
+        {"polygon": [[0, 0], [10, 0], [10, 10], [0, 10]], "text": "7"},
+        {"polygon": [[0, 0]], "text": "8"},  # degenerate
+    ]
+    assert detection_centers(streets) == [(5.0, 5.0), None]
 
 
 def test_adjacency_graphs_and_split_multiplicity(tmp_path):

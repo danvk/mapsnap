@@ -19,8 +19,10 @@ strikingly asymmetric on exactly the cells that matter — Detroit's *missing*
 p22 carries three mutual edges (p21, p28, p29) while the *false* duplicate p2
 carries none.
 
-The rule in one line: a page's key-map region should sit among the regions of
-the pages that print its number in their margins.
+The rule in one line: a page's number should be printed among the numbers of
+the pages that cite it in their margins. Only the DETECTIONS are consulted --
+never the segmented regions -- so a poor segmentation cannot corrupt a page
+number, and the repair can run before page_regions and seed it.
 
 Three cell types, in decreasing order of evidence:
 
@@ -36,8 +38,8 @@ Three cell types, in decreasing order of evidence:
                 other's (Brooklyn's p8/p1/p5 each sit correctly on one sheet
                 and 1-1.8 km wrong on the other). Duplicates within one sheet
                 are the case above, and are relabelled rather than stripped.
-  gaps          A missing key is placed at the centroid of the regions whose
-                pages print its number, when enough of them do.
+  gaps          A missing key is placed at the centroid of the numbers whose
+                pages cite it, when enough of them do.
 
 Constraints inherited from #183's failed global-optimization experiments:
 adjacency never overrides a read that has its own support (its negative signal
@@ -54,8 +56,8 @@ import re
 from dataclasses import dataclass, field
 from pathlib import Path
 
-PROXIMITY_FACTOR = 2.0
-"""How many region-widths apart two key-map regions may be and still count as
+PROXIMITY_FACTOR = 1.5
+"""How many page-pitches apart two printed numbers may be and still count as
 neighbours (see proximity_graph)."""
 
 ONE_SIDED_WEIGHT = 0.25
@@ -112,8 +114,8 @@ class Repair:
 
 
 @dataclass
-class SheetPanels:
-    """One key-map sheet's labelled regions and their contact graph."""
+class SheetNumbers:
+    """One key-map sheet's page-number detections and which are near each other."""
 
     sheet: str
     labels: list[str]
@@ -159,13 +161,13 @@ def digit_family(text: str, keys: set[str]) -> set[str]:
 def support_for(
     index: int,
     key: str,
-    sheet: SheetPanels,
+    sheet: SheetNumbers,
     mutual: dict[str, set[str]],
     one_sided: dict[str, set[str]],
 ) -> tuple[float, tuple[str, ...]]:
     """How strongly the printed graph vouches for ``key`` sitting at ``index``.
 
-    Counts the page's mutual neighbours that own a region touching this one,
+    Counts the page's mutual neighbours printed near this number,
     plus a fractional credit for one-sided claims. Returns the score and the
     vouching page keys, which are carried into the repair record so a human
     can check the reasoning.
@@ -192,7 +194,7 @@ def mutual_count(neighbours: set[str], key: str, mutual: dict[str, set[str]]) ->
 
 
 def plan_sheet_repairs(
-    sheet: SheetPanels,
+    sheet: SheetNumbers,
     mutual: dict[str, set[str]],
     one_sided: dict[str, set[str]],
     volume_keys: set[str],
@@ -256,7 +258,7 @@ def plan_sheet_repairs(
 
 
 def plan_cross_sheet_repairs(
-    sheets: list[SheetPanels],
+    sheets: list[SheetNumbers],
     mutual: dict[str, set[str]],
     one_sided: dict[str, set[str]],
     split_counts: dict[str, int] | None = None,
@@ -320,7 +322,7 @@ def plan_cross_sheet_repairs(
 
 
 def plan_gap_repairs(
-    sheet: SheetPanels,
+    sheet: SheetNumbers,
     mutual: dict[str, set[str]],
     one_sided: dict[str, set[str]],
     volume_keys: set[str],
@@ -432,70 +434,65 @@ def split_multiplicity(volume: Path) -> dict[str, int]:
     return counts
 
 
-def panel_centroids(
-    panels: list[list[list[float]]],
-) -> list[tuple[float, float] | None]:
-    """Each region ring's centroid, or None for a degenerate ring."""
-    from shapely.geometry import Polygon
-
-    out: list[tuple[float, float] | None] = []
-    for ring in panels:
-        if len(ring) < 3:
-            out.append(None)
+def detection_centers(streets: list[dict]) -> list[tuple[float, float] | None]:
+    """Each page-number detection's centre, from its CRNN polygon."""
+    centers: list[tuple[float, float] | None] = []
+    for street in streets:
+        polygon = street.get("polygon") or []
+        if len(polygon) < 3:
+            centers.append(None)
             continue
-        polygon = Polygon([(float(x), float(y)) for x, y in ring])
-        if not polygon.is_valid:
-            polygon = polygon.buffer(0)
-        if polygon.is_empty:
-            out.append(None)
-            continue
-        out.append((polygon.centroid.x, polygon.centroid.y))
-    return out
+        centers.append(
+            (
+                sum(float(point[0]) for point in polygon) / len(polygon),
+                sum(float(point[1]) for point in polygon) / len(polygon),
+            )
+        )
+    return centers
 
 
-def panel_scale(panels: list[list[list[float]]]) -> float:
-    """Typical region width in key-map pixels (root of the median area)."""
-    from shapely.geometry import Polygon
+def page_pitch(centers: list[tuple[float, float] | None]) -> float:
+    """Typical spacing between neighbouring page numbers, in key-map pixels.
 
-    areas = []
-    for ring in panels:
-        if len(ring) < 3:
-            continue
-        polygon = Polygon([(float(x), float(y)) for x, y in ring])
-        if not polygon.is_valid:
-            polygon = polygon.buffer(0)
-        if not polygon.is_empty:
-            areas.append(polygon.area)
-    if not areas:
+    The median nearest-neighbour distance over the printed numbers: one page
+    step on this sheet, measured from the drawing rather than assumed (Detroit
+    320 px, Champaign 351, Brooklyn 580).
+    """
+    points = [point for point in centers if point is not None]
+    if len(points) < 3:
         return 0.0
-    areas.sort()
-    return math.sqrt(areas[len(areas) // 2])
+    nearest = sorted(
+        min(math.dist(point, other) for j, other in enumerate(points) if j != i)
+        for i, point in enumerate(points)
+    )
+    return nearest[len(nearest) // 2]
 
 
 def proximity_graph(
-    panels: list[list[list[float]]], factor: float = PROXIMITY_FACTOR
+    centers: list[tuple[float, float] | None], factor: float = PROXIMITY_FACTOR
 ) -> set[frozenset[int]]:
-    """Region pairs close enough to be plausible neighbours on the sheet.
+    """Detection pairs close enough to be plausible neighbours on the sheet.
 
-    Deliberately NOT polygon contact. Segmented key-map regions are islands,
-    not a mosaic -- Detroit's cover 18% of the sheet, so p65's block sits
-    ~180 px of blank paper from p34's and p40's and no contact tolerance that
-    also respects real separations will join them. Centroid distance within
-    ``factor`` region-widths is permissive by design: the *printed* graph does
-    the discriminating (a candidate still needs two mutual edges among these
-    neighbours), so proximity only has to avoid missing the true ones.
+    Distance between printed numbers, scaled by the sheet's own page pitch.
+    Deliberately permissive: the *printed* graph does the discriminating (a
+    candidate still needs two mutual edges among these neighbours), so this
+    only has to avoid missing true neighbours.
+
+    Region contact was tried first and is unusable -- segmented regions are
+    islands, not a mosaic (Detroit's cover 18% of the sheet), so p65's block
+    sits ~180 px of blank paper from p34's and p40's and no contact tolerance
+    that also respects real separations joins them.
     """
-    centroids = panel_centroids(panels)
-    scale = panel_scale(panels)
-    if scale <= 0:
+    pitch = page_pitch(centers)
+    if pitch <= 0:
         return set()
-    radius = factor * scale
+    radius = factor * pitch
     pairs: set[frozenset[int]] = set()
-    for i, first in enumerate(centroids):
+    for i, first in enumerate(centers):
         if first is None:
             continue
-        for j in range(i + 1, len(centroids)):
-            second = centroids[j]
+        for j in range(i + 1, len(centers)):
+            second = centers[j]
             if second is None:
                 continue
             if math.dist(first, second) <= radius:
@@ -503,29 +500,33 @@ def proximity_graph(
     return pairs
 
 
-def load_sheets(volume: Path) -> list[tuple[str, dict, dict]]:
-    """(stem, keymap doc, regions doc) for every key map with both sidecars."""
+def load_sheets(volume: Path) -> list[tuple[str, dict]]:
+    """(stem, keymap doc) for every key map carrying page-number detections.
+
+    Only ``<stem>.keymap.json`` is read. The segmented regions are NOT an
+    input: their quality varies and their failures are cheap to fix, while a
+    wrong page number poisons every downstream coarse location. This also
+    lets the repair run before page_regions, so corrected numbers seed the
+    segmentation rather than depending on it.
+    """
     sheets = []
-    for regions_path in sorted((volume / "raw").glob("*.regions.panels.json")):
-        if ".truth." in regions_path.name:
+    for keymap_path in sorted((volume / "raw").glob("*.keymap.json")):
+        if ".truth." in keymap_path.name:
             continue
-        stem = regions_path.name[: -len(".regions.panels.json")]
-        keymap_path = volume / "raw" / f"{stem}.keymap.json"
-        if not keymap_path.exists():
-            continue
+        stem = keymap_path.name[: -len(".keymap.json")]
         try:
-            regions = json.loads(regions_path.read_text())
-            keymap = json.loads(keymap_path.read_text())
+            doc = json.loads(keymap_path.read_text())
         except (OSError, ValueError):
             continue
-        sheets.append((stem, keymap, regions))
+        if doc.get("streets"):
+            sheets.append((stem, doc))
     return sheets
 
 
 GAP_SPREAD_FACTOR = 3.0
-"""How far apart the panels citing a missing page may be, in region-widths.
+"""How far apart the numbers citing a missing page may be, in page pitches.
 
-The gap placement is the centroid of the citing regions, which is only
+The gap placement is the centroid of the citing numbers, which is only
 meaningful if they actually surround one spot. Scattered citations mean at
 least one of them is itself misassigned, so the placement is refused rather
 than dropped in the middle of the sheet."""
@@ -534,16 +535,16 @@ than dropped in the middle of the sheet."""
 def gap_placement(
     repair: Repair, centroids: list[tuple[float, float] | None], scale: float
 ) -> tuple[float, float] | None:
-    """Where a gap repair's page belongs: the centroid of its citing regions.
+    """Where a gap repair's page belongs: the centroid of its citing numbers.
 
     Anchored on the MUTUAL citations, which are 96-100% precise, then refined
     with whichever one-sided citations agree with them. Detroit's p59 is cited
     by p27 mutually and by p57, p61 and p1 one-sidedly, and the p1 claim is
     junk (issue #213 names it) -- averaging it in would drag the placement
     across the sheet, so a one-sided citation more than GAP_SPREAD_FACTOR
-    region-widths from the mutual anchor is discarded.
+    page pitches from the mutual anchor is discarded.
 
-    Returns None when no mutual citation has a usable region, or when the
+    Returns None when no mutual citation has a usable position, or when the
     mutual citations themselves disagree on a location (which means one of
     them is misassigned).
     """
@@ -584,9 +585,10 @@ def plan_volume_repairs(
 ) -> tuple[list[Repair], dict[str, dict[str, tuple[float, float]]]]:
     """All proposed repairs for a volume, plus the placement of each gap fill.
 
-    Returns (repairs, placements) where ``placements[sheet][key]`` is the
-    key-map pixel position for a gap recovery, so the caller can synthesize a
-    detection there without redoing the geometry. Gap repairs whose citing
+    Reads only ``raw/*.keymap.json`` and ``adjacency.json`` -- never the
+    segmented regions. Returns (repairs, placements) where
+    ``placements[sheet][key]`` is the key-map pixel position for a gap
+    recovery, so the caller can synthesize a detection there. Gap repairs whose citing
     regions disagree on a location are dropped here rather than proposed.
     """
     mutual, one_sided = adjacency_graphs(volume)
@@ -595,15 +597,17 @@ def plan_volume_repairs(
     volume_keys = volume_page_keys(volume)
     splits = split_multiplicity(volume)
 
-    sheet_panels: list[SheetPanels] = []
+    sheet_panels: list[SheetNumbers] = []
     geometry: dict[str, tuple[list[tuple[float, float] | None], float]] = {}
-    for stem, _keymap, regions in load_sheets(volume):
-        panels = regions.get("panels", [])
+    for stem, doc in load_sheets(volume):
+        streets = doc.get("streets", [])
         labels = [
-            page_key_of(label) or str(label) for label in regions.get("labels", [])
+            page_key_of(street.get("text", "")) or str(street.get("text", ""))
+            for street in streets
         ]
-        sheet_panels.append(SheetPanels(stem, labels, proximity_graph(panels)))
-        geometry[stem] = (panel_centroids(panels), panel_scale(panels))
+        centers = detection_centers(streets)
+        sheet_panels.append(SheetNumbers(stem, labels, proximity_graph(centers)))
+        geometry[stem] = (centers, page_pitch(centers))
 
     repairs: list[Repair] = []
     placements: dict[str, dict[str, tuple[float, float]]] = {}
@@ -613,13 +617,13 @@ def plan_volume_repairs(
         # Gap recovery must see the relabels: a key just recovered from a
         # misread panel is no longer missing, and proposing it again would
         # place the same page twice (Detroit's 65 was found both ways).
-        repaired = SheetPanels(sheet.sheet, list(sheet.labels), sheet.contacts)
+        repaired = SheetNumbers(sheet.sheet, list(sheet.labels), sheet.contacts)
         for relabel in relabels:
             if relabel.index is not None and relabel.new is not None:
                 repaired.labels[relabel.index] = relabel.new
-        centroids, scale = geometry[sheet.sheet]
+        centers, pitch = geometry[sheet.sheet]
         for repair in plan_gap_repairs(repaired, mutual, one_sided, volume_keys):
-            point = gap_placement(repair, centroids, scale)
+            point = gap_placement(repair, centers, pitch)
             if point is None or repair.new is None:
                 continue
             repairs.append(repair)
