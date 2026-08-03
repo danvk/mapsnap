@@ -14,6 +14,7 @@ from mapsnap.keymap.adjacency_assign import (
     proximity_graph,
     split_multiplicity,
     support_for,
+    synthetic_detection,
     volume_shortfall,
 )
 
@@ -217,6 +218,30 @@ def test_gap_placement_averages_the_mutual_citations():
         mutual_indices=(),
     )
     assert gap_placement(weak_only, centroids, scale=200.0) is None
+
+
+def test_synthetic_detection_reads_as_a_detection_and_declares_its_provenance():
+    repair = Repair(
+        sheet="p0",
+        index=None,
+        old=None,
+        new="59",
+        reason="gap",
+        support=1.75,
+        evidence=("27", "57"),
+    )
+    detection = synthetic_detection("59", (500.0, 400.0), pitch=200.0, repair=repair)
+    assert detection["text"] == "59"
+    assert detection["via"] == "adjacency-gap"
+    assert detection["support"] == 1.75 and detection["cited_by"] == ["27", "57"]
+    # Non-zero so the debugger draws it, but below any real read's confidence.
+    assert 0 < detection["confidence"] < 0.5
+    # A glyph-sized box centred on the estimate, so page_regions samples the
+    # colour block underneath it.
+    xs = [point[0] for point in detection["polygon"]]
+    ys = [point[1] for point in detection["polygon"]]
+    assert (sum(xs) / 4, sum(ys) / 4) == (500.0, 400.0)
+    assert max(xs) - min(xs) == max(ys) - min(ys) == 24
 
 
 def test_gap_placement_discards_a_far_flung_one_sided_citation():

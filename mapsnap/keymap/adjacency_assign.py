@@ -679,6 +679,18 @@ re-running the repair never overwrites the true original with a repaired one.
 """
 
 
+GAP_CONFIDENCE = 0.2
+"""``confidence`` on a synthesized gap detection.
+
+``confidence`` means the recogniser's posterior over the text it read, and a
+gap detection read nothing -- there is no posterior to report. Claiming a high
+one would let it pass for a confident read anywhere confidence is thresholded
+or ranked, and the adjacency support that DID place it is a different quantity
+on a different scale (``support``, roughly 1.5-5), so it is not a stand-in.
+What is left is a deliberately low placeholder: low enough to sort below every
+real read, non-zero so the debugger draws it (a 0 renders as invisible)."""
+
+
 def synthetic_detection(
     key: str, point: tuple[float, float], pitch: float, repair: Repair
 ) -> dict:
@@ -700,7 +712,7 @@ def synthetic_detection(
             [int(x - half), int(y + half)],
         ],
         "text": key,
-        "confidence": 0.0,
+        "confidence": GAP_CONFIDENCE,
         "angle": 0,
         "long_side": round(2 * half, 1),
         "short_side": round(2 * half, 1),
