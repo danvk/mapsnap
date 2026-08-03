@@ -18,9 +18,10 @@ numbers are common enough to reciprocate by chance (and page numbering correlate
 adjacency, so such accidents are often "correct"), so single-digit claims — where any tall
 narrow ink can read as a "1" — additionally face a high confidence floor and a height band
 calibrated from the volume's own confirmed multi-digit references (their printed size is very
-consistent: Hudson County median 46 px with p10-p90 of 42-48). Measured on Hudson County the
-result is 167 mutual edges with no known-false edge, reaching 30/33 pages that street matching
-failed to georeference.
+consistent: Hudson County median 46 px with p10-p90 of 42-48). That same calibration sets a
+height floor under EVERY claim (see CLAIM_HEIGHT_FRACTION), which is what separates a printed
+reference from a street-width note. Measured on Hudson County the result is 167 mutual edges
+with no known-false edge, reaching 30/33 pages that street matching failed to georeference.
 
 This is a whole-volume step: it scans every non-split page image (skipping key-map sheets,
 whose faces are covered in page numbers) and writes a single ``<volume>/adjacency.json`` with
@@ -70,6 +71,21 @@ ROTATION_TOLERANCE_DEG = 5.0
 SINGLE_DIGIT_MIN_CONF = 0.9
 SIZE_BAND_FRACTION = (0.65, 1.4)
 SINGLE_DIGIT_MIN_GAP_FRACTION = 0.3
+
+# EVERY claim, not just single digits, faces a height floor derived from the
+# volume's own confirmed references, because MIN_HEIGHT is a corpus-wide
+# compromise that sits well below real printed references. Measured against the
+# hand-labelled truth, true claims cluster tightly just under the volume median
+# (Nashville median 44, p10 38; Hudson 46/42; LA 48/44) while junk sits lower
+# (Nashville median 32, Hudson 34) -- street-width notes ("50'" at 28-34 px) and
+# fragments of larger numbers. At 0.75x the confirmed median the floor lands at
+# 33/34/36 px on those volumes and drops roughly half the junk claims for ~1
+# point of recall: Nashville's mutual-edge precision goes 96% -> 100% (its three
+# false edges were all width notes reciprocating into p8), and one-sided claim
+# precision improves on all three (32->45%, 49->72%, 54->63%). MIN_HEIGHT stays
+# the absolute floor, so a volume printing smaller than the corpus norm is
+# unaffected.
+CLAIM_HEIGHT_FRACTION = 0.75
 
 
 def volume_page_images(volume: Path) -> list[Path]:
@@ -386,6 +402,22 @@ def single_digit_height_band(
     return (SIZE_BAND_FRACTION[0] * median, SIZE_BAND_FRACTION[1] * median)
 
 
+def claim_height_floor(confirmed_heights: list[float], min_height: float) -> float:
+    """The volume's own claim height floor, calibrated from confirmed references.
+
+    ``confirmed_heights`` are the multi-digit claims that reciprocated into
+    mutual edges — the volume's genuine printed references, whose size is very
+    consistent. A claim much shorter than those is a street-width note or a
+    fragment of a larger number, not a sheet reference. Never falls below
+    ``min_height`` (see CLAIM_HEIGHT_FRACTION).
+    """
+    if not confirmed_heights:
+        return min_height
+    ordered = sorted(confirmed_heights)
+    median = ordered[len(ordered) // 2]
+    return max(min_height, CLAIM_HEIGHT_FRACTION * median)
+
+
 def is_claim(
     detection: dict,
     own_key: str | None,
@@ -593,6 +625,7 @@ def main() -> None:
     def compute_claims(
         height_band: tuple[float, float] | None,
         min_gap: float | None,
+        min_height: float | None = None,
     ) -> dict[str, set[str]]:
         return {
             stem: {
@@ -601,7 +634,7 @@ def main() -> None:
                 if is_claim(
                     d,
                     page["key"],
-                    min_height=args.min_height,
+                    min_height=args.min_height if min_height is None else min_height,
                     min_confidence=args.min_confidence,
                     single_digit_min_confidence=args.single_digit_min_confidence,
                     height_band=height_band,
@@ -634,15 +667,17 @@ def main() -> None:
         )
     ]
     height_band = single_digit_height_band(confirmed_heights)
+    claim_floor = claim_height_floor(confirmed_heights, args.min_height)
     min_gap = None
     if height_band and confirmed_heights:
         ordered = sorted(confirmed_heights)
         median_height = ordered[len(ordered) // 2]
         min_gap = SINGLE_DIGIT_MIN_GAP_FRACTION * median_height
         print(
-            f"Single-digit height band: [{height_band[0]:.0f}, {height_band[1]:.0f}]px, "
-            f"isolation floor: {min_gap:.0f}px "
-            f"(from {len(confirmed_heights)} confirmed multi-digit references).",
+            f"Claim height floor: {claim_floor:.0f}px; single-digit band: "
+            f"[{height_band[0]:.0f}, {height_band[1]:.0f}]px, isolation floor: "
+            f"{min_gap:.0f}px (from {len(confirmed_heights)} confirmed "
+            f"multi-digit references at median {median_height:.0f}px).",
             file=sys.stderr,
         )
     else:
@@ -652,13 +687,13 @@ def main() -> None:
             file=sys.stderr,
         )
 
-    claims_by_page = compute_claims(height_band, min_gap)
+    claims_by_page = compute_claims(height_band, min_gap, claim_floor)
     for stem, page in pages.items():
         for detection in page["detections"]:
             detection["claim"] = is_claim(
                 detection,
                 page["key"],
-                min_height=args.min_height,
+                min_height=claim_floor,
                 min_confidence=args.min_confidence,
                 single_digit_min_confidence=args.single_digit_min_confidence,
                 height_band=height_band,
@@ -672,6 +707,7 @@ def main() -> None:
         "command": sys.argv[:],
         "edge_band": EDGE_BAND,
         "min_height": args.min_height,
+        "claim_height_floor": round(claim_floor, 1),
         "min_confidence": args.min_confidence,
         "single_digit_min_confidence": args.single_digit_min_confidence,
         "single_digit_height_band": list(height_band) if height_band else None,

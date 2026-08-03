@@ -3,6 +3,7 @@ from pathlib import Path
 
 from mapsnap.page_adjacency import (
     bbox_gap,
+    claim_height_floor,
     classify_edge,
     is_claim,
     mutual_edges,
@@ -131,6 +132,18 @@ def test_single_digit_height_band_from_median():
 
 def test_single_digit_height_band_empty():
     assert single_digit_height_band([]) is None
+
+
+def test_claim_height_floor_tracks_the_volume():
+    # Nashville/Hudson/LA confirmed-reference medians -> 33/34/36 px floors,
+    # which is where the width notes (28-34 px) fall away.
+    assert abs(claim_height_floor([42.0, 44.0, 46.0], 28.0) - 33.0) < 1e-9
+    assert abs(claim_height_floor([44.0, 46.0, 48.0], 28.0) - 34.5) < 1e-9
+    # MIN_HEIGHT stays the absolute floor: a volume printing smaller than the
+    # corpus norm is not pushed below it.
+    assert claim_height_floor([20.0, 22.0, 24.0], 28.0) == 28.0
+    # No confirmed references (a volume with only one-digit pages): unchanged.
+    assert claim_height_floor([], 28.0) == 28.0
 
 
 def test_mutual_edges_requires_reciprocity():
