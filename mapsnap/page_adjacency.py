@@ -6,8 +6,13 @@ sheet continues. Reading these gives page adjacency that is independent of the k
 detected neighbor's edge (top/left/bottom/right of the image) pins the page's orientation.
 
 Raw digit reads are noisy (house/block/dimension numbers collide with valid page numbers), so a
-detection only becomes a *claim* when it is a valid page number, near the page edge, printed
-large, and axis-aligned; and a claim only becomes an adjacency *edge* when it is reciprocated —
+detection only becomes a *claim* when it resolves to a valid page key, near the page edge,
+printed large, and axis-aligned. Resolution is letter-aware (a "1499G" read claims p1499g, not
+p1499) and repairs the two systematic read failures of long page numbers — leading digits lost
+against the sheet trim ("409" -> 1409) and neighboring ink absorbed into the box ("14027" ->
+1402) — but only on a unique match against keys of >= MIN_REPAIR_DIGITS digits, so volumes
+with 1- and 2-digit page numbers resolve exact reads only. A claim only becomes an adjacency
+*edge* when it is reciprocated —
 page A claims B AND page B claims A. Reciprocity alone is not proof: junk claims of small
 numbers are common enough to reciprocate by chance (and page numbering correlates with
 adjacency, so such accidents are often "correct"), so single-digit claims — where any tall
@@ -27,6 +32,7 @@ each page's number detections and the mutual-edge adjacency graph.
 import argparse
 import json
 import math
+import re
 import sys
 from collections import defaultdict
 from datetime import UTC, datetime
@@ -36,7 +42,7 @@ import numpy as np
 from PIL import Image
 from tqdm import tqdm
 
-from mapsnap.keymap.locate import page_number
+from mapsnap.keymap.locate import page_key, page_number
 from mapsnap.utils import image_stem
 
 # A detection only counts as an adjacency claim when it sits in the outer EDGE_BAND of the
@@ -117,6 +123,81 @@ def bbox_gap(a: list[list[float]], b: list[list[float]]) -> float:
     return math.hypot(dx, dy)
 
 
+MIN_REPAIR_DIGITS = 3
+"""Fewest digits a page key must have before read-repair may target it.
+
+Repair (suffix completion, embedded extraction) exists for volumes like LA 1949
+whose 4-digit '1'-leading references truncate against the sheet trim ("1409"
+reads "409" at conf 1.0) or absorb neighboring ink ("14027" for 1402) — the
+LA truth labels put 49% of all printed references in this boxed-but-unread
+class. For volumes with 1- and 2-digit page numbers, short reads are
+substrings of everything, so repair against short keys would be guesswork:
+below this floor only exact and lettered matches fire, leaving those volumes'
+behavior untouched (Hudson reads 96% of its references fine without repair).
+"""
+
+LETTERED_KEY_PATTERN = re.compile(r"([0-9IO]+)\s*([A-Z]{1,2})$")
+"""A letters-pass read that ends in a short letter suffix ("1499G", "I33S")."""
+
+
+def resolve_page_key(
+    digit_text: str,
+    letter_text: str,
+    valid_keys: set[str],
+    min_repair_digits: int = MIN_REPAIR_DIGITS,
+) -> tuple[str, str] | None:
+    """Resolve raw OCR reads of a margin reference to a valid page key.
+
+    ``digit_text`` is the digits-allowlist read, ``letter_text`` the
+    letters-allowed read of the same box ("" when none). Returns
+    ``(key, method)`` or None, trying in order:
+
+      lettered   the letter read shows a digit run plus a letter suffix that
+                 forms a valid key ("1499G" -> 1499G); checked first because
+                 the digits pass renders the same ink as a bare "1499" -- a
+                 different, wrong page.
+      exact      the digit read is a valid key as-is (the only method that
+                 applies to keys shorter than ``min_repair_digits``).
+      suffix     the read lost its leading digit against the sheet trim:
+                 exactly one valid key ends with it ("409" -> 1409). Requires
+                 a read of >= 3 digits: 2-digit remnants are house-number
+                 fragments that happen to end a page number, measured 8%
+                 precise on the LA truth labels (13/164) — including a
+                 symmetric pair ("85" on p1475, "75" on p1485) confident
+                 enough to reciprocate into a false edge. 3-digit remnants
+                 measure 71% precise and reciprocity removes the rest.
+      embedded   the read absorbed extra digits from neighboring ink: exactly
+                 one valid key appears inside it ("14027" -> 1402).
+
+    Repairs require a UNIQUE match among keys of >= ``min_repair_digits``
+    digits; any ambiguity resolves to None, never a guess.
+    """
+    digits = "".join(c for c in digit_text if c.isdigit())
+    match = LETTERED_KEY_PATTERN.search(letter_text.replace(" ", "").upper())
+    if match:
+        base = match.group(1).replace("I", "1").replace("O", "0")
+        lettered = base + match.group(2)
+        if lettered in valid_keys:
+            return lettered, "lettered"
+    if not digits:
+        return None
+    if digits in valid_keys:
+        return digits, "exact"
+    repairable = [
+        key for key in valid_keys if key.isdigit() and len(key) >= min_repair_digits
+    ]
+    if len(digits) >= 3:
+        suffixes = [
+            key for key in repairable if len(key) > len(digits) and key.endswith(digits)
+        ]
+        if len(suffixes) == 1:
+            return suffixes[0], "suffix"
+    embedded = [key for key in repairable if len(key) < len(digits) and key in digits]
+    if len(embedded) == 1:
+        return embedded[0], "embedded"
+    return None
+
+
 def is_text_veto(
     letter_text: str, letter_confidence: float, digit_confidence: float
 ) -> bool:
@@ -166,24 +247,28 @@ def cached_craft_boxes(image_path: Path) -> tuple[list, list] | None:
 def digit_detections(
     image_path: Path,
     reader,
-    valid_numbers: set[int],
+    valid_keys: set[str],
     craft_boxes: tuple[list, list] | None = None,
 ) -> list[dict]:
-    """All digit reads on one page that parse to a valid volume page number.
+    """All digit reads on one page that resolve to a valid volume page key.
 
     Two recognition passes over the same image: the digits-only pass supplies the
     transcription (immune to look-alike substitutions like 0 -> O), and a letters-allowed
     pass over the same boxes vetoes the ones that are actually street names or other text
-    (see is_text_veto). ``craft_boxes`` (from cached_craft_boxes) skips the CRAFT
-    detection pass — by far the most expensive step — reusing the boxes ``mapsnap ocr``
-    already computed for the same image.
+    (see is_text_veto) and supplies letter suffixes for lettered keys ("1499G").
+    Reads that are not a valid key verbatim go through ``resolve_page_key`` repair.
+    ``craft_boxes`` (from cached_craft_boxes) skips the CRAFT detection pass — by far
+    the most expensive step — reusing the boxes ``mapsnap ocr`` already computed for
+    the same image.
 
-    Each detection records the parsed ``number``, the raw OCR ``text``, EasyOCR's polygon and
-    confidence, the glyph ``height`` in pixels, position as width/height fractions, the
-    ``edge`` classification, and ``nearest_box`` — the gap to the nearest other OCR box, since
-    a genuine sheet reference is printed in open whitespace while a junk single digit is
-    usually a fragment of a larger number with sibling text right beside it. Filtering into
-    claims is left to the caller so the JSON keeps the full picture.
+    Each detection records the resolved ``key`` and how it resolved (``via``), the
+    digit part as ``number`` (for size rules and older readers), the raw OCR ``text``,
+    EasyOCR's polygon and confidence, the glyph ``height`` in pixels, position as
+    width/height fractions, the ``edge`` classification, and ``nearest_box`` — the gap
+    to the nearest other OCR box, since a genuine sheet reference is printed in open
+    whitespace while a junk single digit is usually a fragment of a larger number with
+    sibling text right beside it. Filtering into claims is left to the caller so the
+    JSON keeps the full picture.
     """
     from easyocr.utils import reformat_input
 
@@ -210,7 +295,7 @@ def digit_detections(
     detections = []
     for index, (bbox, text, confidence) in enumerate(results):
         digits = "".join(c for c in text if c.isdigit())
-        if not digits or int(digits) not in valid_numbers:
+        if not digits:
             continue
         # Veto boxes whose letters-pass read reveals text. Pair by box center; the two
         # passes share the same detector so boxes normally coincide.
@@ -223,10 +308,16 @@ def digit_detections(
             ),
             default=(math.inf, -1),
         )
+        letter_text = ""
         if nearest_letter[0] < box_height:
             letter_read = letter_results[nearest_letter[1]]
             if is_text_veto(letter_read[1], float(letter_read[2]), float(confidence)):
                 continue
+            letter_text = str(letter_read[1])
+        resolved = resolve_page_key(text, letter_text, valid_keys)
+        if resolved is None:
+            continue
+        key, via = resolved
         x_frac = sum(p[0] for p in bbox) / 4 / width
         y_frac = sum(p[1] for p in bbox) / 4 / height
         glyph_height = float(max(p[1] for p in bbox) - min(p[1] for p in bbox))
@@ -240,7 +331,9 @@ def digit_detections(
         )
         detections.append(
             {
-                "number": int(digits),
+                "key": key,
+                "via": via,
+                "number": int("".join(c for c in key if c.isdigit())),
                 "text": text,
                 "confidence": round(float(confidence), 4),
                 "polygon": [[int(p[0]), int(p[1])] for p in bbox],
@@ -287,7 +380,7 @@ def single_digit_height_band(
 
 def is_claim(
     detection: dict,
-    own_number: int | None,
+    own_key: str | None,
     *,
     min_height: float = MIN_HEIGHT,
     min_confidence: float = MIN_CONF,
@@ -297,7 +390,7 @@ def is_claim(
 ) -> bool:
     """Whether a detection qualifies as an adjacency claim.
 
-    Every claim must be a valid page number other than the page's own, near a page edge, tall
+    Every claim must be a valid page key other than the page's own, near a page edge, tall
     enough, confident enough, and axis-aligned (rotated quads are always misread street names
     or pipe annotations). Single-digit numbers face three stricter tests — the high
     ``single_digit_min_confidence`` floor, the ``height_band`` around the volume's
@@ -307,7 +400,7 @@ def is_claim(
     coincidence, so reciprocity alone cannot vouch for them.
     """
     if (
-        detection["number"] == own_number
+        detection["key"] == own_key
         or detection["edge"] == "center"
         or detection["height"] < min_height
         or detection["confidence"] < min_confidence
@@ -327,26 +420,45 @@ def is_claim(
     return True
 
 
-def mutual_edges(claims_by_page: dict[str, set[int]]) -> list[tuple[str, str]]:
-    """Reciprocated adjacency edges: A claims B's number and B claims A's number.
+def mutual_edges(claims_by_page: dict[str, set[str]]) -> list[tuple[str, str]]:
+    """Reciprocated adjacency edges: A claims B's key and B claims A's key.
 
-    ``claims_by_page`` maps page stems to claimed page numbers. A number claimed by A resolves
-    to the page stem(s) carrying that number; the edge exists only if some such stem claims A's
-    number back. Returns sorted (stem, stem) pairs, each once.
+    ``claims_by_page`` maps page stems to claimed page keys. A claimed key resolves to
+    the stem(s) carrying exactly that key; a bare-number claim in a volume whose sheet
+    has a lettered stem (Chicago prints "60" for p60w) falls back to the number, but
+    only when it names a single stem — a number shared by many lettered sheets (LA's
+    p1499a-r) is ambiguous and resolves to nothing. The edge exists only if each side's
+    claims resolve to the other. Returns sorted (stem, stem) pairs, each once.
     """
+    stems_by_key: dict[str, list[str]] = defaultdict(list)
     stems_by_number: dict[int, list[str]] = defaultdict(list)
     for stem in claims_by_page:
+        key = page_key(stem)
+        if key is not None:
+            stems_by_key[key].append(stem)
         number = page_number(stem)
         if number is not None:
             stems_by_number[number].append(stem)
+
+    def resolve(claim: str) -> list[str]:
+        stems = stems_by_key.get(claim.upper(), [])
+        if stems:
+            return stems
+        if claim.isdigit():
+            fallback = stems_by_number.get(int(claim), [])
+            if len(fallback) == 1:
+                return fallback
+        return []
+
     edges: set[tuple[str, str]] = set()
     for stem, claimed in claims_by_page.items():
-        own = page_number(stem)
-        if own is None:
-            continue
-        for number in claimed:
-            for other in stems_by_number.get(number, []):
-                if other != stem and own in claims_by_page.get(other, set()):
+        for claim in claimed:
+            for other in resolve(claim):
+                if other == stem:
+                    continue
+                if any(
+                    stem in resolve(back) for back in claims_by_page.get(other, set())
+                ):
                     first, second = sorted((stem, other))
                     edges.add((first, second))
     return sorted(edges)
@@ -407,13 +519,11 @@ def main() -> None:
     images = volume_page_images(args.volume)
     if not images:
         sys.exit(f"No page images found in {args.volume}.")
-    valid_numbers = {
-        number
-        for image in images
-        if (number := page_number(image_stem(str(image)))) is not None
+    valid_keys = {
+        key for image in images if (key := page_key(image_stem(str(image)))) is not None
     }
     print(
-        f"Scanning {len(images)} pages ({len(valid_numbers)} page numbers)...",
+        f"Scanning {len(images)} pages ({len(valid_keys)} page keys)...",
         file=sys.stderr,
     )
     reader = easyocr.Reader(["en"], gpu=not args.no_gpu, verbose=False)
@@ -428,10 +538,11 @@ def main() -> None:
         craft_boxes = cached_craft_boxes(image) if args.reuse_boxes else None
         reused += craft_boxes is not None
         pages[stem] = {
+            "key": page_key(stem),
             "number": page_number(stem),
             "width": width,
             "height": height,
-            "detections": digit_detections(image, reader, valid_numbers, craft_boxes),
+            "detections": digit_detections(image, reader, valid_keys, craft_boxes),
         }
     if args.reuse_boxes:
         print(f"Reused CRAFT boxes for {reused}/{len(images)} pages.", file=sys.stderr)
@@ -439,14 +550,14 @@ def main() -> None:
     def compute_claims(
         height_band: tuple[float, float] | None,
         min_gap: float | None,
-    ) -> dict[str, set[int]]:
+    ) -> dict[str, set[str]]:
         return {
             stem: {
-                d["number"]
+                d["key"]
                 for d in page["detections"]
                 if is_claim(
                     d,
-                    page["number"],
+                    page["key"],
                     min_height=args.min_height,
                     min_confidence=args.min_confidence,
                     single_digit_min_confidence=args.single_digit_min_confidence,
@@ -461,19 +572,19 @@ def main() -> None:
     # printed-reference height from their multi-digit claims; single-digit claims are then
     # re-filtered against the derived band and isolation floor and the graph rebuilt.
     provisional_edges = mutual_edges(compute_claims(None, None))
-    mutual_numbers: dict[str, set[int]] = defaultdict(set)
+    mutual_keys: dict[str, set[str]] = defaultdict(set)
     for first, second in provisional_edges:
-        mutual_numbers[first].add(pages[second]["number"])
-        mutual_numbers[second].add(pages[first]["number"])
+        mutual_keys[first].add(pages[second]["key"])
+        mutual_keys[second].add(pages[first]["key"])
     confirmed_heights = [
         d["height"]
         for stem, page in pages.items()
         for d in page["detections"]
         if d["number"] >= 10
-        and d["number"] in mutual_numbers[stem]
+        and d["key"] in mutual_keys[stem]
         and is_claim(
             d,
-            page["number"],
+            page["key"],
             min_height=args.min_height,
             min_confidence=args.min_confidence,
             single_digit_min_confidence=args.single_digit_min_confidence,
@@ -503,7 +614,7 @@ def main() -> None:
         for detection in page["detections"]:
             detection["claim"] = is_claim(
                 detection,
-                page["number"],
+                page["key"],
                 min_height=args.min_height,
                 min_confidence=args.min_confidence,
                 single_digit_min_confidence=args.single_digit_min_confidence,
