@@ -7,8 +7,10 @@ from mapsnap.keymap.adjacency_assign import (
     adjacency_graphs,
     detection_centers,
     digit_family,
+    displaceable,
     gap_placement,
     median_detection_box,
+    occupant_index,
     page_pitch,
     plan_cross_sheet_repairs,
     plan_gap_repairs,
@@ -177,6 +179,38 @@ def test_gap_recovery_skips_a_key_another_sheet_already_carries():
     volume_keys = {"27", "57", "61", "40", "9"}
     assert plan_gap_repairs(panels, mutual, {}, volume_keys, {"9"})[0].new == "9"
     assert plan_gap_repairs(panels, mutual, {}, volume_keys, set()) == []
+
+
+def test_occupant_index_finds_the_panel_a_gap_landed_on():
+    centers: list[tuple[float, float] | None] = [
+        (100.0, 100.0),
+        (500.0, 100.0),
+        None,
+    ]
+    # Within half a pitch of the second panel: the number IS printed there.
+    assert occupant_index((520.0, 110.0), centers, 320.0) == 1
+    # Squarely in the empty space between them: a real gap.
+    assert occupant_index((300.0, 100.0), centers, 320.0) is None
+
+
+def test_displacement_needs_local_mutual_support_both_ways():
+    # Detroit: the panel reads '80', which nothing beside it vouches for, while
+    # 86's mutual neighbours 87 and 93 are printed right there. Truth says 86.
+    panels = sheet(labels=["80", "87", "93", "54"], contacts=[(0, 1), (0, 2), (0, 3)])
+    mutual = graph([("86", "87"), ("86", "93")])
+    assert displaceable(0, "86", panels, mutual, {})
+
+    # Grand Rapids: 840's citations are scattered across the sheet, none beside
+    # the panel it landed on -- too weak a warrant to overwrite a correct 841.
+    far = sheet(labels=["841", "12"], contacts=[(0, 1)])
+    scattered = graph([("840", "834"), ("840", "842")])
+    assert not displaceable(0, "840", far, scattered, {})
+
+    # And a read with support of its own is never displaced, however well the
+    # newcomer is vouched for: an observation outranks an inferred position.
+    vouched = sheet(labels=["80", "87", "93"], contacts=[(0, 1), (0, 2)])
+    both = graph([("86", "87"), ("86", "93"), ("80", "87")])
+    assert not displaceable(0, "86", vouched, both, {})
 
 
 def test_volume_shortfall_counts_across_every_sheet():

@@ -382,6 +382,57 @@ def plan_gap_repairs(
     return repairs
 
 
+GAP_OCCUPANCY_FACTOR = 0.5
+"""How close a gap placement must land to an existing number to be the same block.
+
+Half a page-pitch: nearer than that and the two boxes are on one panel, so the
+page's number was printed after all and simply misread."""
+
+
+def occupant_index(
+    point: tuple[float, float],
+    centers: list[tuple[float, float] | None],
+    pitch: float,
+) -> int | None:
+    """The detection already sitting where a gap wants to go, if any."""
+    limit = GAP_OCCUPANCY_FACTOR * pitch
+    best: tuple[float, int] | None = None
+    for index, center in enumerate(centers):
+        if center is None:
+            continue
+        distance = math.dist(point, center)
+        if distance <= limit and (best is None or distance < best[0]):
+            best = (distance, index)
+    return None if best is None else best[1]
+
+
+def displaceable(
+    index: int,
+    key: str,
+    sheet: SheetNumbers,
+    mutual: dict[str, set[str]],
+    one_sided: dict[str, set[str]],
+) -> bool:
+    """Whether ``key`` may take over the detection at ``index``.
+
+    Taking a panel over is a RELABEL, not a fill, so it answers to the relabel
+    bar rather than the gap one -- and to the bar measured HERE, among the
+    numbers printed beside this panel. A gap's own support is sheet-wide, which
+    is too weak a warrant to overwrite a read: Grand Rapids' 840 scored 2.25 on
+    citations scattered across the sheet, none of them beside the panel it
+    landed on, and would have overwritten a correct 841.
+
+    Both directions must agree, the same asymmetry that governs duplicates: no
+    mutual neighbour vouches for what the panel currently says, and at least
+    RELABEL_MIN_MUTUAL vouch for what it would become.
+    """
+    neighbours = {sheet.labels[other] for other in sheet.touching(index)}
+    if mutual_count(neighbours, key, mutual) < RELABEL_MIN_MUTUAL:
+        return False
+    score, _ = support_for(index, sheet.labels[index], sheet, mutual, one_sided)
+    return score == 0.0
+
+
 def volume_shortfall(
     sheets: list[SheetNumbers], volume_keys: set[str], splits: dict[str, int]
 ) -> set[str]:
@@ -661,8 +712,30 @@ def plan_volume_repairs(
             point = gap_placement(repair, centers, pitch)
             if point is None or repair.new is None:
                 continue
-            repairs.append(repair)
-            placements.setdefault(repaired.sheet, {})[repair.new] = point
+            # A gap that lands on an existing panel is not a gap: the number IS
+            # printed there, it was misread. Take the panel over rather than
+            # drawing a second box on the same block.
+            sitting = occupant_index(point, centers, pitch)
+            if sitting is not None and displaceable(
+                sitting, repair.new, repaired, mutual, one_sided
+            ):
+                repairs.append(
+                    Repair(
+                        sheet=repaired.sheet,
+                        index=sitting,
+                        old=repaired.labels[sitting],
+                        new=repair.new,
+                        reason="gap-displaces-unsupported",
+                        support=repair.support,
+                        evidence=repair.evidence,
+                        evidence_indices=repair.evidence_indices,
+                        mutual_indices=repair.mutual_indices,
+                    )
+                )
+                repaired.labels[sitting] = repair.new
+            else:
+                repairs.append(repair)
+                placements.setdefault(repaired.sheet, {})[repair.new] = point
             # One fill per shortfall: two sheets that both border the page
             # must not each grow a copy of it.
             missing.discard(repair.new)
