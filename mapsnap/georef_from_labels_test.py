@@ -1406,6 +1406,47 @@ def test_is_scale_outlier():
     assert is_scale_outlier(2.3)
 
 
+def test_inlier_gcp_count(tmp_path):
+    import json
+
+    from mapsnap.georef_from_labels import inlier_gcp_count
+
+    path = tmp_path / "p1.georef.json"
+    path.write_text(
+        json.dumps(
+            {
+                "intersections": [
+                    {"inlier": True},
+                    {"inlier": False},
+                    {"inlier": True},
+                    {},
+                ]
+            }
+        )
+    )
+    assert inlier_gcp_count(str(path)) == 2
+    # A missing or unreadable sidecar counts as no support, never a crash.
+    assert inlier_gcp_count(str(tmp_path / "absent.georef.json")) == 0
+    (tmp_path / "junk.georef.json").write_text("not json")
+    assert inlier_gcp_count(str(tmp_path / "junk.georef.json")) == 0
+
+
+def test_note_override_needs_an_over_determined_fit():
+    """A printed note may only overrule a scattered-scale demotion on real GCP support.
+
+    Columbus p297: a 200 ft sheet at 0.29x the volume reference (a scattered
+    outlier) whose fit matches its printed note but is 621 ft wrong on 2 GCPs.
+    """
+    from mapsnap.georef_from_labels import NOTE_OVERRIDE_MIN_GCPS, is_scale_outlier
+
+    # The p297 shape: note-confirmed, but the volume's rungs call it scattered.
+    assert is_scale_outlier(0.29)
+    assert 2 < NOTE_OVERRIDE_MIN_GCPS  # so p297's 2-GCP fit is demoted
+    # Pages sitting on a recognised rung never reach the gate at all.
+    assert not is_scale_outlier(0.50)  # every 100 ft sheet in the corpus
+    assert not is_scale_outlier(1.00)  # every 50 ft sheet in the corpus
+
+
 def test_family_scale_picks_middle_of_balanced_ladder():
     from mapsnap.georef_from_labels import family_scale
 
