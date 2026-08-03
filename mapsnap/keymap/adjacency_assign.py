@@ -1,0 +1,628 @@
+"""Repair key-map page-number assignments using the printed adjacency graph (#213).
+
+The key map's page numbers are the coarse-location source for OCR restriction,
+georeferencing and snap: placing each page at its region centroid alone puts
+Detroit's pages a median 158 ft from truth, which is why a missing or misread
+number is expensive. Two failure classes survive the CRNN's own repair pass
+(#172), because that pass arbitrates by CTC margin and these cells have no
+margin to arbitrate:
+
+  * a number read as a shorter one, where BOTH reads are confident and valid
+    (Detroit prints 22 and 65; the sheet carries two "2"s and three "6"s at
+    confidence 1.0, so the duplicate keeper logic cannot tell which is which);
+  * a number with no detection at all (Detroit p59 — nothing to repair).
+
+The printed adjacency graph settles both, and is now precise enough to do it:
+mutual edges measure 96-100% against hand-labelled truth (#209), letter-aware
+with roughly twice the recall on 4-digit volumes (#206). The evidence is
+strikingly asymmetric on exactly the cells that matter — Detroit's *missing*
+p22 carries three mutual edges (p21, p28, p29) while the *false* duplicate p2
+carries none.
+
+The rule in one line: a page's key-map region should sit among the regions of
+the pages that print its number in their margins.
+
+Three cell types, in decreasing order of evidence:
+
+  duplicates    Instances of one label are scored by how many of that page's
+                MUTUAL neighbours are nearby. Every mutually-vouched instance
+                keeps its label -- split pages legitimately appear several
+                times on the key map (Champaign draws p4 four times), and
+                undersplit pages may too, so multiplicity is never itself a
+                trigger. Only an unvouched instance is a suspect, and it is
+                relabelled solely to a MISSING key its own neighbours name.
+  cross-sheet   The same key drawn on two key-map SHEETS beyond its expected
+                multiplicity: keep the vouched sheet's copies, drop the
+                other's (Brooklyn's p8/p1/p5 each sit correctly on one sheet
+                and 1-1.8 km wrong on the other). Duplicates within one sheet
+                are the case above, and are relabelled rather than stripped.
+  gaps          A missing key is placed at the centroid of the regions whose
+                pages print its number, when enough of them do.
+
+Constraints inherited from #183's failed global-optimization experiments:
+adjacency never overrides a read that has its own support (its negative signal
+is weak); spatial coherence is a gate, never an energy; repairs only ever
+target keys the sheet is missing; ambiguity means no action.
+
+One-sided claims are corroboration only, never decisive: they measure 32-54%
+precise against label truth (#207) versus 96-100% for mutual edges.
+"""
+
+import json
+import math
+import re
+from dataclasses import dataclass, field
+from pathlib import Path
+
+PROXIMITY_FACTOR = 2.0
+"""How many region-widths apart two key-map regions may be and still count as
+neighbours (see proximity_graph)."""
+
+ONE_SIDED_WEIGHT = 0.25
+"""Weight of an unreciprocated claim relative to a mutual edge.
+
+One-sided claims are 32-54% precise (LA/Hudson/Nashville label truth) against
+96-100% for mutual edges, so four of them are worth less than one mutual edge
+and cannot on their own reach any adoption threshold below."""
+
+RELABEL_MIN_MUTUAL = 2
+"""Mutual neighbours that must vouch for a key before it takes over a panel.
+
+A relabel OVERWRITES an existing assignment, so it can regress a page that was
+right: two independent mutual edges is the bar. Detroit's 22 clears it with
+three (p21, p28, p29) and its 65 with two (p34, p40)."""
+
+GAP_MIN_MUTUAL = 1
+GAP_MIN_SUPPORT = 1.5
+"""Bar for placing a missing key: at least one mutual citation, plus
+corroboration reaching GAP_MIN_SUPPORT in total.
+
+Deliberately weaker than the relabel bar, because the two decisions have
+different downsides. A relabel can take a correct assignment away; a gap
+placement fills a void -- the page has no key-map location at all today, so
+it cannot be snapped or vocabulary-restricted, and the worst case is that it
+stays unusable. Detroit p59 is exactly this shape: one mutual edge (p27) plus
+one-sided claims from p57 and p61, which is 1.5. A mutual edge is still
+required, since one-sided claims are only 32-54% precise and no pile of them
+should place a page on its own."""
+
+
+@dataclass(frozen=True)
+class Repair:
+    """One proposed change to a key map's page-number assignment."""
+
+    sheet: str
+    index: int | None  # panel/detection index; None for a synthesized gap panel
+    old: str | None  # previous label; None when nothing was there
+    new: str | None  # new label; None strips the assignment
+    reason: str
+    support: float = 0.0
+    evidence: tuple[str, ...] = ()
+    evidence_indices: tuple[int, ...] = ()
+    mutual_indices: tuple[int, ...] = ()
+
+    def describe(self) -> str:
+        vouchers = ", ".join(self.evidence) if self.evidence else "-"
+        old = self.old if self.old is not None else "(none)"
+        new = self.new if self.new is not None else "(strip)"
+        return (
+            f"{self.sheet}[{self.index if self.index is not None else 'new'}] "
+            f"{old} -> {new} [{self.reason}; support {self.support:.2f}; {vouchers}]"
+        )
+
+
+@dataclass
+class SheetPanels:
+    """One key-map sheet's labelled regions and their contact graph."""
+
+    sheet: str
+    labels: list[str]
+    contacts: set[frozenset[int]] = field(default_factory=set)
+
+    def touching(self, index: int) -> set[int]:
+        return {
+            other
+            for pair in self.contacts
+            if index in pair
+            for other in pair
+            if other != index
+        }
+
+
+def digit_family(text: str, keys: set[str]) -> set[str]:
+    """Keys a read could be, had the recogniser dropped digits.
+
+    The key-map failure is digit LOSS: a printed "22" reads "2", "65" reads
+    "6". So a candidate is any key whose digits contain the read's digits in
+    order (a subsequence), which covers both a lost leading digit and a lost
+    trailing one. Mirrors the spirit of page_adjacency.resolve_page_key (#206)
+    without its uniqueness requirement, since adjacency -- not the string --
+    does the disambiguating here.
+    """
+    read = "".join(ch for ch in text if ch.isdigit())
+    if not read:
+        return set()
+    family = set()
+    for key in keys:
+        digits = "".join(ch for ch in key if ch.isdigit())
+        if len(digits) <= len(read):
+            continue
+        position = 0
+        for char in digits:
+            if position < len(read) and char == read[position]:
+                position += 1
+        if position == len(read):
+            family.add(key)
+    return family
+
+
+def support_for(
+    index: int,
+    key: str,
+    sheet: SheetPanels,
+    mutual: dict[str, set[str]],
+    one_sided: dict[str, set[str]],
+) -> tuple[float, tuple[str, ...]]:
+    """How strongly the printed graph vouches for ``key`` sitting at ``index``.
+
+    Counts the page's mutual neighbours that own a region touching this one,
+    plus a fractional credit for one-sided claims. Returns the score and the
+    vouching page keys, which are carried into the repair record so a human
+    can check the reasoning.
+    """
+    neighbours = {sheet.labels[other] for other in sheet.touching(index)}
+    return score_neighbours(neighbours, key, mutual, one_sided)
+
+
+def score_neighbours(
+    neighbours: set[str],
+    key: str,
+    mutual: dict[str, set[str]],
+    one_sided: dict[str, set[str]],
+) -> tuple[float, tuple[str, ...]]:
+    """(support, vouching keys) for ``key`` given the page keys around it."""
+    vouchers = sorted(neighbours & mutual.get(key, set()))
+    weak = sorted(neighbours & (one_sided.get(key, set()) - mutual.get(key, set())))
+    return len(vouchers) + ONE_SIDED_WEIGHT * len(weak), tuple(vouchers + weak)
+
+
+def mutual_count(neighbours: set[str], key: str, mutual: dict[str, set[str]]) -> int:
+    """How many of ``neighbours`` are mutual-adjacency neighbours of ``key``."""
+    return len(neighbours & mutual.get(key, set()))
+
+
+def plan_sheet_repairs(
+    sheet: SheetPanels,
+    mutual: dict[str, set[str]],
+    one_sided: dict[str, set[str]],
+    volume_keys: set[str],
+) -> list[Repair]:
+    """Duplicate-label arbitration for one sheet (the pure decision core).
+
+    A label with several instances is only interesting when some instance has
+    NO adjacency support: split pages appear several times legitimately, and
+    every supported instance keeps its label. A zero-support instance adopts a
+    missing key only when exactly one candidate in its digit family is vouched
+    for by RELABEL_MIN_MUTUAL neighbours, so a tie or a shortage of evidence
+    changes nothing.
+    """
+    assigned = {label for label in sheet.labels}
+    missing = {key for key in volume_keys if key not in assigned}
+    by_label: dict[str, list[int]] = {}
+    for index, label in enumerate(sheet.labels):
+        by_label.setdefault(label, []).append(index)
+
+    repairs: list[Repair] = []
+    claimed: set[str] = set()
+    for label, indices in sorted(by_label.items()):
+        if len(indices) < 2:
+            continue
+        for index in indices:
+            neighbours = {sheet.labels[other] for other in sheet.touching(index)}
+            if mutual_count(neighbours, label, mutual) > 0:
+                continue  # a mutually-vouched instance always keeps its label
+            # Only MUTUAL edges protect a label. Detroit's misread "2" panel
+            # sits next to one page that one-sidedly claims p2 -- 0.25 of
+            # support, and at 32-54% precision nowhere near enough to shield
+            # it from three mutual edges naming 22.
+            # The sibling instances are deliberately NOT consulted: Detroit's
+            # p2 has no mutual edges at all, so neither of its "2" panels can
+            # be vouched for. What identifies the impostor is the positive
+            # evidence for 22 at one of them, not a comparison between them.
+            candidates = []
+            for key in sorted(digit_family(label, missing - claimed)):
+                if mutual_count(neighbours, key, mutual) < RELABEL_MIN_MUTUAL:
+                    continue
+                key_score, vouchers = score_neighbours(
+                    neighbours, key, mutual, one_sided
+                )
+                candidates.append((key_score, key, vouchers))
+            if len(candidates) != 1:
+                continue  # no evidence, or ambiguous: leave it alone
+            key_score, key, vouchers = candidates[0]
+            claimed.add(key)
+            repairs.append(
+                Repair(
+                    sheet=sheet.sheet,
+                    index=index,
+                    old=label,
+                    new=key,
+                    reason="duplicate-no-support",
+                    support=key_score,
+                    evidence=vouchers,
+                )
+            )
+    return repairs
+
+
+def plan_cross_sheet_repairs(
+    sheets: list[SheetPanels],
+    mutual: dict[str, set[str]],
+    one_sided: dict[str, set[str]],
+    split_counts: dict[str, int] | None = None,
+) -> list[Repair]:
+    """Strip a key from the SHEET whose regions nothing vouches for.
+
+    Only applies to keys drawn on more than one key-map sheet: a volume with
+    two index sheets can place the same number on both, and one of them is
+    wrong (Brooklyn's p8 sits 72 m from truth on p0b and 1827 m away on p0).
+    Duplicates WITHIN one sheet are not this case -- they are usually split
+    panels, and plan_sheet_repairs relabels rather than strips them.
+
+    Fires only on a clean asymmetry: some sheet's copies are mutually vouched
+    for and another sheet's are not, beyond the key's split multiplicity.
+    """
+    split_counts = split_counts or {}
+    placements: dict[str, dict[str, list[int]]] = {}
+    by_name = {sheet.sheet: sheet for sheet in sheets}
+    for sheet in sheets:
+        for index, label in enumerate(sheet.labels):
+            placements.setdefault(label, {}).setdefault(sheet.sheet, []).append(index)
+
+    repairs: list[Repair] = []
+    for label, per_sheet in sorted(placements.items()):
+        if len(per_sheet) < 2:
+            continue  # one sheet only: not a cross-sheet conflict
+        total = sum(len(indices) for indices in per_sheet.values())
+        if total <= max(1, split_counts.get(label, 1)):
+            continue
+        vouched: dict[str, int] = {}
+        for name, indices in per_sheet.items():
+            sheet = by_name[name]
+            vouched[name] = max(
+                mutual_count(
+                    {sheet.labels[other] for other in sheet.touching(index)},
+                    label,
+                    mutual,
+                )
+                for index in indices
+            )
+        supported = [name for name, count in vouched.items() if count > 0]
+        unsupported = [name for name, count in vouched.items() if count == 0]
+        if not supported or not unsupported:
+            continue  # all or nothing vouched for: no asymmetry to exploit
+        for name in unsupported:
+            sheet = by_name[name]
+            for index in per_sheet[name]:
+                score, _vouchers = support_for(index, label, sheet, mutual, one_sided)
+                repairs.append(
+                    Repair(
+                        sheet=name,
+                        index=index,
+                        old=label,
+                        new=None,
+                        reason="cross-sheet-no-support",
+                        support=score,
+                        evidence=tuple(sorted(supported)),
+                    )
+                )
+    return repairs
+
+
+def plan_gap_repairs(
+    sheet: SheetPanels,
+    mutual: dict[str, set[str]],
+    one_sided: dict[str, set[str]],
+    volume_keys: set[str],
+) -> list[Repair]:
+    """Propose a location for each missing key from the pages that cite it.
+
+    A page absent from the key map has no region to score, so the evidence is
+    the other direction: the panels of the pages whose margins print its
+    number. Those panels surround where it belongs, and their centroid is the
+    estimate. Requires GAP_MIN_MUTUAL mutual citations and GAP_MIN_SUPPORT in
+    total, so a page vouched for only by one-sided claims is never placed.
+
+    The vouching panel indices ride along in ``evidence_indices`` so the caller
+    can compute the position and apply its own spatial sanity check.
+    """
+    assigned = set(sheet.labels)
+    panels_by_label: dict[str, list[int]] = {}
+    for index, label in enumerate(sheet.labels):
+        panels_by_label.setdefault(label, []).append(index)
+
+    repairs: list[Repair] = []
+    for key in sorted(key for key in volume_keys if key not in assigned):
+        strong = sorted(mutual.get(key, set()) & assigned)
+        weak = sorted((one_sided.get(key, set()) - mutual.get(key, set())) & assigned)
+        score = len(strong) + ONE_SIDED_WEIGHT * len(weak)
+        if len(strong) < GAP_MIN_MUTUAL or score < GAP_MIN_SUPPORT:
+            continue
+        strong_indices = tuple(
+            index for label in strong for index in panels_by_label.get(label, [])
+        )
+        weak_indices = tuple(
+            index for label in weak for index in panels_by_label.get(label, [])
+        )
+        repairs.append(
+            Repair(
+                sheet=sheet.sheet,
+                index=None,
+                old=None,
+                new=key,
+                reason="gap",
+                support=score,
+                evidence=tuple(strong + weak),
+                evidence_indices=strong_indices + weak_indices,
+                mutual_indices=strong_indices,
+            )
+        )
+    return repairs
+
+
+# --- volume-level inputs ----------------------------------------------------
+
+
+def page_key_of(stem: str) -> str | None:
+    """The page key a stem or printed text denotes ('p22' -> '22', '1499A')."""
+    match = re.search(r"\d+[A-Za-z]{0,2}", str(stem))
+    return match.group().upper() if match else None
+
+
+def adjacency_graphs(volume: Path) -> tuple[dict[str, set[str]], dict[str, set[str]]]:
+    """(mutual, one_sided) neighbour maps keyed by page key, from adjacency.json."""
+    path = volume / "adjacency.json"
+    mutual: dict[str, set[str]] = {}
+    one_sided: dict[str, set[str]] = {}
+    if not path.exists():
+        return mutual, one_sided
+    doc = json.loads(path.read_text())
+    for field_name, target in (("adjacency", mutual), ("one_sided", one_sided)):
+        for pair in doc.get(field_name, []):
+            if len(pair) != 2:
+                continue
+            first, second = (page_key_of(pair[0]), page_key_of(pair[1]))
+            if not first or not second or first == second:
+                continue
+            target.setdefault(first, set()).add(second)
+            target.setdefault(second, set()).add(first)
+    return mutual, one_sided
+
+
+def volume_page_keys(volume: Path) -> set[str]:
+    """Page keys of the volume's real page images (split parents included)."""
+    keys = set()
+    for image in volume.glob("p*.jpg"):
+        if "__" in image.stem:
+            continue
+        key = page_key_of(image.stem)
+        if key:
+            keys.add(key)
+    return keys
+
+
+def split_multiplicity(volume: Path) -> dict[str, int]:
+    """Page key -> number of split panels, for pages the splitter divided.
+
+    A split page is legitimately drawn once per panel on the key map, so its
+    duplicate regions are expected rather than suspicious.
+    """
+    counts: dict[str, int] = {}
+    for path in volume.glob("p*.panels.json"):
+        stem = path.name[: -len(".panels.json")]
+        key = page_key_of(stem)
+        if not key:
+            continue
+        try:
+            panels = json.loads(path.read_text()).get("panels", [])
+        except (OSError, ValueError):
+            continue
+        if panels:
+            counts[key] = len(panels)
+    return counts
+
+
+def panel_centroids(
+    panels: list[list[list[float]]],
+) -> list[tuple[float, float] | None]:
+    """Each region ring's centroid, or None for a degenerate ring."""
+    from shapely.geometry import Polygon
+
+    out: list[tuple[float, float] | None] = []
+    for ring in panels:
+        if len(ring) < 3:
+            out.append(None)
+            continue
+        polygon = Polygon([(float(x), float(y)) for x, y in ring])
+        if not polygon.is_valid:
+            polygon = polygon.buffer(0)
+        if polygon.is_empty:
+            out.append(None)
+            continue
+        out.append((polygon.centroid.x, polygon.centroid.y))
+    return out
+
+
+def panel_scale(panels: list[list[list[float]]]) -> float:
+    """Typical region width in key-map pixels (root of the median area)."""
+    from shapely.geometry import Polygon
+
+    areas = []
+    for ring in panels:
+        if len(ring) < 3:
+            continue
+        polygon = Polygon([(float(x), float(y)) for x, y in ring])
+        if not polygon.is_valid:
+            polygon = polygon.buffer(0)
+        if not polygon.is_empty:
+            areas.append(polygon.area)
+    if not areas:
+        return 0.0
+    areas.sort()
+    return math.sqrt(areas[len(areas) // 2])
+
+
+def proximity_graph(
+    panels: list[list[list[float]]], factor: float = PROXIMITY_FACTOR
+) -> set[frozenset[int]]:
+    """Region pairs close enough to be plausible neighbours on the sheet.
+
+    Deliberately NOT polygon contact. Segmented key-map regions are islands,
+    not a mosaic -- Detroit's cover 18% of the sheet, so p65's block sits
+    ~180 px of blank paper from p34's and p40's and no contact tolerance that
+    also respects real separations will join them. Centroid distance within
+    ``factor`` region-widths is permissive by design: the *printed* graph does
+    the discriminating (a candidate still needs two mutual edges among these
+    neighbours), so proximity only has to avoid missing the true ones.
+    """
+    centroids = panel_centroids(panels)
+    scale = panel_scale(panels)
+    if scale <= 0:
+        return set()
+    radius = factor * scale
+    pairs: set[frozenset[int]] = set()
+    for i, first in enumerate(centroids):
+        if first is None:
+            continue
+        for j in range(i + 1, len(centroids)):
+            second = centroids[j]
+            if second is None:
+                continue
+            if math.dist(first, second) <= radius:
+                pairs.add(frozenset((i, j)))
+    return pairs
+
+
+def load_sheets(volume: Path) -> list[tuple[str, dict, dict]]:
+    """(stem, keymap doc, regions doc) for every key map with both sidecars."""
+    sheets = []
+    for regions_path in sorted((volume / "raw").glob("*.regions.panels.json")):
+        if ".truth." in regions_path.name:
+            continue
+        stem = regions_path.name[: -len(".regions.panels.json")]
+        keymap_path = volume / "raw" / f"{stem}.keymap.json"
+        if not keymap_path.exists():
+            continue
+        try:
+            regions = json.loads(regions_path.read_text())
+            keymap = json.loads(keymap_path.read_text())
+        except (OSError, ValueError):
+            continue
+        sheets.append((stem, keymap, regions))
+    return sheets
+
+
+GAP_SPREAD_FACTOR = 3.0
+"""How far apart the panels citing a missing page may be, in region-widths.
+
+The gap placement is the centroid of the citing regions, which is only
+meaningful if they actually surround one spot. Scattered citations mean at
+least one of them is itself misassigned, so the placement is refused rather
+than dropped in the middle of the sheet."""
+
+
+def gap_placement(
+    repair: Repair, centroids: list[tuple[float, float] | None], scale: float
+) -> tuple[float, float] | None:
+    """Where a gap repair's page belongs: the centroid of its citing regions.
+
+    Anchored on the MUTUAL citations, which are 96-100% precise, then refined
+    with whichever one-sided citations agree with them. Detroit's p59 is cited
+    by p27 mutually and by p57, p61 and p1 one-sidedly, and the p1 claim is
+    junk (issue #213 names it) -- averaging it in would drag the placement
+    across the sheet, so a one-sided citation more than GAP_SPREAD_FACTOR
+    region-widths from the mutual anchor is discarded.
+
+    Returns None when no mutual citation has a usable region, or when the
+    mutual citations themselves disagree on a location (which means one of
+    them is misassigned).
+    """
+
+    def point_of(index: int) -> tuple[float, float] | None:
+        if 0 <= index < len(centroids):
+            return centroids[index]
+        return None
+
+    anchors = [
+        point for point in map(point_of, repair.mutual_indices) if point is not None
+    ]
+    if not anchors:
+        return None
+    anchor = (
+        sum(point[0] for point in anchors) / len(anchors),
+        sum(point[1] for point in anchors) / len(anchors),
+    )
+    limit = GAP_SPREAD_FACTOR * scale if scale > 0 else math.inf
+    if len(anchors) > 1 and max(math.dist(anchor, p) for p in anchors) > limit:
+        return None
+    weak = [
+        point
+        for index in repair.evidence_indices
+        if index not in repair.mutual_indices
+        and (point := point_of(index)) is not None
+        and math.dist(anchor, point) <= limit
+    ]
+    points = anchors + weak
+    return (
+        sum(point[0] for point in points) / len(points),
+        sum(point[1] for point in points) / len(points),
+    )
+
+
+def plan_volume_repairs(
+    volume: Path,
+) -> tuple[list[Repair], dict[str, dict[str, tuple[float, float]]]]:
+    """All proposed repairs for a volume, plus the placement of each gap fill.
+
+    Returns (repairs, placements) where ``placements[sheet][key]`` is the
+    key-map pixel position for a gap recovery, so the caller can synthesize a
+    detection there without redoing the geometry. Gap repairs whose citing
+    regions disagree on a location are dropped here rather than proposed.
+    """
+    mutual, one_sided = adjacency_graphs(volume)
+    if not mutual:
+        return [], {}
+    volume_keys = volume_page_keys(volume)
+    splits = split_multiplicity(volume)
+
+    sheet_panels: list[SheetPanels] = []
+    geometry: dict[str, tuple[list[tuple[float, float] | None], float]] = {}
+    for stem, _keymap, regions in load_sheets(volume):
+        panels = regions.get("panels", [])
+        labels = [
+            page_key_of(label) or str(label) for label in regions.get("labels", [])
+        ]
+        sheet_panels.append(SheetPanels(stem, labels, proximity_graph(panels)))
+        geometry[stem] = (panel_centroids(panels), panel_scale(panels))
+
+    repairs: list[Repair] = []
+    placements: dict[str, dict[str, tuple[float, float]]] = {}
+    for sheet in sheet_panels:
+        relabels = plan_sheet_repairs(sheet, mutual, one_sided, volume_keys)
+        repairs.extend(relabels)
+        # Gap recovery must see the relabels: a key just recovered from a
+        # misread panel is no longer missing, and proposing it again would
+        # place the same page twice (Detroit's 65 was found both ways).
+        repaired = SheetPanels(sheet.sheet, list(sheet.labels), sheet.contacts)
+        for relabel in relabels:
+            if relabel.index is not None and relabel.new is not None:
+                repaired.labels[relabel.index] = relabel.new
+        centroids, scale = geometry[sheet.sheet]
+        for repair in plan_gap_repairs(repaired, mutual, one_sided, volume_keys):
+            point = gap_placement(repair, centroids, scale)
+            if point is None or repair.new is None:
+                continue
+            repairs.append(repair)
+            placements.setdefault(sheet.sheet, {})[repair.new] = point
+    repairs.extend(plan_cross_sheet_repairs(sheet_panels, mutual, one_sided, splits))
+    return repairs, placements
