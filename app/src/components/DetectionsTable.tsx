@@ -1,5 +1,7 @@
+import type { ReactNode } from 'react';
 import type { IndexedDetection } from '../detections';
 import { isOnBuildingFill } from '../detections';
+import type { Detection } from '../types';
 import { DetectionCanvas } from './DetectionCanvas';
 
 interface DetectionsTableProps {
@@ -13,10 +15,20 @@ interface DetectionsTableProps {
 
 const NUM_PREVIEW_IMAGES = 100;
 
+/** Columns in the table, for the metadata row that spans them all. */
+const COLUMN_COUNT = 7;
+
+/**
+ * How few rows a selection must be down to before each one expands to show where
+ * it came from. Narrowing to a handful is the gesture that means "explain these".
+ */
+const MAX_ROWS_WITH_METADATA = 5;
+
 /**
  * Table of detections sorted by confidence. Shows all filtered detections, or
  * only the selected ones when a selection is active. The first ten rows render
- * a deskewed image patch. Clicking a row selects that detection.
+ * a deskewed image patch. Clicking a row selects that detection. Narrow the
+ * selection to a few rows and each grows a metadata block explaining itself.
  */
 export function DetectionsTable(props: DetectionsTableProps) {
   const {
@@ -31,6 +43,10 @@ export function DetectionsTable(props: DetectionsTableProps) {
   const visible = detections
     .filter(({ i }) => selectedIndices.size === 0 || selectedIndices.has(i))
     .sort((a, b) => b.det.confidence - a.det.confidence);
+  // Only once a selection has narrowed things down: every row of a full sheet
+  // carrying a metadata block would bury the table it belongs to.
+  const showMetadata =
+    selectedIndices.size > 0 && visible.length <= MAX_ROWS_WITH_METADATA;
 
   return (
     <div id="detections-panel">
@@ -59,7 +75,7 @@ export function DetectionsTable(props: DetectionsTableProps) {
               .filter(Boolean)
               .join(' ');
             const type = det.ignore ? 'ignore' : det.hint ? 'hint' : 'street';
-            return (
+            return [
               <tr
                 key={i}
                 className={classes || undefined}
@@ -113,11 +129,70 @@ export function DetectionsTable(props: DetectionsTableProps) {
                     />
                   )}
                 </td>
-              </tr>
-            );
+              </tr>,
+              showMetadata && (
+                <tr key={`${i}-meta`} className="detection-meta">
+                  <td colSpan={COLUMN_COUNT}>
+                    <DetectionMetadata det={det} />
+                  </td>
+                </tr>
+              ),
+            ];
           })}
         </tbody>
       </table>
     </div>
+  );
+}
+
+/**
+ * Where a detection came from, for the handful of rows a small selection shows.
+ *
+ * Everything the row's own columns do not already say: how a key-map number was
+ * repaired and on whose word (#213), the colour under a label, the flags that
+ * decide whether georeferencing keeps it, and where on the sheet it sits.
+ */
+function DetectionMetadata({ det }: { det: Detection }) {
+  const xs = det.polygon.map(([x]) => x);
+  const ys = det.polygon.map(([, y]) => y);
+  const center: [number, number] = [
+    Math.round(xs.reduce((a, b) => a + b, 0) / xs.length),
+    Math.round(ys.reduce((a, b) => a + b, 0) / ys.length),
+  ];
+
+  const rows: [string, ReactNode][] = [];
+  if (det.via) rows.push(['via', det.via]);
+  if (det.support !== undefined) rows.push(['support', det.support.toFixed(2)]);
+  if (det.cited_by?.length) rows.push(['cited by', det.cited_by.join(', ')]);
+  if (det.background) {
+    rows.push([
+      'background',
+      <>
+        <span
+          className="fill-swatch"
+          style={{ background: det.background.color }}
+        />
+        {det.background.color} — hue {det.background.hue}°, chroma{' '}
+        {det.background.chroma}
+      </>,
+    ]);
+  }
+  const flags = [
+    det.ignore && 'ignored',
+    det.hint && 'hint',
+    det.fallback && 'fallback vocabulary',
+  ].filter(Boolean);
+  if (flags.length) rows.push(['flags', flags.join(', ')]);
+  rows.push(['center', `${center[0]}, ${center[1]} px`]);
+
+  return (
+    <dl className="detection-metadata">
+      {rows.map(([label, value]) => (
+        <div key={label}>
+          <dt>{label}</dt>
+          <dd>{value}</dd>
+        </div>
+      ))}
+    </dl>
   );
 }

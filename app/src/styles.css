@@ -93,38 +93,57 @@
 }
 
 /*
- * Panels mode: page-region boxes are tiny, so give the image the bulk of the width and let it
- * scroll vertically with the page; the Index/Page/Area table needs only a narrow strip.
+ * Wide-image views: a full key-map sheet, whether shown as page-region panels or as its
+ * page-number detections. Both draw marks a few dozen pixels across on a sheet thousands
+ * wide, so the 800px cap above renders them illegibly (#215). Give the image the bulk of
+ * the width and let it scroll vertically with the page; the table beside it needs only a
+ * narrow strip and stays in view.
  */
-.container-panels {
+.container-wide {
   align-items: flex-start;
+  --wide-table-width: 220px;
 }
 
-.container-panels .image-column {
+/* The key-map detections table carries seven columns (angle, both sides, confidence, type,
+   text, crop) where the panels table carries three, so it needs more of the strip. */
+.container-keymap {
+  --wide-table-width: 360px;
+}
+
+.container-wide .image-column {
   flex: 1 1 auto;
   min-width: 0;
 }
 
-.container-panels .image-wrapper {
+.container-wide .image-wrapper {
   display: block;
   width: 100%;
 }
 
-.container-panels .image-wrapper img {
+.container-wide .image-wrapper img {
   width: 100%;
   max-width: none;
   max-height: none;
 }
 
-.container-panels .map-column {
-  flex: 0 0 220px;
+/* The whole column is pinned beside the scrolling sheet -- links and controls
+   included, so nothing slides out from over the table -- and bounded by the
+   viewport so the list below scrolls inside itself rather than off-screen.
+   It starts below .view-nav, which is fixed over this same top-right corner and
+   would otherwise sit on the table's header row. */
+.container-wide .map-column {
+  flex: 0 0 var(--wide-table-width);
   min-width: 0;
+  position: sticky;
+  top: 32px;
+  align-self: flex-start;
+  max-height: calc(100vh - 48px);
 }
 
-.container-panels #detections-panel {
+.container-wide #detections-panel {
   height: auto;
-  position: sticky;
-  top: 16px;
+  min-height: 0;
+  overflow-y: auto;
 }
 
 #map {
@@ -314,6 +333,46 @@
 
 #detections-table tr.selected:hover {
   background: #ffe0b2;
+}
+
+/*
+ * Where a detection came from, shown under its row once a selection is down to a
+ * handful. Reads as an annotation on the row above rather than a row of its own,
+ * so it shares the selection tint and drops the cursor and hover affordances.
+ */
+#detections-table tr.detection-meta {
+  cursor: default;
+  background: #fff8ec;
+}
+
+#detections-table tr.detection-meta:hover {
+  background: #fff8ec;
+}
+
+#detections-table tr.detection-meta td {
+  padding: 2px 8px 8px 20px;
+  white-space: normal;
+}
+
+.detection-metadata {
+  margin: 0;
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  gap: 1px 10px;
+  color: #555;
+}
+
+.detection-metadata > div {
+  display: contents;
+}
+
+.detection-metadata dt {
+  color: #999;
+}
+
+.detection-metadata dd {
+  margin: 0;
+  overflow-wrap: anywhere;
 }
 
 #detections-table tr.ignored td {

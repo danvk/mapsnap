@@ -48,6 +48,23 @@ export function pageStem(fileName: string): string {
   return base.split('.')[0];
 }
 
+/**
+ * Whether a JSON path holds a key map's own contents.
+ *
+ * A key map's page-number detections and its page regions are shaped exactly
+ * like any page's streets and panels, so nothing in the parsed data says the
+ * sheet is a key map -- only the filename does. The view uses this to widen the
+ * image, since a key map's marks are illegible at the default 800px cap (#215).
+ */
+export function isKeymapJson(fileName: string): boolean {
+  const base = (fileName.split(/[\\/]/).pop() ?? fileName).toLowerCase();
+  return (
+    base.endsWith('.keymap.json') ||
+    base.endsWith('.keymap-raw.json') ||
+    base.endsWith('.regions.panels.json')
+  );
+}
+
 /** Fallback image dimensions used when an old-format streets.json omits them. */
 export interface FallbackDimensions {
   width: number;

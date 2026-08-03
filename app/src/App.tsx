@@ -24,7 +24,7 @@ import {
   type IndexedDetection,
 } from './detections';
 import { filterBoxes } from './boxes';
-import { pageStem, parseDroppedJson } from './fileLoading';
+import { isKeymapJson, pageStem, parseDroppedJson } from './fileLoading';
 import { ImageColumn, type Mode } from './components/ImageColumn';
 import { MapView } from './components/MapView';
 import { GcpControls, type GcpFitStats } from './components/GcpControls';
@@ -140,6 +140,9 @@ export function App() {
   const [streets, setStreets] = useState<Street[]>([]);
   const [intersections, setIntersections] = useState<IntersectionPoint[]>([]);
   const [keymap, setKeymap] = useState<KeymapLocation | null>(null);
+  // Whether the loaded JSON is a key map's own sidecar (rather than a page's),
+  // which only its filename reveals. Drives the wide-image layout (#215).
+  const [keymapSheet, setKeymapSheet] = useState(false);
   const [truth, setTruth] = useState<[number, number][][] | null>(null);
   const [gcpPairs, setGcpPairs] = useState<GcpPairResult[] | null>(null);
   const [selectedPair, setSelectedPair] = useState<[number, number] | null>(
@@ -378,16 +381,20 @@ export function App() {
   }
 
   // Classify dropped JSON text and switch modes / load data accordingly.
+  // `sourceName` is the file it came from, when known: a key map's detections
+  // parse as ordinary streets, and only the name tells them apart (#215).
   function processJson(
     text: string,
     fallbackWidth: number,
     fallbackHeight: number,
+    sourceName?: string,
   ): void {
     const result = parseDroppedJson(text, {
       width: fallbackWidth,
       height: fallbackHeight,
     });
     if (result.kind === 'invalid') return;
+    setKeymapSheet(!!sourceName && isKeymapJson(sourceName));
     if (result.kind === 'streets') {
       setMode('streets');
       setSelectedIndices(new Set());
@@ -479,7 +486,7 @@ export function App() {
 
     if (jsonFile) {
       const text = await jsonFile.text();
-      processJson(text, fallbackWidth, fallbackHeight);
+      processJson(text, fallbackWidth, fallbackHeight, jsonFile.name);
     }
   }
 
@@ -519,7 +526,12 @@ export function App() {
         if (!response.ok) {
           throw new Error(`${jsonFile}: HTTP ${response.status}`);
         }
-        processJson(await response.text(), fallbackWidth, fallbackHeight);
+        processJson(
+          await response.text(),
+          fallbackWidth,
+          fallbackHeight,
+          jsonFile,
+        );
       }
     } catch (err) {
       console.error('Failed to load files from URL:', err);
@@ -574,10 +586,19 @@ export function App() {
     );
   }
 
+  // A key-map sheet is thousands of pixels wide and its marks are a few dozen
+  // across, so it gets the full column width with a fixed table beside it --
+  // whether it arrived as page regions or as page-number detections (#215).
+  const containerClass = [
+    'container',
+    mode === 'panels' || keymapSheet ? 'container-wide' : '',
+    mode === 'streets' && keymapSheet ? 'container-keymap' : '',
+  ]
+    .filter(Boolean)
+    .join(' ');
+
   return (
-    <div
-      className={mode === 'panels' ? 'container container-panels' : 'container'}
-    >
+    <div className={containerClass}>
       <nav className="view-nav">
         <a href="?view=iiif">volume viewer</a>
         {noteContext && <NoteButton ctx={noteContext} />}
