@@ -59,6 +59,17 @@ export interface Detection {
    * neighbor), false amber (an unreciprocated claim); absent for non-claims.
    */
   mutual?: boolean;
+  /**
+   * How a key-map page number came to be, when it was not simply read (#213):
+   * 'adjacency-gap' for one synthesized where nothing was detected, or
+   * 'adjacency-relabel' for a read the adjacency graph overruled. Absent for an
+   * ordinary read.
+   */
+  via?: string;
+  /** Adjacency support behind a `via` repair: mutual citations, plus 0.25 per one-sided claim. */
+  support?: number;
+  /** Page numbers whose printed margins vouch for a `via` repair. */
+  cited_by?: string[];
 }
 
 /** The key map's expected center and OCR/fit radius for a page (georef.json `keymap`). */

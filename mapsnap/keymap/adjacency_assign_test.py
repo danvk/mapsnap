@@ -1,12 +1,14 @@
 import json
 
 from mapsnap.keymap.adjacency_assign import (
+    MIN_GAP_SIDE,
     Repair,
     SheetNumbers,
     adjacency_graphs,
     detection_centers,
     digit_family,
     gap_placement,
+    median_detection_box,
     page_pitch,
     plan_cross_sheet_repairs,
     plan_gap_repairs,
@@ -230,23 +232,41 @@ def test_synthetic_detection_reads_as_a_detection_and_declares_its_provenance():
         support=1.75,
         evidence=("27", "57"),
     )
-    detection = synthetic_detection("59", (500.0, 400.0), pitch=200.0, repair=repair)
+    detection = synthetic_detection("59", (500.0, 400.0), (72.0, 115.0), repair)
     assert detection["text"] == "59"
     assert detection["via"] == "adjacency-gap"
     assert detection["support"] == 1.75 and detection["cited_by"] == ["27", "57"]
     # Non-zero so the debugger draws it, but below any real read's confidence.
     assert 0 < detection["confidence"] < 0.5
-    # A glyph-sized box centred on the estimate, so page_regions samples the
-    # colour block underneath it.
+    # The given box, centred exactly on the estimate (that centre is the page's
+    # position downstream), with the sides reporting what was actually drawn --
+    # an odd height rounds out to an even one.
     xs = [point[0] for point in detection["polygon"]]
     ys = [point[1] for point in detection["polygon"]]
     assert (sum(xs) / 4, sum(ys) / 4) == (500.0, 400.0)
-    assert max(xs) - min(xs) == max(ys) - min(ys) == 24
-    # A tightly-pitched sheet still gets a box the debugger's short-side filter
-    # will show, rather than one scaled down into invisibility.
-    tight = synthetic_detection("59", (500.0, 400.0), pitch=60.0, repair=repair)
-    sides = [point[0] for point in tight["polygon"]]
-    assert max(sides) - min(sides) == 20
+    assert (max(xs) - min(xs), max(ys) - min(ys)) == (72, 116)
+    assert (detection["long_side"], detection["short_side"]) == (116.0, 72.0)
+
+
+def test_median_detection_box_measures_the_sheet_and_ignores_earlier_gaps():
+    def street(width, height, via=None):
+        record = {"polygon": [[0, 0], [width, 0], [width, height], [0, height]]}
+        if via:
+            record["via"] = via
+        return record
+
+    streets = [street(23, 115), street(72, 115), street(96, 115)]
+    assert median_detection_box(streets) == (72, 115)
+    # A gap synthesized by an earlier run must not pull the median toward
+    # itself, or repeated repairs would drift the box size.
+    assert median_detection_box([*streets, street(500, 500, via="adjacency-gap")]) == (
+        72,
+        115,
+    )
+    # Tiny boxes are floored so the debugger's short-side filter still shows
+    # them, and a sheet with nothing to measure falls back to that floor.
+    assert median_detection_box([street(4, 4)]) == (MIN_GAP_SIDE, MIN_GAP_SIDE)
+    assert median_detection_box([]) == (MIN_GAP_SIDE, MIN_GAP_SIDE)
 
 
 def test_gap_placement_discards_a_far_flung_one_sided_citation():

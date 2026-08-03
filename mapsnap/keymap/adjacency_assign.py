@@ -53,6 +53,7 @@ precise against label truth (#207) versus 96-100% for mutual edges.
 import json
 import math
 import re
+import statistics
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -691,42 +692,72 @@ What is left is a deliberately low placeholder: low enough to sort below every
 real read, non-zero so the debugger draws it (a 0 renders as invisible)."""
 
 MIN_GAP_SIDE = 20.0
-"""Smallest square a synthesized gap detection may be drawn as, in key-map pixels.
+"""Smallest a synthesized gap detection's box may be, in key-map pixels.
 
-Matches the debugger's default minimum-short-side filter, so a gap detection is
-never hidden by it. Only affects display and the colour-block sample page_regions
-takes underneath -- both indifferent to a few pixels on a sheet thousands wide."""
+A floor under the sheet's median detection box, matching the debugger's default
+minimum-short-side filter so a gap detection is never hidden by it. Only affects
+display and the colour-block sample page_regions takes underneath -- both
+indifferent to a few pixels on a sheet thousands wide."""
+
+
+def median_detection_box(streets: list[dict]) -> tuple[float, float]:
+    """(width, height) of the sheet's typical page-number box, in key-map pixels.
+
+    Measured from the polygons rather than the long_side/short_side fields, so
+    it holds whatever their orientation convention is. Previously-synthesized
+    boxes are excluded -- otherwise re-running the repair would let them drag
+    the median toward themselves. Falls back to a MIN_GAP_SIDE square when the
+    sheet has no real detections to measure.
+    """
+    widths: list[float] = []
+    heights: list[float] = []
+    for street in streets:
+        polygon = street.get("polygon") or []
+        if street.get("via") == "adjacency-gap" or len(polygon) < 3:
+            continue
+        xs = [point[0] for point in polygon]
+        ys = [point[1] for point in polygon]
+        widths.append(max(xs) - min(xs))
+        heights.append(max(ys) - min(ys))
+    if not widths:
+        return (MIN_GAP_SIDE, MIN_GAP_SIDE)
+    return (
+        max(MIN_GAP_SIDE, statistics.median(widths)),
+        max(MIN_GAP_SIDE, statistics.median(heights)),
+    )
 
 
 def synthetic_detection(
-    key: str, point: tuple[float, float], pitch: float, repair: Repair
+    key: str, point: tuple[float, float], box: tuple[float, float], repair: Repair
 ) -> dict:
     """A detection record for a page the sheet never printed a readable number for.
 
     Shaped like a CRNN detection so every existing reader (load_seeds,
     load_detections, the debugger) treats it as one, with ``via`` marking its
-    provenance. The box is a nominal glyph-sized square at the estimated spot:
-    page_regions only uses a seed's box to pick the colour block under it, and
-    the world position downstream comes from the box centre.
-
-    The floor keeps the box at least MIN_GAP_SIDE across, since the debugger
-    hides anything whose short side falls under its default slider -- a
-    tightly-pitched sheet would otherwise synthesize invisible boxes.
+    provenance. ``box`` is the (width, height) to draw it at -- the sheet's
+    median real detection, so a gap reads at a glance as the same kind of thing
+    as its neighbours rather than as a speck. page_regions only uses a seed's
+    box to pick the colour block under it, and the world position downstream
+    comes from the box centre, so the size is a display choice either way.
     """
-    half = max(MIN_GAP_SIDE / 2, pitch * 0.06)
-    x, y = point
+    # Integer half-extents about an integer centre, so the polygon's centre is
+    # exactly the estimate rather than half a pixel off it: downstream this box
+    # IS the page's position, and the sides are reported from what was drawn.
+    half_width = max(1, round(box[0] / 2))
+    half_height = max(1, round(box[1] / 2))
+    x, y = round(point[0]), round(point[1])
     return {
         "polygon": [
-            [int(x - half), int(y - half)],
-            [int(x + half), int(y - half)],
-            [int(x + half), int(y + half)],
-            [int(x - half), int(y + half)],
+            [x - half_width, y - half_height],
+            [x + half_width, y - half_height],
+            [x + half_width, y + half_height],
+            [x - half_width, y + half_height],
         ],
         "text": key,
         "confidence": GAP_CONFIDENCE,
         "angle": 0,
-        "long_side": round(2 * half, 1),
-        "short_side": round(2 * half, 1),
+        "long_side": float(max(2 * half_width, 2 * half_height)),
+        "short_side": float(min(2 * half_width, 2 * half_height)),
         "dir_pix": 0.0,
         "via": "adjacency-gap",
         "support": round(repair.support, 2),
@@ -761,14 +792,14 @@ def apply_repairs(
         if not raw_path.exists():
             raw_path.write_text(json.dumps(doc, indent=2))
 
-        pitch = page_pitch(detection_centers(streets))
+        box = median_detection_box(streets)
         stripped: list[int] = []
         for repair in sheet_repairs:
             if repair.index is None:
                 point = placements.get(stem, {}).get(repair.new or "")
                 if point is None or repair.new is None:
                     continue
-                streets.append(synthetic_detection(repair.new, point, pitch, repair))
+                streets.append(synthetic_detection(repair.new, point, box, repair))
             elif repair.new is None:
                 stripped.append(repair.index)
             elif 0 <= repair.index < len(streets):

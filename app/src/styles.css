@@ -126,15 +126,24 @@
   max-height: none;
 }
 
+/* The whole column is pinned beside the scrolling sheet -- links and controls
+   included, so nothing slides out from over the table -- and bounded by the
+   viewport so the list below scrolls inside itself rather than off-screen.
+   It starts below .view-nav, which is fixed over this same top-right corner and
+   would otherwise sit on the table's header row. */
 .container-wide .map-column {
   flex: 0 0 var(--wide-table-width);
   min-width: 0;
+  position: sticky;
+  top: 32px;
+  align-self: flex-start;
+  max-height: calc(100vh - 48px);
 }
 
 .container-wide #detections-panel {
   height: auto;
-  position: sticky;
-  top: 16px;
+  min-height: 0;
+  overflow-y: auto;
 }
 
 #map {
@@ -324,6 +333,46 @@
 
 #detections-table tr.selected:hover {
   background: #ffe0b2;
+}
+
+/*
+ * Where a detection came from, shown under its row once a selection is down to a
+ * handful. Reads as an annotation on the row above rather than a row of its own,
+ * so it shares the selection tint and drops the cursor and hover affordances.
+ */
+#detections-table tr.detection-meta {
+  cursor: default;
+  background: #fff8ec;
+}
+
+#detections-table tr.detection-meta:hover {
+  background: #fff8ec;
+}
+
+#detections-table tr.detection-meta td {
+  padding: 2px 8px 8px 20px;
+  white-space: normal;
+}
+
+.detection-metadata {
+  margin: 0;
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  gap: 1px 10px;
+  color: #555;
+}
+
+.detection-metadata > div {
+  display: contents;
+}
+
+.detection-metadata dt {
+  color: #999;
+}
+
+.detection-metadata dd {
+  margin: 0;
+  overflow-wrap: anywhere;
 }
 
 #detections-table tr.ignored td {
