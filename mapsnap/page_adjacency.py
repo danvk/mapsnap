@@ -43,6 +43,7 @@ import numpy as np
 from PIL import Image
 from tqdm import tqdm
 
+from mapsnap.detect_text import craft_hint
 from mapsnap.keymap.locate import page_key, page_number
 from mapsnap.utils import image_stem
 
@@ -248,7 +249,7 @@ def box_center(bbox: list[list[float]]) -> tuple[float, float]:
 
 
 def cached_craft_boxes(image_path: Path) -> tuple[list, list] | None:
-    """The angle-0 CRAFT boxes from ``<stem>.boxes.json`` (written by ``mapsnap ocr``), or None.
+    """The angle-0 CRAFT boxes from ``<stem>.boxes.json`` (written by ``mapsnap craft``), or None.
 
     Returns (horizontal_list, free_list) in the same shape ``reader.detect`` yields, so
     recognition can skip the CRAFT pass entirely. Returns None when the file is absent, records
@@ -578,15 +579,6 @@ def main() -> None:
     parser.add_argument(
         "--no-gpu", action="store_true", help="Disable GPU acceleration for EasyOCR."
     )
-    parser.add_argument(
-        "--reuse-boxes",
-        action="store_true",
-        help=(
-            "Reuse CRAFT boxes from each page's <stem>.boxes.json (written by mapsnap ocr) "
-            "instead of re-running detection; pages without one (or whose boxes were computed "
-            "at different image dimensions) still run CRAFT."
-        ),
-    )
     args = parser.parse_args()
 
     import easyocr
@@ -604,14 +596,17 @@ def main() -> None:
     reader = easyocr.Reader(["en"], gpu=not args.no_gpu, verbose=False)
 
     pages: dict[str, dict] = {}
-    reused = 0
     for image in tqdm(images, smoothing=0):
         stem = image_stem(str(image))
         # Record the scanned image's dimensions so a viewer can rescale detection
         # polygons when it loads the page at a different resolution.
         width, height = Image.open(image).size
-        craft_boxes = cached_craft_boxes(image) if args.reuse_boxes else None
-        reused += craft_boxes is not None
+        craft_boxes = cached_craft_boxes(image)
+        if craft_boxes is None:
+            sys.exit(
+                f"No usable CRAFT boxes for {image.name} (missing, or computed at "
+                f"different image dimensions).\nRun: {craft_hint([str(image)])}"
+            )
         pages[stem] = {
             "key": page_key(stem),
             "number": page_number(stem),
@@ -619,8 +614,6 @@ def main() -> None:
             "height": height,
             "detections": digit_detections(image, reader, valid_keys, craft_boxes),
         }
-    if args.reuse_boxes:
-        print(f"Reused CRAFT boxes for {reused}/{len(images)} pages.", file=sys.stderr)
 
     def compute_claims(
         height_band: tuple[float, float] | None,

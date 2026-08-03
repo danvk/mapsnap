@@ -26,6 +26,10 @@ SUBCOMMANDS: dict[str, tuple[str, str]] = {
         "Compare archived fit runs (experiments diff <id-a> <id-b>)",
     ),
     # Individual commands
+    "craft": (
+        "mapsnap.craft",
+        "Run CRAFT text detection and cache <stem>.boxes.json (prerequisite for ocr/adjacency)",
+    ),
     "ocr": ("mapsnap.detect_text", "Detect text regions in map images"),
     "georef": (
         "mapsnap.georef_from_labels",
