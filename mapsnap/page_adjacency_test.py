@@ -6,6 +6,7 @@ from mapsnap.page_adjacency import (
     classify_edge,
     is_claim,
     mutual_edges,
+    one_sided_edges,
     polygon_rotation_deg,
     resolve_page_key,
     single_digit_height_band,
@@ -149,6 +150,19 @@ def test_mutual_edges_empty_when_one_sided():
     assert mutual_edges({"p1": {"2"}, "p2": set()}) == []
 
 
+def test_one_sided_edges_are_the_unreciprocated_remainder():
+    claims = {"p49": {"50", "51"}, "p50": {"49"}, "p51": set()}
+    # 49<->50 is mutual and excluded; 49->51 resolves but lacks the reciprocal.
+    assert one_sided_edges(claims) == [("p49", "p51")]
+
+
+def test_one_sided_edges_skip_unresolvable_claims():
+    # A claim of a page outside the volume, and an ambiguous bare number among
+    # lettered sheets, resolve to nothing and produce no one-sided edge.
+    claims = {"p1499a": {"1488", "7777"}, "p1488": set(), "p1499b": {"1499"}}
+    assert one_sided_edges(claims) == [("p1499a", "p1488")]
+
+
 def test_mutual_edges_lettered_keys_do_not_collide():
     # LA-style: 18 sheets share the number 1499. A lettered claim reaches exactly
     # its sheet; a bare "1499" claim is ambiguous among them and resolves to nothing.
@@ -190,6 +204,15 @@ def test_resolve_page_key_repairs_long_keys():
     # containing two valid keys names neither.
     assert resolve_page_key("9", "", LA_KEYS) is None
     assert resolve_page_key("14021403", "", LA_KEYS) is None
+
+
+def test_resolve_page_key_bare_number_reaches_a_unique_lettered_key():
+    # Chicago prints a bare "60" for sheet p60w; Miami "8" for p8s. The read
+    # must resolve at DETECTION time, not just at edge-resolution time.
+    assert resolve_page_key("60", "", {"59W", "60W", "61W"}) == ("60W", "number")
+    assert resolve_page_key("8", "", {"7", "8S", "9"}) == ("8S", "number")
+    # A digit part shared by many lettered sheets stays ambiguous.
+    assert resolve_page_key("1499", "", {"1499A", "1499G", "1499L"}) is None
 
 
 def test_resolve_page_key_is_inert_for_short_key_volumes():

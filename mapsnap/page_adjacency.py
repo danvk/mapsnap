@@ -156,8 +156,11 @@ def resolve_page_key(
                  forms a valid key ("1499G" -> 1499G); checked first because
                  the digits pass renders the same ink as a bare "1499" -- a
                  different, wrong page.
-      exact      the digit read is a valid key as-is (the only method that
-                 applies to keys shorter than ``min_repair_digits``).
+      exact      the digit read is a valid key as-is.
+      number     the digit read matches exactly ONE key's digit part: Chicago
+                 prints a bare "60" for sheet p60w, and Miami "8" for p8s.
+                 A digit part shared by many lettered keys (LA's 18 p1499*
+                 sheets) is ambiguous and never resolved this way.
       suffix     the read lost its leading digit against the sheet trim:
                  exactly one valid key ends with it ("409" -> 1409). Requires
                  a read of >= 3 digits: 2-digit remnants are house-number
@@ -183,6 +186,11 @@ def resolve_page_key(
         return None
     if digits in valid_keys:
         return digits, "exact"
+    same_number = [
+        key for key in valid_keys if "".join(c for c in key if c.isdigit()) == digits
+    ]
+    if len(same_number) == 1:
+        return same_number[0], "number"
     repairable = [
         key for key in valid_keys if key.isdigit() and len(key) >= min_repair_digits
     ]
@@ -420,15 +428,14 @@ def is_claim(
     return True
 
 
-def mutual_edges(claims_by_page: dict[str, set[str]]) -> list[tuple[str, str]]:
-    """Reciprocated adjacency edges: A claims B's key and B claims A's key.
+def claim_resolver(claims_by_page: dict[str, set[str]]):
+    """resolve(claim key) -> stems carrying it, shared by both edge builders.
 
-    ``claims_by_page`` maps page stems to claimed page keys. A claimed key resolves to
-    the stem(s) carrying exactly that key; a bare-number claim in a volume whose sheet
-    has a lettered stem (Chicago prints "60" for p60w) falls back to the number, but
-    only when it names a single stem — a number shared by many lettered sheets (LA's
-    p1499a-r) is ambiguous and resolves to nothing. The edge exists only if each side's
-    claims resolve to the other. Returns sorted (stem, stem) pairs, each once.
+    A claimed key resolves to the stem(s) carrying exactly that key; a
+    bare-number claim in a volume whose sheet has a lettered stem (Chicago
+    prints "60" for p60w) falls back to the number, but only when it names a
+    single stem — a number shared by many lettered sheets (LA's p1499a-r) is
+    ambiguous and resolves to nothing.
     """
     stems_by_key: dict[str, list[str]] = defaultdict(list)
     stems_by_number: dict[int, list[str]] = defaultdict(list)
@@ -450,6 +457,17 @@ def mutual_edges(claims_by_page: dict[str, set[str]]) -> list[tuple[str, str]]:
                 return fallback
         return []
 
+    return resolve
+
+
+def mutual_edges(claims_by_page: dict[str, set[str]]) -> list[tuple[str, str]]:
+    """Reciprocated adjacency edges: A claims B's key and B claims A's key.
+
+    ``claims_by_page`` maps page stems to claimed page keys (see claim_resolver
+    for how claims resolve to stems). The edge exists only if each side's
+    claims resolve to the other. Returns sorted (stem, stem) pairs, each once.
+    """
+    resolve = claim_resolver(claims_by_page)
     edges: set[tuple[str, str]] = set()
     for stem, claimed in claims_by_page.items():
         for claim in claimed:
@@ -461,6 +479,31 @@ def mutual_edges(claims_by_page: dict[str, set[str]]) -> list[tuple[str, str]]:
                 ):
                     first, second = sorted((stem, other))
                     edges.add((first, second))
+    return sorted(edges)
+
+
+def one_sided_edges(claims_by_page: dict[str, set[str]]) -> list[tuple[str, str]]:
+    """Directed claims that resolve to a real page but are not reciprocated.
+
+    The lower-trust adjacency tier. Truth itself reciprocates 89-93% of its
+    printed edges, so a one-sided claim CAN be a genuine reference whose
+    reciprocal failed to read — but this tier is where every junk read that
+    resolves to a real page also lands, and reciprocity is precisely the
+    filter that was removing them. Measured against the hand-labelled truth:
+    LA 105/193 = 54%, Hudson 48/98 = 49%, Nashville 52/165 = 32% genuine,
+    tracking each volume's claim precision (79/87/63%). Mutual edges on the
+    same volumes are 96-100%. Consumers must therefore treat these as
+    candidates to verify, never as facts, and weight them well below mutual
+    edges. Returns sorted (claimer, target) pairs, excluding mutual edges.
+    """
+    resolve = claim_resolver(claims_by_page)
+    mutual = {frozenset(edge) for edge in mutual_edges(claims_by_page)}
+    edges: set[tuple[str, str]] = set()
+    for stem, claimed in claims_by_page.items():
+        for claim in claimed:
+            for other in resolve(claim):
+                if other != stem and frozenset((stem, other)) not in mutual:
+                    edges.add((stem, other))
     return sorted(edges)
 
 
@@ -623,6 +666,7 @@ def main() -> None:
             )
 
     edges = mutual_edges(claims_by_page)
+    one_sided = one_sided_edges(claims_by_page)
     doc = {
         "timestamp": datetime.now(UTC).isoformat(),
         "command": sys.argv[:],
@@ -634,13 +678,14 @@ def main() -> None:
         "single_digit_min_gap": round(min_gap, 1) if min_gap is not None else None,
         "pages": pages,
         "adjacency": [list(edge) for edge in edges],
+        "one_sided": [list(edge) for edge in one_sided],
     }
     output = args.output or (args.volume / "adjacency.json")
     output.write_text(json.dumps(doc, indent=2))
     total_claims = sum(len(c) for c in claims_by_page.values())
     print(
         f"Wrote {output}: {len(pages)} pages, {total_claims} directed claims, "
-        f"{len(edges)} mutual edges.",
+        f"{len(edges)} mutual edges, {len(one_sided)} one-sided.",
         file=sys.stderr,
     )
 
