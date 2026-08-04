@@ -27,10 +27,12 @@ from typing import cast
 
 import numpy as np
 from PIL import Image, ImageDraw
+from shapely import make_valid
+from shapely.errors import GEOSException
 from shapely.geometry import LineString, MultiPolygon, Polygon
 from shapely.geometry import mapping as geom_mapping
 from shapely.geometry import shape as geom_shape
-from shapely.geometry.base import BaseMultipartGeometry
+from shapely.geometry.base import BaseGeometry, BaseMultipartGeometry
 from shapely.ops import polygonize, unary_union
 
 # ~0.5 miles in degrees latitude (constant regardless of location).
@@ -255,6 +257,27 @@ def _assign_blocks_to_pages(
     return assignment
 
 
+def safe_overlay(a: BaseGeometry, b: BaseGeometry, op: str) -> BaseGeometry | None:
+    """Boolean overlay of two geometries, or None if GEOS can't do it.
+
+    Dent detection derives its operands from earlier overlays, which can leave
+    slivers that GEOS rejects with a side-location conflict. Those candidates
+    are heuristic refinements, so dropping one is harmless -- crashing the whole
+    IIIF build over it is not. A `make_valid` retry recovers most of them.
+
+    The result is passed through exactly as GEOS returns it, including
+    GeometryCollections, since callers do their own filtering.
+    """
+    try:
+        return cast(BaseGeometry, getattr(a, op)(b))
+    except GEOSException:
+        pass
+    try:
+        return cast(BaseGeometry, getattr(make_valid(a), op)(make_valid(b)))
+    except GEOSException:
+        return None
+
+
 def _collect_polygons(geom: object) -> list[Polygon]:
     """Extract all non-empty Polygon parts from any Shapely geometry."""
     if isinstance(geom, Polygon):
@@ -413,8 +436,13 @@ def _fill_concave_dents(
             for j, mask_j in enumerate(masks):
                 if j == i or mask_j is None:
                     continue
-                arm_geo = mask_j.intersection(page_polys[i]).difference(mask_i)
-                if arm_geo.is_empty:
+                overlap = safe_overlay(mask_j, page_polys[i], "intersection")
+                arm_geo = (
+                    safe_overlay(overlap, mask_i, "difference")
+                    if overlap is not None
+                    else None
+                )
+                if arm_geo is None or arm_geo.is_empty:
                     continue
                 for piece in _collect_polygons(arm_geo):
                     if piece.area < mask_i.area * 0.001:
@@ -440,7 +468,9 @@ def _fill_concave_dents(
                     # Verify removing piece from j improves j's convexity ratio
                     # (confirms it's a protrusion in j, not a legitimate block
                     # assignment that happens to lie within i's page extent).
-                    test_j = mask_j.difference(piece)
+                    test_j = safe_overlay(mask_j, piece, "difference")
+                    if test_j is None:
+                        continue
                     if not test_j.is_empty:
                         test_j_poly: Polygon | None = None
                         if isinstance(test_j, Polygon):
@@ -463,8 +493,8 @@ def _fill_concave_dents(
         for i, mask_i in enumerate(masks):
             if mask_i is None:
                 continue
-            dent_i = mask_i.convex_hull.difference(mask_i)
-            if dent_i.is_empty:
+            dent_i = safe_overlay(mask_i.convex_hull, mask_i, "difference")
+            if dent_i is None or dent_i.is_empty:
                 continue
             for piece in _collect_polygons(dent_i):
                 if piece.area < mask_i.area * 0.001:
@@ -505,12 +535,13 @@ def _fill_concave_dents(
         if cur_i is None or cur_j is None:
             continue
         # Verify j still owns the piece; an earlier transfer may have claimed it.
-        if cur_j.intersection(piece).area <= piece.area * 0.5:
+        still_owned = safe_overlay(cur_j, piece, "intersection")
+        if still_owned is None or still_owned.area <= piece.area * 0.5:
             continue
 
-        candidate_i = cur_i.union(piece)
-        candidate_j = cur_j.difference(piece)
-        if not isinstance(candidate_i, Polygon):
+        candidate_i = safe_overlay(cur_i, piece, "union")
+        candidate_j = safe_overlay(cur_j, piece, "difference")
+        if candidate_j is None or not isinstance(candidate_i, Polygon):
             continue
 
         # For the source, allow a MultiPolygon if one component dominates (≥90%).

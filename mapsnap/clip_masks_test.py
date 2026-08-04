@@ -11,6 +11,7 @@ from mapsnap.clip_masks import (
     PageColorData,
     _assign_blocks_to_pages,
     _assign_blocks_to_pages_with_splits,
+    _collect_polygons,
     _convexity_ratio,
     _fill_concave_dents,
     _fill_coverage_gaps,
@@ -22,6 +23,7 @@ from mapsnap.clip_masks import (
     _score_block_on_page,
     compute_all_clip_masks,
     geo_polygon_to_svg,
+    safe_overlay,
 )
 
 
@@ -792,3 +794,37 @@ def test_fill_coverage_gaps_no_gaps():
 
     result = _fill_coverage_gaps([mask], [page_poly])
     assert result[0] is mask  # same object returned (no modification)
+
+
+def test_safe_overlay_normal_polygons():
+    """Valid operands behave exactly like the plain shapely call."""
+    a = Polygon([(0, 0), (4, 0), (4, 4), (0, 4)])
+    b = Polygon([(2, 2), (6, 2), (6, 6), (2, 6)])
+    diff = safe_overlay(a, b, "difference")
+    inter = safe_overlay(a, b, "intersection")
+    assert diff is not None and inter is not None
+    assert diff.area == pytest.approx(a.difference(b).area)
+    assert inter.area == pytest.approx(4.0)
+
+
+def test_safe_overlay_recovers_from_invalid_operand():
+    """A self-intersecting bowtie is repaired rather than raising."""
+    bowtie = Polygon([(0, 0), (4, 4), (4, 0), (0, 4)])
+    assert not bowtie.is_valid
+    other = Polygon([(0, 0), (4, 0), (4, 4), (0, 4)])
+    result = safe_overlay(bowtie, other, "difference")
+    assert result is not None
+    assert result.is_valid
+
+
+def test_safe_overlay_passes_through_non_polygon_result():
+    """Non-polygonal results reach the caller, which does its own filtering.
+
+    Returning None here would silently drop GeometryCollections that the dent
+    heuristics rely on, quietly changing clip masks.
+    """
+    a = Polygon([(0, 0), (2, 0), (2, 2), (0, 2)])
+    b = Polygon([(2, 0), (4, 0), (4, 2), (2, 2)])
+    touching = safe_overlay(a, b, "intersection")
+    assert touching is not None
+    assert _collect_polygons(touching) == []
