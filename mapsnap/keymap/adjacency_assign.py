@@ -733,6 +733,13 @@ def plan_volume_repairs(
                     )
                 )
                 repaired.labels[sitting] = repair.new
+            elif sitting is not None:
+                # Occupied, and the occupant has a claim to its own label that
+                # this gap cannot beat. Drawing the number here anyway would
+                # hand that page's colour block to two pages at segmentation
+                # time (#218) -- worse than leaving the page unplaced, which is
+                # only where it already was. So decline rather than guess.
+                continue
             else:
                 repairs.append(repair)
                 placements.setdefault(repaired.sheet, {})[repair.new] = point
@@ -900,9 +907,33 @@ def apply_repairs(
     return counts
 
 
+MAX_REPAIR_ROUNDS = 5
+"""How many times the pass may run on its own output before giving up.
+
+Convergence is normally one or two rounds; the cap is a backstop against a
+volume where a repair keeps re-opening the cell it just closed."""
+
+
 def repair_volume(volume: Path, dry_run: bool = False) -> list[Repair]:
-    """Plan (and unless ``dry_run``, apply) a volume's assignment repairs."""
-    repairs, placements = plan_volume_repairs(volume)
-    if repairs and not dry_run:
+    """Plan (and unless ``dry_run``, apply) a volume's assignment repairs.
+
+    Repairs uncover repairs, so the pass runs again on its own output until a
+    round proposes nothing. Detroit is the case that showed it: the panel read
+    as "80" is really 86, and only once 86 has taken it over does the REAL 80
+    -- never detected at all -- become a visible gap, with more support (3.75)
+    than anything the first round found. One pass left it on the table.
+
+    Bounded by MAX_REPAIR_ROUNDS. A dry run reports the first round only, since
+    later rounds are defined by what the earlier ones wrote.
+    """
+    if dry_run:
+        return plan_volume_repairs(volume)[0]
+
+    applied: list[Repair] = []
+    for _round in range(MAX_REPAIR_ROUNDS):
+        repairs, placements = plan_volume_repairs(volume)
+        if not repairs:
+            break
         apply_repairs(volume, repairs, placements)
-    return repairs
+        applied.extend(repairs)
+    return applied

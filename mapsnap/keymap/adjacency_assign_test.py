@@ -418,9 +418,11 @@ def test_apply_repairs_rewrites_the_keymap_and_keeps_the_original(tmp_path):
             ("21", 1100.0, 1000.0),
             ("28", 900.0, 1000.0),
             ("29", 1000.0, 1100.0),
+            # Spread a full pitch apart, so 59's estimate lands in the empty
+            # middle rather than inside a citation's own block.
             ("27", 2000.0, 2000.0),
-            ("57", 2100.0, 2000.0),
-            ("61", 2000.0, 2100.0),
+            ("57", 2100.0, 2200.0),
+            ("61", 2200.0, 2000.0),
         ],
         adjacency=[["p22", "p21"], ["p22", "p28"], ["p22", "p29"], ["p59", "p27"]],
         one_sided=[["p59", "p57"], ["p59", "p61"]],
@@ -451,6 +453,71 @@ def test_apply_repairs_rewrites_the_keymap_and_keeps_the_original(tmp_path):
     repair_volume(volume)
     original_again = json.loads((volume / "raw" / "p0.keymap-raw.json").read_text())
     assert original_again == original
+
+
+def test_repair_volume_runs_until_it_stops_finding_things(tmp_path):
+    from mapsnap.keymap.adjacency_assign import repair_volume
+
+    # Detroit's shape: the panel read "80" is really 86, and only once 86 has
+    # taken it over does the real 80 -- never detected -- become a visible gap.
+    volume = write_volume(
+        tmp_path,
+        entries=[
+            # 87 and 93 bracket the panel read "80", so 86's estimate lands on
+            # it and takes it over.
+            ("80", 1000.0, 1000.0),
+            ("87", 600.0, 1000.0),
+            ("93", 1400.0, 1000.0),
+            # 80's own neighbours, off in their own corner.
+            ("64", 3000.0, 3000.0),
+            ("79", 3400.0, 3000.0),
+            ("81", 3200.0, 3400.0),
+        ],
+        adjacency=[
+            ["p86", "p87"],
+            ["p86", "p93"],
+            ["p80", "p64"],
+            ["p80", "p79"],
+            ["p80", "p81"],
+        ],
+        pages=["64", "79", "80", "81", "86", "87", "93"],
+    )
+    repairs = repair_volume(volume)
+    reasons = [r.reason for r in repairs]
+    assert "gap-displaces-unsupported" in reasons  # round one: 86 takes the panel
+    assert "gap" in reasons  # round two: the real 80, now visibly missing
+    texts = [
+        s["text"]
+        for s in json.loads((volume / "raw" / "p0.keymap.json").read_text())["streets"]
+    ]
+    assert texts.count("86") == 1 and texts.count("80") == 1
+    # Running again changes nothing: the pass has converged.
+    assert repair_volume(volume) == []
+
+
+def test_a_gap_is_declined_rather_than_drawn_on_another_pages_panel(tmp_path):
+    from mapsnap.keymap.adjacency_assign import repair_volume
+
+    # 30's citations put it right on top of 29, whose own label 29 is vouched
+    # for by 28. Drawing it anyway would hand 29's colour block to two pages
+    # (#218), so the pass declines and 30 stays unplaced.
+    volume = write_volume(
+        tmp_path,
+        entries=[
+            ("29", 1000.0, 1000.0),
+            ("28", 1000.0, 900.0),  # vouches for 29 being 29
+            ("31", 900.0, 1000.0),  # 30's citations bracket 29, so 30's
+            ("51", 1100.0, 1000.0),  # estimate lands squarely on 29's panel
+        ],
+        adjacency=[["p29", "p28"], ["p30", "p31"], ["p30", "p51"]],
+        pages=["28", "29", "30", "31", "51"],
+    )
+    assert repair_volume(volume) == []
+    texts = [
+        s["text"]
+        for s in json.loads((volume / "raw" / "p0.keymap.json").read_text())["streets"]
+    ]
+    assert "30" not in texts and texts.count("29") == 1
 
 
 def test_repair_volume_is_a_no_op_without_adjacency(tmp_path):
