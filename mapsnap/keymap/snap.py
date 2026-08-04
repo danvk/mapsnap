@@ -49,6 +49,7 @@ from mapsnap.road_model import page_world_affine
 
 M_PER_DEG_LAT = 110_540.0
 M_PER_DEG_LON_EQUATOR = 111_320.0
+FEET_PER_METRE = 3.28084
 
 SEARCH_SLACK_PX = 600
 """How far outside the page's expected footprint the crop reaches. The region
@@ -68,6 +69,13 @@ need a better prior, not a wider ladder -- widening it admits aliases."""
 PEAK_SUPPRESS_PX = 70
 """Radius blanked around the winning peak before measuring the runner-up, so
 the margin compares distinct placements rather than one peak against itself."""
+
+GCP_CONFLICT_FT = 50.0
+"""How far apart two readings of one key-map pixel may be before both are
+discarded. A detected intersection matched to two different OSM intersections
+is a contradiction, not noise: the spline can only average it, and averaging
+drags the surrounding fit. Miami's key map has 99 such pairs among 507 inliers
+(median 233 ft apart, max 490), and they cost it ~21 ft of page accuracy."""
 
 TPS_SMOOTHING = 1e6
 """Thin-plate spline regularization. The intersections carry real residuals, so
@@ -155,6 +163,39 @@ def thin_plate_spline(
     return evaluate
 
 
+def consistent_gcps(inliers: list[dict]) -> list[dict]:
+    """Drop GCPs that put one key-map pixel in two different places.
+
+    A pixel matched to two OSM intersections more than GCP_CONFLICT_FT apart is
+    a contradiction the spline cannot resolve -- it splits the difference and
+    bends the neighbourhood to do it. Dropping the whole group is deliberate:
+    there is no evidence here for which reading is right, and keeping either at
+    random is how a plausible-looking fit ends up in the wrong street.
+    """
+    groups: dict[tuple[float, float], list[dict]] = {}
+    for gcp in inliers:
+        groups.setdefault((round(gcp["x"], 1), round(gcp["y"], 1)), []).append(gcp)
+
+    kept = []
+    for readings in groups.values():
+        if len(readings) == 1:
+            kept.append(readings[0])
+            continue
+        lons = [r["lon"] for r in readings]
+        lats = [r["lat"] for r in readings]
+        lon_scale = M_PER_DEG_LON_EQUATOR * math.cos(math.radians(lats[0]))
+        spread = (
+            math.hypot(
+                (max(lons) - min(lons)) * lon_scale,
+                (max(lats) - min(lats)) * M_PER_DEG_LAT,
+            )
+            * FEET_PER_METRE
+        )
+        if spread <= GCP_CONFLICT_FT:
+            kept.append(readings[0])
+    return kept
+
+
 def keymap_model(
     georef: dict,
     min_gcps: int = MIN_KEYMAP_INLIERS,
@@ -168,7 +209,9 @@ def keymap_model(
     intersections follows the sheet. Falls back to the corner affine when the
     sheet has too few of them to constrain a warp.
     """
-    inliers = [i for i in georef.get("intersections", []) if i.get("inlier")]
+    inliers = consistent_gcps(
+        [i for i in georef.get("intersections", []) if i.get("inlier")]
+    )
     affine = page_world_affine(georef)
     if len(inliers) < min_gcps:
         return lambda query: (
@@ -568,16 +611,32 @@ def volume_pose_medians(volume: Path) -> tuple[float, float] | None:
     return float(np.median(scales)), float(np.median(thetas))
 
 
+def page_number(stem: str) -> int | None:
+    """The integer sheet number in a stem like 'p12', or None if it has none.
+
+    Not every sheet has one. Detroit's are all plain integers, but Miami and DC
+    carry two kinds that are not: skeleton sheets (p10s, p133s), which map the
+    same ground as their full-colour sibling, and genuine lettered sub-sheets
+    (DC's p1a through p1d). Only the first kind is redundant, and which of a
+    pN/pNs pair counts is already decided downstream by
+    ``compare_iiif_georef.redundant_skeleton_keys`` -- so placement need not
+    treat them specially, it only has to stop assuming every stem parses.
+    """
+    digits = stem[1:]
+    return int(digits) if digits.isdigit() else None
+
+
 def published_rotations(volume: Path) -> dict[int, float]:
     """Ground rotation of each page's own published fit, by page number."""
     rotations = {}
     for page in sorted(volume.glob("p*.jpg")):
-        if "__" in page.stem:
+        number = page_number(page.stem)
+        if "__" in page.stem or number is None:
             continue
         for channel in ("georef-streets", "georef-osm", "georef"):
             path = volume / f"{page.stem}.{channel}.json"
             if path.exists():
-                rotations[int(page.stem[1:])] = metric_theta(
+                rotations[number] = metric_theta(
                     page_world_affine(json.loads(path.read_text()))
                 )
                 break
@@ -663,6 +722,16 @@ def snap_volume(
     volume_m_per_px, volume_theta = medians
 
     hypotheses = rotation_hypotheses(volume, volume_theta)
+
+    def rotations_for(stem: str) -> tuple[float, ...]:
+        """Extra rotation hypotheses for a page, if its neighbours suggest any.
+
+        Lettered sheets have no number to look up, so they simply get the
+        volume median -- the same answer they got before neighbours existed.
+        """
+        number = page_number(stem)
+        return () if number is None else hypotheses.get(number, ())
+
     rows: list[dict] = []
     output_dir.mkdir(parents=True, exist_ok=True)
     for georef_path in sorted((volume / "raw").glob("*.georef.json")):
@@ -695,7 +764,7 @@ def snap_volume(
             target = SnapTarget(
                 centre=(float(panel[:, 0].mean()), float(panel[:, 1].mean())),
                 m_per_px=volume_m_per_px,
-                rotations=(volume_theta, *hypotheses.get(int(page.stem[1:]), ())),
+                rotations=(volume_theta, *rotations_for(page.stem)),
             )
             crop = stretched_crop(keymap_prob, model, target, probability.shape)
             if crop is None:

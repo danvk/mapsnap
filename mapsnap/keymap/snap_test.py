@@ -12,11 +12,13 @@ from mapsnap.keymap.snap import (
     affine_m_per_px,
     as_3x3,
     cluster_rotations,
+    consistent_gcps,
     keymap_model,
     linear_part_metres,
     local_tangent,
     match_page,
     metric_theta,
+    page_number,
     page_world_affine_from_match,
     rotated_extent,
     stretched_crop,
@@ -361,3 +363,43 @@ def test_as_3x3_round_trips():
     affine = np.array([[1.0, 2.0, 3.0], [4.0, 5.0, 6.0]])
     assert as_3x3(affine)[:2, :] == pytest.approx(affine)
     assert as_3x3(affine)[2].tolist() == [0.0, 0.0, 1.0]
+
+
+def test_page_number_parses_plain_stems():
+    assert page_number("p12") == 12
+    assert page_number("p1") == 1
+
+
+def test_page_number_returns_none_for_lettered_sheets():
+    """Miami and DC carry lettered sheets; Detroit does not, so int() survived.
+
+    Anything keying pages by number has to tolerate these rather than crash.
+    """
+    assert page_number("p10s") is None
+    assert page_number("p133s") is None
+    assert page_number("p") is None
+
+
+def gcp(x, y, lon, lat):
+    return {"x": x, "y": y, "lon": lon, "lat": lat, "inlier": True}
+
+
+def test_consistent_gcps_keeps_unique_pixels():
+    points = [gcp(10, 10, -83.0, 42.0), gcp(20, 20, -83.1, 42.1)]
+    assert len(consistent_gcps(points)) == 2
+
+
+def test_consistent_gcps_drops_a_contradicted_pixel():
+    """One pixel claimed by two far-apart places is evidence for neither.
+
+    Both readings go, rather than picking one: there is nothing here to say
+    which is right, and a wrong GCP bends the spline around it.
+    """
+    far = [gcp(10, 10, -83.0, 42.0), gcp(10, 10, -83.0, 42.005)]
+    assert consistent_gcps(far) == []
+
+
+def test_consistent_gcps_collapses_near_duplicates():
+    """Two readings that agree are one measurement, not a contradiction."""
+    near = [gcp(10, 10, -83.0, 42.0), gcp(10, 10, -83.0, 42.00002)]
+    assert len(consistent_gcps(near)) == 1
