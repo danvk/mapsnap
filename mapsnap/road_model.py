@@ -68,16 +68,26 @@ def page_scale_m_per_px(georef: dict) -> float:
 
 
 def rasterize_road_mask(
-    georef: dict, features: list[dict], width_m: float = ROAD_WIDTH_M
+    georef: dict,
+    features: list[dict],
+    width_m: float = ROAD_WIDTH_M,
+    width_px: int | None = None,
 ) -> np.ndarray:
     """Auto-label: OSM centerlines drawn into the page's pixel space as a road mask.
 
     Projects every (Multi)LineString vertex through the inverse of the page's georef
     transform and strokes the polylines at ``width_m`` (converted through the page's own
-    scale). Returns a uint8 mask (0/255) of shape (height, width).
+    scale). ``width_px`` overrides that with an explicit pixel stroke, for drawings
+    whose road width is stylistic rather than physical -- a key map's streets are
+    exaggerated on paper, so no ground width is right for them. Returns a uint8 mask
+    (0/255) of shape (height, width).
     """
     world_to_px = invert_affine(page_world_affine(georef))
-    thickness = max(3, round(width_m / page_scale_m_per_px(georef)))
+    thickness = (
+        int(width_px)
+        if width_px is not None
+        else max(3, round(width_m / page_scale_m_per_px(georef)))
+    )
     mask = np.zeros((georef["height"], georef["width"]), np.uint8)
     for feature in features:
         geometry = feature.get("geometry", {})
@@ -129,17 +139,21 @@ class DoubleConv(nn.Module):
 
 
 class UNet(nn.Module):
-    """A small UNet: grayscale page patch in, per-pixel road logit out.
+    """A small UNet: page patch in (grayscale or colour), per-pixel road logit out.
 
     Encoder halves resolution four times (so the deepest features see ~16x16 patch cells =
     broad context: block structure, corridor continuity); the decoder doubles it back,
     concatenating the encoder's same-resolution features at each step (skip connections) so
     the output regains pixel-precise edges the downsampling destroyed.
+
+    ``in_channels=3`` is for key maps, where colour is load-bearing: their pale
+    pastel region fills are nearly paper-bright in grayscale, and the roads
+    crossing those fills would vanish with them.
     """
 
-    def __init__(self, base: int = 24):
+    def __init__(self, base: int = 24, in_channels: int = 1):
         super().__init__()
-        self.enc1 = DoubleConv(1, base)
+        self.enc1 = DoubleConv(in_channels, base)
         self.enc2 = DoubleConv(base, base * 2)
         self.enc3 = DoubleConv(base * 2, base * 4)
         self.enc4 = DoubleConv(base * 4, base * 8)
@@ -224,11 +238,13 @@ ROAD_MODEL_PATH = Path(__file__).resolve().parent.parent / "models" / "road_unet
 def load_model(model_path: Path, device) -> "UNet":
     """Load a trained road UNet from a checkpoint, moved to ``device`` and set to eval mode.
 
-    The channel width is inferred from the checkpoint so differently-sized
-    models (--base at training time) load transparently.
+    The channel width AND input channels are inferred from the checkpoint so
+    differently-sized models (--base at training time) and the colour key-map
+    variant load transparently.
     """
     state_dict = torch.load(str(model_path), map_location=device)
-    model = UNet(base=int(state_dict["enc1.block.0.weight"].shape[0]))
+    first = state_dict["enc1.block.0.weight"]
+    model = UNet(base=int(first.shape[0]), in_channels=int(first.shape[1]))
     model.load_state_dict(state_dict)
     model.to(device)
     model.eval()
