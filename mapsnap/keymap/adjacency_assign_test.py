@@ -1,10 +1,13 @@
 import json
+import math
 
 from mapsnap.keymap.adjacency_assign import (
     MIN_GAP_SIDE,
+    CellModel,
     Repair,
     SheetNumbers,
     adjacency_graphs,
+    cell_model,
     detection_centers,
     digit_family,
     displaceable,
@@ -187,10 +190,51 @@ def test_occupant_index_finds_the_panel_a_gap_landed_on():
         (500.0, 100.0),
         None,
     ]
-    # Within half a pitch of the second panel: the number IS printed there.
-    assert occupant_index((520.0, 110.0), centers, 320.0) == 1
+    square = CellModel(0.0, 320.0, 320.0)
+    # Inside the second panel's cell: the number IS printed there.
+    assert occupant_index((520.0, 110.0), centers, square) == 1
     # Squarely in the empty space between them: a real gap.
-    assert occupant_index((300.0, 100.0), centers, 320.0) is None
+    assert occupant_index((300.0, 100.0), centers, square) is None
+
+
+def test_occupancy_follows_the_cell_shape_not_a_radius():
+    centers: list[tuple[float, float] | None] = [(0.0, 0.0)]
+    # A tall cell: 150px up the long axis is still inside, 150px along the
+    # short one is a cell away. A circle of one radius cannot say both.
+    tall = CellModel(0.0, sx=200.0, sy=400.0)
+    assert occupant_index((0.0, 150.0), centers, tall) == 0
+    assert occupant_index((150.0, 0.0), centers, tall) is None
+    # Rotate the grid a quarter turn and the two swap over.
+    turned = CellModel(math.pi / 2, sx=200.0, sy=400.0)
+    assert occupant_index((150.0, 0.0), centers, turned) == 0
+    assert occupant_index((0.0, 150.0), centers, turned) is None
+
+
+def test_cell_model_recovers_a_rotated_rectangular_grid():
+    # A 5x5 lattice, 200 across and 300 up, turned 20 degrees.
+    theta = math.radians(20)
+    cos, sin = math.cos(theta), math.sin(theta)
+    centers: list[tuple[float, float] | None] = [
+        (
+            (column * 200.0) * cos - (row * 300.0) * sin,
+            (column * 200.0) * sin + (row * 300.0) * cos,
+        )
+        for row in range(5)
+        for column in range(5)
+    ]
+    cell = cell_model(centers, page_pitch(centers), aspect_limit=2.0)
+    assert math.isclose(math.degrees(cell.theta) % 90, 20, abs_tol=1.0)
+    assert math.isclose(min(cell.sx, cell.sy), 200, abs_tol=1.0)
+    assert math.isclose(max(cell.sx, cell.sy), 300, abs_tol=1.0)
+
+
+def test_cell_model_falls_back_to_a_square_when_it_cannot_tell():
+    # Too few numbers to see a grid in, and an estimate more elongated than any
+    # page could be: both fall back to a square cell of one pitch.
+    sparse: list[tuple[float, float] | None] = [(0.0, 0.0), (200.0, 0.0), (400.0, 0.0)]
+    assert cell_model(sparse, 200.0) == CellModel(0.0, 200.0, 200.0)
+    strip: list[tuple[float, float] | None] = [(x * 100.0, 0.0) for x in range(12)]
+    assert cell_model(strip, 100.0, aspect_limit=1.2) == CellModel(0.0, 100.0, 100.0)
 
 
 def test_displacement_needs_local_mutual_support_both_ways():

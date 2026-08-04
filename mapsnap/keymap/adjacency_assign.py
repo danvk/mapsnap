@@ -382,26 +382,25 @@ def plan_gap_repairs(
     return repairs
 
 
-GAP_OCCUPANCY_FACTOR = 0.5
-"""How close a gap placement must land to an existing number to be the same block.
-
-Half a page-pitch: nearer than that and the two boxes are on one panel, so the
-page's number was printed after all and simply misread."""
-
-
 def occupant_index(
     point: tuple[float, float],
     centers: list[tuple[float, float] | None],
-    pitch: float,
+    cell: "CellModel",
 ) -> int | None:
-    """The detection already sitting where a gap wants to go, if any."""
-    limit = GAP_OCCUPANCY_FACTOR * pitch
+    """The detection whose cell a gap placement lands in, if any.
+
+    The cell is the grid's own rectangle rather than a circle of half a pitch:
+    a sheet's blocks are elongated and rotated, so a circle sized off the
+    nearest-neighbour pitch is both too small (the pitch runs 20-30% under the
+    true step) and the wrong shape, missing collisions along the long axis while
+    refusing legitimate neighbours along the short one.
+    """
     best: tuple[float, int] | None = None
     for index, center in enumerate(centers):
-        if center is None:
+        if center is None or not cell.same_cell(center, point):
             continue
         distance = math.dist(point, center)
-        if distance <= limit and (best is None or distance < best[0]):
+        if best is None or distance < best[0]:
             best = (distance, index)
     return None if best is None else best[1]
 
@@ -479,6 +478,160 @@ def adjacency_graphs(volume: Path) -> tuple[dict[str, set[str]], dict[str, set[s
     return mutual, one_sided
 
 
+COMPASS_EDGES = ("T", "B", "L", "R")
+COMPASS_MIN_PAIRS = 5
+COMPASS_MIN_AGREEMENT = 0.6
+"""How tightly a volume's confirmed pairs must agree on what a printed margin
+means before that margin is trusted as a direction (1.0 = perfect agreement).
+
+Measured across the corpus this cleanly separates volumes whose page frames
+line up with their key map -- Columbus 0.87-0.95, Detroit 0.83-0.86, Nashville
+0.78-0.88 about a rotated axis -- from Grand Rapids at 0.13-0.30, where two
+margins come out 19 degrees apart and mean nothing."""
+
+
+def claim_edges(volume: Path) -> dict[tuple[str, str], str]:
+    """{(citing page, cited page): the margin it was printed in}, from adjacency.json.
+
+    A page prints its neighbours' numbers around its own border, and the scan
+    records which border. That is a bearing waiting to be calibrated.
+    """
+    path = volume / "adjacency.json"
+    if not path.exists():
+        return {}
+    doc = json.loads(path.read_text())
+    edges: dict[tuple[str, str], str] = {}
+    for page in doc.get("pages", {}).values():
+        citer = page_key_of(str(page.get("key", "")))
+        if not citer:
+            continue
+        for detection in page.get("detections", []):
+            if not detection.get("claim"):
+                continue
+            cited = page_key_of(str(detection.get("key", "")))
+            edge = next(
+                (
+                    letter
+                    for letter in str(detection.get("edge") or "")
+                    if letter in COMPASS_EDGES
+                ),
+                None,
+            )
+            if cited and edge:
+                edges[(citer, cited)] = edge
+    return edges
+
+
+def learn_claim_compass(
+    edges: dict[tuple[str, str], str],
+    positions: dict[str, tuple[float, float]],
+    mutual: dict[str, set[str]],
+) -> dict[str, float]:
+    """{margin: bearing on the key map}, learned from pairs already placed.
+
+    A margin only means a direction if the page's own frame lines up with the
+    key map's, which varies by volume and cannot be assumed -- so it is measured
+    on the mutual pairs where both numbers are printed and their bearing is
+    therefore known. Margins whose samples disagree are left out entirely.
+    """
+    samples: dict[str, list[float]] = {}
+    for (citer, cited), edge in edges.items():
+        if cited not in mutual.get(citer, set()):
+            continue
+        start, end = positions.get(citer), positions.get(cited)
+        if start is None or end is None or math.dist(start, end) < 1e-6:
+            continue
+        samples.setdefault(edge, []).append(
+            math.atan2(end[1] - start[1], end[0] - start[0])
+        )
+
+    compass: dict[str, float] = {}
+    for edge, angles in samples.items():
+        if len(angles) < COMPASS_MIN_PAIRS:
+            continue
+        mean_x = statistics.mean(math.cos(a) for a in angles)
+        mean_y = statistics.mean(math.sin(a) for a in angles)
+        if math.hypot(mean_x, mean_y) >= COMPASS_MIN_AGREEMENT:
+            compass[edge] = math.atan2(mean_y, mean_x)
+    return compass
+
+
+def step_towards(cell: "CellModel", bearing: float) -> tuple[float, float]:
+    """The one-cell move of ``cell`` that best follows ``bearing``.
+
+    The compass says which way the missing page lies; the cell says how far that
+    is, which differs between the grid's two axes. Neither alone places a page:
+    a bearing without a distance is a ray, and a distance without a bearing is
+    the four-way ambiguity that sank plain lattice voting.
+    """
+    return min(
+        cell.steps(),
+        key=lambda step: abs(
+            (math.atan2(step[1], step[0]) - bearing + math.pi) % (2 * math.pi) - math.pi
+        ),
+    )
+
+
+def compass_placement(
+    repair: Repair,
+    sheet: SheetNumbers,
+    geometry: tuple[list[tuple[float, float] | None], "CellModel"],
+    directions: tuple[dict[tuple[str, str], str], dict[str, float]],
+) -> tuple[float, float] | None:
+    """Where the citing pages' margins say the missing number belongs.
+
+    Each citation that named a usable margin projects one cell that way; their
+    mean is the estimate. Returns None when no citation can, leaving the caller
+    to fall back on the centroid.
+    """
+    centers, cell = geometry
+    edges, compass = directions
+    if not compass or repair.new is None or cell.sx <= 0:
+        return None
+    projections: list[tuple[float, float]] = []
+    for index in repair.evidence_indices:
+        center = centers[index] if 0 <= index < len(centers) else None
+        if center is None:
+            continue
+        edge = edges.get((sheet.labels[index], repair.new))
+        bearing = compass.get(edge) if edge else None
+        if bearing is None:
+            continue
+        step = step_towards(cell, bearing)
+        projections.append((center[0] + step[0], center[1] + step[1]))
+    if not projections:
+        return None
+    return (
+        sum(p[0] for p in projections) / len(projections),
+        sum(p[1] for p in projections) / len(projections),
+    )
+
+
+def page_aspect_limit(volume: Path, sample: int = 40) -> float | None:
+    """The volume's typical page long-side/short-side ratio, or None if unknown.
+
+    A key-map block stands for one sheet, so it cannot be more elongated than
+    the sheet is -- which makes this an upper bound on a believable cell aspect
+    rather than a prediction of it (measured cells run rounder than their
+    pages).
+    """
+    from mapsnap.utils import jpeg_dimensions
+
+    ratios: list[float] = []
+    for image in sorted(volume.glob("p*.jpg")):
+        if "__" in image.stem:
+            continue
+        try:
+            width, height = jpeg_dimensions(image)
+        except (OSError, ValueError):
+            continue
+        if width and height:
+            ratios.append(max(width, height) / min(width, height))
+        if len(ratios) >= sample:
+            break
+    return statistics.median(ratios) if ratios else None
+
+
 def volume_page_keys(volume: Path) -> set[str]:
     """Page keys of the volume's real page images (split parents included)."""
     keys = set()
@@ -544,6 +697,149 @@ def page_pitch(centers: list[tuple[float, float] | None]) -> float:
         for i, point in enumerate(points)
     )
     return nearest[len(nearest) // 2]
+
+
+GRID_REACH_FACTOR = 2.2
+"""How far apart two numbers may be and still be treated as one grid step,
+as a multiple of the nearest-neighbour pitch."""
+
+GRID_ALIGN_DEGREES = 20.0
+"""How near an offset must lie to a grid axis to be measuring that axis's spacing."""
+
+MIN_GRID_OFFSETS = 10
+"""Offsets needed before the estimated grid is preferred to the plain pitch."""
+
+
+@dataclass(frozen=True)
+class CellModel:
+    """The lattice a sheet's page numbers are printed on.
+
+    A Sanborn sheet is taller than it is wide, so a page's neighbour to one side
+    sits closer than its neighbour above -- and the sheet may be drawn at any
+    rotation, so neither can be called north or east. ``theta`` is the grid's
+    own rotation and ``sx``/``sy`` are the two spacings measured along its axes,
+    all from the printed numbers alone (never the segmented regions).
+
+    The pitch alone is a poor stand-in: it is the median NEAREST-neighbour
+    distance, so it tracks the shorter axis and comes in 20-30% under the true
+    step on every sheet measured (Detroit 319 against 383; Miami 201 against
+    247).
+    """
+
+    theta: float
+    sx: float
+    sy: float
+
+    def grid_frame(self, vector: tuple[float, float]) -> tuple[float, float]:
+        """A displacement rotated into the grid's own axes."""
+        cos, sin = math.cos(-self.theta), math.sin(-self.theta)
+        return (
+            vector[0] * cos - vector[1] * sin,
+            vector[0] * sin + vector[1] * cos,
+        )
+
+    def image_frame(self, vector: tuple[float, float]) -> tuple[float, float]:
+        """A grid-frame displacement rotated back onto the sheet."""
+        cos, sin = math.cos(self.theta), math.sin(self.theta)
+        return (
+            vector[0] * cos - vector[1] * sin,
+            vector[0] * sin + vector[1] * cos,
+        )
+
+    def same_cell(self, a: tuple[float, float], b: tuple[float, float]) -> bool:
+        """Whether two points fall in the same cell of the grid."""
+        dx, dy = self.grid_frame((b[0] - a[0], b[1] - a[1]))
+        return abs(dx) <= self.sx / 2 and abs(dy) <= self.sy / 2
+
+    def steps(self) -> list[tuple[float, float]]:
+        """The four one-cell moves, on the sheet."""
+        return [
+            self.image_frame(step)
+            for step in (
+                (self.sx, 0.0),
+                (-self.sx, 0.0),
+                (0.0, self.sy),
+                (0.0, -self.sy),
+            )
+        ]
+
+
+def grid_offsets(
+    centers: list[tuple[float, float] | None], pitch: float
+) -> list[tuple[float, float]]:
+    """Displacements between numbers near enough to be a single grid step apart."""
+    points = [point for point in centers if point is not None]
+    reach = GRID_REACH_FACTOR * pitch
+    return [
+        (b[0] - a[0], b[1] - a[1])
+        for i, a in enumerate(points)
+        for b in points[i + 1 :]
+        if 0 < math.dist(a, b) <= reach
+    ]
+
+
+def grid_orientation(offsets: list[tuple[float, float]]) -> float:
+    """The lattice's rotation in radians, from its offsets.
+
+    A rectangular grid's offsets point along two perpendicular axes and either
+    way along each, so their angles repeat every 90 degrees. Averaging
+    ``exp(4i*angle)`` collapses that four-fold symmetry into one direction, the
+    way a circular mean collapses a two-fold one.
+    """
+    total = sum(
+        complex(math.cos(4 * math.atan2(dy, dx)), math.sin(4 * math.atan2(dy, dx)))
+        for dx, dy in offsets
+    )
+    if abs(total) < 1e-9:
+        return 0.0
+    return math.atan2(total.imag, total.real) / 4
+
+
+def axis_spacings(
+    offsets: list[tuple[float, float]], theta: float
+) -> tuple[float, float] | None:
+    """(x spacing, y spacing) in the grid's frame, or None if an axis is unseen."""
+    along: list[float] = []
+    across: list[float] = []
+    cos, sin = math.cos(-theta), math.sin(-theta)
+    for dx, dy in offsets:
+        x, y = dx * cos - dy * sin, dx * sin + dy * cos
+        angle = abs(math.degrees(math.atan2(y, x)))
+        if angle <= GRID_ALIGN_DEGREES or angle >= 180 - GRID_ALIGN_DEGREES:
+            along.append(abs(x))
+        elif abs(angle - 90) <= GRID_ALIGN_DEGREES:
+            across.append(abs(y))
+    if not along or not across:
+        return None
+    return statistics.median(along), statistics.median(across)
+
+
+def cell_model(
+    centers: list[tuple[float, float] | None],
+    pitch: float,
+    aspect_limit: float | None = None,
+) -> CellModel:
+    """The grid the sheet's numbers sit on, falling back to a square pitch cell.
+
+    ``aspect_limit`` bounds how elongated the cell may be -- the page images'
+    own aspect ratio, since a block cannot be more elongated than the sheet it
+    stands for. An estimate beyond it means the axes were confused, so the
+    square fallback is safer.
+    """
+    if pitch <= 0:
+        return CellModel(0.0, 0.0, 0.0)
+    offsets = grid_offsets(centers, pitch)
+    if len(offsets) < MIN_GRID_OFFSETS:
+        return CellModel(0.0, pitch, pitch)
+    theta = grid_orientation(offsets)
+    spacings = axis_spacings(offsets, theta)
+    if spacings is None:
+        return CellModel(0.0, pitch, pitch)
+    sx, sy = spacings
+    ratio = max(sx, sy) / min(sx, sy) if min(sx, sy) > 0 else math.inf
+    if not math.isfinite(ratio) or (aspect_limit and ratio > aspect_limit):
+        return CellModel(0.0, pitch, pitch)
+    return CellModel(theta, sx, sy)
 
 
 def proximity_graph(
@@ -675,8 +971,11 @@ def plan_volume_repairs(
     volume_keys = volume_page_keys(volume)
     splits = split_multiplicity(volume)
 
+    aspect_limit = page_aspect_limit(volume)
+    edges = claim_edges(volume)
+    positions: dict[str, tuple[float, float]] = {}
     sheet_panels: list[SheetNumbers] = []
-    geometry: dict[str, tuple[list[tuple[float, float] | None], float]] = {}
+    geometry: dict[str, tuple[list[tuple[float, float] | None], float, CellModel]] = {}
     for stem, doc in load_sheets(volume):
         streets = doc.get("streets", [])
         labels = [
@@ -685,7 +984,11 @@ def plan_volume_repairs(
         ]
         centers = detection_centers(streets)
         sheet_panels.append(SheetNumbers(stem, labels, proximity_graph(centers)))
-        geometry[stem] = (centers, page_pitch(centers))
+        pitch = page_pitch(centers)
+        geometry[stem] = (centers, pitch, cell_model(centers, pitch, aspect_limit))
+        for label, center in zip(labels, centers):
+            if center is not None and label not in positions:
+                positions[label] = center
 
     repairs: list[Repair] = []
     placements: dict[str, dict[str, tuple[float, float]]] = {}
@@ -703,19 +1006,25 @@ def plan_volume_repairs(
                 repaired.labels[relabel.index] = relabel.new
         repaired_sheets.append(repaired)
 
+    compass = learn_claim_compass(edges, positions, mutual)
     missing = volume_shortfall(repaired_sheets, volume_keys, splits)
     for repaired in repaired_sheets:
-        centers, pitch = geometry[repaired.sheet]
+        centers, pitch, cell = geometry[repaired.sheet]
         for repair in plan_gap_repairs(
             repaired, mutual, one_sided, volume_keys, missing
         ):
-            point = gap_placement(repair, centers, pitch)
+            # The margins the citing pages printed the number in beat their
+            # centroid, which has no way to tell an L-shaped set of neighbours
+            # from a surrounding one and lands short towards the crowded side.
+            point = compass_placement(
+                repair, repaired, (centers, cell), (edges, compass)
+            ) or gap_placement(repair, centers, pitch)
             if point is None or repair.new is None:
                 continue
             # A gap that lands on an existing panel is not a gap: the number IS
             # printed there, it was misread. Take the panel over rather than
             # drawing a second box on the same block.
-            sitting = occupant_index(point, centers, pitch)
+            sitting = occupant_index(point, centers, cell)
             if sitting is not None and displaceable(
                 sitting, repair.new, repaired, mutual, one_sided
             ):
