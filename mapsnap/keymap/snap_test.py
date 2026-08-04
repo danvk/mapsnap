@@ -6,19 +6,23 @@ import numpy as np
 import pytest
 
 from mapsnap.keymap.snap import (
+    THETA_JITTER_DEG,
     SnapTarget,
     affine_corners,
     affine_m_per_px,
-    affine_theta_deg,
     as_3x3,
+    cluster_rotations,
     keymap_model,
     linear_part_metres,
     local_tangent,
     match_page,
+    metric_theta,
     page_world_affine_from_match,
+    rotated_extent,
     stretched_crop,
     thin_plate_spline,
     unit_stretch,
+    wrap_deg,
 )
 
 LATITUDE = 42.36
@@ -191,7 +195,107 @@ def test_local_tangent_recovers_scale_and_rotation():
     georef = synthetic_georef()
     tangent = local_tangent(keymap_model(georef), (2000.0, 1500.0))
     assert affine_m_per_px(tangent) == pytest.approx(0.8, rel=0.02)
-    assert affine_theta_deg(tangent) == pytest.approx(0.0, abs=0.5)
+    assert metric_theta(tangent) == pytest.approx(0.0, abs=0.5)
+
+
+def test_metric_theta_is_immune_to_the_lon_lat_aspect():
+    """The angle must not depend on latitude, where a naive atan2 does.
+
+    A degree of longitude is cos(latitude) of a degree of latitude, so reading
+    an angle straight off lon/lat coefficients reports a different rotation for
+    the same ground rotation at different latitudes.
+    """
+    angles = []
+    for latitude in (0.0, 42.36, 60.0):
+        radians = math.radians(30.0)
+        lon_scale = 111_320.0 * math.cos(math.radians(latitude))
+        linear = np.diag([1.0, -1.0]) @ rotation(30.0) * 0.5
+        affine = np.array(
+            [
+                [linear[0, 0] / lon_scale, linear[0, 1] / lon_scale, -83.0],
+                [linear[1, 0] / 110_540.0, linear[1, 1] / 110_540.0, latitude],
+            ]
+        )
+        angles.append(metric_theta(affine))
+        assert radians is not None
+    assert max(angles) - min(angles) < 0.01
+
+
+def test_metric_theta_is_immune_to_anisotropy():
+    """atan2 of one column drifts with anisotropy; the polar rotation does not."""
+    lon_scale = 111_320.0 * math.cos(math.radians(LATITUDE))
+    upright = np.diag([1.0, -1.0]) @ rotation(25.0)
+    stretched = np.diag([1.0, -1.0]) @ rotation(25.0) @ np.diag([1.12, 1.0])
+    angles = []
+    for linear in (upright, stretched):
+        affine = np.array(
+            [
+                [linear[0, 0] / lon_scale, linear[0, 1] / lon_scale, -83.0],
+                [linear[1, 0] / 110_540.0, linear[1, 1] / 110_540.0, LATITUDE],
+            ]
+        )
+        angles.append(metric_theta(affine))
+    assert angles[0] == pytest.approx(angles[1], abs=0.01)
+
+
+def test_rotated_extent_grows_for_a_sideways_page():
+    """A page turned 90 degrees needs a canvas with its dimensions swapped."""
+    assert rotated_extent(100, 200, 0.0) == (100, 200)
+    assert rotated_extent(100, 200, 90.0) == (200, 100)
+    wide, tall = rotated_extent(100, 200, 45.0)
+    assert wide > 100 and tall > 100
+
+
+def test_snap_target_span_covers_every_hypothesis():
+    target = SnapTarget((0.0, 0.0), 0.2, (-26.0, 56.0))
+    assert target.span_deg() == pytest.approx(92.0)
+
+
+def test_match_page_achieves_the_rotation_it_was_asked_for():
+    """The rotation that comes out is the rotation that went in.
+
+    This is the invariant the shipped version violated: the template angle was
+    applied as `target - crop`, but composing through a y-down image and a
+    north-up world negates it, so the achieved rotation went as `2*crop -
+    target`. With a key map and its pages at nearly the same angle that lands
+    inside the jitter and looks fine, which is exactly why it survived.
+    """
+    rng = np.random.default_rng(7)
+    keymap = np.zeros((1400, 1600), np.float32)
+    for x in range(60, 1600, 130):
+        keymap[:, x : x + 9] = 1.0
+    for y in range(50, 1400, 145):
+        keymap[y : y + 9, :] = 1.0
+    keymap += rng.normal(0, 0.01, keymap.shape).astype(np.float32)
+    model = keymap_model(synthetic_georef())
+    page = keymap[490:890, 520:1000].copy()
+
+    for wanted in (-20.0, 0.0, 35.0):
+        target = SnapTarget(centre=(760.0, 690.0), m_per_px=0.8, rotations=(wanted,))
+        crop = stretched_crop(keymap, model, target, page.shape)
+        assert crop is not None
+        match = match_page(crop, page, model, target)
+        assert match is not None
+        affine = page_world_affine_from_match(match, model, page.shape)
+        # Tolerance is the jitter ladder plus a little: the matcher is free to
+        # choose any rung, so this pins the absence of a sign flip or a gross
+        # offset, not sub-degree accuracy.
+        assert (
+            abs(wrap_deg(metric_theta(affine) - wanted)) < max(THETA_JITTER_DEG) + 2.5
+        )
+
+
+def test_cluster_rotations_separates_two_regimes():
+    """A mixed neighbourhood must not collapse to one meaningless average.
+
+    This is why neighbours add a hypothesis rather than replace the prior: the
+    median of [-26, -25, 56, 57] is 15 degrees, an angle no page has.
+    """
+    clusters = cluster_rotations([-26.0, -25.0, 56.0, 57.0, 55.0])
+    assert len(clusters) == 2
+    assert clusters[0][1] == 3
+    assert clusters[0][0] == pytest.approx(56.0)
+    assert clusters[1][0] == pytest.approx(-25.5)
 
 
 def test_stretched_crop_removes_the_sheet_anisotropy():
@@ -200,7 +304,7 @@ def test_stretched_crop_removes_the_sheet_anisotropy():
     model = keymap_model(georef)
     probability = np.zeros((3000, 4000), np.float32)
     crop = stretched_crop(
-        probability, model, SnapTarget((2000.0, 1500.0), 0.2, 0.0), (600, 500)
+        probability, model, SnapTarget((2000.0, 1500.0), 0.2, (0.0,)), (600, 500)
     )
     assert crop is not None
     assert crop.anisotropy_pct == pytest.approx(10.0, abs=0.6)
@@ -219,7 +323,7 @@ def test_stretched_crop_returns_none_off_sheet():
     probability = np.zeros((3000, 4000), np.float32)
     assert (
         stretched_crop(
-            probability, model, SnapTarget((-9000.0, -9000.0), 0.2, 0.0), (600, 500)
+            probability, model, SnapTarget((-9000.0, -9000.0), 0.2, (0.0,)), (600, 500)
         )
         is None
     )
@@ -238,12 +342,12 @@ def test_match_page_finds_a_planted_page():
     georef = synthetic_georef()
     model = keymap_model(georef)
     # The page is the key-map neighbourhood around (760, 690), at page scale.
-    target = SnapTarget(centre=(760.0, 690.0), m_per_px=0.8, theta_deg=0.0)
+    target = SnapTarget(centre=(760.0, 690.0), m_per_px=0.8, rotations=(0.0,))
     page = keymap[690 - 200 : 690 + 200, 760 - 240 : 760 + 240].copy()
 
     crop = stretched_crop(keymap, model, target, page.shape)
     assert crop is not None
-    match = match_page(crop, page, target)
+    match = match_page(crop, page, model, target)
     assert match is not None
 
     affine = page_world_affine_from_match(match, model, page.shape)
