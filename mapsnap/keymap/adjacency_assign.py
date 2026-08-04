@@ -479,6 +479,135 @@ def adjacency_graphs(volume: Path) -> tuple[dict[str, set[str]], dict[str, set[s
     return mutual, one_sided
 
 
+COMPASS_EDGES = ("T", "B", "L", "R")
+COMPASS_MIN_PAIRS = 5
+COMPASS_MIN_AGREEMENT = 0.6
+"""How tightly a volume's confirmed pairs must agree on what a printed margin
+means before that margin is read as a direction (1.0 = perfect agreement).
+
+Measured across the corpus this separates volumes whose page frames line up
+with their key map -- Columbus 0.87-0.95, Detroit 0.83-0.86, Nashville 0.78-0.88
+about an axis rotated some 25 degrees -- from Grand Rapids at 0.13-0.30, where
+two margins come out 19 degrees apart and mean nothing."""
+
+
+def claim_edges(volume: Path) -> dict[tuple[str, str], str]:
+    """{(citing page, cited page): the margin it was printed in}, from adjacency.json.
+
+    A sheet prints its neighbours' numbers around its own border and the scan
+    records which border, so every claim already carries a direction. It is
+    just in the citing page's frame rather than the key map's.
+    """
+    path = volume / "adjacency.json"
+    if not path.exists():
+        return {}
+    try:
+        doc = json.loads(path.read_text())
+    except (OSError, ValueError):
+        return {}
+    edges: dict[tuple[str, str], str] = {}
+    for page in doc.get("pages", {}).values():
+        citer = page_key_of(str(page.get("key", "")))
+        if not citer:
+            continue
+        for detection in page.get("detections", []):
+            if not detection.get("claim"):
+                continue
+            cited = page_key_of(str(detection.get("key", "")))
+            edge = next(
+                (
+                    letter
+                    for letter in str(detection.get("edge") or "")
+                    if letter in COMPASS_EDGES
+                ),
+                None,
+            )
+            if cited and edge:
+                edges[(citer, cited)] = edge
+    return edges
+
+
+def learn_claim_compass(
+    edges: dict[tuple[str, str], str],
+    positions: dict[str, tuple[float, float]],
+    mutual: dict[str, set[str]],
+) -> dict[str, float]:
+    """{margin: bearing on the key map}, calibrated from pairs already placed.
+
+    A margin only names a direction if the page's frame lines up with the key
+    map's, which varies by volume and cannot be assumed -- so it is measured on
+    the mutual pairs where both numbers are printed and the bearing between them
+    is therefore known. Margins whose samples disagree are dropped entirely,
+    which is what keeps a volume like Grand Rapids from being given a compass it
+    has not earned.
+    """
+    samples: dict[str, list[float]] = {}
+    for (citer, cited), edge in edges.items():
+        if cited not in mutual.get(citer, set()):
+            continue
+        start, end = positions.get(citer), positions.get(cited)
+        if start is None or end is None or math.dist(start, end) < 1e-6:
+            continue
+        samples.setdefault(edge, []).append(
+            math.atan2(end[1] - start[1], end[0] - start[0])
+        )
+
+    compass: dict[str, float] = {}
+    for edge, angles in samples.items():
+        if len(angles) < COMPASS_MIN_PAIRS:
+            continue
+        mean_x = statistics.mean(math.cos(angle) for angle in angles)
+        mean_y = statistics.mean(math.sin(angle) for angle in angles)
+        if math.hypot(mean_x, mean_y) >= COMPASS_MIN_AGREEMENT:
+            compass[edge] = math.atan2(mean_y, mean_x)
+    return compass
+
+
+def compass_placement(
+    repair: Repair,
+    sheet: SheetNumbers,
+    geometry: tuple[list[tuple[float, float] | None], float],
+    directions: tuple[dict[tuple[str, str], str], dict[str, float]],
+) -> tuple[float, float] | None:
+    """Where the citing pages' printed margins say the missing number belongs.
+
+    Each citation that named a usable margin projects one page-step that way,
+    and their mean is the estimate. This is what the citations actually said,
+    where their centroid is only where they sit: a page cited from above, from
+    the left and from the right is placed BELOW the first and BETWEEN the other
+    two, rather than in the middle of all three, which is how Detroit's p59
+    ended up half a step high.
+
+    Returns None when no citation carries a usable margin, leaving the caller
+    on the centroid.
+    """
+    centers, pitch = geometry
+    edges, compass = directions
+    if not compass or repair.new is None or pitch <= 0:
+        return None
+    projections: list[tuple[float, float]] = []
+    for index in repair.evidence_indices:
+        center = centers[index] if 0 <= index < len(centers) else None
+        if center is None or not 0 <= index < len(sheet.labels):
+            continue
+        edge = edges.get((sheet.labels[index], repair.new))
+        bearing = compass.get(edge) if edge else None
+        if bearing is None:
+            continue
+        projections.append(
+            (
+                center[0] + pitch * math.cos(bearing),
+                center[1] + pitch * math.sin(bearing),
+            )
+        )
+    if not projections:
+        return None
+    return (
+        sum(point[0] for point in projections) / len(projections),
+        sum(point[1] for point in projections) / len(projections),
+    )
+
+
 def volume_page_keys(volume: Path) -> set[str]:
     """Page keys of the volume's real page images (split parents included)."""
     keys = set()
@@ -675,6 +804,8 @@ def plan_volume_repairs(
     volume_keys = volume_page_keys(volume)
     splits = split_multiplicity(volume)
 
+    edges = claim_edges(volume)
+    positions: dict[str, tuple[float, float]] = {}
     sheet_panels: list[SheetNumbers] = []
     geometry: dict[str, tuple[list[tuple[float, float] | None], float]] = {}
     for stem, doc in load_sheets(volume):
@@ -686,6 +817,9 @@ def plan_volume_repairs(
         centers = detection_centers(streets)
         sheet_panels.append(SheetNumbers(stem, labels, proximity_graph(centers)))
         geometry[stem] = (centers, page_pitch(centers))
+        for label, center in zip(labels, centers):
+            if center is not None and label not in positions:
+                positions[label] = center
 
     repairs: list[Repair] = []
     placements: dict[str, dict[str, tuple[float, float]]] = {}
@@ -703,13 +837,19 @@ def plan_volume_repairs(
                 repaired.labels[relabel.index] = relabel.new
         repaired_sheets.append(repaired)
 
+    compass = learn_claim_compass(edges, positions, mutual)
     missing = volume_shortfall(repaired_sheets, volume_keys, splits)
     for repaired in repaired_sheets:
         centers, pitch = geometry[repaired.sheet]
         for repair in plan_gap_repairs(
             repaired, mutual, one_sided, volume_keys, missing
         ):
-            point = gap_placement(repair, centers, pitch)
+            # What the citing pages SAID beats where they sit: their centroid
+            # cannot tell a set of neighbours around a corner from one all
+            # round, and lands short towards the crowded side.
+            point = compass_placement(
+                repair, repaired, (centers, pitch), (edges, compass)
+            ) or gap_placement(repair, centers, pitch)
             if point is None or repair.new is None:
                 continue
             # A gap that lands on an existing panel is not a gap: the number IS
