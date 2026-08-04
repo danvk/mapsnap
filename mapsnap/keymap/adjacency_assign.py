@@ -405,6 +405,59 @@ def occupant_index(
     return None if best is None else best[1]
 
 
+SNAP_OCCUPIED_GAPS = False
+"""Whether an estimate landing on an occupied cell steps into a free neighbour
+instead of being declined.
+
+Off: measured on the corpus, snapping recovers the coverage that declining
+loses (993 pages located against 994 for the shipped pass) but the recovered
+placements are mostly wrong, so fewer land usefully close -- 940 within 500 ft
+against 954. Kept switchable because the prototype is the evidence."""
+
+SNAP_MIN_RESIDUAL = 0.2
+"""How far off an occupant's centre an estimate must fall, as a fraction of the
+cell, before its direction is worth following.
+
+An estimate landing dead on a printed number says nothing about which way the
+missing page lies, so there is nothing to snap along."""
+
+
+def snap_to_free_cell(
+    point: tuple[float, float],
+    centers: list[tuple[float, float] | None],
+    cell: "CellModel",
+    occupant: int,
+) -> tuple[float, float] | None:
+    """Move an estimate off an occupied cell into the neighbouring free one.
+
+    MEASURED AND REJECTED (#218). The theory: an estimate landing on a printed
+    number means the estimator fell short rather than that the page belongs
+    there, so the residual from the occupant's centre should say which of the
+    four neighbouring cells to step into. In practice the residual is not a
+    compass -- snapped placements land a median 1.73 page-pitches from truth
+    against 0.50 for placements taken directly, and only 2 of 12 land within a
+    pitch against 13 of 17. Kept as the prototype behind that result.
+    """
+    origin = centers[occupant]
+    if origin is None or cell.sx <= 0 or cell.sy <= 0:
+        return None
+    residual = (point[0] - origin[0], point[1] - origin[1])
+    if math.hypot(*residual) < SNAP_MIN_RESIDUAL * min(cell.sx, cell.sy):
+        return None
+    bearing = math.atan2(residual[1], residual[0])
+    ordered = sorted(
+        cell.steps(),
+        key=lambda step: abs(
+            (math.atan2(step[1], step[0]) - bearing + math.pi) % (2 * math.pi) - math.pi
+        ),
+    )
+    for step in ordered:
+        candidate = (origin[0] + step[0], origin[1] + step[1])
+        if occupant_index(candidate, centers, cell) is None:
+            return candidate
+    return None
+
+
 def displaceable(
     index: int,
     key: str,
@@ -1010,6 +1063,10 @@ def plan_volume_repairs(
     missing = volume_shortfall(repaired_sheets, volume_keys, splits)
     for repaired in repaired_sheets:
         centers, pitch, cell = geometry[repaired.sheet]
+        # Grows as this round places numbers, so two gaps cannot be sent to the
+        # same empty cell -- a number synthesized a moment ago occupies its cell
+        # as firmly as one the recogniser read.
+        occupied: list[tuple[float, float] | None] = list(centers)
         for repair in plan_gap_repairs(
             repaired, mutual, one_sided, volume_keys, missing
         ):
@@ -1024,9 +1081,11 @@ def plan_volume_repairs(
             # A gap that lands on an existing panel is not a gap: the number IS
             # printed there, it was misread. Take the panel over rather than
             # drawing a second box on the same block.
-            sitting = occupant_index(point, centers, cell)
-            if sitting is not None and displaceable(
-                sitting, repair.new, repaired, mutual, one_sided
+            sitting = occupant_index(point, occupied, cell)
+            if (
+                sitting is not None
+                and sitting < len(repaired.labels)
+                and displaceable(sitting, repair.new, repaired, mutual, one_sided)
             ):
                 repairs.append(
                     Repair(
@@ -1046,12 +1105,23 @@ def plan_volume_repairs(
                 # Occupied, and the occupant has a claim to its own label that
                 # this gap cannot beat. Drawing the number here anyway would
                 # hand that page's colour block to two pages at segmentation
-                # time (#218) -- worse than leaving the page unplaced, which is
-                # only where it already was. So decline rather than guess.
-                continue
+                # time (#218). Stepping into the neighbouring cell the estimate
+                # was reaching for recovers the page in theory; measured, those
+                # snapped placements are mostly wrong, so the pass declines.
+                snapped = (
+                    snap_to_free_cell(point, occupied, cell, sitting)
+                    if SNAP_OCCUPIED_GAPS
+                    else None
+                )
+                if snapped is None:
+                    continue
+                repairs.append(repair)
+                placements.setdefault(repaired.sheet, {})[repair.new] = snapped
+                occupied.append(snapped)
             else:
                 repairs.append(repair)
                 placements.setdefault(repaired.sheet, {})[repair.new] = point
+                occupied.append(point)
             # One fill per shortfall: two sheets that both border the page
             # must not each grow a copy of it.
             missing.discard(repair.new)
