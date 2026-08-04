@@ -117,9 +117,16 @@ class Match:
 
 
 def thin_plate_spline(
-    source: np.ndarray, destination: np.ndarray, smoothing: float = TPS_SMOOTHING
+    source: np.ndarray, destination: np.ndarray, smoothing: float | None = None
 ) -> Callable[[np.ndarray], np.ndarray]:
-    """Smoothed thin-plate spline mapping `source` points onto `destination`."""
+    """Smoothed thin-plate spline mapping `source` points onto `destination`.
+
+    `smoothing` resolves at call time rather than being bound as a default, so
+    that overriding TPS_SMOOTHING actually changes behaviour -- a default
+    argument would freeze the value at import and silently ignore the override.
+    """
+    if smoothing is None:
+        smoothing = TPS_SMOOTHING
     count = len(source)
     squared = ((source[:, None, :] - source[None, :, :]) ** 2).sum(-1)
     kernel = np.where(
@@ -149,7 +156,9 @@ def thin_plate_spline(
 
 
 def keymap_model(
-    georef: dict, min_gcps: int = MIN_KEYMAP_INLIERS
+    georef: dict,
+    min_gcps: int = MIN_KEYMAP_INLIERS,
+    smoothing: float | None = None,
 ) -> Callable[[np.ndarray], np.ndarray]:
     """Key-map pixel -> lon/lat, as a spline through the sheet's own GCPs.
 
@@ -178,7 +187,7 @@ def keymap_model(
             (lonlat[:, 1] - origin[1]) * M_PER_DEG_LAT,
         ]
     )
-    spline = thin_plate_spline(pixels, metres)
+    spline = thin_plate_spline(pixels, metres, smoothing=smoothing)
 
     def to_world(query: np.ndarray) -> np.ndarray:
         out = spline(query)
@@ -634,7 +643,12 @@ def rotation_hypotheses(
     return hypotheses
 
 
-def snap_volume(volume: Path, output_dir: Path, min_margin: float = 0.0) -> list[dict]:
+def snap_volume(
+    volume: Path,
+    output_dir: Path,
+    min_margin: float = 0.0,
+    smoothing: float | None = None,
+) -> list[dict]:
     """Place every page that has a key-map region and a P(road) map.
 
     Writes one georef sidecar per placed page into `output_dir` and returns a
@@ -666,7 +680,7 @@ def snap_volume(volume: Path, output_dir: Path, min_margin: float = 0.0) -> list
             continue
 
         georef = json.loads(georef_path.read_text())
-        model = keymap_model(georef)
+        model = keymap_model(georef, smoothing=smoothing)
         keymap_prob = keymap_image.astype(np.float32) / 255.0
         regions = json.loads(regions_path.read_text())
         labels = [str(label) for label in regions["labels"]]
@@ -733,6 +747,16 @@ def main() -> None:
         help="Where to write georef sidecars (default: <volume>/kmsnap)",
     )
     parser.add_argument(
+        "--smoothing",
+        type=float,
+        default=None,
+        help=(
+            "Key-map spline regularization (default "
+            f"{TPS_SMOOTHING:.0e}). Lower follows the sheet's intersections more "
+            "closely; on Detroit that chases their noise and doubles the disasters."
+        ),
+    )
+    parser.add_argument(
         "--min-margin",
         type=float,
         default=0.0,
@@ -741,7 +765,12 @@ def main() -> None:
     args = parser.parse_args()
 
     output_dir = args.output_dir or (args.volume / "kmsnap")
-    rows = snap_volume(args.volume, output_dir, min_margin=args.min_margin)
+    rows = snap_volume(
+        args.volume,
+        output_dir,
+        min_margin=args.min_margin,
+        smoothing=args.smoothing,
+    )
     if not rows:
         print("No pages placed.", file=sys.stderr)
         return
