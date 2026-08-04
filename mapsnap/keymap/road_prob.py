@@ -522,6 +522,11 @@ def main() -> None:
     for sheet in sheets:
         image = read_sheet(sheet)
         probability = predict_sheet(model, image, device)
+        # The model was never supervised on furniture (the loss is masked to
+        # the mapped extent), so over legends and title blocks it free-runs --
+        # Detroit's KEY box comes out solid road. The artifact only claims to
+        # be P(road) of the MAP, so confine it to the same extent.
+        probability *= mapped_extent_mask(sheet)
         cv2.imwrite(str(sheet.roadprob_path), (probability * 255).astype(np.uint8))
         render = overlay_render(image, probability)
         name = (

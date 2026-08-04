@@ -99,8 +99,8 @@ def test_colour_checkpoint_round_trip(tmp_path):
     path = tmp_path / "model.pt"
     torch.save(model.state_dict(), path)
     loaded = load_model(path, "cpu")
-    first = loaded.enc1.block[0]
-    assert first.weight.shape[1] == 3 and first.weight.shape[0] == 8
+    state = loaded.state_dict()["enc1.block.0.weight"]
+    assert state.shape[1] == 3 and state.shape[0] == 8
 
 
 def write_sheet(tmp_path, inliers=30, with_regions=True):

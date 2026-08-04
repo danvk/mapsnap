@@ -55,3 +55,14 @@ uv run python -m mapsnap.keymap.score_keymap_labels \
 ## Note on these binaries
 
 `data/` is gitignored, so these weights live here (outside it) to ship with the repo and keep the pipeline runnable on a fresh clone. They are regenerable from the truth data with the commands above; if the history bloat becomes a concern, move them to Git LFS or a release asset.
+
+## keymap_road_unet.pt
+
+P(road) for key-map sheets (issue #211): a colour UNet (base=24, 3-channel)
+trained by `mapsnap.keymap.train_road_prob` on OSM centerlines rendered
+through each sheet's own georef -- per-sheet pixel stroke widths, soft labels,
+loss masked to the mapped extent. Holdout (detroit, miami, grand_rapids,
+brooklyn_1939_1 -- whole volumes): buffered F1 0.865 at tolerance 40px,
+completeness 0.73-0.93 with the fill-background stratum >= paper everywhere.
+Run `python -m mapsnap.keymap.road_prob predict` to write
+`raw/<stem>.roadprob.png` (masked to the mapped extent) plus an overlay render.
