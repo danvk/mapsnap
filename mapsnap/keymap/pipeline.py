@@ -154,7 +154,12 @@ def main() -> None:
 
     centerlines = args.centerlines
     if centerlines is None:
-        found = default_centerlines(images[0].parent)
+        # Search from the VOLUME directory, not the key map's own (``raw/``)
+        # one: default_centerlines checks a directory and its parent, so
+        # starting at raw/ reaches only the volume, and a centerlines.geojson
+        # shared by several volumes of one set (brooklyn_1904-1908/vol13/raw ->
+        # brooklyn_1904-1908) would be missed.
+        found = default_centerlines(keymap_volume_dir(images[0]))
         if found is None:
             sys.exit(
                 "No --centerlines given and no centerlines.geojson found next to the key map(s)."

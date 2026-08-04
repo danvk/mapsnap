@@ -5,6 +5,7 @@ from mapsnap.keymap.pipeline import (
     keymap_volume_dir,
     valid_page_spec,
 )
+from mapsnap.utils import default_centerlines
 
 
 def test_format_page_spec_single_run():
@@ -35,6 +36,28 @@ def test_keymap_volume_dir_under_raw():
 def test_keymap_volume_dir_flat():
     # A key map alongside the scaled pages has the volume as its immediate parent.
     assert keymap_volume_dir(Path("data/chicago/p0b.jpg")) == Path("data/chicago")
+
+
+def test_centerlines_found_from_the_volume_dir_not_the_raw_dir(tmp_path: Path):
+    """A centerlines.geojson shared by several volumes of one set must be found.
+
+    default_centerlines checks a directory and its parent, so the search has to
+    start at the volume directory: from the key map's own raw/ it would reach
+    only the volume and miss a file one level further up.
+    """
+    keymap = tmp_path / "brooklyn" / "vol13" / "raw" / "p0L.jpg"
+    keymap.parent.mkdir(parents=True)
+    keymap.write_bytes(b"")
+    shared = tmp_path / "brooklyn" / "centerlines.geojson"
+    shared.write_text("{}")
+
+    assert default_centerlines(keymap.parent) is None  # the bug: raw/ then vol13/
+    assert default_centerlines(keymap_volume_dir(keymap)) == shared
+
+    # A volume with its own centerlines still resolves to that one, not the set's.
+    own = tmp_path / "brooklyn" / "vol13" / "centerlines.geojson"
+    own.write_text("{}")
+    assert default_centerlines(keymap_volume_dir(keymap)) == own
 
 
 def test_valid_page_spec_from_volume_images(tmp_path: Path):
