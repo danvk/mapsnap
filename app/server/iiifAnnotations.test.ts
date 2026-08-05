@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  imageStemsByLowercase,
   rescaleSvgSelector,
   rewriteAnnotationPage,
   serviceUrlToPageKey,
@@ -189,5 +190,27 @@ describe('rewriteAnnotationPage', () => {
     const input = fixturePage();
     rewriteAnnotationPage(input, localPages, baseUrl);
     expect(input).toEqual(fixturePage());
+  });
+});
+
+describe('imageStemsByLowercase', () => {
+  it('maps a lowercased stem to the real filename case', async () => {
+    const { mkdtemp, writeFile } = await import('fs/promises');
+    const { tmpdir } = await import('os');
+    const { join } = await import('path');
+    const dir = await mkdtemp(join(tmpdir(), 'stems-'));
+    // The two conventions that coexist in the corpus: Chicago writes p103w.jpg
+    // for a URL ending 0103W, Asheville writes p33A.jpg for one ending 0033A.
+    await writeFile(join(dir, 'p103w.jpg'), '');
+    await writeFile(join(dir, 'p33A.jpg'), '');
+    await writeFile(join(dir, 'p7.jpg'), '');
+    const stems = await imageStemsByLowercase(dir);
+    expect(stems.get('p103w')).toBe('p103w');
+    expect(stems.get('p33a')).toBe('p33A');
+    expect(stems.get('p7')).toBe('p7');
+  });
+
+  it('returns an empty map for a missing directory', async () => {
+    expect((await imageStemsByLowercase('/nonexistent-volume')).size).toBe(0);
   });
 });

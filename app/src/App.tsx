@@ -184,12 +184,32 @@ declare global {
  * (text detections), panels (page-split polygons), and boxes (raw CRAFT
  * detection boxes per rotation).
  */
-export function App() {
-  const [mode, setMode] = useState<Mode>(() =>
-    new URLSearchParams(window.location.search).get('view') === 'iiif'
-      ? 'iiif'
-      : 'georef',
-  );
+/** Which files a debug view shows, and how it is being displayed. */
+export interface DebugViewProps {
+  /**
+   * Files to open, as `?files=` would name them. Omitted for the standalone
+   * page, which reads the URL instead.
+   */
+  files?: string[];
+  /**
+   * Shown as an "x" when given, for the embedded case. Its presence is also
+   * what tells the view it is embedded: the standalone page has nothing to
+   * close back to.
+   */
+  onClose?: () => void;
+}
+
+/**
+ * The debugger proper: one page's image with its overlay, table and controls.
+ *
+ * Rendered two ways. Standalone it is the whole page, reading `?files=` from
+ * the URL. Embedded in the volume viewer it takes `files` as a prop and sits
+ * where the map was, so that following a page's "streets view" link does not
+ * lose the volume, its page list or its selection.
+ */
+export function DebugView({ files: filesProp, onClose }: DebugViewProps = {}) {
+  const embedded = onClose !== undefined;
+  const [mode, setMode] = useState<Mode>('georef');
   const [streets, setStreets] = useState<Street[]>([]);
   const [intersections, setIntersections] = useState<IntersectionPoint[]>([]);
   const [keymap, setKeymap] = useState<KeymapLocation | null>(null);
@@ -627,7 +647,9 @@ export function App() {
   // On first load, honor a `?files=data/image.jpg,data/streets.json` deep link
   // by fetching those files from the dev server and entering the matching view.
   useEffect(() => {
-    const filesParam = new URLSearchParams(window.location.search).get('files');
+    const filesParam =
+      filesProp?.join(',') ??
+      new URLSearchParams(window.location.search).get('files');
     if (!filesParam) return;
     const files = filesParam
       .split(',')
@@ -660,19 +682,12 @@ export function App() {
     return () => window.removeEventListener('keydown', onKeydown);
   }, [mode]);
 
-  if (mode === 'iiif') {
-    return (
-      <div className="container container-iiif">
-        <VolumeViewer />
-      </div>
-    );
-  }
-
   // A key-map sheet is thousands of pixels wide and its marks are a few dozen
   // across, so it gets the full column width with a fixed table beside it --
   // whether it arrived as page regions or as page-number detections (#215).
   const containerClass = [
     'container',
+    embedded ? 'container-embedded' : '',
     mode === 'panels' || keymapSheet ? 'container-wide' : '',
     mode === 'streets' && keymapSheet ? 'container-keymap' : '',
   ]
@@ -682,7 +697,19 @@ export function App() {
   return (
     <div className={containerClass}>
       <nav className="view-nav">
-        <a href="?view=iiif">volume viewer</a>
+        {embedded ? (
+          <button
+            type="button"
+            className="debug-close"
+            onClick={onClose}
+            title="Close this view and show the map again"
+            aria-label="Close debug view"
+          >
+            ×
+          </button>
+        ) : (
+          <a href="?view=iiif">volume viewer</a>
+        )}
         {noteContext && <NoteButton ctx={noteContext} />}
       </nav>
       <ImageColumn
@@ -848,4 +875,24 @@ export function App() {
       </div>
     </div>
   );
+}
+
+/**
+ * Route between the volume viewer and the standalone debugger.
+ *
+ * `?view=iiif` gets the volume viewer, which now embeds {@link DebugView}
+ * itself when a page's view is opened; anything else is the standalone
+ * debugger reading `?files=` from the URL.
+ */
+export function App() {
+  const isVolumeViewer =
+    new URLSearchParams(window.location.search).get('view') === 'iiif';
+  if (isVolumeViewer) {
+    return (
+      <div className="container container-iiif">
+        <VolumeViewer />
+      </div>
+    );
+  }
+  return <DebugView />;
 }
