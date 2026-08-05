@@ -9,7 +9,16 @@
  *
  * Usage:
  *   node server/main.ts [data_dir] [port]
- *   npm run server                          # ../data on :8182
+ *   npm run server                          # ../data on :8182, restarts on edit
+ *   npm run server:once                     # same, without the watcher
+ *
+ * `npm run server` runs under `node --watch-path=./server`, so editing anything
+ * in this directory restarts the process -- the client half of the app has
+ * always hot-reloaded and the server half not doing so was a standing papercut
+ * (#203). The watch is scoped to ./server rather than the whole module graph so
+ * that editing a page under src/ does not bounce the API, and it covers files
+ * that are not imported (a new route module, say) which a graph-based watch
+ * would miss. `server:once` is the unwatched form for anything scripted.
  *
  * In development `npm run dev` proxies /iiif, /iiif-api, /api and /notes-api
  * here; a production build (`npm run build`) is served standalone at /mapsnap.

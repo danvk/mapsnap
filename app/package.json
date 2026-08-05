@@ -2,13 +2,15 @@
   "name": "mapsnap-app",
   "version": "1.0.0",
   "scripts": {
-    "dev": "vite",
+    "dev": "concurrently --kill-others --names client,server --prefix-colors cyan,magenta \"npm:client:dev\" \"npm:server\"",
+    "client:dev": "vite",
     "build": "vite build",
     "preview": "vite preview",
     "type-check": "tsc --noEmit",
     "test": "vitest run",
     "format": "prettier --write .",
-    "server": "node server/main.ts"
+    "server": "node --watch-path=./server --watch-preserve-output server/main.ts",
+    "server:once": "node server/main.ts"
   },
   "type": "module",
   "dependencies": {
@@ -24,6 +26,7 @@
     "@types/react": "^19.2.17",
     "@types/react-dom": "^19.2.3",
     "@vitejs/plugin-react": "^5.2.0",
+    "concurrently": "^10.0.4",
     "express": "^4.22.2",
     "express-iiif": "^1.8.0",
     "jsdom": "^29.1.1",
