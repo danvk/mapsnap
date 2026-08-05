@@ -469,15 +469,12 @@ export function VolumeViewer() {
           selectedItemIndex={selectedItemIndex}
           onSelectPage={handleSelectPage}
         />
-        {debugView ? (
-          <div className="volume-viewer-debug">
-            <DebugView
-              key={debugView.files.join(',')}
-              files={debugView.files}
-              onClose={() => setDebugView(null)}
-            />
-          </div>
-        ) : (
+        {/* The map stays mounted while a debug view is open, hidden rather than
+            unmounted. Unmounting destroys the maplibre instance, and remounting
+            re-runs its initial fitBounds and refetches every tile -- a visible
+            jump and reload on what should be a return to where you were. Hiding
+            it keeps its layout box, so nothing resizes either. */}
+        <div className="volume-map-slot" aria-hidden={debugView !== null}>
           <VolumeMap
             annotation={annotation}
             pages={pages}
@@ -501,7 +498,16 @@ export function VolumeViewer() {
             }
             onLoadResult={setLoadResult}
           />
-        )}
+          {debugView && (
+            <div className="volume-viewer-debug">
+              <DebugView
+                key={debugView.files.join(',')}
+                files={debugView.files}
+                onClose={() => setDebugView(null)}
+              />
+            </div>
+          )}
+        </div>
         <InfoPanel
           onOpenDebugView={(files, label) => setDebugView({ files, label })}
           runArtifacts={runArtifacts}

@@ -776,15 +776,34 @@ tr.relaxed {
 /* A page view opened inside the volume viewer, in the space the map occupies.
    It is the same component the standalone debugger renders, so it keeps its own
    scrolling and just needs to be told how much room it has. */
-.volume-viewer-debug {
+/* Holds the map and, when one is open, a debug view laid over it. The map keeps
+   its box either way: it is hidden, never unmounted, so returning to it costs no
+   camera move and no tile refetch. */
+.volume-map-slot {
   flex: 1;
   min-width: 0;
+  display: flex;
+  position: relative;
+}
+
+.volume-map-slot > #map {
+  flex: 1;
+  min-width: 0;
+}
+
+/* A child with `visibility: visible` would defeat this, but the map only ever
+   sets its own visibility to hidden or leaves it unset, so it inherits. */
+.volume-map-slot[aria-hidden='true'] > #map {
+  visibility: hidden;
+}
+
+.volume-viewer-debug {
+  position: absolute;
+  inset: 0;
   overflow: auto;
+  background: #fff;
   border-left: 1px solid #ddd;
   border-right: 1px solid #ddd;
-  /* Anchors the embedded view's own nav, which would otherwise inherit
-     .view-nav's `position: fixed` and land over the info panel. */
-  position: relative;
 }
 
 /* Standalone, .view-nav is fixed to the window's top-right corner. Embedded, it
