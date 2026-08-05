@@ -1,13 +1,19 @@
+import json
 import math
 from pathlib import Path
 
+import pytest
+
 from mapsnap.keymap.locate import (
+    MIN_KEYMAP_MEGAPIXELS,
     KeymapLocator,
+    above_megapixel_floor,
     bilinear_pixel_to_world,
     discover_keymaps,
     estimate_radius,
     geometry_segments,
     geometry_vertices,
+    keymap_megapixels,
     meters_between,
     page_key,
     page_number,
@@ -386,3 +392,87 @@ def test_redundant_keymaps_drops_only_one_of_three_duplicates():
     b = {"1", "2", "3", "4", "5", "6"}
     multi = a | {"154", "823", "7217", "911"}
     assert redundant_keymaps([a, b, multi], VOLUME_KEYS) == {2}
+
+
+def write_keymap_pair(directory, stem, width, height):
+    """A <stem>.keymap.json with the georef sidecar usable_keymaps requires."""
+    (directory / f"{stem}.keymap.json").write_text(json.dumps({"streets": []}))
+    (directory / f"{stem}.georef.json").write_text(
+        json.dumps({"width": width, "height": height, "corners": []})
+    )
+
+
+def test_keymap_megapixels_reads_the_sidecar(tmp_path):
+    write_keymap_pair(tmp_path, "p0", 6447, 7795)
+    assert keymap_megapixels(tmp_path / "p0.georef.json") == pytest.approx(
+        50.3, abs=0.1
+    )
+
+
+def test_keymap_megapixels_returns_none_without_dimensions(tmp_path):
+    (tmp_path / "p0.georef.json").write_text(json.dumps({"corners": []}))
+    assert keymap_megapixels(tmp_path / "p0.georef.json") is None
+
+
+def test_above_megapixel_floor_splits_the_two_populations(tmp_path):
+    """Columbia's 4400x5517 is under the floor; Detroit's 6447x7795 is over it."""
+    write_keymap_pair(tmp_path, "columbia", 4400, 5517)
+    write_keymap_pair(tmp_path, "detroit", 6447, 7795)
+    assert not above_megapixel_floor(tmp_path / "columbia.keymap.json")
+    assert above_megapixel_floor(tmp_path / "detroit.keymap.json")
+
+
+def test_above_megapixel_floor_passes_a_sheet_with_no_recorded_size(tmp_path):
+    """An unreadable size is not evidence of a bad scan, so the sheet passes."""
+    (tmp_path / "p0.keymap.json").write_text(json.dumps({"streets": []}))
+    (tmp_path / "p0.georef.json").write_text(json.dumps({"corners": []}))
+    assert above_megapixel_floor(tmp_path / "p0.keymap.json")
+
+
+def test_usable_keymaps_ignores_resolution(tmp_path):
+    """The locator itself keeps low-resolution sheets.
+
+    osm-snap and street-solve build locators through usable_keymaps and get real
+    value from a sheet whose page numbers are unreliable -- its georeferenced
+    rectangle alone cuts Columbia's candidate streets to 22%. Only the
+    vocabulary restriction, which needs each page's number read correctly,
+    applies the floor.
+    """
+    write_keymap_pair(tmp_path, "columbia", 4400, 5517)
+    assert [p.name for p in usable_keymaps(tmp_path)] == ["columbia.keymap.json"]
+
+
+def test_usable_keymaps_still_requires_a_georef(tmp_path):
+    """The pre-existing rule is unchanged: no sidecar, no locator."""
+    (tmp_path / "p0.keymap.json").write_text(json.dumps({"streets": []}))
+    assert usable_keymaps(tmp_path) == []
+
+
+def test_resolve_keymaps_applies_the_floor_to_discovery(tmp_path):
+    """The vocabulary path drops a sub-floor sheet; the locator path kept it."""
+    write_keymap_pair(tmp_path, "p0", 4400, 5517)
+    (tmp_path / "p0.jpg").write_bytes(b"")
+    assert usable_keymaps(tmp_path) != []
+    assert resolve_keymaps(None, False, [str(tmp_path / "p0.jpg")]) == []
+
+
+def test_resolve_keymaps_honours_an_explicit_keymap(tmp_path):
+    """--keymap is the caller overriding the defaults, floor included."""
+    write_keymap_pair(tmp_path, "p0", 4400, 5517)
+    explicit = [str(tmp_path / "p0.keymap.json")]
+    assert resolve_keymaps(explicit, False, []) == [tmp_path / "p0.keymap.json"]
+
+
+def test_resolve_keymaps_still_honours_ignore(tmp_path):
+    write_keymap_pair(tmp_path, "p0", 6447, 7795)
+    (tmp_path / "p0.jpg").write_bytes(b"")
+    assert resolve_keymaps(None, True, [str(tmp_path / "p0.jpg")]) == []
+
+
+def test_megapixel_floor_sits_in_the_corpus_gap():
+    """The two populations are 23.8-24.3 MP and 43.0-53.7 MP; the floor is between.
+
+    Pinned because the value's justification is that gap, not the number itself:
+    a future sheet landing near the floor means the assumption needs rechecking.
+    """
+    assert 25.0 < MIN_KEYMAP_MEGAPIXELS < 42.0
