@@ -8,7 +8,8 @@
     "type-check": "tsc --noEmit",
     "test": "vitest run",
     "format": "prettier --write .",
-    "server": "node server/main.ts"
+    "server": "node --watch-path=./server --watch-preserve-output server/main.ts",
+    "server:once": "node server/main.ts"
   },
   "type": "module",
   "dependencies": {
