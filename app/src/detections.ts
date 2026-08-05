@@ -5,15 +5,76 @@ export interface DetectionFilters {
   minConfidence: number;
   minShortSide: number;
   minLongSide: number;
+  /** Minimum long/short side ratio, matching georef's `--min-aspect-ratio`. */
+  minAspectRatio: number;
+  /**
+   * Whether to apply georef's confidence-for-size trade (see
+   * {@link relaxedShortSide}). Off shows the strict floors only.
+   */
+  relaxation: boolean;
+  /**
+   * Size floor a confidence-1.0 detection must meet, as a fraction of
+   * minShortSide. georef's `--high-confidence-size-fraction`, default 0.7.
+   */
+  highConfidenceSizeFraction: number;
   showIgnored: boolean;
   /** Text query; empty shows everything. See {@link matchesTextQuery}. */
   text: string;
+}
+
+/**
+ * The thresholds georef actually ran with, read from a page's
+ * `<stem>.georef.json` at `inputs.parameters`. Every sidecar carries these, and
+ * min_short_side is usually auto-calibrated from the volume's own detections
+ * (the p25 of confident reads), so a hand-set slider will not match the run.
+ */
+export interface GeorefParameters {
+  min_confidence?: number;
+  min_short_side?: number;
+  min_long_side?: number;
+  min_aspect_ratio?: number;
+  high_confidence_size_fraction?: number;
+}
+
+/**
+ * The short side a detection must have at this confidence.
+ *
+ * georef trades confidence for size: a detection at `minConfidence` must meet
+ * the full `minShortSide`, while one at confidence 1.0 need only meet
+ * `minShortSide * highConfidenceSizeFraction`. Between those it interpolates as
+ * a power law, linear in log-confidence against log-threshold. Mirrors
+ * `confidence_relaxed_threshold` in georef_from_labels.py.
+ */
+export function relaxedShortSide(
+  confidence: number,
+  minConfidence: number,
+  minShortSide: number,
+  highConfidenceSizeFraction: number,
+): number {
+  const floor = minShortSide * highConfidenceSizeFraction;
+  if (
+    confidence <= minConfidence ||
+    floor >= minShortSide ||
+    minConfidence <= 0
+  ) {
+    return minShortSide;
+  }
+  const capped = Math.min(confidence, 1);
+  const exponent = Math.log(floor / minShortSide) / Math.log(minConfidence);
+  return minShortSide * Math.pow(minConfidence / capped, exponent);
 }
 
 /** A detection paired with its index in the original, unfiltered list. */
 export interface IndexedDetection {
   det: Detection;
   i: number;
+  /**
+   * True when this detection clears the size gate only because relaxation
+   * lowered it — i.e. it would be rejected at the strict floors. Worth marking:
+   * these are the reads georef admitted on the strength of their confidence
+   * rather than their size.
+   */
+  relaxed?: boolean;
 }
 
 /** Map confidence in [0, 1] to a CSS color string (red → yellow → green). */
@@ -75,21 +136,57 @@ export function detectionFromAdjacency(
   };
 }
 
-/** Return detections passing the given filters, paired with their original indices. */
+/**
+ * Return detections passing the given filters, paired with their original indices.
+ *
+ * Mirrors georef's admission gate: the confidence floor, the size floors (both
+ * scaled together when relaxation is on, exactly as `passes_admission_gate`
+ * scales min_long_side by the ratio the short side was relaxed by), and the
+ * aspect-ratio floor. Detections admitted only by relaxation are flagged rather
+ * than silently mixed in.
+ *
+ * The word-level rejections georef also applies (number-only, bare letters,
+ * direction words) are deliberately not reproduced here: those depend on the
+ * volume's street vocabulary, which the viewer does not load.
+ */
 export function filterDetections(
   detections: Detection[],
   filters: DetectionFilters,
 ): IndexedDetection[] {
-  return detections
-    .map((det, i) => ({ det, i }))
-    .filter(
-      ({ det }) =>
-        det.confidence >= filters.minConfidence &&
-        det.short_side >= filters.minShortSide &&
-        det.long_side >= filters.minLongSide &&
-        (!det.ignore || filters.showIgnored) &&
-        matchesTextQuery(det.text, filters.text),
+  const out: IndexedDetection[] = [];
+  for (let i = 0; i < detections.length; i++) {
+    const det = detections[i];
+    if (det.confidence < filters.minConfidence) continue;
+    if (det.ignore && !filters.showIgnored) continue;
+    if (!matchesTextQuery(det.text, filters.text)) continue;
+    if (det.long_side < filters.minAspectRatio * det.short_side) continue;
+
+    const strict =
+      det.short_side >= filters.minShortSide &&
+      det.long_side >= filters.minLongSide;
+    if (strict) {
+      out.push({ det, i });
+      continue;
+    }
+    if (!filters.relaxation) continue;
+
+    const requiredShort = relaxedShortSide(
+      det.confidence,
+      filters.minConfidence,
+      filters.minShortSide,
+      filters.highConfidenceSizeFraction,
     );
+    // georef scales the long-side floor by whatever fraction the short side was
+    // relaxed by, so a relaxed detection is not held to the full long side.
+    const requiredLong =
+      filters.minShortSide > 0
+        ? filters.minLongSide * (requiredShort / filters.minShortSide)
+        : filters.minLongSide;
+    if (det.short_side >= requiredShort && det.long_side >= requiredLong) {
+      out.push({ det, i, relaxed: true });
+    }
+  }
+  return out;
 }
 
 // Escape a query term for use inside a RegExp.

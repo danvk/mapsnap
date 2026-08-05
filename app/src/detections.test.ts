@@ -6,6 +6,7 @@ import {
   filterDetections,
   isOnBuildingFill,
   matchesTextQuery,
+  relaxedShortSide,
   previewOrientation,
 } from './detections';
 import type { Detection } from './types';
@@ -122,6 +123,9 @@ describe('filterDetections', () => {
       minConfidence: 0,
       minShortSide: 0,
       minLongSide: 0,
+      minAspectRatio: 0,
+      relaxation: false,
+      highConfidenceSizeFraction: 0.7,
       showIgnored: true,
       text: '',
     });
@@ -133,6 +137,9 @@ describe('filterDetections', () => {
       minConfidence: 0.5,
       minShortSide: 20,
       minLongSide: 50,
+      minAspectRatio: 0,
+      relaxation: false,
+      highConfidenceSizeFraction: 0.7,
       showIgnored: true,
       text: '',
     });
@@ -144,6 +151,9 @@ describe('filterDetections', () => {
       minConfidence: 0,
       minShortSide: 0,
       minLongSide: 0,
+      minAspectRatio: 0,
+      relaxation: false,
+      highConfidenceSizeFraction: 0.7,
       showIgnored: false,
       text: '',
     });
@@ -289,5 +299,133 @@ describe('matchesTextQuery', () => {
   it('treats regex metacharacters literally', () => {
     expect(matchesTextQuery('6', '.')).toBe(false);
     expect(matchesTextQuery('N. MAIN', '.')).toBe(true);
+  });
+});
+
+describe('relaxedShortSide', () => {
+  it('returns the full floor at or below min confidence', () => {
+    expect(relaxedShortSide(0.15, 0.15, 20, 0.7)).toBe(20);
+    expect(relaxedShortSide(0.1, 0.15, 20, 0.7)).toBe(20);
+  });
+
+  it('returns the high-confidence floor at confidence 1', () => {
+    expect(relaxedShortSide(1, 0.15, 20, 0.7)).toBeCloseTo(14, 6);
+  });
+
+  it('interpolates monotonically between the two', () => {
+    const mid = relaxedShortSide(0.5, 0.15, 20, 0.7);
+    expect(mid).toBeLessThan(20);
+    expect(mid).toBeGreaterThan(14);
+  });
+
+  it('is disabled when the fraction would not lower the floor', () => {
+    expect(relaxedShortSide(1, 0.15, 20, 1)).toBe(20);
+  });
+});
+
+describe('filterDetections aspect ratio and relaxation', () => {
+  const wide = makeDetection({
+    text: 'BROADWAY',
+    confidence: 0.9,
+    short_side: 10,
+    long_side: 90,
+  });
+  const squat = makeDetection({
+    text: 'ELM',
+    confidence: 0.9,
+    short_side: 40,
+    long_side: 50,
+  });
+
+  it('rejects a detection below the aspect-ratio floor', () => {
+    const base = {
+      minConfidence: 0,
+      minShortSide: 0,
+      minLongSide: 0,
+      relaxation: false,
+      highConfidenceSizeFraction: 0.7,
+      showIgnored: true,
+      text: '',
+    };
+    expect(
+      filterDetections([wide, squat], { ...base, minAspectRatio: 0 }),
+    ).toHaveLength(2);
+    expect(
+      filterDetections([wide, squat], { ...base, minAspectRatio: 2 }),
+    ).toHaveLength(1);
+  });
+
+  it('admits an undersized but confident detection only with relaxation on', () => {
+    const small = makeDetection({
+      text: 'OAK',
+      confidence: 1,
+      short_side: 15,
+      long_side: 40,
+    });
+    const base = {
+      minConfidence: 0.15,
+      minShortSide: 20,
+      minLongSide: 40,
+      minAspectRatio: 0,
+      highConfidenceSizeFraction: 0.7,
+      showIgnored: true,
+      text: '',
+    };
+    expect(
+      filterDetections([small], { ...base, relaxation: false }),
+    ).toHaveLength(0);
+    const relaxed = filterDetections([small], { ...base, relaxation: true });
+    expect(relaxed).toHaveLength(1);
+    expect(relaxed[0].relaxed).toBe(true);
+  });
+
+  it('does not mark a detection that clears the strict floors', () => {
+    const big = makeDetection({
+      text: 'MAIN',
+      confidence: 1,
+      short_side: 30,
+      long_side: 90,
+    });
+    const result = filterDetections([big], {
+      minConfidence: 0.15,
+      minShortSide: 20,
+      minLongSide: 40,
+      minAspectRatio: 0,
+      relaxation: true,
+      highConfidenceSizeFraction: 0.7,
+      showIgnored: true,
+      text: '',
+    });
+    expect(result).toHaveLength(1);
+    expect(result[0].relaxed).toBeUndefined();
+  });
+
+  it('relaxes the long side in the same proportion as the short side', () => {
+    // georef scales min_long_side by required_short/min_short; a detection just
+    // under both floors must clear both relaxed floors, not only the short one.
+    const shortOnly = makeDetection({
+      text: 'PINE',
+      confidence: 1,
+      short_side: 15,
+      long_side: 39,
+    });
+    const both = makeDetection({
+      text: 'CEDAR',
+      confidence: 1,
+      short_side: 15,
+      long_side: 30,
+    });
+    const base = {
+      minConfidence: 0.15,
+      minShortSide: 20,
+      minLongSide: 40,
+      minAspectRatio: 0,
+      relaxation: true,
+      highConfidenceSizeFraction: 0.7,
+      showIgnored: true,
+      text: '',
+    };
+    expect(filterDetections([shortOnly], base)).toHaveLength(1);
+    expect(filterDetections([both], base)).toHaveLength(1);
   });
 });

@@ -1,6 +1,10 @@
 import { useState } from 'react';
 import type { IndexedBox } from '../boxes';
-import type { DetectionFilters, IndexedDetection } from '../detections';
+import type {
+  DetectionFilters,
+  GeorefParameters,
+  IndexedDetection,
+} from '../detections';
 import { pointInPolygon } from '../geometry';
 import type { IntersectionPoint, PanelPolygon, Street } from '../types';
 import { useElementSize } from '../hooks/useElementSize';
@@ -9,6 +13,11 @@ import { BoxesOverlay } from './BoxesOverlay';
 import { DetectionsOverlay } from './DetectionsOverlay';
 import { GeorefOverlay } from './GeorefOverlay';
 import { PanelsOverlay } from './PanelsOverlay';
+
+const RELAXATION_HELP =
+  'georef trades confidence for size: a detection at the confidence floor must meet the full ' +
+  'size floor, while one at confidence 1.0 need only meet a fraction of it, interpolated as a ' +
+  'power law. Detections admitted only this way are marked "relaxed".';
 
 export type Mode =
   | 'georef'
@@ -49,6 +58,11 @@ interface ImageColumnProps {
   setColorByInlier: (value: boolean) => void;
   filters: DetectionFilters;
   setFilters: (filters: DetectionFilters) => void;
+  /** Thresholds this page's georef run recorded, when its sidecar had them. */
+  georefParameters?: GeorefParameters | null;
+  /** Whether the sliders still match that run. */
+  atRunThresholds?: boolean;
+  onRestoreRunThresholds?: () => void;
   onFiles: (files: File[]) => void;
 }
 
@@ -86,6 +100,9 @@ export function ImageColumn(props: ImageColumnProps) {
     colorByInlier,
     setColorByInlier,
     filters,
+    georefParameters,
+    atRunThresholds,
+    onRestoreRunThresholds,
     setFilters,
     onFiles,
   } = props;
@@ -334,6 +351,56 @@ export function ImageColumn(props: ImageColumnProps) {
               }
             />
           </div>
+          <div className="filter-row">
+            <label htmlFor="filter-aspect">
+              Min aspect ratio: <span>{filters.minAspectRatio.toFixed(2)}</span>
+            </label>
+            <input
+              type="range"
+              id="filter-aspect"
+              min={0}
+              max={6}
+              step={0.05}
+              value={filters.minAspectRatio}
+              onChange={(e) =>
+                setFilters({
+                  ...filters,
+                  minAspectRatio: parseFloat(e.target.value),
+                })
+              }
+            />
+          </div>
+          <div className="filter-row">
+            <input
+              type="checkbox"
+              id="relaxation"
+              checked={filters.relaxation}
+              onChange={(e) =>
+                setFilters({ ...filters, relaxation: e.target.checked })
+              }
+            />
+            <label htmlFor="relaxation" title={RELAXATION_HELP}>
+              Confidence relaxation (to{' '}
+              {(filters.highConfidenceSizeFraction * 100).toFixed(0)}% of the
+              size floor)
+            </label>
+          </div>
+          {georefParameters && (
+            <div className="filter-row filter-provenance">
+              <span>
+                georef ran at short{' '}
+                {georefParameters.min_short_side?.toFixed(0)}
+                px, long {georefParameters.min_long_side?.toFixed(0)}px, conf{' '}
+                {georefParameters.min_confidence}
+                {atRunThresholds ? '' : ' (sliders changed)'}
+              </span>
+              {!atRunThresholds && onRestoreRunThresholds && (
+                <button type="button" onClick={onRestoreRunThresholds}>
+                  restore
+                </button>
+              )}
+            </div>
+          )}
           <div className="filter-row">
             <input
               type="checkbox"

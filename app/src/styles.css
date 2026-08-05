@@ -737,3 +737,26 @@ tr.on-fill td {
   color: #777;
   font-variant-numeric: tabular-nums;
 }
+
+/* A detection admitted only by georef's confidence-for-size trade, not by clearing
+   the strict floors. Marked rather than blended in: these are the reads whose
+   acceptance rests on confidence, so they are the ones to look at when a fit is
+   built from small labels. */
+tr.relaxed {
+  background: rgba(255, 200, 0, 0.12);
+}
+
+.relaxed-badge {
+  margin-left: 4px;
+  padding: 0 4px;
+  border-radius: 3px;
+  background: #f0ad4e;
+  color: #222;
+  font-size: 0.75em;
+}
+
+.filter-provenance {
+  font-size: 0.8em;
+  color: #666;
+  gap: 6px;
+}

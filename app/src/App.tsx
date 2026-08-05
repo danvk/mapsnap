@@ -17,6 +17,7 @@ import {
   directionThroughCorners,
   projectThroughCorners,
 } from './geometry';
+import type { GeorefParameters } from './detections';
 import {
   detectionFromAdjacency,
   filterDetections,
@@ -77,6 +78,58 @@ function findPairRecord(
 // Whether a URL/path points at an image we can load (matched by extension).
 function isImageUrl(url: string): boolean {
   return /\.(jpe?g|png|webp|gif|tiff?)(\?.*)?$/i.test(url);
+}
+
+/**
+ * Read the thresholds georef ran with from a page's own `<stem>.georef.json`.
+ *
+ * The streets view is opened on `<stem>.streets.json`, which records the reads
+ * but not the gate that judged them; the sidecar next to it carries both, at
+ * `inputs.parameters`. Fetching it means the sliders start where the run
+ * actually was — min_short_side in particular is auto-calibrated per volume
+ * from the p25 of its confident detections, so any fixed default is wrong for
+ * most volumes. Returns null when there is no sibling sidecar (an un-georef'd
+ * page), leaving the defaults alone.
+ */
+async function fetchGeorefParameters(
+  files: string[],
+): Promise<GeorefParameters | null> {
+  const streets = files.find((f) => f.endsWith('.streets.json'));
+  if (!streets) return null;
+  const sidecar = streets.replace(/\.streets\.json$/, '.georef.json');
+  try {
+    const response = await fetch(resolveDataUrl(sidecar));
+    if (!response.ok) return null;
+    const doc = await response.json();
+    const parameters = doc?.inputs?.parameters;
+    return parameters && typeof parameters === 'object' ? parameters : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * The subset of {@link DetectionFilters} a georef run pins down.
+ *
+ * Only keys the sidecar actually carries are returned, so a partial
+ * `inputs.parameters` leaves the rest of the sliders at their defaults rather
+ * than snapping them to zero.
+ */
+export function filtersFromParameters(
+  parameters: GeorefParameters,
+): Partial<DetectionFilters> {
+  const out: Partial<DetectionFilters> = {};
+  if (parameters.min_confidence !== undefined)
+    out.minConfidence = parameters.min_confidence;
+  if (parameters.min_short_side !== undefined)
+    out.minShortSide = parameters.min_short_side;
+  if (parameters.min_long_side !== undefined)
+    out.minLongSide = parameters.min_long_side;
+  if (parameters.min_aspect_ratio !== undefined)
+    out.minAspectRatio = parameters.min_aspect_ratio;
+  if (parameters.high_confidence_size_fraction !== undefined)
+    out.highConfidenceSizeFraction = parameters.high_confidence_size_fraction;
+  return out;
 }
 
 // Resolve a `?files=` entry to a fetchable URL, leaving absolute URLs/paths as
@@ -200,9 +253,27 @@ export function App() {
     minConfidence: 0.15,
     minShortSide: 20,
     minLongSide: 20,
+    minAspectRatio: 1,
+    relaxation: true,
+    highConfidenceSizeFraction: 0.7,
     showIgnored: false,
     text: '',
   });
+  // The thresholds georef actually ran with for this page, once its sibling
+  // sidecar has been read. Shown so a slider that has drifted from the run is
+  // visible as such, and restorable.
+  const [georefParameters, setGeorefParameters] =
+    useState<GeorefParameters | null>(null);
+
+  // Whether the sliders still sit where this page's georef run had them, so a
+  // drifted view says so instead of quietly showing a different gate.
+  const atRunThresholds = useMemo(() => {
+    if (!georefParameters) return true;
+    const pinned = filtersFromParameters(georefParameters);
+    return (Object.entries(pinned) as [keyof DetectionFilters, number][]).every(
+      ([key, value]) => Math.abs((filters[key] as number) - value) < 1e-9,
+    );
+  }, [georefParameters, filters]);
 
   const prevObjectUrlRef = useRef<string | null>(null);
 
@@ -558,6 +629,11 @@ export function App() {
       .filter(Boolean);
     setNoteContext(noteContextFromFiles(files));
     void loadFromUrls(files).finally(() => setInitialViewPending(false));
+    void fetchGeorefParameters(files).then((parameters) => {
+      if (!parameters) return;
+      setGeorefParameters(parameters);
+      setFilters((prev) => ({ ...prev, ...filtersFromParameters(parameters) }));
+    });
     // Runs once on mount; loadFromUrls closes over the initial (empty) state.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -635,6 +711,17 @@ export function App() {
         setColorByInlier={setColorByInlier}
         filters={filters}
         setFilters={setFilters}
+        georefParameters={georefParameters}
+        atRunThresholds={atRunThresholds}
+        onRestoreRunThresholds={
+          georefParameters
+            ? () =>
+                setFilters((prev) => ({
+                  ...prev,
+                  ...filtersFromParameters(georefParameters),
+                }))
+            : undefined
+        }
         onFiles={handleFiles}
       />
       <div className="map-column">
