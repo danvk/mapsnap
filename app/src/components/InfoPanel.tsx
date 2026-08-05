@@ -4,6 +4,47 @@ import type { SkippedItem } from '../../server/iiifAnnotations';
 import type { PageCompareStats } from '../iiif/compare';
 import { hasFootprint, type PageGeo } from '../iiif/pages';
 
+/**
+ * One page view, offered both inline and as a standalone tab.
+ *
+ * Clicking the label opens it in place of the map, which keeps the volume, its
+ * page list and the current selection on screen. The adjacent arrow is a real
+ * link, so ctrl/cmd-click and "open in new tab" keep working exactly as before
+ * -- that was the habit this replaces, not one to take away.
+ */
+function DebugViewLink({
+  label,
+  files,
+  onOpen,
+}: {
+  label: string;
+  files: string[];
+  onOpen?: (files: string[], label: string) => void;
+}): ReactElement {
+  const href = `?files=${files.join(',')}`;
+  return (
+    <span className="debug-view-link">
+      {onOpen ? (
+        <button type="button" onClick={() => onOpen(files, label)}>
+          {label}
+        </button>
+      ) : (
+        <a href={href}>{label}</a>
+      )}
+      <a
+        href={href}
+        target="_blank"
+        rel="noreferrer"
+        className="debug-view-newtab"
+        title={`Open ${label} in a new tab`}
+        aria-label={`Open ${label} in a new tab`}
+      >
+        ↗
+      </a>
+    </span>
+  );
+}
+
 /** A run's own artifact directory and the pages it saved sidecars for. */
 export interface RunArtifacts {
   dir: string;
@@ -39,6 +80,11 @@ interface InfoPanelProps {
   keymaps: KeymapInfo[];
   /** Volume directory name, e.g. "brooklyn_ny_1906_vol_6". */
   volume: string;
+  /**
+   * Opens a page view inline, in place of the map. Absent in contexts with
+   * nowhere to put it, in which case the labels stay plain links.
+   */
+  onOpenDebugView?: (files: string[], label: string) => void;
   /**
    * The run's own artifact directory and the page stems it holds sidecars for,
    * from GET /iiif-api/run-artifacts. Links prefer these over the top-level
@@ -141,6 +187,7 @@ export function InfoPanel(props: InfoPanelProps) {
     keymaps,
     volume,
     runArtifacts,
+    onOpenDebugView,
     onClose,
   } = props;
 
@@ -148,10 +195,51 @@ export function InfoPanel(props: InfoPanelProps) {
     // Prefer the run's own sidecar for this page; fall back to the volume root
     // when this run did not save one, and say so rather than linking silently
     // to a file that may have come from a different run.
+    //
+    // Only the sidecar moves. An artifact directory holds a run's json and txt
+    // output, never page images -- those exist once, at the volume root -- so
+    // the image and its sidecar cannot share a base path.
     const fromRun = !!runArtifacts?.stems.includes(selectedPage.stem);
-    const base = fromRun
+    const imageBase = `data/${volume}/${selectedPage.stem}`;
+    const sidecarBase = fromRun
       ? `${runArtifacts!.dir}/${selectedPage.stem}`
-      : `data/${volume}/${selectedPage.stem}`;
+      : imageBase;
+
+    // A not-georeferenced page has no `<stem>.georef.json`; it has whichever
+    // failure sidecar the fit wrote, so link that instead of a missing file.
+    const georefFiles = selectedMissing
+      ? selectedFailedGeorefType
+        ? [
+            `${imageBase}.jpg`,
+            `${sidecarBase}.georef-${selectedFailedGeorefType}.json`,
+          ]
+        : null
+      : [`${imageBase}.jpg`, `${sidecarBase}.georef.json`];
+    const debugViews: { label: string; files: string[] }[] = [
+      {
+        label: 'streets view',
+        files: [`${imageBase}.jpg`, `${sidecarBase}.streets.json`],
+      },
+      ...(georefFiles
+        ? [
+            {
+              label: selectedMissing
+                ? `georef view (${selectedFailedGeorefType})`
+                : 'georef view',
+              files: georefFiles,
+            },
+          ]
+        : []),
+      ...(hasAdjacency
+        ? [
+            {
+              label: 'adjacency view',
+              // Adjacency is volume-wide, not per run.
+              files: [`${imageBase}.jpg`, `data/${volume}/adjacency.json`],
+            },
+          ]
+        : []),
+    ];
     return (
       <div className="page-info-panel">
         <div className="page-info-header">
@@ -232,23 +320,14 @@ export function InfoPanel(props: InfoPanelProps) {
           </p>
         )}
         <div className="page-info-links">
-          <a href={`?files=${base}.jpg,${base}.streets.json`}>streets view</a>
-          {selectedMissing ? (
-            selectedFailedGeorefType && (
-              <a
-                href={`?files=${base}.jpg,${base}.georef-${selectedFailedGeorefType}.json`}
-              >
-                georef view ({selectedFailedGeorefType})
-              </a>
-            )
-          ) : (
-            <a href={`?files=${base}.jpg,${base}.georef.json`}>georef view</a>
-          )}
-          {hasAdjacency && (
-            <a href={`?files=${base}.jpg,data/${volume}/adjacency.json`}>
-              adjacency view
-            </a>
-          )}
+          {debugViews.map(({ label, files }) => (
+            <DebugViewLink
+              key={label}
+              label={label}
+              files={files}
+              onOpen={onOpenDebugView}
+            />
+          ))}
         </div>
       </div>
     );

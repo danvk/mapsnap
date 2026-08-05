@@ -772,3 +772,73 @@ tr.relaxed {
   font-size: 0.8em;
   color: #555;
 }
+
+/* A page view opened inside the volume viewer, in the space the map occupies.
+   It is the same component the standalone debugger renders, so it keeps its own
+   scrolling and just needs to be told how much room it has. */
+.volume-viewer-debug {
+  flex: 1;
+  min-width: 0;
+  overflow: auto;
+  border-left: 1px solid #ddd;
+  border-right: 1px solid #ddd;
+  /* Anchors the embedded view's own nav, which would otherwise inherit
+     .view-nav's `position: fixed` and land over the info panel. */
+  position: relative;
+}
+
+/* Standalone, .view-nav is fixed to the window's top-right corner. Embedded, it
+   belongs to the view's own corner -- fixed positioning would put the close
+   button outside the box it closes. */
+.container-embedded .view-nav {
+  position: absolute;
+  top: 4px;
+  right: 8px;
+}
+
+/* Embedded, the debugger drops the standalone page's outer padding and max
+   width: the volume viewer already positions it. */
+.container-embedded {
+  padding: 0;
+  max-width: none;
+  height: 100%;
+}
+
+.debug-close {
+  border: none;
+  background: none;
+  cursor: pointer;
+  font-size: 1.3em;
+  line-height: 1;
+  padding: 0 6px;
+  color: #666;
+}
+.debug-close:hover {
+  color: #000;
+}
+
+/* Label opens the view inline; the arrow beside it is a plain link, so the
+   ctrl-click-for-a-new-tab habit still works. */
+.debug-view-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  margin-right: 10px;
+}
+.debug-view-link button {
+  border: none;
+  background: none;
+  padding: 0;
+  cursor: pointer;
+  color: #0066cc;
+  font: inherit;
+  text-decoration: underline;
+}
+.debug-view-newtab {
+  font-size: 0.85em;
+  text-decoration: none;
+  opacity: 0.6;
+}
+.debug-view-newtab:hover {
+  opacity: 1;
+}

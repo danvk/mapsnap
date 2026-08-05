@@ -30,6 +30,7 @@ import {
   pagesFromAnnotation,
   unfittedPages,
 } from '../iiif/pages';
+import { DebugView } from '../App';
 import { InfoPanel, type RunArtifacts } from './InfoPanel';
 import { PageList } from './PageList';
 import { VolumeMap } from './VolumeMap';
@@ -117,6 +118,13 @@ export function VolumeViewer() {
   // The annotation's own artifact directory, so page links point at the files
   // that produced it rather than at whatever the last run left at the top level.
   const [runArtifacts, setRunArtifacts] = useState<RunArtifacts | undefined>();
+  // A page view opened in place of the map. Null shows the map. The volume,
+  // page list and selection are deliberately untouched by this, so closing the
+  // view returns to exactly what was on screen before.
+  const [debugView, setDebugView] = useState<{
+    files: string[];
+    label: string;
+  } | null>(null);
   // The selected volume's adjacency.json (per-page claims + mutual graph), or null when absent.
   const [adjacencyData, setAdjacencyData] = useState<AdjacencyData | null>(
     null,
@@ -461,30 +469,41 @@ export function VolumeViewer() {
           selectedItemIndex={selectedItemIndex}
           onSelectPage={handleSelectPage}
         />
-        <VolumeMap
-          annotation={annotation}
-          pages={pages}
-          missingPages={missingPages}
-          truthPages={truthPages ?? []}
-          showMissing={showMissing}
-          selectedItemIndex={selectedItemIndex}
-          onSelectPage={handleSelectPage}
-          opacity={opacity / 100}
-          awaitingView={!!selectedPath && !error}
-          pageColors={pageColors}
-          adjacencyClaims={showAdjacency ? adjacencyClaims : []}
-          selectedStem={selectedPage?.stem ?? null}
-          initialViewport={initialViewport}
-          fitVolumeKey={volumeName ?? null}
-          onViewportChange={(center, zoom) =>
-            updateUrl({
-              center: `${center[0].toFixed(5)},${center[1].toFixed(5)}`,
-              zoom: zoom.toFixed(2),
-            })
-          }
-          onLoadResult={setLoadResult}
-        />
+        {debugView ? (
+          <div className="volume-viewer-debug">
+            <DebugView
+              key={debugView.files.join(',')}
+              files={debugView.files}
+              onClose={() => setDebugView(null)}
+            />
+          </div>
+        ) : (
+          <VolumeMap
+            annotation={annotation}
+            pages={pages}
+            missingPages={missingPages}
+            truthPages={truthPages ?? []}
+            showMissing={showMissing}
+            selectedItemIndex={selectedItemIndex}
+            onSelectPage={handleSelectPage}
+            opacity={opacity / 100}
+            awaitingView={!!selectedPath && !error}
+            pageColors={pageColors}
+            adjacencyClaims={showAdjacency ? adjacencyClaims : []}
+            selectedStem={selectedPage?.stem ?? null}
+            initialViewport={initialViewport}
+            fitVolumeKey={volumeName ?? null}
+            onViewportChange={(center, zoom) =>
+              updateUrl({
+                center: `${center[0].toFixed(5)},${center[1].toFixed(5)}`,
+                zoom: zoom.toFixed(2),
+              })
+            }
+            onLoadResult={setLoadResult}
+          />
+        )}
         <InfoPanel
+          onOpenDebugView={(files, label) => setDebugView({ files, label })}
           runArtifacts={runArtifacts}
           pages={pages}
           missingCount={missingPages.length}
