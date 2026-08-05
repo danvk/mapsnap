@@ -63,7 +63,7 @@ export function DetectionsTable(props: DetectionsTableProps) {
           </tr>
         </thead>
         <tbody>
-          {visible.map(({ det, i }, rowIdx) => {
+          {visible.map(({ det, i, relaxed }, rowIdx) => {
             const onFill = isOnBuildingFill(det);
             const classes = [
               selectedIndices.has(i) ? 'selected' : '',
@@ -71,6 +71,7 @@ export function DetectionsTable(props: DetectionsTableProps) {
               det.hint ? 'hint' : '',
               det.fallback ? 'fallback' : '',
               onFill ? 'on-fill' : '',
+              relaxed ? 'relaxed' : '',
             ]
               .filter(Boolean)
               .join(' ');
@@ -87,6 +88,14 @@ export function DetectionsTable(props: DetectionsTableProps) {
                 <td>{det.confidence.toFixed(3)}</td>
                 <td>
                   {type}
+                  {relaxed && (
+                    <span
+                      className="relaxed-badge"
+                      title="Below the strict size floor; admitted because its confidence bought a lower one."
+                    >
+                      relaxed
+                    </span>
+                  )}
                   {det.fallback && (
                     <span
                       className="fallback-badge"
