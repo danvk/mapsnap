@@ -7,7 +7,7 @@ import subprocess
 import sys
 from pathlib import Path
 
-from mapsnap import archive, experiments
+from mapsnap import experiments
 from mapsnap.utils import default_centerlines, list_pages, run_cmd
 
 
@@ -141,7 +141,7 @@ def main() -> None:
     # into it, so an interrupted run leaves an empty one; treating that as done
     # would skip this run's computation for good and leave the tag permanently
     # empty.
-    if archive.is_complete(archive_dir):
+    if experiments.is_complete(archive_dir):
         print(f"Run {run_id} already archived at {archive_dir}; skipping computation.")
         return
 

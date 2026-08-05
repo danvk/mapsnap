@@ -288,6 +288,20 @@ def archive_streets(dir_path: Path, run_dir: Path, dedup_source: Path | None) ->
         shutil.copy2(streets, dest)
 
 
+def is_complete(run_dir: Path) -> bool:
+    """Whether a run directory holds a finished archive.
+
+    :func:`archive_run` creates the directory before copying into it, so an
+    interrupted archive leaves one behind with nothing (or half) in it. The
+    manifest is written last, which makes its presence -- not the directory's --
+    the honest completion marker.
+
+    Lives here rather than in ``mapsnap.archive`` because ``mapsnap.fit`` needs
+    it too, and ``mapsnap.archive`` imports from ``mapsnap.fit``.
+    """
+    return (run_dir / "manifest.json").exists()
+
+
 def archive_run(
     dir_path: Path,
     run_id: str,

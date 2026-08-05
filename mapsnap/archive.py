@@ -26,6 +26,7 @@ import sys
 from pathlib import Path
 
 from mapsnap import experiments
+from mapsnap.experiments import is_complete
 from mapsnap.fit import find_centerlines, find_ref_iiif
 
 
@@ -46,17 +47,6 @@ def archived_stems(run_dir: Path) -> set[str]:
         for path in run_dir.glob("p*.georef.json")
         if path.name.startswith("p")
     }
-
-
-def is_complete(run_dir: Path) -> bool:
-    """Whether a run directory holds a finished archive.
-
-    The manifest is written last, so its presence -- not the directory's --
-    is what says the copy finished. A directory alone can be the remains of an
-    interrupted archive, and treating that as done would silently skip the work
-    that would have filled it.
-    """
-    return (run_dir / "manifest.json").exists()
 
 
 def main() -> None:
