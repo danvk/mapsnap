@@ -1,6 +1,6 @@
 import { typedApi } from 'crosswalk';
 import { jsonFetch } from '../apiFetch';
-import type { API, KeymapInfo } from '../../server/api';
+import type { API, KeymapInfo, RunArtifactsResponse } from '../../server/api';
 import type { CompareResponse } from '../../server/compareTxt';
 import type {
   RewrittenAnnotationResponse,
@@ -67,6 +67,19 @@ export async function fetchAdjacency(
 }
 
 /** Fetch a volume's key-map sheets (raw/*.keymap.json) and which sidecars each has. */
+/**
+ * Where the run that produced `path` kept its own per-page sidecars.
+ *
+ * Returns `{ dir: null, stems: [] }` when the run saved none, which is the
+ * common case and not an error — the caller then falls back to the volume's
+ * top-level sidecars and says so.
+ */
+export async function fetchRunArtifacts(
+  path: string,
+): Promise<RunArtifactsResponse> {
+  return api.get('/iiif-api/run-artifacts')(null, { path });
+}
+
 export async function fetchKeymaps(volume: string): Promise<KeymapInfo[]> {
   const { keymaps } = await api.get('/iiif-api/keymaps')(null, { volume });
   return keymaps;

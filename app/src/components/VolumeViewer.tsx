@@ -17,6 +17,7 @@ import {
   fetchCompare,
   fetchKeymaps,
   fetchRewrittenAnnotation,
+  fetchRunArtifacts,
   fetchVolumePageFiles,
   fetchVolumes,
 } from '../iiif/api';
@@ -29,7 +30,7 @@ import {
   pagesFromAnnotation,
   unfittedPages,
 } from '../iiif/pages';
-import { InfoPanel } from './InfoPanel';
+import { InfoPanel, type RunArtifacts } from './InfoPanel';
 import { PageList } from './PageList';
 import { VolumeMap } from './VolumeMap';
 
@@ -113,6 +114,9 @@ export function VolumeViewer() {
   const [compareMissing, setCompareMissing] = useState<string[]>([]);
   // The compare table's summary footer ("N/M pages georeferenced", RMSE stats), or "" if none.
   const [compareFooter, setCompareFooter] = useState<string>('');
+  // The annotation's own artifact directory, so page links point at the files
+  // that produced it rather than at whatever the last run left at the top level.
+  const [runArtifacts, setRunArtifacts] = useState<RunArtifacts | undefined>();
   // The selected volume's adjacency.json (per-page claims + mutual graph), or null when absent.
   const [adjacencyData, setAdjacencyData] = useState<AdjacencyData | null>(
     null,
@@ -157,6 +161,7 @@ export function VolumeViewer() {
     // Per-page truth error and summary footer from this annotation's `mapsnap compare` sidecar.
     setCompareRows(null);
     setCompareFooter('');
+    setRunArtifacts(undefined);
     fetchCompare(selectedPath)
       .then(({ pages, missing, footer }) => {
         if (cancelled) return;
@@ -168,6 +173,17 @@ export function VolumeViewer() {
         if (cancelled) return;
         setCompareRows([]);
         setCompareMissing([]);
+      });
+
+    fetchRunArtifacts(selectedPath)
+      .then(({ dir, stems }) => {
+        if (cancelled) return;
+        setRunArtifacts(dir ? { dir, stems } : undefined);
+      })
+      .catch(() => {
+        // An older server without this endpoint degrades to the top-level
+        // links, which is what the viewer did before this existed.
+        if (!cancelled) setRunArtifacts(undefined);
       });
 
     // Truth annotation, rewritten into the same local pixel frame, for the missing-page
@@ -469,6 +485,7 @@ export function VolumeViewer() {
           onLoadResult={setLoadResult}
         />
         <InfoPanel
+          runArtifacts={runArtifacts}
           pages={pages}
           missingCount={missingPages.length}
           skipped={skipped}

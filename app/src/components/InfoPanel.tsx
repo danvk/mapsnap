@@ -4,6 +4,12 @@ import type { SkippedItem } from '../../server/iiifAnnotations';
 import type { PageCompareStats } from '../iiif/compare';
 import { hasFootprint, type PageGeo } from '../iiif/pages';
 
+/** A run's own artifact directory and the pages it saved sidecars for. */
+export interface RunArtifacts {
+  dir: string;
+  stems: string[];
+}
+
 interface InfoPanelProps {
   /** All pages in the loaded annotation, or [] before one is loaded. */
   pages: PageGeo[];
@@ -33,6 +39,13 @@ interface InfoPanelProps {
   keymaps: KeymapInfo[];
   /** Volume directory name, e.g. "brooklyn_ny_1906_vol_6". */
   volume: string;
+  /**
+   * The run's own artifact directory and the page stems it holds sidecars for,
+   * from GET /iiif-api/run-artifacts. Links prefer these over the top-level
+   * sidecars, which belong to whatever ran most recently rather than to the
+   * annotation on screen.
+   */
+  runArtifacts?: RunArtifacts;
   onClose: () => void;
 }
 
@@ -127,11 +140,18 @@ export function InfoPanel(props: InfoPanelProps) {
     compareFooter,
     keymaps,
     volume,
+    runArtifacts,
     onClose,
   } = props;
 
   if (selectedPage) {
-    const base = `data/${volume}/${selectedPage.stem}`;
+    // Prefer the run's own sidecar for this page; fall back to the volume root
+    // when this run did not save one, and say so rather than linking silently
+    // to a file that may have come from a different run.
+    const fromRun = !!runArtifacts?.stems.includes(selectedPage.stem);
+    const base = fromRun
+      ? `${runArtifacts!.dir}/${selectedPage.stem}`
+      : `data/${volume}/${selectedPage.stem}`;
     return (
       <div className="page-info-panel">
         <div className="page-info-header">
@@ -197,6 +217,19 @@ export function InfoPanel(props: InfoPanelProps) {
             <span className="page-info-note-label">📓 Note</span>
             <p>{selectedNote}</p>
           </div>
+        )}
+        {runArtifacts?.dir && !fromRun && (
+          <p className="page-info-fallback">
+            This run saved no sidecar for this page; the links below point at
+            the volume&rsquo;s top-level files, which may come from a different
+            run.
+          </p>
+        )}
+        {!runArtifacts?.dir && (
+          <p className="page-info-fallback">
+            This run has no artifact directory; the links below point at the
+            volume&rsquo;s top-level files, which may come from a different run.
+          </p>
         )}
         <div className="page-info-links">
           <a href={`?files=${base}.jpg,${base}.streets.json`}>streets view</a>

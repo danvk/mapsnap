@@ -27,6 +27,7 @@ import {
   parseMissingTruthKeys,
 } from './compareTxt.ts';
 import { volumePages } from './adjacencyTruth.ts';
+import { runArtifactDir } from './runArtifacts.ts';
 
 const require = createRequire(import.meta.url);
 const iiif = require('express-iiif').default;
@@ -155,6 +156,39 @@ export function registerIiifApi(
     const volumePath = parts.slice(0, -1).join('/');
     const serviceBaseUrl = `${request.protocol}://${request.get('host')}/iiif/${volumePath}`;
     return rewriteAnnotationPage(page, localPages, serviceBaseUrl);
+  });
+
+  // Where a run's own per-page sidecars live, so the viewer can link to the files
+  // that produced the annotation being looked at rather than to whatever the last
+  // run happened to leave at the top level.
+  router.get('/iiif-api/run-artifacts', async (_params, request) => {
+    const rawPath = request.query.path;
+    const relativePath = rawPath.replace(/^data\//, '');
+    const parts = relativePath.split('/');
+    if (
+      !relativePath.endsWith('.iiif.json') ||
+      parts.length < 2 ||
+      !parts.every(isSafeName)
+    ) {
+      throw new HTTPError(400, `invalid path: ${rawPath}`);
+    }
+    const artifactDir = runArtifactDir(relativePath);
+    if (!artifactDir) return { dir: null, stems: [] };
+
+    let files: string[];
+    try {
+      files = await readdir(join(dataDir, artifactDir));
+    } catch {
+      // A run with no saved sidecars is the common case, not an error.
+      return { dir: null, stems: [] };
+    }
+    const stems = files
+      .map((file) => file.match(/^(p[^.]+)\.georef\.json$/)?.[1])
+      .filter((stem): stem is string => stem !== undefined)
+      .sort();
+    return stems.length > 0
+      ? { dir: `data/${artifactDir}`, stems }
+      : { dir: null, stems: [] };
   });
 
   // Per-page truth comparison from the annotation's `mapsnap compare` sidecar table
