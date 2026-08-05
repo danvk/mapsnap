@@ -2,7 +2,7 @@
   "name": "mapsnap-app",
   "version": "1.0.0",
   "scripts": {
-    "dev": "node scripts/dev.mjs",
+    "dev": "concurrently --kill-others --names client,server --prefix-colors cyan,magenta \"npm:client:dev\" \"npm:server\"",
     "client:dev": "vite",
     "build": "vite build",
     "preview": "vite preview",
@@ -26,6 +26,7 @@
     "@types/react": "^19.2.17",
     "@types/react-dom": "^19.2.3",
     "@vitejs/plugin-react": "^5.2.0",
+    "concurrently": "^10.0.4",
     "express": "^4.22.2",
     "express-iiif": "^1.8.0",
     "jsdom": "^29.1.1",
