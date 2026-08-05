@@ -34,15 +34,7 @@ import { DebugView } from '../App';
 import { InfoPanel, type RunArtifacts } from './InfoPanel';
 import { PageList } from './PageList';
 import { VolumeMap } from './VolumeMap';
-
-// Split a repo-root-relative annotation path like
-// "data/brooklyn_ny_1906_vol_6/generated.iiif.json" into volume + file name.
-function parseAnnotationPath(
-  path: string | null,
-): { volume: string; file: string } | null {
-  const match = path?.match(/^data\/([^/]+)\/([^/]+)$/);
-  return match ? { volume: match[1] ?? '', file: match[2] ?? '' } : null;
-}
+import { parseAnnotationPath } from '../iiif/volumePath';
 
 // Map viewport from the URL's `center=lng,lat` and `zoom=Z` params, or null when absent/invalid.
 function parseViewport(

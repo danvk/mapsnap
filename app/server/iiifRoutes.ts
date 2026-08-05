@@ -27,8 +27,9 @@ import {
   parseLandByPage,
   parseMissingTruthKeys,
 } from './compareTxt.ts';
-import { volumePages } from './adjacencyTruth.ts';
+import { findVolumes, volumePages } from './adjacencyTruth.ts';
 import { runArtifactDir } from './runArtifacts.ts';
+import { isSafeSegment, isSafeVolume } from './volumePaths.ts';
 
 const require = createRequire(import.meta.url);
 const iiif = require('express-iiif').default;
@@ -38,16 +39,6 @@ const PAGE_IMAGE_PATTERN = /^p\d+[a-z]?\.jpg$/i;
 // A failed-georef sidecar name -> [full, stem, kind], e.g.
 // "p1452.georef-nofit.json" -> ["…", "p1452", "nofit"].
 const FAILED_GEOREF_PATTERN = /^(.+)\.georef-([a-z0-9]+)\.json$/i;
-
-// Reject a path segment that could escape the data directory.
-function isSafeName(name: string): boolean {
-  return (
-    name !== '' &&
-    !name.includes('/') &&
-    !name.includes('\\') &&
-    !name.includes('..')
-  );
-}
 
 // Read a *.iiif.json if it is a georeference AnnotationPage, else null.
 async function readAnnotationPage(
@@ -90,17 +81,21 @@ export function registerIiifApi(
   router: TypedRouter<API>,
   dataDir: string,
 ): void {
-  // List volume directories that have local page images and annotation files.
+  // Volume directories that have local page images and annotation files.
+  //
+  // findVolumes descends into a multi-volume atlas, so `brooklyn_1904-1908/vol13`
+  // is listed under that name rather than being missed because its parent holds no
+  // page images (#228). It stops at the first page-bearing directory on a branch,
+  // so a volume's own `raw/` is never listed as a volume.
   router.get('/iiif-api/volumes', async () => {
-    const entries = await readdir(dataDir, { withFileTypes: true });
     const volumes: VolumeInfo[] = [];
-    for (const entry of entries.filter((e) => e.isDirectory())) {
-      const files = await readdir(join(dataDir, entry.name));
+    for (const name of await findVolumes(dataDir)) {
+      const files = await readdir(join(dataDir, name));
       const pageCount = files.filter((f) => PAGE_IMAGE_PATTERN.test(f)).length;
       if (pageCount === 0) continue;
       const annotations: AnnotationFileInfo[] = [];
       for (const file of files.filter((f) => f.endsWith('.iiif.json'))) {
-        const path = join(dataDir, entry.name, file);
+        const path = join(dataDir, name, file);
         const page = await readAnnotationPage(path);
         if (!page) continue;
         const { mtimeMs } = await stat(path);
@@ -112,7 +107,7 @@ export function registerIiifApi(
       }
       if (annotations.length === 0) continue;
       annotations.sort((a, b) => b.modifiedMs - a.modifiedMs);
-      volumes.push({ name: entry.name, pageCount, annotations });
+      volumes.push({ name, pageCount, annotations });
     }
     volumes.sort((a, b) => a.name.localeCompare(b.name));
     return { volumes };
@@ -128,7 +123,7 @@ export function registerIiifApi(
     if (
       !relativePath.endsWith('.iiif.json') ||
       parts.length < 2 ||
-      !parts.every(isSafeName)
+      !parts.every(isSafeSegment)
     ) {
       throw new HTTPError(400, `invalid path: ${rawPath}`);
     }
@@ -177,7 +172,7 @@ export function registerIiifApi(
     if (
       !relativePath.endsWith('.iiif.json') ||
       parts.length < 2 ||
-      !parts.every(isSafeName)
+      !parts.every(isSafeSegment)
     ) {
       throw new HTTPError(400, `invalid path: ${rawPath}`);
     }
@@ -209,7 +204,7 @@ export function registerIiifApi(
     if (
       !relativePath.endsWith('.iiif.json') ||
       parts.length < 2 ||
-      !parts.every(isSafeName)
+      !parts.every(isSafeSegment)
     ) {
       throw new HTTPError(400, `invalid path: ${rawPath}`);
     }
@@ -236,7 +231,7 @@ export function registerIiifApi(
   // for the viewer's adjacency overlay. Null when the volume has no adjacency data.
   router.get('/iiif-api/adjacency', async (_params, request) => {
     const { volume } = request.query;
-    if (!isSafeName(volume)) {
+    if (!isSafeVolume(volume)) {
       throw new HTTPError(400, `invalid volume: ${volume}`);
     }
     try {
@@ -257,7 +252,7 @@ export function registerIiifApi(
   // { pages: ["p1", …], failed: { "p1452": "nofit", "p1427": "misscale" } }.
   router.get('/iiif-api/failed-georefs', async (_params, request) => {
     const { volume } = request.query;
-    if (!isSafeName(volume)) {
+    if (!isSafeVolume(volume)) {
       throw new HTTPError(400, `invalid volume: ${volume}`);
     }
     let files: string[];
@@ -284,7 +279,7 @@ export function registerIiifApi(
   // <stem>.georef.json are the region and georef views. ?volume=<dir> → { keymaps: [...] }.
   router.get('/iiif-api/keymaps', async (_params, request) => {
     const { volume } = request.query;
-    if (!isSafeName(volume)) {
+    if (!isSafeVolume(volume)) {
       throw new HTTPError(400, `invalid volume: ${volume}`);
     }
     let files: string[];

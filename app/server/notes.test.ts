@@ -14,9 +14,20 @@ describe('isValidNoteTarget', () => {
     expect(isValidNoteTarget('brooklyn_1904-1908', 'p6N')).toBe(true);
   });
 
+  it('accepts a subvolume of a multi-volume atlas', () => {
+    expect(isValidNoteTarget('brooklyn_1904-1908/vol13', 'p6')).toBe(true);
+    expect(isValidNoteTarget('queens_1950/vol2', 'p1401__2')).toBe(true);
+  });
+
+  it('rejects a path deeper than a volume', () => {
+    // Otherwise a volume's own subdirectories could be addressed as volumes.
+    expect(isValidNoteTarget('brooklyn_1904-1908/vol13/raw', 'p6')).toBe(false);
+  });
+
   it('rejects path escapes and separators', () => {
     expect(isValidNoteTarget('..', 'p1')).toBe(false);
-    expect(isValidNoteTarget('vol/sub', 'p1')).toBe(false);
+    expect(isValidNoteTarget('vol/..', 'p1')).toBe(false);
+    expect(isValidNoteTarget('vol//sub', 'p1')).toBe(false);
     expect(isValidNoteTarget('vol', '../secret')).toBe(false);
     expect(isValidNoteTarget('vol', 'p1/p2')).toBe(false);
     expect(isValidNoteTarget('vol', 'p1.json')).toBe(false); // no dots in page
