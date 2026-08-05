@@ -9,6 +9,9 @@
 - Write unit tests for all public functions.
 - Functions should never take more than four positional arguments. To avoid this factor out dataclasses/interfaces, use keyword-only arguments or an options object, or group x/y parameters into  `(x, y)` tuples (or lat/lng, width/height, etc.).
 - All boolean variables (function parameters, command-line flags) should default to `false`.
+- Use American English:
+  - "Color" not "colour"
+  - "Penalize" not "penalise"
 
 ### Python
 
