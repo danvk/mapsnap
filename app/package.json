@@ -2,7 +2,8 @@
   "name": "mapsnap-app",
   "version": "1.0.0",
   "scripts": {
-    "dev": "vite",
+    "dev": "node scripts/dev.mjs",
+    "client:dev": "vite",
     "build": "vite build",
     "preview": "vite preview",
     "type-check": "tsc --noEmit",
