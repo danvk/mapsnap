@@ -7,7 +7,7 @@ import subprocess
 import sys
 from pathlib import Path
 
-from mapsnap import experiments
+from mapsnap import archive, experiments
 from mapsnap.utils import default_centerlines, list_pages, run_cmd
 
 
@@ -136,7 +136,12 @@ def main() -> None:
     run_id = resolve_run_id(dir_path, args.tag, id_tokens, inputs, git)
 
     archive_dir = dir_path / experiments.ARTIFACTS_DIRNAME / run_id
-    if archive_dir.exists():
+    # The manifest is written last, so it -- not the directory -- is what says a
+    # previous run finished. archive_run creates the directory before copying
+    # into it, so an interrupted run leaves an empty one; treating that as done
+    # would skip this run's computation for good and leave the tag permanently
+    # empty.
+    if archive.is_complete(archive_dir):
         print(f"Run {run_id} already archived at {archive_dir}; skipping computation.")
         return
 

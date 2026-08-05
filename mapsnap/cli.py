@@ -67,6 +67,10 @@ SUBCOMMANDS: dict[str, tuple[str, str]] = {
         "mapsnap.make_iiif_georef",
         "Combine georeferences into a IIIF AnnotationPage",
     ),
+    "archive": (
+        "mapsnap.archive",
+        "Archive an already-produced run's sidecars under artifacts/<tag>/",
+    ),
     "compare": (
         "mapsnap.compare_iiif_georef",
         "Compare human vs computer IIIF georeferencing",
