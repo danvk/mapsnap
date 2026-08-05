@@ -13,6 +13,7 @@ import type { Express } from 'express';
 import { HTTPError, type TypedRouter } from 'crosswalk';
 import type { API } from './api.ts';
 import {
+  imageStemsByLowercase,
   rewriteAnnotationPage,
   serviceUrlToPageKey,
   type AnnotationFileInfo,
@@ -140,10 +141,18 @@ export function registerIiifApi(
       );
     }
     const volumeDir = dirname(annotationPath);
+    const stems = await imageStemsByLowercase(volumeDir);
     const localPages = new Map<string, { width: number; height: number }>();
     for (const item of page.items) {
-      const pageKey = serviceUrlToPageKey(item?.target?.source?.id);
-      if (!pageKey || localPages.has(pageKey)) continue;
+      const derived = serviceUrlToPageKey(item?.target?.source?.id);
+      if (!derived) continue;
+      // Volumes disagree about the case of a lettered suffix -- Chicago's
+      // 0103W is p103w.jpg on disk, Asheville's 0033A is p33A.jpg -- so the
+      // derived key's case is a guess. Resolve it against the directory and
+      // use the real stem, or every link the viewer builds from it 404s on a
+      // case-sensitive filesystem (and reads the wrong name on a forgiving one).
+      const pageKey = stems.get(derived.toLowerCase()) ?? derived;
+      if (localPages.has(pageKey)) continue;
       try {
         const dims = await cachedJpegDimensions(
           join(volumeDir, `${pageKey}.jpg`),
@@ -155,7 +164,7 @@ export function registerIiifApi(
     }
     const volumePath = parts.slice(0, -1).join('/');
     const serviceBaseUrl = `${request.protocol}://${request.get('host')}/iiif/${volumePath}`;
-    return rewriteAnnotationPage(page, localPages, serviceBaseUrl);
+    return rewriteAnnotationPage(page, localPages, serviceBaseUrl, stems);
   });
 
   // Where a run's own per-page sidecars live, so the viewer can link to the files

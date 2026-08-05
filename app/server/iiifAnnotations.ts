@@ -168,6 +168,18 @@ export function rewriteAnnotationPage(
   page: GeorefAnnotationPage,
   localPages: Map<string, LocalPageImage>,
   serviceBaseUrl: string,
+  /**
+   * Real page stems by lowercased form, from {@link imageStemsByLowercase}.
+   *
+   * The case of a lettered suffix cannot be derived from the annotation --
+   * Chicago's `...-0103W` is `p103w.jpg` on disk, Asheville's `...-0033A` is
+   * `p33A.jpg` -- so the derived key is resolved against the volume's actual
+   * filenames. Resolving here rather than in the caller keeps the keys this
+   * function emits and the keys it looks up in `localPages` the same; splitting
+   * that across two places silently turns every lettered page into
+   * "missing-image".
+   */
+  stemsByLowercase?: Map<string, string>,
 ): RewriteResult {
   const result: GeorefAnnotationPage = structuredClone(page);
   const kept: GeorefAnnotationItem[] = [];
@@ -176,7 +188,10 @@ export function rewriteAnnotationPage(
     const label = String(item.label ?? item.id ?? '');
     const target = item.target;
     const source = target?.source;
-    const pageKey = serviceUrlToPageKey(source?.id);
+    const derived = serviceUrlToPageKey(source?.id);
+    const pageKey = derived
+      ? (stemsByLowercase?.get(derived.toLowerCase()) ?? derived)
+      : derived;
     if (!pageKey || !target || !source?.width || !source.height) {
       skipped.push({ label, pageKey, reason: 'not-a-page' });
       continue;
@@ -219,4 +234,32 @@ export function rewriteAnnotationPage(
   }
   result.items = kept;
   return { annotation: result, skipped };
+}
+
+/**
+ * A volume's page-image stems, indexed by their lowercased form.
+ *
+ * The case of a lettered page suffix is not derivable from the annotation:
+ * Chicago's `...-0103W` is `p103w.jpg` on disk while Asheville's `...-0033A` is
+ * `p33A.jpg`, so the same URL shape maps to different filenames in different
+ * volumes. Rather than guess, callers derive a candidate key and look up the
+ * real stem here.
+ *
+ * Returns an empty map for an unreadable directory, so a caller falls back to
+ * its candidate rather than failing.
+ */
+export async function imageStemsByLowercase(
+  volumeDir: string,
+): Promise<Map<string, string>> {
+  const { readdir } = await import('fs/promises');
+  const stems = new Map<string, string>();
+  try {
+    for (const file of await readdir(volumeDir)) {
+      const match = file.match(/^(p[^/]*)\.jpg$/);
+      if (match?.[1]) stems.set(match[1].toLowerCase(), match[1]);
+    }
+  } catch {
+    /* no such directory; caller uses its candidate */
+  }
+  return stems;
 }
