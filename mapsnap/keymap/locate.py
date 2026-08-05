@@ -65,6 +65,75 @@ def keymap_georef_path(keymap_json: Path) -> Path:
     )
 
 
+MIN_KEYMAP_MEGAPIXELS = 35.0
+"""Below this, a key map's page numbers are not read reliably enough to use.
+
+The corpus splits cleanly in two: Columbia at 24.3 MP and Asheville at 23.8,
+then nothing until Chicago at 43.0 and everything else 43.8-53.7. The threshold
+sits in a 1.8x gap with no sheet anywhere near it, so it is a separation of two
+populations rather than a tuned constant.
+
+What goes wrong below it is specific. Scale normalisation still delivers a digit
+to the recognizer at the right size -- 10.5 px on Columbia against Detroit's
+10.4 -- but from ~20% less ink, and a weak activation fires one CTC timestep
+instead of two. The detection box is then half a glyph wide, "17" reads as "1",
+and because 1 is a real page in a volume numbered 1-53 nothing downstream
+objects. That page is then handed page 1's neighbourhood, so its OCR vocabulary
+excludes the streets it actually contains: worse than no key map at all.
+
+Measured on Columbia, the only sub-threshold volume with truth data: dropping
+the restriction moves the volume from 45.7% to 63.0%, +12 pages placed and none
+lost.
+
+The floor applies only to the OCR/georef vocabulary restriction, which is the
+one consumer that needs each page's number read correctly. osm-snap and
+street-solve also build locators, and keep working on a sheet this bad: they
+use the key map's georeferenced rectangle (on Columbia, 22% of the volume's
+centerlines -- a property of the drawing, not of any number on it), and
+street-solve rejects a per-page prior whose detections disagree by more than
+400 m before using it. Gating them too costs 3.1 points, measured.
+
+Resolution is a correlate here, not the mechanism: a high-resolution sheet can
+read badly as well (Grand Rapids, 53.7 MP, is worth +3.3 to drop). This removes
+the sheets we know mislocate pages; it is not a claim that megapixels predict
+key-map quality.
+"""
+
+
+def keymap_megapixels(georef_path: Path) -> float | None:
+    """A key map's scan size in megapixels, or None if its sidecar omits it.
+
+    Read from the georef sidecar rather than the image, since it records the
+    dimensions and :func:`usable_keymaps` has already required it to exist --
+    no decode, and no second source of truth about the sheet's size.
+    """
+    try:
+        doc = json.loads(georef_path.read_text())
+        return float(doc["width"]) * float(doc["height"]) / 1e6
+    except (OSError, ValueError, KeyError, TypeError):
+        return None
+
+
+def above_megapixel_floor(
+    keymap_json: Path, min_megapixels: float = MIN_KEYMAP_MEGAPIXELS
+) -> bool:
+    """Whether a key map is scanned finely enough to restrict a page's vocabulary.
+
+    A sheet whose sidecar does not record its dimensions passes: an unreadable
+    size is not evidence of a bad scan.
+    """
+    megapixels = keymap_megapixels(keymap_georef_path(keymap_json))
+    if megapixels is None or megapixels >= min_megapixels:
+        return True
+    print(
+        f"Ignoring key map {keymap_json.name} for vocabulary restriction: "
+        f"{megapixels:.1f} MP is under the {min_megapixels:g} MP floor, below "
+        "which page numbers are truncated often enough to mislocate pages.",
+        file=sys.stderr,
+    )
+    return False
+
+
 def usable_keymaps(directory: Path) -> list[Path]:
     """Key-map detections files in one directory that a locator can actually load.
 
@@ -72,6 +141,10 @@ def usable_keymaps(directory: Path) -> list[Path]:
     beside a ``-misscale``/``-nofit`` sidecar rather than the ``<stem>.georef.json``
     :func:`KeymapLocator.from_keymap` reads, so it is skipped here instead of
     raising when the locator gets around to opening it.
+
+    Deliberately not filtered by scan resolution: osm-snap and street-solve build
+    locators through here and get real value from a low-resolution sheet even when
+    its page numbers are unreliable (see :data:`MIN_KEYMAP_MEGAPIXELS`).
     """
     return [
         keymap_json
@@ -165,8 +238,13 @@ def resolve_keymaps(
     if ignore:
         return []
     if explicit:
+        # An explicit --keymap is the caller overriding the defaults, floor included.
         return [Path(path) for path in explicit]
-    return discover_keymaps(image_paths)
+    return [
+        keymap_json
+        for keymap_json in discover_keymaps(image_paths)
+        if above_megapixel_floor(keymap_json)
+    ]
 
 
 def keymap_regions_path(keymap_json: Path) -> Path:
