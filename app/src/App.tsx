@@ -371,8 +371,14 @@ export function App() {
   }, [selectedPair, activePair, streets.length]);
 
   const filteredDetections = useMemo(
-    () => filterDetections(detections, filters),
-    [detections, filters],
+    // Key-map page numbers are not street reads and never face georef's
+    // admission gate, so they are shown unfiltered rather than judged by
+    // thresholds that do not apply to them.
+    () =>
+      keymapSheet
+        ? detections.map((det, i) => ({ det, i }))
+        : filterDetections(detections, filters),
+    [detections, filters, keymapSheet],
   );
 
   // Boxes mode: apply the short/long-side sliders, then hide the toggled-off rotations.
@@ -681,6 +687,7 @@ export function App() {
       </nav>
       <ImageColumn
         mode={mode}
+        keymapSheet={keymapSheet}
         imageSrc={imageSrc}
         roadMapSrc={roadMapSrc}
         showRoadMap={showRoadMap}

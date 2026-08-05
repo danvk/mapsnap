@@ -29,6 +29,8 @@ export type Mode =
 
 interface ImageColumnProps {
   mode: Mode;
+  /** True when the loaded JSON is a key map's page-number sidecar. */
+  keymapSheet?: boolean;
   imageSrc: string;
   /** URL of this page's road-probability map, when one exists; enables the toggle below. */
   roadMapSrc: string | null;
@@ -75,6 +77,7 @@ interface ImageColumnProps {
 export function ImageColumn(props: ImageColumnProps) {
   const {
     mode,
+    keymapSheet = false,
     imageSrc,
     roadMapSrc,
     showRoadMap,
@@ -115,6 +118,12 @@ export function ImageColumn(props: ImageColumnProps) {
   const boxesMode = mode === 'boxes';
   // Adjacency mode renders detections just like streets mode (overlay + click select).
   const detectionsMode = streetsMode || mode === 'adjacency';
+  // A key map's detections are its page numbers, not street reads: the size,
+  // confidence and aspect thresholds all describe georef's street-admission
+  // gate, which never runs on them. The sliders are hidden rather than left to
+  // invite tuning a gate that does not exist -- but the detections themselves
+  // still render and stay selectable, so this gates the panel only.
+  const showFilters = streetsMode && !keymapSheet;
 
   // In streets/panels/boxes mode, select the shapes under the click point. The wrapper
   // (currentTarget) tightly wraps the image, so its rect matches the image's.
@@ -271,7 +280,7 @@ export function ImageColumn(props: ImageColumnProps) {
         </>
       )}
 
-      {streetsMode && (
+      {showFilters && (
         <div id="detection-filters">
           <div className="filter-row">
             <label htmlFor="filter-text">
