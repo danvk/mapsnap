@@ -123,6 +123,25 @@ export interface KeymapInfo {
   hasGeoref: boolean;
 }
 
+/**
+ * Response of GET /iiif-api/run-artifacts — where a run's own sidecars live.
+ *
+ * A tagged run may keep per-page sidecars under `artifacts/<tag>/`, in which
+ * case the viewer should link there: the top-level `<stem>.georef.json` is
+ * whatever the last run wrote and need not be what produced the annotation
+ * being looked at. Not every run saves them, so this reports what is actually
+ * present rather than assuming.
+ *
+ * `dir` is the artifact directory, repo-root-relative, or null when the run has
+ * none. `stems` lists the page stems it holds a sidecar for, so the viewer can
+ * fall back per page instead of all-or-nothing — a run that saved only its
+ * failures still links those correctly.
+ */
+export interface RunArtifactsResponse {
+  dir: string | null;
+  stems: string[];
+}
+
 /** Response of GET /iiif-api/keymaps — a volume's key-map sheets, for the info-panel links. */
 export interface KeymapsResponse {
   keymaps: KeymapInfo[];
@@ -170,6 +189,9 @@ export interface API {
   };
   '/iiif-api/adjacency': {
     get: GetEndpoint<AdjacencyResponse, VolumeQuery>;
+  };
+  '/iiif-api/run-artifacts': {
+    get: GetEndpoint<RunArtifactsResponse, AnnotationQuery>;
   };
   '/iiif-api/keymaps': {
     get: GetEndpoint<KeymapsResponse, VolumeQuery>;

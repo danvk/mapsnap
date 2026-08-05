@@ -760,3 +760,15 @@ tr.relaxed {
   color: #666;
   gap: 6px;
 }
+
+/* Shown when a page's debugger links fall back to the volume's top-level sidecars
+   because the run being viewed did not save its own. Worth stating: those files
+   belong to whatever ran last, which need not be the run on screen. */
+.page-info-fallback {
+  margin: 6px 0;
+  padding: 4px 6px;
+  border-left: 3px solid #f0ad4e;
+  background: rgba(255, 200, 0, 0.1);
+  font-size: 0.8em;
+  color: #555;
+}
