@@ -28,7 +28,7 @@ import {
   parseMissingTruthKeys,
 } from './compareTxt.ts';
 import { findVolumes, volumePages } from './adjacencyTruth.ts';
-import { runArtifactDir } from './runArtifacts.ts';
+import { runArtifactDir, runArtifactStems } from './runArtifacts.ts';
 import { isSafeSegment, isSafeVolume } from './volumePaths.ts';
 
 const require = createRequire(import.meta.url);
@@ -186,10 +186,7 @@ export function registerIiifApi(
       // A run with no saved sidecars is the common case, not an error.
       return { dir: null, stems: [] };
     }
-    const stems = files
-      .map((file) => file.match(/^(p[^.]+)\.georef\.json$/)?.[1])
-      .filter((stem): stem is string => stem !== undefined)
-      .sort();
+    const stems = runArtifactStems(files);
     return stems.length > 0
       ? { dir: `data/${artifactDir}`, stems }
       : { dir: null, stems: [] };

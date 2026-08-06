@@ -96,6 +96,14 @@ export function DetectionsTable(props: DetectionsTableProps) {
                       relaxed
                     </span>
                   )}
+                  {det.underline_removed && (
+                    <span
+                      className="underline-badge"
+                      title="An ordinal underline was painted out of this box before recognition, so this read comes from altered pixels (#250)."
+                    >
+                      underline
+                    </span>
+                  )}
                   {det.fallback && (
                     <span
                       className="fallback-badge"
