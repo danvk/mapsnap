@@ -96,7 +96,7 @@ def test_underlined_cases_lose_ink_low_in_the_box():
         after = _erase_underlines(before, [case["box"]])
         rows = np.where((before != after).any(axis=2).any(axis=1))[0]
         assert len(rows), case["name"]
-        x0, x1, y0, y1 = case["box"]
+        _x0, _x1, y0, y1 = case["box"]
         assert rows.min() >= y0 + (y1 - y0) * 0.4, case["name"]
         assert rows.max() <= y1, case["name"]
 
