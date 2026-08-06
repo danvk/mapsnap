@@ -81,6 +81,39 @@ def resolve_run_id(
     )
 
 
+# Every `p<stem>.georef*.json` at the volume root is produced by one of the
+# stages below -- georef writes the plain fit and its failure variants, the
+# adjacency gate the contradicted ones, snap the -osm ones, street-solve the
+# -streets ones. Nothing else writes them.
+DERIVED_SIDECAR_GLOB = "p*.georef*.json"
+
+
+def clear_derived_sidecars(dir_path: Path) -> int:
+    """Remove the georef sidecars this run is about to regenerate; return the count.
+
+    Without this a run is not idempotent. `mapsnap iiif` publishes whatever
+    sidecars are on disk, and a stage that declines to write one this time
+    leaves the *previous* run's file in place to be published instead. Worse,
+    snap's `ransac-neighbor` rotation prior reads neighbouring pages' published
+    fits, so a single leftover file perturbs its neighbours' searches and
+    cascades outward.
+
+    Measured on Grand Rapids: consecutive runs alternated between two fixed
+    points, 69.8% and 71.8%, differing by two stale sidecars and 33 of 60
+    published pages. Clearing first makes two consecutive runs byte-identical
+    (issue #240). Note this is not a fix for nondeterminism -- the pipeline was
+    always deterministic given its inputs; the stale files simply *were* part of
+    the input.
+    """
+    removed = 0
+    for path in sorted(dir_path.glob(DERIVED_SIDECAR_GLOB)):
+        path.unlink()
+        removed += 1
+    if removed:
+        print(f"Cleared {removed} derived georef sidecar(s) from {dir_path}")
+    return removed
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(
         description="Georeference images, build IIIF annotation page, and compare against reference."
@@ -144,6 +177,8 @@ def main() -> None:
     if experiments.is_complete(archive_dir):
         print(f"Run {run_id} already archived at {archive_dir}; skipping computation.")
         return
+
+    clear_derived_sidecars(dir_path)
 
     run_cmd(
         ["mapsnap", "georef", *images, "--centerlines", str(centerlines), *georef_extra]
