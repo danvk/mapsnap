@@ -282,7 +282,7 @@ def test_non_street_text_all_uppercase():
 
 
 # ---------------------------------------------------------------------------
-# _trim_underlines
+# _erase_underlines (golden-image cases live in erase_underlines_test.py)
 # ---------------------------------------------------------------------------
 
 
@@ -294,8 +294,8 @@ def _make_img(height: int, width: int, dark_rows: list[int]) -> np.ndarray:
     return img
 
 
-def test_erase_underlines_paints_dark_bottom_row_white():
-    # Box spanning rows 0-19; dark row at 17 (within bottom 25%) should become white.
+def test_erase_underlines_removes_a_full_width_rule():
+    # A dark row low in the box with nothing beneath it: a rule.
     img = _make_img(50, 100, dark_rows=[17])
     result = _erase_underlines(img, [[0, 100, 0, 20]])
     assert result[17, :, :].min() == 255  # row 17 is now white
@@ -316,11 +316,25 @@ def test_erase_underlines_does_not_mutate_input():
     assert np.array_equal(img, original)
 
 
-def test_erase_underlines_dark_row_outside_scan_window_unchanged():
-    # Dark row at 2 is outside the bottom 25% of a 0-20 box (scan starts at 15).
+def test_erase_underlines_ignores_a_rule_high_in_the_box():
+    # Row 2 is nowhere near the baseline, so it is text, not a rule.
     img = _make_img(50, 100, dark_rows=[2])
     result = _erase_underlines(img, [[0, 100, 0, 20]])
     assert result[2, :, :].min() == 0  # row 2 still dark
+
+
+def test_erase_underlines_keeps_a_bar_with_glyph_beneath_it():
+    """A digit crossbar looks like a rule until you check what is under it.
+
+    Erasing the crossbar of the "4" in Fargo p60__1's 14TH turned the read into
+    "6TH" and dropped it below the acceptance floor; the ink-beneath check is
+    what prevents that (issue #250). The stem must be narrower than the opening
+    kernel, or it is itself read as part of the rule.
+    """
+    img = _make_img(50, 100, dark_rows=[15])
+    img[16:19, 48:54, :] = 0  # a 6px stem continuing below the bar
+    result = _erase_underlines(img, [[0, 100, 0, 20]])
+    assert result[15, :, :].min() == 0  # the bar survives
 
 
 def test_erase_underlines_preserves_row_above_underline():

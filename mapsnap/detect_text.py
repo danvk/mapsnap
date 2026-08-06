@@ -186,34 +186,70 @@ def backfill_backgrounds(image_path: str) -> int:
 def _erase_underlines(
     img_array: np.ndarray,
     boxes: list,
-    dark_coverage: float = 0.25,
-    scan_fraction: float = 0.25,
+    ink_threshold: int = 175,
+    min_run: int = 12,
+    max_thickness: int = 4,
+    low_fraction: float = 0.6,
 ) -> np.ndarray:
-    """Return a copy of img_array with dashed underlines painted white.
+    """Return a copy of img_array with dashed underline STROKES painted white.
 
-    Sanborn maps often print dashed underlines below street labels. CRAFT captures
-    these in the bounding box, causing near-baseline characters (e.g. 'D') to be
-    misread (e.g. as 'P'). Painting them out preserves the full bounding-box height
-    (avoiding character clipping) while removing the noise from the recognizer.
+    Sanborn maps rule a line under the ordinal suffix of a numbered street
+    ("10<u>TH</u>"). CRAFT includes it in the box, and it both fuses the
+    characters above it and adds a strong horizontal edge the recognizer has to
+    explain.
 
-    Scans the bottom scan_fraction of each ``[x_min, x_max, y_min, y_max]`` box.
-    Rows in that region with >= dark_coverage fraction of dark pixels
-    (grayscale < 128) are overwritten with white (255) within the box column range.
+    This removes the rule itself and nothing else. The previous implementation
+    painted out whole rows of the box, which cannot work: the rule shares rows
+    with the glyphs, so any threshold that reached the top of the rule also
+    erased the bottoms of the digits beside it. On Fargo p60__1 that left a 1px
+    bar fusing T and H *and* clipped the "1" and "0", scoring below what doing
+    nothing scored (issue #250).
+
+    A rule is found as a connected component of ink that is long
+    (>= ``min_run`` px), thin (<= ``max_thickness`` px tall) and low in the box
+    (its bottom past ``low_fraction`` of the height). Only those pixels are
+    whitened, so glyph pixels on the same rows survive. ``ink_threshold`` is
+    deliberately looser than a binarization threshold: the rule's top row is
+    often anti-aliased to mid-grey and is exactly the row the old scan missed.
     """
     img_out = img_array.copy()
-    gray = img_array.mean(axis=2)  # (H, W) grayscale
-    H, W = gray.shape
+    gray = img_array.mean(axis=2)
+    height, width = gray.shape
     for x_min, x_max, y_min, y_max in boxes:
-        x_min, x_max, y_min, y_max = int(x_min), int(x_max), int(y_min), int(y_max)
-        crop_h = y_max - y_min
-        scan_start = y_max - max(1, int(crop_h * scan_fraction))
-        col_start, col_end = max(0, x_min), min(W, x_max)
-        for row in range(scan_start, y_max):
-            if row >= H:
-                break
-            row_pixels = gray[row, col_start:col_end]
-            if len(row_pixels) and (row_pixels < 128).mean() >= dark_coverage:
-                img_out[row, col_start:col_end] = 255
+        x0, x1 = max(0, int(x_min)), min(width, int(x_max))
+        y0, y1 = max(0, int(y_min)), min(height, int(y_max))
+        if x1 - x0 < min_run or y1 - y0 < 3:
+            continue
+        ink = (gray[y0:y1, x0:x1] < ink_threshold).astype(np.uint8)
+        runs = cv2.morphologyEx(
+            ink, cv2.MORPH_OPEN, cv2.getStructuringElement(cv2.MORPH_RECT, (min_run, 1))
+        )
+        count, labels, stats, _ = cv2.connectedComponentsWithStats(runs, 8)
+        rule = np.zeros_like(ink)
+        for index in range(1, count):
+            left, top, run_w, run_h, _area = stats[index]
+            if (
+                run_h > max_thickness
+                or run_w < min_run
+                or top + run_h < (y1 - y0) * low_fraction
+            ):
+                continue
+            # A digit's crossbar is also long, thin, horizontal and low in the
+            # box -- the "4" in Fargo p60__1's 14TH is exactly that, and erasing
+            # it turned the read into "6TH". What separates them is what lies
+            # BELOW: a crossbar has the rest of its glyph under it, a rule has
+            # nothing. Measure only the rule's own columns, since a neighbouring
+            # letter's descender says nothing about this run.
+            below = ink[top + run_h :, left : left + run_w]
+            if below.size and below.sum() > 0.15 * run_w:
+                continue
+            rule[labels == index] = 1
+        if not rule.any():
+            continue
+        # Never whiten a pixel that was not ink to begin with.
+        region = img_out[y0:y1, x0:x1]
+        region[(rule & ink).astype(bool)] = 255
+        img_out[y0:y1, x0:x1] = region
     return img_out
 
 

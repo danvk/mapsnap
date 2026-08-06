@@ -1,0 +1,90 @@
+[
+ {
+  "name": "fargo_8th_underlined",
+  "box": [
+   3,
+   43,
+   3,
+   23
+  ],
+  "changed_px": 50,
+  "source": "data/fargo_nd_1958/p60__1.jpg@270"
+ },
+ {
+  "name": "fargo_10th_underlined",
+  "box": [
+   3,
+   51,
+   3,
+   23
+  ],
+  "changed_px": 64,
+  "source": "data/fargo_nd_1958/p60__1.jpg@270"
+ },
+ {
+  "name": "fargo_13th_underlined",
+  "box": [
+   3,
+   51,
+   3,
+   23
+  ],
+  "changed_px": 56,
+  "source": "data/fargo_nd_1958/p60__1.jpg@0"
+ },
+ {
+  "name": "fargo_14th_four_crossbar",
+  "box": [
+   3,
+   53,
+   3,
+   23
+  ],
+  "changed_px": 0,
+  "source": "data/fargo_nd_1958/p60__1.jpg@0"
+ },
+ {
+  "name": "fargo_12th_no_underline",
+  "box": [
+   3,
+   53,
+   3,
+   27
+  ],
+  "changed_px": 0,
+  "source": "data/fargo_nd_1958/p60__1.jpg@0"
+ },
+ {
+  "name": "queens_p1_0",
+  "box": [
+   3,
+   45,
+   3,
+   17
+  ],
+  "changed_px": 105,
+  "source": "data/queens_1950/vol1/p1.jpg@0"
+ },
+ {
+  "name": "queens_p1_1",
+  "box": [
+   3,
+   49,
+   3,
+   27
+  ],
+  "changed_px": 49,
+  "source": "data/queens_1950/vol1/p1.jpg@90"
+ },
+ {
+  "name": "queens_p10_2",
+  "box": [
+   3,
+   71,
+   3,
+   17
+  ],
+  "changed_px": 46,
+  "source": "data/queens_1950/vol1/p10.jpg@0"
+ }
+]
