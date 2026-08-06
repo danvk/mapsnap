@@ -19,12 +19,21 @@ its key-map neighborhood; that needs three sidecars next to the (raw) key-map im
   * ``<stem>.regions.panels.json`` — the colored block polygon around each page number
     (``mapsnap.keymap.page_regions``), so a page's key-map neighborhood is its own block.
 
-Between the first and the rest, the page-number assignments are repaired against the volume's
+Between the first and the rest, the page-number assignments can be repaired against the volume's
 printed adjacency graph (``mapsnap.keymap.adjacency_assign``, issue #213): a number misread as a
 shorter one and a page whose number never read at all are both settled by which pages cite it in
-their margins. The repaired detections BECOME ``<stem>.keymap.json`` (the original is kept as
-``<stem>.keymap-raw.json``), so the corrections flow into the region segmentation below and into
-every downstream consumer of the key map.
+their margins. With ``--repair-assignments`` the repaired detections BECOME
+``<stem>.keymap.json`` (the original is kept as ``<stem>.keymap-raw.json``), so the corrections
+flow into the region segmentation below and into every downstream consumer of the key map.
+
+**Off by default** (issue #239). The repair's gap-fills invent a key-map location for a page
+whose number was never read, and every consumer treats that guess as if it had been detected:
+``ocr`` restricts the page's vocabulary to streets near it, and ``page_regions`` seeds a block
+around it for ``snap`` to target. Measured end to end, turning the repairs off was worth
+**+7.6 points on Grand Rapids and +6.9 on Nashville**, both landing above their pre-feature
+baselines -- the vocabulary restriction alone discarded 794 correct street labels on Grand
+Rapids. The pass still runs and reports what it would have changed, so its accuracy stays
+visible while it is being improved.
 
 They are built in that order for a reason: ``<stem>.keymap.json`` is what identifies a page as a
 key map, and the georef step reads it to decide whether to refit the corners with a full 6-DOF
@@ -99,7 +108,8 @@ def valid_page_spec(keymap_images: list[Path]) -> str:
     return format_page_spec(key for key in keys if page_key_sort(key)[0] >= 1)
 
 
-def main() -> None:
+def build_parser() -> argparse.ArgumentParser:
+    """The `mapsnap keymap` argument parser, split out so flags are testable."""
     parser = argparse.ArgumentParser(
         description="Prepare full-resolution key map(s): OCR+georef, page numbers, and regions."
     )
@@ -141,6 +151,18 @@ def main() -> None:
         help="Skip the key-map OCR pass for images that already have a .streets.json output.",
     )
     parser.add_argument(
+        "--repair-assignments",
+        action="store_true",
+        help=(
+            "Apply the adjacency-driven page-number repairs (#213) to the "
+            "detected numbers. Off by default: the repairs invent key-map "
+            "locations for pages that were never read, and those guesses then "
+            "drive OCR vocabulary restriction and region seeding, which cost "
+            "more than the repairs gain (see #239). The pass is still planned "
+            "and reported so its quality can be judged."
+        ),
+    )
+    parser.add_argument(
         "--dry-run",
         action="store_true",
         help=(
@@ -148,6 +170,11 @@ def main() -> None:
             "nothing (the detection pass still runs)."
         ),
     )
+    return parser
+
+
+def main() -> None:
+    parser = build_parser()
     args = parser.parse_args()
 
     images = [Path(image) for image in args.images]
@@ -198,18 +225,25 @@ def main() -> None:
     #    (#213): a number misread as a shorter one (Detroit's 22 read as "2"),
     #    and a page whose number never read at all, are both settled by which
     #    pages cite it in their margins. Runs here, before the regions are
-    #    segmented, so the corrected numbers SEED the segmentation -- and it
-    #    reads only <stem>.keymap.json, so a poor segmentation can never
+    #    segmented, so corrected numbers SEED the segmentation -- which is also
+    #    why a wrong one is expensive, and why applying them is opt-in (#239).
+    #    It reads only <stem>.keymap.json, so a poor segmentation can never
     #    corrupt a page number. A volume with no adjacency.json is a no-op.
     volume = keymap_volume_dir(images[0])
-    repairs = repair_volume(volume, dry_run=args.dry_run)
+    # Planned either way, applied only when asked. Reporting the repairs a run
+    # would have made keeps them visible -- and comparable against the detected
+    # numbers -- while they are being improved.
+    applying = args.repair_assignments and not args.dry_run
+    repairs = repair_volume(volume, dry_run=not applying)
     for repair in repairs:
         print(f"  assignment repair: {repair.describe()}", file=sys.stderr)
-    print(
-        f"{len(repairs)} assignment repair(s)"
-        + (" (dry run, nothing written)" if args.dry_run else ""),
-        file=sys.stderr,
-    )
+    if applying:
+        note = ""
+    elif args.dry_run:
+        note = " (dry run, nothing written)"
+    else:
+        note = " NOT applied (pass --repair-assignments to apply; see #239)"
+    print(f"{len(repairs)} assignment repair(s){note}", file=sys.stderr)
     if args.dry_run:
         return
 
