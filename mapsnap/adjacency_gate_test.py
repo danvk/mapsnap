@@ -1,6 +1,8 @@
 import json
 from pathlib import Path
 
+import pytest
+
 from mapsnap.adjacency_gate import (
     arbitrate_suspects,
     contradiction_centers,
@@ -171,3 +173,108 @@ def test_corroborated_pair_blames_the_edge(tmp_path):
     )
     _, verdicts = gate(volume)
     assert verdicts == []
+
+
+def coarse_doc(lon0: float, lat0: float = LAT0, n_gcps: int = 5) -> dict:
+    """A double-scale sheet: the same 1000x800 px covering twice the ground span."""
+    doc = georef_doc(lon0, lat0, n_gcps)
+    doc["corners"] = [
+        [lon0, lat0],
+        [lon0 + 2 * PAGE_LON_SPAN, lat0],
+        [lon0 + 2 * PAGE_LON_SPAN, lat0 - 0.016],
+        [lon0, lat0 - 0.016],
+    ]
+    return doc
+
+
+def write_mixed_scale_volume(tmp_path: Path, p5_lat_shift: float) -> Path:
+    """Three fine pages (the scale median) plus a coarse mutual pair p4~p5."""
+    adjacency = {
+        "pages": {
+            "p1": {"detections": [claim("2", 0.98)]},
+            "p2": {"detections": [claim("1", 0.02), claim("3", 0.98)]},
+            "p3": {"detections": [claim("2", 0.02)]},
+            "p4": {"detections": [claim("5", 0.98)]},
+            "p5": {"detections": [claim("4", 0.02)]},
+        },
+        "adjacency": [["p1", "p2"], ["p2", "p3"], ["p4", "p5"]],
+    }
+    (tmp_path / "adjacency.json").write_text(json.dumps(adjacency))
+    for i, stem in enumerate(["p1", "p2", "p3"]):
+        doc = georef_doc(i * PAGE_LON_SPAN)
+        (tmp_path / f"{stem}.georef.json").write_text(json.dumps(doc))
+    (tmp_path / "p4.georef.json").write_text(json.dumps(coarse_doc(4 * PAGE_LON_SPAN)))
+    (tmp_path / "p5.georef.json").write_text(
+        json.dumps(coarse_doc(6 * PAGE_LON_SPAN, LAT0 + p5_lat_shift))
+    )
+    return tmp_path
+
+
+def test_edge_scale_factor_widens_for_coarse_never_narrows_for_fine():
+    import math as math_module
+
+    from mapsnap.adjacency_gate import edge_scale_factor
+
+    def page(log_scale: float):
+        import numpy as np
+
+        from mapsnap.adjacency_gate import FittedPage
+
+        return FittedPage(
+            stem="p",
+            affine=np.zeros((2, 3)),
+            width=1,
+            height=1,
+            channel_paths=[],
+            gcps=0,
+            theta_deg=0.0,
+            log_scale=log_scale,
+        )
+
+    median = -13.0
+    # A coarse pair at 2x the median widens the bar 2x; the coarser page rules.
+    assert edge_scale_factor(
+        page(median + math_module.log(2)), page(median), median
+    ) == pytest.approx(2.0)
+    # A fine pair never narrows below the calibrated floor.
+    assert (
+        edge_scale_factor(
+            page(median - math_module.log(2)), page(median - math_module.log(2)), median
+        )
+        == 1.0
+    )
+
+
+def test_coarse_pair_at_metric_bar_is_not_contradicted(tmp_path):
+    from mapsnap.adjacency_gate import edge_contradictions
+
+    # ~112 m stamp separation: over the fixed 100 m bar, but the same *pixel*
+    # error a fine sheet would show at ~56 m. The doubled bar clears it.
+    volume = write_mixed_scale_volume(tmp_path, p5_lat_shift=0.0008)
+    adjacency = json.loads((volume / "adjacency.json").read_text())
+    pages = load_fitted_pages(volume, adjacency)
+    contradictions, edge_flags = edge_contradictions(adjacency, pages)
+    assert contradictions == []
+    assert edge_flags["p4"] == [False]
+
+
+def test_coarse_pair_far_over_scaled_bar_is_still_contradicted(tmp_path):
+    from mapsnap.adjacency_gate import edge_contradictions
+
+    # ~270 m separation exceeds even the doubled bar: still a contradiction.
+    volume = write_mixed_scale_volume(tmp_path, p5_lat_shift=0.0024)
+    adjacency = json.loads((volume / "adjacency.json").read_text())
+    pages = load_fitted_pages(volume, adjacency)
+    contradictions, _ = edge_contradictions(adjacency, pages)
+    assert [(c.a, c.b) for c in contradictions] == [("p4", "p5")]
+
+
+def test_fine_pair_over_metric_bar_is_still_contradicted(tmp_path):
+    from mapsnap.adjacency_gate import edge_contradictions
+
+    # The same displacement on median-scale sheets keeps the original bar.
+    volume = write_volume(tmp_path, p3_lat_shift=0.0012, p3_gcps=5)
+    adjacency = json.loads((volume / "adjacency.json").read_text())
+    pages = load_fitted_pages(volume, adjacency)
+    contradictions, _ = edge_contradictions(adjacency, pages)
+    assert [(c.a, c.b) for c in contradictions] == [("p2", "p3")]

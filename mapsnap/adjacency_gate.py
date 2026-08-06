@@ -170,12 +170,28 @@ def stamp_worlds(
     return out
 
 
+def edge_scale_factor(a: FittedPage, b: FittedPage, median_log_scale: float) -> float:
+    """How much to widen the stamp bar for an edge between coarse sheets.
+
+    The stamp separation measures *pixel* registration pushed through each
+    page's fit, so a fixed metric bar demands twice the pixel accuracy of a
+    sheet drawn at twice the ground scale. Widen the bar by the coarser
+    page's scale relative to the volume median (Fargo's two large-format
+    sheets p57/p64 sit at ~2x the median and healthy edges between them
+    measure ~115 m). Never narrowed below 1: the 100 m floor is calibrated
+    on pooled healthy pairs, and fine sheets keep it.
+    """
+    return max(1.0, math.exp(max(a.log_scale, b.log_scale) - median_log_scale))
+
+
 def edge_contradictions(
     adjacency: dict, pages: dict[str, FittedPage], stamp_m: float = GATE_STAMP_M
 ) -> tuple[list[Contradiction], dict[str, list[bool]]]:
     """Flagged edges plus, per page, the compatible/contradicted flags of its edges."""
     contradictions: list[Contradiction] = []
     edge_flags: dict[str, list[bool]] = defaultdict(list)
+    log_scales = sorted(p.log_scale for p in pages.values())
+    median_log_scale = log_scales[len(log_scales) // 2] if log_scales else 0.0
     for a, b in adjacency.get("adjacency", []):
         if a not in pages or b not in pages:
             continue
@@ -184,7 +200,9 @@ def edge_contradictions(
         if not wa or not wb:
             continue
         distance = min(haversine_m(p[1], p[0], q[1], q[0]) for p in wa for q in wb)
-        bad = distance > stamp_m
+        bad = distance > stamp_m * edge_scale_factor(
+            pages[a], pages[b], median_log_scale
+        )
         edge_flags[a].append(bad)
         edge_flags[b].append(bad)
         if bad:
