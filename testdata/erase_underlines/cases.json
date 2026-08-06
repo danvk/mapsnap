@@ -9,7 +9,7 @@
   ],
   "changed_px": 50,
   "source": "data/fargo_nd_1958/p60__1.jpg@270",
-  "note": "underlined 8TH; rule removal takes 0.142 -> 0.733"
+  "note": "underlined 8TH; 0.142 raw -> 0.949 erased"
  },
  {
   "name": "fargo_10th_rule",
@@ -21,7 +21,7 @@
   ],
   "changed_px": 64,
   "source": "data/fargo_nd_1958/p60__1.jpg@270",
-  "note": "underlined 10TH; still limited by digit confusion (#251)"
+  "note": "underlined 10TH; still capped by digit confusion (#251)"
  },
  {
   "name": "fargo_13th_rule",
@@ -57,7 +57,7 @@
   ],
   "changed_px": 0,
   "source": "data/fargo_nd_1958/p60__1.jpg@0",
-  "note": "CONTROL: no rule present"
+  "note": "CONTROL: no rule detected"
  },
  {
   "name": "queens_36th_rule",
@@ -69,10 +69,10 @@
   ],
   "changed_px": 24,
   "source": "data/queens_1950/vol1/p1.jpg@0",
-  "note": "underlined 36TH from Queens vol1"
+  "note": "underlined 36TH; 0.310 raw -> 0.952 erased"
  },
  {
-  "name": "queens_34th_plain",
+  "name": "queens_34th_smallrule",
   "box": [
    3,
    63,
@@ -81,10 +81,10 @@
   ],
   "changed_px": 0,
   "source": "data/queens_1950/vol1/p1.jpg@0",
-  "note": "CONTROL: Queens 34TH, no rule -- must survive untouched"
+  "note": "MISSED: Queens 34TH IS underlined, but the rule is too small/faint to detect. Pins current behaviour (see #250)."
  },
  {
-  "name": "queens_9th_plain",
+  "name": "queens_9th_smallrule",
   "box": [
    3,
    43,
@@ -93,10 +93,10 @@
   ],
   "changed_px": 0,
   "source": "data/queens_1950/vol1/p1.jpg@270",
-  "note": "CONTROL: Queens 9TH, no rule -- must survive untouched"
+  "note": "MISSED: Queens 9TH IS underlined, but the rule is too small/faint to detect. Pins current behaviour (see #250)."
  },
  {
-  "name": "queens_5th_plain",
+  "name": "queens_5th_smallrule",
   "box": [
    3,
    49,
@@ -105,10 +105,10 @@
   ],
   "changed_px": 0,
   "source": "data/queens_1950/vol1/p10.jpg@0",
-  "note": "CONTROL: Queens 5TH, no rule -- must survive untouched"
+  "note": "MISSED: Queens 5TH IS underlined, but the rule is too small/faint to detect. Pins current behaviour (see #250)."
  },
  {
-  "name": "queens_49th_plain",
+  "name": "queens_49th_smallrule",
   "box": [
    3,
    65,
@@ -117,6 +117,30 @@
   ],
   "changed_px": 0,
   "source": "data/queens_1950/vol1/p10.jpg@270",
-  "note": "CONTROL: Queens 49TH, no rule -- must survive untouched"
+  "note": "MISSED: Queens 49TH IS underlined, but the rule is too small/faint to detect. Pins current behaviour (see #250)."
+ },
+ {
+  "name": "queens_blob_dense",
+  "box": [
+   3,
+   61,
+   3,
+   19
+  ],
+  "changed_px": 0,
+  "source": "data/queens_1950/vol1/p1.jpg@0",
+  "note": "CONTROL: >90% ink, not a label; must be skipped outright"
+ },
+ {
+  "name": "queens_blob_hatched",
+  "box": [
+   3,
+   87,
+   3,
+   17
+  ],
+  "changed_px": 0,
+  "source": "data/queens_1950/vol1/p10.jpg@0",
+  "note": "CONTROL: >90% ink, not a label; must be skipped outright"
  }
 ]

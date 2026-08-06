@@ -13,10 +13,15 @@ selecting on "the code did something" only finds cases the code already agrees
 with, and an earlier version of this file froze three such false positives
 (dark map blobs, >90% ink) as expected output.
 
-Only 2 of 41 Queens ordinals carry a rule at all, which is the likely reason the
-original underline work regressed that volume: there is almost nothing to remove,
-so over-eager removal is pure damage. Hence the Queens cases here are mostly
-CONTROLS -- high-confidence reads that must come back byte-identical.
+Three kinds of case, and the distinction matters:
+
+* ``*_rule`` -- a rule the detector finds and removes. Golden output.
+* ``*_smallrule`` -- a Queens ordinal that **is** underlined, with a rule too
+  small or faint for the current detector. These pin *current* behaviour, not
+  desired behaviour: catching them is future work (#250).
+* ``*_plain`` / ``*_blob`` -- true controls that must never fire. The blobs are
+  CRAFT boxes on dense map content at >90% ink; an earlier version of this file
+  mistakenly froze the detector erasing runs inside them as expected output.
 """
 
 import json
@@ -81,8 +86,8 @@ def test_negative_controls_are_untouched():
     assert {c["name"] for c in controls} >= {
         "fargo_14th_crossbar",
         "fargo_12th_plain",
-        "queens_34th_plain",
-        "queens_9th_plain",
+        "queens_blob_dense",
+        "queens_blob_hatched",
     }
     for case in controls:
         before = load(case["name"], "before")
@@ -99,6 +104,21 @@ def test_underlined_cases_lose_ink_low_in_the_box():
         _x0, _x1, y0, y1 = case["box"]
         assert rows.min() >= y0 + (y1 - y0) * 0.4, case["name"]
         assert rows.max() <= y1, case["name"]
+
+
+def test_repaint_uses_paper_colour_not_pure_white():
+    """255 is a pathological fill: the recognizer scores it far worse.
+
+    On Fargo p60__1's 8TH, filling the rule with 255 reads at 0.733 while the
+    label's own paper (254, 254, 251) reads at 0.949 -- as does every other
+    non-255 fill tried. So the rule is repainted in the median colour of the
+    box's non-ink pixels.
+    """
+    image = np.full((20, 60, 3), 250, np.uint8)
+    image[16:18, :, :] = 0
+    result = _erase_underlines(image, [[0, 60, 0, 20]])
+    assert tuple(int(v) for v in result[16, 30]) == (250, 250, 250)
+    assert result[16, 30].max() != 255
 
 
 def test_mostly_ink_box_is_skipped():

@@ -254,9 +254,20 @@ def _erase_underlines(
             rule[labels == index] = 1
         if not rule.any():
             continue
-        # Never whiten a pixel that was not ink to begin with.
         region = img_out[y0:y1, x0:x1]
-        region[(rule & ink).astype(bool)] = 255
+        paper = region[~ink.astype(bool)]
+        # Paint the rule out in the label's own paper colour, not pure white.
+        # 255 is a pathological value for the recognizer: on Fargo p60__1's 8TH,
+        # filling with 255 scores 0.733 while the measured paper (254, 254, 251)
+        # scores 0.949 -- and so does every other non-255 fill tried (250, 240,
+        # and Queens' much warmer 203/194/173). Reproducible across repeats.
+        value = (
+            np.median(paper, axis=0).astype(np.uint8)
+            if len(paper)
+            else np.array([254, 254, 254], np.uint8)
+        )
+        # Never repaint a pixel that was not ink to begin with.
+        region[(rule & ink).astype(bool)] = value
         img_out[y0:y1, x0:x1] = region
     return img_out
 
