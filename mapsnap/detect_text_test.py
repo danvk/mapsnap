@@ -11,6 +11,8 @@ from mapsnap.detect_text import (
     _merge_vocab_passes,
     _nms_bboxes,
     annotate_backgrounds,
+    box_key,
+    choose_underline_read,
     filter_args,
     has_split_panels,
     lab_to_hex,
@@ -343,6 +345,58 @@ def test_erase_underlines_preserves_row_above_underline():
     result = _erase_underlines(img, [[0, 100, 0, 20]])
     assert result[17, :, :].min() == 255  # underline erased
     assert result[14, :, :].max() == 0  # text row above scan window intact
+
+
+# ---------------------------------------------------------------------------
+# choose_underline_read
+# ---------------------------------------------------------------------------
+
+
+def test_choose_underline_read_keeps_erased_when_it_scores_higher():
+    # Fargo p60__1 8TH: unreadable under the rule, clean once it is painted out.
+    text, confidence, used_erased = choose_underline_read(
+        ("8TH", 0.9529), ("8TH", 0.1244)
+    )
+    assert (text, confidence, used_erased) == ("8TH", 0.9529, True)
+
+
+def test_choose_underline_read_keeps_original_when_erasure_hurts():
+    # Fargo p9c BROADWAY: a confident read the eraser wrecked.
+    text, confidence, used_erased = choose_underline_read(
+        ("BROADWAY", 0.2921), ("BROADWAY", 0.9997)
+    )
+    assert (text, confidence, used_erased) == ("BROADWAY", 0.9997, False)
+
+
+def test_choose_underline_read_takes_the_original_text_not_just_its_score():
+    text, confidence, used_erased = choose_underline_read(("133", 0.20), ("13TH", 0.80))
+    assert (text, confidence, used_erased) == ("13TH", 0.80, False)
+
+
+def test_choose_underline_read_without_an_original_keeps_the_erased_read():
+    # No original read means the rule never fired on this box.
+    assert choose_underline_read(("MAIN", 0.5), None) == ("MAIN", 0.5, True)
+
+
+def test_choose_underline_read_prefers_erased_on_a_tie():
+    assert choose_underline_read(("A", 0.5), ("B", 0.5)) == ("A", 0.5, True)
+
+
+# ---------------------------------------------------------------------------
+# box_key
+# ---------------------------------------------------------------------------
+
+
+def test_box_key_is_stable_across_float_and_int_bboxes():
+    assert box_key([[1.0, 2.0], [9.0, 2.0], [9.0, 8.0], [1.0, 8.0]]) == box_key(
+        [[1, 2], [9, 2], [9, 8], [1, 8]]
+    )
+
+
+def test_box_key_distinguishes_different_boxes():
+    assert box_key([[0, 0], [4, 0], [4, 4], [0, 4]]) != box_key(
+        [[0, 0], [5, 0], [5, 4], [0, 4]]
+    )
 
 
 # ---------------------------------------------------------------------------

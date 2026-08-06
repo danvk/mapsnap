@@ -602,6 +602,51 @@ def filter_args(argv: list[str], image: str) -> list[str]:
     return [arg for arg in argv if not arg.endswith(".jpg") or arg == image]
 
 
+def box_key(bbox) -> tuple[tuple[int, int], ...]:
+    """Hashable identity for a recognizer bbox, stable across recognition passes."""
+    return tuple((round(float(x)), round(float(y))) for x, y in bbox)
+
+
+def choose_underline_read(
+    erased: tuple[str, float], original: tuple[str, float] | None
+) -> tuple[str, float, bool]:
+    """Pick between an underline-erased read and the same box read untouched.
+
+    Returns (text, confidence, used_erased). Erasing a rule rescues a squished ordinal
+    whose descender-height digits the recognizer otherwise merges with the bar, but it
+    damages reads that never needed the help just as often — measured over Fargo 1958,
+    476 erased boxes gained confidence and 450 lost it, including BROADWAY at 0.9997 ->
+    0.2921. Neither arm dominates, so keep whichever read scores higher; ``original`` is
+    None for a box the rule never fired on, which keeps the erased read by default.
+    """
+    if original is None:
+        return erased[0], erased[1], True
+    if original[1] > erased[1]:
+        return original[0], original[1], False
+    return erased[0], erased[1], True
+
+
+def _read_boxes(
+    reader: easyocr.Reader,
+    img_array: np.ndarray,
+    boxes: list,
+    recognize_kwargs: dict,
+) -> dict[tuple[tuple[int, int], ...], tuple[str, float]]:
+    """Recognize ``boxes`` on ``img_array``, keyed by :func:`box_key` of the returned bbox.
+
+    Both this and the main pass are handed the same box list, so the recognizer returns
+    the same bboxes and the two reads of a box pair up by key.
+    """
+    if not boxes:
+        return {}
+    return {
+        box_key(bbox): (text, float(confidence))
+        for bbox, text, confidence in reader.recognize(
+            img_array, list(boxes), [], **recognize_kwargs
+        )
+    }
+
+
 def _recognize_pass(
     reader: easyocr.Reader,
     img: Image.Image,
@@ -657,17 +702,23 @@ def _recognize_pass(
                 )
                 >= min_long_side
             ]
-        rotated_clean = _erase_underlines(rotated_array, horizontal_list)
-        # Which boxes had an ordinal rule painted out, so the read can say so.
-        # Matched by box rather than by result order: recognize() returns the
-        # horizontal boxes then the free ones, and a detection that fails the
-        # aspect check below never becomes a detection at all.
-        underlined = [
-            horizontal_list[i]
-            for i in underline_rule_boxes(rotated_array, horizontal_list)
-        ]
+        rule_indices = underline_rule_boxes(rotated_array, horizontal_list)
+        rotated_clean = (
+            _erase_underlines(rotated_array, horizontal_list)
+            if rule_indices
+            else rotated_array
+        )
         results = reader.recognize(
             rotated_clean, horizontal_list, free_list, **recognize_kwargs
+        )
+        # Re-read only the boxes the rule fired on, this time untouched, so
+        # choose_underline_read can keep whichever of the two scores higher. Costs one
+        # extra recognition call on ~13% of boxes and nothing on a page with no rules.
+        original_reads = _read_boxes(
+            reader,
+            rotated_array,
+            [horizontal_list[i] for i in rule_indices],
+            recognize_kwargs,
         )
         for bbox, text, confidence in results:
             # Reject boxes that are taller than wide in rotated-image coordinates.
@@ -685,18 +736,18 @@ def _recognize_pass(
             elif angle == 270:
                 # PIL rotate(270) is CW; inverse: (rx, ry) -> (ry, H-1-rx)
                 polygon = [[y, orig_height - 1 - x] for x, y in polygon]
-            centre_x = sum(xs) / len(xs)
-            centre_y = sum(ys) / len(ys)
+            text, confidence, used_erased = choose_underline_read(
+                (text, float(confidence)), original_reads.get(box_key(bbox))
+            )
             detection = {
                 "polygon": polygon,
                 "text": text,
-                "confidence": round(float(confidence), 4),
+                "confidence": round(confidence, 4),
                 "angle": angle,
             }
-            if any(
-                b[0] <= centre_x <= b[1] and b[2] <= centre_y <= b[3]
-                for b in underlined
-            ):
+            # Flag only when the erased read actually won, so the badge marks reads
+            # the rule changed rather than every box it happened to touch.
+            if used_erased and box_key(bbox) in original_reads:
                 detection["underline_removed"] = True
             detections.append(detection)
     return detections
