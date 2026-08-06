@@ -11,12 +11,10 @@
 
 import { readFile, readdir } from 'fs/promises';
 import { join } from 'path';
+import { MAX_VOLUME_DEPTH } from './volumePaths.ts';
 
 /** Extensions a raw page image may use, in the order they are probed. */
 const IMAGE_EXTENSIONS = ['.jpg', '.jpeg', '.png'];
-
-/** How many directory levels below `data/` a volume may sit (`data/queens_1950/vol2`). */
-const MAX_VOLUME_DEPTH = 2;
 
 /** A key-map page: where its files live and which of them exist. */
 export interface KeymapPage {

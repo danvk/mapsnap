@@ -20,13 +20,13 @@
  */
 
 import { readFile, readdir, writeFile } from 'fs/promises';
+import { MAX_VOLUME_DEPTH, isSafeVolume } from './volumePaths.ts';
+
+export { isSafeVolume };
 import { join } from 'path';
 
 /** A page image at the volume root: a whole sheet (p12, p33B, p101w) or a panel (p12__1). */
 const PAGE_IMAGE = /^p\d+[A-Za-z]{0,2}(?:__\d+)?\.jpe?g$/;
-
-/** How many directory levels below `data/` a volume may sit (`data/queens_1950/vol2`). */
-const MAX_VOLUME_DEPTH = 2;
 
 /** One volume that has labelable pages. */
 export interface AdjacencyVolume {
@@ -42,16 +42,6 @@ export interface AdjacencyPageTruth {
   width: number;
   height: number;
   labels: { x: number; y: number; text: string }[];
-}
-
-/** Reject a volume path that could escape the data directory. */
-export function isSafeVolume(volume: string): boolean {
-  const parts = volume.split('/');
-  if (parts.length < 1 || parts.length > MAX_VOLUME_DEPTH) return false;
-  return parts.every(
-    (part) =>
-      part !== '' && part !== '.' && part !== '..' && !part.includes('\\'),
-  );
 }
 
 /** Reject a page stem that is not a whole-sheet stem or a split panel. */

@@ -7,6 +7,7 @@
  */
 
 import { join } from 'path';
+import { isSafeVolume } from './volumePaths.ts';
 
 /** On-disk shape of a note sidecar. */
 export interface NoteFile {
@@ -15,25 +16,16 @@ export interface NoteFile {
   updated: string;
 }
 
-// A path segment safe to join under the data directory: non-empty, no slashes
-// or parent-directory escapes. (Same rule the image/label servers use.)
-function isSafeSegment(name: string): boolean {
-  return (
-    name !== '' &&
-    !name.includes('/') &&
-    !name.includes('\\') &&
-    !name.includes('..')
-  );
-}
-
 /**
  * Whether ``volume`` and ``page`` are safe to use as path segments.
  *
- * ``page`` must additionally be a bare page key (letters, digits, underscores —
- * e.g. "p1401__2"), so the only file it can name is ``<page>.json``.
+ * ``volume`` may name a subvolume of a multi-volume atlas
+ * (``brooklyn_1904-1908/vol13``); ``page`` must be a bare page key (letters,
+ * digits, underscores — e.g. "p1401__2"), so the only file it can name is
+ * ``<page>.json``.
  */
 export function isValidNoteTarget(volume: string, page: string): boolean {
-  return isSafeSegment(volume) && /^[A-Za-z0-9_]+$/.test(page);
+  return isSafeVolume(volume) && /^[A-Za-z0-9_]+$/.test(page);
 }
 
 /** Directory holding a volume's note sidecars, under ``dataDir``. */
