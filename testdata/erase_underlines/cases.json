@@ -1,6 +1,6 @@
 [
  {
-  "name": "fargo_8th_underlined",
+  "name": "fargo_8th_rule",
   "box": [
    3,
    43,
@@ -8,10 +8,11 @@
    23
   ],
   "changed_px": 50,
-  "source": "data/fargo_nd_1958/p60__1.jpg@270"
+  "source": "data/fargo_nd_1958/p60__1.jpg@270",
+  "note": "underlined 8TH; rule removal takes 0.142 -> 0.733"
  },
  {
-  "name": "fargo_10th_underlined",
+  "name": "fargo_10th_rule",
   "box": [
    3,
    51,
@@ -19,10 +20,11 @@
    23
   ],
   "changed_px": 64,
-  "source": "data/fargo_nd_1958/p60__1.jpg@270"
+  "source": "data/fargo_nd_1958/p60__1.jpg@270",
+  "note": "underlined 10TH; still limited by digit confusion (#251)"
  },
  {
-  "name": "fargo_13th_underlined",
+  "name": "fargo_13th_rule",
   "box": [
    3,
    51,
@@ -30,10 +32,11 @@
    23
   ],
   "changed_px": 56,
-  "source": "data/fargo_nd_1958/p60__1.jpg@0"
+  "source": "data/fargo_nd_1958/p60__1.jpg@0",
+  "note": "underlined 13TH; fixes the misread '133' -> '13TH'"
  },
  {
-  "name": "fargo_14th_four_crossbar",
+  "name": "fargo_14th_crossbar",
   "box": [
    3,
    53,
@@ -41,10 +44,11 @@
    23
   ],
   "changed_px": 0,
-  "source": "data/fargo_nd_1958/p60__1.jpg@0"
+  "source": "data/fargo_nd_1958/p60__1.jpg@0",
+  "note": "CONTROL: the 4's crossbar mimics a rule; erasing it read '6TH'"
  },
  {
-  "name": "fargo_12th_no_underline",
+  "name": "fargo_12th_plain",
   "box": [
    3,
    53,
@@ -52,39 +56,67 @@
    27
   ],
   "changed_px": 0,
-  "source": "data/fargo_nd_1958/p60__1.jpg@0"
+  "source": "data/fargo_nd_1958/p60__1.jpg@0",
+  "note": "CONTROL: no rule present"
  },
  {
-  "name": "queens_p1_0",
-  "box": [
-   3,
-   45,
-   3,
-   17
-  ],
-  "changed_px": 105,
-  "source": "data/queens_1950/vol1/p1.jpg@0"
- },
- {
-  "name": "queens_p1_1",
+  "name": "queens_36th_rule",
   "box": [
    3,
    49,
    3,
-   27
+   23
   ],
-  "changed_px": 49,
-  "source": "data/queens_1950/vol1/p1.jpg@90"
+  "changed_px": 24,
+  "source": "data/queens_1950/vol1/p1.jpg@0",
+  "note": "underlined 36TH from Queens vol1"
  },
  {
-  "name": "queens_p10_2",
+  "name": "queens_34th_plain",
   "box": [
    3,
-   71,
+   63,
    3,
-   17
+   29
   ],
-  "changed_px": 46,
-  "source": "data/queens_1950/vol1/p10.jpg@0"
+  "changed_px": 0,
+  "source": "data/queens_1950/vol1/p1.jpg@0",
+  "note": "CONTROL: Queens 34TH, no rule -- must survive untouched"
+ },
+ {
+  "name": "queens_9th_plain",
+  "box": [
+   3,
+   43,
+   3,
+   27
+  ],
+  "changed_px": 0,
+  "source": "data/queens_1950/vol1/p1.jpg@270",
+  "note": "CONTROL: Queens 9TH, no rule -- must survive untouched"
+ },
+ {
+  "name": "queens_5th_plain",
+  "box": [
+   3,
+   49,
+   3,
+   29
+  ],
+  "changed_px": 0,
+  "source": "data/queens_1950/vol1/p10.jpg@0",
+  "note": "CONTROL: Queens 5TH, no rule -- must survive untouched"
+ },
+ {
+  "name": "queens_49th_plain",
+  "box": [
+   3,
+   65,
+   3,
+   34
+  ],
+  "changed_px": 0,
+  "source": "data/queens_1950/vol1/p10.jpg@270",
+  "note": "CONTROL: Queens 49TH, no rule -- must survive untouched"
  }
 ]

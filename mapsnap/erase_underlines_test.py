@@ -7,7 +7,16 @@ rewrite fixes (issue #250) is a rule sharing rows with the glyphs above it, and 
 digit crossbar that looks exactly like a rule until you check what lies beneath.
 
 Cases are drawn from Fargo p60__1 (the page that motivated the rewrite) and from
-Queens vol 1, the volume the original underline work regressed (cf8817f).
+Queens vol 1, the volume the original underline work regressed (cf8817f). Each is
+an ordinal street label chosen by what it *says*, not by whether the rule fires --
+selecting on "the code did something" only finds cases the code already agrees
+with, and an earlier version of this file froze three such false positives
+(dark map blobs, >90% ink) as expected output.
+
+Only 2 of 41 Queens ordinals carry a rule at all, which is the likely reason the
+original underline work regressed that volume: there is almost nothing to remove,
+so over-eager removal is pure damage. Hence the Queens cases here are mostly
+CONTROLS -- high-confidence reads that must come back byte-identical.
 """
 
 import json
@@ -70,8 +79,10 @@ def test_negative_controls_are_untouched():
     """
     controls = [c for c in CASES if c["changed_px"] == 0]
     assert {c["name"] for c in controls} >= {
-        "fargo_14th_four_crossbar",
-        "fargo_12th_no_underline",
+        "fargo_14th_crossbar",
+        "fargo_12th_plain",
+        "queens_34th_plain",
+        "queens_9th_plain",
     }
     for case in controls:
         before = load(case["name"], "before")
@@ -88,6 +99,17 @@ def test_underlined_cases_lose_ink_low_in_the_box():
         x0, x1, y0, y1 = case["box"]
         assert rows.min() >= y0 + (y1 - y0) * 0.4, case["name"]
         assert rows.max() <= y1, case["name"]
+
+
+def test_mostly_ink_box_is_skipped():
+    """A CRAFT box on hatching is not a label, and every bottom row looks like a rule.
+
+    Three fixtures in an earlier version of this file were exactly this: dark map
+    blobs at >90% ink where the rule happily erased an arbitrary horizontal run.
+    """
+    image = np.full((20, 60, 3), 0, np.uint8)
+    image[0:2, :, :] = 255
+    assert np.array_equal(_erase_underlines(image, [[0, 60, 0, 20]]), image)
 
 
 def test_box_smaller_than_min_run_is_skipped():

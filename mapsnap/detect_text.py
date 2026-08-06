@@ -190,6 +190,7 @@ def _erase_underlines(
     min_run: int = 12,
     max_thickness: int = 4,
     low_fraction: float = 0.6,
+    max_ink_fraction: float = 0.6,
 ) -> np.ndarray:
     """Return a copy of img_array with dashed underline STROKES painted white.
 
@@ -208,7 +209,8 @@ def _erase_underlines(
     A rule is found as a connected component of ink that is long
     (>= ``min_run`` px), thin (<= ``max_thickness`` px tall) and low in the box
     (its bottom past ``low_fraction`` of the height). Only those pixels are
-    whitened, so glyph pixels on the same rows survive. ``ink_threshold`` is
+    whitened, so glyph pixels on the same rows survive. Boxes that are more than
+    ``max_ink_fraction`` ink are skipped outright: they are not text. ``ink_threshold`` is
     deliberately looser than a binarization threshold: the rule's top row is
     often anti-aliased to mid-grey and is exactly the row the old scan missed.
     """
@@ -221,6 +223,12 @@ def _erase_underlines(
         if x1 - x0 < min_run or y1 - y0 < 3:
             continue
         ink = (gray[y0:y1, x0:x1] < ink_threshold).astype(np.uint8)
+        # A crop that is mostly ink is not a label -- CRAFT boxes sometimes land
+        # on hatching or a dark blob, where every bottom row holds a long
+        # horizontal run and the rule below would happily erase one. Legible
+        # labels run ~18-30% ink; the blobs that motivated this check run >90%.
+        if ink.mean() > max_ink_fraction:
+            continue
         runs = cv2.morphologyEx(
             ink, cv2.MORPH_OPEN, cv2.getStructuringElement(cv2.MORPH_RECT, (min_run, 1))
         )
