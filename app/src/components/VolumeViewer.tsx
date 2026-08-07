@@ -90,6 +90,9 @@ export function VolumeViewer() {
   const [showAdjacency, setShowAdjacency] = useState(
     () => initialParams.get('adj') === '1',
   );
+  const [isolateSelected, setIsolateSelected] = useState(
+    () => initialParams.get('only') === '1',
+  );
   const [error, setError] = useState<string | null>(null);
   // Selection is tracked by page stem (stable across annotation files, unlike the item index).
   const [selectedStem, setSelectedStem] = useState<string | null>(() =>
@@ -356,8 +359,9 @@ export function VolumeViewer() {
       rmse: colorByRmse ? '1' : null,
       missing: showMissing ? '1' : null,
       adj: showAdjacency ? '1' : null,
+      only: isolateSelected ? '1' : null,
     });
-  }, [selectedStem, colorByRmse, showMissing, showAdjacency]);
+  }, [selectedStem, colorByRmse, showMissing, showAdjacency, isolateSelected]);
 
   function selectVolume(name: string): void {
     const volume = volumes?.find((v) => v.name === name);
@@ -429,6 +433,22 @@ export function VolumeViewer() {
             Show missing pages
           </label>
         )}
+        <label
+          className="rmse-color-control"
+          title={
+            selectedStem
+              ? `Show only ${selectedStem}`
+              : 'Select a page to isolate it'
+          }
+        >
+          <input
+            type="checkbox"
+            checked={isolateSelected}
+            disabled={!selectedStem}
+            onChange={(e) => setIsolateSelected(e.target.checked)}
+          />
+          Isolate selected
+        </label>
         {adjacencyData && (
           <label className="rmse-color-control">
             <input
@@ -473,6 +493,7 @@ export function VolumeViewer() {
             missingPages={missingPages}
             truthPages={truthPages ?? []}
             showMissing={showMissing}
+            isolateSelected={isolateSelected}
             selectedItemIndex={selectedItemIndex}
             onSelectPage={handleSelectPage}
             opacity={opacity / 100}

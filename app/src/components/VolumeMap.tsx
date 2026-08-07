@@ -21,6 +21,11 @@ interface VolumeMapProps {
   truthPages: PageGeo[];
   /** Whether the missing-page footprints are drawn and clickable. */
   showMissing: boolean;
+  /**
+   * Show only the selected page's warped image, hiding every other sheet.
+   * No-op while nothing is selected -- isolating "nothing" would blank the map.
+   */
+  isolateSelected: boolean;
   /** itemIndex of the selected page, or null for no selection. */
   selectedItemIndex: number | null;
   /** Called with the clicked page's itemIndex, or null for empty space. */
@@ -111,6 +116,7 @@ export function VolumeMap(props: VolumeMapProps) {
     missingPages,
     truthPages,
     showMissing,
+    isolateSelected,
     selectedItemIndex,
     onSelectPage,
     opacity,
@@ -477,6 +483,39 @@ export function VolumeMap(props: VolumeMapProps) {
       frontOrderRef.current.push(page.itemIndex);
     }
   }, [selectedItemIndex, pages, missingPages, truthPages, mapReady]);
+
+  // Isolate: hide every warped image except the selected page's.
+  //
+  // Toggling the `visible` map option rather than re-adding a filtered
+  // annotation, because layer.clear() + addGeoreferenceAnnotation would drop
+  // every map's fetched tiles and re-run the initial fitBounds -- a full
+  // reload and a viewport jump for what should be a display toggle.
+  useEffect(() => {
+    const layer = layerRef.current;
+    if (!layer || !mapReady) return;
+    const mapIds = mapIdsRef.current.filter((id): id is string => !!id);
+    if (mapIds.length === 0) return;
+    const selectedMapId =
+      selectedItemIndex === null
+        ? null
+        : (mapIdsRef.current[selectedItemIndex] ?? null);
+    // Isolating with nothing selected (or with a missing page, which has no
+    // warped image) would leave an empty map, so show everything instead.
+    if (!isolateSelected || !selectedMapId) {
+      layer.setMapsOptions(mapIds, { visible: true }, { animate: false });
+      return;
+    }
+    layer.setMapsOptions(
+      mapIds.filter((id) => id !== selectedMapId),
+      { visible: false },
+      { animate: false },
+    );
+    layer.setMapsOptions(
+      [selectedMapId],
+      { visible: true },
+      { animate: false },
+    );
+  }, [isolateSelected, selectedItemIndex, annotation, mapReady]);
 
   // Bring a newly-selected page into view when it isn't already fully visible. Keyed on the
   // selected stem, not the item index, so switching annotation files within a volume (which

@@ -171,6 +171,35 @@ function fitSummary(pages: PageGeo[]): string {
  * The links use the debugger's `?files=` deep-link convention, so they open
  * the page's streets or georef view in this same app.
  */
+/**
+ * A similarity fit is exactly skew 0 / anisotropy 1, so any real deviation
+ * comes from the annotation's own transform. A flat sheet photographed square
+ * cannot shear, so past these tolerances the georeference is more likely bad
+ * reference data than a real property of the map -- worth flagging in red
+ * while auditing truth. Thresholds are loose enough that ordinary
+ * polynomial-fit wobble stays quiet.
+ */
+const SKEW_WARN_DEGREES = 1.0;
+const ANISOTROPY_WARN = 0.05;
+
+/** The skew and anisotropy rows shared by the truth and generated stat blocks. */
+function DistortionRows({ page }: { page: PageGeo }) {
+  const skewBad = Math.abs(page.skewDegrees) > SKEW_WARN_DEGREES;
+  const anisoBad = Math.abs(page.anisotropy - 1) > ANISOTROPY_WARN;
+  return (
+    <>
+      <dt>Skew</dt>
+      <dd className={skewBad ? 'gcp-stats-warning' : undefined}>
+        {page.skewDegrees.toFixed(2)}°
+      </dd>
+      <dt>Anisotropy</dt>
+      <dd className={anisoBad ? 'gcp-stats-warning' : undefined}>
+        {page.anisotropy.toFixed(3)}
+      </dd>
+    </>
+  );
+}
+
 export function InfoPanel(props: InfoPanelProps) {
   const {
     pages,
@@ -261,6 +290,7 @@ export function InfoPanel(props: InfoPanelProps) {
                   <dd>{selectedPage.scalePixelsPerFoot.toFixed(2)} px/ft</dd>
                   <dt>Truth rotation</dt>
                   <dd>{selectedPage.rotationDegrees.toFixed(1)}°</dd>
+                  <DistortionRows page={selectedPage} />
                   <dt>Size</dt>
                   <dd>
                     {selectedPage.width} × {selectedPage.height} px
@@ -289,6 +319,7 @@ export function InfoPanel(props: InfoPanelProps) {
               <dd>{selectedPage.scalePixelsPerFoot.toFixed(2)} px/ft</dd>
               <dt>Rotation</dt>
               <dd>{selectedPage.rotationDegrees.toFixed(1)}°</dd>
+              <DistortionRows page={selectedPage} />
               <dt>Size</dt>
               <dd>
                 {selectedPage.width} × {selectedPage.height} px

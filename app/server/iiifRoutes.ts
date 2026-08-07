@@ -29,6 +29,7 @@ import {
 } from './compareTxt.ts';
 import { findVolumes, volumePages } from './adjacencyTruth.ts';
 import { runArtifactDir, runArtifactStems } from './runArtifacts.ts';
+import { withTiles } from './iiifAnnotations.ts';
 import { isSafeSegment, isSafeVolume } from './volumePaths.ts';
 
 const require = createRequire(import.meta.url);
@@ -71,8 +72,24 @@ async function cachedJpegDimensions(
   return dims;
 }
 
-/** Mount the raw IIIF image service (express-iiif) under `/iiif`. */
+/**
+ * Mount the raw IIIF image service (express-iiif) under `/iiif`.
+ *
+ * info.json responses are passed through {@link withTiles} first; see there
+ * for why an advertised tileset is load-bearing for the map viewer.
+ */
 export function registerIiifImages(app: Express, dataDir: string): void {
+  app.use('/iiif', (request, response, next) => {
+    if (!request.path.endsWith('/info.json')) return next();
+    const json = response.json.bind(response);
+    response.json = (body: unknown) =>
+      json(
+        body && typeof body === 'object'
+          ? withTiles(body as Record<string, unknown>)
+          : body,
+      );
+    next();
+  });
   app.use('/iiif', iiif({ imageDir: dataDir }));
 }
 
@@ -139,20 +156,32 @@ export function registerIiifApi(
     const stems = await imageStemsByLowercase(volumeDir);
     const localPages = new Map<string, { width: number; height: number }>();
     for (const item of page.items) {
-      const derived = serviceUrlToPageKey(item?.target?.source?.id);
-      if (!derived) continue;
+      // Same (url, label) pair rewriteAnnotationPage will use: the label
+      // carries the split-panel variant and, for volumes that link no image
+      // service, the page number itself. Deriving the key differently here
+      // keys localPages under names the rewrite never looks up, and every
+      // page reports "missing-image".
+      const derived = serviceUrlToPageKey(
+        item?.target?.source?.id,
+        String(item?.label ?? item?.id ?? ''),
+        String(item?.id ?? ''),
+      );
+      // A split panel is georeferenced against its parent sheet, so the image
+      // to measure and serve is the parent (see rewriteAnnotationPage).
+      const parent = derived?.replace(/__\d+$/, '');
+      if (!parent) continue;
       // Volumes disagree about the case of a lettered suffix -- Chicago's
       // 0103W is p103w.jpg on disk, Asheville's 0033A is p33A.jpg -- so the
       // derived key's case is a guess. Resolve it against the directory and
       // use the real stem, or every link the viewer builds from it 404s on a
       // case-sensitive filesystem (and reads the wrong name on a forgiving one).
-      const pageKey = stems.get(derived.toLowerCase()) ?? derived;
-      if (localPages.has(pageKey)) continue;
+      const imageKey = stems.get(parent.toLowerCase()) ?? parent;
+      if (localPages.has(imageKey)) continue;
       try {
         const dims = await cachedJpegDimensions(
-          join(volumeDir, `${pageKey}.jpg`),
+          join(volumeDir, `${imageKey}.jpg`),
         );
-        localPages.set(pageKey, dims);
+        localPages.set(imageKey, dims);
       } catch {
         // No local image for this page; rewriteAnnotationPage reports it.
       }

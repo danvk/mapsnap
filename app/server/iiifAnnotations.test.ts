@@ -3,6 +3,9 @@ import {
   imageStemsByLowercase,
   rescaleSvgSelector,
   rewriteAnnotationPage,
+  labelToPageKey,
+  splitIndexFor,
+  withTiles,
   serviceUrlToPageKey,
   type GeorefAnnotationPage,
 } from './iiifAnnotations';
@@ -42,6 +45,115 @@ describe('serviceUrlToPageKey', () => {
     expect(serviceUrlToPageKey(null)).toBeNull();
     expect(serviceUrlToPageKey(undefined)).toBeNull();
     expect(serviceUrlToPageKey('')).toBeNull();
+  });
+
+  it('takes the generated split-panel variant from the id, not the label', () => {
+    const label = 'Fargo, N.D. | 1958 p45 [2]';
+    const base = 'https://tile.loc.gov/…:06536_1958-0045';
+    expect(
+      serviceUrlToPageKey(`${base}/info.json`, label, `${base}__1/georef`),
+    ).toBe('p45__1');
+    expect(
+      serviceUrlToPageKey(`${base}/info.json`, label, `${base}__3/georef`),
+    ).toBe('p45__3');
+    // A generated whole page keeps no variant despite the stray label.
+    expect(
+      serviceUrlToPageKey(`${base}/info.json`, label, `${base}/georef`),
+    ).toBe('p45');
+  });
+
+  it('takes the split-panel variant from the label, which no URL records', () => {
+    // Without this every panel of a sheet collapses onto the parent key and
+    // all but one annotation is lost (228 panels across the truth volumes).
+    expect(
+      serviceUrlToPageKey(
+        'service:gmd:x:03376_01_1951-0428',
+        'New Orleans, La. | 1951 | Vol. 5 p428 [2]',
+      ),
+    ).toBe('p428__2');
+    expect(
+      serviceUrlToPageKey(
+        'service:gmd:x:sb001250',
+        'New Orleans, La. | 1896 | Vol. 2 p125 [3]',
+      ),
+    ).toBe('p125__3');
+    // A label with no bracket leaves the key unsuffixed.
+    expect(
+      serviceUrlToPageKey(
+        'service:gmd:x:03376_01_1951-0428',
+        'New Orleans, La. | 1951 | Vol. 5 p428',
+      ),
+    ).toBe('p428');
+  });
+
+  it('falls back to the label when the volume links no image service', () => {
+    // Grand Rapids 1953 vol 7: 73 of 83 truth annotations carry source.id null.
+    expect(
+      serviceUrlToPageKey(null, 'Grand Rapids, Mich. | 1953 | Vol. 7 p844 [3]'),
+    ).toBe('p844__3');
+    expect(
+      serviceUrlToPageKey(null, 'Grand Rapids, Mich. | 1953 | Vol. 7 p712'),
+    ).toBe('p712');
+    // Letter-only key-map sheets still resolve.
+    expect(
+      serviceUrlToPageKey(null, 'Los Angeles, Calif. | 1949 | Vol. 14 pa [2]'),
+    ).toBe('pa__2');
+    // No URL and no page identifier in the label is still null.
+    expect(
+      serviceUrlToPageKey(null, 'Grand Rapids, Mich. | 1953 | Vol. 7'),
+    ).toBeNull();
+  });
+});
+
+describe('splitIndexFor', () => {
+  it('prefers the id, because generated labels are copied from truth', () => {
+    // All three of fargo p45's generated panels are labelled "p45 [2]"; only
+    // the id distinguishes them. Trusting the label pointed every panel at
+    // p45__2.jpg and rendered the wrong sheet in the volume viewer.
+    const label = 'Fargo, N.D. | 1958 p45 [2]';
+    const base = 'https://tile.loc.gov/…:06536_1958-0045';
+    expect(splitIndexFor(`${base}__1/georef`, label)).toBe(1);
+    expect(splitIndexFor(`${base}__2/georef`, label)).toBe(2);
+    expect(splitIndexFor(`${base}__3/georef`, label)).toBe(3);
+  });
+
+  it('ignores a stray label variant on a generated whole page', () => {
+    expect(
+      splitIndexFor(
+        'https://tile.loc.gov/…:06536_1958-0045/georef',
+        'Fargo, N.D. | 1958 p45 [2]',
+      ),
+    ).toBeNull();
+  });
+
+  it('falls back to the label for a truth item, whose id has no variant', () => {
+    expect(
+      splitIndexFor(
+        'https://oldinsurancemaps.net/iiif/resource/54284/',
+        'Grand Rapids, Mich. | 1953 | Vol. 7 p844 [3]',
+      ),
+    ).toBe(3);
+    expect(splitIndexFor(undefined, 'Fargo, N.D. | 1958 p45')).toBeNull();
+  });
+});
+
+describe('labelToPageKey', () => {
+  it('reads the page id from the last pipe-separated segment', () => {
+    expect(labelToPageKey('New Orleans, La. | 1896 | Vol. 2 p156')).toBe(
+      'p156',
+    );
+    expect(labelToPageKey('New Orleans, La. | 1951 | Vol. 5 p428 [2]')).toBe(
+      'p428__2',
+    );
+    expect(labelToPageKey('Chicago | 1950 | Vol. 1 p103W')).toBe('p103w');
+    expect(labelToPageKey('Los Angeles, Calif. | 1949 | Vol. 14 pa [2]')).toBe(
+      'pa__2',
+    );
+  });
+
+  it('returns null when the label carries no page identifier', () => {
+    expect(labelToPageKey('Grand Rapids, Mich. | 1953 | Vol. 7')).toBeNull();
+    expect(labelToPageKey('')).toBeNull();
   });
 });
 
@@ -193,6 +305,85 @@ describe('rewriteAnnotationPage', () => {
   });
 });
 
+describe('rewriteAnnotationPage split panels', () => {
+  // A split panel is georeferenced against its PARENT sheet: the source is the
+  // parent's full-resolution size and the coords/selector are parent pixels.
+  // Serving the panel image rescaled them by the panel's aspect and rendered
+  // the sheet at ~2x scale, misaligned (fargo p45__1).
+  const parentSource = {
+    id: 'https://tile.loc.gov/…:06536_1958-0045/info.json',
+    type: 'ImageService2',
+    width: 6660,
+    height: 8070,
+  };
+  function panel(index: number) {
+    return {
+      id: `https://tile.loc.gov/…:06536_1958-0045__${index}/georef`,
+      label: 'Fargo, N.D. | 1958 p45 [2]',
+      target: { source: { ...parentSource } },
+      body: {
+        features: [
+          {
+            type: 'Feature',
+            properties: { resourceCoords: [3330, 4035], type: 'gcp' },
+            geometry: { type: 'Point', coordinates: [-96.8, 46.88] },
+          },
+        ],
+      },
+    };
+  }
+
+  it('serves the parent image while keeping the panel identity', () => {
+    const { annotation, skipped } = rewriteAnnotationPage(
+      { items: [panel(1), panel(3)] } as never,
+      new Map([['p45', { width: 1665, height: 2018 }]]),
+      'http://localhost:8182/iiif/fargo_nd_1958',
+      new Map([['p45', 'p45']]),
+    );
+    expect(skipped).toEqual([]);
+    const keys = annotation.items.map(
+      (item) =>
+        item.metadata?.find((entry) => entry.label === 'page')?.value ?? '',
+    );
+    expect(keys).toEqual(['p45__1', 'p45__3']);
+    for (const item of annotation.items) {
+      // Parent image, and coords scaled by the parent ratio (0.25) on BOTH
+      // axes -- the panel image would have given 1665/6660 vs 989/8070.
+      expect(item.target?.source?.id).toBe(
+        'http://localhost:8182/iiif/fargo_nd_1958/p45.jpg',
+      );
+      expect(item.target?.source?.width).toBe(1665);
+      expect(item.body?.features?.[0]?.properties.resourceCoords).toEqual([
+        832.5, 1009,
+      ]);
+    }
+  });
+
+  it('keeps a panel whose own image was never split out locally', () => {
+    // grand_rapids p729__2 has truth but no p729__2.jpg; the parent exists, and
+    // the parent is what the annotation is drawn against anyway.
+    const { annotation, skipped } = rewriteAnnotationPage(
+      {
+        items: [
+          {
+            id: 'https://oldinsurancemaps.net/iiif/resource/54284/',
+            label: 'Grand Rapids, Mich. | 1953 | Vol. 7 p729 [2]',
+            target: { source: { ...parentSource, id: null } },
+            body: { features: [] },
+          },
+        ],
+      } as never,
+      new Map([['p729', { width: 1665, height: 2018 }]]),
+      'http://localhost:8182/iiif/grand_rapids_mi_1953_vol7',
+      new Map([['p729', 'p729']]),
+    );
+    expect(skipped).toEqual([]);
+    expect(
+      annotation.items[0]?.metadata?.find((e) => e.label === 'page')?.value,
+    ).toBe('p729__2');
+  });
+});
+
 describe('imageStemsByLowercase', () => {
   it('maps a lowercased stem to the real filename case', async () => {
     const { mkdtemp, writeFile } = await import('fs/promises');
@@ -212,5 +403,42 @@ describe('imageStemsByLowercase', () => {
 
   it('returns an empty map for a missing directory', async () => {
     expect((await imageStemsByLowercase('/nonexistent-volume')).size).toBe(0);
+  });
+});
+
+describe('withTiles', () => {
+  it('always yields at least one scale factor, however small the image', () => {
+    // The bug this exists for: @allmaps/iiif-parser's fallback tileset uses
+    // Array.from({length: maxExponent}), which is EMPTY at maxExponent 0, so
+    // any image under one tile wide renders zero zoom levels and throws.
+    // grand_rapids p844__3 (682x568) and fargo p62__4 (365x488) are real cases.
+    const small = withTiles({ width: 682, height: 568 }) as {
+      tiles: { width: number; scaleFactors: number[] }[];
+    };
+    expect(small.tiles).toEqual([{ width: 512, scaleFactors: [1, 2] }]);
+    const tiny = withTiles({ width: 100, height: 80 }) as {
+      tiles: { width: number; scaleFactors: number[] }[];
+    };
+    expect(tiny.tiles[0]!.scaleFactors).toEqual([1]);
+  });
+
+  it('covers a full-size sheet down to a single tile', () => {
+    const sheet = withTiles({ width: 6660, height: 8070 }) as {
+      tiles: { width: number; scaleFactors: number[] }[];
+    };
+    // 8070 / 512 = 15.8 -> the coarsest factor must reduce it under one tile.
+    const coarsest = sheet.tiles[0]!.scaleFactors.at(-1)!;
+    expect(8070 / coarsest).toBeLessThanOrEqual(512);
+    expect(sheet.tiles[0]!.scaleFactors[0]).toBe(1);
+  });
+
+  it('leaves a body that already advertises tiles alone', () => {
+    const existing = { width: 100, height: 100, tiles: [{ width: 256 }] };
+    expect(withTiles(existing)).toBe(existing);
+  });
+
+  it('passes through a body with no usable dimensions', () => {
+    const noDims = { type: 'ImageService3' };
+    expect(withTiles(noDims)).toBe(noDims);
   });
 });
