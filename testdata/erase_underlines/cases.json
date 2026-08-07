@@ -142,5 +142,57 @@
   "changed_px": 0,
   "source": "data/queens_1950/vol1/p10.jpg@0",
   "note": "CONTROL: >90% ink, not a label; must be skipped outright"
+ },
+ {
+  "name": "nashville_4th_smallrule",
+  "box": [
+   3,
+   47,
+   3,
+   19
+  ],
+  "changed_px": 44,
+  "eraser": "legacy",
+  "source": "data/nashville_tn_1957_vol1a/p60.jpg@270",
+  "note": "squished ordinal; winning CRAFT box is the taller of three over these glyphs. The precise eraser also fires here but erases differently -- the legacy row-paint won the arbitration (0.690 legacy vs 0.010 raw)"
+ },
+ {
+  "name": "nashville_pipe_dashline",
+  "box": [
+   3,
+   41,
+   3,
+   23
+  ],
+  "changed_px": 38,
+  "eraser": "legacy",
+  "source": "data/nashville_tn_1957_vol1a/p10.jpg@270",
+  "note": "a 6\" W. PIPE label on a dashed line, MISREAD as '4TH' at 0.730 by the legacy variant (0.235 raw). Pins current behavior: the vote can raise a wrong read's confidence, and '4TH' enters street matching where the pipe-label forms in NON_STREET_TEXT would not. Same one-arbitrary-row painting as the S NEIL case (#264)."
+ },
+ {
+  "name": "champaign_sneil_dashline",
+  "box": [
+   3,
+   87,
+   3,
+   23
+  ],
+  "changed_px": 84,
+  "eraser": "legacy",
+  "source": "data/champaign_ill_1915/p20__1.jpg@270",
+  "note": "label printed ON a dashed street line, dashes at glyph height. The eraser does NOT remove the dash line: its ink spans rows 7-18 of the box and only row 18 falls in the bottom-quarter scan window, so one row is painted and the line survives (see #264). That single row is still worth 0.476 vs 0.265 raw. The precise detector refuses the box entirely (glyph ink below the run). Pins current behavior, not desired behavior."
+ },
+ {
+  "name": "nashville_2nd_smallrule",
+  "box": [
+   3,
+   37,
+   3,
+   19
+  ],
+  "changed_px": 68,
+  "eraser": "legacy",
+  "source": "data/nashville_tn_1957_vol1a/p3.jpg@270",
+  "note": "small ordinal rule under min_run=12 in a tiny box; only legacy reads it (0.965 legacy vs 0.127 raw)"
  }
 ]

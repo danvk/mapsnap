@@ -12,10 +12,11 @@ from mapsnap.detect_text import (
     _nms_bboxes,
     annotate_backgrounds,
     box_key,
-    choose_underline_read,
+    choose_best_read,
     filter_args,
     has_split_panels,
     lab_to_hex,
+    legacy_erase_rows,
     page_lab,
     page_vocabs,
     region_color,
@@ -348,38 +349,90 @@ def test_erase_underlines_preserves_row_above_underline():
 
 
 # ---------------------------------------------------------------------------
-# choose_underline_read
+# choose_best_read
 # ---------------------------------------------------------------------------
 
 
-def test_choose_underline_read_keeps_erased_when_it_scores_higher():
+def test_choose_best_read_keeps_erased_when_it_scores_higher():
     # Fargo p60__1 8TH: unreadable under the rule, clean once it is painted out.
-    text, confidence, used_erased = choose_underline_read(
-        ("8TH", 0.9529), ("8TH", 0.1244)
+    assert choose_best_read(("8TH", 0.9529), True, ("8TH", 0.1244), None) == (
+        "8TH",
+        0.9529,
+        "erased",
     )
-    assert (text, confidence, used_erased) == ("8TH", 0.9529, True)
 
 
-def test_choose_underline_read_keeps_original_when_erasure_hurts():
-    # Fargo p9c BROADWAY: a confident read the eraser wrecked.
-    text, confidence, used_erased = choose_underline_read(
-        ("BROADWAY", 0.2921), ("BROADWAY", 0.9997)
+def test_choose_best_read_keeps_raw_when_erasure_hurts():
+    # Fargo p9c BROADWAY: a confident read the precise eraser wrecked.
+    assert choose_best_read(("BROADWAY", 0.2921), True, ("BROADWAY", 0.9997), None) == (
+        "BROADWAY",
+        0.9997,
+        "raw",
     )
-    assert (text, confidence, used_erased) == ("BROADWAY", 0.9997, False)
 
 
-def test_choose_underline_read_takes_the_original_text_not_just_its_score():
-    text, confidence, used_erased = choose_underline_read(("133", 0.20), ("13TH", 0.80))
-    assert (text, confidence, used_erased) == ("13TH", 0.80, False)
+def test_choose_best_read_legacy_wins_small_rule_ordinals():
+    # Nashville p3 2ND: the rule is too small for the precise detector, so main
+    # IS the raw read — only the legacy row-paint recovers the label.
+    assert choose_best_read(("2ND", 0.127), False, None, ("2ND", 0.965)) == (
+        "2ND",
+        0.965,
+        "legacy",
+    )
 
 
-def test_choose_underline_read_without_an_original_keeps_the_erased_read():
-    # No original read means the rule never fired on this box.
-    assert choose_underline_read(("MAIN", 0.5), None) == ("MAIN", 0.5, True)
+def test_choose_best_read_takes_the_winning_text_not_just_its_score():
+    assert choose_best_read(("133", 0.20), True, ("13TH", 0.80), ("1E3", 0.30)) == (
+        "13TH",
+        0.80,
+        "raw",
+    )
 
 
-def test_choose_underline_read_prefers_erased_on_a_tie():
-    assert choose_underline_read(("A", 0.5), ("B", 0.5)) == ("A", 0.5, True)
+def test_choose_best_read_without_alternatives_keeps_main():
+    assert choose_best_read(("MAIN", 0.5), False, None, None) == ("MAIN", 0.5, "raw")
+
+
+def test_choose_best_read_prefers_main_on_a_tie():
+    assert choose_best_read(("A", 0.5), True, ("B", 0.5), ("C", 0.5)) == (
+        "A",
+        0.5,
+        "erased",
+    )
+
+
+# ---------------------------------------------------------------------------
+# legacy_erase_rows
+# ---------------------------------------------------------------------------
+
+
+def test_legacy_erase_rows_paints_a_dark_bottom_row_and_reports_the_box():
+    img = _make_img(50, 100, dark_rows=[47])
+    result, fired = legacy_erase_rows(img, [[0, 100, 0, 50]])
+    assert fired == [0]
+    assert result[47, :, :].min() == 255
+
+
+def test_legacy_erase_rows_leaves_a_clean_box_alone():
+    img = _make_img(50, 100, dark_rows=[])
+    result, fired = legacy_erase_rows(img, [[0, 100, 0, 50]])
+    assert fired == []
+    assert (result == img).all()
+
+
+def test_legacy_erase_rows_ignores_dark_rows_above_the_scan_window():
+    # Row 20 is dark but sits above the bottom quarter of the box: not painted.
+    img = _make_img(50, 100, dark_rows=[20])
+    result, fired = legacy_erase_rows(img, [[0, 100, 0, 50]])
+    assert fired == []
+    assert result[20, :, :].max() == 0
+
+
+def test_legacy_erase_rows_does_not_mutate_input():
+    img = _make_img(50, 100, dark_rows=[47])
+    copy = img.copy()
+    legacy_erase_rows(img, [[0, 100, 0, 50]])
+    assert (img == copy).all()
 
 
 # ---------------------------------------------------------------------------
