@@ -3,6 +3,7 @@ import {
   imageStemsByLowercase,
   rescaleSvgSelector,
   rewriteAnnotationPage,
+  labelToPageKey,
   serviceUrlToPageKey,
   type GeorefAnnotationPage,
 } from './iiifAnnotations';
@@ -42,6 +43,68 @@ describe('serviceUrlToPageKey', () => {
     expect(serviceUrlToPageKey(null)).toBeNull();
     expect(serviceUrlToPageKey(undefined)).toBeNull();
     expect(serviceUrlToPageKey('')).toBeNull();
+  });
+
+  it('takes the split-panel variant from the label, which no URL records', () => {
+    // Without this every panel of a sheet collapses onto the parent key and
+    // all but one annotation is lost (228 panels across the truth volumes).
+    expect(
+      serviceUrlToPageKey(
+        'service:gmd:x:03376_01_1951-0428',
+        'New Orleans, La. | 1951 | Vol. 5 p428 [2]',
+      ),
+    ).toBe('p428__2');
+    expect(
+      serviceUrlToPageKey(
+        'service:gmd:x:sb001250',
+        'New Orleans, La. | 1896 | Vol. 2 p125 [3]',
+      ),
+    ).toBe('p125__3');
+    // A label with no bracket leaves the key unsuffixed.
+    expect(
+      serviceUrlToPageKey(
+        'service:gmd:x:03376_01_1951-0428',
+        'New Orleans, La. | 1951 | Vol. 5 p428',
+      ),
+    ).toBe('p428');
+  });
+
+  it('falls back to the label when the volume links no image service', () => {
+    // Grand Rapids 1953 vol 7: 73 of 83 truth annotations carry source.id null.
+    expect(
+      serviceUrlToPageKey(null, 'Grand Rapids, Mich. | 1953 | Vol. 7 p844 [3]'),
+    ).toBe('p844__3');
+    expect(
+      serviceUrlToPageKey(null, 'Grand Rapids, Mich. | 1953 | Vol. 7 p712'),
+    ).toBe('p712');
+    // Letter-only key-map sheets still resolve.
+    expect(
+      serviceUrlToPageKey(null, 'Los Angeles, Calif. | 1949 | Vol. 14 pa [2]'),
+    ).toBe('pa__2');
+    // No URL and no page identifier in the label is still null.
+    expect(
+      serviceUrlToPageKey(null, 'Grand Rapids, Mich. | 1953 | Vol. 7'),
+    ).toBeNull();
+  });
+});
+
+describe('labelToPageKey', () => {
+  it('reads the page id from the last pipe-separated segment', () => {
+    expect(labelToPageKey('New Orleans, La. | 1896 | Vol. 2 p156')).toBe(
+      'p156',
+    );
+    expect(labelToPageKey('New Orleans, La. | 1951 | Vol. 5 p428 [2]')).toBe(
+      'p428__2',
+    );
+    expect(labelToPageKey('Chicago | 1950 | Vol. 1 p103W')).toBe('p103w');
+    expect(labelToPageKey('Los Angeles, Calif. | 1949 | Vol. 14 pa [2]')).toBe(
+      'pa__2',
+    );
+  });
+
+  it('returns null when the label carries no page identifier', () => {
+    expect(labelToPageKey('Grand Rapids, Mich. | 1953 | Vol. 7')).toBeNull();
+    expect(labelToPageKey('')).toBeNull();
   });
 });
 

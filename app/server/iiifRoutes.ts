@@ -139,7 +139,15 @@ export function registerIiifApi(
     const stems = await imageStemsByLowercase(volumeDir);
     const localPages = new Map<string, { width: number; height: number }>();
     for (const item of page.items) {
-      const derived = serviceUrlToPageKey(item?.target?.source?.id);
+      // Same (url, label) pair rewriteAnnotationPage will use: the label
+      // carries the split-panel variant and, for volumes that link no image
+      // service, the page number itself. Deriving the key differently here
+      // keys localPages under names the rewrite never looks up, and every
+      // page reports "missing-image".
+      const derived = serviceUrlToPageKey(
+        item?.target?.source?.id,
+        String(item?.label ?? item?.id ?? ''),
+      );
       if (!derived) continue;
       // Volumes disagree about the case of a lettered suffix -- Chicago's
       // 0103W is p103w.jpg on disk, Asheville's 0033A is p33A.jpg -- so the

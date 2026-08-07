@@ -89,32 +89,64 @@ export interface VolumeListResponse {
 export type RewrittenAnnotationResponse = RewriteResult;
 
 /**
- * Extract the page key from a LOC IIIF service URL, or null for non-page images.
+ * Extract the page key from an OIM annotation label, or null if it has none.
  *
- * Port of _service_url_to_page_key in mapsnap/make_iiif_georef.py. The page key
- * is the trailing segment after the last "-", with leading zeros stripped and
- * any letter suffix lowercased:
- *   "...:01790_01N_1950-0006N/info.json" → "p6n"
- *   "...:05791_02_1939-0027s"            → "p27s"
- * Sanborn sb-format (5 digits then a suffix char, '0' meaning none):
- *   "...:sb001250" → "p125";  "...:sb00154s" → "p154s"
- * Covers and indexes ("...-covr", "...-titl") and missing URLs return null.
+ * Port of label_to_page_key in mapsnap/utils.py: the page identifier in the
+ * last pipe-separated segment, lowercased, with a bracketed split variant
+ * collapsed to a double underscore.
+ *   "New Orleans, La. | 1951 | Vol. 5 p428 [2]"  → "p428__2"
+ *   "Grand Rapids, Mich. | 1953 | Vol. 7 p844"   → "p844"
+ * Un-numbered index sheets carry letter-only ids ("... pa [2]" → "pa__2").
+ */
+export function labelToPageKey(label: string): string | null {
+  const lastPart = (label.split('|').pop() ?? '').trim();
+  const match = lastPart.match(/\b(p\d+[a-z]?|p[a-z]{1,2})(?:\s*\[(\d+)\])?$/i);
+  if (!match) return null;
+  const page = (match[1] ?? '').toLowerCase();
+  return match[2] ? `${page}__${match[2]}` : page;
+}
+
+/**
+ * Extract the page key for an annotation, or null for non-page images.
+ *
+ * Port of source_id_to_page_key in mapsnap/utils.py, and it needs BOTH the
+ * service URL and the annotation label:
+ *
+ * - The URL carries the page number:
+ *     "...:01790_01N_1950-0006N/info.json" → "p6n"
+ *     "...:05791_02_1939-0027s"            → "p27s"
+ *   Sanborn sb-format (5 digits then a suffix char, '0' meaning none):
+ *     "...:sb001250" → "p125";  "...:sb00154s" → "p154s"
+ * - The LABEL carries the split-panel variant, which no URL records. A truth
+ *   annotation for one panel of a split sheet is labelled "... p844 [3]" and
+ *   must resolve to "p844__3"; deriving "p844" instead silently collapses
+ *   every panel of a sheet onto its parent, so several annotations claim one
+ *   key and all but one are lost (228 panels across the 15 truth volumes).
+ * - Some OIM volumes link no image service at all and carry `source.id: null`
+ *   (Grand Rapids 1953 vol 7: 73 of 83 annotations). The label alone then
+ *   resolves the page.
+ *
+ * Covers and indexes ("...-covr", "...-titl") return null when the label has
+ * no page identifier either.
  */
 export function serviceUrlToPageKey(
   url: string | null | undefined,
+  label = '',
 ): string | null {
-  if (!url) return null;
+  const splitMatch = label.trimEnd().match(/\[(\d+)\]$/);
+  const splitSuffix = splitMatch ? `__${splitMatch[1]}` : '';
+  if (!url) return labelToPageKey(label);
   url = url.replace(/\/info\.json$/, '');
   const sbMatch = url.match(/:sb(\d{5})([a-z0-9])$/i);
   if (sbMatch) {
     const pageNum = parseInt(sbMatch[1] ?? '', 10);
     const suffixChar = (sbMatch[2] ?? '').toLowerCase();
     const suffix = suffixChar === '0' ? '' : suffixChar;
-    return `p${pageNum}${suffix}`;
+    return `p${pageNum}${suffix}${splitSuffix}`;
   }
   const match = url.match(/-0*(\d+)([a-z]*)$/i);
   if (!match) return null;
-  return `p${match[1]}${(match[2] ?? '').toLowerCase()}`;
+  return `p${match[1]}${(match[2] ?? '').toLowerCase()}${splitSuffix}`;
 }
 
 // Round to 1 decimal, rendering integral values without a trailing ".0".
@@ -188,7 +220,7 @@ export function rewriteAnnotationPage(
     const label = String(item.label ?? item.id ?? '');
     const target = item.target;
     const source = target?.source;
-    const derived = serviceUrlToPageKey(source?.id);
+    const derived = serviceUrlToPageKey(source?.id, label);
     const pageKey = derived
       ? (stemsByLowercase?.get(derived.toLowerCase()) ?? derived)
       : derived;
