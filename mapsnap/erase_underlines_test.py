@@ -27,10 +27,13 @@ Three kinds of case, and the distinction matters:
   classes motivate it, from the 2026-08-06 baseline: ``*_smallrule`` ordinals
   whose rules sit under the precise detector's min_run (nashville 2ND
   0.965 legacy vs 0.127 raw), and ``*_dashline`` labels printed on a dashed
-  street line -- not underlines at all; the dash row crosses the bottom of the
-  box and the row-paint strips it (champaign S NEIL 0.476 vs 0.265). The
-  precise detector correctly refuses the dash-line class (ink below the run),
-  so only the legacy vote reads these.
+  street line -- not underlines at all. These pin *current* behaviour and are
+  not a solved case: the row-paint does not remove the dash line (champaign
+  S NEIL's dash ink spans rows 7-18 of the box; only row 18 lies in the
+  bottom-quarter scan window, so one arbitrary row is painted), it just
+  happens to help -- 0.476 vs 0.265 raw. The precise detector refuses the
+  class outright (glyph ink below the run). See #264; one of these fixtures
+  is a 6" W. PIPE label the vote confidently misreads as "4TH".
 """
 
 import json
