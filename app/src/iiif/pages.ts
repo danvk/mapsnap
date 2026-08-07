@@ -12,6 +12,7 @@ import type {
   GeorefAnnotationPage,
   GcpFeature,
 } from '../../server/iiifAnnotations';
+import { splitIndexFor } from '../../server/iiifAnnotations';
 import {
   computeCorners,
   pointInPolygon,
@@ -77,24 +78,6 @@ export interface PageGeo {
   gcps: PageGcp[];
   /** The annotation's transformation type, e.g. "polynomial" or "helmert". */
   transformationType: string;
-}
-
-/**
- * Split panel number for an item, or null for a whole page.
- *
- * A generated split carries it in its id (`…-1499M__2/georef`); a truth split carries it in
- * a trailing `[N]` on its label. A generated whole page's id ends in `/georef` and its label
- * may still carry a stray `[N]` copied from the truth — which is ignored.
- */
-function splitIndexFor(
-  id: string | undefined,
-  label: string | undefined,
-): number | null {
-  const idMatch = id?.match(/__(\d+)\//);
-  if (idMatch) return Number(idMatch[1]);
-  if (id?.includes('/georef')) return null; // generated whole page
-  const labelMatch = label?.match(/\[(\d+)\]\s*$/);
-  return labelMatch ? Number(labelMatch[1]) : null;
 }
 
 /** Parse the vertex list out of an SvgSelector's polygon value. */

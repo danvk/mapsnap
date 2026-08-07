@@ -107,6 +107,29 @@ export function labelToPageKey(label: string): string | null {
 }
 
 /**
+ * Split-panel number for an annotation item, or null for a whole page.
+ *
+ * The ID is authoritative and the label is the fallback, because the two
+ * disagree on generated annotations: `mapsnap iiif` copies the label from the
+ * truth item it matched, so all three of fargo p45's panels are labelled
+ * "p45 [2]" while their ids correctly read `-0045__1/georef`, `__2`, `__3`.
+ * Trusting the label there points every panel at the same (wrong) image.
+ * A truth item has no `__N` in its id and carries the panel number only in its
+ * label; a generated WHOLE page ends in `/georef` with no `__N`, and its label
+ * may still carry a stray `[N]` copied from truth, which must be ignored.
+ */
+export function splitIndexFor(
+  id: string | undefined,
+  label: string | undefined,
+): number | null {
+  const idMatch = id?.match(/__(\d+)\//);
+  if (idMatch) return Number(idMatch[1]);
+  if (id?.includes('/georef')) return null; // generated whole page
+  const labelMatch = label?.match(/\[(\d+)\]\s*$/);
+  return labelMatch ? Number(labelMatch[1]) : null;
+}
+
+/**
  * Extract the page key for an annotation, or null for non-page images.
  *
  * Port of source_id_to_page_key in mapsnap/utils.py, and it needs BOTH the
@@ -117,7 +140,8 @@ export function labelToPageKey(label: string): string | null {
  *     "...:05791_02_1939-0027s"            → "p27s"
  *   Sanborn sb-format (5 digits then a suffix char, '0' meaning none):
  *     "...:sb001250" → "p125";  "...:sb00154s" → "p154s"
- * - The LABEL carries the split-panel variant, which no URL records. A truth
+ * - The split-panel variant comes from {@link splitIndexFor}, which prefers the
+ *   item id and falls back to the label; no URL records it. A truth
  *   annotation for one panel of a split sheet is labelled "... p844 [3]" and
  *   must resolve to "p844__3"; deriving "p844" instead silently collapses
  *   every panel of a sheet onto its parent, so several annotations claim one
@@ -132,10 +156,17 @@ export function labelToPageKey(label: string): string | null {
 export function serviceUrlToPageKey(
   url: string | null | undefined,
   label = '',
+  id?: string,
 ): string | null {
-  const splitMatch = label.trimEnd().match(/\[(\d+)\]$/);
-  const splitSuffix = splitMatch ? `__${splitMatch[1]}` : '';
-  if (!url) return labelToPageKey(label);
+  const splitIndex = splitIndexFor(id, label);
+  const splitSuffix = splitIndex != null ? `__${splitIndex}` : '';
+  if (!url) {
+    const fromLabel = labelToPageKey(label);
+    if (!fromLabel) return null;
+    // labelToPageKey already appends the label's own variant; when the id
+    // overrides it (or says there is none), rebuild from the parent key.
+    return fromLabel.replace(/__\d+$/, '') + splitSuffix;
+  }
   url = url.replace(/\/info\.json$/, '');
   const sbMatch = url.match(/:sb(\d{5})([a-z0-9])$/i);
   if (sbMatch) {
@@ -220,7 +251,11 @@ export function rewriteAnnotationPage(
     const label = String(item.label ?? item.id ?? '');
     const target = item.target;
     const source = target?.source;
-    const derived = serviceUrlToPageKey(source?.id, label);
+    const derived = serviceUrlToPageKey(
+      source?.id,
+      label,
+      String(item.id ?? ''),
+    );
     const pageKey = derived
       ? (stemsByLowercase?.get(derived.toLowerCase()) ?? derived)
       : derived;

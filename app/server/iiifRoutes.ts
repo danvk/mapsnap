@@ -164,6 +164,7 @@ export function registerIiifApi(
       const derived = serviceUrlToPageKey(
         item?.target?.source?.id,
         String(item?.label ?? item?.id ?? ''),
+        String(item?.id ?? ''),
       );
       if (!derived) continue;
       // Volumes disagree about the case of a lettered suffix -- Chicago's

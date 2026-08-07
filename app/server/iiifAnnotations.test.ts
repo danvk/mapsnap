@@ -4,6 +4,7 @@ import {
   rescaleSvgSelector,
   rewriteAnnotationPage,
   labelToPageKey,
+  splitIndexFor,
   withTiles,
   serviceUrlToPageKey,
   type GeorefAnnotationPage,
@@ -46,6 +47,21 @@ describe('serviceUrlToPageKey', () => {
     expect(serviceUrlToPageKey('')).toBeNull();
   });
 
+  it('takes the generated split-panel variant from the id, not the label', () => {
+    const label = 'Fargo, N.D. | 1958 p45 [2]';
+    const base = 'https://tile.loc.gov/…:06536_1958-0045';
+    expect(
+      serviceUrlToPageKey(`${base}/info.json`, label, `${base}__1/georef`),
+    ).toBe('p45__1');
+    expect(
+      serviceUrlToPageKey(`${base}/info.json`, label, `${base}__3/georef`),
+    ).toBe('p45__3');
+    // A generated whole page keeps no variant despite the stray label.
+    expect(
+      serviceUrlToPageKey(`${base}/info.json`, label, `${base}/georef`),
+    ).toBe('p45');
+  });
+
   it('takes the split-panel variant from the label, which no URL records', () => {
     // Without this every panel of a sheet collapses onto the parent key and
     // all but one annotation is lost (228 panels across the truth volumes).
@@ -86,6 +102,38 @@ describe('serviceUrlToPageKey', () => {
     expect(
       serviceUrlToPageKey(null, 'Grand Rapids, Mich. | 1953 | Vol. 7'),
     ).toBeNull();
+  });
+});
+
+describe('splitIndexFor', () => {
+  it('prefers the id, because generated labels are copied from truth', () => {
+    // All three of fargo p45's generated panels are labelled "p45 [2]"; only
+    // the id distinguishes them. Trusting the label pointed every panel at
+    // p45__2.jpg and rendered the wrong sheet in the volume viewer.
+    const label = 'Fargo, N.D. | 1958 p45 [2]';
+    const base = 'https://tile.loc.gov/…:06536_1958-0045';
+    expect(splitIndexFor(`${base}__1/georef`, label)).toBe(1);
+    expect(splitIndexFor(`${base}__2/georef`, label)).toBe(2);
+    expect(splitIndexFor(`${base}__3/georef`, label)).toBe(3);
+  });
+
+  it('ignores a stray label variant on a generated whole page', () => {
+    expect(
+      splitIndexFor(
+        'https://tile.loc.gov/…:06536_1958-0045/georef',
+        'Fargo, N.D. | 1958 p45 [2]',
+      ),
+    ).toBeNull();
+  });
+
+  it('falls back to the label for a truth item, whose id has no variant', () => {
+    expect(
+      splitIndexFor(
+        'https://oldinsurancemaps.net/iiif/resource/54284/',
+        'Grand Rapids, Mich. | 1953 | Vol. 7 p844 [3]',
+      ),
+    ).toBe(3);
+    expect(splitIndexFor(undefined, 'Fargo, N.D. | 1958 p45')).toBeNull();
   });
 });
 
