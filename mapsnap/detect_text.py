@@ -213,7 +213,7 @@ def _underline_rule_mask(
     runs = cv2.morphologyEx(
         ink, cv2.MORPH_OPEN, cv2.getStructuringElement(cv2.MORPH_RECT, (min_run, 1))
     )
-    count, labels, stats, _ = cv2.connectedComponentsWithStats(runs, 8)
+    count, labels, stats, _ = cv2.connectedComponentsWithStats(runs, connectivity=8)
     rule = np.zeros_like(ink)
     for index in range(1, count):
         left, top, run_w, run_h, _area = stats[index]

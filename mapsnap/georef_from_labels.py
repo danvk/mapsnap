@@ -2317,6 +2317,15 @@ def has_confident_street_in_radius(
     return False
 
 
+def _doc_inlier_count(path: str) -> int:
+    """Number of inlier street matches recorded in a written georef sidecar."""
+    try:
+        doc = json.loads(Path(path).read_text())
+    except (OSError, ValueError):
+        return 0
+    return sum(1 for street in doc.get("streets") or [] if street.get("inlier"))
+
+
 def _process_one_image(image_path: str) -> tuple[str, ProcessResult]:
     """Georeference one image using _worker_state, capturing its log to a <stem>.txt sidecar.
 
@@ -2496,15 +2505,65 @@ def _process_one_image(image_path: str) -> tuple[str, ProcessResult]:
                             )
                             # Keep the fit as a key-map-outlier sidecar (it records where the
                             # page was wrongly placed) instead of a plain georef.json.
-                            os.replace(
-                                output_path,
-                                output_path.replace(
-                                    ".georef.json", ".georef-keymap-outlier.json"
-                                ),
+                            outlier_path = output_path.replace(
+                                ".georef.json", ".georef-keymap-outlier.json"
                             )
+                            os.replace(output_path, outlier_path)
                             # Failure with nofit_written set: the page stays unplaced and the
                             # redundant nofit sidecar is suppressed (the outlier one stands in).
                             result = ProcessResult(success=False, nofit_written=True)
+                            # #259: the rectangle vocabulary is what reintroduced the
+                            # quadrant ambiguity (aliased 3-inlier poses near-tie within
+                            # 0.9%), so retry with the *neighborhood* vocabulary — inherently
+                            # in-radius and quadrant-free — at relaxed size floors, which
+                            # admits the below-floor cross-street reads the strict pass
+                            # starved on (Fargo p58__2: 14 px labels vs a 20 px floor).
+                            # Accept only a fit at least as well-supported as the one just
+                            # rejected — a weaker fit around a wrong key-map location
+                            # (Fargo p55) must not be conjured into existence.
+                            retried = run(
+                                near,
+                                near_cos_phi,
+                                size_fraction=KEYMAP_RETRY_SIZE_FRACTION,
+                            )
+                            if retried.success:
+                                rejected_inliers = _doc_inlier_count(outlier_path)
+                                retried_inliers = _doc_inlier_count(output_path)
+                                retried_scale = (
+                                    deg_per_px_to_px_per_ft(retried.scale_deg_per_px)
+                                    if retried.scale_deg_per_px is not None
+                                    else None
+                                )
+                                if (
+                                    retried_scale is not None
+                                    and prior is not None
+                                    and not broadened_scale_plausible(
+                                        retried_scale, prior
+                                    )
+                                ):
+                                    print(
+                                        "  rejecting in-radius retry: "
+                                        f"{retried_scale:.3f} px/ft is "
+                                        f"{retried_scale / prior:.2f}x the key-map "
+                                        f"region prior {prior:.3f} px/ft"
+                                    )
+                                    if os.path.exists(output_path):
+                                        os.remove(output_path)
+                                elif retried_inliers < rejected_inliers:
+                                    print(
+                                        "  rejecting in-radius retry: "
+                                        f"{retried_inliers} inliers < the rejected "
+                                        f"fit's {rejected_inliers}"
+                                    )
+                                    if os.path.exists(output_path):
+                                        os.remove(output_path)
+                                else:
+                                    print(
+                                        "  accepting in-radius retry: "
+                                        f"{retried_inliers} inliers >= the rejected "
+                                        f"fit's {rejected_inliers}"
+                                    )
+                                    result = retried
                         else:
                             result = broadened
             elif rectangle_index is not None:

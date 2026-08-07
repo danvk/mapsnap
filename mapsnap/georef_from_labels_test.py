@@ -1863,3 +1863,20 @@ def test_keymap_location_is_anchored():
     assert not keymap_location_is_anchored(spread)
     # No key map at all -> not anchored.
     assert not keymap_location_is_anchored(None)
+
+
+def test_doc_inlier_count_counts_only_inlier_streets(tmp_path):
+    from mapsnap.georef_from_labels import _doc_inlier_count
+
+    doc = {
+        "streets": [
+            {"street": "A", "inlier": True},
+            {"street": "B", "inlier": False},
+            {"street": "C", "inlier": True},
+            {"street": "D"},
+        ]
+    }
+    path = tmp_path / "p1.georef.json"
+    path.write_text(json.dumps(doc))
+    assert _doc_inlier_count(str(path)) == 2
+    assert _doc_inlier_count(str(tmp_path / "missing.json")) == 0
