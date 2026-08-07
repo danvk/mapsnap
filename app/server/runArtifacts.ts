@@ -34,3 +34,25 @@ export function runArtifactDir(relativePath: string): string | null {
   }
   return null;
 }
+
+/** Page sidecars a run archived: `p12.georef.json`, `p12.georef-osm.json`, `p12.streets.json`. */
+const PAGE_SIDECAR = /^(p[^.]+)\.(?:georef(?:-[a-z0-9-]+)?|streets)\.json$/;
+
+/**
+ * Page stems a run saved any sidecar for, from that directory's file names.
+ *
+ * Every per-page artifact counts, not only the plain georef. A page the run
+ * demoted or rescued has `georef-osm.json` or `georef-nofit.json` and no plain
+ * `georef.json`, and a page that never fitted still has `streets.json`. Matching
+ * only `p<stem>.georef.json` reported "this run saved no sidecar for this page"
+ * for 54 of 112 pages on one Fargo run -- precisely the unfitted pages someone
+ * opening the viewer is most likely to be looking at.
+ */
+export function runArtifactStems(files: string[]): string[] {
+  const stems = new Set<string>();
+  for (const file of files) {
+    const match = file.match(PAGE_SIDECAR);
+    if (match?.[1]) stems.add(match[1]);
+  }
+  return [...stems].sort();
+}

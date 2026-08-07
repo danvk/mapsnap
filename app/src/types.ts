@@ -49,6 +49,11 @@ export interface Detection {
   /** Read by the key-map rectangle fallback vocab rather than the tighter radius vocab. */
   fallback?: boolean;
   /**
+   * An ordinal underline (the rule under "10<u>TH</u>") was painted out of this
+   * box before recognition, so this read comes from altered pixels (#250).
+   */
+  underline_removed?: boolean;
+  /**
    * The background under this detection, set only when it is more saturated than the page's
    * paper — i.e. the label is printed on a coloured building fill rather than on the paper
    * where street names belong. Absent for the ordinary on-paper case.

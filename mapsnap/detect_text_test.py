@@ -11,6 +11,8 @@ from mapsnap.detect_text import (
     _merge_vocab_passes,
     _nms_bboxes,
     annotate_backgrounds,
+    box_key,
+    choose_underline_read,
     filter_args,
     has_split_panels,
     lab_to_hex,
@@ -282,7 +284,7 @@ def test_non_street_text_all_uppercase():
 
 
 # ---------------------------------------------------------------------------
-# _trim_underlines
+# _erase_underlines (golden-image cases live in erase_underlines_test.py)
 # ---------------------------------------------------------------------------
 
 
@@ -294,8 +296,8 @@ def _make_img(height: int, width: int, dark_rows: list[int]) -> np.ndarray:
     return img
 
 
-def test_erase_underlines_paints_dark_bottom_row_white():
-    # Box spanning rows 0-19; dark row at 17 (within bottom 25%) should become white.
+def test_erase_underlines_removes_a_full_width_rule():
+    # A dark row low in the box with nothing beneath it: a rule.
     img = _make_img(50, 100, dark_rows=[17])
     result = _erase_underlines(img, [[0, 100, 0, 20]])
     assert result[17, :, :].min() == 255  # row 17 is now white
@@ -316,11 +318,25 @@ def test_erase_underlines_does_not_mutate_input():
     assert np.array_equal(img, original)
 
 
-def test_erase_underlines_dark_row_outside_scan_window_unchanged():
-    # Dark row at 2 is outside the bottom 25% of a 0-20 box (scan starts at 15).
+def test_erase_underlines_ignores_a_rule_high_in_the_box():
+    # Row 2 is nowhere near the baseline, so it is text, not a rule.
     img = _make_img(50, 100, dark_rows=[2])
     result = _erase_underlines(img, [[0, 100, 0, 20]])
     assert result[2, :, :].min() == 0  # row 2 still dark
+
+
+def test_erase_underlines_keeps_a_bar_with_glyph_beneath_it():
+    """A digit crossbar looks like a rule until you check what is under it.
+
+    Erasing the crossbar of the "4" in Fargo p60__1's 14TH turned the read into
+    "6TH" and dropped it below the acceptance floor; the ink-beneath check is
+    what prevents that (issue #250). The stem must be narrower than the opening
+    kernel, or it is itself read as part of the rule.
+    """
+    img = _make_img(50, 100, dark_rows=[15])
+    img[16:19, 48:54, :] = 0  # a 6px stem continuing below the bar
+    result = _erase_underlines(img, [[0, 100, 0, 20]])
+    assert result[15, :, :].min() == 0  # the bar survives
 
 
 def test_erase_underlines_preserves_row_above_underline():
@@ -329,6 +345,58 @@ def test_erase_underlines_preserves_row_above_underline():
     result = _erase_underlines(img, [[0, 100, 0, 20]])
     assert result[17, :, :].min() == 255  # underline erased
     assert result[14, :, :].max() == 0  # text row above scan window intact
+
+
+# ---------------------------------------------------------------------------
+# choose_underline_read
+# ---------------------------------------------------------------------------
+
+
+def test_choose_underline_read_keeps_erased_when_it_scores_higher():
+    # Fargo p60__1 8TH: unreadable under the rule, clean once it is painted out.
+    text, confidence, used_erased = choose_underline_read(
+        ("8TH", 0.9529), ("8TH", 0.1244)
+    )
+    assert (text, confidence, used_erased) == ("8TH", 0.9529, True)
+
+
+def test_choose_underline_read_keeps_original_when_erasure_hurts():
+    # Fargo p9c BROADWAY: a confident read the eraser wrecked.
+    text, confidence, used_erased = choose_underline_read(
+        ("BROADWAY", 0.2921), ("BROADWAY", 0.9997)
+    )
+    assert (text, confidence, used_erased) == ("BROADWAY", 0.9997, False)
+
+
+def test_choose_underline_read_takes_the_original_text_not_just_its_score():
+    text, confidence, used_erased = choose_underline_read(("133", 0.20), ("13TH", 0.80))
+    assert (text, confidence, used_erased) == ("13TH", 0.80, False)
+
+
+def test_choose_underline_read_without_an_original_keeps_the_erased_read():
+    # No original read means the rule never fired on this box.
+    assert choose_underline_read(("MAIN", 0.5), None) == ("MAIN", 0.5, True)
+
+
+def test_choose_underline_read_prefers_erased_on_a_tie():
+    assert choose_underline_read(("A", 0.5), ("B", 0.5)) == ("A", 0.5, True)
+
+
+# ---------------------------------------------------------------------------
+# box_key
+# ---------------------------------------------------------------------------
+
+
+def test_box_key_is_stable_across_float_and_int_bboxes():
+    assert box_key([[1.0, 2.0], [9.0, 2.0], [9.0, 8.0], [1.0, 8.0]]) == box_key(
+        [[1, 2], [9, 2], [9, 8], [1, 8]]
+    )
+
+
+def test_box_key_distinguishes_different_boxes():
+    assert box_key([[0, 0], [4, 0], [4, 4], [0, 4]]) != box_key(
+        [[0, 0], [5, 0], [5, 4], [0, 4]]
+    )
 
 
 # ---------------------------------------------------------------------------

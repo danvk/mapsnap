@@ -746,6 +746,15 @@ tr.relaxed {
   background: rgba(255, 200, 0, 0.12);
 }
 
+.underline-badge {
+  margin-left: 4px;
+  padding: 0 4px;
+  border-radius: 3px;
+  background: #7c3aed;
+  color: #fff;
+  font-size: 0.75em;
+}
+
 .relaxed-badge {
   margin-left: 4px;
   padding: 0 4px;
