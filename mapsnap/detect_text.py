@@ -607,23 +607,75 @@ def box_key(bbox) -> tuple[tuple[int, int], ...]:
     return tuple((round(float(x)), round(float(y))) for x, y in bbox)
 
 
-def choose_underline_read(
-    erased: tuple[str, float], original: tuple[str, float] | None
-) -> tuple[str, float, bool]:
-    """Pick between an underline-erased read and the same box read untouched.
+def legacy_erase_rows(
+    img_array: np.ndarray,
+    boxes: list,
+    dark_coverage: float = 0.25,
+    scan_fraction: float = 0.25,
+) -> tuple[np.ndarray, list[int]]:
+    """The pre-#250 row-painting eraser, kept as an arbitration candidate.
 
-    Returns (text, confidence, used_erased). Erasing a rule rescues a squished ordinal
-    whose descender-height digits the recognizer otherwise merges with the bar, but it
-    damages reads that never needed the help just as often — measured over Fargo 1958,
-    476 erased boxes gained confidence and 450 lost it, including BROADWAY at 0.9997 ->
-    0.2921. Neither arm dominates, so keep whichever read scores higher; ``original`` is
-    None for a box the rule never fired on, which keeps the erased read by default.
+    Scans the bottom ``scan_fraction`` of each box and paints any row with
+    >= ``dark_coverage`` dark pixels white. Low precision, high recall — it
+    fires on glyph bottoms as happily as on rules — which is exactly why it
+    survives here: Nashville's tiny squished ordinals (20x8 px boxes, rules
+    6-10 px long) sit below the precise detector's min_run, and this variant
+    is what read them at 0.6-0.9 confidence. It never decides a read on its
+    own; :func:`choose_best_read` keeps it only when it beats both the raw
+    and the precisely-erased read.
+
+    Returns the (possibly) painted copy and the indices of boxes painted.
     """
-    if original is None:
-        return erased[0], erased[1], True
-    if original[1] > erased[1]:
-        return original[0], original[1], False
-    return erased[0], erased[1], True
+    img_out = img_array.copy()
+    gray = img_array.mean(axis=2)
+    height, width = gray.shape
+    fired: list[int] = []
+    for index, (x_min, x_max, y_min, y_max) in enumerate(boxes):
+        x_min, x_max, y_min, y_max = int(x_min), int(x_max), int(y_min), int(y_max)
+        crop_h = y_max - y_min
+        scan_start = y_max - max(1, int(crop_h * scan_fraction))
+        col_start, col_end = max(0, x_min), min(width, x_max)
+        painted = False
+        for row in range(scan_start, y_max):
+            if row >= height:
+                break
+            row_pixels = gray[row, col_start:col_end]
+            if len(row_pixels) and (row_pixels < 128).mean() >= dark_coverage:
+                img_out[row, col_start:col_end] = 255
+                painted = True
+        if painted:
+            fired.append(index)
+    return img_out, fired
+
+
+def choose_best_read(
+    main: tuple[str, float],
+    main_is_erased: bool,
+    raw: tuple[str, float] | None,
+    legacy: tuple[str, float] | None,
+) -> tuple[str, float, str]:
+    """Pick the best of up to three reads of one box; returns (text, confidence, source).
+
+    ``main`` is the batch read (on the precisely-erased image when the rule fired
+    there, else effectively raw); ``raw`` and ``legacy`` are optional re-reads of the
+    untouched crop and the legacy row-painted crop. No single variant dominates:
+    precise erasure rescues Fargo's large-rule ordinals but 450 of its 926 changed
+    reads lost confidence (BROADWAY 0.9997 -> 0.2921) — hence the raw vote — while
+    Nashville's small-rule ordinals are invisible to the precise detector and only
+    the legacy row-paint reads them (2ND 0.965 vs 0.127 raw). Highest confidence
+    wins; ties keep the earlier candidate (main, then raw, then legacy). Source is
+    "erased", "raw", or "legacy".
+    """
+    candidates = [(main[0], main[1], "erased" if main_is_erased else "raw")]
+    if raw is not None:
+        candidates.append((raw[0], raw[1], "raw"))
+    if legacy is not None:
+        candidates.append((legacy[0], legacy[1], "legacy"))
+    best = candidates[0]
+    for candidate in candidates[1:]:
+        if candidate[1] > best[1]:
+            best = candidate
+    return best
 
 
 def _read_boxes(
@@ -711,13 +763,22 @@ def _recognize_pass(
         results = reader.recognize(
             rotated_clean, horizontal_list, free_list, **recognize_kwargs
         )
-        # Re-read only the boxes the rule fired on, this time untouched, so
-        # choose_underline_read can keep whichever of the two scores higher. Costs one
-        # extra recognition call on ~13% of boxes and nothing on a page with no rules.
+        # Re-read the boxes an eraser touched and let choose_best_read keep the
+        # highest-confidence variant: raw for boxes the precise rule fired on, and
+        # the legacy row-paint wherever it would have painted (its recall covers
+        # the small faint rules the precise detector misses). Costs extra
+        # recognition calls only on affected boxes.
         original_reads = _read_boxes(
             reader,
             rotated_array,
             [horizontal_list[i] for i in rule_indices],
+            recognize_kwargs,
+        )
+        legacy_image, legacy_indices = legacy_erase_rows(rotated_array, horizontal_list)
+        legacy_reads = _read_boxes(
+            reader,
+            legacy_image,
+            [horizontal_list[i] for i in legacy_indices],
             recognize_kwargs,
         )
         for bbox, text, confidence in results:
@@ -736,8 +797,12 @@ def _recognize_pass(
             elif angle == 270:
                 # PIL rotate(270) is CW; inverse: (rx, ry) -> (ry, H-1-rx)
                 polygon = [[y, orig_height - 1 - x] for x, y in polygon]
-            text, confidence, used_erased = choose_underline_read(
-                (text, float(confidence)), original_reads.get(box_key(bbox))
+            key = box_key(bbox)
+            text, confidence, source = choose_best_read(
+                (text, float(confidence)),
+                key in original_reads,
+                original_reads.get(key),
+                legacy_reads.get(key),
             )
             detection = {
                 "polygon": polygon,
@@ -745,9 +810,9 @@ def _recognize_pass(
                 "confidence": round(confidence, 4),
                 "angle": angle,
             }
-            # Flag only when the erased read actually won, so the badge marks reads
-            # the rule changed rather than every box it happened to touch.
-            if used_erased and box_key(bbox) in original_reads:
+            # Flag only when an erased variant actually won, so the badge marks
+            # reads an eraser changed rather than every box one touched.
+            if source != "raw" and (key in original_reads or key in legacy_reads):
                 detection["underline_removed"] = True
             detections.append(detection)
     return detections
