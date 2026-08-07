@@ -29,6 +29,7 @@ import {
 } from './compareTxt.ts';
 import { findVolumes, volumePages } from './adjacencyTruth.ts';
 import { runArtifactDir, runArtifactStems } from './runArtifacts.ts';
+import { withTiles } from './iiifAnnotations.ts';
 import { isSafeSegment, isSafeVolume } from './volumePaths.ts';
 
 const require = createRequire(import.meta.url);
@@ -71,8 +72,24 @@ async function cachedJpegDimensions(
   return dims;
 }
 
-/** Mount the raw IIIF image service (express-iiif) under `/iiif`. */
+/**
+ * Mount the raw IIIF image service (express-iiif) under `/iiif`.
+ *
+ * info.json responses are passed through {@link withTiles} first; see there
+ * for why an advertised tileset is load-bearing for the map viewer.
+ */
 export function registerIiifImages(app: Express, dataDir: string): void {
+  app.use('/iiif', (request, response, next) => {
+    if (!request.path.endsWith('/info.json')) return next();
+    const json = response.json.bind(response);
+    response.json = (body: unknown) =>
+      json(
+        body && typeof body === 'object'
+          ? withTiles(body as Record<string, unknown>)
+          : body,
+      );
+    next();
+  });
   app.use('/iiif', iiif({ imageDir: dataDir }));
 }
 

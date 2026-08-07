@@ -295,3 +295,41 @@ export async function imageStemsByLowercase(
   }
   return stems;
 }
+
+/** Tile edge advertised in info.json. 512 is the Image API's common default. */
+const TILE_WIDTH = 512;
+
+/**
+ * Add a `tiles` entry to an Image API info.json body, in place of nothing.
+ *
+ * express-iiif advertises no tilesets. @allmaps/iiif-parser then synthesises
+ * one, and its fallback has an off-by-one:
+ *
+ *   scaleFactors: Array.from({ length: maxExponent }, (_, e) => 2 ** e)
+ *
+ * For an image whose longest side is <= its 768 px tile width, maxExponent is
+ * 0, so scaleFactors is EMPTY, the map gets zero zoom levels, and rendering
+ * dies in getTileImageRequest with "Cannot read properties of undefined
+ * (reading 'originalWidth')". 22 small split panels across the truth volumes
+ * hit this (grand_rapids p844__3 at 682x568, fargo p62__4 at 365x488).
+ *
+ * Advertising a real tileset keeps the parser out of that path entirely — and
+ * is honest for a level2 service, which serves any region and size. Scale
+ * factors always include 1, so the smallest image still gets one zoom level.
+ */
+export function withTiles(
+  info: Record<string, unknown>,
+): Record<string, unknown> {
+  const width = Number(info.width);
+  const height = Number(info.height);
+  if (!Number.isFinite(width) || !Number.isFinite(height)) return info;
+  if (Array.isArray(info.tiles) && info.tiles.length > 0) return info;
+  const maxExponent = Math.ceil(
+    Math.log2(Math.max(1, Math.max(width, height) / TILE_WIDTH)),
+  );
+  const scaleFactors = Array.from(
+    { length: Math.max(1, maxExponent + 1) },
+    (unused, exponent) => 2 ** exponent,
+  );
+  return { ...info, tiles: [{ width: TILE_WIDTH, scaleFactors }] };
+}

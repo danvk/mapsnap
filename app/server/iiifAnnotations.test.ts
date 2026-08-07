@@ -4,6 +4,7 @@ import {
   rescaleSvgSelector,
   rewriteAnnotationPage,
   labelToPageKey,
+  withTiles,
   serviceUrlToPageKey,
   type GeorefAnnotationPage,
 } from './iiifAnnotations';
@@ -275,5 +276,42 @@ describe('imageStemsByLowercase', () => {
 
   it('returns an empty map for a missing directory', async () => {
     expect((await imageStemsByLowercase('/nonexistent-volume')).size).toBe(0);
+  });
+});
+
+describe('withTiles', () => {
+  it('always yields at least one scale factor, however small the image', () => {
+    // The bug this exists for: @allmaps/iiif-parser's fallback tileset uses
+    // Array.from({length: maxExponent}), which is EMPTY at maxExponent 0, so
+    // any image under one tile wide renders zero zoom levels and throws.
+    // grand_rapids p844__3 (682x568) and fargo p62__4 (365x488) are real cases.
+    const small = withTiles({ width: 682, height: 568 }) as {
+      tiles: { width: number; scaleFactors: number[] }[];
+    };
+    expect(small.tiles).toEqual([{ width: 512, scaleFactors: [1, 2] }]);
+    const tiny = withTiles({ width: 100, height: 80 }) as {
+      tiles: { width: number; scaleFactors: number[] }[];
+    };
+    expect(tiny.tiles[0]!.scaleFactors).toEqual([1]);
+  });
+
+  it('covers a full-size sheet down to a single tile', () => {
+    const sheet = withTiles({ width: 6660, height: 8070 }) as {
+      tiles: { width: number; scaleFactors: number[] }[];
+    };
+    // 8070 / 512 = 15.8 -> the coarsest factor must reduce it under one tile.
+    const coarsest = sheet.tiles[0]!.scaleFactors.at(-1)!;
+    expect(8070 / coarsest).toBeLessThanOrEqual(512);
+    expect(sheet.tiles[0]!.scaleFactors[0]).toBe(1);
+  });
+
+  it('leaves a body that already advertises tiles alone', () => {
+    const existing = { width: 100, height: 100, tiles: [{ width: 256 }] };
+    expect(withTiles(existing)).toBe(existing);
+  });
+
+  it('passes through a body with no usable dimensions', () => {
+    const noDims = { type: 'ImageService3' };
+    expect(withTiles(noDims)).toBe(noDims);
   });
 });
