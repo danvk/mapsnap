@@ -22,6 +22,8 @@ function page(stem: string): PageGeo {
     clipRing: [],
     scalePixelsPerFoot: 1,
     rotationDegrees: 0,
+    skewDegrees: 0,
+    anisotropy: 1,
     gcps: [],
     transformationType: 'polynomial',
   };

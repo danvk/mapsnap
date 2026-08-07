@@ -58,6 +58,22 @@ export interface PageGeo {
   scalePixelsPerFoot: number;
   /** Rotation from north-up in degrees, positive clockwise. */
   rotationDegrees: number;
+  /**
+   * Deviation of the image x/y axes from perpendicular, in degrees.
+   *
+   * 0 for a similarity (our own 4-parameter fits are 0 by construction), so a
+   * non-zero value means the annotation carries a transform that shears the
+   * sheet — which a photographed flat map cannot physically do. Matches
+   * `truth_distortion` in mapsnap/compare_iiif_georef.py, so it reads the same
+   * as the `skew°` column of `mapsnap compare`.
+   */
+  skewDegrees: number;
+  /**
+   * x-scale / y-scale ratio. 1.0 for a similarity; > 1 means an image pixel
+   * covers more ground horizontally than vertically. Same definition as the
+   * `aniso` column of `mapsnap compare`.
+   */
+  anisotropy: number;
   gcps: PageGcp[];
   /** The annotation's transformation type, e.g. "polynomial" or "helmert". */
   transformationType: string;
@@ -105,6 +121,42 @@ function deltaMeters(
     (b[0] - a[0]) * Math.cos(latRefRadians) * METERS_PER_DEGREE_LON_AT_EQUATOR,
     (b[1] - a[1]) * METERS_PER_DEGREE_LAT,
   ];
+}
+
+/**
+ * Skew (degrees off perpendicular) and anisotropy (x/y scale ratio) of a page.
+ *
+ * Port of `truth_distortion` in mapsnap/compare_iiif_georef.py, working from
+ * the projected corners rather than the affine matrix: the metric per-pixel
+ * step vectors are (ne − nw)/width and (sw − nw)/height, which are the affine's
+ * two columns whenever the transform is affine, and its first-order behaviour
+ * over the sheet otherwise.
+ *
+ * A similarity gives skew 0 and anisotropy 1. Truth annotations that deviate
+ * far are usually bad reference data — a flat sheet photographed square cannot
+ * shear — so the numbers belong next to scale and rotation in the info panel.
+ */
+export function distortion(
+  corners: Corners,
+  width: number,
+  height: number,
+): { skewDegrees: number; anisotropy: number } {
+  const [nw, ne, , sw] = corners;
+  const across = deltaMeters(nw, ne);
+  const down = deltaMeters(nw, sw);
+  const vx: [number, number] = [across[0] / width, across[1] / width];
+  const vy: [number, number] = [down[0] / height, down[1] / height];
+  const scaleX = Math.hypot(vx[0], vx[1]);
+  const scaleY = Math.hypot(vy[0], vy[1]);
+  if (scaleX === 0 || scaleY === 0) return { skewDegrees: 0, anisotropy: 1 };
+  const cosAngle = Math.min(
+    1,
+    Math.max(-1, (vx[0] * vy[0] + vx[1] * vy[1]) / (scaleX * scaleY)),
+  );
+  return {
+    skewDegrees: (Math.acos(cosAngle) * 180) / Math.PI - 90,
+    anisotropy: scaleX / scaleY,
+  };
 }
 
 /** Bearing of the a→b geo vector in degrees clockwise from north. */
@@ -260,6 +312,8 @@ export function unfittedPages(
       clipRing: [],
       scalePixelsPerFoot: 0,
       rotationDegrees: 0,
+      skewDegrees: 0,
+      anisotropy: 1,
       gcps: [],
       transformationType: '',
     });
@@ -291,10 +345,16 @@ export function pagesFromAnnotation(
   const pages: PageGeo[] = [];
   (annotation.items ?? []).forEach((item, itemIndex) => {
     const source = item.target?.source;
-    const pageKey = item.metadata?.find(
+    // The server's `page` metadata is the on-disk stem, so for a split panel it
+    // already ends in __N. PageGeo.pageKey is the PARENT key that panels share,
+    // so strip the suffix here rather than appending a second one below --
+    // otherwise a truth panel becomes "p844__3__3" and matches nothing.
+    const stemFromMetadata = item.metadata?.find(
       (entry) => entry.label === 'page',
     )?.value;
-    if (!source?.width || !source.height || !pageKey) return;
+    const pageKey = stemFromMetadata?.replace(/__\d+$/, '');
+    if (!source?.width || !source.height || !stemFromMetadata || !pageKey)
+      return;
     const { width, height } = source;
 
     const points = gcpPoints(item.body?.features ?? []);
@@ -319,7 +379,8 @@ export function pagesFromAnnotation(
         : rectRing;
 
     const splitIndex = splitIndexFor(item.id, item.label);
-    const stem = splitIndex != null ? `${pageKey}__${splitIndex}` : pageKey;
+    const stem =
+      splitIndex != null ? `${pageKey}__${splitIndex}` : stemFromMetadata;
 
     const [nw, ne, , sw] = corners;
     const feetAcross = Math.hypot(...deltaMeters(nw, ne)) * FEET_PER_METER;
@@ -328,6 +389,7 @@ export function pagesFromAnnotation(
     const scalePixelsPerFoot = (width / feetAcross + height / feetDown) / 2;
     const bearing = bearingDegrees(nw, ne);
     const rotationDegrees = ((bearing - 90 + 540) % 360) - 180;
+    const { skewDegrees, anisotropy } = distortion(corners, width, height);
 
     const transformation = item.body?.transformation as
       | { type?: string }
@@ -344,6 +406,8 @@ export function pagesFromAnnotation(
       clipRing,
       scalePixelsPerFoot,
       rotationDegrees,
+      skewDegrees,
+      anisotropy,
       gcps: points,
       transformationType: transformation?.type ?? 'polynomial',
     });

@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import type { GeorefAnnotationPage } from '../../server/iiifAnnotations';
 import {
   bearingDegrees,
+  distortion,
   hasFootprint,
   missingTruthPages,
   pagesFromAnnotation,
@@ -9,6 +10,7 @@ import {
   svgPolygonPoints,
   type PageGeo,
 } from './pages';
+import type { Corners } from '../types';
 
 const METERS_PER_DEGREE_LAT = 110574;
 const METERS_PER_DEGREE_LON_AT_EQUATOR = 111320;
@@ -313,5 +315,111 @@ describe('unfittedPages', () => {
   it('reports nothing when the server sent no page list', () => {
     // An older server omits `pages`; losing the listing beats a crashed page.
     expect(unfittedPages([pageGeo('p1', 0)], [])).toEqual([]);
+  });
+});
+
+describe('distortion', () => {
+  // Build corners from metric offsets using the module's own constants, so a
+  // "square" page really is square in metres (a degree-square is not: the lat
+  // and lon metre-per-degree constants differ by 0.7%).
+  const LAT = 40.7;
+  const METERS_PER_DEGREE_LAT = 110574;
+  const METERS_PER_DEGREE_LON_AT_EQUATOR = 111320;
+  const lonMeters =
+    Math.cos((LAT * Math.PI) / 180) * METERS_PER_DEGREE_LON_AT_EQUATOR;
+
+  /** A page 1000×800 px whose x step is `xMeters` and y step `yMeters` per pixel,
+   *  with `shearMeters` of eastward drift per pixel of y. */
+  function corners(xMeters: number, yMeters: number, shearMeters = 0): Corners {
+    const east = (m: number) => m / lonMeters;
+    const north = (m: number) => m / METERS_PER_DEGREE_LAT;
+    const nw: [number, number] = [-74, LAT];
+    const ne: [number, number] = [nw[0] + east(1000 * xMeters), LAT];
+    const swLon = nw[0] + east(800 * shearMeters);
+    const swLat = LAT - north(800 * yMeters);
+    return [nw, ne, [ne[0] + east(800 * shearMeters), swLat], [swLon, swLat]];
+  }
+
+  it('reports zero skew and unit anisotropy for a similarity', () => {
+    const { skewDegrees, anisotropy } = distortion(corners(1, 1), 1000, 800);
+    expect(skewDegrees).toBeCloseTo(0, 6);
+    expect(anisotropy).toBeCloseTo(1, 6);
+  });
+
+  it('reports anisotropy when x pixels cover more ground than y', () => {
+    const { skewDegrees, anisotropy } = distortion(corners(1.2, 1), 1000, 800);
+    expect(anisotropy).toBeCloseTo(1.2, 6);
+    expect(skewDegrees).toBeCloseTo(0, 6);
+  });
+
+  it('reports skew when the axes are not perpendicular', () => {
+    // One metre of eastward drift per metre of y is 45° off perpendicular.
+    // The sign follows truth_distortion in compare_iiif_georef.py: an x-shear
+    // closes the angle between the axes, so skew goes NEGATIVE.
+    const { skewDegrees } = distortion(corners(1, 1, 1), 1000, 800);
+    expect(skewDegrees).toBeLessThan(0);
+    expect(Math.abs(skewDegrees)).toBeCloseTo(45, 0);
+  });
+
+  it('is degenerate-safe', () => {
+    const collapsed: Corners = [
+      [-74, LAT],
+      [-74, LAT],
+      [-74, LAT],
+      [-74, LAT],
+    ];
+    expect(distortion(collapsed, 1000, 800)).toEqual({
+      skewDegrees: 0,
+      anisotropy: 1,
+    });
+  });
+});
+
+describe('pagesFromAnnotation split keys', () => {
+  // The server's `page` metadata is the on-disk stem, so a truth panel arrives
+  // as "p844__3". Appending the label's [3] again produced "p844__3__3", which
+  // matched no page in the list and rendered as "not georeferenced".
+  function truthPanel(stem: string, label: string) {
+    return {
+      id: 'https://oldinsurancemaps.net/iiif/resource/54284/',
+      label,
+      metadata: [{ label: 'page', value: stem }],
+      target: {
+        source: { id: 'x', type: 'ImageService3', width: 1000, height: 800 },
+      },
+      body: {
+        type: 'GeoreferencedMap',
+        transformation: { type: 'polynomial' },
+        features: [
+          [0, 0, -74, 40.7],
+          [1000, 0, -73.99, 40.7],
+          [1000, 800, -73.99, 40.69],
+        ].map(([x, y, lon, lat]) => ({
+          type: 'Feature',
+          properties: { resourceCoords: [x, y], type: 'gcp' },
+          geometry: { type: 'Point', coordinates: [lon, lat] },
+        })),
+      },
+    };
+  }
+
+  it('does not double a split suffix already present in the metadata', () => {
+    const [page] = pagesFromAnnotation({
+      items: [
+        truthPanel('p844__3', 'Grand Rapids, Mich. | 1953 | Vol. 7 p844 [3]'),
+      ],
+    } as never);
+    expect(page!.stem).toBe('p844__3');
+    expect(page!.pageKey).toBe('p844');
+    expect(page!.splitIndex).toBe(3);
+  });
+
+  it('leaves a whole page unsuffixed', () => {
+    const [page] = pagesFromAnnotation({
+      items: [truthPanel('p712', 'Grand Rapids, Mich. | 1953 | Vol. 7 p712')],
+    } as never);
+    expect(page!.stem).toBe('p712');
+    expect(page!.pageKey).toBe('p712');
+    expect(page!.splitIndex).toBeNull();
   });
 });
