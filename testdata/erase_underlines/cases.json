@@ -142,5 +142,57 @@
   "changed_px": 0,
   "source": "data/queens_1950/vol1/p10.jpg@0",
   "note": "CONTROL: >90% ink, not a label; must be skipped outright"
+ },
+ {
+  "name": "nashville_4th_smallrule",
+  "box": [
+   3,
+   47,
+   3,
+   19
+  ],
+  "changed_px": 44,
+  "eraser": "legacy",
+  "source": "data/nashville_tn_1957_vol1a/p60.jpg@270",
+  "note": "squished ordinal; winning CRAFT box is the taller of three over these glyphs. The precise eraser also fires here but erases differently -- the legacy row-paint won the arbitration (0.690 legacy vs 0.010 raw)"
+ },
+ {
+  "name": "nashville_4th_dashline",
+  "box": [
+   3,
+   41,
+   3,
+   23
+  ],
+  "changed_px": 38,
+  "eraser": "legacy",
+  "source": "data/nashville_tn_1957_vol1a/p10.jpg@270",
+  "note": "italic 4TH printed on a dashed line (dash-line class, not an underline); 0.730 legacy vs 0.235 raw"
+ },
+ {
+  "name": "champaign_sneil_dashline",
+  "box": [
+   3,
+   87,
+   3,
+   23
+  ],
+  "changed_px": 84,
+  "eraser": "legacy",
+  "source": "data/champaign_ill_1915/p20__1.jpg@270",
+  "note": "NOT an underline: label printed on a dashed street line; legacy row-paint strips the dash row (0.476 legacy vs 0.265 raw); precise detector correctly refuses (ink below run)"
+ },
+ {
+  "name": "nashville_2nd_smallrule",
+  "box": [
+   3,
+   37,
+   3,
+   19
+  ],
+  "changed_px": 68,
+  "eraser": "legacy",
+  "source": "data/nashville_tn_1957_vol1a/p3.jpg@270",
+  "note": "small ordinal rule under min_run=12 in a tiny box; only legacy reads it (0.965 legacy vs 0.127 raw)"
  }
 ]

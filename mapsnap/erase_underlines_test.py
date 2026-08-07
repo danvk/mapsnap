@@ -22,6 +22,15 @@ Three kinds of case, and the distinction matters:
 * ``*_plain`` / ``*_blob`` -- true controls that must never fire. The blobs are
   CRAFT boxes on dense map content at >90% ink; an earlier version of this file
   mistakenly froze the detector erasing runs inside them as expected output.
+* ``eraser: "legacy"`` -- cases for :func:`legacy_erase_rows`, the pre-#250
+  row-painting eraser kept as a third arbitration vote (#263). Two artifact
+  classes motivate it, from the 2026-08-06 baseline: ``*_smallrule`` ordinals
+  whose rules sit under the precise detector's min_run (nashville 2ND
+  0.965 legacy vs 0.127 raw), and ``*_dashline`` labels printed on a dashed
+  street line -- not underlines at all; the dash row crosses the bottom of the
+  box and the row-paint strips it (champaign S NEIL 0.476 vs 0.265). The
+  precise detector correctly refuses the dash-line class (ink below the run),
+  so only the legacy vote reads these.
 """
 
 import json
@@ -31,10 +40,12 @@ import cv2
 import numpy as np
 import pytest
 
-from mapsnap.detect_text import _erase_underlines
+from mapsnap.detect_text import _erase_underlines, legacy_erase_rows
 
 TESTDATA = Path(__file__).parent.parent / "testdata" / "erase_underlines"
-CASES = json.loads((TESTDATA / "cases.json").read_text())
+ALL_CASES = json.loads((TESTDATA / "cases.json").read_text())
+CASES = [c for c in ALL_CASES if c.get("eraser") != "legacy"]
+LEGACY_CASES = [c for c in ALL_CASES if c.get("eraser") == "legacy"]
 
 
 def load(name: str, suffix: str) -> np.ndarray:
@@ -137,3 +148,42 @@ def test_box_smaller_than_min_run_is_skipped():
     image = np.full((20, 8, 3), 255, np.uint8)
     image[15:18, :, :] = 0
     assert np.array_equal(_erase_underlines(image, [[0, 8, 0, 20]]), image)
+
+
+@pytest.mark.parametrize("case", LEGACY_CASES, ids=[c["name"] for c in LEGACY_CASES])
+def test_legacy_matches_golden_output(case):
+    before = load(case["name"], "before")
+    expected = load(case["name"], "after")
+    after, fired = legacy_erase_rows(before, [case["box"]])
+    assert fired == [0]
+    assert np.array_equal(after, expected)
+
+
+@pytest.mark.parametrize("case", LEGACY_CASES, ids=[c["name"] for c in LEGACY_CASES])
+def test_legacy_only_whitens_never_darkens(case):
+    before = load(case["name"], "before")
+    after, _fired = legacy_erase_rows(before, [case["box"]])
+    assert (after.astype(int) >= before.astype(int)).all()
+
+
+@pytest.mark.parametrize("case", LEGACY_CASES, ids=[c["name"] for c in LEGACY_CASES])
+def test_legacy_changed_pixel_count_recorded(case):
+    before = load(case["name"], "before")
+    after, _fired = legacy_erase_rows(before, [case["box"]])
+    assert int((before != after).any(axis=2).sum()) == case["changed_px"]
+
+
+@pytest.mark.parametrize("case", LEGACY_CASES, ids=[c["name"] for c in LEGACY_CASES])
+def test_legacy_output_differs_from_the_precise_eraser(case):
+    """Each legacy fixture must be a read the precise eraser cannot produce.
+
+    On most (dash-line labels, sub-min_run rules) the precise detector does not
+    fire at all; on nashville_4th_smallrule's taller box it fires but erases
+    differently, and the legacy variant still won the arbitration (0.690 vs
+    0.010 raw). If the two erasers converge on one of these, the legacy vote
+    has stopped mattering for it and the fixture should be revisited.
+    """
+    before = load(case["name"], "before")
+    precise = _erase_underlines(before, [case["box"]])
+    legacy, _fired = legacy_erase_rows(before, [case["box"]])
+    assert not np.array_equal(precise, legacy)
