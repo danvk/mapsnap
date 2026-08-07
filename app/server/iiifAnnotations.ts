@@ -256,14 +256,29 @@ export function rewriteAnnotationPage(
       label,
       String(item.id ?? ''),
     );
-    const pageKey = derived
-      ? (stemsByLowercase?.get(derived.toLowerCase()) ?? derived)
-      : derived;
-    if (!pageKey || !target || !source?.width || !source.height) {
+    // Identity and image are different keys for a split panel. Both truth and
+    // generated annotations publish a panel against its PARENT sheet: the
+    // source is the parent's full-resolution size (6660x8070), and both the
+    // GCP resourceCoords and the clipping selector are in parent pixels, the
+    // selector delimiting the panel's region. So the image to serve is the
+    // parent, while the page this annotation IS remains the panel -- which is
+    // what the page list, the selection and the sidecar links key off.
+    //
+    // Serving the panel image instead rescales parent-frame coordinates by the
+    // panel's aspect (fargo p45__1: x by 1665/6660 = 0.25 but y by 989/8070 =
+    // 0.12), rendering the sheet at ~2x scale and misaligned.
+    const suffix = derived?.match(/__\d+$/)?.[0] ?? '';
+    const parentDerived =
+      suffix && derived ? derived.slice(0, -suffix.length) : derived;
+    const imageKey = parentDerived
+      ? (stemsByLowercase?.get(parentDerived.toLowerCase()) ?? parentDerived)
+      : parentDerived;
+    const pageKey = imageKey ? `${imageKey}${suffix}` : imageKey;
+    if (!imageKey || !pageKey || !target || !source?.width || !source.height) {
       skipped.push({ label, pageKey, reason: 'not-a-page' });
       continue;
     }
-    const local = localPages.get(pageKey);
+    const local = localPages.get(imageKey);
     if (!local) {
       skipped.push({ label, pageKey, reason: 'missing-image' });
       continue;
@@ -271,7 +286,7 @@ export function rewriteAnnotationPage(
     const scaleX = local.width / source.width;
     const scaleY = local.height / source.height;
     target.source = {
-      id: `${serviceBaseUrl}/${pageKey}.jpg`,
+      id: `${serviceBaseUrl}/${imageKey}.jpg`,
       type: 'ImageService3',
       width: local.width,
       height: local.height,

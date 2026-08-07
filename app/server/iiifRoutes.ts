@@ -166,19 +166,22 @@ export function registerIiifApi(
         String(item?.label ?? item?.id ?? ''),
         String(item?.id ?? ''),
       );
-      if (!derived) continue;
+      // A split panel is georeferenced against its parent sheet, so the image
+      // to measure and serve is the parent (see rewriteAnnotationPage).
+      const parent = derived?.replace(/__\d+$/, '');
+      if (!parent) continue;
       // Volumes disagree about the case of a lettered suffix -- Chicago's
       // 0103W is p103w.jpg on disk, Asheville's 0033A is p33A.jpg -- so the
       // derived key's case is a guess. Resolve it against the directory and
       // use the real stem, or every link the viewer builds from it 404s on a
       // case-sensitive filesystem (and reads the wrong name on a forgiving one).
-      const pageKey = stems.get(derived.toLowerCase()) ?? derived;
-      if (localPages.has(pageKey)) continue;
+      const imageKey = stems.get(parent.toLowerCase()) ?? parent;
+      if (localPages.has(imageKey)) continue;
       try {
         const dims = await cachedJpegDimensions(
-          join(volumeDir, `${pageKey}.jpg`),
+          join(volumeDir, `${imageKey}.jpg`),
         );
-        localPages.set(pageKey, dims);
+        localPages.set(imageKey, dims);
       } catch {
         // No local image for this page; rewriteAnnotationPage reports it.
       }

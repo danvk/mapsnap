@@ -305,6 +305,85 @@ describe('rewriteAnnotationPage', () => {
   });
 });
 
+describe('rewriteAnnotationPage split panels', () => {
+  // A split panel is georeferenced against its PARENT sheet: the source is the
+  // parent's full-resolution size and the coords/selector are parent pixels.
+  // Serving the panel image rescaled them by the panel's aspect and rendered
+  // the sheet at ~2x scale, misaligned (fargo p45__1).
+  const parentSource = {
+    id: 'https://tile.loc.gov/…:06536_1958-0045/info.json',
+    type: 'ImageService2',
+    width: 6660,
+    height: 8070,
+  };
+  function panel(index: number) {
+    return {
+      id: `https://tile.loc.gov/…:06536_1958-0045__${index}/georef`,
+      label: 'Fargo, N.D. | 1958 p45 [2]',
+      target: { source: { ...parentSource } },
+      body: {
+        features: [
+          {
+            type: 'Feature',
+            properties: { resourceCoords: [3330, 4035], type: 'gcp' },
+            geometry: { type: 'Point', coordinates: [-96.8, 46.88] },
+          },
+        ],
+      },
+    };
+  }
+
+  it('serves the parent image while keeping the panel identity', () => {
+    const { annotation, skipped } = rewriteAnnotationPage(
+      { items: [panel(1), panel(3)] } as never,
+      new Map([['p45', { width: 1665, height: 2018 }]]),
+      'http://localhost:8182/iiif/fargo_nd_1958',
+      new Map([['p45', 'p45']]),
+    );
+    expect(skipped).toEqual([]);
+    const keys = annotation.items.map(
+      (item) =>
+        item.metadata?.find((entry) => entry.label === 'page')?.value ?? '',
+    );
+    expect(keys).toEqual(['p45__1', 'p45__3']);
+    for (const item of annotation.items) {
+      // Parent image, and coords scaled by the parent ratio (0.25) on BOTH
+      // axes -- the panel image would have given 1665/6660 vs 989/8070.
+      expect(item.target?.source?.id).toBe(
+        'http://localhost:8182/iiif/fargo_nd_1958/p45.jpg',
+      );
+      expect(item.target?.source?.width).toBe(1665);
+      expect(item.body?.features?.[0]?.properties.resourceCoords).toEqual([
+        832.5, 1009,
+      ]);
+    }
+  });
+
+  it('keeps a panel whose own image was never split out locally', () => {
+    // grand_rapids p729__2 has truth but no p729__2.jpg; the parent exists, and
+    // the parent is what the annotation is drawn against anyway.
+    const { annotation, skipped } = rewriteAnnotationPage(
+      {
+        items: [
+          {
+            id: 'https://oldinsurancemaps.net/iiif/resource/54284/',
+            label: 'Grand Rapids, Mich. | 1953 | Vol. 7 p729 [2]',
+            target: { source: { ...parentSource, id: null } },
+            body: { features: [] },
+          },
+        ],
+      } as never,
+      new Map([['p729', { width: 1665, height: 2018 }]]),
+      'http://localhost:8182/iiif/grand_rapids_mi_1953_vol7',
+      new Map([['p729', 'p729']]),
+    );
+    expect(skipped).toEqual([]);
+    expect(
+      annotation.items[0]?.metadata?.find((e) => e.label === 'page')?.value,
+    ).toBe('p729__2');
+  });
+});
+
 describe('imageStemsByLowercase', () => {
   it('maps a lowercased stem to the real filename case', async () => {
     const { mkdtemp, writeFile } = await import('fs/promises');
