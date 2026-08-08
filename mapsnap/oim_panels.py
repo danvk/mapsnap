@@ -35,6 +35,25 @@ from pathlib import Path
 
 from mapsnap.utils import label_to_page_key
 
+
+def title_page_key(title: str) -> str | None:
+    """Page key from an OIM document title.
+
+    Most volumes use plain page labels ("Fargo, N.D. | 1958 p12" -> p12);
+    volumes ingested from LOC's sb-format use it in titles too
+    ("Washington, D.C. | 1916 | Vol. 2 psb002600" -> p260: sb + 5-digit page +
+    suffix char, '0' meaning none), which label_to_page_key does not parse.
+    """
+    key = label_to_page_key(title)
+    if key:
+        return key
+    m = re.search(r"\bpsb(\d{5})([a-z0-9])$", title.strip(), re.IGNORECASE)
+    if m:
+        suffix = m.group(2).lower()
+        return f"p{int(m.group(1))}{'' if suffix == '0' else suffix}"
+    return None
+
+
 OIM_BASE = "https://oldinsurancemaps.net"
 FETCH_DELAY_S = 0.3  # politeness delay between document-page fetches
 
@@ -62,11 +81,24 @@ def embedded_json(html: str, key: str):
 
 
 def volume_map_slug(volume: Path) -> str:
-    """The OIM map slug (e.g. 'sanborn06536_012') from the volume's LOC manifest."""
+    """The OIM map slug (e.g. 'sanborn06536_012') for a volume.
+
+    Prefer the volume's own truth file: main.iiif.json's top-level id is the
+    OIM mosaic URL (…/iiif/mosaic/<slug>/main-content/), present for both
+    OIM-native and LOC-downloaded volumes. Fall back to the LOC manifest for
+    volumes without truth.
+    """
+    truth = volume / "main.iiif.json"
+    if truth.exists():
+        m = re.search(
+            r"/iiif/mosaic/([^/]+)/", json.loads(truth.read_text()).get("id", "")
+        )
+        if m:
+            return m.group(1)
     manifest = json.loads((volume / "manifest.json").read_text())
     m = re.search(r"/item/([^/]+)/", manifest["@id"])
     if not m:
-        raise ValueError(f"no LOC item id in {volume}/manifest.json")
+        raise ValueError(f"no OIM slug in {volume}'s main.iiif.json or manifest.json")
     return m.group(1)
 
 
@@ -127,13 +159,20 @@ def region_division(region: dict) -> int:
         return 0
 
 
-def region_ring(region: dict) -> list[list[float]] | None:
-    """A region's boundary as a closed [x, y] ring in canvas coordinates."""
+def region_ring(region: dict, canvas_height: float) -> list[list[float]] | None:
+    """A region's boundary as a closed [x, y] ring in image (y-down) coordinates.
+
+    OIM stores boundaries in a GIS-style y-up frame (origin bottom-left):
+    kansas_city p493's region-2 crop is provably the TOP-left of the sheet
+    (0.956 correlation) while its boundary reads y 4128–7795 of 7795. Flip y
+    against the canvas height to get ordinary image coordinates. Full-height
+    vertical cuts are flip-invariant, which is what let the bug hide.
+    """
     boundary = region.get("boundary") or {}
     coords = boundary.get("coordinates")
     if not coords or boundary.get("type") != "Polygon":
         return None
-    ring = [[float(x), float(y)] for x, y in coords[0]]
+    ring = [[float(x), canvas_height - float(y)] for x, y in coords[0]]
     if ring and ring[0] != ring[-1]:
         ring.append(ring[0])
     return ring
@@ -143,12 +182,12 @@ def write_page_files(
     volume: Path, page_key: str, regions: list[dict], cutlines: list, canvas: list
 ) -> bool:
     """Write oim/<page>.panels.json (+ cutlines.json); returns False if not cut."""
-    rings = [r for r in (region_ring(region) for region in regions) if r]
+    width, height = canvas
+    rings = [r for r in (region_ring(region, height) for region in regions) if r]
     if len(rings) < 2:
         return False
     oim_dir = volume / "oim"
     oim_dir.mkdir(exist_ok=True)
-    width, height = canvas
     (oim_dir / f"{page_key}.panels.json").write_text(
         json.dumps(
             {
@@ -169,7 +208,10 @@ def write_page_files(
                     "image": f"{page_key}.jpg",
                     "width": width,
                     "height": height,
-                    "cutlines": cutlines,
+                    "cutlines": [
+                        [[float(x), height - float(y)] for x, y in line]
+                        for line in cutlines
+                    ],
                 },
                 indent=1,
             )
@@ -213,11 +255,15 @@ def main() -> None:
 
     slug = volume_map_slug(args.volume)
     documents = map_documents(slug)
-    by_key: dict[str, int] = {}
+    # Some volumes carry DUPLICATE documents per page (grand_rapids has two
+    # uploads of most sheets, both "prepared"); only one holds the cut
+    # regions. Keep every candidate and let the fetch loop pick whichever
+    # actually has >= 2 region boundaries.
+    by_key: dict[str, list[int]] = {}
     for doc in documents:
-        key = label_to_page_key(str(doc.get("title", "")))
+        key = title_page_key(str(doc.get("title", "")))
         if key:
-            by_key[key] = doc["id"]
+            by_key.setdefault(key, []).append(doc["id"])
 
     if args.pages:
         targets = list(args.pages)
@@ -227,11 +273,19 @@ def main() -> None:
         targets = sorted(split_page_keys(args.volume))
     written = 0
     for page_key in targets:
-        doc_id = by_key.get(page_key)
-        if doc_id is None:
+        doc_ids = by_key.get(page_key)
+        if not doc_ids:
             print(f"  {page_key}: no OIM document", file=sys.stderr)
             continue
-        regions, cutlines, canvas = document_regions(doc_id)
+        best: tuple[list, list, list | None] = ([], [], None)
+        for doc_id in doc_ids:
+            candidate = document_regions(doc_id)
+            if len(candidate[0]) > len(best[0]):
+                best = candidate
+            if len(best[0]) >= 2:
+                break
+            time.sleep(FETCH_DELAY_S)
+        regions, cutlines, canvas = best
         if canvas is None:
             raw = args.volume / "raw" / f"{page_key}.jpg"
             if raw.exists():
