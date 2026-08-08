@@ -15,6 +15,7 @@ Usage:
 
 import argparse
 import json
+from itertools import pairwise
 from pathlib import Path
 from typing import TypedDict
 
@@ -112,7 +113,19 @@ JUNCTION_MAX_PX = 250.0  # max distance to extend an endpoint to reach another s
 NODE_OVERSHOOT_PX = (
     5.0  # push just past a reached segment so polygonize nodes the crossing
 )
-MIN_PANEL_FRAC = 0.05  # min panel area as fraction of total page area
+MIN_PANEL_FRAC = 0.01  # min panel area as fraction of total page area
+SMALL_PANEL_BAND_FRAC = (
+    0.05  # panels below this are "small" and must pass the shape guard
+)
+SMALL_PANEL_MAX_ASPECT = (
+    4.0  # small-panel bbox aspect bound: real insets measure 1.0-2.3,
+)
+# over-fragmentation slivers (edge strips, margin cuts) 5-20 (measured on the OIM truth
+# corpus, scripts/score_splits_oim.py)
+SMALL_PANEL_MIN_DIM_FRAC = (
+    0.10  # small-panel min bbox dimension as a fraction of the short
+)
+# page side: true insets measure >= 0.14, slivers <= 0.08
 COVERAGE_MIN_FRAC = 0.90  # if the kept panels tile less than this, the partition is
 # over-fragmented (e.g. a dense downtown page split along many building walls) — treat the
 # page as a single, unsplit panel. A gutter-emptiness test was tried as a no-split signal
@@ -663,18 +676,110 @@ def panel_compactness(geom) -> float:
     return 4 * np.pi * geom.area / (geom.length**2) if geom.length else 0.0
 
 
-def assemble_panels(faces: list, h: int, w: int) -> list:
+def face_divider_backed(
+    face,
+    thick_mask: np.ndarray,
+    h: int,
+    w: int,
+    backed_min_frac: float = 0.6,
+    search_px: int = 6,
+    step_px: float = 12.0,
+) -> float:
+    """Fraction of a face's interior boundary that lies on thick divider ink.
+
+    Samples points along the face's exterior ring, skipping stretches on the
+    page border (those need no divider), and checks whether thick ink exists
+    within ``search_px`` of each sample in the eroded thick mask. A real inset
+    is fenced by heavy dividers on every interior side, so its backed fraction
+    is high; a sliver from over-fragmentation is bounded by thin block/street
+    linework the erosion removed. Returns the backed fraction (callers compare
+    against ``backed_min_frac``; exposed for reporting).
+    """
+    ring = list(face.exterior.coords)
+    total = 0
+    backed = 0
+    mh, mw = thick_mask.shape
+    for (x0, y0), (x1, y1) in pairwise(ring):
+        length = float(np.hypot(x1 - x0, y1 - y0))
+        n = max(1, int(length / step_px))
+        for k in range(n + 1):
+            t = k / max(n, 1)
+            x = x0 + (x1 - x0) * t
+            y = y0 + (y1 - y0) * t
+            if on_boundary(x, y, h, w, tol=3.0):
+                continue
+            total += 1
+            xi, yi = round(x), round(y)
+            x_lo, x_hi = max(0, xi - search_px), min(mw, xi + search_px + 1)
+            y_lo, y_hi = max(0, yi - search_px), min(mh, yi + search_px + 1)
+            if x_lo < x_hi and y_lo < y_hi and thick_mask[y_lo:y_hi, x_lo:x_hi].any():
+                backed += 1
+    if total == 0:
+        # Entire ring on the page border: a full-page face, trivially fine.
+        return 1.0
+    return backed / total
+
+
+def assemble_panels(
+    faces: list,
+    h: int,
+    w: int,
+    min_panel_frac: float | None = None,
+    small_face_policy: str = "glue",
+    thick_mask: np.ndarray | None = None,
+    backed_min_frac: float = 0.6,
+) -> list:
     """Turn polygonize faces into panels that tile the whole page.
 
-    Faces below MIN_PANEL_FRAC are leftover slivers / small insets. If there is at most one
-    real panel — or the real panels are too fragmented to trust (they cover less than
-    COVERAGE_MIN_FRAC of the page) — the page is a single panel covering everything.
-    Otherwise each leftover face is glued onto the real panel whose union with it is most
-    compact, so the panels cover 100% of the page with the least raggedness.
+    Faces below the area floor (``min_panel_frac``, default MIN_PANEL_FRAC) are
+    leftovers and are glued onto a neighbouring panel. Faces in the small band
+    (floor..SMALL_PANEL_BAND_FRAC) additionally must be panel-shaped (aspect and
+    minimum-dimension bounds) — this replaced PR #70's 0.05 hard floor, which
+    also glued away genuine small insets (the panel-billed disaster class, #83).
+    Measured on the OIM truth corpus: floor 0.01 + shape guard recovers 13/31
+    small insets (from 2/31) with ~4 extra over-splits corpus-wide.
+
+    ``small_face_policy="verified"`` keeps a sub-floor face as a real panel when
+    its interior boundary is backed by thick divider ink
+    (:func:`face_divider_backed` ≥ ``backed_min_frac``; requires ``thick_mask``).
+    Measured WORSE than the shape guard on negatives (94.5% vs 98.6% accuracy):
+    dense pages are full of heavy linework, so divider-backing fires spuriously.
+    Kept for the harness record.
+
+    If there is at most one real panel — or the real panels are too fragmented
+    to trust (they cover less than COVERAGE_MIN_FRAC of the page) — the page is
+    a single panel covering everything. Otherwise each remaining leftover face
+    is glued onto the real panel whose union with it is most compact, so the
+    panels cover 100% of the page with the least raggedness.
     """
     total = h * w
-    min_area = MIN_PANEL_FRAC * total
-    big = [f for f in faces if f.area >= min_area]
+    min_area = (MIN_PANEL_FRAC if min_panel_frac is None else min_panel_frac) * total
+
+    def small_shape_ok(face) -> bool:
+        # A face in the small band must be panel-shaped: real insets are compact
+        # rectangles; slivers from a stray long rule are thin strips. Measured
+        # separation on the OIM corpus: true insets aspect <= 2.3 and min
+        # dimension >= 14% of the short page side; slivers >= 5.0 and <= 8%.
+        if face.area >= SMALL_PANEL_BAND_FRAC * total:
+            return True
+        x0, y0, x1, y1 = face.bounds
+        bw, bh = x1 - x0, y1 - y0
+        if min(bw, bh) <= 0:
+            return False
+        return max(bw, bh) / min(bw, bh) <= SMALL_PANEL_MAX_ASPECT and min(
+            bw, bh
+        ) >= SMALL_PANEL_MIN_DIM_FRAC * min(h, w)
+
+    big = [f for f in faces if f.area >= min_area and small_shape_ok(f)]
+    if small_face_policy == "verified" and thick_mask is not None:
+        promoted = [
+            f
+            for f in faces
+            if f.area < min_area
+            and f.area >= 0.002 * total
+            and face_divider_backed(f, thick_mask, h, w) >= backed_min_frac
+        ]
+        big = big + promoted
     if len(big) <= 1 or sum(f.area for f in big) / total < COVERAGE_MIN_FRAC:
         return [box(0, 0, w, h)]
 
@@ -682,7 +787,10 @@ def assemble_panels(faces: list, h: int, w: int) -> list:
     # compact — so panels stay connected and grow to absorb the gap. Iterate so a leftover
     # only reachable through another leftover gets absorbed once its neighbour is.
     panels = list(big)
-    leftovers = [f for f in faces if f.area < min_area]
+    kept = {id(f) for f in big}
+    # Everything not kept — sub-floor faces AND shape-rejected small-band faces —
+    # gets glued, so the panels still tile the page.
+    leftovers = [f for f in faces if id(f) not in kept]
     progressed = True
     while leftovers and progressed:
         progressed = False
@@ -932,6 +1040,9 @@ def finalize_panels(
     cropped_h: int,
     cropped_w: int,
     border: int = BORDER_PX,
+    min_panel_frac: float | None = None,
+    small_face_policy: str = "glue",
+    thick_mask: np.ndarray | None = None,
 ) -> tuple[list, list[tuple[float, float, float, float]]]:
     """Close the divider graph in the cropped frame, then expand panels to the full frame.
 
@@ -943,22 +1054,45 @@ def finalize_panels(
     snapped = snap_to_boundary(extended, cropped_h, cropped_w)
     bridged = bridge_junctions(snapped, cropped_h, cropped_w)
     faces = build_and_polygonize(bridged, cropped_h, cropped_w)
-    panels = assemble_panels(faces, cropped_h, cropped_w)
+    panels = assemble_panels(
+        faces,
+        cropped_h,
+        cropped_w,
+        min_panel_frac=min_panel_frac,
+        small_face_policy=small_face_policy,
+        thick_mask=thick_mask,
+    )
     return expand_to_full_frame(panels, cropped_h, cropped_w, border), bridged
 
 
-def compute_panels(image_path: Path, border: int = BORDER_PX) -> list:
+def compute_panels(
+    image_path: Path,
+    border: int = BORDER_PX,
+    min_panel_frac: float | None = None,
+    small_face_policy: str = "glue",
+) -> list:
     """Detect panels for one image as polygons in the full (uncropped) scaled-image frame.
 
     The I/O-free pipeline used by the scoring harness; process_image mirrors it while also
-    writing per-stage debug images.
+    writing per-stage debug images. ``min_panel_frac`` and ``small_face_policy`` are the
+    #83 small-inset experiment knobs (see assemble_panels); production defaults are
+    unchanged.
     """
     rgb = crop_border(load_rgb(image_path), border)
     gray = crop_border(load_gray(image_path), border)
     h, w = gray.shape
     binary = binarize(rgb, gray)
+    thick = compute_thick_mask(binary) if small_face_policy == "verified" else None
     connected = connected_dividers(detect_lines(binary), h, w, binary)
-    panels, _ = finalize_panels(connected, h, w, border)
+    panels, _ = finalize_panels(
+        connected,
+        h,
+        w,
+        border,
+        min_panel_frac=min_panel_frac,
+        small_face_policy=small_face_policy,
+        thick_mask=thick,
+    )
     return panels
 
 

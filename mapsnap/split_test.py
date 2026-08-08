@@ -178,3 +178,25 @@ def test_assemble_panels_over_fragmented_falls_back_to_single():
     panels = assemble_panels(faces, 100, 100)
     assert len(panels) == 1
     assert panels[0].area == pytest.approx(100 * 100)
+
+
+def test_assemble_panels_keeps_a_panel_shaped_small_inset():
+    # A compact corner inset in the small band (3% of the page, aspect 1.2,
+    # min dimension 16% of the page side) is a real panel, not a sliver --
+    # the panel-billed disaster class the 0.05 hard floor used to glue away.
+    faces = [
+        box(0, 0, 100, 84),
+        box(0, 84, 18, 100),
+        box(18, 84, 100, 100),
+    ]
+    panels = assemble_panels(faces, 100, 100)
+    assert len(panels) == 3
+
+
+def test_assemble_panels_glues_an_edge_strip_in_the_small_band():
+    # Same area as a keepable inset, but a 4x100 edge strip (aspect 25):
+    # the nashville over-split class. Shape guard glues it.
+    faces = [box(0, 0, 4, 100), box(4, 0, 100, 100)]
+    panels = assemble_panels(faces, 100, 100)
+    assert len(panels) == 1
+    assert panels[0].area == pytest.approx(100 * 100)
