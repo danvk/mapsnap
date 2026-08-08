@@ -113,7 +113,19 @@ JUNCTION_MAX_PX = 250.0  # max distance to extend an endpoint to reach another s
 NODE_OVERSHOOT_PX = (
     5.0  # push just past a reached segment so polygonize nodes the crossing
 )
-MIN_PANEL_FRAC = 0.05  # min panel area as fraction of total page area
+MIN_PANEL_FRAC = 0.01  # min panel area as fraction of total page area
+SMALL_PANEL_BAND_FRAC = (
+    0.05  # panels below this are "small" and must pass the shape guard
+)
+SMALL_PANEL_MAX_ASPECT = (
+    4.0  # small-panel bbox aspect bound: real insets measure 1.0-2.3,
+)
+# over-fragmentation slivers (edge strips, margin cuts) 5-20 (measured on the OIM truth
+# corpus, scripts/score_splits_oim.py)
+SMALL_PANEL_MIN_DIM_FRAC = (
+    0.10  # small-panel min bbox dimension as a fraction of the short
+)
+# page side: true insets measure >= 0.14, slivers <= 0.08
 COVERAGE_MIN_FRAC = 0.90  # if the kept panels tile less than this, the partition is
 # over-fragmented (e.g. a dense downtown page split along many building walls) — treat the
 # page as a single, unsplit panel. A gutter-emptiness test was tried as a no-split signal
@@ -720,14 +732,19 @@ def assemble_panels(
     """Turn polygonize faces into panels that tile the whole page.
 
     Faces below the area floor (``min_panel_frac``, default MIN_PANEL_FRAC) are
-    leftover slivers / small insets. With the default ``small_face_policy="glue"``
-    every one is glued onto a neighbouring real panel — the PR #70 behaviour,
-    which also glues away genuine small insets (the panel-billed disaster class,
-    #83). ``small_face_policy="verified"`` instead keeps a small face as a real
-    panel when its interior boundary is backed by thick divider ink
-    (:func:`face_divider_backed` ≥ ``backed_min_frac``; requires ``thick_mask``):
-    a real inset is fenced by heavy dividers, an over-fragmentation sliver is
-    bounded by thin linework.
+    leftovers and are glued onto a neighbouring panel. Faces in the small band
+    (floor..SMALL_PANEL_BAND_FRAC) additionally must be panel-shaped (aspect and
+    minimum-dimension bounds) — this replaced PR #70's 0.05 hard floor, which
+    also glued away genuine small insets (the panel-billed disaster class, #83).
+    Measured on the OIM truth corpus: floor 0.01 + shape guard recovers 13/31
+    small insets (from 2/31) with ~4 extra over-splits corpus-wide.
+
+    ``small_face_policy="verified"`` keeps a sub-floor face as a real panel when
+    its interior boundary is backed by thick divider ink
+    (:func:`face_divider_backed` ≥ ``backed_min_frac``; requires ``thick_mask``).
+    Measured WORSE than the shape guard on negatives (94.5% vs 98.6% accuracy):
+    dense pages are full of heavy linework, so divider-backing fires spuriously.
+    Kept for the harness record.
 
     If there is at most one real panel — or the real panels are too fragmented
     to trust (they cover less than COVERAGE_MIN_FRAC of the page) — the page is
@@ -737,7 +754,23 @@ def assemble_panels(
     """
     total = h * w
     min_area = (MIN_PANEL_FRAC if min_panel_frac is None else min_panel_frac) * total
-    big = [f for f in faces if f.area >= min_area]
+
+    def small_shape_ok(face) -> bool:
+        # A face in the small band must be panel-shaped: real insets are compact
+        # rectangles; slivers from a stray long rule are thin strips. Measured
+        # separation on the OIM corpus: true insets aspect <= 2.3 and min
+        # dimension >= 14% of the short page side; slivers >= 5.0 and <= 8%.
+        if face.area >= SMALL_PANEL_BAND_FRAC * total:
+            return True
+        x0, y0, x1, y1 = face.bounds
+        bw, bh = x1 - x0, y1 - y0
+        if min(bw, bh) <= 0:
+            return False
+        return max(bw, bh) / min(bw, bh) <= SMALL_PANEL_MAX_ASPECT and min(
+            bw, bh
+        ) >= SMALL_PANEL_MIN_DIM_FRAC * min(h, w)
+
+    big = [f for f in faces if f.area >= min_area and small_shape_ok(f)]
     if small_face_policy == "verified" and thick_mask is not None:
         promoted = [
             f
@@ -754,7 +787,10 @@ def assemble_panels(
     # compact — so panels stay connected and grow to absorb the gap. Iterate so a leftover
     # only reachable through another leftover gets absorbed once its neighbour is.
     panels = list(big)
-    leftovers = [f for f in faces if f.area < min_area]
+    kept = {id(f) for f in big}
+    # Everything not kept — sub-floor faces AND shape-rejected small-band faces —
+    # gets glued, so the panels still tile the page.
+    leftovers = [f for f in faces if id(f) not in kept]
     progressed = True
     while leftovers and progressed:
         progressed = False
