@@ -100,6 +100,10 @@ SUBCOMMANDS: dict[str, tuple[str, str]] = {
         "mapsnap.fix_truth_splits",
         "Repair OIM-exported SvgSelectors for split pages (OIM#402)",
     ),
+    "oim-panels": (
+        "mapsnap.oim_panels",
+        "Build oim/pN.panels.json from OIM region boundaries (supersedes oim-split-truth)",
+    ),
     "oim-split-truth": (
         "mapsnap.oim_truth",
         "Locate OIM's manual split regions on the canvas for comparison",
