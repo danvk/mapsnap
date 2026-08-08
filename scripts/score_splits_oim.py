@@ -189,15 +189,15 @@ def main() -> None:
                 smalls.append(round(panel_iou, 3))
         by_volume[volume].append(iou)
         records.append(
-            dict(
-                kind="positive",
-                volume=volume,
-                page=image.name.split(".")[0],
-                iou=round(iou, 4),
-                n_truth=len(truth),
-                n_gen=len(gen),
-                small_panel_ious=smalls,
-            )
+            {
+                "kind": "positive",
+                "volume": volume,
+                "page": image.name.split(".")[0],
+                "iou": round(iou, 4),
+                "n_truth": len(truth),
+                "n_gen": len(gen),
+                "small_panel_ious": smalls,
+            }
         )
     neg_ok = 0
     for volume, image in negative_cases:
@@ -209,13 +209,13 @@ def main() -> None:
         ok = len(gen) == 1
         neg_ok += ok
         records.append(
-            dict(
-                kind="negative",
-                volume=volume,
-                page=image.name.split(".")[0],
-                n_gen=len(gen),
-                ok=ok,
-            )
+            {
+                "kind": "negative",
+                "volume": volume,
+                "page": image.name.split(".")[0],
+                "n_gen": len(gen),
+                "ok": ok,
+            }
         )
 
     print(f"\n{'volume':28s} {'sheets':>6s} {'mean IoU':>9s}")
