@@ -96,7 +96,7 @@ def score_case(truth: list[Polygon], gen: list[Polygon]) -> tuple[float, list[fl
     for j, g in enumerate(gen):
         if j not in matched_g:
             total_union += g.area
-    return (total_int / total_union if total_union > 0 else 1.0), per_truth
+    return (float(total_int / total_union) if total_union > 0 else 1.0), per_truth
 
 
 def gather_cases(
@@ -133,7 +133,7 @@ def gather_cases(
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description=__doc__.split("\n")[0])
+    parser = argparse.ArgumentParser(description=(__doc__ or "").split("\n")[0])
     parser.add_argument("--data-dir", type=Path, default=Path("data"))
     parser.add_argument(
         "--negatives",
