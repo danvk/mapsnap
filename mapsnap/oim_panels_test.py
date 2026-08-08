@@ -30,6 +30,7 @@ def test_region_ring_flips_y_and_closes():
     # boundary y in [5, 10] and must come out at image y in [0, 5].
     r = region(1, [[0, 5], [10, 5], [10, 10], [0, 10]])
     ring = region_ring(r, 10)
+    assert ring is not None
     assert ring[0] == ring[-1]
     ys = [y for _, y in ring]
     assert min(ys) == 0.0 and max(ys) == 5.0
