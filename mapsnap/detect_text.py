@@ -607,6 +607,23 @@ def box_key(bbox) -> tuple[tuple[int, int], ...]:
     return tuple((round(float(x)), round(float(y))) for x, y in bbox)
 
 
+def load_recognizer_weights(reader: easyocr.Reader, weights_path: str) -> None:
+    """Swap fine-tuned recognizer weights (#265) into an EasyOCR reader.
+
+    The checkpoint is a plain state_dict for easyocr's recognition model
+    (written by mapsnap.train_street_recognizer), so the architecture, charset,
+    and the constrained CTC decoder downstream are all unchanged — only the
+    learned weights differ.
+    """
+    import torch
+
+    state = torch.load(weights_path, map_location="cpu")
+    model = reader.recognizer
+    inner = model.module if hasattr(model, "module") else model
+    inner.load_state_dict(state)
+    print(f"Recognizer weights: {weights_path}", file=sys.stderr)
+
+
 def legacy_erase_rows(
     img_array: np.ndarray,
     boxes: list,
@@ -997,9 +1014,12 @@ def _worker_init(
     craft_scale: float,
     tile_size: int,
     gpu: bool,
+    recognizer_weights: str | None,
 ) -> None:
     """Initialize per-worker state once per process: create the EasyOCR reader."""
     _worker_state["reader"] = easyocr.Reader(["en"], gpu=gpu, verbose=False)
+    if recognizer_weights:
+        load_recognizer_weights(_worker_state["reader"], recognizer_weights)
     _worker_state["vocab_strings"] = vocab_strings
     _worker_state["min_size"] = min_size
     _worker_state["min_long_side"] = min_long_side
@@ -1185,6 +1205,16 @@ def main() -> None:
         ),
     )
     parser.add_argument(
+        "--recognizer-weights",
+        default=None,
+        metavar="PT",
+        help=(
+            "Path to fine-tuned recognizer weights (a state_dict from "
+            "mapsnap.train_street_recognizer) to load in place of EasyOCR's "
+            "stock model. Detection, vocabulary, and decoding are unchanged."
+        ),
+    )
+    parser.add_argument(
         "--craft-scale",
         type=float,
         default=1.0,
@@ -1318,6 +1348,7 @@ def main() -> None:
             args.craft_scale,
             args.tile_size,
             gpu,
+            args.recognizer_weights,
         )
         with multiprocessing.Pool(
             args.num_workers,
@@ -1332,6 +1363,8 @@ def main() -> None:
                 pass
     else:
         reader = easyocr.Reader(["en"], gpu=gpu, verbose=False)
+        if args.recognizer_weights:
+            load_recognizer_weights(reader, args.recognizer_weights)
         for image_path in tqdm(images, smoothing=0):
             primary_vocab, fallback_vocab = page_vocabs(
                 image_path, locator, geojson["features"], vocab_strings, rectangle_vocab
