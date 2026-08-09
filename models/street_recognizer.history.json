@@ -1,0 +1,122 @@
+[
+ {
+  "epoch": 0,
+  "loss": 0.5172542954787491,
+  "val_clean": 0.838,
+  "val_corrupted": 0.7042
+ },
+ {
+  "epoch": 1,
+  "loss": 0.21417160554054548,
+  "val_clean": 0.8756,
+  "val_corrupted": 0.7606
+ },
+ {
+  "epoch": 2,
+  "loss": 0.16582979000650527,
+  "val_clean": 0.8873,
+  "val_corrupted": 0.7676
+ },
+ {
+  "epoch": 3,
+  "loss": 0.13631206755791375,
+  "val_clean": 0.8944,
+  "val_corrupted": 0.7958
+ },
+ {
+  "epoch": 4,
+  "loss": 0.13624985712746962,
+  "val_clean": 0.8967,
+  "val_corrupted": 0.8099
+ },
+ {
+  "epoch": 5,
+  "loss": 0.11786528474015252,
+  "val_clean": 0.9061,
+  "val_corrupted": 0.8028
+ },
+ {
+  "epoch": 6,
+  "loss": 0.10798969412055927,
+  "val_clean": 0.9061,
+  "val_corrupted": 0.8075
+ },
+ {
+  "epoch": 7,
+  "loss": 0.10200336995549743,
+  "val_clean": 0.9014,
+  "val_corrupted": 0.8192
+ },
+ {
+  "epoch": 8,
+  "loss": 0.09125121515357822,
+  "val_clean": 0.9014,
+  "val_corrupted": 0.8192
+ },
+ {
+  "epoch": 9,
+  "loss": 0.09367330503324425,
+  "val_clean": 0.9014,
+  "val_corrupted": 0.8404
+ },
+ {
+  "epoch": 10,
+  "loss": 0.07956641342687776,
+  "val_clean": 0.9131,
+  "val_corrupted": 0.8404
+ },
+ {
+  "epoch": 11,
+  "loss": 0.08266412966214574,
+  "val_clean": 0.9061,
+  "val_corrupted": 0.8451
+ },
+ {
+  "epoch": 12,
+  "loss": 0.07592572767677437,
+  "val_clean": 0.9038,
+  "val_corrupted": 0.8333
+ },
+ {
+  "epoch": 13,
+  "loss": 0.06611239226493318,
+  "val_clean": 0.9085,
+  "val_corrupted": 0.838
+ },
+ {
+  "epoch": 14,
+  "loss": 0.07138167840818595,
+  "val_clean": 0.8991,
+  "val_corrupted": 0.8333
+ },
+ {
+  "epoch": 15,
+  "loss": 0.06580502368042215,
+  "val_clean": 0.892,
+  "val_corrupted": 0.831
+ },
+ {
+  "epoch": 16,
+  "loss": 0.06348772511611185,
+  "val_clean": 0.9038,
+  "val_corrupted": 0.8451
+ },
+ {
+  "epoch": 17,
+  "loss": 0.0679711708060761,
+  "val_clean": 0.9014,
+  "val_corrupted": 0.8427
+ },
+ {
+  "epoch": 18,
+  "loss": 0.0668756398097877,
+  "val_clean": 0.9108,
+  "val_corrupted": 0.8474
+ },
+ {
+  "epoch": 19,
+  "loss": 0.058277606425098924,
+  "val_clean": 0.8991,
+  "val_corrupted": 0.8404
+ }
+]

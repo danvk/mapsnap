@@ -66,3 +66,35 @@ brooklyn_1939_1 -- whole volumes): buffered F1 0.865 at tolerance 40px,
 completeness 0.73-0.93 with the fill-background stratum >= paper everywhere.
 Run `python -m mapsnap.keymap.road_prob predict` to write
 `raw/<stem>.roadprob.png` (masked to the mapped extent) plus an overlay render.
+
+## street_recognizer.pt
+
+Fine-tuned street-label **recognizer** (#265): EasyOCR's `latin_g2` CRNN
+(`easyocr.model.vgg_model.Model`, 3.8M params) fine-tuned on 3,916 inlier
+agreement crops from 15 volumes (conf >= 0.15, rotation-twin-deduped), half of
+each batch corrupted by `mapsnap.ocr_augment`'s measured-geometry artifacts
+(underline rules fused to glyph bottoms, dashed pipe lines at glyph height,
+capped junk fragments, resolution squeeze, photometric jitter). Holdout =
+fargo + nashville, excluded end to end.
+
+Consumed by `mapsnap ocr --recognizer-weights models/street_recognizer.pt` —
+a plain state_dict swapped into `reader.recognizer`; detection, vocabulary
+trie, constrained CTC decode, and the three-vote underline arbitration are
+all unchanged.
+
+Held-out benchmarks (2026-08-09, `scripts/ocr_recognizer_bench.py`): clean
+crops 0.958 vs stock 0.932 exact; real underline/dash crops read RAW (no
+erasers) 0.871 vs stock 0.655. End-to-end A/B: fargo 52.4 -> 63.9,
+nashville 65.7 -> 64.8 (the regression decomposes to snap-refine #277 and
+yellow-fill #278, not read quality). Training curve:
+`street_recognizer.history.json` (best epoch 18).
+
+Retrain (CPU, ~2.5 h; `nn.CTCLoss` is unreliable on MPS):
+
+```sh
+uv run python -m mapsnap.train_street_recognizer build-dataset \
+    ~/Documents/ohm/ocr-train-harvest-2026-08-08.jsonl --out data/ocr_finetune_cache
+uv run python -m mapsnap.train_street_recognizer render-review \
+    data/ocr_finetune_cache --out review.html   # eyeball before training
+uv run python -m mapsnap.train_street_recognizer train data/ocr_finetune_cache
+```
