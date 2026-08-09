@@ -1800,6 +1800,18 @@ INCUMBENT_DEFENSIBLE_VERIFICATION = 0.1
 # points everywhere) and band-aware margins (their edge over flat 0.05 is
 # one train loss; zero holdout benefit for the extra shape).
 REFINE_VER_MARGIN = 0.05
+# ... and only when the incumbent is a real fit. The 93%-of-the-time
+# calibration above was measured on multi-GCP RANSAC incumbents; a
+# deferred/1-effective-GCP incumbent is a rung-guess free to swing about its
+# single anchor, and the candidate search for fitted pages is LOCAL around
+# that incumbent, so an "agreeing" challenger confirms the guess by
+# construction rather than by evidence. Nashville p4 (#277): both A/B arms
+# produced the identical half-scale deferred fit; one candidate roll had no
+# agreeing pose, fell through to rung_flip, and landed 26 ft — the other
+# rolled two agreeing half-scale poses, refine fired first, and blessed
+# 406 ft. Weak incumbents must fall through to the calibrated rung_flip /
+# keep-incumbent paths instead.
+REFINE_MIN_EFFECTIVE_GCPS = 2
 
 
 def refine_adoption(record: dict, margin: float = REFINE_VER_MARGIN) -> dict | None:
@@ -1816,6 +1828,13 @@ def refine_adoption(record: dict, margin: float = REFINE_VER_MARGIN) -> dict | N
     incumbent = record.get("incumbent")
     candidates = record.get("candidates") or []
     if not incumbent or not candidates:
+        return None
+    # Refinement's premise — agreement means the pose is right and the snap is
+    # merely more precise — requires an incumbent constrained enough to be
+    # worth agreeing with (see REFINE_MIN_EFFECTIVE_GCPS). Records cached
+    # before effective_gcps was recorded stay eligible.
+    effective_gcps = incumbent.get("effective_gcps")
+    if effective_gcps is not None and effective_gcps < REFINE_MIN_EFFECTIVE_GCPS:
         return None
     top = candidates[0]
     if top.get("select_score") is None:

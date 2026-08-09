@@ -482,3 +482,20 @@ def test_stamp_corroborated_rescue_relaxes_the_gates():
         PRODUCTION_GATE_MARGIN,
     )
     assert choice["chosen"] is None and "score" in choice["reason"]
+
+
+def test_refine_ineligible_on_one_gcp_incumbent():
+    # #277: a deferred/1-effective-GCP incumbent is a rung-guess; an agreeing
+    # challenger from the local search confirms it by construction, so refine
+    # must decline and let rung_flip / keep-incumbent decide (nashville p4:
+    # refine blessed the half-scale pose at 406 ft that rung_flip had been
+    # flipping to 26 ft).
+    record = fitted_record(incumbent_ver=0.2, challenger_ver=0.35, shift_m=15.0)
+    record["incumbent"]["effective_gcps"] = 1
+    assert refine_adoption(record) is None
+    # Two distinct intersections is a real fit: refinement applies again.
+    record["incumbent"]["effective_gcps"] = 2
+    assert refine_adoption(record) is not None
+    # Records cached before effective_gcps existed keep the old behavior.
+    del record["incumbent"]["effective_gcps"]
+    assert refine_adoption(record) is not None
