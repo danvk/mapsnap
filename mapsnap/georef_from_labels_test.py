@@ -1708,6 +1708,63 @@ def test_drop_labels_on_fill_band_edges_are_inclusive():
     assert [d["text"] for d in fill] == ["BELOW"]
 
 
+def _boxed(text: str, hue: float, x0: int, y0: int) -> dict:
+    """A fill-backed detection with a 20x10 polygon at (x0, y0), for P(road) tests."""
+    det = _on(text, hue=hue)
+    det["polygon"] = [[x0, y0], [x0 + 20, y0], [x0 + 20, y0 + 10], [x0, y0 + 10]]
+    return det
+
+
+def _road_prob() -> "np.ndarray":
+    """A 100x100 P(road) map: a road corridor down rows 0-19, blocks elsewhere."""
+    import numpy as np
+
+    prob = np.full((100, 100), 0.02, dtype=np.float32)
+    prob[0:20, :] = 0.95
+    return prob
+
+
+def test_label_off_corridor_uses_box_p75():
+    from mapsnap.georef_from_labels import label_off_corridor
+
+    prob = _road_prob()
+    # On the corridor: kept.
+    assert not label_off_corridor(_boxed("MAIN", 93.0, 10, 5), prob)
+    # On a block: off-corridor.
+    assert label_off_corridor(_boxed("SEARS", 93.0, 10, 50), prob)
+    # p75 deliberately tolerates overhang: a box with ~27% of its rows on the road
+    # (a street label whose box spills onto the blocks either side) is still spared.
+    assert not label_off_corridor(_boxed("OVERHANG", 93.0, 10, 17), prob)
+    # Only a grazing touch (~9% of rows) reads as off-corridor.
+    assert label_off_corridor(_boxed("GRAZE", 93.0, 10, 19), prob)
+
+
+def test_drop_labels_on_fill_uses_road_prob_only_inside_the_yellow_band():
+    # #278: the yellow band is spared by colour alone, so P(road) settles it. Outside the
+    # band colour still decides, and a corridor label stays regardless of its hue.
+    from mapsnap.georef_from_labels import drop_labels_on_fill
+
+    prob = _road_prob()
+    kept, fill = drop_labels_on_fill(
+        [
+            _boxed("2ND", 93.0, 10, 50),  # yellow, off corridor -> now dropped
+            _boxed("BROADWAY", 93.0, 10, 5),  # yellow, on corridor -> spared
+            _boxed("REP", 5.0, 10, 5),  # red, on corridor -> still dropped
+        ],
+        road_prob=prob,
+    )
+    assert [d["text"] for d in kept] == ["BROADWAY"]
+    assert [d["text"] for d in fill] == ["2ND", "REP"]
+
+
+def test_drop_labels_on_fill_without_road_prob_is_unchanged():
+    # No cached map (or a key-map page): exactly the pre-#127 behaviour.
+    from mapsnap.georef_from_labels import drop_labels_on_fill
+
+    kept, fill = drop_labels_on_fill([_boxed("2ND", 93.0, 10, 50)])
+    assert [d["text"] for d in kept] == ["2ND"] and fill == []
+
+
 def test_is_split_page():
     from mapsnap.georef_from_labels import is_split_page
 
