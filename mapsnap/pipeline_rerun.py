@@ -43,7 +43,11 @@ from mapsnap.utils import Step, list_pages, run_cmd
 
 
 def rerun_volume(
-    volume: Path, tag: str, force: bool, recognizer_weights: str | None = None
+    volume: Path,
+    tag: str,
+    force: bool,
+    recognizer_weights: str | None = None,
+    no_fit: bool = False,
 ) -> None:
     """Run the six re-run steps for one volume (raises SystemExit on step failure)."""
     if not (volume / "mapsnap.json").exists():
@@ -120,6 +124,9 @@ def rerun_volume(
         )
 
     # fit resumes itself (an already-archived run id is skipped), so no stamp.
+    if no_fit:
+        print(f"{volume.name}: OCR complete; skipping fit (--no-fit).", flush=True)
+        return
     run_cmd(["mapsnap", "fit", str(volume), "--tag", tag])
 
 
@@ -142,6 +149,15 @@ def main() -> None:
         help="Redo steps whose rerun stamps say they already completed.",
     )
     parser.add_argument(
+        "--no-fit",
+        action="store_true",
+        help=(
+            "Stop after OCR instead of fitting. For two-lane corpus runs: one "
+            "lane owns OCR (which must stay serial) while a second lane fits "
+            "the volumes it has released."
+        ),
+    )
+    parser.add_argument(
         "--recognizer-weights",
         default=None,
         metavar="PT",
@@ -156,7 +172,9 @@ def main() -> None:
     for volume in args.volumes:
         print(f"\n=== {volume} ===", flush=True)
         try:
-            rerun_volume(volume, args.tag, args.force, args.recognizer_weights)
+            rerun_volume(
+                volume, args.tag, args.force, args.recognizer_weights, args.no_fit
+            )
         except SystemExit as exit_info:
             print(
                 f"FAILED {volume}: {exit_info.code}",
