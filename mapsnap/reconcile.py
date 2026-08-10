@@ -415,7 +415,12 @@ def bar_sibling_collision_entries(nodes: dict[str, PageNode], node: PageNode) ->
         if hypothesis.affine is None:
             continue
         for sibling in siblings:
-            published = sibling.hypotheses[sibling.published_index]
+            # The comprehension above filtered on published_index, but pyright
+            # cannot carry that narrowing to this loop.
+            index = sibling.published_index
+            if index is None:
+                continue
+            published = sibling.hypotheses[index]
             if published.affine is None:
                 continue
             origin = (published.affine[0, 2], published.affine[1, 2])
