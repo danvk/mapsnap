@@ -327,6 +327,22 @@ def archive_run(
         shutil.copy2(georef, run_dir / georef.name)
     for log in sorted(dir_path.glob("p*.txt")):
         shutil.copy2(log, run_dir / log.name)
+    # Channel candidate stores, so a later reconcile/analysis pass can see the
+    # poses this run actually weighed (#270). Without these the baseline is
+    # unrecoverable once any post-run experiment re-matches: the files live at
+    # fixed paths and are overwritten in place.
+    for channel in ("osm_snap", "street_solve"):
+        channel_dir = artifacts_dir / channel
+        for name in (
+            "candidates.jsonl",
+            "selection_arbitrate.jsonl",
+            "selection_union.jsonl",
+        ):
+            source = channel_dir / name
+            if source.exists():
+                target_dir = run_dir / channel
+                target_dir.mkdir(exist_ok=True)
+                shutil.copy2(source, target_dir / name)
     if iiif_path is not None and iiif_path.exists():
         shutil.copy2(iiif_path, run_dir / iiif_path.name)
     if compare_txt is not None and compare_txt.exists():

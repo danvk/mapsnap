@@ -100,6 +100,10 @@ SUBCOMMANDS: dict[str, tuple[str, str]] = {
         "mapsnap.fix_truth_splits",
         "Repair OIM-exported SvgSelectors for split pages (OIM#402)",
     ),
+    "reconcile": (
+        "mapsnap.reconcile",
+        "Report-only joint arbitration of all candidate poses per volume (#270)",
+    ),
     "oim-panels": (
         "mapsnap.oim_panels",
         "Build oim/pN.panels.json from OIM region boundaries (supersedes oim-split-truth)",
