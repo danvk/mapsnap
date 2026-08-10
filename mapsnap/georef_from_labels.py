@@ -317,6 +317,13 @@ DOUBLE_SCALE_BAND = (1.8, 2.2)
 # fills outside the band — the red/pink brick and blue stone of the Sanborn colour code — are
 # treated as buildings. Brown is a dark yellow/orange and shares the band.
 FILL_YELLOW_HUE_BAND = (40.0, 110.0)
+# The P(road) probability a yellow-band label's box must reach to stay spared (#127/#278).
+# Chroma alone cannot separate a yellow frame building from yellowed paper, so the band above
+# is spared wholesale; where a road-probability map exists it settles those cases on geometry
+# instead. 0.2 sits in the empty gap between the two populations (chroma-flagged p75 median
+# 0.016, georef-inlier median 0.973): it drops 87% of the known building labels while touching
+# 2.0% of inliers, and moving it to 0.05 or 0.5 changes inlier loss by under 1.5 points.
+FILL_ROAD_PROB_MIN = 0.2
 
 # Confidence floor for the *weaker* half of an assembled multi-word street. A part this weak is
 # never trusted alone; it is admitted only when its partner clears min_confidence and the two
@@ -2603,6 +2610,7 @@ def _process_one_image(image_path: str) -> tuple[str, ProcessResult]:
 def drop_labels_on_fill(
     detections: list[dict],
     yellow_band: tuple[float, float] = FILL_YELLOW_HUE_BAND,
+    road_prob: np.ndarray | None = None,
 ) -> tuple[list[dict], list[dict]]:
     """Split detections into (kept, on-fill) by the ``background`` colour OCR recorded for each.
 
@@ -2627,17 +2635,49 @@ def drop_labels_on_fill(
 
     Key-map pages must skip this entirely — their street names sit on the coloured region blocks
     by design.
+    ``road_prob``, when given, adjudicates exactly the yellow band this rule spares (#127/#278):
+    a spared label whose box sits off the road corridor is a building label after all. See
+    :func:`label_off_corridor`.
     """
     low, high = yellow_band
     kept: list[dict] = []
     on_fill: list[dict] = []
     for det in detections:
         background = det.get("background")
-        if background is not None and not (low <= background["hue"] <= high):
+        if background is None:
+            kept.append(det)
+            continue
+        # Outside the spared band the colour alone disqualifies; inside it, P(road)
+        # (where available) decides whether this really is a building label.
+        outside_band = not (low <= background["hue"] <= high)
+        if outside_band or (
+            road_prob is not None and label_off_corridor(det, road_prob)
+        ):
             on_fill.append(det)
         else:
             kept.append(det)
     return kept, on_fill
+
+
+def label_off_corridor(
+    det: dict, road_prob: np.ndarray, threshold: float = FILL_ROAD_PROB_MIN
+) -> bool:
+    """Whether a detection's box sits off the road corridor per the P(road) map.
+
+    Uses the box's 75th-percentile probability: a street label is drawn along a corridor, so
+    most of its box is road even when the box overhangs a block, while a building label sits
+    on fill with only a corner near the street. Measured over four volumes (nashville, chicago,
+    new_orleans_1951, kansas_city): chroma-flagged labels median 0.016, georef inliers median
+    0.973 — the populations are nearly disjoint.
+    """
+    xs = [p[0] for p in det["polygon"]]
+    ys = [p[1] for p in det["polygon"]]
+    height, width = road_prob.shape
+    x0, x1 = max(0, int(min(xs))), min(width, int(max(xs)) + 1)
+    y0, y1 = max(0, int(min(ys))), min(height, int(max(ys)) + 1)
+    if x1 <= x0 or y1 <= y0:
+        return False
+    return bool(np.percentile(road_prob[y0:y1, x0:x1], 75) < threshold)
 
 
 def needs_size_relaxation(
@@ -2777,6 +2817,7 @@ def prepare_label_features(
     edge_margin: float = 0.0,
     high_confidence_size_fraction: float = 0.7,
     keep_labels_on_fill: bool = False,
+    road_prob: np.ndarray | None = None,
     collinear_perp_tolerance_px: float = COLLINEAR_PERP_TOLERANCE_PX,
 ) -> list[LabelFeature]:
     """Load, promote, assemble, dedupe, filter, and canonicalize street reads into features.
@@ -2839,7 +2880,9 @@ def prepare_label_features(
     # Street names are printed on paper; text on a coloured building fill is a building label
     # that can still prefix-match a street name and fabricate GCPs.
     if not keep_labels_on_fill:
-        all_detections, on_fill = drop_labels_on_fill(all_detections)
+        all_detections, on_fill = drop_labels_on_fill(
+            all_detections, road_prob=road_prob
+        )
         if on_fill:
             named = sorted(
                 {
@@ -2984,6 +3027,13 @@ def process_image(
             os.path.dirname(image_path), f"{image_stem(image_path)}.keymap.json"
         )
     )
+    # P(road), where a cached map exists, settles the yellow-band labels the colour
+    # rule spares wholesale (#127/#278). Absent, the filter behaves exactly as before.
+    road_prob = None
+    if not (keep_labels_on_fill or is_keymap_page):
+        from mapsnap.edge_join_experiment import load_prob
+
+        road_prob = load_prob(Path(os.path.dirname(image_path)), image_stem(image_path))
 
     features = prepare_label_features(
         labels_path,
@@ -2996,6 +3046,7 @@ def process_image(
         edge_margin=edge_margin,
         high_confidence_size_fraction=high_confidence_size_fraction,
         keep_labels_on_fill=keep_labels_on_fill or is_keymap_page,
+        road_prob=road_prob,
         collinear_perp_tolerance_px=collinear_perp_tolerance_px,
     )
 
