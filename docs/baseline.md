@@ -65,7 +65,10 @@ lets snap resurrect a whole-page fit for a page that no longer exists whole.
 
 **Lane A owns OCR and is serial.** Two concurrent EasyOCR jobs bog the machine
 down; never run two. **Lane B fits** each volume as lane A releases it, which
-is safe to overlap because a fit only reads its own volume.
+is safe to overlap because a fit only reads its own volume. A fit does not
+monopolise the GPU the way OCR does, so **the fit lane can run two at a
+time** — useful when it falls behind, and the right shape for a parameter
+sweep, where every job is a fit.
 
 Single-lane runs cost roughly double: on 2026-08-10, washington_dc took 29 min
 and kansas_city 69 min end to end, and the fit half of each was pure blocking
@@ -91,6 +94,12 @@ whether a change generalizes, and a champaign (41 pages) plus a brooklyn (65)
 plus a nashville (74) in the time one washington_dc (159) takes is three
 independent readings instead of one. Save the big volumes for the tail, when
 you already know roughly what you are looking at.
+
+**A marker file must mean the step succeeded, not that it ran.** Gate the
+release on the exit code. A lane A whose `rerun` failed but still marked its
+volume ready leaves the fit lane fitting whatever `streets.json` was on disk
+from an earlier run — which produces *plausible* wrong numbers rather than
+obviously wrong ones. This cost most of a night on 2026-08-10.
 
 Score each volume as it lands rather than only at the end — a change that goes
 badly wrong is visible in the first two or three volumes, and there is no point
