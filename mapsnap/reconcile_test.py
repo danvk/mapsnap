@@ -8,8 +8,8 @@ import numpy as np
 import pytest
 
 from mapsnap.reconcile import (
+    KEEP_PRIOR,
     UNPLACED,
-    W_INCUMBENT,
     Hypothesis,
     PageNode,
     build_edges,
@@ -134,21 +134,27 @@ def test_dedupe_merges_near_identical_and_keeps_max_gcps():
 
 
 def test_unplaced_bar():
-    # A junk 1-GCP pose scoring under the keep-bar loses to UNPLACED even as
-    # the published pose (fargo p63__4: verification -0.14); a real fit wins.
-    weak = scored("georef", affine(0), verification=0.1, gcps=1, published=True)
+    # A junk 1-GCP pose with no P(road) support loses to UNPLACED even as the
+    # published pose (fargo p63__4: verification -0.14, a bucket measuring
+    # 0.224 good land against 0.224 disaster land); a real fit wins easily.
+    weak = scored("georef", affine(0), verification=-0.14, gcps=1, published=True)
     strong = scored("georef", affine(0), verification=1.8, gcps=4, published=True)
     unplaced = scored(UNPLACED, None, 0.0)
     assert weak.unary > unplaced.unary
     assert strong.unary < unplaced.unary
 
 
-def test_incumbent_epsilon_breaks_ties_only():
-    published = scored("georef", affine(0), verification=1.5, published=True)
-    tie_rival = scored("snap:0", affine(300), verification=1.5)
-    clear_rival = scored("snap:1", affine(600), verification=1.5 + W_INCUMBENT + 0.2)
-    assert published.unary < tie_rival.unary  # epsilon holds the tie
-    assert clear_rival.unary < published.unary  # a real winner still flips
+def test_keep_prior_defends_by_measured_support():
+    # The published pose's protection is its MEASURED expected value, not a
+    # flat epsilon: a 4+ GCP fit whose P(road) says nothing still carries 0.57
+    # (the corpus rate at which such poses are good), while a 1-GCP fit in the
+    # same situation carries ~0 — that bucket is a genuine coin flip.
+    strong = scored("georef", affine(0), verification=-0.45, gcps=5, published=True)
+    weak = scored("georef", affine(0), verification=-0.45, gcps=1, published=True)
+    unplaced = scored(UNPLACED, None, 0.0)
+    assert strong.unary < unplaced.unary  # kept on its prior
+    assert weak.unary > unplaced.unary  # no evidence, no prior, no keep
+    assert KEEP_PRIOR[("4+", False)] > KEEP_PRIOR[("0-1", False)]
 
 
 def test_pose_scale_log2_tracks_scale():
@@ -273,28 +279,20 @@ def test_stamp_factor_scale_aware():
     assert coarse < fine
 
 
-def test_sibling_overlap_blocks_same_ground():
-    # Two panels of one sheet posed on the same ground: the joint solve sends
-    # the weaker one to UNPLACED. Panels elsewhere pay nothing.
+def test_no_sibling_factor_between_panels():
+    # Split panels are separate maps sharing a sheet; they may legitimately
+    # depict overlapping ground (a small inset detailing an area the large
+    # panel also covers — kansas_city p526, both fits correct). No edge is
+    # created between siblings, so overlap costs them nothing.
     strong = scored("georef", affine(0), verification=1.9, gcps=4)
-    # Above the abstention bar on their own (unary < 0), so only the overlap
-    # factor can push the same-ground one out.
-    weak_same_ground = scored("snap:0", affine(30), verification=1.6, gcps=1)
-    weak_elsewhere = scored("snap:0", affine(5 * PAGE_EAST_M), verification=1.6, gcps=1)
+    inset = scored("georef", affine(30), verification=1.6, gcps=1)
     nodes = {
         "p9__1": make_node("p9__1", [strong, scored(UNPLACED, None, 0)], base="p9"),
-        "p9__2": make_node(
-            "p9__2", [weak_same_ground, scored(UNPLACED, None, 0)], base="p9"
-        ),
+        "p9__2": make_node("p9__2", [inset, scored(UNPLACED, None, 0)], base="p9"),
     }
-    edges = build_edges(nodes, {})
-    assert edges == [("sibling", "p9__1", "p9__2")]
-    assignment = solve(nodes, edges, {}, 0.0, (-74.0, LAT0))
-    assert nodes["p9__2"].hypotheses[assignment["p9__2"]].source == UNPLACED
-    # Same panel posed far away: kept.
-    nodes["p9__2"].hypotheses[0] = weak_elsewhere
-    assignment = solve(nodes, edges, {}, 0.0, (-74.0, LAT0))
-    assert nodes["p9__2"].hypotheses[assignment["p9__2"]].source == "snap:0"
+    assert build_edges(nodes, {}) == []
+    assignment = solve(nodes, [], {}, 0.0, (-74.0, LAT0))
+    assert nodes["p9__2"].hypotheses[assignment["p9__2"]].source == "georef"
 
 
 def test_solve_deterministic_under_permutation():

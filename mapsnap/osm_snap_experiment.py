@@ -1812,6 +1812,15 @@ REFINE_VER_MARGIN = 0.05
 # 406 ft. Weak incumbents must fall through to the calibrated rung_flip /
 # keep-incumbent paths instead.
 REFINE_MIN_EFFECTIVE_GCPS = 2
+# ... and the challenger's own verification must be informative, not merely
+# larger. Verification is inlier_frac + ncc_fine - chamfer/clamp; a negative
+# value means the posed road skeleton lands further from OSM than the clamp
+# allows, i.e. P(road) does not support this pose (nor, usually, any pose on
+# that page). Comparing two negatives with a margin is arithmetic on noise:
+# richmond p380 replaced a 16 ft fit (14 GCPs, name 8/9) with a 65 ft pose on
+# -0.154 vs -0.249. Corpus-wide this gate touches exactly one adoption of 605
+# (#291), and that one is the loss.
+REFINE_MIN_VERIFICATION = 0.0
 
 
 def refine_adoption(record: dict, margin: float = REFINE_VER_MARGIN) -> dict | None:
@@ -1843,6 +1852,8 @@ def refine_adoption(record: dict, margin: float = REFINE_VER_MARGIN) -> dict | N
     top_verification = top.get("verification")
     if incumbent_verification is None or top_verification is None:
         return None
+    if top_verification <= REFINE_MIN_VERIFICATION:
+        return None  # the challenger's own evidence is absent (#291)
     if top_verification <= incumbent_verification + margin:
         return None
     disagreement = grid_rmse_ft_between(
