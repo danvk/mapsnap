@@ -19,7 +19,8 @@ Per volume:
      (a detected key map with no raw scan is skipped with a warning — downloading is out of
      scope here), including that assignment repair;
   7. ``mapsnap ocr`` re-recognizes every page (panels supersede their parent),
-     auto-discovering the georeferenced key maps;
+     auto-discovering the georeferenced key maps; ``--recognizer-weights``
+     swaps in fine-tuned weights and forces a full re-read;
   8. ``mapsnap fit --tag <tag>`` georeferences, runs the geometry-first snap
      channel (rescue/arbitrate/refine), builds the IIIF AnnotationPage, and
      compares against truth.
@@ -41,7 +42,9 @@ from mapsnap.keymap.records import recorded_keymap_keys
 from mapsnap.utils import Step, list_pages, run_cmd
 
 
-def rerun_volume(volume: Path, tag: str, force: bool) -> None:
+def rerun_volume(
+    volume: Path, tag: str, force: bool, recognizer_weights: str | None = None
+) -> None:
     """Run the six re-run steps for one volume (raises SystemExit on step failure)."""
     if not (volume / "mapsnap.json").exists():
         sys.exit(
@@ -97,11 +100,19 @@ def rerun_volume(volume: Path, tag: str, force: bool) -> None:
 
     with step(f"rerun-{tag}-ocr"):
         images = [str(p) for p in list_pages(volume)]
+        # Changing the recognizer changes every read, so --resume (which skips
+        # any page that already has a .streets.json) must not be passed: the
+        # cached reads came from different weights.
+        resume = [] if recognizer_weights else ["--resume"]
+        weights = (
+            ["--recognizer-weights", recognizer_weights] if recognizer_weights else []
+        )
         run_cmd(
             [
                 "mapsnap",
                 "ocr",
-                "--resume",
+                *resume,
+                *weights,
                 "--centerlines",
                 str(centerlines),
                 *images,
@@ -130,13 +141,22 @@ def main() -> None:
         action="store_true",
         help="Redo steps whose rerun stamps say they already completed.",
     )
+    parser.add_argument(
+        "--recognizer-weights",
+        default=None,
+        metavar="PT",
+        help=(
+            "Fine-tuned recognizer weights to pass to `mapsnap ocr` (#265). "
+            "Implies a full re-OCR: cached reads came from other weights."
+        ),
+    )
     args = parser.parse_args()
 
     failures: list[str] = []
     for volume in args.volumes:
         print(f"\n=== {volume} ===", flush=True)
         try:
-            rerun_volume(volume, args.tag, args.force)
+            rerun_volume(volume, args.tag, args.force, args.recognizer_weights)
         except SystemExit as exit_info:
             print(
                 f"FAILED {volume}: {exit_info.code}",
