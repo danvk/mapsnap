@@ -139,6 +139,15 @@ def main() -> None:
         help="Human-readable name recorded alongside the run id in the manifest.",
     )
     parser.add_argument(
+        "--reconcile",
+        action="store_true",
+        help=(
+            "Publish through the reconcile arbiter (#270): after the channels "
+            "run, weigh all their poses jointly and publish the winners. "
+            "Report-only without this flag."
+        ),
+    )
+    parser.add_argument(
         "--no-snap",
         action="store_true",
         help=(
@@ -205,6 +214,14 @@ def main() -> None:
         # with) the snap channel; skipped with --no-snap for the same reason.
         run_cmd(["mapsnap", "street-solve", str(dir_path)])
 
+    # The arbiter (#270): weigh every pose the channels produced -- including
+    # the ones they rejected -- against each other and against not publishing
+    # at all, jointly across the volume. Its pN.georef-reconcile.json sidecars
+    # take top priority in the glob below, and a page it arbitrates to
+    # unplaced leaves a marker that suppresses the channel sidecars entirely.
+    if args.reconcile:
+        run_cmd(["mapsnap", "reconcile", str(dir_path), "--publish"])
+
     output_iiif = dir_path / f"{run_id}.iiif.json"
     # Pass the glob as a literal string; make_iiif_georef does its own glob
     # expansion (first glob wins per page, so the channel priority is
@@ -216,6 +233,11 @@ def main() -> None:
             f"{dir_path / '*.georef-streets.json'},"
             f"{dir_path / '*.georef-osm.json'},{dir_path / '*.georef.json'}"
         )
+    if args.reconcile:
+        # Reconcile's sidecars win over every channel. Pages it arbitrated to
+        # unplaced have had their channel sidecars renamed aside by `publish`,
+        # so no glob entry matches them at all.
+        georef_glob = f"{dir_path / '*.georef-reconcile.json'},{georef_glob}"
     run_cmd(
         [
             "mapsnap",

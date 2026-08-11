@@ -354,3 +354,42 @@ def test_keep_bar_is_lower_than_enter_bar():
     assert kept.unary < unplaced.unary
     assert entrant.unary > unplaced.unary
     assert strong_entrant.unary < unplaced.unary
+
+
+def test_publish_writes_sidecars_and_holds_unplaced(tmp_path):
+    # --publish is the only mode that writes to the volume root: chosen poses
+    # become pN.georef-reconcile.json (top of fit's glob), and a page
+    # arbitrated to unplaced has its channel sidecars renamed aside, since a
+    # glob can only skip a page that has no sidecar at all.
+    from mapsnap.reconcile import publish
+
+    write_sidecar(tmp_path, "p1", "georef", georef_doc(affine(0)))
+    write_sidecar(tmp_path, "p2", "georef-osm", georef_doc(affine(500)))
+    keep = make_node("p1", [scored("georef", affine(0), verification=1.9, gcps=4)])
+    drop = make_node(
+        "p2",
+        [
+            scored("georef-osm", affine(500), verification=0.1),
+            scored(UNPLACED, None, 0),
+        ],
+    )
+    written, unplaced = publish(tmp_path, {"p1": keep, "p2": drop}, {"p1": 0, "p2": 1})
+    assert (written, unplaced) == (1, 1)
+    assert (tmp_path / "p1.georef-reconcile.json").exists()
+    assert not (tmp_path / "p2.georef-reconcile.json").exists()
+    # p2's channel sidecar is held aside, so no glob entry can match it...
+    assert not (tmp_path / "p2.georef-osm.json").exists()
+    assert (tmp_path / "p2.georef-osm-reconcile-held.json").exists()
+    # ...and both live under fit's clear-glob, so the next run starts clean.
+    assert len(list(tmp_path.glob("p*.georef*.json"))) == 3
+
+
+def test_publish_records_provenance(tmp_path):
+    from mapsnap.reconcile import publish
+
+    write_sidecar(tmp_path, "p1", "georef", georef_doc(affine(0)))
+    node = make_node("p1", [scored("georef", affine(0), verification=1.9, gcps=4)])
+    publish(tmp_path, {"p1": node}, {"p1": 0})
+    doc = json.loads((tmp_path / "p1.georef-reconcile.json").read_text())
+    assert doc["reconcile"]["source"] == "georef"
+    assert "terms" in doc["reconcile"] and "corners" in doc
