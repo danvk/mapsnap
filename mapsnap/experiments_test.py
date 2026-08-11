@@ -112,19 +112,34 @@ def test_gather_inputs_no_truth(tmp_path):
     assert inputs["boxes_sha"] is None
 
 
-def test_coverage_counts_classifies_variants(tmp_path):
+POSED = {"corners": [[0, 1], [1, 1], [1, 0], [0, 0]], "width": 10, "height": 10}
+
+
+def test_coverage_counts_classifies_verdicts(tmp_path):
+    # Every page has a p<stem>.georef.json since #270 phase 3, so the counts
+    # must read each one's recorded verdict. Counting FILES reported all three
+    # of these as georeferenced and every verdict as zero.
     for stem in ("p1", "p2", "p3"):
         (tmp_path / f"{stem}.jpg").touch()
-    _write(tmp_path / "p1.georef.json", "{}")
-    _write(tmp_path / "p2.georef-misscale.json", "{}")
-    _write(tmp_path / "p3.georef-1gcp.json", "{}")
+    _write(tmp_path / "p1.georef.json", json.dumps(POSED))
+    _write(tmp_path / "p2.georef.json", json.dumps({**POSED, "status": "misscale"}))
+    _write(tmp_path / "p3.georef.json", json.dumps({**POSED, "status": "1gcp"}))
 
     counts = coverage_counts(tmp_path)
     assert counts["pages"] == 3
     assert counts["georeferenced"] == 1
     assert counts["misscale"] == 1
-    assert counts["deferred_unconfirmed"] == 1
+    assert counts["1gcp"] == 1
     assert counts["outlier"] == 0
+
+
+def test_coverage_counts_poseless_sidecar_is_not_georeferenced(tmp_path):
+    # A neighborhood-only sidecar records that georef was asked and had no
+    # answer; it must not count as a fit just because the file exists.
+    (tmp_path / "p1.jpg").touch()
+    _write(tmp_path / "p1.georef.json", json.dumps({"status": "nofit", "keymap": {}}))
+    counts = coverage_counts(tmp_path)
+    assert counts["georeferenced"] == 0 and counts["nofit"] == 1
 
 
 # --- manifest ---
@@ -132,7 +147,7 @@ def test_coverage_counts_classifies_variants(tmp_path):
 
 def test_build_manifest_coverage_only_without_truth(tmp_path):
     (tmp_path / "p1.jpg").touch()
-    _write(tmp_path / "p1.georef.json", "{}")
+    _write(tmp_path / "p1.georef.json", json.dumps(POSED))
     manifest = build_manifest(
         tmp_path,
         run_id="abc-123",

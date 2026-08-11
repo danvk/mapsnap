@@ -24,6 +24,7 @@ import subprocess
 import sys
 from pathlib import Path
 
+from mapsnap import sidecar
 from mapsnap.compare_iiif_georef import compare_pages
 from mapsnap.score import summarize, volume_page_scores
 from mapsnap.utils import default_centerlines, list_pages
@@ -34,12 +35,11 @@ ARTIFACTS_DIRNAME = "artifacts"
 # config hash — otherwise `-j2` and `-j1` would fragment a shared baseline into two archives.
 HASH_EXCLUDED_VALUE_FLAGS = frozenset({"--num-workers"})
 
-# Suffixes distinguishing the non-canonical georef variants the pipeline can emit.
-GEOREF_VARIANT_SUFFIXES = {
-    "misscale": "-misscale",
-    "outlier": "-outlier",
-    "deferred_unconfirmed": "-1gcp",
-}
+# Verdicts georef can record against its own pose (mapsnap.sidecar). These were
+# filename suffixes until #270 phase 3; counting them by glob now silently
+# reports zero, since every page has exactly one p<stem>.georef.json whatever
+# the verdict inside it.
+COUNTED_VERDICTS = ("misscale", "outlier", "1gcp", "keymap-outlier", "nofit")
 
 
 def file_sha256(path: Path) -> str:
@@ -161,16 +161,30 @@ def auto_run_id(git_sha: str, config_hash: str) -> str:
 def coverage_counts(dir_path: Path) -> dict:
     """Count pages and georef outcomes from the live sidecar files in ``dir_path``.
 
-    ``georeferenced`` counts canonical ``p*.georef.json``; the variant suffixes
-    (``-misscale`` / ``-outlier`` / ``-1gcp``) are counted under their status names.
-    ``pages`` is the number of effective input page images.
+    ``georeferenced`` counts pages whose RANSAC sidecar holds a pose georef
+    STANDS BEHIND, and each verdict is counted under its own name. Both read
+    the recorded status rather than the filename: after #270 phase 3 every page
+    has a ``p<stem>.georef.json`` whatever georef concluded about it, so
+    counting files reported every page as georeferenced and every verdict as
+    zero. ``pages`` is the number of effective input page images.
     """
-    counts = {
+    counts: dict[str, int] = {
         "pages": len(list_pages(dir_path)),
-        "georeferenced": len(list(dir_path.glob("p*.georef.json"))),
+        "georeferenced": 0,
     }
-    for status, suffix in GEOREF_VARIANT_SUFFIXES.items():
-        counts[status] = len(list(dir_path.glob(f"p*.georef{suffix}.json")))
+    for verdict in COUNTED_VERDICTS:
+        counts[verdict] = 0
+    for path in dir_path.glob("p*.georef.json"):
+        try:
+            doc = json.loads(path.read_text())
+        except (OSError, ValueError):
+            continue
+        if sidecar.accepted(doc):
+            counts["georeferenced"] += 1
+        else:
+            verdict = sidecar.status(doc)
+            if verdict in counts:
+                counts[verdict] += 1
     return counts
 
 
@@ -430,7 +444,7 @@ def diff_volume(man_a: dict, man_b: dict) -> dict:
     cov_b = man_b.get("metrics", {})
     coverage = {
         key: cov_b.get(key, 0) - cov_a.get(key, 0)
-        for key in ("georeferenced", *GEOREF_VARIANT_SUFFIXES)
+        for key in ("georeferenced", *COUNTED_VERDICTS)
     }
 
     truth_a = (cov_a.get("truth") or {}).get("per_page", {})

@@ -3002,7 +3002,10 @@ def prepare_label_features(
         # map to the *same list object* in block_index (set by build_block_index), so
         # id() detects them as duplicates and keeps only the longest (most specific) name.
         seen_block_ids: set[int] = set()
-        for canonical in sorted(canonicals, key=len, reverse=True):
+        # Longest (most specific) name first, ties broken by name: equal-length
+        # aliases map to the same block list, so which one survives the id()
+        # dedup below is decided here -- by hash order, until #299.
+        for canonical in sorted(canonicals, key=lambda c: (-len(c), c)):
             bid = id(block_index[canonical])
             if bid in seen_block_ids:
                 continue

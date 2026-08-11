@@ -258,3 +258,24 @@ def test_printed_letters_ignores_punctuation_and_spaces():
     assert printed_letters("CLYDE") == 5
     assert printed_letters("VAN BRUNT") == 8
     assert printed_letters("3RD") == 3
+
+
+def test_canonical_street_matches_returns_sorted():
+    """Matches come back sorted, so callers can break ties deterministically.
+
+    ``normalized_streets`` is a set, so its iteration order is Python's
+    per-process string hash order and there is no order to preserve -- sorting
+    is the only way the return can be stable. Returning it unsorted made the
+    whole fit pipeline non-reproducible across runs (#299): callers rank
+    candidates by length, and equal-length names then tied and resolved by
+    hash. Miami fitted 83 pages one run and 82 the next, moving that volume's
+    score by 5.5 points.
+    """
+    names = {
+        "NORTHWEST FIRST AVENUE",
+        "SOUTHEAST FIRST STREET",
+        "SOUTHWEST FIRST AVENUE",
+        "NORTHEAST FIRST STREET",
+    }
+    assert len({len(n) for n in names}) == 1, "the tie is the point: all equal length"
+    assert canonical_street_matches("FIRST", names) == sorted(names)

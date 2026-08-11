@@ -465,10 +465,17 @@ def canonical_street_matches(
     """Return all keys from normalized_streets that match text.
 
     Returns every key with at least one prefix-compatible candidate matching
-    normalize_street(text). Collects all matches rather than returning whichever
-    the set iteration yields first, eliminating nondeterminism when a bare label
-    (e.g. "CLINTON") could match multiple full names (e.g. "CLINTON AVENUE" and
-    "CLINTON STREET").
+    normalize_street(text), SORTED. Collects all matches rather than returning
+    whichever the set iteration yields first, eliminating nondeterminism when a
+    bare label (e.g. "CLINTON") could match multiple full names (e.g. "CLINTON
+    AVENUE" and "CLINTON STREET").
+
+    The sort matters as much as the collection. ``normalized_streets`` is a set,
+    so the order matches come out in is Python's per-process string hash order:
+    returning them unsorted made the whole pipeline non-reproducible across
+    runs (#299) even though the SET of matches was stable. Callers rank these
+    by length, and equal-length names -- "NORTHWEST FIRST AVENUE" against
+    "SOUTHEAST FIRST STREET" -- then tied and resolved by hash.
 
     When normalization expands a direction abbreviation (e.g. "W"→"WEST") and the
     raw text is itself a known alias (e.g. "W" for "AVENUE W"), only that alias is
@@ -494,7 +501,7 @@ def canonical_street_matches(
                 and s[prefix_len:].split(" ", 1)[0] in STREET_TYPES
             ):
                 matches.append(s)
-        return matches
+        return sorted(matches)
     matches: list[str] = []
     for s in normalized_streets:
         for candidate in _match_candidates(s):
@@ -508,7 +515,7 @@ def canonical_street_matches(
             ):
                 matches.append(s)
                 break  # count each key at most once
-    return matches
+    return sorted(matches)
 
 
 def polygon_side_lengths(polygon: list[list[int]]) -> list[float]:
