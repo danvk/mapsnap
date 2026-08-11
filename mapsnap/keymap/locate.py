@@ -18,6 +18,7 @@ from pathlib import Path
 
 import numpy as np
 
+from mapsnap import sidecar
 from mapsnap.feature_index import FeatureIndex
 from mapsnap.keymap.fit_keymap import (
     key_stem,
@@ -138,9 +139,11 @@ def usable_keymaps(directory: Path) -> list[Path]:
     """Key-map detections files in one directory that a locator can actually load.
 
     A key map whose own georeferencing failed leaves a bare ``<stem>.keymap.json``
-    beside a ``-misscale``/``-nofit`` sidecar rather than the ``<stem>.georef.json``
+    beside a sidecar that records a demotion rather than the accepted pose
     :func:`KeymapLocator.from_keymap` reads, so it is skipped here instead of
-    raising when the locator gets around to opening it.
+    raising when the locator gets around to opening it. The check is on the
+    recorded verdict, not the file's existence: a demoted sidecar is still on
+    disk (#270 phase 3).
 
     Deliberately not filtered by scan resolution: osm-snap and street-solve build
     locators through here and get real value from a low-resolution sheet even when
@@ -149,8 +152,16 @@ def usable_keymaps(directory: Path) -> list[Path]:
     return [
         keymap_json
         for keymap_json in sorted(directory.glob("*.keymap.json"))
-        if keymap_georef_path(keymap_json).exists()
+        if _georef_accepted(keymap_georef_path(keymap_json))
     ]
+
+
+def _georef_accepted(path: Path) -> bool:
+    """Whether a georef sidecar exists and holds a pose its channel stands behind."""
+    try:
+        return sidecar.accepted(json.loads(path.read_text()))
+    except (OSError, ValueError):
+        return False
 
 
 def foreign_key_fraction(keys: set[str], volume_keys: set[str]) -> float:

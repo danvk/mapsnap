@@ -36,7 +36,7 @@ from pathlib import Path
 import cv2
 import numpy as np
 
-from mapsnap import edge_join
+from mapsnap import edge_join, sidecar
 from mapsnap.compare_iiif_georef import (
     annotation_transform_type,
     extract_gcps,
@@ -186,13 +186,33 @@ def load_truth_units(volume: Path) -> tuple[dict[str, dict], set[str]]:
     return unsplit, split_parents
 
 
+# Verdicts that GEOREF_VARIANTS never listed, so a page carrying one used to
+# fall through page_fit_state to ("none", None): rescue-eligible, and denied the
+# key-map centers in its own sidecar. Preserved here deliberately -- collapsing
+# the variants into one file must not quietly change what snap searches (#270
+# phase 3). Withholding a key-map prior from a page demoted FOR being far from
+# its key map is worth revisiting, but as its own measured change.
+LEGACY_UNLISTED_VERDICTS = ("keymap-outlier", "contradicted")
+
+
 def page_fit_state(volume: Path, stem: str) -> tuple[str, dict | None]:
-    """(fit state, georef-variant JSON) for a base page stem."""
-    for variant in GEOREF_VARIANTS:
+    """(fit state, georef JSON) for a base page stem.
+
+    The state is the verdict recorded in ``p<stem>.georef.json``; "fitted"
+    means georef stands behind the pose. Older volumes encoded the verdict as a
+    filename suffix instead, so those are still recognized.
+    """
+    path = volume / f"{stem}.georef.json"
+    if path.exists():
+        doc = json.loads(path.read_text())
+        state = sidecar.status(doc)
+        if state in LEGACY_UNLISTED_VERDICTS:
+            return "none", None
+        return ("fitted" if state == sidecar.ACCEPTED else state), doc
+    for variant in GEOREF_VARIANTS[1:]:  # legacy renamed-aside layout
         path = volume / f"{stem}.{variant}.json"
         if path.exists():
-            state = variant.removeprefix("georef-") if "-" in variant else "fitted"
-            return state, json.loads(path.read_text())
+            return variant.removeprefix("georef-"), json.loads(path.read_text())
     # Split pieces (p239__1.georef*.json) mean the base page was split.
     if list(volume.glob(f"{stem}__*.georef*.json")):
         return "split", None

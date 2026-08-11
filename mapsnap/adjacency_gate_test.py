@@ -3,6 +3,7 @@ from pathlib import Path
 
 import pytest
 
+from mapsnap import sidecar
 from mapsnap.adjacency_gate import (
     arbitrate_suspects,
     contradiction_centers,
@@ -91,8 +92,14 @@ def test_displaced_weak_page_is_demoted_with_hints(tmp_path):
     assert abs(lat - (LAT0 - 0.004)) < 1e-6
 
     demote(volume, pages["p3"], verdict)
-    assert not (volume / "p3.georef.json").exists()
-    assert (volume / "p3.georef-contradicted.json").exists()
+    # The pose stays in its own sidecar; what changes is that georef no longer
+    # claims it, so it stops counting as a published fit and the arbiter can
+    # still weigh it (with the contradiction against it).
+    doc = json.loads((volume / "p3.georef.json").read_text())
+    assert sidecar.status(doc) == sidecar.CONTRADICTED
+    assert not sidecar.accepted(doc)
+    assert doc["status_detail"]["reason"] == "uncorroborated"
+    assert doc["corners"]
     centers = contradiction_centers(volume, "p3")
     assert len(centers) == 1 and abs(centers[0][0] - lon) < 1e-9
     assert contradiction_centers(volume, "p2") == []

@@ -23,8 +23,8 @@ this combination names the wrong page on 18 of 19 decidable contradictions and
 demotes 10 true disasters against one false demotion (Nashville p8, a genuine
 odd-scale sheet whose five mutual edges are all junk single-digit reciprocation).
 
-Demotion renames every channel sidecar (pN.georef*.json ->
-pN.<channel>-contradicted.json, invisible to the IIIF globs) and writes
+Demotion records ``status: contradicted`` on every channel sidecar the page has
+-- the pose stays where it is, the channel simply stops claiming it -- and writes
 pN.contradiction.json carrying the partner-side stamp positions — the trusted
 neighbors' printed claims of this page, each a world point on the shared seam.
 Snap's rescue reads those as extra search centers (see build_page_context), so a
@@ -49,6 +49,7 @@ from pathlib import Path
 
 import numpy as np
 
+from mapsnap import sidecar
 from mapsnap.keymap.locate import page_key
 from mapsnap.road_model import effective_gcp_count, page_world_affine
 from mapsnap.utils import haversine_m
@@ -107,6 +108,14 @@ class Verdict:
     partners: list[dict] = field(default_factory=list)  # re-search hints
 
 
+def _accepted(path: Path) -> bool:
+    """Whether a channel sidecar holds a pose its channel stands behind."""
+    try:
+        return sidecar.accepted(json.loads(path.read_text()))
+    except (OSError, ValueError):
+        return False
+
+
 def load_fitted_pages(volume: Path, adjacency: dict) -> dict[str, FittedPage]:
     """Parent pages with a published fit, keyed by stem.
 
@@ -117,10 +126,12 @@ def load_fitted_pages(volume: Path, adjacency: dict) -> dict[str, FittedPage]:
     """
     pages: dict[str, FittedPage] = {}
     for stem in adjacency.get("pages", {}):
+        # A channel sidecar exists whether or not the channel stands behind its
+        # pose, so "published" is the recorded verdict, not the file's presence.
         paths = [
-            volume / f"{stem}.{channel}.json"
+            path
             for channel in CHANNELS
-            if (volume / f"{stem}.{channel}.json").exists()
+            if (path := volume / f"{stem}.{channel}.json").exists() and _accepted(path)
         ]
         if not paths:
             continue
@@ -276,9 +287,13 @@ def arbitrate_suspects(adjacency: dict, pages: dict[str, FittedPage]) -> list[Ve
 
 
 def demote(volume: Path, page: FittedPage, verdict: Verdict) -> None:
-    """Rename the page's channel sidecars and write the re-search hint file."""
+    """Record the contradiction on the page's channel sidecars, write the hint file."""
     for path in page.channel_paths:
-        path.rename(path.with_name(path.name[: -len(".json")] + "-contradicted.json"))
+        sidecar.demote(
+            path,
+            sidecar.CONTRADICTED,
+            {"reason": verdict.reason, "signal": verdict.signal},
+        )
     hint = {
         "timestamp": datetime.now(UTC).isoformat(),
         "reason": verdict.reason,

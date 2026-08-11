@@ -30,6 +30,7 @@ import numpy as np
 from PIL import Image
 from tqdm import tqdm
 
+from mapsnap import sidecar
 from mapsnap.compare_iiif_georef import truth_distortion, truth_polygons_by_page
 from mapsnap.keymap.locate import (
     KeymapLocator,
@@ -243,6 +244,19 @@ def fit_keymap_affine(
 
 
 _FT_PER_DEG_LAT: float = math.pi * 20_925_524.0 / 180.0  # feet per degree latitude
+
+
+def _restore_demoted(output_path: str, demoted_doc: dict) -> None:
+    """Put a demoted pose back as the page's sidecar after a retry lost to it."""
+    Path(output_path).write_text(json.dumps(demoted_doc, indent=2))
+
+
+def _accepted(georef_path: str) -> bool:
+    """Whether a georef sidecar on disk holds a pose this channel stands behind."""
+    try:
+        return sidecar.accepted(json.loads(Path(georef_path).read_text()))
+    except (OSError, json.JSONDecodeError):
+        return False
 
 
 def _dist_km(a: tuple[float, float], b: tuple[float, float]) -> float:
@@ -2343,6 +2357,10 @@ def _process_one_image(image_path: str) -> tuple[str, ProcessResult]:
     labels_path, output_path, log_path = derive_paths(image_path)
     if os.path.exists(output_path):
         os.remove(output_path)
+    # Legacy cleanup: these verdicts are recorded inside p<stem>.georef.json now,
+    # but a volume last fitted by an older build still has the renamed-aside
+    # files, and the arbiter globs p<stem>.georef*.json — a leftover would enter
+    # as a duplicate hypothesis of a pose this run has superseded.
     for stale_suffix in (
         ".georef-misscale.json",
         ".georef-outlier.json",
@@ -2510,12 +2528,22 @@ def _process_one_image(image_path: str) -> tuple[str, ProcessResult]:
                                 f"the key-map location ({distance_m / radius_m:.1f}x the "
                                 f"{radius_m:.0f} m radius) despite confident in-radius streets"
                             )
-                            # Keep the fit as a key-map-outlier sidecar (it records where the
-                            # page was wrongly placed) instead of a plain georef.json.
-                            outlier_path = output_path.replace(
-                                ".georef.json", ".georef-keymap-outlier.json"
+                            # Keep the pose (it records where the page was wrongly
+                            # placed) but stop claiming it: the arbiter weighs this
+                            # pose against the others, and for the p55 class it is
+                            # sometimes the right one.
+                            sidecar.demote(
+                                output_path,
+                                sidecar.KEYMAP_OUTLIER,
+                                {
+                                    "distance_m": round(distance_m),
+                                    "radius_m": round(radius_m),
+                                },
                             )
-                            os.replace(output_path, outlier_path)
+                            # Hold the demoted pose in memory: the retry below
+                            # writes over the same sidecar, and whichever pose
+                            # loses still has to survive for the arbiter.
+                            demoted_doc = json.loads(Path(output_path).read_text())
                             # Failure with nofit_written set: the page stays unplaced and the
                             # redundant nofit sidecar is suppressed (the outlier one stands in).
                             result = ProcessResult(success=False, nofit_written=True)
@@ -2534,7 +2562,11 @@ def _process_one_image(image_path: str) -> tuple[str, ProcessResult]:
                                 size_fraction=KEYMAP_RETRY_SIZE_FRACTION,
                             )
                             if retried.success:
-                                rejected_inliers = _doc_inlier_count(outlier_path)
+                                rejected_inliers = sum(
+                                    1
+                                    for street in demoted_doc.get("streets") or []
+                                    if street.get("inlier")
+                                )
                                 retried_inliers = _doc_inlier_count(output_path)
                                 retried_scale = (
                                     deg_per_px_to_px_per_ft(retried.scale_deg_per_px)
@@ -2554,22 +2586,24 @@ def _process_one_image(image_path: str) -> tuple[str, ProcessResult]:
                                         f"{retried_scale / prior:.2f}x the key-map "
                                         f"region prior {prior:.3f} px/ft"
                                     )
-                                    if os.path.exists(output_path):
-                                        os.remove(output_path)
+                                    _restore_demoted(output_path, demoted_doc)
                                 elif retried_inliers < rejected_inliers:
                                     print(
                                         "  rejecting in-radius retry: "
                                         f"{retried_inliers} inliers < the rejected "
                                         f"fit's {rejected_inliers}"
                                     )
-                                    if os.path.exists(output_path):
-                                        os.remove(output_path)
+                                    _restore_demoted(output_path, demoted_doc)
                                 else:
                                     print(
                                         "  accepting in-radius retry: "
                                         f"{retried_inliers} inliers >= the rejected "
                                         f"fit's {rejected_inliers}"
                                     )
+                                    # The retry's pose is the channel's answer;
+                                    # the key-map outlier rides along as a
+                                    # rejected pose for the arbiter to weigh.
+                                    sidecar.attach_rejected(output_path, [demoted_doc])
                                     result = retried
                         else:
                             result = broadened
@@ -2581,17 +2615,22 @@ def _process_one_image(image_path: str) -> tuple[str, ProcessResult]:
     if result.deferred is not None:
         result.deferred["log_path"] = log_path
     # A key-map-placed page that produced neither a fit nor a deferred sidecar leaves no georef
-    # file at all. Write a minimal .georef-nofit.json holding just the neighborhood so the
-    # debugger can still show where the key map expected this page. Skip this when process_image
-    # already wrote a richer --debug nofit sidecar (with seed-pair fits) to the same path.
+    # file at all. Write a minimal sidecar holding just the neighborhood, marked nofit, so the
+    # debugger can still show where the key map expected this page and the arbiter can see that
+    # the channel was asked and had no answer. Skip this when process_image already wrote a
+    # richer --debug nofit sidecar (with seed-pair fits) to the same path.
     if (
         keymap is not None
         and not result.success
         and result.deferred is None
         and not result.nofit_written
     ):
-        nofit_path = output_path.replace(".georef.json", ".georef-nofit.json")
-        nofit: dict = {"keymap": keymap, "streets": [], "intersections": []}
+        nofit: dict = {
+            "status": sidecar.NOFIT,
+            "keymap": keymap,
+            "streets": [],
+            "intersections": [],
+        }
         from mapsnap.printed_scale import printed_scale_ft as _note_read
 
         _note = _note_read(Path(derive_paths(image_path)[0]))
@@ -2602,7 +2641,7 @@ def _process_one_image(image_path: str) -> tuple[str, ProcessResult]:
             }
         if truth_polygons:
             nofit["truth"] = truth_polygons
-        with open(nofit_path, "w") as f:
+        with open(output_path, "w") as f:
             json.dump(nofit, f, indent=2)
     return image_path, result
 
@@ -3110,9 +3149,9 @@ def process_image(
     if A is None:
         print("RANSAC failed: no valid affine found.", file=sys.stderr)
         # Under --debug the pipeline still scored every seed pair before rejecting them all.
-        # Surface those fits in a .georef-nofit.json so the debugger's interactive explorer
-        # can show why the page failed and let the user try each candidate. Frame the map on
-        # the best-scoring (still-rejected) pair; mark none as `initial`, since the pipeline
+        # Surface those fits, marked nofit, so the debugger's interactive explorer can show
+        # why the page failed and let the user try each candidate. Frame the map on the
+        # best-scoring (still-rejected) pair; mark none as `initial`, since the pipeline
         # selected no pair.
         scored_pairs = [rec for rec in (pair_records or []) if "affine" in rec]
         if scored_pairs:
@@ -3121,9 +3160,8 @@ def process_image(
             best_residuals = _inlier_residuals(
                 features, block_index, best_A, best["inlier_streets"]
             )
-            nofit_path = output_path.replace(".georef.json", ".georef-nofit.json")
             print(
-                f"Writing {len(scored_pairs)} rejected seed-pair fits to {nofit_path} "
+                f"Writing {len(scored_pairs)} rejected seed-pair fits to {output_path} "
                 "for the interactive debugger.",
                 file=sys.stderr,
             )
@@ -3134,11 +3172,11 @@ def process_image(
                 best["inlier_streets"],
                 best_residuals,
                 image_path,
-                nofit_path,
+                output_path,
                 labels_path,
                 centerlines_path,
                 initial_pair=None,
-                extra_fields={"nofit": True},
+                extra_fields={"nofit": True, "status": sidecar.NOFIT},
                 parameters=parameters,
                 keymap=keymap,
                 truth_polygons=truth_polygons,
@@ -3426,11 +3464,6 @@ def process_deferred_image(
         file=sys.stderr,
     )
 
-    actual_output_path = (
-        output_path
-        if decision.confirmed
-        else output_path.replace(".georef.json", ".georef-1gcp.json")
-    )
     one_gcp_extra = {
         "one_gcp": {
             "method": decision.method,
@@ -3448,7 +3481,7 @@ def process_deferred_image(
         inlier_feat_indices,
         residuals,
         image_path,
-        actual_output_path,
+        output_path,
         labels_path,
         centerlines_path,
         extra_fields=one_gcp_extra,
@@ -3456,6 +3489,15 @@ def process_deferred_image(
         keymap=keymap,
         truth_polygons=truth_polygons,
     )
+    if not decision.confirmed:
+        # The pose exists but nothing corroborated its single GCP. It stays in
+        # the page's own sidecar, unclaimed, for the arbiter to weigh against
+        # the geometry channels' poses and against leaving the page unplaced.
+        sidecar.demote(
+            output_path,
+            sidecar.ONE_GCP,
+            {"method": decision.method, "n_agree": decision.n_agree},
+        )
     return ProcessResult(
         success=decision.confirmed, scale_deg_per_px=scale, center=center
     )
@@ -4075,33 +4117,36 @@ def main() -> None:
                             file=sys.stderr,
                         )
                         continue
-                    misscale_path = out_path.replace(
-                        ".georef.json", ".georef-misscale.json"
-                    )
                     if os.path.exists(out_path):
-                        os.rename(out_path, misscale_path)
+                        sidecar.demote(
+                            out_path,
+                            sidecar.MISSCALE,
+                            {"px_per_ft": round(px_per_ft, 4), "gcps": n_gcps},
+                        )
                         n_success -= 1
                         n_dropped += 1
                         print(
                             f"Dropped scale outlier {img_path}: {px_per_ft:.4f} px/ft "
                             f"matches its PRINTED note ({note_ratio:.2f}x) but only "
-                            f"{n_gcps} inlier GCP(s) support the pose "
-                            f"-> {misscale_path}",
+                            f"{n_gcps} inlier GCP(s) support the pose",
                             file=sys.stderr,
                         )
                     continue
                 _, out_path, _ = derive_paths(img_path)
-                misscale_path = out_path.replace(
-                    ".georef.json", ".georef-misscale.json"
-                )
                 if os.path.exists(out_path):
-                    os.rename(out_path, misscale_path)
+                    sidecar.demote(
+                        out_path,
+                        sidecar.MISSCALE,
+                        {
+                            "px_per_ft": round(px_per_ft, 4),
+                            "note_ratio": round(note_ratio, 3),
+                        },
+                    )
                     n_success -= 1
                     n_dropped += 1
                     print(
                         f"Dropped scale outlier {img_path}: {px_per_ft:.4f} px/ft is "
-                        f"{note_ratio:.2f}x the page's PRINTED scale note "
-                        f"-> {misscale_path}",
+                        f"{note_ratio:.2f}x the page's PRINTED scale note",
                         file=sys.stderr,
                     )
                 continue
@@ -4124,17 +4169,22 @@ def main() -> None:
                         )
                         continue
                 _, out_path, _ = derive_paths(img_path)
-                misscale_path = out_path.replace(
-                    ".georef.json", ".georef-misscale.json"
-                )
                 if os.path.exists(out_path):
-                    os.rename(out_path, misscale_path)
+                    sidecar.demote(
+                        out_path,
+                        sidecar.MISSCALE,
+                        {
+                            "px_per_ft": round(px_per_ft, 4),
+                            "reference_px_per_ft": round(ref_scale_px_per_ft, 4),
+                            "ratio": round(ratio, 3),
+                        },
+                    )
                     n_success -= 1
                     n_dropped += 1
                     print(
                         f"Dropped scale outlier {img_path}: "
                         f"{px_per_ft:.4f} px/ft vs reference {ref_scale_px_per_ft:.4f} "
-                        f"({ratio:.2f}×) → {misscale_path}",
+                        f"({ratio:.2f}×)",
                         file=sys.stderr,
                     )
         if n_dropped:
@@ -4147,9 +4197,14 @@ def main() -> None:
     # perfectly-fit halves. Five georeferenced pages is the floor for calling
     # anything an outlier.
     if args.min_distance_for_outlier_km > 0 and len(location_records) >= 5:
-        # Only pages whose .georef.json still exists (not already renamed by scale check).
+        # Only pages RANSAC still stands behind: a page the scale check just
+        # demoted must not anchor "far from the rest" for anybody else. That
+        # used to follow from the file having been renamed away; now it is the
+        # recorded verdict that says so.
         active = [
-            (p, c) for p, c in location_records if os.path.exists(derive_paths(p)[1])
+            (p, c)
+            for p, c in location_records
+            if os.path.exists(derive_paths(p)[1]) and _accepted(derive_paths(p)[1])
         ]
         n_dropped = 0
         for img_path, center in active:
@@ -4157,13 +4212,16 @@ def main() -> None:
             min_dist_km = min(_dist_km(center, other) for other in other_centers)
             if min_dist_km > args.min_distance_for_outlier_km:
                 _, out_path, _ = derive_paths(img_path)
-                outlier_path = out_path.replace(".georef.json", ".georef-outlier.json")
-                os.rename(out_path, outlier_path)
+                sidecar.demote(
+                    out_path,
+                    sidecar.OUTLIER,
+                    {"km_from_closest": round(min_dist_km, 2)},
+                )
                 n_success -= 1
                 n_dropped += 1
                 print(
                     f"Dropped location outlier {img_path}: "
-                    f"{min_dist_km:.1f} km from closest map → {outlier_path}",
+                    f"{min_dist_km:.1f} km from closest map",
                     file=sys.stderr,
                 )
         if n_dropped:
