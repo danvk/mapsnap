@@ -441,6 +441,16 @@ def truth_rings(volume: Path, unit: PageUnit) -> list | None:
     return [[[float(x), float(y)] for x, y in ring] for ring in polygons]
 
 
+STREET_SUFFIX = "street"
+"""This channel's sidecar name: p<stem>.georef-street.json.
+
+A constant, not a literal at each call site: the name has to agree with
+reconcile's CHANNEL_ORDER and fit's glob, and when it was spelled out three
+times a rename reached two of them. The one it missed still wrote a valid
+sidecar, so nothing failed -- the pose just stopped counting as the incumbent.
+"""
+
+
 def write_georef_streets(
     volume: Path,
     unit: PageUnit,
@@ -449,9 +459,10 @@ def write_georef_streets(
     pose,
     gates: StreetGates,
     label_size: tuple[int, int],
-    suffix: str,
     extra: dict,
     raw_soups: dict | None = None,
+    *,
+    suffix: str = STREET_SUFFIX,
 ) -> Path:
     """Write one <stem>.georef-street*.json in the pipeline's sidecar schema."""
     size = (unit.width, unit.height)
@@ -614,7 +625,7 @@ def cmd_select(args: argparse.Namespace) -> None:
     if not posed:
         sys.exit(f"no posed candidates in {path}; run `candidates` first")
 
-    for stale in volume.glob("p*.georef-street.json"):
+    for stale in volume.glob(f"p*.georef-{STREET_SUFFIX}.json"):
         stale.unlink()  # this command owns them; never leave a previous run's pick
 
     vctx = load_volume_context(volume, units)
@@ -667,7 +678,6 @@ def cmd_select(args: argparse.Namespace) -> None:
             tuple(record["pose"]),
             gates,
             label_size,
-            "streets",
             {
                 "pose": record["pose"],
                 "adopted_over": source,
@@ -817,7 +827,6 @@ def cmd_materialize(args: argparse.Namespace) -> None:
                     result.pose,
                     gates,
                     label_size,
-                    args.suffix,
                     {
                         "pose": [round(v, 6) for v in result.pose],
                         "psi_source": result.psi_source,
@@ -830,6 +839,7 @@ def cmd_materialize(args: argparse.Namespace) -> None:
                         ),
                     },
                     raw_soups,
+                    suffix=args.suffix,
                 )
             )
         else:
@@ -845,7 +855,6 @@ def cmd_materialize(args: argparse.Namespace) -> None:
                     truth_pose,
                     gates,
                     label_size,
-                    f"{args.suffix}-truth",
                     {
                         "pose": [round(v, 6) for v in truth_pose],
                         "source": "truth",
@@ -853,6 +862,7 @@ def cmd_materialize(args: argparse.Namespace) -> None:
                         "note": "detections scored against the human georeference",
                     },
                     raw_soups,
+                    suffix=f"{args.suffix}-truth",
                 )
             )
         for path in written:
@@ -887,7 +897,7 @@ def build_parser() -> argparse.ArgumentParser:
     materialize.add_argument("--truth-prior", action="store_true")
     materialize.add_argument(
         "--suffix",
-        default="street",
+        default=STREET_SUFFIX,
         help="Sidecar suffix: <stem>.georef-<suffix>.json (default: %(default)s).",
     )
     materialize.set_defaults(func=cmd_materialize)
