@@ -1,35 +1,54 @@
 # How a page gets its fit — and every way it can be rejected
 
-As of the `2026-08-07` run (main @ `31146e1`). Every gate below is illustrated
-with a page from that run; grep the page's `<stem>.txt` sidecar or the run's
-fit log for the quoted messages.
+Stage structure as of #270 phase 3; the per-gate examples are from the
+`2026-08-07` run (main @ `31146e1`) and still name the right pages, though a
+rejection that used to rename a file now records a `status` inside it. Grep
+the page's `<stem>.txt` sidecar or the run's fit log for the quoted messages.
 
-`mapsnap fit DIR --tag T` runs five stages in a fixed order. Each stage
+`mapsnap fit DIR --tag T` runs six stages in a fixed order. Each stage
 communicates with the next entirely through per-page sidecar files:
 
 ```
 clear_derived_sidecars          (#247: delete p*.georef*.json so nothing stale survives)
         │
         ▼
-1. mapsnap georef               writes p*.georef.json … or a rejection sidecar
+1. mapsnap georef               RANSAC pose           → p*.georef.json
         │
         ▼
-2. mapsnap adjacency-gate       renames contradicted fits, leaves re-search hints
+2. mapsnap adjacency-gate       contradiction verdict + re-search hints
         │
         ▼
-3. mapsnap snap                 rescue / arbitrate / refine → p*.georef-osm.json
+3. mapsnap snap                 rescue / arbitrate / refine → p*.georef-snap.json
         │
         ▼
-4. mapsnap street-solve         referee-approved poses → p*.georef-streets.json
+4. mapsnap street-solve         street-constraint pose     → p*.georef-street.json
         │
         ▼
-5. mapsnap iiif                 first glob wins: streets > osm > georef
+5. mapsnap reconcile --publish  weighs every pose jointly  → p*.georef-final.json
+        │
+        ▼
+6. mapsnap iiif                 publishes p*.georef-final.json, and only that
 ```
 
-A page is **published** iff it ends the run with a `georef-streets.json`,
-`georef-osm.json`, or plain `georef.json`. Every other sidecar
-(`-misscale`, `-1gcp`, `-nofit`, `-keymap-outlier`, `-outlier`,
-`-contradicted`) is invisible to the IIIF glob: the page is unplaced.
+**One sidecar per channel, one verdict inside it** (#270 phase 3). A channel
+writes its pose to its own file and records what it concluded in a `status`
+field; `status: fitted` (or no status at all) means the channel stands behind
+the pose, and anything else — `misscale`, `outlier`, `keymap-outlier`, `1gcp`,
+`nofit`, `contradicted` — is a pose the channel produced and declined. The
+pose stays readable either way, which is the point: the arbiter weighs
+declined poses too, and the fargo p55 class is precisely a declined pose that
+was right. A channel that reached more than one pose (georef's key-map retry)
+keeps the loser under `rejected` in the same file.
+
+A page is **published** iff its `georef-final.json` carries corners. The
+arbiter writes one for *every* page, so declining to place a page is a
+recorded decision (`corners: null`) rather than the absence of a file.
+
+This replaced a scheme where the *filename* carried the judgement — a page
+had up to nine kinds of `p*.georef*.json` and publication was first-glob-wins
+over them. That made stage ORDER the thing that decided what got published,
+gave each stage a reason to hide its predecessors' files, and let a reader
+that didn't know the whole variant vocabulary drop pages silently.
 
 ---
 
@@ -73,7 +92,7 @@ against progressively wider street sets until something fits:
 
 **Key-map-outlier rejection + retry (#259):** a rectangle-tier fit placed
 beyond the key-map radius, when the location is anchored and confident
-in-radius streets exist, is renamed `georef-keymap-outlier.json`, then the
+in-radius streets exist, is recorded `status: keymap-outlier`, then the
 neighborhood is retried at relaxed floors; the retry publishes only if it has
 at least as many inliers as the rejected fit.
 
@@ -91,7 +110,7 @@ Admitted labels are extrapolated along their text direction; label pairs whose
 streets intersect near the page **and** in OSM become intersection GCPs
 (deduped). Then `ransac_hybrid`:
 
-- **< 1 GCP** → `georef-nofit.json` (minimal sidecar so the debugger can show
+- **< 1 GCP** → `status: nofit` (a neighborhood-only sidecar so the debugger can show
   the key-map expectation). *Example: fargo p59__2.*
 - **exactly 1 distinct intersection** → **deferred** for median-scale
   processing (see 1e). Log: `Only 1 distinct intersection: 10TH x 14TH;
@@ -118,7 +137,7 @@ kept, never un-rejected later:
    `keep` verdict overrides the bands (requires an over-determined fit); a
    mismatch against the note drops a fit the bands would have kept.
    *Drop example: washington_dc p227 — `15.4838 px/ft is 12.31x the page's
-   PRINTED scale note → p227.georef-misscale.json`.*
+   PRINTED scale note` → p227.georef.json gets `status: misscale`.*
 2. **Neighbor corroboration** (`scale_corroborated_by_neighbors`): if the
    page's scale is within the SAME band of the median of ≥ 2 *adjacent* fitted
    pages, the off-rung scale is treated as a real local drawing scale.
@@ -134,20 +153,20 @@ kept, never un-rejected later:
    within stage 1. What can resurrect a rejected page is stage 3.
 
    *Plain band rejection example: champaign p1 — `0.3726 px/ft vs reference
-   1.4504 (0.26×) → p1.georef-misscale.json`.*
+   1.4504 (0.26×)` → p1.georef.json gets `status: misscale`.*
 
 **Deferred (1-intersection) processing.** Each deferred page is fitted at
 every scale candidate (volume reference, key-map region rung, adjacent-page
 rungs) × rotation candidates (from its own two labels, validated against ≥ 2
 neighbors within 1.5× page dimensions); the page's own labels arbitrate.
 Confirmed fits (≥ 2 agreeing neighbors) publish as `georef.json`; unconfirmed
-ones write `georef-1gcp.json` and stay unplaced (snap may rescue them).
+ones are marked `status: 1gcp` and stay unplaced (snap may rescue them).
 *Example: chicago p1n — `Deferred: 2 / 3 inlier labels`, unconfirmed →
-`p1n.georef-1gcp.json`.*
+`status: 1gcp` on p1n.georef.json.*
 
 **Location outlier.** With ≥ 5 fitted pages, any page whose center is more
-than `--min-distance-for-outlier-km` from every other page is renamed
-`georef-outlier.json`. *Examples: grand_rapids p819 (`1.6 km from closest
+than `--min-distance-for-outlier-km` from every other page is marked
+`status: outlier`. *Examples: grand_rapids p819 (`1.6 km from closest
 map`), miami p91__3 (1.9 km).*
 
 ### Stage-1 outcome summary
@@ -155,11 +174,11 @@ map`), miami p91__3 (1.9 km).*
 | sidecar | meaning | 08-07 example |
 |---|---|---|
 | `georef.json` | published RANSAC fit | fargo p64 (11.1 ft) |
-| `georef-misscale.json` | scale off the volume rungs / printed note | champaign p1; dc p227 |
-| `georef-1gcp.json` | deferred fit, unconfirmed by neighbors | chicago p1n |
-| `georef-nofit.json` | key-map-placed page, no usable fit | fargo p59__2 |
-| `georef-keymap-outlier.json` | rectangle fit far from anchored key-map location | fargo p55 |
-| `georef-outlier.json` | center km from every other page | grand_rapids p819 |
+| `misscale` | scale off the volume rungs / printed note | champaign p1; dc p227 |
+| `1gcp` | deferred fit, unconfirmed by neighbors | chicago p1n |
+| `nofit` | key-map-placed page, no usable fit | fargo p59__2 |
+| `keymap-outlier` | rectangle fit far from anchored key-map location | fargo p55 |
+| `outlier` | center km from every other page | grand_rapids p819 |
 
 ---
 
@@ -184,7 +203,7 @@ a contradiction and arbitration names a suspect:
 A named suspect is demoted only with a **hard signal**: effective GCPs ≤ 2, or
 rotation/scale deviation from the *volume median* beyond 15° / 0.2 log (known
 flaw on multi-family volumes, #256). Demotion renames every channel sidecar to
-`*-contradicted.json` and writes `p*.contradiction.json` with the partners'
+`status: contradicted` on each channel sidecar and writes `p*.contradiction.json` with the partners'
 stamp positions — which stage 3 reads as extra search centers. (These hint
 files currently outlive the run; #258.)
 
@@ -199,7 +218,7 @@ alignment). What happens next depends on the page's state:
 
 **Unplaced pages** (`nofit`, `misscale`, `1gcp`, `outlier`, `none` — including
 gate-demoted pages) get **rescue**: the top candidate publishes as
-`georef-osm.json` if `select_score ≥ 1.25` and `margin ≥ 0.25`.
+`georef-snap.json` if `select_score ≥ 1.25` and `margin ≥ 0.25`.
 *Example: fargo p31 (prev=none) rescued at score 2.19 → 6.5 ft.*
 
 - **Stamp-corroborated rescue**: for a contradiction-demoted page whose
@@ -239,7 +258,7 @@ intersections needed. The channel alone is a coin flip, so a pose is adopted
 **only where an independent referee** (`osm_snap.evaluate_pose`: road-skeleton
 chamfer + name alignment, derived from neither channel) prefers it over the
 currently-published pose by a clear margin. Adopted poses write
-`georef-streets.json`, the top-priority channel.
+`georef-street.json`.
 
 *08-07 adoptions (13 pages corpus-wide): new_orleans_1896 p125/p164/p181,
 kansas_city p453/p470/p548, grand_rapids p703/p711, philadelphia p237/p238,
@@ -247,15 +266,26 @@ los_angeles p1499j, nashville p66, washington_dc p166.*
 
 ---
 
-## Stage 5: publication
+## Stage 5: arbitration (`reconcile.py`)
 
-`mapsnap iiif` expands the glob
-`*.georef-streets.json,*.georef-osm.json,*.georef.json` — **first match wins
-per page**. Consequences worth knowing:
+Every pose the channels produced — including the ones they declined, the top
+snap candidates, and the street-solve pose — is weighed against every other
+and against not placing the page at all, jointly across the volume (#270).
+The winner is written to `p*.georef-final.json`; a page the arbiter declines
+gets one with `corners: null`.
 
-- A page can end the run with several sidecars; only the highest-priority one
-  publishes. *Example: fargo p55 has `georef-keymap-outlier.json` (the correct
-  pose, rejected) and `georef-osm.json` (the wrong pose, published).*
+This is the stage that fixes the pathology stage 5 used to have: fargo p55
+ended a run holding both `keymap-outlier` (the correct pose, declined) and a
+snap pose (wrong, published) and *nothing ever compared them*, because
+publication was glob precedence and precedence does not look inside files.
+
+## Stage 6: publication
+
+`mapsnap iiif` expands one glob, `*.georef-final.json`. There is no
+precedence left to reason about: exactly one sidecar answers for each page.
+
+- A poseless `georef-final.json` leaves the page unplaced *and* claims its
+  page key, so nothing else can supply a pose for it.
 - Truth comparison then cross-matches split panels: a truth panel with no fit
   of its own is scored against another panel's fit — the `(p59__1)`-style
   marker in compare output (#267). This is how an *unfitted* page (fargo
@@ -272,15 +302,15 @@ Reject paths, in the order a page can hit them:
 |---|---|---|---|---|
 | 1 | detection admission (conf/size/aspect/words/fill) | 1a | label dropped | fargo p58__2's 14 px cross-streets (strict tier) |
 | 2 | seed rotation outlier | 1c | candidate pair vetoed | (debug-only message; see `ransac_hybrid` tests) |
-| 3 | < 2 GCPs | 1c | defer or `-nofit` | fargo p59__2 |
+| 3 | < 2 GCPs | 1c | defer or `nofit` | fargo p59__2 |
 | 4 | relaxed-fit region-scale check | 1b | relaxed fit discarded | — |
 | 5 | broadened-fit scale prior (0.1–6.0×) | 1b | fit removed | — |
-| 6 | key-map outlier (+ retry) | 1b | `-keymap-outlier`, maybe retried | fargo p55 (stays), p58__2 (retry wins) |
-| 7 | printed-scale-note mismatch | 1d | `-misscale` | dc p227 (12.31×) |
-| 8 | scale bands vs reference | 1d | `-misscale` unless note/neighbors keep it | champaign p1 (0.26×); fargo p59__1 **kept** |
-| 9 | deferred fit unconfirmed | 1d | `-1gcp` | chicago p1n |
-| 10 | location outlier | 1d | `-outlier` | grand_rapids p819 |
-| 11 | adjacency contradiction + hard signal | 2 | `*-contradicted` + hints | fargo p32, kansas_city p551 |
+| 6 | key-map outlier (+ retry) | 1b | `keymap-outlier`, maybe retried | fargo p55 (stays), p58__2 (retry wins) |
+| 7 | printed-scale-note mismatch | 1d | `misscale` | dc p227 (12.31×) |
+| 8 | scale bands vs reference | 1d | `misscale` unless note/neighbors keep it | champaign p1 (0.26×); fargo p59__1 **kept** |
+| 9 | deferred fit unconfirmed | 1d | `1gcp` | chicago p1n |
+| 10 | location outlier | 1d | `outlier` | grand_rapids p819 |
+| 11 | adjacency contradiction + hard signal | 2 | `contradicted` + hints | fargo p32, kansas_city p551 |
 | 12 | snap rescue bars (1.25 / 0.7 / margin) | 3 | candidate not published | fargo p60__1 in pre-#263 runs |
 | 13 | snap challenge bars | 3 | incumbent kept | (default outcome for most fitted pages) |
 | 14 | snap refine margin (0.05) | 3 | incumbent kept | — |
@@ -296,6 +326,6 @@ Resurrection paths — the only ways a rejected page returns:
 | any published pose | street-solve referee adoption (replacement, not resurrection) | nashville p66 |
 
 Note what is *not* on the resurrection list: nothing ever un-renames a
-`-misscale`/`-outlier`/`-contradicted` sidecar back to `georef.json`. All
+demoted sidecar's `status` back to `fitted`. All
 recovery flows through a different channel's sidecar outranking or standing in
 for the lost one.
