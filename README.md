@@ -171,7 +171,11 @@ Test data comes from hand-geocoding by volunteers on OldInsuranceMaps.net:
   </tbody>
 </table>
 
-**Score** is the land-weighted share of each volume georeferenced to within 25ft, minus the share placed 200ft or worse — so a volume is rewarded for accurate coverage and penalised for confident mistakes. Pages left unplaced count against coverage but are not penalised as errors. RMSE is measured over a grid of points inside each page's own truth footprint (split sheets are graded per panel).
+**Score** is the weighted share of each volume georeferenced to within 25ft, minus the share placed 200ft or worse — so a volume is rewarded for accurate coverage and penalised for confident mistakes. Pages left unplaced count against coverage but are not penalised as errors. RMSE is measured over a grid of points inside each page's own truth footprint (split sheets are graded per panel).
+
+Each **sheet** carries the same weight, split across its panels by the paper area each occupies, and discounted by the share of the sheet that is usable land (approximated by proximity to an OSM street). So a sheet counts for no more because it is physically large, but a sheet that is mostly harbour counts for less than a dense downtown one.
+
+> **Note:** the table above predates this weighting and is not comparable to it; it will be regenerated from the next full corpus run.
 
 You can view the fits on Allmaps or get the IIIF files from the `gallery` directory. For notes on poor fits, see [test data notes].
 
