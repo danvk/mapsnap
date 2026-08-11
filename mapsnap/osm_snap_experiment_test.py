@@ -499,3 +499,16 @@ def test_refine_ineligible_on_one_gcp_incumbent():
     # Records cached before effective_gcps existed keep the old behavior.
     del record["incumbent"]["effective_gcps"]
     assert refine_adoption(record) is not None
+
+
+def test_refine_requires_informative_challenger_evidence():
+    # #291: two negative verifications differ by more than the margin, but the
+    # difference is noise — P(road) supports neither pose. richmond p380 lost
+    # a 16 ft fit to a 65 ft one exactly this way.
+    record = fitted_record(incumbent_ver=-0.249, challenger_ver=-0.154, shift_m=15.0)
+    record["incumbent"]["effective_gcps"] = 14
+    assert refine_adoption(record) is None
+    # A challenger with real evidence still refines.
+    record = fitted_record(incumbent_ver=-0.249, challenger_ver=0.35, shift_m=15.0)
+    record["incumbent"]["effective_gcps"] = 14
+    assert refine_adoption(record) is not None

@@ -20,9 +20,8 @@ street-solve pose, and explicit UNPLACED — by minimizing a joint energy:
   incumbent epsilon;
 - pairwise: printed-stamp agreement between the CHOSEN poses of mutually
   claiming neighbors (robust, scale-aware — the adjacency gate's math as a
-  factor instead of a demotion), footprint overlap, and a panel-sibling
-  anti-collision term (fires only when siblings land on the same ground;
-  insets legitimately elsewhere contribute nothing).
+  factor instead of a demotion) and footprint overlap, whose threshold is
+  self-calibrated per volume.
 
 Arbitration-only: no continuous optimization; the optimizer is ICM over
 hypothesis indices (generalizing snap's ``select_volume``), deterministic by
@@ -40,7 +39,7 @@ import math
 import shutil
 import subprocess
 from dataclasses import dataclass, field
-from itertools import combinations, product
+from itertools import product
 from pathlib import Path
 
 import numpy as np
@@ -62,83 +61,59 @@ from mapsnap.utils import haversine_m
 # The abstention bar: a pose must beat UNPLACED (energy 0) by scoring above
 # this on the evaluate_pose evidence. Equal to snap's PRODUCTION_GATE_SCORE so
 # reconcile's bar for existence matches the rescue committee's.
-RECONCILE_GATE = 1.25
-# The keep-bar for the PUBLISHED pose is far lower than the enter-bar for a
-# new one — mirroring the pipeline's own explicit asymmetry (arbitration
-# defends incumbents down to verification 0.1 while rescue demands select
-# 1.25). Fargo calibration: real fits on sparse road grids verify 0.5-0.9
-# and died wholesale at a symmetric 1.25 keep-bar (p9a-p9i, p64), while the
-# junk it must still unpublish sits near or below zero (p63__4: -0.14).
-KEEP_GATE = 0.35
-# ... implemented as: every pose is judged at KEEP_GATE (so pose-vs-pose
-# comparison stays fair at the incumbent epsilon), and poses on pages whose
-# published state is UNPLACED pay the difference as an entry penalty —
-# rescue-from-nothing needs enter-bar evidence, replacing or keeping an
-# existing fit needs only keep-bar evidence.
-ENTRY_PENALTY = RECONCILE_GATE - KEEP_GATE
-# Split panels are small crops with sparse road evidence; evaluate_pose's
-# verification is systematically lower on them (the documented small-footprint
-# bias). Good DC panels at 5-20 ft graded evidence ~0.24 — below the page
-# keep-bar through no fault of the pose. Panels keep at a discounted bar.
-PANEL_KEEP_DISCOUNT = 0.20
-# Epsilon preference for the currently published pose: a stabilizer against
-# churn on ties, deliberately far too small to act as the old defensibility
-# veto (p174's incumbent must lose to a rival 0.5 better). 0.15 rather than
-# 0.10 after fargo p17: an ambiguity-penalized alias still edged the correct
-# streets pose by 0.031 — ties this narrow belong to the incumbent.
-W_INCUMBENT = 0.15
+# Entry bar: a pose may only ENTER a page the pipeline left unplaced with
+# rescue-grade evidence. Equal to snap's PRODUCTION_GATE_SCORE, whose rescue
+# committee this mirrors.
+ENTRY_PENALTY = 1.25
+# KEEP prior: the MEASURED expected land-score value of publishing a pose,
+# conditioned on the two features that predict it — how constrained the fit is
+# (effective GCPs) and whether the geometric channel has anything to say
+# (verification sign). Land-weighted over all 1,323 published poses of the
+# 2026-08-10 corpus: E[keep] = good_share - disaster_share, directly
+# comparable to E[unplaced] = 0 by construction.
+#
+# This replaces an invented GCP ladder and a hand-picked keep bar. It is also
+# why "keep unless contradicted" is not a rule here: a 4+ GCP pose carries
+# 0.57-0.94 of prior, so only real contradicting evidence can move it, while a
+# 1-GCP pose with no P(road) support carries ~0 and is genuinely a coin flip
+# (that bucket measures 0.224 good land against 0.224 disaster land).
+KEEP_PRIOR = {
+    ("0-1", False): 0.00,
+    ("0-1", True): 0.69,
+    ("2-3", False): 0.25,
+    ("2-3", True): 0.68,
+    ("4+", False): 0.57,
+    ("4+", True): 0.94,
+}
 # Hypotheses closer than this are the same pose; keep one, merge provenance.
 DEDUPE_FT = 10.0
-# Energy translation of cmd_posegraph's effective-GCP anchor sigma tiers
-# (edge_join_experiment: eff>=4 -> 1.5m ... eff<=1 -> 25m): well-anchored
-# RANSAC evidence earns a bonus (GCPs are evidence evaluate_pose cannot see),
-# 1-GCP rung-guesses pay a penalty. Applies ONLY to hypotheses that carry GCP
-# evidence (the georef family); channel poses (-osm, -streets, snap
-# candidates) have none by construction and get 0, not the 0-GCP penalty.
-GCP_TIER_BONUS = {4: -0.45, 3: -0.30, 2: -0.15, 1: 0.20, 0: 0.0}
 # Robust keymap-distance term: (distance/radius)^2 clamped — SOFT prior, per
-# the p55 lesson (the keymap location itself can be km wrong; correct fits
-# 2-3 radii out are routine, DC p214 sat 11 km out). Max 0.05*3 = 0.15, small
-# against typical evidence margins. The fargo smoke run's first calibration
-# had 0.15*3 = 0.45, which single-handedly unpublished p3 (5 ft vs truth).
+# the p55 lesson (the keymap location itself can be km wrong).
 W_KEYMAP = 0.05
 KEYMAP_CLAMP = 3.0
 # Rung term: sitting ON any integer rung of the volume family costs nothing —
-# second scale families are legitimate (fargo's 9-series and large-format
-# sheets; the rung_flip docs record that a volume-median referee breaks
-# exactly these). Only a scale BETWEEN rungs pays W_RUNG_OFF; a printed note
-# contradicted by the pose pays W_NOTE_MISMATCH.
+# second scale families are legitimate. Only a scale BETWEEN rungs pays; a
+# printed note contradicted by the pose pays W_NOTE_MISMATCH.
 W_RUNG_OFF = 0.15
 W_NOTE_MISMATCH = 0.30
-# Robust stamp factor between chosen neighbor poses. Clamped so one junk edge
-# can never dominate a page's evidence (the fargo p64 lesson) — max 0.6,
-# comparable to a strong unary margin rather than a multiple of it (the smoke
-# run's 0.75*4 = 3.0 cap let one disagreeing edge domino good pages out).
+# Robust stamp factor between chosen neighbor poses, clamped so one junk edge
+# cannot dominate (the fargo p64 lesson).
 W_STAMP = 0.30
 STAMP_CLAMP = 2.0
 # Max-mixture junk model: beyond this multiple of the bar the disagreement is
-# more likely a junk claim than a misplacement (junk claims reciprocate by
-# luck and scatter volume-wide), so the cost drops to a flat constant instead
-# of the clamp — a far-out edge must not be able to eject a well-evidenced
-# pose (fargo p32/p50: 4-6 ft fits evicted by junk stamps in calibration v2).
+# more likely a junk claim than a misplacement, so the cost goes flat.
 STAMP_OUTLIER_RATIO = 5.0
 STAMP_JUNK_COST = 0.15
-# Footprint-overlap factor, reusing select_volume's shape. The soft threshold
-# is SELF-CALIBRATED per volume from the published adjacent fitted pairs' p90
-# IoU (adjacent Sanborn sheets legitimately overlap at their seams — fargo's
-# healthy neighbors overlap enough that a fixed 0.15 evicted 5 ft fits in
-# calibration v3); OVERLAP_SOFT is only the floor.
+# Footprint-overlap factor, self-calibrated per volume from the p90 of
+# published adjacent pairs (adjacent sheets overlap at their seams).
 W_OVERLAP = 3.0
 OVERLAP_SOFT = 0.15
 OVERLAP_HARD_DELTA = 0.35
-# Sibling anti-collision: two panels of one sheet posed on the SAME ground is
-# the mis-split signature (fargo p63). Insets legitimately elsewhere (other
-# area / rotation / scale, champaign p4) overlap nothing and pay nothing.
-# Real sibling panels overlap legitimately (DC p261 pair: 0.131 at correct
-# poses; LA p1499m higher) — the anti-collision floor sits above that, and the
-# fargo p63 mis-split class it exists for overlaps far higher still.
-SIBLING_SOFT = 0.25
-SIBLING_HARD = 0.55
+# NO sibling factor. Split panels are separate maps that happen to share a
+# sheet: no geographic relationship (champaign p4's panels sit 891 m apart at
+# +0.2 and +48.9 degrees) and they may legitimately depict OVERLAPPING ground,
+# because a small inset often details an area the large panel also covers
+# (kansas_city p526: 0.33 overlap, both fits correct at 6.7 and 17.4 ft).
 # Snap candidates entering the hypothesis set, by rank, plausible only.
 SNAP_TOP_K = 3
 # A raw candidate may ENTER an unplaced page only with snap's own admission
@@ -330,6 +305,12 @@ def dedupe_hypotheses(hypotheses: list[Hypothesis]) -> list[Hypothesis]:
     return kept
 
 
+def keep_prior(effective_gcps: int, verification: float | None) -> float:
+    """Measured expected value of publishing a pose with these features."""
+    tier = "0-1" if effective_gcps <= 1 else ("2-3" if effective_gcps <= 3 else "4+")
+    return KEEP_PRIOR[(tier, verification is not None and verification >= 0)]
+
+
 def carries_gcp_evidence(source: str) -> bool:
     """Whether a hypothesis's GCP count is meaningful (georef-family sidecars)."""
     return source.startswith("georef") and source not in (
@@ -389,56 +370,6 @@ def transfer_gcp_tiers(node: PageNode) -> None:
                 other.scores["gcp_transfer_from"] = h.source
 
 
-def bar_sibling_collision_entries(nodes: dict[str, PageNode], node: PageNode) -> None:
-    """Bar entering poses that collide with a published sibling's pose.
-
-    Snap's panel gate (panel_allowed_candidates) already refuses candidates
-    that disagree with reliable fitted siblings; this is the same
-    sheet-integrity rule as an entry bar. Without it, a junk candidate
-    entering an unplaced panel can evict its CORRECT published sibling via
-    the symmetric anti-collision factor (LA p1408__2 entering at 848 ft
-    evicted p1408__1's 11 ft pose in gate run 2).
-    """
-    if not node.is_panel or node.published_index is not None:
-        return
-    siblings = [
-        other
-        for other in nodes.values()
-        if other.is_panel
-        and other.base == node.base
-        and other is not node
-        and other.published_index is not None
-    ]
-    if not siblings:
-        return
-    for hypothesis in node.hypotheses:
-        if hypothesis.affine is None:
-            continue
-        for sibling in siblings:
-            # The comprehension above filtered on published_index, but pyright
-            # cannot carry that narrowing to this loop.
-            index = sibling.published_index
-            if index is None:
-                continue
-            published = sibling.hypotheses[index]
-            if published.affine is None:
-                continue
-            origin = (published.affine[0, 2], published.affine[1, 2])
-            own = footprint_metres(
-                hypothesis.affine, node.unit.width, node.unit.height, origin
-            )
-            theirs = footprint_metres(
-                published.affine, sibling.unit.width, sibling.unit.height, origin
-            )
-            if not (own.is_valid and theirs.is_valid and own.area and theirs.area):
-                continue
-            iou_over_min = own.intersection(theirs).area / min(own.area, theirs.area)
-            if iou_over_min > SIBLING_SOFT:
-                hypothesis.scores["entry_barred"] = True
-                hypothesis.scores["entry_barred_by"] = sibling.unit.stem
-                break
-
-
 def apply_ambiguity_penalty(node: PageNode) -> None:
     """Mark non-published poses whose evidence ties a genuinely distinct rival.
 
@@ -480,7 +411,6 @@ def unary_energy(
     family_log2: float | None,
     note_ratio: float | None,
     page_placed: bool = True,
-    is_panel: bool = False,
 ) -> float:
     """Energy of one hypothesis in isolation; UNPLACED is exactly 0.
 
@@ -503,14 +433,16 @@ def unary_energy(
         hypothesis.scores["unverified"] = True
     if verification is None:
         verification = 0.0
-    gate = KEEP_GATE - (PANEL_KEEP_DISCOUNT if is_panel else 0.0)
-    terms["evidence"] = -(verification + W_NAME * name + W_CONTAIN * containment - gate)
+    terms["evidence"] = -(verification + W_NAME * name + W_CONTAIN * containment)
     if not page_placed:
         terms["entry"] = ENTRY_PENALTY
-    if carries_gcp_evidence(hypothesis.source) or hypothesis.scores.get(
-        "gcp_transfer_from"
-    ):
-        terms["gcp_tier"] = GCP_TIER_BONUS[min(4, max(0, hypothesis.effective_gcps))]
+    if is_published:
+        # The incumbent's measured prior: what publishing a pose with this
+        # much support is worth, against E[unplaced] = 0. Replaces both the
+        # invented incumbent epsilon and the flat keep bar.
+        terms["keep_prior"] = -keep_prior(
+            hypothesis.effective_gcps, hypothesis.scores.get("verification")
+        )
     keymap_dist = hypothesis.scores.get("keymap_dist_m")
     if keymap_dist is not None and keymap_radius_m > 0:
         terms["keymap"] = W_KEYMAP * min(
@@ -533,8 +465,6 @@ def unary_energy(
         terms["contradicted"] = W_CONTRADICTED
     if not page_placed and hypothesis.scores.get("entry_barred"):
         terms["entry_barred"] = 10.0
-    if is_published:
-        terms["incumbent"] = -W_INCUMBENT
     hypothesis.unary_terms = terms
     hypothesis.unary = sum(terms.values())
     return hypothesis.unary
@@ -632,12 +562,10 @@ def pairwise_energy(
         # term here is double jeopardy — it evicted stamp-agreeing 10 ft fits
         # in gate run 1.
         return stamp_energy(adjacency, node_a, hyp_a, node_b, hyp_b, median_log_scale)
-    if kind == "sibling":
-        energy = 0.0
-        soft, hard = SIBLING_SOFT, SIBLING_HARD
-    else:  # plain overlap pair
-        energy = 0.0
-        soft, hard = overlap_soft, overlap_soft + OVERLAP_HARD_DELTA
+    # Overlap pair (the only non-stamp kind): adjacent sheets overlap at their
+    # seams legitimately, so the threshold is self-calibrated per volume.
+    energy = 0.0
+    soft, hard = overlap_soft, overlap_soft + OVERLAP_HARD_DELTA
     poly_a = footprint_metres(
         hyp_a.affine, node_a.unit.width, node_a.unit.height, origin
     )
@@ -898,7 +826,6 @@ def score_nodes(vctx, nodes: dict[str, PageNode], note_ratios: dict) -> None:
                     1,
                 )
         transfer_gcp_tiers(node)
-        bar_sibling_collision_entries(nodes, node)
         apply_ambiguity_penalty(node)
         for i, hypothesis in enumerate(node.hypotheses):
             unary_energy(
@@ -908,14 +835,13 @@ def score_nodes(vctx, nodes: dict[str, PageNode], note_ratios: dict) -> None:
                 family_log2,
                 note_ratios.get(stem),
                 page_placed=node.published_index is not None,
-                is_panel=node.is_panel,
             )
 
 
 def build_edges(
     nodes: dict[str, PageNode], adjacency: dict
 ) -> list[tuple[str, str, str]]:
-    """(kind, a, b) edges: mutual-stamp pairs, panel siblings, no duplicates."""
+    """(kind, a, b) edges: mutual-stamp pairs, no duplicates."""
     edges: list[tuple[str, str, str]] = []
     seen: set[tuple[str, str]] = set()
     for a, b in adjacency.get("adjacency", []) if adjacency else []:
@@ -924,16 +850,6 @@ def build_edges(
             if key not in seen:
                 seen.add(key)
                 edges.append(("stamp", key[0], key[1]))
-    by_base: dict[str, list[str]] = {}
-    for stem, node in nodes.items():
-        if node.is_panel and node.base:
-            by_base.setdefault(node.base, []).append(stem)
-    for siblings in by_base.values():
-        for a, b in combinations(sorted(siblings), 2):
-            key = (a, b)
-            if key not in seen:
-                seen.add(key)
-                edges.append(("sibling", a, b))
     return edges
 
 
@@ -955,7 +871,7 @@ def write_outputs(
         rivals = sorted(
             (h.unary, i) for i, h in enumerate(node.hypotheses) if i != chosen
         )
-        near_flip = bool(rivals) and rivals[0][0] - chosen_h.unary < W_INCUMBENT + 0.1
+        near_flip = bool(rivals) and rivals[0][0] - chosen_h.unary < 0.25
         rows.append(
             {
                 "stem": stem,
@@ -1099,19 +1015,16 @@ def main() -> None:
         "--gate",
         type=float,
         default=None,
-        help="Override RECONCILE_GATE (sweep support).",
+        help="Override the entry bar (sweep support).",
     )
-    parser.add_argument("--incumbent-bonus", type=float, default=None)
     parser.add_argument(
         "--pages", nargs="*", default=None, help="Restrict to these stems (debug)."
     )
     args = parser.parse_args()
 
-    global RECONCILE_GATE, W_INCUMBENT
+    global ENTRY_PENALTY
     if args.gate is not None:
-        RECONCILE_GATE = args.gate
-    if args.incumbent_bonus is not None:
-        W_INCUMBENT = args.incumbent_bonus
+        ENTRY_PENALTY = args.gate
 
     from mapsnap.osm_snap_experiment import load_volume_context, printed_note_ratios
 
