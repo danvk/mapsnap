@@ -936,6 +936,67 @@ def write_outputs(
     return len(flips), rows
 
 
+def publish(
+    volume: Path, nodes: dict[str, PageNode], assignment: dict[str, int]
+) -> tuple[int, int]:
+    """Write the arbitrated poses as ``pN.georef-reconcile.json`` sidecars.
+
+    The ONLY mode that writes to the volume root. Each file records the pose
+    the joint solve chose plus its provenance, and takes top priority in
+    ``fit``'s IIIF glob — so a page whose arbitration agrees with the existing
+    publication is simply republished, and one that flipped is republished
+    from whichever channel won. A page arbitrated to UNPLACED gets no file
+    and no other channel can supply one, because the reconcile glob is
+    consulted first and the pipeline's own sidecars for that page remain
+    where they are (unpublishing is expressed by writing nothing here AND by
+    fit's glob, see write_unplaced_marker).
+    """
+    written = unplaced = 0
+    for stale in volume.glob("p*.georef-reconcile.json"):
+        stale.unlink()
+    for stale in volume.glob("p*.reconcile-unplaced"):
+        stale.unlink()
+    for stem in sorted(nodes):
+        node = nodes[stem]
+        hypothesis = node.hypotheses[assignment[stem]]
+        if hypothesis.affine is None:
+            if node.published_index is not None:
+                for channel in CHANNEL_ORDER:
+                    sidecar = volume / f"{stem}.{channel}.json"
+                    if sidecar.exists():
+                        sidecar.rename(volume / f"{stem}.{channel}-reconcile-held.json")
+                unplaced += 1
+            continue
+        a = hypothesis.affine
+        w, h = node.unit.width, node.unit.height
+        corners = [
+            [a[0, 0] * x + a[0, 1] * y + a[0, 2], a[1, 0] * x + a[1, 1] * y + a[1, 2]]
+            for x, y in [(0, 0), (w, 0), (w, h), (0, h)]
+        ]
+        (volume / f"{stem}.georef-reconcile.json").write_text(
+            json.dumps(
+                {
+                    "width": w,
+                    "height": h,
+                    "corners": corners,
+                    "streets": [],
+                    "intersections": [],
+                    "reconcile": {
+                        "source": hypothesis.source,
+                        "merged": hypothesis.merged_sources,
+                        "unary": round(hypothesis.unary, 4),
+                        "terms": {
+                            k: round(v, 4) for k, v in hypothesis.unary_terms.items()
+                        },
+                    },
+                },
+                indent=1,
+            )
+        )
+        written += 1
+    return written, unplaced
+
+
 def materialize_and_grade(
     volume: Path, nodes: dict[str, PageNode], assignment: dict[str, int], out_dir: Path
 ) -> None:
@@ -1004,6 +1065,13 @@ def main() -> None:
         metavar="DIR",
         help="Read georef sidecars from this dir (e.g. artifacts/reconcile-base) "
         "instead of the volume root — the archived-baseline mode.",
+    )
+    parser.add_argument(
+        "--publish",
+        action="store_true",
+        help="Write the arbitrated poses as pN.georef-reconcile.json in the "
+        "volume root (the only mode that writes there). fit --reconcile does "
+        "this for you.",
     )
     parser.add_argument(
         "--grade",
@@ -1075,6 +1143,9 @@ def main() -> None:
     out_dir = volume / "artifacts" / "reconcile"
     flips, _ = write_outputs(volume, nodes, assignment, out_dir)
     print(f"{flips} decisions flipped -> {out_dir / 'report.md'}")
+    if args.publish:
+        written, unplaced = publish(volume, nodes, assignment)
+        print(f"published {written} reconcile sidecars, {unplaced} unplaced markers")
     if args.grade:
         materialize_and_grade(volume, nodes, assignment, out_dir)
 

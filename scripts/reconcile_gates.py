@@ -55,6 +55,11 @@ RECOVERY = [
 ]
 
 GOOD_FT, MID_FT, DISASTER_FT = 25.0, 50.0, 200.0
+# G1 asks whether the change DESTROYS pages, so its predicate is the severe
+# one (good -> >50 ft or unplaced). That is not the same question as "what did
+# this cost": a page sliding 24.7 -> 25.1 ft is invisible to G1 and cost
+# grand_rapids 1.89 points, more than all three G1 offenders combined. Both
+# are reported; neither is presented as the other.
 
 
 def band(rmse: float | None) -> str:
@@ -122,6 +127,7 @@ def run_volume(name: str) -> dict:
     base = compare_rows(truth, base_iiif, volume)
     recon = compare_rows(truth, recon_iiif, volume)
     g1_offenders = []
+    any_worse = []
     band_moves = 0
     new_disasters = []
     for key in set(base) | set(recon):
@@ -129,8 +135,10 @@ def run_volume(name: str) -> dict:
         if b != r:
             band_moves += 1
         base_good = base.get(key) is not None and base[key] <= GOOD_FT
-        if base_good and (recon.get(key) is None or recon[key] > MID_FT):
-            g1_offenders.append((key, base[key], recon.get(key)))
+        if base_good and (recon.get(key) is None or recon[key] > GOOD_FT):
+            any_worse.append((key, base[key], recon.get(key)))
+            if recon.get(key) is None or recon[key] > MID_FT:
+                g1_offenders.append((key, base[key], recon.get(key)))
         if r == "disaster" and b != "disaster":
             new_disasters.append((key, base.get(key), recon[key]))
     return {
@@ -138,6 +146,7 @@ def run_volume(name: str) -> dict:
         "base_rows": base,
         "recon_rows": recon,
         "g1_offenders": sorted(g1_offenders),
+        "any_worse": sorted(any_worse),
         "band_moves": band_moves,
         "new_disasters": sorted(new_disasters),
         "net_base": net_score(volume, base_iiif),
@@ -159,6 +168,15 @@ def main() -> None:
                 f"- {r['volume']} {key}: {was:.1f} -> "
                 f"{now if now is None else f'{now:.1f}'} ft"
             )
+    lines.append("")
+    lines.append("### every page that got worse (good -> anything worse), for scale")
+    total_worse = sum(len(r["any_worse"]) for r in results.values())
+    lines.append(f"{total_worse} pages, of which {sum(len(r['g1_offenders']) for r in results.values())} are G1 offenders:")
+    for r in results.values():
+        for key, was, now in r["any_worse"]:
+            severe = " (G1)" if (now is None or now > MID_FT) else ""
+            lines.append(f"- {r['volume']} {key}: {was:.1f} -> "
+                         f"{'unplaced' if now is None else f'{now:.1f}'} ft{severe}")
     lines.append("")
     # G2
     recovered = 0
