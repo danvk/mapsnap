@@ -171,12 +171,16 @@ def main() -> None:
     lines.append("")
     lines.append("### every page that got worse (good -> anything worse), for scale")
     total_worse = sum(len(r["any_worse"]) for r in results.values())
-    lines.append(f"{total_worse} pages, of which {sum(len(r['g1_offenders']) for r in results.values())} are G1 offenders:")
+    lines.append(
+        f"{total_worse} pages, of which {sum(len(r['g1_offenders']) for r in results.values())} are G1 offenders:"
+    )
     for r in results.values():
         for key, was, now in r["any_worse"]:
             severe = " (G1)" if (now is None or now > MID_FT) else ""
-            lines.append(f"- {r['volume']} {key}: {was:.1f} -> "
-                         f"{'unplaced' if now is None else f'{now:.1f}'} ft{severe}")
+            lines.append(
+                f"- {r['volume']} {key}: {was:.1f} -> "
+                f"{'unplaced' if now is None else f'{now:.1f}'} ft{severe}"
+            )
     lines.append("")
     # G2
     recovered = 0
