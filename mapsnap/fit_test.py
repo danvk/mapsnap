@@ -28,8 +28,8 @@ def test_clear_derived_sidecars_removes_every_variant(tmp_path: Path):
     for name in (
         "p1.georef.json",
         "p2.georef-nofit.json",
-        "p3.georef-osm.json",
-        "p4.georef-streets.json",
+        "p3.georef-snap.json",
+        "p4.georef-street.json",
         "p5.georef-contradicted.json",
         "p6.georef-keymap-outlier.json",
         "p7__2.georef.json",

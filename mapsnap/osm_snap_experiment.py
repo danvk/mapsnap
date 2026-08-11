@@ -1495,7 +1495,7 @@ def build_hybrid_iiif(volume: Path, output: Path) -> None:
     """Build the osm-first hybrid IIIF for the volume's current sidecars."""
     import subprocess
 
-    georef_glob = f"{volume / '*.georef-osm.json'},{volume / '*.georef.json'}"
+    georef_glob = f"{volume / '*.georef-snap.json'},{volume / '*.georef.json'}"
     subprocess.run(
         [
             "mapsnap",
@@ -2902,11 +2902,11 @@ def cmd_reannotate(volume: Path) -> None:
 
 
 def osm_variant_path(volume: Path, stem: str) -> Path:
-    return volume / f"{stem}.georef-osm.json"
+    return volume / f"{stem}.georef-snap.json"
 
 
 def cmd_materialize(volume: Path, mode: str) -> None:
-    """Write pN.georef-osm.json sidecars for the selection's accepted pages."""
+    """Write pN.georef-snap.json sidecars for the selection's accepted pages."""
     from mapsnap.edge_join_experiment import page_fit_state
 
     records = {r["target"]: r for r in load_candidates(volume)}
@@ -2915,7 +2915,7 @@ def cmd_materialize(volume: Path, mode: str) -> None:
         sys.exit(f"{selection_path} missing; run `select --mode {mode}` first")
     # Remove every sidecar this channel owns before writing: a stale one from
     # a looser gate would silently keep scoring.
-    for stale in volume.glob("p*.georef-osm.json"):
+    for stale in volume.glob("p*.georef-snap.json"):
         stale.unlink()
     written = 0
     for line in selection_path.read_text().splitlines():
@@ -2939,7 +2939,7 @@ def cmd_materialize(volume: Path, mode: str) -> None:
             # A panel with no own sidecar borrows the keymap block from any
             # sibling variant of the same sheet (the sheet is what the keymap
             # places). The stale-osm cleanup above already ran, so a sibling's
-            # georef-osm sidecar can only be one written earlier this loop.
+            # georef-snap sidecar can only be one written earlier this loop.
             base = panel_base(choice["target"])
             if base is not None:
                 for sibling in sorted(volume.glob(f"{base}__*.georef*.json")):
@@ -2981,7 +2981,7 @@ def cmd_materialize(volume: Path, mode: str) -> None:
             doc["keymap"] = georef["keymap"]
         osm_variant_path(volume, choice["target"]).write_text(json.dumps(doc, indent=2))
         written += 1
-    print(f"{written} pN.georef-osm.json sidecars written in {volume}")
+    print(f"{written} pN.georef-snap.json sidecars written in {volume}")
 
 
 def main() -> None:
@@ -3048,7 +3048,7 @@ def main() -> None:
         "--arbitrate-gate", type=float, default=PRODUCTION_ARBITRATE_GATE
     )
 
-    p_mat = sub.add_parser("materialize", help="write pN.georef-osm.json sidecars")
+    p_mat = sub.add_parser("materialize", help="write pN.georef-snap.json sidecars")
     p_mat.add_argument("volume", type=Path)
     p_mat.add_argument(
         "--mode",

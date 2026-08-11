@@ -3,7 +3,7 @@
 The fit pipeline publishes by stage precedence: each stage gates its
 predecessors, publication is first-glob-wins over channel sidecars, and no
 step ever compares two candidate poses for the same page (fargo p55:
-``georef-keymap-outlier.json`` correct, ``georef-osm.json`` published, never
+``georef-keymap-outlier.json`` correct, ``georef-snap.json`` published, never
 weighed against each other). Every regression autopsied on the 2026-08-10 run
 was an ordering artifact of exactly this shape — displaced rescues enjoying
 incumbency (washington_dc), a rank-2 pose at 11 ft losing to name score
@@ -139,7 +139,7 @@ DISTINCT_M = 100.0
 ICM_MAX_ROUNDS = 25
 EXHAUSTIVE_LIMIT = 20_000
 # Published-channel precedence, mirroring fit.py's IIIF glob order.
-CHANNEL_ORDER = ("georef-streets", "georef-osm", "georef")
+CHANNEL_ORDER = ("georef-street", "georef-snap", "georef")
 
 UNPLACED = "unplaced"
 
@@ -148,7 +148,7 @@ UNPLACED = "unplaced"
 class Hypothesis:
     """One candidate pose for a page (or the explicit unplaced state)."""
 
-    source: str  # "georef" | "georef-osm" | ... | "snap:0" | "streets" | UNPLACED
+    source: str  # "georef" | "georef-snap" | ... | "snap:0" | "streets" | UNPLACED
     affine: np.ndarray | None  # page px -> (lon, lat); None iff unplaced
     effective_gcps: int = 0
     merged_sources: list[str] = field(default_factory=list)
@@ -314,8 +314,8 @@ def keep_prior(effective_gcps: int, verification: float | None) -> float:
 def carries_gcp_evidence(source: str) -> bool:
     """Whether a hypothesis's GCP count is meaningful (georef-family sidecars)."""
     return source.startswith("georef") and source not in (
-        "georef-osm",
-        "georef-streets",
+        "georef-snap",
+        "georef-street",
     )
 
 
@@ -939,7 +939,7 @@ def write_outputs(
 def publish(
     volume: Path, nodes: dict[str, PageNode], assignment: dict[str, int]
 ) -> tuple[int, int]:
-    """Write the arbitrated poses as ``pN.georef-reconcile.json`` sidecars.
+    """Write the arbitrated poses as ``pN.georef-final.json`` sidecars.
 
     The ONLY mode that writes to the volume root. Each file records the pose
     the joint solve chose plus its provenance, and takes top priority in
@@ -952,7 +952,7 @@ def publish(
     fit's glob, see write_unplaced_marker).
     """
     written = unplaced = 0
-    for stale in volume.glob("p*.georef-reconcile.json"):
+    for stale in volume.glob("p*.georef-final.json"):
         stale.unlink()
     for stale in volume.glob("p*.reconcile-unplaced"):
         stale.unlink()
@@ -973,7 +973,7 @@ def publish(
             [a[0, 0] * x + a[0, 1] * y + a[0, 2], a[1, 0] * x + a[1, 1] * y + a[1, 2]]
             for x, y in [(0, 0), (w, 0), (w, h), (0, h)]
         ]
-        (volume / f"{stem}.georef-reconcile.json").write_text(
+        (volume / f"{stem}.georef-final.json").write_text(
             json.dumps(
                 {
                     "width": w,
@@ -1069,7 +1069,7 @@ def main() -> None:
     parser.add_argument(
         "--publish",
         action="store_true",
-        help="Write the arbitrated poses as pN.georef-reconcile.json in the "
+        help="Write the arbitrated poses as pN.georef-final.json in the "
         "volume root (the only mode that writes there). fit --reconcile does "
         "this for you.",
     )

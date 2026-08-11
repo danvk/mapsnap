@@ -71,7 +71,7 @@ be demoted even with many GCPs (NO-1896 p125: 12 GCPs, 46 deg and 0.76 off —
 a confidently wrong fit). Both thresholds clear every healthy suspect measured
 across the corpus."""
 
-CHANNELS = ("georef-streets", "georef-osm", "georef")
+CHANNELS = ("georef-street", "georef-snap", "georef")
 
 
 @dataclass

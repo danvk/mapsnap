@@ -453,7 +453,7 @@ def write_georef_streets(
     extra: dict,
     raw_soups: dict | None = None,
 ) -> Path:
-    """Write one <stem>.georef-streets*.json in the pipeline's sidecar schema."""
+    """Write one <stem>.georef-street*.json in the pipeline's sidecar schema."""
     size = (unit.width, unit.height)
     label_scale = (size[0] / label_size[0], size[1] / label_size[1])
     doc = {
@@ -575,7 +575,7 @@ def incumbent_pose(volume: Path, unit: PageUnit) -> tuple[np.ndarray | None, str
     Snap's sidecar takes priority in the production glob, so on a page it acted on
     that -- not the RANSAC fit -- is what a challenger has to beat.
     """
-    osm_path = volume / f"{unit.stem}.georef-osm.json"
+    osm_path = volume / f"{unit.stem}.georef-snap.json"
     if osm_path.exists():
         try:
             return page_world_affine(json.loads(osm_path.read_text())), "snap"
@@ -614,7 +614,7 @@ def cmd_select(args: argparse.Namespace) -> None:
     if not posed:
         sys.exit(f"no posed candidates in {path}; run `candidates` first")
 
-    for stale in volume.glob("p*.georef-streets.json"):
+    for stale in volume.glob("p*.georef-street.json"):
         stale.unlink()  # this command owns them; never leave a previous run's pick
 
     vctx = load_volume_context(volume, units)
@@ -739,7 +739,7 @@ def cmd_report(args: argparse.Namespace) -> None:
 
 
 def cmd_materialize(args: argparse.Namespace) -> None:
-    """Write .georef-streets.json (and the truth-pose twin) for chosen pages."""
+    """Write .georef-street.json (and the truth-pose twin) for chosen pages."""
     volume = Path(args.volume)
     locator, centerlines, filter_params, scale = volume_context(volume)
     gates = StreetGates(**parse_gate_overrides(args.gates))
@@ -875,7 +875,7 @@ def main() -> None:
     candidates.set_defaults(func=cmd_candidates)
 
     materialize = sub.add_parser(
-        "materialize", help="Write .georef-streets.json sidecars for chosen pages."
+        "materialize", help="Write .georef-street.json sidecars for chosen pages."
     )
     materialize.add_argument("volume")
     materialize.add_argument("--pages", required=True)

@@ -11,11 +11,11 @@ prefers it by a clear margin. Measured over every disagreement in the twelve
 truth volumes that picks the closer pose 85% of the time and never costs a page
 its <=25 ft placement.
 
-Writes pN.georef-streets.json sidecars for the adopted pages, deleting the
+Writes pN.georef-street.json sidecars for the adopted pages, deleting the
 previous run's first. Build the volume IIIF with the streets-first hybrid glob
 so the sidecars win where they exist:
 
-    mapsnap iiif <ref> '<dir>/*.georef-streets.json,<dir>/*.georef-osm.json,<dir>/*.georef.json' ...
+    mapsnap iiif <ref> '<dir>/*.georef-street.json,<dir>/*.georef-snap.json,<dir>/*.georef.json' ...
 
 (`mapsnap fit` does this automatically.) The referee shares the snap channel's
 machinery (P(road) maps, OSM rasters), so run this after `mapsnap snap` — the
@@ -35,7 +35,7 @@ def main() -> None:
         description=(
             "Fit street-constraint poses for every key-map-prior page and adopt "
             "each one only where the independent referee prefers it. Writes "
-            "pN.georef-streets.json sidecars; include them streets-first in the "
+            "pN.georef-street.json sidecars; include them streets-first in the "
             "IIIF glob."
         )
     )

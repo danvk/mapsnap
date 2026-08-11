@@ -3,7 +3,7 @@
 The production entry point for the osm_snap channel (see osm_snap.py for the
 matcher and osm_snap_experiment.py for the underlying commands). Matches each
 page's road-UNet P(road) map against OSM centerlines rasterized in a local
-metre frame — no street-name OCR required — and writes pN.georef-osm.json
+metre frame — no street-name OCR required — and writes pN.georef-snap.json
 sidecars for three kinds of placements:
 
   - RESCUE: pages the RANSAC georeferencer left unplaced (nofit/misscale/
@@ -22,7 +22,7 @@ diagnostics. Road-UNet P(road) maps are inferred on demand (cached under
 artifacts/edge_join/roadprob/). Build the volume IIIF with the osm-first
 hybrid glob so the sidecars win where they exist:
 
-    mapsnap iiif <ref> '<dir>/*.georef-osm.json,<dir>/*.georef.json' ...
+    mapsnap iiif <ref> '<dir>/*.georef-snap.json,<dir>/*.georef.json' ...
 
 (`mapsnap fit` does this automatically.) First run costs UNet inference plus
 NCC matching (roughly 10-30 minutes per volume); candidates are cached in
@@ -41,7 +41,7 @@ def main() -> None:
         description=(
             "Geometry-first OSM snap: rescue unplaced pages, arbitrate "
             "OSM-contradicted fits, and refine mid-tier fits. Writes "
-            "pN.georef-osm.json sidecars; include them osm-first in the "
+            "pN.georef-snap.json sidecars; include them osm-first in the "
             "IIIF glob."
         )
     )

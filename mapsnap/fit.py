@@ -200,7 +200,7 @@ def main() -> None:
     run_cmd(["mapsnap", "adjacency-gate", str(dir_path)])
 
     # The geometry-first snap channel: rescue unplaced pages, arbitrate fits
-    # OSM contradicts, refine mid-tier fits. Its pN.georef-osm.json sidecars
+    # OSM contradicts, refine mid-tier fits. Its pN.georef-snap.json sidecars
     # take priority over plain georefs in the hybrid glob below.
     if not args.no_snap:
         # Both passes are per-page and CPU-bound, so one --num-workers governs
@@ -209,14 +209,14 @@ def main() -> None:
         # The street-constraint channel: fit key-map-prior pages from their
         # street labels and adopt a pose only where the independent referee
         # prefers it over whatever snap/georef published. Its
-        # pN.georef-streets.json sidecars take top priority in the glob. Runs
+        # pN.georef-street.json sidecars take top priority in the glob. Runs
         # after snap because the referee judges against (and shares machinery
         # with) the snap channel; skipped with --no-snap for the same reason.
         run_cmd(["mapsnap", "street-solve", str(dir_path)])
 
     # The arbiter (#270): weigh every pose the channels produced -- including
     # the ones they rejected -- against each other and against not publishing
-    # at all, jointly across the volume. Its pN.georef-reconcile.json sidecars
+    # at all, jointly across the volume. Its pN.georef-final.json sidecars
     # take top priority in the glob below, and a page it arbitrates to
     # unplaced leaves a marker that suppresses the channel sidecars entirely.
     if args.reconcile:
@@ -230,14 +230,14 @@ def main() -> None:
         georef_glob = str(dir_path / "*.georef.json")
     else:
         georef_glob = (
-            f"{dir_path / '*.georef-streets.json'},"
-            f"{dir_path / '*.georef-osm.json'},{dir_path / '*.georef.json'}"
+            f"{dir_path / '*.georef-street.json'},"
+            f"{dir_path / '*.georef-snap.json'},{dir_path / '*.georef.json'}"
         )
     if args.reconcile:
         # Reconcile's sidecars win over every channel. Pages it arbitrated to
         # unplaced have had their channel sidecars renamed aside by `publish`,
         # so no glob entry matches them at all.
-        georef_glob = f"{dir_path / '*.georef-reconcile.json'},{georef_glob}"
+        georef_glob = f"{dir_path / '*.georef-final.json'},{georef_glob}"
     run_cmd(
         [
             "mapsnap",

@@ -599,7 +599,7 @@ def volume_pose_medians(volume: Path) -> tuple[float, float] | None:
     for page in sorted(volume.glob("p*.jpg")):
         if "__" in page.stem:
             continue
-        for channel in ("georef-streets", "georef-osm", "georef"):
+        for channel in ("georef-street", "georef-snap", "georef"):
             path = volume / f"{page.stem}.{channel}.json"
             if path.exists():
                 affine = page_world_affine(json.loads(path.read_text()))
@@ -633,7 +633,7 @@ def published_rotations(volume: Path) -> dict[int, float]:
         number = page_number(page.stem)
         if "__" in page.stem or number is None:
             continue
-        for channel in ("georef-streets", "georef-osm", "georef"):
+        for channel in ("georef-street", "georef-snap", "georef"):
             path = volume / f"{page.stem}.{channel}.json"
             if path.exists():
                 rotations[number] = metric_theta(
