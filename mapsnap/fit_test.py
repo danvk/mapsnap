@@ -64,3 +64,32 @@ def test_clear_derived_sidecars_removes_every_variant(tmp_path: Path):
 def test_clear_derived_sidecars_on_empty_dir(tmp_path: Path):
     """A first run has nothing to clear and must not fail."""
     assert clear_derived_sidecars(tmp_path) == 0
+
+
+def test_channel_writers_and_arbiter_agree_on_names():
+    """Every channel the pipeline WRITES is one the arbiter LOOKS FOR.
+
+    These names live in three places -- the writer, reconcile's CHANNEL_ORDER,
+    and fit's glob -- and a mismatch is silent: the sidecar is still globbed as
+    a hypothesis, so the arbiter sees the pose, but the channel stops counting
+    as the incumbent and every keep_prior/entry decision on that page shifts.
+    Renaming the channels once already produced exactly this: street-solve's
+    suffix lived in an argparse DEFAULT ("streets"), which a rename of the
+    literal names did not touch, and washington_dc p166 went 14 -> 115 ft.
+    """
+
+    from mapsnap.osm_snap_experiment import osm_variant_path
+    from mapsnap.reconcile import CHANNEL_ORDER
+    from mapsnap.street_solve_experiment import build_parser
+
+    volume = Path("/vol")
+    assert osm_variant_path(volume, "p1").name == "p1.georef-snap.json"
+
+    parser = build_parser()
+    suffix = parser.parse_args(["materialize", str(volume), "--pages", "p1"]).suffix
+    assert f"p1.georef-{suffix}.json" == "p1.georef-street.json"
+
+    written = {"georef-snap", f"georef-{suffix}", "georef"}
+    assert written == set(CHANNEL_ORDER), (
+        f"channels written {written} != channels arbitrated {set(CHANNEL_ORDER)}"
+    )

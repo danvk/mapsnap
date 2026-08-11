@@ -859,7 +859,11 @@ def cmd_materialize(args: argparse.Namespace) -> None:
             print(path)
 
 
-def main() -> None:
+def build_parser() -> argparse.ArgumentParser:
+    """The CLI parser, separated from main() so its defaults are testable.
+
+    The sidecar suffix in particular is a default, not a literal, and a channel
+    rename that misses it fails silently (see fit_test's channel-name test)."""
     parser = argparse.ArgumentParser(description=(__doc__ or "").split("\n")[0])
     sub = parser.add_subparsers(dest="command", required=True)
 
@@ -883,7 +887,7 @@ def main() -> None:
     materialize.add_argument("--truth-prior", action="store_true")
     materialize.add_argument(
         "--suffix",
-        default="streets",
+        default="street",
         help="Sidecar suffix: <stem>.georef-<suffix>.json (default: %(default)s).",
     )
     materialize.set_defaults(func=cmd_materialize)
@@ -905,7 +909,11 @@ def main() -> None:
     report.add_argument("volumes", nargs="+")
     report.set_defaults(func=cmd_report)
 
-    args = parser.parse_args()
+    return parser
+
+
+def main() -> None:
+    args = build_parser().parse_args()
     args.func(args)
 
 
