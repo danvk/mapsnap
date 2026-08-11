@@ -106,21 +106,21 @@ def test_collect_globs_all_variants(tmp_path):
     # The p55 case: a rejected keymap-outlier pose and a published osm pose
     # must BOTH become hypotheses (GEOREF_VARIANTS omits -keymap-outlier).
     write_sidecar(tmp_path, "p55", "georef-keymap-outlier", georef_doc(affine(0)))
-    write_sidecar(tmp_path, "p55", "georef-osm", georef_doc(affine(5000)))
+    write_sidecar(tmp_path, "p55", "georef-snap", georef_doc(affine(5000)))
     hypotheses, published = collect_hypotheses(tmp_path, "p55", None, None)
     sources = [h.source for h in hypotheses]
     assert "georef-keymap-outlier" in sources
-    assert "georef-osm" in sources
+    assert "georef-snap" in sources
     assert sources[-1] == UNPLACED
-    assert published is not None and hypotheses[published].source == "georef-osm"
+    assert published is not None and hypotheses[published].source == "georef-snap"
 
 
 def test_published_channel_resolution_follows_glob_order(tmp_path):
     write_sidecar(tmp_path, "p1", "georef", georef_doc(affine(0)))
-    write_sidecar(tmp_path, "p1", "georef-osm", georef_doc(affine(5000)))
-    assert published_channel(tmp_path, "p1") == "georef-osm"
-    write_sidecar(tmp_path, "p1", "georef-streets", georef_doc(affine(9000)))
-    assert published_channel(tmp_path, "p1") == "georef-streets"
+    write_sidecar(tmp_path, "p1", "georef-snap", georef_doc(affine(5000)))
+    assert published_channel(tmp_path, "p1") == "georef-snap"
+    write_sidecar(tmp_path, "p1", "georef-street", georef_doc(affine(9000)))
+    assert published_channel(tmp_path, "p1") == "georef-street"
 
 
 def test_dedupe_merges_near_identical_and_keeps_max_gcps():
@@ -357,31 +357,36 @@ def test_keep_bar_is_lower_than_enter_bar():
 
 
 def test_publish_writes_sidecars_and_holds_unplaced(tmp_path):
-    # --publish is the only mode that writes to the volume root: chosen poses
-    # become pN.georef-reconcile.json (top of fit's glob), and a page
-    # arbitrated to unplaced has its channel sidecars renamed aside, since a
-    # glob can only skip a page that has no sidecar at all.
+    # --publish is the only mode that writes to the volume root, and it answers
+    # for EVERY page: a chosen pose becomes pN.georef-final.json with corners,
+    # a page arbitrated to unplaced becomes one with corners: null. The channel
+    # sidecars are left exactly where they are -- unpublishing is a written
+    # decision now, not the absence of a file.
     from mapsnap.reconcile import publish
 
     write_sidecar(tmp_path, "p1", "georef", georef_doc(affine(0)))
-    write_sidecar(tmp_path, "p2", "georef-osm", georef_doc(affine(500)))
+    write_sidecar(tmp_path, "p2", "georef-snap", georef_doc(affine(500)))
     keep = make_node("p1", [scored("georef", affine(0), verification=1.9, gcps=4)])
     drop = make_node(
         "p2",
         [
-            scored("georef-osm", affine(500), verification=0.1),
+            scored("georef-snap", affine(500), verification=0.1),
             scored(UNPLACED, None, 0),
         ],
     )
     written, unplaced = publish(tmp_path, {"p1": keep, "p2": drop}, {"p1": 0, "p2": 1})
     assert (written, unplaced) == (1, 1)
-    assert (tmp_path / "p1.georef-reconcile.json").exists()
-    assert not (tmp_path / "p2.georef-reconcile.json").exists()
-    # p2's channel sidecar is held aside, so no glob entry can match it...
-    assert not (tmp_path / "p2.georef-osm.json").exists()
-    assert (tmp_path / "p2.georef-osm-reconcile-held.json").exists()
-    # ...and both live under fit's clear-glob, so the next run starts clean.
-    assert len(list(tmp_path.glob("p*.georef*.json"))) == 3
+    assert json.loads((tmp_path / "p1.georef-final.json").read_text())["corners"]
+    assert (
+        json.loads((tmp_path / "p2.georef-final.json").read_text())["corners"] is None
+    )
+    # p2's own channel sidecar is untouched: the pose stays readable.
+    assert (tmp_path / "p2.georef-snap.json").exists()
+    # expand_georef_globs skips the poseless one, so p2 goes unpublished.
+    from mapsnap.make_iiif_georef import expand_georef_globs
+
+    chosen = expand_georef_globs(f"{tmp_path}/p*.georef-final.json")
+    assert [Path(p).name for p in chosen] == ["p1.georef-final.json"]
 
 
 def test_publish_records_provenance(tmp_path):
@@ -390,6 +395,65 @@ def test_publish_records_provenance(tmp_path):
     write_sidecar(tmp_path, "p1", "georef", georef_doc(affine(0)))
     node = make_node("p1", [scored("georef", affine(0), verification=1.9, gcps=4)])
     publish(tmp_path, {"p1": node}, {"p1": 0})
-    doc = json.loads((tmp_path / "p1.georef-reconcile.json").read_text())
+    doc = json.loads((tmp_path / "p1.georef-final.json").read_text())
     assert doc["reconcile"]["source"] == "georef"
     assert "terms" in doc["reconcile"] and "corners" in doc
+
+
+def test_demoted_channel_is_not_the_incumbent(tmp_path):
+    # A demotion is a verdict inside the file now, not a rename, so the sidecar
+    # exists either way. The incumbent must follow the verdict: this is the
+    # exact set the old glob-over-renamed-files arrangement published.
+    from mapsnap import sidecar
+
+    doc = georef_doc(affine(0))
+    write_sidecar(tmp_path, "p1", "georef", doc)
+    assert published_channel(tmp_path, "p1") == "georef"
+    sidecar.demote(tmp_path / "p1.georef.json", sidecar.MISSCALE)
+    assert published_channel(tmp_path, "p1") is None
+    # ...but the pose is still a hypothesis, carrying its verdict.
+    hypotheses, published = collect_hypotheses(tmp_path, "p1", None, None)
+    assert published is None
+    assert [h.source for h in hypotheses] == ["georef:misscale", UNPLACED]
+    assert hypotheses[0].status == sidecar.MISSCALE
+
+
+def test_rejected_poses_become_hypotheses(tmp_path):
+    # The p55 shape under the collapsed layout: georef's key-map retry kept one
+    # pose and set the other aside, both inside p55.georef.json. Both have to
+    # reach the arbiter -- weighing them against each other is the point.
+    from mapsnap import sidecar
+
+    doc = georef_doc(affine(0))
+    write_sidecar(tmp_path, "p55", "georef", doc)
+    sidecar.attach_rejected(
+        tmp_path / "p55.georef.json",
+        [{**georef_doc(affine(5000)), "status": sidecar.KEYMAP_OUTLIER}],
+    )
+    hypotheses, published = collect_hypotheses(tmp_path, "p55", None, None)
+    assert [h.source for h in hypotheses] == [
+        "georef",
+        "georef:keymap-outlier",
+        UNPLACED,
+    ]
+    assert published == 0
+
+
+def test_contradicted_term_follows_the_verdict_not_the_filename():
+    # W_CONTRADICTED used to key off "contradicted" appearing in the sidecar's
+    # NAME; it keys off the recorded status now.
+    from mapsnap import sidecar
+    from mapsnap.reconcile import W_CONTRADICTED
+
+    plain = Hypothesis(source="georef", affine=affine(0), effective_gcps=2)
+    plain.scores["verification"] = 1.0
+    unary_energy(plain, False, 600.0, None, None)
+    flagged = Hypothesis(
+        source="georef",
+        affine=affine(0),
+        effective_gcps=2,
+        status=sidecar.CONTRADICTED,
+    )
+    flagged.scores["verification"] = 1.0
+    unary_energy(flagged, False, 600.0, None, None)
+    assert flagged.unary - plain.unary == pytest.approx(W_CONTRADICTED)

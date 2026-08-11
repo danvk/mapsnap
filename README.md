@@ -311,7 +311,7 @@ The four arguments here are:
 - `mapsnap ocr`: runs OCR over the downscaled images, saving candidate detections to `boxes.json` and `streets.json` files.
 - `mapsnap fit`: another pipeline that runs:
   - `mapsnap georef`: georeferences images based on street detections, writing out `georef.json` files where it can find a good fit.
-  - `mapsnap snap`: the geometry-first channel — matches each page's road-UNet mask directly against OSM street geometry to rescue pages the street-name georeferencer couldn't place, replace fits that OSM actively contradicts, and refine mid-tier fits to street-grid precision. Writes `georef-osm.json` sidecars that take priority in the next step. Skip with `--no-snap`.
+  - `mapsnap snap`: the geometry-first channel — matches each page's road-UNet mask directly against OSM street geometry to rescue pages the street-name georeferencer couldn't place, replace fits that OSM actively contradicts, and refine mid-tier fits to street-grid precision. Writes `georef-snap.json` sidecars for the arbiter to weigh. Skip with `--no-snap`.
   - `mapsnap iiif`: produces a IIIF Georeference Extension with clipping masks. You can find examples of these in the `gallery` directory. View them on Allmaps.
   - `mapsnap compare`: compares the generated IIIF file with the human-generated one from OIM, producing a report on the accuracy of the fit.
 

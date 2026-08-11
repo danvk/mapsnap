@@ -281,7 +281,20 @@ def make_keymap(directory: Path, stem: str, *, with_georef: bool = True) -> Path
     keymap = directory / f"{stem}.keymap.json"
     keymap.write_text("{}")
     if with_georef:
-        (directory / f"{stem}.georef.json").write_text("{}")
+        # A georeferenced key map: usable_keymaps tests the recorded pose, not
+        # merely the sidecar's existence (a demoted sidecar is still on disk).
+        (directory / f"{stem}.georef.json").write_text(
+            json.dumps(
+                {
+                    "corners": [
+                        [-81.0, 34.1],
+                        [-80.9, 34.1],
+                        [-80.9, 34.0],
+                        [-81.0, 34.0],
+                    ]
+                }
+            )
+        )
     return keymap
 
 
@@ -398,7 +411,15 @@ def write_keymap_pair(directory, stem, width, height):
     """A <stem>.keymap.json with the georef sidecar usable_keymaps requires."""
     (directory / f"{stem}.keymap.json").write_text(json.dumps({"streets": []}))
     (directory / f"{stem}.georef.json").write_text(
-        json.dumps({"width": width, "height": height, "corners": []})
+        json.dumps(
+            {
+                "width": width,
+                "height": height,
+                # A real pose: usable_keymaps requires a georeferenced key map,
+                # and a cornerless sidecar is a page georef could not place.
+                "corners": [[-81.0, 34.1], [-80.9, 34.1], [-80.9, 34.0], [-81.0, 34.0]],
+            }
+        )
     )
 
 

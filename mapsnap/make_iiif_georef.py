@@ -49,11 +49,15 @@ def georef_path_to_page_key(path: str) -> str | None:
     """Extract page key like 'p428__2' from a georef filename.
 
     Accepts filenames ending in '_p16s.georef.json', '_p16.georef.json',
-    '_p16s.gcps.georef.json' (the '.gcps' infix is optional), or the
-    neighbor-fit / OSM-snap / street-constraint variants
-    '_p16.georef-neighbor.json', '_p16.georef-osm.json' and
-    '_p16.georef-streets.json'. A variant missing from this list is dropped
-    silently -- the glob matches the file but no page key comes out of it.
+    '_p16s.gcps.georef.json' (the '.gcps' infix is optional), and ANY
+    '-<variant>' sidecar: '_p16.georef-final.json', '_p16.georef-snap.json',
+    '_p16.georef-street.json', '_p16.georef-neighbor.json', …
+
+    The variant list used to be a whitelist, which made a renamed or new
+    sidecar fail *silently*: the glob matched the file, no page key came out,
+    and the page simply left the manifest. Callers choose which sidecars to
+    publish by passing explicit globs, so the parser has no business
+    second-guessing them.
 
     Any letter page suffix is kept (Sanborn sheets run 'a', 'b', … past the
     directional 's'/'n'/'e'/'w'/'l'/'r' letters), not just a known few — a
@@ -62,7 +66,7 @@ def georef_path_to_page_key(path: str) -> str | None:
     still parse here; drop_redundant_skeletons raises on them rather than guess.
     """
     m = re.search(
-        r"(?:\b|_)(p\d+)([a-z]*)((?:__\d+)?)(?:\.[^.]+)?\.georef(?:2|-neighbor|-osm|-streets)?\.json$",
+        r"(?:\b|_)(p\d+)([a-z]*)((?:__\d+)?)(?:\.[^.]+)?\.georef(?:2|-[a-z0-9-]+)?\.json$",
         path,
         re.IGNORECASE,
     )
@@ -70,6 +74,21 @@ def georef_path_to_page_key(path: str) -> str | None:
         return None
     page_num, suffix, split = m.groups()
     return f"{page_num}{suffix.lower()}{split}"
+
+
+def has_pose(path: str) -> bool:
+    """Whether a georef sidecar carries a pose (four world corners) to publish.
+
+    A sidecar without corners is a recorded *decision not to place* the page,
+    not a malformed file: the arbiter writes one for every page it leaves
+    unplaced, and georef has always written neighborhood-only sidecars for
+    pages it could not fit.
+    """
+    try:
+        doc = json.loads(Path(path).read_text())
+    except (OSError, json.JSONDecodeError):
+        return False
+    return bool(doc.get("corners"))
 
 
 def expand_georef_globs(pattern: str) -> list[str]:
@@ -87,6 +106,7 @@ def expand_georef_globs(pattern: str) -> list[str]:
     """
     chosen: dict[str, str] = {}
     ordered: list[str] = []
+    unplaced = 0
     for sub_pattern in pattern.split(","):
         for path in sorted(glob.glob(sub_pattern.strip())):
             page_key = georef_path_to_page_key(path)
@@ -99,8 +119,19 @@ def expand_georef_globs(pattern: str) -> list[str]:
                 continue
             if page_key in chosen:
                 continue
+            if not has_pose(path):
+                # An explicit non-fit: the sidecar exists and records a
+                # decision, but there is no pose to publish. This is how the
+                # arbiter says "unplaced" (and what a bare neighborhood-only
+                # sidecar has always been). Claim the page key regardless, so a
+                # later glob cannot resurrect a pose this one declined.
+                chosen[page_key] = path
+                unplaced += 1
+                continue
             chosen[page_key] = path
             ordered.append(path)
+    if unplaced:
+        print(f"{unplaced} page(s) had a sidecar but no pose; left unplaced.")
     return ordered
 
 

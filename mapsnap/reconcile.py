@@ -3,7 +3,7 @@
 The fit pipeline publishes by stage precedence: each stage gates its
 predecessors, publication is first-glob-wins over channel sidecars, and no
 step ever compares two candidate poses for the same page (fargo p55:
-``georef-keymap-outlier.json`` correct, ``georef-osm.json`` published, never
+``georef-keymap-outlier.json`` correct, ``georef-snap.json`` published, never
 weighed against each other). Every regression autopsied on the 2026-08-10 run
 was an ordering artifact of exactly this shape — displaced rescues enjoying
 incumbency (washington_dc), a rank-2 pose at 11 ft losing to name score
@@ -44,6 +44,7 @@ from pathlib import Path
 
 import numpy as np
 
+from mapsnap import sidecar
 from mapsnap.adjacency_gate import (
     GATE_STAMP_M,
     FittedPage,
@@ -139,7 +140,7 @@ DISTINCT_M = 100.0
 ICM_MAX_ROUNDS = 25
 EXHAUSTIVE_LIMIT = 20_000
 # Published-channel precedence, mirroring fit.py's IIIF glob order.
-CHANNEL_ORDER = ("georef-streets", "georef-osm", "georef")
+CHANNEL_ORDER = ("georef-street", "georef-snap", "georef")
 
 UNPLACED = "unplaced"
 
@@ -148,10 +149,11 @@ UNPLACED = "unplaced"
 class Hypothesis:
     """One candidate pose for a page (or the explicit unplaced state)."""
 
-    source: str  # "georef" | "georef-osm" | ... | "snap:0" | "streets" | UNPLACED
+    source: str  # "georef" | "georef-snap" | ... | "snap:0" | "streets" | UNPLACED
     affine: np.ndarray | None  # page px -> (lon, lat); None iff unplaced
     effective_gcps: int = 0
     merged_sources: list[str] = field(default_factory=list)
+    status: str = sidecar.ACCEPTED  # the writing channel's verdict on this pose
     scores: dict = field(default_factory=dict)
     unary_terms: dict = field(default_factory=dict)
     unary: float = 0.0
@@ -176,10 +178,22 @@ def sidecar_pose(doc: dict) -> np.ndarray | None:
 
 
 def published_channel(sidecar_dir: Path, stem: str) -> str | None:
-    """Which channel first-glob-wins publishes for this stem, or None."""
+    """Which channel would publish this stem on its own account, or None.
+
+    A channel sidecar now exists whether or not that channel stands behind the
+    pose inside it (a demotion is a recorded verdict, not a rename), so the
+    incumbent is the highest-precedence channel whose verdict is ACCEPTED —
+    exactly the set the old glob-over-renamed-files arrangement published.
+    """
     for channel in CHANNEL_ORDER:
-        if (sidecar_dir / f"{stem}.{channel}.json").exists():
-            return channel
+        path = sidecar_dir / f"{stem}.{channel}.json"
+        if not path.exists():
+            continue
+        try:
+            if sidecar.accepted(json.loads(path.read_text())):
+                return channel
+        except (OSError, ValueError):
+            continue
     return None
 
 
@@ -210,16 +224,22 @@ def collect_hypotheses(
     hypotheses: list[Hypothesis] = []
     for name, path in ordered:
         doc = json.loads(path.read_text())
-        affine = sidecar_pose(doc)
-        if affine is None:
-            continue
-        hypotheses.append(
-            Hypothesis(
-                source=name,
-                affine=affine,
-                effective_gcps=effective_gcp_count(doc),
+        # A channel's own sidecar plus any pose it reached and set aside (the
+        # key-map retry keeps both). All of them are hypotheses; the status is
+        # what the channel concluded, not whether the pose is worth weighing.
+        for variant in (doc, *sidecar.rejected_poses(doc)):
+            affine = sidecar_pose(variant)
+            if affine is None:
+                continue
+            status = sidecar.status(variant)
+            hypotheses.append(
+                Hypothesis(
+                    source=name if status == sidecar.ACCEPTED else f"{name}:{status}",
+                    affine=affine,
+                    effective_gcps=effective_gcp_count(variant),
+                    status=status,
+                )
             )
-        )
     if snap_record is not None:
         record_margin = snap_record.get("margin")
         rank = 0
@@ -314,8 +334,8 @@ def keep_prior(effective_gcps: int, verification: float | None) -> float:
 def carries_gcp_evidence(source: str) -> bool:
     """Whether a hypothesis's GCP count is meaningful (georef-family sidecars)."""
     return source.startswith("georef") and source not in (
-        "georef-osm",
-        "georef-streets",
+        "georef-snap",
+        "georef-street",
     )
 
 
@@ -461,7 +481,7 @@ def unary_energy(
             terms["rung"] = 0.0 if rung_distance < 0.25 else W_RUNG_OFF
     if hypothesis.scores.get("ambiguous"):
         terms["ambiguity"] = W_AMBIG
-    if "contradicted" in hypothesis.source:
+    if hypothesis.status == sidecar.CONTRADICTED:
         terms["contradicted"] = W_CONTRADICTED
     if not page_placed and hypothesis.scores.get("entry_barred"):
         terms["entry_barred"] = 10.0
@@ -939,41 +959,39 @@ def write_outputs(
 def publish(
     volume: Path, nodes: dict[str, PageNode], assignment: dict[str, int]
 ) -> tuple[int, int]:
-    """Write the arbitrated poses as ``pN.georef-reconcile.json`` sidecars.
+    """Write the arbitrated answer as ``pN.georef-final.json``, one per page.
 
-    The ONLY mode that writes to the volume root. Each file records the pose
-    the joint solve chose plus its provenance, and takes top priority in
-    ``fit``'s IIIF glob — so a page whose arbitration agrees with the existing
-    publication is simply republished, and one that flipped is republished
-    from whichever channel won. A page arbitrated to UNPLACED gets no file
-    and no other channel can supply one, because the reconcile glob is
-    consulted first and the pipeline's own sidecars for that page remain
-    where they are (unpublishing is expressed by writing nothing here AND by
-    fit's glob, see write_unplaced_marker).
+    The ONLY mode that writes to the volume root, and the only sidecar
+    ``fit`` publishes from. Every arbitrated page gets a file, including the
+    ones left unplaced: those carry ``corners: null``, which
+    ``expand_georef_globs`` skips while still claiming the page key.
+
+    An explicit non-fit is what lets the arbiter *unpublish*. Previously that
+    took renaming each channel's sidecar out of the glob's way — the pipeline
+    could only express "unplaced" as the absence of a file, so suppressing a
+    pose meant hiding it. Here the decision is a written record, and the
+    channels' own sidecars stay exactly where they are.
     """
     written = unplaced = 0
-    for stale in volume.glob("p*.georef-reconcile.json"):
-        stale.unlink()
-    for stale in volume.glob("p*.reconcile-unplaced"):
+    for stale in volume.glob("p*.georef-final.json"):
         stale.unlink()
     for stem in sorted(nodes):
         node = nodes[stem]
         hypothesis = node.hypotheses[assignment[stem]]
-        if hypothesis.affine is None:
-            if node.published_index is not None:
-                for channel in CHANNEL_ORDER:
-                    sidecar = volume / f"{stem}.{channel}.json"
-                    if sidecar.exists():
-                        sidecar.rename(volume / f"{stem}.{channel}-reconcile-held.json")
-                unplaced += 1
-            continue
-        a = hypothesis.affine
         w, h = node.unit.width, node.unit.height
-        corners = [
-            [a[0, 0] * x + a[0, 1] * y + a[0, 2], a[1, 0] * x + a[1, 1] * y + a[1, 2]]
-            for x, y in [(0, 0), (w, 0), (w, h), (0, h)]
-        ]
-        (volume / f"{stem}.georef-reconcile.json").write_text(
+        a = hypothesis.affine
+        corners = (
+            None
+            if a is None
+            else [
+                [
+                    a[0, 0] * x + a[0, 1] * y + a[0, 2],
+                    a[1, 0] * x + a[1, 1] * y + a[1, 2],
+                ]
+                for x, y in [(0, 0), (w, 0), (w, h), (0, h)]
+            ]
+        )
+        (volume / f"{stem}.georef-final.json").write_text(
             json.dumps(
                 {
                     "width": w,
@@ -993,7 +1011,10 @@ def publish(
                 indent=1,
             )
         )
-        written += 1
+        if corners is None:
+            unplaced += 1
+        else:
+            written += 1
     return written, unplaced
 
 
@@ -1069,7 +1090,7 @@ def main() -> None:
     parser.add_argument(
         "--publish",
         action="store_true",
-        help="Write the arbitrated poses as pN.georef-reconcile.json in the "
+        help="Write the arbitrated poses as pN.georef-final.json in the "
         "volume root (the only mode that writes there). fit --reconcile does "
         "this for you.",
     )

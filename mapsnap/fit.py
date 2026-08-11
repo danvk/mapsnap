@@ -139,21 +139,12 @@ def main() -> None:
         help="Human-readable name recorded alongside the run id in the manifest.",
     )
     parser.add_argument(
-        "--reconcile",
-        action="store_true",
-        help=(
-            "Publish through the reconcile arbiter (#270): after the channels "
-            "run, weigh all their poses jointly and publish the winners. "
-            "Report-only without this flag."
-        ),
-    )
-    parser.add_argument(
         "--no-snap",
         action="store_true",
         help=(
             "Skip the geometry channels — OSM snap (rescue/arbitrate/refine) "
             "and the street-constraint solver, whose referee rides on snap's "
-            "machinery — and build the IIIF from RANSAC georefs alone."
+            "machinery — so the arbiter weighs RANSAC's poses alone."
         ),
     )
     args, georef_extra = parser.parse_known_args()
@@ -200,44 +191,30 @@ def main() -> None:
     run_cmd(["mapsnap", "adjacency-gate", str(dir_path)])
 
     # The geometry-first snap channel: rescue unplaced pages, arbitrate fits
-    # OSM contradicts, refine mid-tier fits. Its pN.georef-osm.json sidecars
-    # take priority over plain georefs in the hybrid glob below.
+    # OSM contradicts, refine mid-tier fits. Writes pN.georef-snap.json.
     if not args.no_snap:
         # Both passes are per-page and CPU-bound, so one --num-workers governs
         # both; the rest of the georef passthrough is georef-only.
         run_cmd(["mapsnap", "snap", str(dir_path), *worker_flag(georef_extra)])
         # The street-constraint channel: fit key-map-prior pages from their
-        # street labels and adopt a pose only where the independent referee
-        # prefers it over whatever snap/georef published. Its
-        # pN.georef-streets.json sidecars take top priority in the glob. Runs
-        # after snap because the referee judges against (and shares machinery
-        # with) the snap channel; skipped with --no-snap for the same reason.
+        # street labels. Writes pN.georef-street.json. Runs after snap because
+        # its referee shares machinery with the snap channel; skipped with
+        # --no-snap for the same reason.
         run_cmd(["mapsnap", "street-solve", str(dir_path)])
 
-    # The arbiter (#270): weigh every pose the channels produced -- including
+    # The arbiter (#270) weighs every pose the channels produced -- including
     # the ones they rejected -- against each other and against not publishing
-    # at all, jointly across the volume. Its pN.georef-reconcile.json sidecars
-    # take top priority in the glob below, and a page it arbitrates to
-    # unplaced leaves a marker that suppresses the channel sidecars entirely.
-    if args.reconcile:
-        run_cmd(["mapsnap", "reconcile", str(dir_path), "--publish"])
+    # at all, jointly across the volume, and writes the answer for EVERY page
+    # as pN.georef-final.json (poseless when it declines to place the page).
+    run_cmd(["mapsnap", "reconcile", str(dir_path), "--publish"])
 
     output_iiif = dir_path / f"{run_id}.iiif.json"
-    # Pass the glob as a literal string; make_iiif_georef does its own glob
-    # expansion (first glob wins per page, so the channel priority is
-    # streets, then snap, then plain georefs).
-    if args.no_snap:
-        georef_glob = str(dir_path / "*.georef.json")
-    else:
-        georef_glob = (
-            f"{dir_path / '*.georef-streets.json'},"
-            f"{dir_path / '*.georef-osm.json'},{dir_path / '*.georef.json'}"
-        )
-    if args.reconcile:
-        # Reconcile's sidecars win over every channel. Pages it arbitrated to
-        # unplaced have had their channel sidecars renamed aside by `publish`,
-        # so no glob entry matches them at all.
-        georef_glob = f"{dir_path / '*.georef-reconcile.json'},{georef_glob}"
+    # One glob, one channel. Publication used to be first-glob-wins over three
+    # channel sidecars, which made stage ORDER the thing that decided what got
+    # published and gave every stage a reason to hide its predecessors' files.
+    # The arbiter answers for every page instead, so there is nothing to
+    # prioritize between (#270 phase 3).
+    georef_glob = str(dir_path / "*.georef-final.json")
     run_cmd(
         [
             "mapsnap",

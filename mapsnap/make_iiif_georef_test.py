@@ -1,5 +1,6 @@
 """Unit tests for make_iiif_georef helpers."""
 
+import json
 from pathlib import Path
 
 from shapely.geometry import box
@@ -15,6 +16,9 @@ from mapsnap.make_iiif_georef import (
     make_annotation,
 )
 from mapsnap.split import write_panels_json
+
+# A minimal sidecar that carries a pose (expand_georef_globs skips poseless ones).
+_POSED = {"corners": [[0, 0], [1, 0], [1, 1], [0, 1]]}
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -305,17 +309,37 @@ def test_georef_path_neighbor_variant():
 
 
 def test_georef_path_osm_variant():
-    assert georef_path_to_page_key("data/vol/p147.georef-osm.json") == "p147"
-    assert georef_path_to_page_key("data/vol/p4l__2.georef-osm.json") == "p4l__2"
+    assert georef_path_to_page_key("data/vol/p147.georef-snap.json") == "p147"
+    assert georef_path_to_page_key("data/vol/p4l__2.georef-snap.json") == "p4l__2"
     # A variant absent from the pattern yields no page key, so the glob matches the
     # file and the annotation silently omits the page -- worth a test per variant.
-    assert georef_path_to_page_key("data/vol/p147.georef-streets.json") == "p147"
-    assert georef_path_to_page_key("data/vol/p4l__2.georef-streets.json") == "p4l__2"
+    assert georef_path_to_page_key("data/vol/p147.georef-street.json") == "p147"
+    assert georef_path_to_page_key("data/vol/p4l__2.georef-street.json") == "p4l__2"
 
 
-def test_georef_path_other_variants_do_not_match():
-    assert georef_path_to_page_key("data/vol/p16.georef-nofit.json") is None
-    assert georef_path_to_page_key("data/vol/p16.georef-misscale.json") is None
+def test_georef_path_parses_any_variant():
+    # The variant list used to be a whitelist, so renaming a channel silently
+    # dropped every page of it. Parsing is now general; what must not be
+    # published is decided by the sidecar's CONTENT (has_pose), not its name.
+    assert georef_path_to_page_key("data/vol/p16.georef-final.json") == "p16"
+    assert georef_path_to_page_key("data/vol/p16.georef-nofit.json") == "p16"
+    assert georef_path_to_page_key("data/vol/p16.georef-misscale.json") == "p16"
+    assert georef_path_to_page_key("data/vol/p16.notgeoref.json") is None
+
+
+def test_expand_globs_skips_and_claims_poseless_sidecars(tmp_path):
+    """A poseless sidecar leaves the page unplaced AND blocks later globs."""
+    (tmp_path / "p1.georef-final.json").write_text(json.dumps({"corners": None}))
+    (tmp_path / "p1.georef.json").write_text(
+        json.dumps({"corners": [[0, 0], [1, 0], [1, 1], [0, 1]]})
+    )
+    (tmp_path / "p2.georef-final.json").write_text(
+        json.dumps({"corners": [[0, 0], [1, 0], [1, 1], [0, 1]]})
+    )
+    pattern = f"{tmp_path}/p*.georef-final.json,{tmp_path}/p*.georef.json"
+    assert [Path(p).name for p in expand_georef_globs(pattern)] == [
+        "p2.georef-final.json"
+    ]
 
 
 def test_expand_georef_globs_first_glob_wins(tmp_path):
@@ -324,7 +348,7 @@ def test_expand_georef_globs_first_glob_wins(tmp_path):
         "p1.georef-neighbor.json",
         "p2.georef-neighbor.json",
     ]:
-        (tmp_path / name).write_text("{}")
+        (tmp_path / name).write_text(json.dumps(_POSED))
     pattern = f"{tmp_path}/p*.georef.json,{tmp_path}/p*.georef-neighbor.json"
     paths = [Path(p).name for p in expand_georef_globs(pattern)]
     assert paths == ["p1.georef.json", "p2.georef-neighbor.json"]
@@ -334,8 +358,8 @@ def test_expand_georef_globs_warns_on_unparsable_key(tmp_path, capsys):
     # A file whose name encodes no page key must not vanish silently: it is
     # skipped, but with a warning naming the file (regression guard for the
     # suffix bug that once dropped pages with no trace).
-    (tmp_path / "p16.georef.json").write_text("{}")
-    (tmp_path / "key.georef.json").write_text("{}")
+    (tmp_path / "p16.georef.json").write_text(json.dumps(_POSED))
+    (tmp_path / "key.georef.json").write_text(json.dumps(_POSED))
     paths = [Path(p).name for p in expand_georef_globs(f"{tmp_path}/*.georef.json")]
     assert paths == ["p16.georef.json"]
     err = capsys.readouterr().err

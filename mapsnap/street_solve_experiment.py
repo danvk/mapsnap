@@ -441,6 +441,16 @@ def truth_rings(volume: Path, unit: PageUnit) -> list | None:
     return [[[float(x), float(y)] for x, y in ring] for ring in polygons]
 
 
+STREET_SUFFIX = "street"
+"""This channel's sidecar name: p<stem>.georef-street.json.
+
+A constant, not a literal at each call site: the name has to agree with
+reconcile's CHANNEL_ORDER and fit's glob, and when it was spelled out three
+times a rename reached two of them. The one it missed still wrote a valid
+sidecar, so nothing failed -- the pose just stopped counting as the incumbent.
+"""
+
+
 def write_georef_streets(
     volume: Path,
     unit: PageUnit,
@@ -449,11 +459,12 @@ def write_georef_streets(
     pose,
     gates: StreetGates,
     label_size: tuple[int, int],
-    suffix: str,
     extra: dict,
     raw_soups: dict | None = None,
+    *,
+    suffix: str = STREET_SUFFIX,
 ) -> Path:
-    """Write one <stem>.georef-streets*.json in the pipeline's sidecar schema."""
+    """Write one <stem>.georef-street*.json in the pipeline's sidecar schema."""
     size = (unit.width, unit.height)
     label_scale = (size[0] / label_size[0], size[1] / label_size[1])
     doc = {
@@ -575,7 +586,7 @@ def incumbent_pose(volume: Path, unit: PageUnit) -> tuple[np.ndarray | None, str
     Snap's sidecar takes priority in the production glob, so on a page it acted on
     that -- not the RANSAC fit -- is what a challenger has to beat.
     """
-    osm_path = volume / f"{unit.stem}.georef-osm.json"
+    osm_path = volume / f"{unit.stem}.georef-snap.json"
     if osm_path.exists():
         try:
             return page_world_affine(json.loads(osm_path.read_text())), "snap"
@@ -614,7 +625,7 @@ def cmd_select(args: argparse.Namespace) -> None:
     if not posed:
         sys.exit(f"no posed candidates in {path}; run `candidates` first")
 
-    for stale in volume.glob("p*.georef-streets.json"):
+    for stale in volume.glob(f"p*.georef-{STREET_SUFFIX}.json"):
         stale.unlink()  # this command owns them; never leave a previous run's pick
 
     vctx = load_volume_context(volume, units)
@@ -667,7 +678,6 @@ def cmd_select(args: argparse.Namespace) -> None:
             tuple(record["pose"]),
             gates,
             label_size,
-            "streets",
             {
                 "pose": record["pose"],
                 "adopted_over": source,
@@ -739,7 +749,7 @@ def cmd_report(args: argparse.Namespace) -> None:
 
 
 def cmd_materialize(args: argparse.Namespace) -> None:
-    """Write .georef-streets.json (and the truth-pose twin) for chosen pages."""
+    """Write .georef-street.json (and the truth-pose twin) for chosen pages."""
     volume = Path(args.volume)
     locator, centerlines, filter_params, scale = volume_context(volume)
     gates = StreetGates(**parse_gate_overrides(args.gates))
@@ -817,7 +827,6 @@ def cmd_materialize(args: argparse.Namespace) -> None:
                     result.pose,
                     gates,
                     label_size,
-                    args.suffix,
                     {
                         "pose": [round(v, 6) for v in result.pose],
                         "psi_source": result.psi_source,
@@ -830,6 +839,7 @@ def cmd_materialize(args: argparse.Namespace) -> None:
                         ),
                     },
                     raw_soups,
+                    suffix=args.suffix,
                 )
             )
         else:
@@ -845,7 +855,6 @@ def cmd_materialize(args: argparse.Namespace) -> None:
                     truth_pose,
                     gates,
                     label_size,
-                    f"{args.suffix}-truth",
                     {
                         "pose": [round(v, 6) for v in truth_pose],
                         "source": "truth",
@@ -853,13 +862,18 @@ def cmd_materialize(args: argparse.Namespace) -> None:
                         "note": "detections scored against the human georeference",
                     },
                     raw_soups,
+                    suffix=f"{args.suffix}-truth",
                 )
             )
         for path in written:
             print(path)
 
 
-def main() -> None:
+def build_parser() -> argparse.ArgumentParser:
+    """The CLI parser, separated from main() so its defaults are testable.
+
+    The sidecar suffix in particular is a default, not a literal, and a channel
+    rename that misses it fails silently (see fit_test's channel-name test)."""
     parser = argparse.ArgumentParser(description=(__doc__ or "").split("\n")[0])
     sub = parser.add_subparsers(dest="command", required=True)
 
@@ -875,7 +889,7 @@ def main() -> None:
     candidates.set_defaults(func=cmd_candidates)
 
     materialize = sub.add_parser(
-        "materialize", help="Write .georef-streets.json sidecars for chosen pages."
+        "materialize", help="Write .georef-street.json sidecars for chosen pages."
     )
     materialize.add_argument("volume")
     materialize.add_argument("--pages", required=True)
@@ -883,7 +897,7 @@ def main() -> None:
     materialize.add_argument("--truth-prior", action="store_true")
     materialize.add_argument(
         "--suffix",
-        default="streets",
+        default=STREET_SUFFIX,
         help="Sidecar suffix: <stem>.georef-<suffix>.json (default: %(default)s).",
     )
     materialize.set_defaults(func=cmd_materialize)
@@ -905,7 +919,11 @@ def main() -> None:
     report.add_argument("volumes", nargs="+")
     report.set_defaults(func=cmd_report)
 
-    args = parser.parse_args()
+    return parser
+
+
+def main() -> None:
+    args = build_parser().parse_args()
     args.func(args)
 
 
