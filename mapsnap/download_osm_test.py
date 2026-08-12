@@ -97,3 +97,65 @@ BOUNDARY = {
         {"type": "relation", "tags": {"name": "Richmond"}, "members": [{"type": "way"}]}
     ]
 }
+
+
+# --- buffering ---
+
+
+def square_relation(size_deg=0.01, lat=37.55):
+    """An `out geom` relation whose member ways form a closed square."""
+    c = [(0.0, lat), (size_deg, lat), (size_deg, lat + size_deg), (0.0, lat + size_deg)]
+    ways = [[c[i], c[(i + 1) % 4]] for i in range(4)]
+    return {
+        "elements": [
+            {
+                "type": "relation",
+                "tags": {"name": "Square"},
+                "members": [
+                    {
+                        "type": "way",
+                        "role": "outer",
+                        "geometry": [{"lat": la, "lon": lo} for lo, la in w],
+                    }
+                    for w in ways
+                ],
+            }
+        ]
+    }
+
+
+def test_buffer_grows_the_boundary_by_roughly_the_requested_metres():
+    from shapely.geometry import Point, Polygon
+
+    rings = dl.relation_rings(square_relation())
+    assert len(rings) == 4  # four member ways, not yet a ring
+    grown = dl.buffered_rings(rings, 1000.0)
+    assert len(grown) == 1
+
+    poly = Polygon(grown[0])
+    original = Polygon([(0.0, 37.55), (0.01, 37.55), (0.01, 37.56), (0.0, 37.56)])
+    assert poly.contains(original)
+    # A point 900 m west of the original edge is inside the buffer; 2.5 km is not.
+    deg_per_m = 1 / (111_320.0 * 0.79)
+    assert poly.contains(Point(-900 * deg_per_m, 37.555))
+    assert not poly.contains(Point(-2500 * deg_per_m, 37.555))
+
+
+def test_boundary_document_describes_the_buffered_extent():
+    # The ring the viewer draws must claim the area actually downloaded, not
+    # the administrative line it was grown from.
+    rings = dl.relation_rings(square_relation())
+    grown = dl.buffered_rings(rings, 1000.0)
+    doc = dl.boundary_document(42, square_relation(), grown, 1000.0)
+    element = doc["elements"][0]
+    assert element["tags"]["mapsnap:buffer_m"] == "1000"
+    assert element["tags"]["name"] == "Square"
+    assert len(element["members"]) == len(grown)
+    # Same schema the viewer already reads: way members carrying geometry.
+    assert all(m["type"] == "way" and m["geometry"] for m in element["members"])
+
+
+def test_poly_query_lists_lat_lon_pairs_per_ring():
+    query = dl.form_osm_query_polygons([[(1.5, 2.5), (3.5, 4.5), (5.5, 6.5)]])
+    assert 'poly:"2.500000 1.500000 4.500000 3.500000 6.500000 5.500000"' in query
+    assert '["highway"]["name"]' in query
