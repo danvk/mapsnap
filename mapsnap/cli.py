@@ -1,5 +1,6 @@
 """Unified mapsnap command-line interface."""
 
+import faulthandler
 import importlib
 import sys
 
@@ -126,6 +127,24 @@ Commands:
 
 
 def main() -> None:
+    # A native crash (SIGSEGV/SIGBUS/SIGFPE) in numpy, shapely, cv2 or torch kills
+    # the process with no Python traceback at all -- #296 has taken out `snap`
+    # three times in ~60 fits, and every report so far is just "rc=245".
+    # faulthandler writes the C-level and Python stacks straight to fd 2 from the
+    # signal handler, so the next occurrence names the line.
+    faulthandler.enable()
+    # Line-buffer stdout so progress SURVIVES such a crash. Piped output is
+    # block-buffered by default, so the buffer dies with the process: the
+    # crashed runs looked like `snap` had produced nothing before dying, when in
+    # fact its output was simply lost. Without this the traceback above has no
+    # context about which page was being processed.
+    reconfigure = getattr(sys.stdout, "reconfigure", None)
+    if reconfigure is not None:
+        try:
+            reconfigure(line_buffering=True)
+        except ValueError:  # already-detached or non-text stream
+            pass
+
     if len(sys.argv) < 2 or sys.argv[1] in ("-h", "--help"):
         print(HELP)
         sys.exit(0 if len(sys.argv) >= 2 else 1)

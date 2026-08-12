@@ -32,3 +32,27 @@ def test_every_command_module_imports(name: str) -> None:
     assert callable(getattr(module, "main", None)), (
         f"{module_name} has no main() for `mapsnap {name}`"
     )
+
+
+def test_fatal_signal_produces_a_python_traceback():
+    """A native crash must name the Python line, not just exit 245.
+
+    #296 has killed `snap` three times in ~60 fits and every report was a bare
+    exit code, because a SIGSEGV inside numpy/shapely/cv2/torch unwinds no
+    Python frames. faulthandler writes both stacks from the signal handler.
+    """
+    import subprocess
+    import sys
+
+    crash = (
+        "import ctypes\n"
+        "from mapsnap import cli\n"
+        "cli.faulthandler.enable()\n"
+        "ctypes.string_at(0)\n"
+    )
+    result = subprocess.run(
+        [sys.executable, "-c", crash], capture_output=True, text=True, check=False
+    )
+    assert result.returncode != 0
+    assert "Fatal Python error" in result.stderr
+    assert "ctypes" in result.stderr

@@ -175,6 +175,21 @@ def main() -> None:
     # would skip this run's computation for good and leave the tag permanently
     # empty.
     if experiments.is_complete(archive_dir):
+        # Skipping is only honest when the archived run would produce the same
+        # thing. An auto run id encodes (commit, flags, inputs) so a collision
+        # implies a match, but an explicit --tag is just a name: re-using one
+        # after changing code or reads silently republishes the OLD run and
+        # reports it as this one. That happened -- an A/B arm was "re-run" under
+        # a tag the previous experiment had already archived, and its stale
+        # numbers were reported as new until the archives were purged by hand.
+        stale = experiments.archive_differs(archive_dir, inputs, git, georef_extra)
+        if stale:
+            sys.exit(
+                f"Run {run_id} is already archived at {archive_dir}, but it was "
+                f"produced from different {stale}. Refusing to skip and report "
+                f"that run as this one: choose a new --tag, or delete the "
+                f"archive to recompute."
+            )
         print(f"Run {run_id} already archived at {archive_dir}; skipping computation.")
         return
 
