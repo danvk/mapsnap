@@ -159,7 +159,7 @@ def usable_keymaps(directory: Path) -> list[Path]:
 def _georef_accepted(path: Path) -> bool:
     """Whether a georef sidecar exists and holds a pose its channel stands behind."""
     try:
-        return sidecar.accepted(json.loads(path.read_text()))
+        return sidecar.internally_valid(json.loads(path.read_text()))
     except (OSError, ValueError):
         return False
 

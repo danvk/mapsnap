@@ -179,7 +179,7 @@ def coverage_counts(dir_path: Path) -> dict:
             doc = json.loads(path.read_text())
         except (OSError, ValueError):
             continue
-        if sidecar.accepted(doc):
+        if sidecar.internally_valid(doc):
             counts["georeferenced"] += 1
         else:
             verdict = sidecar.status(doc)

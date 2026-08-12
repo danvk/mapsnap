@@ -97,7 +97,7 @@ def test_displaced_weak_page_is_demoted_with_hints(tmp_path):
     # still weigh it (with the contradiction against it).
     doc = json.loads((volume / "p3.georef.json").read_text())
     assert sidecar.status(doc) == sidecar.CONTRADICTED
-    assert not sidecar.accepted(doc)
+    assert not sidecar.internally_valid(doc)
     assert doc["status_detail"]["reason"] == "uncorroborated"
     assert doc["corners"]
     centers = contradiction_centers(volume, "p3")
