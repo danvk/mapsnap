@@ -283,9 +283,17 @@ export function registerIiifApi(
     }
     try {
       const dir = join(dataDir, volume);
-      const name = (await readdir(dir)).find((f) => /^r\d+\.json$/.test(f));
-      if (!name) return { relation: null };
-      const doc = JSON.parse(await readFile(join(dir, name), 'utf8'));
+      // Which relation the streets came from is recorded in the volume's own
+      // manifest, so a leftover r<id>.json from an earlier download is ignored
+      // rather than drawing a boundary the current streets did not come from.
+      const manifest = JSON.parse(
+        await readFile(join(dir, 'mapsnap.json'), 'utf8'),
+      );
+      const name: unknown = manifest?.params?.relation;
+      if (typeof name !== 'string' || !/^r\d+$/.test(name)) {
+        return { relation: null };
+      }
+      const doc = JSON.parse(await readFile(join(dir, `${name}.json`), 'utf8'));
       const element = doc.elements?.[0];
       if (!element) return { relation: null };
       const ways = (element.members ?? [])
@@ -296,7 +304,7 @@ export function registerIiifApi(
         .filter((w: unknown[]) => w.length >= 2);
       return {
         relation: {
-          id: name.replace(/\.json$/, ''),
+          id: name,
           name: element.tags?.name ?? null,
           ways,
         },

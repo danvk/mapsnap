@@ -2,17 +2,19 @@
 
 Writes into a volume directory:
 
-    streets.osm.json   the named highways inside the relation (or bbox)
-    r<id>.json         the relation's own boundary geometry (relation mode only)
+    streets.osm.json   the named highways inside the relation
+    r<id>.json         the relation's own boundary geometry
 
 The boundary is what the volume viewer draws as a red ring, so a page whose
 ground falls OUTSIDE the download is visible as such -- its streets are absent
 from the vocabulary and it cannot be fit at all, however good the reads are
 (richmond p383's BENTON/VAWTER/FENWICK appear nowhere in its streets.txt).
+Which boundary belongs to a volume is recorded in its mapsnap.json manifest
+under params.relation, so a leftover r<id>.json from an earlier relation is
+simply ignored rather than needing to be cleaned up.
 
 Usage:
     python download_osm.py r<relation_id> DIR
-    python download_osm.py <sw_lat> <sw_lon> <ne_lat> <ne_lon> DIR
 """
 
 import argparse
@@ -29,22 +31,6 @@ OVERPASS_URL = "https://overpass-api.de/api/interpreter"
 MAX_ATTEMPTS = 5  # total Overpass attempts before giving up
 INITIAL_RETRY_DELAY = 2.0  # seconds before the first retry; doubles each attempt
 MAX_RETRY_DELAY = 60.0  # cap on the exponential backoff delay
-
-
-def form_osm_query_bbox(sw: tuple[float, float], ne: tuple[float, float]) -> str:
-    sw_lat, sw_lon = sw
-    ne_lat, ne_lon = ne
-    return f"""[out:json][timeout:120];
-(
-    way["highway"]["name"](
-        {sw_lat}, {sw_lon},
-        {ne_lat}, {ne_lon}
-    );
-);
-out body;
->;
-out skel qt;
-"""
 
 
 def form_osm_query_relation(relation_id: int) -> str:
@@ -130,50 +116,31 @@ def download_osm(
 def main() -> None:
     parser = argparse.ArgumentParser(
         description="Download OSM street data via the Overpass API.",
-        usage="%(prog)s (r<relation_id> | sw_lat sw_lon ne_lat ne_lon) DIR",
+        usage="%(prog)s r<relation_id> DIR",
     )
     parser.add_argument(
-        "args",
-        nargs="+",
-        metavar="ARG",
-        help="Either 'r<relation_id>' or four floats: sw_lat sw_lon ne_lat ne_lon",
+        "relation",
+        metavar="RELATION",
+        help="OSM relation to download, as 'r<relation_id>' (e.g. r3864712)",
     )
     parser.add_argument(
         "output_dir",
         metavar="DIR",
-        help="Volume directory to write streets.osm.json (and r<id>.json) into",
+        help="Volume directory to write streets.osm.json and r<id>.json into",
     )
     parsed = parser.parse_args()
+
+    if not (parsed.relation.startswith("r") and parsed.relation[1:].isdigit()):
+        parser.error(
+            f"Expected an OSM relation like 'r3864712', got {parsed.relation!r}"
+        )
+    relation_id = int(parsed.relation[1:])
 
     out_dir = Path(parsed.output_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
     output = out_dir / "streets.osm.json"
-    relation_id: int | None = None
-    positional = parsed.args
-    if (
-        len(positional) == 1
-        and positional[0].startswith("r")
-        and positional[0][1:].isdigit()
-    ):
-        relation_id = int(positional[0][1:])
-        query = form_osm_query_relation(relation_id)
-        print(f"Querying relation r{relation_id}.", file=sys.stderr)
-    elif len(positional) == 4:
-        try:
-            sw_lat, sw_lon, ne_lat, ne_lon = [float(x) for x in positional]
-        except ValueError:
-            parser.error(
-                "Bounding box arguments must be four floats: sw_lat sw_lon ne_lat ne_lon"
-            )
-        query = form_osm_query_bbox((sw_lat, sw_lon), (ne_lat, ne_lon))
-        print(
-            f"Querying bbox ({sw_lat}, {sw_lon}) → ({ne_lat}, {ne_lon}).",
-            file=sys.stderr,
-        )
-    else:
-        parser.error(
-            "Pass either 'r<relation_id>' or four floats: sw_lat sw_lon ne_lat ne_lon"
-        )
+    query = form_osm_query_relation(relation_id)
+    print(f"Querying relation r{relation_id}.", file=sys.stderr)
 
     print(f"Running Overpass query:\n{query}", file=sys.stderr)
     result = download_osm(query)
@@ -181,15 +148,6 @@ def main() -> None:
     output.write_text(json.dumps(result, indent=2))
     print(f"Wrote {n_elements} elements to {output}", file=sys.stderr)
 
-    if relation_id is None:
-        # A bbox download has no boundary to record; the viewer simply draws no
-        # ring for it, rather than one that would misrepresent the extent.
-        return
-    # Stale rings are worse than none: a leftover boundary from a previous
-    # relation would draw a line the current streets were not downloaded from.
-    for stale in out_dir.glob("r*.json"):
-        if stale.name != f"r{relation_id}.json":
-            stale.unlink()
     boundary = download_osm(form_relation_geometry_query(relation_id))
     boundary_path = out_dir / f"r{relation_id}.json"
     boundary_path.write_text(json.dumps(boundary, indent=2))
