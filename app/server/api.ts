@@ -125,7 +125,16 @@ export type AdjacencyLabelsResponse = LabelsWriteRequest | { exists: false };
  * none rather than failing.
  */
 export interface FailedGeorefsResponse {
-  failed: Record<string, string>;
+  /**
+   * Page stem → every `<stem>.georef*.json` sidecar it has, sorted.
+   *
+   * Was a single "failure kind" per stem, decoded from the filename. #270
+   * phase 3 collapsed those suffixes into a `status` field inside one sidecar
+   * per channel, so the name no longer says anything about failure -- and the
+   * old pattern started matching `-final`/`-snap`/`-street`, i.e. every page.
+   * The viewer lists what is there and lets each file speak for itself (#252).
+   */
+  georefs: Record<string, string[]>;
   pages?: string[];
 }
 

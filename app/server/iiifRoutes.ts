@@ -39,7 +39,7 @@ const PAGE_IMAGE_PATTERN = /^p\d+[a-z]?\.jpg$/i;
 
 // A failed-georef sidecar name -> [full, stem, kind], e.g.
 // "p1452.georef-nofit.json" -> ["…", "p1452", "nofit"].
-const FAILED_GEOREF_PATTERN = /^(.+)\.georef-([a-z0-9]+)\.json$/i;
+const GEOREF_SIDECAR_PATTERN = /^(.+)\.georef(?:-[a-z0-9-]+)?\.json$/i;
 
 // Read a *.iiif.json if it is a georeference AnnotationPage, else null.
 /**
@@ -354,11 +354,10 @@ export function registerIiifApi(
     }
   });
 
-  // A volume's page files: every page-image stem, plus the ones with a failed-georef
-  // sidecar and that sidecar's kind, so the viewer can link an un-georeferenced page to
-  // its georef-<kind>.json file and — for a volume with no truth annotation — work out
-  // which pages went unplaced at all. ?volume=<dir> →
-  // { pages: ["p1", …], failed: { "p1452": "nofit", "p1427": "misscale" } }.
+  // A volume's page files: every page-image stem, plus every georef sidecar each
+  // page has, so the viewer can link to all of them and — for a volume with no
+  // truth annotation — work out which pages went unplaced. ?volume=<dir> →
+  // { pages: ["p1", …], georefs: { "p12": ["p12.georef.json", "p12.georef-snap.json"] } }.
   router.get('/iiif-api/failed-georefs', async (_params, request) => {
     const { volume } = request.query;
     if (!isSafeVolume(volume)) {
@@ -370,17 +369,19 @@ export function registerIiifApi(
     } catch {
       throw new HTTPError(404, `no such volume: ${volume}`);
     }
-    const failed: Record<string, string> = {};
+    const georefs: Record<string, string[]> = {};
     for (const file of files) {
-      const match = file.match(FAILED_GEOREF_PATTERN);
-      // First kind wins if a page somehow has more than one failed sidecar.
-      if (match && match[1] && match[2] && !(match[1] in failed)) {
-        failed[match[1]] = match[2].toLowerCase();
-      }
+      const match = file.match(GEOREF_SIDECAR_PATTERN);
+      if (match && match[1]) (georefs[match[1]] ??= []).push(file);
+    }
+    // Plain `georef.json` first, then the variants alphabetically, so the
+    // RANSAC fit heads the list and the channels follow in a stable order.
+    for (const list of Object.values(georefs)) {
+      list.sort((a, b) => a.length - b.length || a.localeCompare(b));
     }
     // volumePages drops a split sheet in favour of its panels, so a sheet whose panels
     // all fitted is not reported as an unplaced page.
-    return { failed, pages: await volumePages(dataDir, volume) };
+    return { georefs, pages: await volumePages(dataDir, volume) };
   });
 
   // A volume's key-map sheets and which visualization sidecars each has, so the viewer can link

@@ -64,10 +64,13 @@ interface InfoPanelProps {
   /** Whether the selected page is a missing (un-fitted) truth page. */
   selectedMissing: boolean;
   /**
-   * Failure kind of the selected page's failed-georef sidecar ("nofit"/"1gcp"/…),
-   * or null when it has none; drives the georef-view link for a missing page.
+   * Every `<stem>.georef*.json` the selected page has, plain first.
+   *
+   * A page can have several -- the RANSAC fit, the snap and street channels,
+   * and the arbiter's answer -- and which ones exist is itself informative, so
+   * they are all linked rather than guessed at from the page's status (#252).
    */
-  selectedFailedGeorefType: string | null;
+  selectedGeorefFiles: string[];
   /** Truth-compare stats for the selected page, when the volume has truth. */
   selectedStats: PageCompareStats | null;
   /** The selected page's note text, or null when it has none. */
@@ -208,7 +211,7 @@ export function InfoPanel(props: InfoPanelProps) {
     annotationName,
     selectedPage,
     selectedMissing,
-    selectedFailedGeorefType,
+    selectedGeorefFiles,
     selectedStats,
     selectedNote,
     hasAdjacency,
@@ -230,35 +233,25 @@ export function InfoPanel(props: InfoPanelProps) {
     // the image and its sidecar cannot share a base path.
     const fromRun = !!runArtifacts?.stems.includes(selectedPage.stem);
     const imageBase = `data/${volume}/${selectedPage.stem}`;
-    const sidecarBase = fromRun
-      ? `${runArtifacts!.dir}/${selectedPage.stem}`
-      : imageBase;
+    const sidecarDir = fromRun ? runArtifacts!.dir! : `data/${volume}`;
+    const sidecarBase = `${sidecarDir}/${selectedPage.stem}`;
 
-    // A not-georeferenced page has no `<stem>.georef.json`; it has whichever
-    // failure sidecar the fit wrote, so link that instead of a missing file.
-    const georefFiles = selectedMissing
-      ? selectedFailedGeorefType
-        ? [
-            `${imageBase}.jpg`,
-            `${sidecarBase}.georef-${selectedFailedGeorefType}.json`,
-          ]
-        : null
-      : [`${imageBase}.jpg`, `${sidecarBase}.georef.json`];
+    // One entry per georef sidecar the page actually has. The label is the
+    // variant ("georef", "georef-snap", …) so the list doubles as a readout of
+    // which channels produced a pose for this page. The filenames come from the
+    // volume root; when a run is selected they are looked for in its archive,
+    // which may hold fewer -- that link 404s visibly rather than silently
+    // resolving to another run's file.
+    const georefViews = selectedGeorefFiles.map((file) => ({
+      label: `${file.slice(selectedPage.stem.length + 1, -'.json'.length)} view`,
+      files: [`${imageBase}.jpg`, `${sidecarDir}/${file}`],
+    }));
     const debugViews: { label: string; files: string[] }[] = [
       {
         label: 'streets view',
         files: [`${imageBase}.jpg`, `${sidecarBase}.streets.json`],
       },
-      ...(georefFiles
-        ? [
-            {
-              label: selectedMissing
-                ? `georef view (${selectedFailedGeorefType})`
-                : 'georef view',
-              files: georefFiles,
-            },
-          ]
-        : []),
+      ...georefViews,
       ...(hasAdjacency
         ? [
             {
