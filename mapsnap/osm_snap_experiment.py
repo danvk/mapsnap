@@ -1138,6 +1138,11 @@ def cmd_candidates(
     else:
         init_worker(volume, vctx)
         for unit in stale:
+            # Which page we are ON, to stderr, before the work starts. The
+            # finished-page line below only prints on success, so a native crash
+            # (#296) would otherwise be attributable only to "the page after the
+            # last one logged". Stderr keeps stdout's parsed format unchanged.
+            print(f"snap: starting {unit.stem}", file=sys.stderr, flush=True)
             record_done(*snap_one_page(unit.stem))
     print(f"{len(stale)} pages computed; {len(existing)} total in {out_path}")
 
