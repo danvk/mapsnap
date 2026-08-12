@@ -130,6 +130,7 @@ export function VolumeViewer() {
   const [osmRelation, setOsmRelation] = useState<{
     id: string;
     name: string | null;
+    bufferM: number | null;
     ways: [number, number][][];
   } | null>(null);
   const [adjacencyData, setAdjacencyData] = useState<AdjacencyData | null>(
@@ -491,6 +492,10 @@ export function VolumeViewer() {
             className="rmse-color-control"
             title={`Streets were downloaded from OSM ${osmRelation.id}${
               osmRelation.name ? ` (${osmRelation.name})` : ''
+            }${
+              osmRelation.bufferM
+                ? `, buffered by ${osmRelation.bufferM} m — the ring is the area actually downloaded, not the administrative line`
+                : ' (no buffer — the ring is the administrative boundary itself)'
             }. Pages crossing this ring cover ground whose streets are missing from the vocabulary.`}
           >
             <input
@@ -498,7 +503,13 @@ export function VolumeViewer() {
               checked={showOsmRelation}
               onChange={(e) => setShowOsmRelation(e.target.checked)}
             />
-            OSM boundary
+            {osmRelation.bufferM
+              ? `OSM boundary +${
+                  osmRelation.bufferM >= 1000
+                    ? `${osmRelation.bufferM / 1000} km`
+                    : `${osmRelation.bufferM} m`
+                }`
+              : 'OSM boundary'}
           </label>
         )}
         <div className="opacity-control">
