@@ -39,9 +39,55 @@ const PAGE_IMAGE_PATTERN = /^p\d+[a-z]?\.jpg$/i;
 
 // A failed-georef sidecar name -> [full, stem, kind], e.g.
 // "p1452.georef-nofit.json" -> ["…", "p1452", "nofit"].
-const FAILED_GEOREF_PATTERN = /^(.+)\.georef-([a-z0-9]+)\.json$/i;
+const GEOREF_SIDECAR_PATTERN = /^(.+)\.georef(?:-[a-z0-9-]+)?\.json$/i;
 
 // Read a *.iiif.json if it is a georeference AnnotationPage, else null.
+/**
+ * Item counts for annotation files, keyed by path and invalidated by mtime.
+ *
+ * The volume list parses every `*.iiif.json` under data/ purely to show an item
+ * count beside each file: 633 files and 175 MB of JSON at the time of writing,
+ * about half a second, on every request. Counts cannot change without the file
+ * changing, so a stat is enough to reuse one (#288).
+ */
+const itemCountCache = new Map<
+  string,
+  { mtimeMs: number; itemCount: number; oimSlug?: string }
+>();
+
+/**
+ * OIM map slug from a truth file's mosaic id, e.g.
+ * ".../iiif/mosaic/sanborn09064_008/main-content/" -> "sanborn09064_008".
+ *
+ * Only the VOLUME is derivable offline. A per-page link would need OIM's
+ * document id, and the annotation's own id is a IIIF resource id in a
+ * different namespace: richmond p315 is resource 81359, and OIM's own page for
+ * 81359 is a different sheet entirely (#298).
+ */
+function oimSlugOf(page: GeorefAnnotationPage): string | undefined {
+  const id = (page as { id?: unknown }).id;
+  const match =
+    typeof id === 'string' ? id.match(/\/iiif\/mosaic\/([^/]+)\//) : null;
+  return match?.[1];
+}
+
+async function annotationFacts(
+  path: string,
+  mtimeMs: number,
+): Promise<{ itemCount: number; oimSlug?: string } | null> {
+  const hit = itemCountCache.get(path);
+  if (hit && hit.mtimeMs === mtimeMs) return hit;
+  const page = await readAnnotationPage(path);
+  if (!page) return null;
+  const facts = {
+    mtimeMs,
+    itemCount: page.items.length,
+    oimSlug: oimSlugOf(page),
+  };
+  itemCountCache.set(path, facts);
+  return facts;
+}
+
 async function readAnnotationPage(
   path: string,
 ): Promise<GeorefAnnotationPage | null> {
@@ -105,27 +151,45 @@ export function registerIiifApi(
   // page images (#228). It stops at the first page-bearing directory on a branch,
   // so a volume's own `raw/` is never listed as a volume.
   router.get('/iiif-api/volumes', async () => {
-    const volumes: VolumeInfo[] = [];
-    for (const name of await findVolumes(dataDir)) {
-      const files = await readdir(join(dataDir, name));
-      const pageCount = files.filter((f) => PAGE_IMAGE_PATTERN.test(f)).length;
-      if (pageCount === 0) continue;
-      const annotations: AnnotationFileInfo[] = [];
-      for (const file of files.filter((f) => f.endsWith('.iiif.json'))) {
-        const path = join(dataDir, name, file);
-        const page = await readAnnotationPage(path);
-        if (!page) continue;
-        const { mtimeMs } = await stat(path);
-        annotations.push({
-          name: file,
-          modifiedMs: Math.round(mtimeMs),
-          itemCount: page.items.length,
-        });
-      }
-      if (annotations.length === 0) continue;
-      annotations.sort((a, b) => b.modifiedMs - a.modifiedMs);
-      volumes.push({ name, pageCount, annotations });
-    }
+    // Every volume, and every annotation within it, is read CONCURRENTLY.
+    // Serially this walked ~18 volumes x several annotation files each,
+    // parsing every one in full for its item count, and took long enough that
+    // the volume picker arrived after the map had drawn (#288).
+    const names = await findVolumes(dataDir);
+    const built = await Promise.all(
+      names.map(async (name): Promise<VolumeInfo | null> => {
+        const files = await readdir(join(dataDir, name));
+        const pageCount = files.filter((f) =>
+          PAGE_IMAGE_PATTERN.test(f),
+        ).length;
+        if (pageCount === 0) return null;
+        let oimSlug: string | undefined;
+        const annotations = (
+          await Promise.all(
+            files
+              .filter((f) => f.endsWith('.iiif.json'))
+              .map(async (file): Promise<AnnotationFileInfo | null> => {
+                const path = join(dataDir, name, file);
+                const info = await stat(path);
+                const facts = await annotationFacts(path, info.mtimeMs);
+                if (!facts) return null;
+                if (file === 'main.iiif.json' && facts.oimSlug) {
+                  oimSlug = facts.oimSlug;
+                }
+                return {
+                  name: file,
+                  modifiedMs: Math.round(info.mtimeMs),
+                  itemCount: facts.itemCount,
+                };
+              }),
+          )
+        ).filter((a): a is AnnotationFileInfo => a !== null);
+        if (annotations.length === 0) return null;
+        annotations.sort((a, b) => b.modifiedMs - a.modifiedMs);
+        return { name, pageCount, annotations, oimSlug };
+      }),
+    );
+    const volumes = built.filter((v): v is VolumeInfo => v !== null);
     volumes.sort((a, b) => a.name.localeCompare(b.name));
     return { volumes };
   });
@@ -320,11 +384,10 @@ export function registerIiifApi(
     }
   });
 
-  // A volume's page files: every page-image stem, plus the ones with a failed-georef
-  // sidecar and that sidecar's kind, so the viewer can link an un-georeferenced page to
-  // its georef-<kind>.json file and — for a volume with no truth annotation — work out
-  // which pages went unplaced at all. ?volume=<dir> →
-  // { pages: ["p1", …], failed: { "p1452": "nofit", "p1427": "misscale" } }.
+  // A volume's page files: every page-image stem, plus every georef sidecar each
+  // page has, so the viewer can link to all of them and — for a volume with no
+  // truth annotation — work out which pages went unplaced. ?volume=<dir> →
+  // { pages: ["p1", …], georefs: { "p12": ["p12.georef.json", "p12.georef-snap.json"] } }.
   router.get('/iiif-api/failed-georefs', async (_params, request) => {
     const { volume } = request.query;
     if (!isSafeVolume(volume)) {
@@ -336,17 +399,19 @@ export function registerIiifApi(
     } catch {
       throw new HTTPError(404, `no such volume: ${volume}`);
     }
-    const failed: Record<string, string> = {};
+    const georefs: Record<string, string[]> = {};
     for (const file of files) {
-      const match = file.match(FAILED_GEOREF_PATTERN);
-      // First kind wins if a page somehow has more than one failed sidecar.
-      if (match && match[1] && match[2] && !(match[1] in failed)) {
-        failed[match[1]] = match[2].toLowerCase();
-      }
+      const match = file.match(GEOREF_SIDECAR_PATTERN);
+      if (match && match[1]) (georefs[match[1]] ??= []).push(file);
+    }
+    // Plain `georef.json` first, then the variants alphabetically, so the
+    // RANSAC fit heads the list and the channels follow in a stable order.
+    for (const list of Object.values(georefs)) {
+      list.sort((a, b) => a.length - b.length || a.localeCompare(b));
     }
     // volumePages drops a split sheet in favour of its panels, so a sheet whose panels
     // all fitted is not reported as an unplaced page.
-    return { failed, pages: await volumePages(dataDir, volume) };
+    return { georefs, pages: await volumePages(dataDir, volume) };
   });
 
   // A volume's key-map sheets and which visualization sidecars each has, so the viewer can link

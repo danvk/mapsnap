@@ -138,8 +138,8 @@ export function VolumeViewer() {
   );
   // Page key → note text for the selected volume (markers + tooltip).
   const [notes, setNotes] = useState<Map<string, string>>(new Map());
-  // Page stem → failed-georef kind ("nofit"/"1gcp"/…) for the selected volume.
-  const [failedGeorefs, setFailedGeorefs] = useState<Map<string, string>>(
+  // Page stem → its georef sidecars, for the selected volume.
+  const [georefSidecars, setGeorefSidecars] = useState<Map<string, string[]>>(
     new Map(),
   );
   // Every page-image stem in the selected volume; the un-fit list for a volume with
@@ -222,14 +222,14 @@ export function VolumeViewer() {
   const selection = parseAnnotationPath(selectedPath);
   const selectedVolume = volumes?.find((v) => v.name === selection?.volume);
 
-  // Load the selected volume's page notes, failed-georef sidecars, and adjacency data: the
-  // notes drive the list markers/tooltip, the failed-georefs the missing-page links, the
+  // Load the selected volume's page notes, georef sidecars, and adjacency data: the
+  // notes drive the list markers/tooltip, the sidecars the per-page georef links, the
   // adjacency the claim overlay.
   const volumeName = selection?.volume;
   useEffect(() => {
     if (!volumeName) {
       setNotes(new Map());
-      setFailedGeorefs(new Map());
+      setGeorefSidecars(new Map());
       setAdjacencyData(null);
       setOsmRelation(null);
       setKeymaps([]);
@@ -258,14 +258,14 @@ export function VolumeViewer() {
         if (!cancelled) setNotes(new Map());
       });
     fetchVolumePageFiles(volumeName)
-      .then(({ stems, failed }) => {
+      .then(({ stems, georefs }) => {
         if (cancelled) return;
-        setFailedGeorefs(failed);
+        setGeorefSidecars(georefs);
         setVolumeStems(stems);
       })
       .catch(() => {
         if (cancelled) return;
-        setFailedGeorefs(new Map());
+        setGeorefSidecars(new Map());
         setVolumeStems([]);
       });
     setAdjacencyData(null);
@@ -586,8 +586,8 @@ export function VolumeViewer() {
           annotationName={selection?.file ?? null}
           selectedPage={selectedPage}
           selectedMissing={selectedIsMissing}
-          selectedFailedGeorefType={
-            selectedPage ? (failedGeorefs.get(selectedPage.stem) ?? null) : null
+          selectedGeorefFiles={
+            selectedPage ? (georefSidecars.get(selectedPage.stem) ?? []) : []
           }
           selectedStats={
             selectedItemIndex === null
@@ -599,6 +599,7 @@ export function VolumeViewer() {
           }
           hasAdjacency={adjacencyData !== null}
           compareFooter={compareFooter}
+          oimSlug={selectedVolume?.oimSlug ?? null}
           keymaps={keymaps}
           volume={selection?.volume ?? ''}
           onClose={() => setSelectedStem(null)}

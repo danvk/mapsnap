@@ -27,16 +27,17 @@ export function fetchRewrittenAnnotation(
   return api.get('/iiif-api/annotation')(null, { path });
 }
 
-/** A volume's page-image stems, and which of them have a failed-georef sidecar. */
+/** A volume's page-image stems, and every georef sidecar each page has. */
 export interface VolumePageFiles {
   /** Every page-image stem, split sheets represented by their panels. */
   stems: string[];
   /** Page stem → failure kind ("nofit", "1gcp", …), for linking to the georef view. */
-  failed: Map<string, string>;
+  /** Page stem → its `<stem>.georef*.json` sidecars, plain first (#252). */
+  georefs: Map<string, string[]>;
 }
 
 /**
- * Fetch a volume's page files: the stems on disk plus the failed-georef sidecars.
+ * Fetch a volume's page files: the stems on disk plus their georef sidecars.
  *
  * An older server omits `pages`; the stems then come back empty, which costs the
  * un-fit listing on truth-less volumes rather than taking the viewer down.
@@ -44,10 +45,13 @@ export interface VolumePageFiles {
 export async function fetchVolumePageFiles(
   volume: string,
 ): Promise<VolumePageFiles> {
-  const { failed, pages } = await api.get('/iiif-api/failed-georefs')(null, {
+  const { georefs, pages } = await api.get('/iiif-api/failed-georefs')(null, {
     volume,
   });
-  return { stems: pages ?? [], failed: new Map(Object.entries(failed)) };
+  return {
+    stems: pages ?? [],
+    georefs: new Map(Object.entries(georefs ?? {})),
+  };
 }
 
 /**

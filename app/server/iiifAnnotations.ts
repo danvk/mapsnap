@@ -75,6 +75,8 @@ export interface AnnotationFileInfo {
 
 /** A volume directory with local page images and georeference annotations. */
 export interface VolumeInfo {
+  /** OIM map slug from main.iiif.json's mosaic id, when the volume has truth. */
+  oimSlug?: string;
   name: string;
   pageCount: number;
   annotations: AnnotationFileInfo[];
