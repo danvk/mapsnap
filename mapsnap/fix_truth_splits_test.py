@@ -89,7 +89,7 @@ def test_fix_applies_only_when_containment_improves(tmp_path):
     oim = tmp_path
     Image.fromarray(crop).save(oim / "p1__1.jpg")
     Image.fromarray(crop).save(oim / "p1__2.jpg")
-    from mapsnap.oim_truth import panel_polygon
+    from mapsnap.fix_truth_splits import panel_polygon
 
     polygon = panel_polygon(np.asarray(Image.open(oim / "p1__1.jpg").convert("L")))
     assert polygon is not None

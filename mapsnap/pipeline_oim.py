@@ -211,9 +211,13 @@ def main() -> None:
             ]
         )
 
-    # Locate OIM's manual split regions on the canvas (ground truth for compare).
-    with step("oim-split-truth"):
-        run_cmd(["mapsnap", "oim-split-truth", str(dir_path / "main.iiif.json")])
+    # OIM's manual split regions on the canvas (ground truth for compare), read
+    # from the boundaries OIM publishes rather than reverse-engineered from
+    # crops (#273/#274). The old `oim-split-truth` step template-matched
+    # oim/pN__i.jpg files that nothing in this pipeline downloads any more, so
+    # it could only warn-and-skip -- a new volume got no split truth at all.
+    with step("oim-panels"):
+        run_cmd(["mapsnap", "oim-panels", str(dir_path)])
 
     run_cmd(["mapsnap", "fit", str(dir_path), "--tag", "mapsnap"])
 
