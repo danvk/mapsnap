@@ -1,8 +1,18 @@
 """Download OSM street data using the Overpass API.
 
+Writes into a volume directory:
+
+    streets.osm.json   the named highways inside the relation (or bbox)
+    r<id>.json         the relation's own boundary geometry (relation mode only)
+
+The boundary is what the volume viewer draws as a red ring, so a page whose
+ground falls OUTSIDE the download is visible as such -- its streets are absent
+from the vocabulary and it cannot be fit at all, however good the reads are
+(richmond p383's BENTON/VAWTER/FENWICK appear nowhere in its streets.txt).
+
 Usage:
-    python download_osm.py r<relation_id> --output FILE
-    python download_osm.py <sw_lat> <sw_lon> <ne_lat> <ne_lon> --output FILE
+    python download_osm.py r<relation_id> DIR
+    python download_osm.py <sw_lat> <sw_lon> <ne_lat> <ne_lon> DIR
 """
 
 import argparse
@@ -12,6 +22,7 @@ import time
 import urllib.error
 import urllib.parse
 import urllib.request
+from pathlib import Path
 
 OVERPASS_URL = "https://overpass-api.de/api/interpreter"
 
@@ -50,6 +61,19 @@ way(area.searchArea)["highway"]["name"];
 out body;
 >;
 out skel qt;
+"""
+
+
+def form_relation_geometry_query(relation_id: int) -> str:
+    """Query for the relation's own boundary, with each member way's geometry.
+
+    ``out geom`` inlines every way's coordinates on the relation element, which
+    is what the viewer reads: it draws one line per member way rather than
+    stitching a ring, so no polygon assembly is needed in the browser.
+    """
+    return f"""[out:json][timeout:180];
+rel({relation_id});
+out geom;
 """
 
 
@@ -106,7 +130,7 @@ def download_osm(
 def main() -> None:
     parser = argparse.ArgumentParser(
         description="Download OSM street data via the Overpass API.",
-        usage="%(prog)s (r<relation_id> | sw_lat sw_lon ne_lat ne_lon) --output FILE",
+        usage="%(prog)s (r<relation_id> | sw_lat sw_lon ne_lat ne_lon) DIR",
     )
     parser.add_argument(
         "args",
@@ -114,9 +138,17 @@ def main() -> None:
         metavar="ARG",
         help="Either 'r<relation_id>' or four floats: sw_lat sw_lon ne_lat ne_lon",
     )
-    parser.add_argument("--output", required=True, help="Output JSON file")
+    parser.add_argument(
+        "output_dir",
+        metavar="DIR",
+        help="Volume directory to write streets.osm.json (and r<id>.json) into",
+    )
     parsed = parser.parse_args()
 
+    out_dir = Path(parsed.output_dir)
+    out_dir.mkdir(parents=True, exist_ok=True)
+    output = out_dir / "streets.osm.json"
+    relation_id: int | None = None
     positional = parsed.args
     if (
         len(positional) == 1
@@ -146,9 +178,26 @@ def main() -> None:
     print(f"Running Overpass query:\n{query}", file=sys.stderr)
     result = download_osm(query)
     n_elements = len(result.get("elements", []))
-    with open(parsed.output, "w") as f:
-        json.dump(result, f, indent=2)
-    print(f"Wrote {n_elements} elements to {parsed.output}", file=sys.stderr)
+    output.write_text(json.dumps(result, indent=2))
+    print(f"Wrote {n_elements} elements to {output}", file=sys.stderr)
+
+    if relation_id is None:
+        # A bbox download has no boundary to record; the viewer simply draws no
+        # ring for it, rather than one that would misrepresent the extent.
+        return
+    # Stale rings are worse than none: a leftover boundary from a previous
+    # relation would draw a line the current streets were not downloaded from.
+    for stale in out_dir.glob("r*.json"):
+        if stale.name != f"r{relation_id}.json":
+            stale.unlink()
+    boundary = download_osm(form_relation_geometry_query(relation_id))
+    boundary_path = out_dir / f"r{relation_id}.json"
+    boundary_path.write_text(json.dumps(boundary, indent=2))
+    members = len((boundary.get("elements") or [{}])[0].get("members", []))
+    print(
+        f"Wrote the r{relation_id} boundary ({members} ways) to {boundary_path}",
+        file=sys.stderr,
+    )
 
 
 if __name__ == "__main__":
