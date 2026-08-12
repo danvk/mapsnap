@@ -34,6 +34,22 @@ export interface AdjacencyResponse {
   adjacency: AdjacencyData | null;
 }
 
+/**
+ * Response of GET /iiif-api/osm-relation — the boundary of the OSM relation the
+ * volume's street network was downloaded from, as one LineString per member way.
+ *
+ * `null` when the volume has no r<id>.json. The ways are NOT stitched into a
+ * ring: drawing them as separate lines traces the same boundary and avoids
+ * reimplementing polygon assembly in the browser.
+ */
+export interface OsmRelationResponse {
+  relation: {
+    id: string;
+    name: string | null;
+    ways: [number, number][][];
+  } | null;
+}
+
 /** Query naming a georeference AnnotationPage, repo-root-relative. */
 export interface AnnotationQuery {
   path: string;
@@ -189,6 +205,9 @@ export interface API {
   };
   '/iiif-api/adjacency': {
     get: GetEndpoint<AdjacencyResponse, VolumeQuery>;
+  };
+  '/iiif-api/osm-relation': {
+    get: GetEndpoint<OsmRelationResponse, VolumeQuery>;
   };
   '/iiif-api/run-artifacts': {
     get: GetEndpoint<RunArtifactsResponse, AnnotationQuery>;

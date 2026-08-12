@@ -271,6 +271,41 @@ export function registerIiifApi(
     }
   });
 
+  // The boundary of the OSM relation this volume's streets were downloaded from
+  // (data/<volume>/r<id>.json, saved by the coverage sweep). The viewer draws it
+  // so a page whose ground falls OUTSIDE the download is visible as such: those
+  // pages' streets are missing from the vocabulary entirely, which is why
+  // richmond p383 and fargo's Moorhead sheets cannot be fit at all.
+  router.get('/iiif-api/osm-relation', async (_params, request) => {
+    const { volume } = request.query;
+    if (!isSafeVolume(volume)) {
+      throw new HTTPError(400, `invalid volume: ${volume}`);
+    }
+    try {
+      const dir = join(dataDir, volume);
+      const name = (await readdir(dir)).find((f) => /^r\d+\.json$/.test(f));
+      if (!name) return { relation: null };
+      const doc = JSON.parse(await readFile(join(dir, name), 'utf8'));
+      const element = doc.elements?.[0];
+      if (!element) return { relation: null };
+      const ways = (element.members ?? [])
+        .filter((m: any) => m.type === 'way' && Array.isArray(m.geometry))
+        .map((m: any) =>
+          m.geometry.map((p: any) => [p.lon, p.lat] as [number, number]),
+        )
+        .filter((w: unknown[]) => w.length >= 2);
+      return {
+        relation: {
+          id: name.replace(/\.json$/, ''),
+          name: element.tags?.name ?? null,
+          ways,
+        },
+      };
+    } catch {
+      return { relation: null };
+    }
+  });
+
   // A volume's page files: every page-image stem, plus the ones with a failed-georef
   // sidecar and that sidecar's kind, so the viewer can link an un-georeferenced page to
   // its georef-<kind>.json file and — for a volume with no truth annotation — work out

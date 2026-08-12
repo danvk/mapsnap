@@ -2,6 +2,7 @@ import { typedApi } from 'crosswalk';
 import { jsonFetch } from '../apiFetch';
 import type { API, KeymapInfo, RunArtifactsResponse } from '../../server/api';
 import type { CompareResponse } from '../../server/compareTxt';
+import type { OsmRelationResponse } from '../../server/api';
 import type {
   RewrittenAnnotationResponse,
   VolumeListResponse,
@@ -56,6 +57,21 @@ export async function fetchVolumePageFiles(
  */
 export async function fetchCompare(path: string): Promise<CompareResponse> {
   return api.get('/iiif-api/compare')(null, { path });
+}
+
+/**
+ * Fetch the boundary of the OSM relation the volume's streets came from, or null.
+ *
+ * Used to show which pages sit outside the downloaded network: their streets are
+ * absent from the vocabulary, so they cannot be fit however good the reads are.
+ */
+export async function fetchOsmRelation(
+  volume: string,
+): Promise<OsmRelationResponse['relation']> {
+  const { relation } = await api.get('/iiif-api/osm-relation')(null, {
+    volume,
+  });
+  return relation;
 }
 
 /** Fetch a volume's adjacency.json (per-page sheet-number claims + mutual graph), or null. */

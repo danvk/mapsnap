@@ -13,6 +13,7 @@ import {
 import type { ComparePageStats } from '../../server/compareTxt';
 import type { AdjacencyData } from '../types';
 import {
+  fetchOsmRelation,
   fetchAdjacency,
   fetchCompare,
   fetchKeymaps,
@@ -90,6 +91,11 @@ export function VolumeViewer() {
   const [showAdjacency, setShowAdjacency] = useState(
     () => initialParams.get('adj') === '1',
   );
+  // Default ON: a page outside the downloaded relation cannot be fit at all,
+  // and that is invisible without the ring.
+  const [showOsmRelation, setShowOsmRelation] = useState(
+    () => initialParams.get('osm') !== '0',
+  );
   const [isolateSelected, setIsolateSelected] = useState(
     () => initialParams.get('only') === '1',
   );
@@ -121,6 +127,11 @@ export function VolumeViewer() {
     label: string;
   } | null>(null);
   // The selected volume's adjacency.json (per-page claims + mutual graph), or null when absent.
+  const [osmRelation, setOsmRelation] = useState<{
+    id: string;
+    name: string | null;
+    ways: [number, number][][];
+  } | null>(null);
   const [adjacencyData, setAdjacencyData] = useState<AdjacencyData | null>(
     null,
   );
@@ -219,10 +230,18 @@ export function VolumeViewer() {
       setNotes(new Map());
       setFailedGeorefs(new Map());
       setAdjacencyData(null);
+      setOsmRelation(null);
       setKeymaps([]);
       return;
     }
     let cancelled = false;
+    fetchOsmRelation(volumeName)
+      .then((relation) => {
+        if (!cancelled) setOsmRelation(relation);
+      })
+      .catch(() => {
+        if (!cancelled) setOsmRelation(null);
+      });
     fetchKeymaps(volumeName)
       .then((list) => {
         if (!cancelled) setKeymaps(list);
@@ -359,9 +378,17 @@ export function VolumeViewer() {
       rmse: colorByRmse ? '1' : null,
       missing: showMissing ? '1' : null,
       adj: showAdjacency ? '1' : null,
+      osm: showOsmRelation ? null : '0',
       only: isolateSelected ? '1' : null,
     });
-  }, [selectedStem, colorByRmse, showMissing, showAdjacency, isolateSelected]);
+  }, [
+    selectedStem,
+    colorByRmse,
+    showMissing,
+    showAdjacency,
+    showOsmRelation,
+    isolateSelected,
+  ]);
 
   function selectVolume(name: string): void {
     const volume = volumes?.find((v) => v.name === name);
@@ -459,6 +486,21 @@ export function VolumeViewer() {
             Show adjacency
           </label>
         )}
+        {osmRelation && (
+          <label
+            className="rmse-color-control"
+            title={`Streets were downloaded from OSM ${osmRelation.id}${
+              osmRelation.name ? ` (${osmRelation.name})` : ''
+            }. Pages crossing this ring cover ground whose streets are missing from the vocabulary.`}
+          >
+            <input
+              type="checkbox"
+              checked={showOsmRelation}
+              onChange={(e) => setShowOsmRelation(e.target.checked)}
+            />
+            OSM boundary
+          </label>
+        )}
         <div className="opacity-control">
           <label htmlFor="iiif-opacity-slider">Opacity</label>
           <input
@@ -500,6 +542,9 @@ export function VolumeViewer() {
             awaitingView={!!selectedPath && !error}
             pageColors={pageColors}
             adjacencyClaims={showAdjacency ? adjacencyClaims : []}
+            osmRelationWays={
+              showOsmRelation && osmRelation ? osmRelation.ways : null
+            }
             selectedStem={selectedPage?.stem ?? null}
             initialViewport={initialViewport}
             fitVolumeKey={volumeName ?? null}
