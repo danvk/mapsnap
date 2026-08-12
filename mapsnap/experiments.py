@@ -316,6 +316,35 @@ def is_complete(run_dir: Path) -> bool:
     return (run_dir / "manifest.json").exists()
 
 
+def archive_differs(
+    run_dir: Path, inputs: dict, git: dict, flag_tokens: list[str]
+) -> str | None:
+    """What an existing archive was built from that this run is not, or None.
+
+    Guards the "already archived, skipping" path. With an auto run id the id
+    itself encodes (commit, flags, inputs), so a collision means a genuine
+    match and this always returns None. With an explicit ``--tag`` it does not:
+    the tag is just a name, and re-using one after changing code or reads makes
+    `fit` republish the archived run and present it as the new one.
+
+    Returns a short human phrase naming the FIRST mismatch, for the error
+    message. A manifest that cannot be read counts as differing -- an archive
+    we cannot verify is not one we should silently trust.
+    """
+    try:
+        manifest = json.loads((run_dir / "manifest.json").read_text())
+    except (OSError, ValueError):
+        return "an unreadable manifest"
+    if manifest.get("inputs") != inputs:
+        return "inputs (reads, centerlines or truth)"
+    archived_sha = (manifest.get("git") or {}).get("sha")
+    if archived_sha and git.get("sha") and archived_sha != git["sha"]:
+        return f"a different commit ({archived_sha[:8]})"
+    if (manifest.get("flags") or []) != list(flag_tokens):
+        return "different flags"
+    return None
+
+
 def archive_run(
     dir_path: Path,
     run_id: str,

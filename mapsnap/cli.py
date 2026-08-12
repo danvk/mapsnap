@@ -138,10 +138,12 @@ def main() -> None:
     # crashed runs looked like `snap` had produced nothing before dying, when in
     # fact its output was simply lost. Without this the traceback above has no
     # context about which page was being processed.
-    try:
-        sys.stdout.reconfigure(line_buffering=True)
-    except (AttributeError, ValueError):
-        pass
+    reconfigure = getattr(sys.stdout, "reconfigure", None)
+    if reconfigure is not None:
+        try:
+            reconfigure(line_buffering=True)
+        except ValueError:  # already-detached or non-text stream
+            pass
 
     if len(sys.argv) < 2 or sys.argv[1] in ("-h", "--help"):
         print(HELP)

@@ -4,6 +4,7 @@ import json
 from pathlib import Path
 
 from mapsnap.experiments import (
+    archive_differs,
     archive_run,
     auto_run_id,
     build_manifest,
@@ -358,3 +359,62 @@ def test_truth_metrics_score_absent_without_centerlines(tmp_path):
     generated.write_text(json.dumps({"items": [item]}))
     metrics = truth_metrics(truth, generated)
     assert "score" not in metrics
+
+
+# --- archive reuse guard ---
+
+
+def _manifest(tmp_path, **over):
+    run = tmp_path / "artifacts" / "run1"
+    run.mkdir(parents=True)
+    doc = {
+        "run_id": "run1",
+        "git": {"sha": "a" * 40},
+        "flags": [],
+        "inputs": {"centerlines_sha": "sha256:abc"},
+    }
+    doc.update(over)
+    _write(run / "manifest.json", json.dumps(doc))
+    return run
+
+
+def test_archive_differs_accepts_a_matching_archive(tmp_path):
+    run = _manifest(tmp_path)
+    assert (
+        archive_differs(run, {"centerlines_sha": "sha256:abc"}, {"sha": "a" * 40}, [])
+        is None
+    )
+
+
+def test_archive_differs_catches_changed_reads(tmp_path):
+    # The incident this exists for: an A/B arm "re-run" under a tag the previous
+    # experiment had archived. fit skipped, and the old run's numbers were
+    # reported as the new arm's until the archives were purged by hand.
+    run = _manifest(tmp_path)
+    reason = archive_differs(
+        run, {"centerlines_sha": "sha256:CHANGED"}, {"sha": "a" * 40}, []
+    )
+    assert reason and "inputs" in reason
+
+
+def test_archive_differs_catches_a_different_commit(tmp_path):
+    run = _manifest(tmp_path)
+    reason = archive_differs(
+        run, {"centerlines_sha": "sha256:abc"}, {"sha": "b" * 40}, []
+    )
+    assert reason and "commit" in reason
+
+
+def test_archive_differs_catches_different_flags(tmp_path):
+    run = _manifest(tmp_path)
+    reason = archive_differs(
+        run, {"centerlines_sha": "sha256:abc"}, {"sha": "a" * 40}, ["--no-snap"]
+    )
+    assert reason and "flags" in reason
+
+
+def test_archive_differs_distrusts_an_unreadable_manifest(tmp_path):
+    run = tmp_path / "artifacts" / "run2"
+    run.mkdir(parents=True)
+    _write(run / "manifest.json", "{not json")
+    assert archive_differs(run, {}, {"sha": "a" * 40}, []) is not None
