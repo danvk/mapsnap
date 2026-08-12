@@ -390,6 +390,12 @@ export function DebugView({ files: filesProp, onClose }: DebugViewProps = {}) {
     };
   }, [selectedPair, activePair, streets.length]);
 
+  // Substring search over detection text. Key-map sheets bypass the size and
+  // confidence filters entirely (their page numbers are not street reads), which
+  // left that view with no way to narrow a long list at all (#245); a text box
+  // serves both modes.
+  const [textFilter, setTextFilter] = useState('');
+
   const filteredDetections = useMemo(
     // Key-map page numbers are not street reads and never face georef's
     // admission gate, so they are shown unfiltered rather than judged by
@@ -400,6 +406,15 @@ export function DebugView({ files: filesProp, onClose }: DebugViewProps = {}) {
         : filterDetections(detections, filters),
     [detections, filters, keymapSheet],
   );
+
+  const shownDetections = useMemo(() => {
+    const needle = textFilter.trim().toLowerCase();
+    return needle
+      ? filteredDetections.filter(({ det }) =>
+          det.text.toLowerCase().includes(needle),
+        )
+      : filteredDetections;
+  }, [filteredDetections, textFilter]);
 
   // Boxes mode: apply the short/long-side sliders, then hide the toggled-off rotations.
   // The angle checkboxes count from the side-filtered set so the numbers track the sliders,
@@ -831,8 +846,25 @@ export function DebugView({ files: filesProp, onClose }: DebugViewProps = {}) {
           </>
         )}
         {mode === 'streets' && (
+          <div className="filter-row detection-text-filter">
+            <label htmlFor="detection-text-filter">Filter text:</label>
+            <input
+              id="detection-text-filter"
+              type="search"
+              value={textFilter}
+              placeholder="e.g. BROAD"
+              onChange={(e) => setTextFilter(e.target.value)}
+            />
+            {textFilter.trim() && (
+              <span className="filter-count">
+                {shownDetections.length} of {filteredDetections.length}
+              </span>
+            )}
+          </div>
+        )}
+        {mode === 'streets' && (
           <DetectionsTable
-            detections={filteredDetections}
+            detections={shownDetections}
             selectedIndices={selectedIndices}
             onSelect={(index) => setSelectedIndices(new Set([index]))}
             image={imageEl}
