@@ -67,7 +67,13 @@ function serveDataDir(): Plugin {
         }
 
         fs.stat(filePath, (err, stat) => {
-          if (err || !stat.isFile()) return next();
+          if (err || !stat.isFile()) {
+            // A missing data file is a 404, not the app. Falling through sent
+            // index.html with a 200, so a typo'd or stale data URL looked like
+            // a successful fetch of HTML (#241).
+            res.statusCode = 404;
+            return res.end(`Not found: ${pathname}`);
+          }
           res.setHeader('Content-Type', contentTypeFor(filePath));
           fs.createReadStream(filePath).pipe(res);
         });
@@ -76,9 +82,61 @@ function serveDataDir(): Plugin {
   };
 }
 
+/**
+ * 404 for file-looking URLs nothing served, instead of the SPA fallback.
+ *
+ * Vite answers any unmatched path with index.html and a 200, which is right
+ * for an app that routes on the path -- this one routes on the query string,
+ * so every extension-bearing URL that reaches the fallback is a mistake, and
+ * silently returning HTML makes it look like a successful fetch (#241).
+ *
+ * Runs BEFORE Vite's own middlewares (a post hook would sit after the fallback
+ * and never see these), so it must skip anything Vite legitimately serves:
+ * its internal endpoints, and real files under the app root or public/.
+ */
+function notFoundForMissingFiles(): Plugin {
+  return {
+    name: 'not-found-for-missing-files',
+    configureServer(server) {
+      const base = server.config.base;
+      const appRoot = server.config.root;
+      const publicDir = server.config.publicDir;
+      server.middlewares.use((req, res, next) => {
+        if (!req.url) return next();
+        const pathname = decodeURIComponent(
+          new URL(req.url, 'http://localhost').pathname,
+        );
+        const rel = pathname.startsWith(base)
+          ? pathname.slice(base.length)
+          : pathname.replace(/^\//, '');
+        // Extensionless paths are app entry points; let the fallback have them.
+        if (!path.extname(rel)) return next();
+        // Vite internals: /@vite/client, /@fs/..., /@id/..., node_modules, and
+        // the source tree it compiles on the fly.
+        if (/^(@|node_modules\/|src\/|\.vite\/)/.test(rel)) return next();
+        // data/ has its own handler above, which 404s on its own.
+        if (rel.startsWith('data/')) return next();
+        for (const dir of [appRoot, publicDir]) {
+          if (!dir) continue;
+          const candidate = path.join(dir, rel);
+          if (
+            (candidate === dir || candidate.startsWith(dir + path.sep)) &&
+            fs.existsSync(candidate) &&
+            fs.statSync(candidate).isFile()
+          ) {
+            return next();
+          }
+        }
+        res.statusCode = 404;
+        res.end(`Not found: ${pathname}`);
+      });
+    },
+  };
+}
+
 export default defineConfig({
   base: '/mapsnap/',
-  plugins: [react(), serveDataDir()],
+  plugins: [react(), serveDataDir(), notFoundForMissingFiles()],
   build: {
     rollupOptions: {
       input: {
