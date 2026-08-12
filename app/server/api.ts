@@ -46,6 +46,8 @@ export interface OsmRelationResponse {
   relation: {
     id: string;
     name: string | null;
+    /** Metres the download was grown past the administrative boundary, if any. */
+    bufferM: number | null;
     ways: [number, number][][];
   } | null;
 }

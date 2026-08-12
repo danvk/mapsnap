@@ -6,6 +6,7 @@ import urllib.request
 from pathlib import Path
 
 from mapsnap.craft import volume_craft_images
+from mapsnap.download_osm import BUFFER_M
 from mapsnap.keymap.records import recorded_keymap_keys
 from mapsnap.utils import (
     Step,
@@ -58,6 +59,17 @@ def main() -> None:
         "relation", metavar="RELATION", help="OSM relation ID for the street network"
     )
     parser.add_argument(
+        "--buffer-m",
+        type=float,
+        default=BUFFER_M,
+        metavar="M",
+        help=(
+            "Download streets this far past the relation boundary "
+            "(default: %(default)s). Sheets routinely map ground just outside "
+            "the modern administrative line."
+        ),
+    )
+    parser.add_argument(
         "oim_prefix", metavar="OIM_PREFIX", help="OIM URL prefix for image downloads"
     )
     parser.add_argument(
@@ -91,6 +103,7 @@ def main() -> None:
         {
             "sanborn_slug": args.sanborn_slug,
             "relation": args.relation,
+            "buffer_m": str(args.buffer_m),
             "oim_prefix": args.oim_prefix,
         },
     )
@@ -136,6 +149,8 @@ def main() -> None:
                 "download-osm",
                 args.relation,
                 str(dir_path),
+                "--buffer-m",
+                str(args.buffer_m),
             ]
         )
 

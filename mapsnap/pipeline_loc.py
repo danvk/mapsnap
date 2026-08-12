@@ -6,6 +6,7 @@ import sys
 from pathlib import Path
 
 from mapsnap.craft import volume_craft_images
+from mapsnap.download_osm import BUFFER_M
 from mapsnap.keymap.records import recorded_keymap_keys
 from mapsnap.utils import Step, list_pages, run_cmd, write_run_record
 
@@ -21,6 +22,17 @@ def main() -> None:
     parser.add_argument("dir", metavar="DIR", help="Directory containing manifest.json")
     parser.add_argument(
         "relation", metavar="RELATION", help="OSM relation ID for the street network"
+    )
+    parser.add_argument(
+        "--buffer-m",
+        type=float,
+        default=BUFFER_M,
+        metavar="M",
+        help=(
+            "Download streets this far past the relation boundary "
+            "(default: %(default)s). Sheets routinely map ground just outside "
+            "the modern administrative line."
+        ),
     )
     parser.add_argument(
         "--force",
@@ -42,7 +54,13 @@ def main() -> None:
     print(args.dir)
     print(args.relation)
     write_run_record(
-        dir_path, "loc", {"manifest": str(manifest), "relation": args.relation}
+        dir_path,
+        "loc",
+        {
+            "manifest": str(manifest),
+            "relation": args.relation,
+            "buffer_m": str(args.buffer_m),
+        },
     )
 
     step = Step(dir_path, force=args.force)
@@ -62,6 +80,8 @@ def main() -> None:
                 "download-osm",
                 args.relation,
                 str(dir_path),
+                "--buffer-m",
+                str(args.buffer_m),
             ]
         )
 

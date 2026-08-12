@@ -302,9 +302,15 @@ export function registerIiifApi(
           m.geometry.map((p: any) => [p.lon, p.lat] as [number, number]),
         )
         .filter((w: unknown[]) => w.length >= 2);
+      // download-osm records the buffer it used on the saved boundary, so the
+      // ring can say whether it traces the administrative line or the (larger)
+      // area actually downloaded. Absent on volumes fetched before buffering.
+      const bufferRaw = element.tags?.['mapsnap:buffer_m'];
+      const bufferM = bufferRaw == null ? null : Number(bufferRaw);
       return {
         relation: {
           id: name,
+          bufferM: Number.isFinite(bufferM) ? bufferM : null,
           name: element.tags?.name ?? null,
           ways,
         },
