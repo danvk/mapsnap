@@ -1,16 +1,39 @@
-"""Land-weighted success score for georeferenced volumes.
+"""Success score for georeferenced volumes: every sheet counts once.
 
-The project's success metric: **the share of truth land area on pages
-georeferenced to within a good-fit threshold (default 25ft RMSE), minus the
-share placed disastrously (default >=200ft)** — placing a page 2000ft off is
-worse than not placing it at all, so a disaster subtracts what a success adds.
-Unplaced truth pages stay in the denominator and earn nothing.
+The project's success metric: **the weighted share of truth pages georeferenced
+to within a good-fit threshold (default 25ft RMSE), minus the share placed
+disastrously (default >=200ft)** — placing a page 2000ft off is worse than not
+placing it at all, so a disaster subtracts what a success adds. Unplaced truth
+pages stay in the denominator and earn nothing.
 
-Weighting by *land* area (rather than counting pages) downweights small split
-panels and waterfront sheets that are mostly water. Land is approximated by
-street proximity: the fraction of a page's footprint within STREET_NEAR_M of an
-OSM street centerline. Streets only exist on usable land, so this needs no
+A page's weight is::
+
+    sheet_portion x land_fraction
+
+**sheet_portion** normalizes each SHEET to weight 1, split across its panels by
+the paper area each occupies (so a four-way split still totals one sheet, and a
+95/5 split weighs 0.95/0.05). Portions come from the OIM region boundaries in
+``oim/pN.panels.json`` — the same source ``mapsnap compare`` matches splits
+with — not from the truth SvgSelector, which is a clip MASK and so conflates
+masking with splitting.
+
+**land_fraction** is the share of the page's footprint within STREET_NEAR_M of
+an OSM street centerline. Streets only exist on usable land, so this needs no
 separate water dataset and also discounts rail yards and other unmapped ground.
+A sheet that is mostly harbour is worth proportionally less than a dense
+downtown sheet.
+
+This replaced weighting by absolute land AREA, which let a physically enormous
+low-density sheet outweigh a compact dense one. Hudson scored 50.5% with 76% of
+its pages placed, because its unplaced sheets carried 1.45x the land of its
+typical placed sheet: 24% of the sheets consumed 43% of the weight. Normalizing
+per sheet scores it 72.9% — much closer to what the volume actually looks like —
+while keeping the water discount that the land fraction was already providing
+(brooklyn moves only -1.5 with the fraction retained, against -9.3 without it).
+
+Across volumes the aggregate is a SIMPLE MEAN of per-volume scores: a volume is
+the unit of work, and pooling pages let the biggest volumes set the corpus
+number.
 
 Each GENERATED_IIIF argument is scored against the ``main.iiif.json`` truth and
 ``centerlines.geojson`` in its own directory; pages are matched and RMSE
@@ -38,6 +61,7 @@ from mapsnap.compare_iiif_georef import (
     compare_pages,
     extract_gcps,
     fit_transform,
+    load_split_polygons,
     truth_polygon_world,
 )
 from mapsnap.utils import default_centerlines, source_id_to_page_key
@@ -71,29 +95,40 @@ class PageScore:
     area_m2: float
     land_m2: float
     rmse_ft: float | None  # None = truth page with no generated fit
+    sheet_portion: float = 1.0  # share of its SHEET's weight (1.0 if unsplit)
+
+    @property
+    def land_fraction(self) -> float:
+        """Share of this page's footprint that is usable land."""
+        return self.land_m2 / self.area_m2 if self.area_m2 else 0.0
+
+    @property
+    def weight(self) -> float:
+        """This page's weight in the score: its slice of a sheet, less its water."""
+        return self.sheet_portion * self.land_fraction
 
 
 @dataclass
 class ScoreSummary:
-    """Land-weighted totals for a set of pages (one volume or the aggregate)."""
+    """Weighted totals for a set of pages (one volume)."""
 
     n_pages: int
     n_placed: int
-    land_m2: float
-    good_m2: float  # rmse <= good threshold
-    disaster_m2: float  # placed at rmse >= disaster threshold
+    weight: float
+    good_weight: float  # rmse <= good threshold
+    disaster_weight: float  # placed at rmse >= disaster threshold
 
     @property
     def good_share(self) -> float:
-        return self.good_m2 / self.land_m2 if self.land_m2 else 0.0
+        return self.good_weight / self.weight if self.weight else 0.0
 
     @property
     def disaster_share(self) -> float:
-        return self.disaster_m2 / self.land_m2 if self.land_m2 else 0.0
+        return self.disaster_weight / self.weight if self.weight else 0.0
 
     @property
     def net_score(self) -> float:
-        """The success metric: good land share minus disaster land share."""
+        """The success metric: good share minus disaster share."""
         return self.good_share - self.disaster_share
 
 
@@ -161,6 +196,63 @@ def land_fraction(
     return float(len(np.unique(hits)) / len(inside))
 
 
+def sheet_of(page_key: str) -> str:
+    """The sheet a page key belongs to ('p59__2' -> 'p59')."""
+    return page_key.split("__")[0]
+
+
+def split_index(page_key: str) -> int | None:
+    """1-based panel index in a split page key, or None when the page is unsplit."""
+    if "__" not in page_key:
+        return None
+    try:
+        return int(page_key.split("__")[1])
+    except ValueError:
+        return None
+
+
+def sheet_portions(oim_dir: Path, page_keys: list[str]) -> dict[str, float]:
+    """Each page key's share of its own sheet's weight, summing to 1 per sheet.
+
+    Split portions are the PAPER area of each OIM region boundary
+    (``oim/pN.panels.json``), normalized within the sheet. Paper, not ground:
+    an inset is small on the sheet however much ground it covers, and that is
+    what "a fraction of a page" means.
+
+    Panels are normalized to sum to 1 rather than divided by the raw sheet
+    rectangle, so that a sheet whose panels do not quite tile it still carries
+    the same total weight as an unsplit one. Measured across the 18 truth
+    volumes, the OIM panels tile their sheet almost exactly (median coverage
+    1.000), so the normalization is a safeguard rather than a correction.
+    """
+    by_sheet: dict[str, list[str]] = {}
+    for key in page_keys:
+        by_sheet.setdefault(sheet_of(key), []).append(key)
+
+    portions: dict[str, float] = {}
+    for sheet, keys in by_sheet.items():
+        if len(keys) == 1 and split_index(keys[0]) is None:
+            portions[keys[0]] = 1.0
+            continue
+        polygons = load_split_polygons(oim_dir / f"{sheet}.panels.json")
+        areas = {}
+        for key in keys:
+            index = split_index(key)
+            polygon = polygons.get(index) if index is not None else None
+            areas[key] = polygon.area if polygon is not None else 0.0
+        total = sum(areas.values())
+        if total <= 0:
+            # No usable boundaries: split the sheet evenly rather than drop it.
+            print(
+                f"  {sheet}: no panel boundaries; weighting its "
+                f"{len(keys)} panels equally",
+                file=sys.stderr,
+            )
+        for key in keys:
+            portions[key] = areas[key] / total if total > 0 else 1.0 / len(keys)
+    return portions
+
+
 def volume_page_scores(
     generated_iiif: Path,
     *,
@@ -226,6 +318,7 @@ def volume_page_scores(
     )
     streets = street_tree(centerlines, frame)
 
+    portions = sheet_portions(volume / "oim", sorted(rings))
     scores = []
     for key, ring in sorted(rings.items()):
         footprint = Polygon([frame.to_xy(lon, lat) for lon, lat in ring]).buffer(0)
@@ -238,6 +331,7 @@ def volume_page_scores(
                 area_m2=footprint.area,
                 land_m2=footprint.area * fraction,
                 rmse_ft=rmse_by_key[key],
+                sheet_portion=portions.get(key, 1.0),
             )
         )
     return scores
@@ -249,16 +343,16 @@ def summarize(
     good_ft: float = GOOD_FT,
     disaster_ft: float = DISASTER_FT,
 ) -> ScoreSummary:
-    """Land-weighted totals over a set of page scores."""
+    """Weighted totals over a set of page scores (one volume)."""
     return ScoreSummary(
         n_pages=len(pages),
         n_placed=sum(1 for p in pages if p.rmse_ft is not None),
-        land_m2=sum(p.land_m2 for p in pages),
-        good_m2=sum(
-            p.land_m2 for p in pages if p.rmse_ft is not None and p.rmse_ft <= good_ft
+        weight=sum(p.weight for p in pages),
+        good_weight=sum(
+            p.weight for p in pages if p.rmse_ft is not None and p.rmse_ft <= good_ft
         ),
-        disaster_m2=sum(
-            p.land_m2
+        disaster_weight=sum(
+            p.weight
             for p in pages
             if p.rmse_ft is not None and p.rmse_ft >= disaster_ft
         ),
@@ -268,8 +362,10 @@ def summarize(
 def main() -> None:
     parser = argparse.ArgumentParser(
         description=(
-            "Land-weighted success score: share of truth land area georeferenced "
-            "to <=GOOD ft RMSE, minus the share placed at >=DISASTER ft."
+            "Success score: weighted share of truth pages georeferenced to "
+            "<=GOOD ft RMSE, minus the share placed at >=DISASTER ft. Each "
+            "sheet weighs 1 (split across its panels by paper area), less its "
+            "water. Several volumes print a simple mean."
         )
     )
     parser.add_argument(
@@ -331,6 +427,7 @@ def main() -> None:
     print(header)
     print("-" * len(header))
     all_pages: list[tuple[str, PageScore]] = []
+    summaries: list[ScoreSummary] = []
     for path in args.generated:
         generated = Path(path)
         pages = volume_page_scores(
@@ -338,26 +435,39 @@ def main() -> None:
         )
         all_pages.extend((generated.parent.name, p) for p in pages)
         s = summarize(pages, good_ft=args.good_ft, disaster_ft=args.disaster_ft)
+        summaries.append(s)
         print(
             f"{generated.parent.name:<30} {s.n_pages:>5} {s.n_placed:>6} "
             f"{s.good_share:>7.1%} {s.disaster_share:>7.1%} {s.net_score:>6.1%}"
         )
-    if len(args.generated) > 1:
-        s = summarize(
-            [p for _, p in all_pages],
-            good_ft=args.good_ft,
-            disaster_ft=args.disaster_ft,
-        )
+    if len(summaries) > 1:
+        # A SIMPLE MEAN, not a pooled total: a volume is the unit of work, and
+        # pooling let the largest volumes decide the corpus number.
+        n = len(summaries)
         print("-" * len(header))
         print(
-            f"{'AGGREGATE':<30} {s.n_pages:>5} {s.n_placed:>6} "
-            f"{s.good_share:>7.1%} {s.disaster_share:>7.1%} {s.net_score:>6.1%}"
+            f"{'MEAN OF ' + str(n) + ' VOLUMES':<30} "
+            f"{sum(s.n_pages for s in summaries):>5} "
+            f"{sum(s.n_placed for s in summaries):>6} "
+            f"{sum(s.good_share for s in summaries) / n:>7.1%} "
+            f"{sum(s.disaster_share for s in summaries) / n:>7.1%} "
+            f"{sum(s.net_score for s in summaries) / n:>6.1%}"
         )
 
     if args.csv:
         with open(args.csv, "w", newline="") as f:
             writer = csv.writer(f)
-            writer.writerow(["volume", "page_key", "area_m2", "land_m2", "rmse_ft"])
+            writer.writerow(
+                [
+                    "volume",
+                    "page_key",
+                    "area_m2",
+                    "land_m2",
+                    "sheet_portion",
+                    "weight",
+                    "rmse_ft",
+                ]
+            )
             for volume_name, p in all_pages:
                 writer.writerow(
                     [
@@ -365,6 +475,8 @@ def main() -> None:
                         p.page_key,
                         round(p.area_m2, 1),
                         round(p.land_m2, 1),
+                        round(p.sheet_portion, 4),
+                        round(p.weight, 4),
                         "" if p.rmse_ft is None else round(p.rmse_ft, 1),
                     ]
                 )
