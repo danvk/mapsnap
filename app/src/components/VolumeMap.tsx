@@ -322,6 +322,31 @@ export function VolumeMap(props: VolumeMapProps) {
           'line-dasharray': [2, 2],
         },
       });
+      // The OTHER panels of a selected split sheet, greyed out. Added before
+      // the selection layers so it draws beneath them: selecting one panel of a
+      // sheet otherwise gives no clue where the cut runs, since the neighbouring
+      // panel looks like more of the same map (#303).
+      map.addSource('sibling-panels', {
+        type: 'geojson',
+        data: EMPTY_FEATURES,
+      });
+      map.addLayer({
+        id: 'sibling-panels-fill',
+        type: 'fill',
+        source: 'sibling-panels',
+        paint: { 'fill-color': '#111827', 'fill-opacity': 0.45 },
+      });
+      map.addLayer({
+        id: 'sibling-panels-outline',
+        type: 'line',
+        source: 'sibling-panels',
+        paint: {
+          'line-color': '#111827',
+          'line-width': 1,
+          'line-dasharray': [3, 2],
+          'line-opacity': 0.8,
+        },
+      });
       map.addSource('selected-page', {
         type: 'geojson',
         data: EMPTY_FEATURES,
@@ -486,6 +511,10 @@ export function VolumeMap(props: VolumeMapProps) {
     // Nothing to outline for a miss known only by name (a truth-less volume's).
     if (!page || !hasFootprint(page)) {
       source?.setData(EMPTY_FEATURES);
+      // Deselecting must clear the grey too, or it stays over the sheet.
+      map
+        .getSource<maplibregl.GeoJSONSource>('sibling-panels')
+        ?.setData(EMPTY_FEATURES);
       return;
     }
     // A fitted page (non-negative id) shows the truth box(es) sharing its page key beneath its
@@ -497,6 +526,28 @@ export function VolumeMap(props: VolumeMapProps) {
             .map((truth) => truth.rectRing)
         : [];
     source?.setData(selectionFeatures(page, truthRings));
+
+    // Grey the sheet's other panels so the cut is visible. Keyed on pageKey,
+    // which splits share, and only for a page that is itself a panel.
+    const siblings = map.getSource<maplibregl.GeoJSONSource>('sibling-panels');
+    siblings?.setData(
+      page.splitIndex === null
+        ? EMPTY_FEATURES
+        : {
+            type: 'FeatureCollection',
+            features: pages
+              .filter(
+                (other) =>
+                  other.pageKey === page.pageKey &&
+                  other.itemIndex !== page.itemIndex,
+              )
+              .map((other): FeatureCollection['features'][0] => ({
+                type: 'Feature',
+                properties: {},
+                geometry: { type: 'Polygon', coordinates: [other.clipRing] },
+              })),
+          },
+    );
     const mapId = mapIdsRef.current[page.itemIndex];
     if (mapId) {
       layer.bringMapsToFront([mapId]);
