@@ -598,13 +598,28 @@ export function VolumeMap(props: VolumeMapProps) {
     }
     const features = props.pages
       .filter((page) => props.pageColors?.has(page.itemIndex))
+      // Isolating hides every other page's warped image, so leaving their
+      // colour fills drawn buries the isolated page under overlays belonging
+      // to sheets that are no longer visible (#287).
+      .filter(
+        (page) =>
+          !isolateSelected ||
+          selectedItemIndex === null ||
+          page.itemIndex === selectedItemIndex,
+      )
       .map((page): FeatureCollection['features'][0] => ({
         type: 'Feature',
         properties: { color: props.pageColors?.get(page.itemIndex) },
         geometry: { type: 'Polygon', coordinates: [page.clipRing] },
       }));
     source.setData({ type: 'FeatureCollection', features });
-  }, [props.pageColors, props.pages, mapReady]);
+  }, [
+    props.pageColors,
+    props.pages,
+    isolateSelected,
+    selectedItemIndex,
+    mapReady,
+  ]);
 
   // Adjacency claim boxes, one polygon per claim. `mutual` drives the colour; `onSelectedPage`
   // (true for every claim when nothing is selected) drives filled-vs-dashed in the layer paint.

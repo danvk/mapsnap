@@ -42,6 +42,31 @@ const PAGE_IMAGE_PATTERN = /^p\d+[a-z]?\.jpg$/i;
 const FAILED_GEOREF_PATTERN = /^(.+)\.georef-([a-z0-9]+)\.json$/i;
 
 // Read a *.iiif.json if it is a georeference AnnotationPage, else null.
+/**
+ * Item counts for annotation files, keyed by path and invalidated by mtime.
+ *
+ * The volume list parses every `*.iiif.json` under data/ purely to show an item
+ * count beside each file: 633 files and 175 MB of JSON at the time of writing,
+ * about half a second, on every request. Counts cannot change without the file
+ * changing, so a stat is enough to reuse one (#288).
+ */
+const itemCountCache = new Map<
+  string,
+  { mtimeMs: number; itemCount: number }
+>();
+
+async function annotationItemCount(
+  path: string,
+  mtimeMs: number,
+): Promise<number | null> {
+  const hit = itemCountCache.get(path);
+  if (hit && hit.mtimeMs === mtimeMs) return hit.itemCount;
+  const page = await readAnnotationPage(path);
+  if (!page) return null;
+  itemCountCache.set(path, { mtimeMs, itemCount: page.items.length });
+  return page.items.length;
+}
+
 async function readAnnotationPage(
   path: string,
 ): Promise<GeorefAnnotationPage | null> {
@@ -105,27 +130,42 @@ export function registerIiifApi(
   // page images (#228). It stops at the first page-bearing directory on a branch,
   // so a volume's own `raw/` is never listed as a volume.
   router.get('/iiif-api/volumes', async () => {
-    const volumes: VolumeInfo[] = [];
-    for (const name of await findVolumes(dataDir)) {
-      const files = await readdir(join(dataDir, name));
-      const pageCount = files.filter((f) => PAGE_IMAGE_PATTERN.test(f)).length;
-      if (pageCount === 0) continue;
-      const annotations: AnnotationFileInfo[] = [];
-      for (const file of files.filter((f) => f.endsWith('.iiif.json'))) {
-        const path = join(dataDir, name, file);
-        const page = await readAnnotationPage(path);
-        if (!page) continue;
-        const { mtimeMs } = await stat(path);
-        annotations.push({
-          name: file,
-          modifiedMs: Math.round(mtimeMs),
-          itemCount: page.items.length,
-        });
-      }
-      if (annotations.length === 0) continue;
-      annotations.sort((a, b) => b.modifiedMs - a.modifiedMs);
-      volumes.push({ name, pageCount, annotations });
-    }
+    // Every volume, and every annotation within it, is read CONCURRENTLY.
+    // Serially this walked ~18 volumes x several annotation files each,
+    // parsing every one in full for its item count, and took long enough that
+    // the volume picker arrived after the map had drawn (#288).
+    const names = await findVolumes(dataDir);
+    const built = await Promise.all(
+      names.map(async (name): Promise<VolumeInfo | null> => {
+        const files = await readdir(join(dataDir, name));
+        const pageCount = files.filter((f) =>
+          PAGE_IMAGE_PATTERN.test(f),
+        ).length;
+        if (pageCount === 0) return null;
+        const annotations = (
+          await Promise.all(
+            files
+              .filter((f) => f.endsWith('.iiif.json'))
+              .map(async (file): Promise<AnnotationFileInfo | null> => {
+                const path = join(dataDir, name, file);
+                const info = await stat(path);
+                const itemCount = await annotationItemCount(path, info.mtimeMs);
+                return itemCount === null
+                  ? null
+                  : {
+                      name: file,
+                      modifiedMs: Math.round(info.mtimeMs),
+                      itemCount,
+                    };
+              }),
+          )
+        ).filter((a): a is AnnotationFileInfo => a !== null);
+        if (annotations.length === 0) return null;
+        annotations.sort((a, b) => b.modifiedMs - a.modifiedMs);
+        return { name, pageCount, annotations };
+      }),
+    );
+    const volumes = built.filter((v): v is VolumeInfo => v !== null);
     volumes.sort((a, b) => a.name.localeCompare(b.name));
     return { volumes };
   });

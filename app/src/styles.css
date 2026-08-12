@@ -504,7 +504,10 @@ tr.on-fill td {
    the page itself never scrolls, capped in width with its own horizontal
    scroll when the truth columns overflow. */
 .page-list {
-  max-width: 20rem;
+  /* FIXED, not max-: the column set changes between a truth annotation (no
+     compare columns) and a run (several), and a list that resizes with it
+     shifts the map beside it, so the two cannot be visually compared (#289). */
+  width: 20rem;
   max-height: 90vh;
   flex-shrink: 0;
   overflow: auto;
