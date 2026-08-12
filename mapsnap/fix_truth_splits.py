@@ -33,6 +33,7 @@ import sys
 from collections import defaultdict
 from pathlib import Path
 
+import cv2
 import numpy as np
 from PIL import Image
 from shapely.geometry import Point, Polygon
@@ -43,7 +44,6 @@ from mapsnap.compare_iiif_georef import (
     label_split_index,
     parse_svg_polygon,
 )
-from mapsnap.oim_truth import panel_polygon
 from mapsnap.utils import source_id_to_page_key
 
 # A GCP within this many canvas pixels of the selector counts as inside it;
@@ -76,6 +76,37 @@ def ring_offset(
     dx = float(arr[:, 0].min() - crop_polygon[:, 0].min())
     dy = float(arr[:, 1].min() - crop_polygon[:, 1].min())
     return dx, dy
+
+
+# Panel extraction by luminance, inherited from the retired `oim-split-truth`.
+# #273 showed this is NOT a sound way to build truth -- on bright scans the
+# paper is whiter than OIM's JPEG-dithered mask, so the "non-white" region
+# collapses onto ink. It survives here only to re-derive a CROP OFFSET from
+# artifacts a volume already has, where the polygon is subtracted from a stored
+# ring and small shape errors cancel. Do not use it to build panel geometry;
+# `mapsnap oim-panels` reads OIM's published boundaries instead.
+WHITE_THRESHOLD = 250  # pixels at or above this are masked-out (not part of the panel)
+CLOSE_KERNEL_PX = 25  # close small holes/noise in the panel mask before contouring
+APPROX_EPS_FRAC = 0.003  # Douglas-Peucker tolerance as a fraction of contour perimeter
+
+
+def panel_polygon(split_gray: np.ndarray) -> np.ndarray | None:
+    """Largest non-white region of a split image as an (N, 2) [x, y] polygon.
+
+    Pure-white pixels are masked-out (not part of the panel), so the remaining
+    shape is the panel's outline in the split image's own pixel frame. Returns
+    None if the image has no non-white content.
+    """
+    mask = ((split_gray < WHITE_THRESHOLD).astype(np.uint8)) * 255
+    closed = cv2.morphologyEx(
+        mask, cv2.MORPH_CLOSE, np.ones((CLOSE_KERNEL_PX, CLOSE_KERNEL_PX), np.uint8)
+    )
+    contours, _ = cv2.findContours(closed, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+    if not contours:
+        return None
+    contour = max(contours, key=cv2.contourArea)
+    eps = APPROX_EPS_FRAC * cv2.arcLength(contour, True)
+    return cv2.approxPolyDP(contour, eps, closed=True).reshape(-1, 2).astype(float)
 
 
 def gcp_containment(item: dict, points: list[tuple[float, float]]) -> float:

@@ -465,7 +465,7 @@ def test_compare_pages_warns_on_truth_splits_without_oim_panels(tmp_path, capsys
     assert rows == []
     assert len(missing) == 2
     err = capsys.readouterr().err
-    assert "p52" in err and "oim-split-truth" in err
+    assert "p52" in err and "oim-panels" in err
 
 
 def test_selector_split_polygons_gates_on_gcp_containment():

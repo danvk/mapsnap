@@ -106,11 +106,7 @@ SUBCOMMANDS: dict[str, tuple[str, str]] = {
     ),
     "oim-panels": (
         "mapsnap.oim_panels",
-        "Build oim/pN.panels.json from OIM region boundaries (supersedes oim-split-truth)",
-    ),
-    "oim-split-truth": (
-        "mapsnap.oim_truth",
-        "Locate OIM's manual split regions on the canvas for comparison",
+        "Build oim/pN.panels.json and cutlines.json from OIM's published region boundaries",
     ),
 }
 
