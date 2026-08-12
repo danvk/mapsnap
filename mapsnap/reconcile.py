@@ -153,7 +153,7 @@ class Hypothesis:
     affine: np.ndarray | None  # page px -> (lon, lat); None iff unplaced
     effective_gcps: int = 0
     merged_sources: list[str] = field(default_factory=list)
-    status: str = sidecar.ACCEPTED  # the writing channel's verdict on this pose
+    status: str = sidecar.VALID  # the writing channel's verdict on this pose
     scores: dict = field(default_factory=dict)
     unary_terms: dict = field(default_factory=dict)
     unary: float = 0.0
@@ -190,7 +190,7 @@ def published_channel(sidecar_dir: Path, stem: str) -> str | None:
         if not path.exists():
             continue
         try:
-            if sidecar.accepted(json.loads(path.read_text())):
+            if sidecar.internally_valid(json.loads(path.read_text())):
                 return channel
         except (OSError, ValueError):
             continue
@@ -234,7 +234,7 @@ def collect_hypotheses(
             status = sidecar.status(variant)
             hypotheses.append(
                 Hypothesis(
-                    source=name if status == sidecar.ACCEPTED else f"{name}:{status}",
+                    source=name if status == sidecar.VALID else f"{name}:{status}",
                     affine=affine,
                     effective_gcps=effective_gcp_count(variant),
                     status=status,

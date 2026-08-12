@@ -18,7 +18,7 @@ Under this contract a page has at most one sidecar per channel:
 ``p<stem>.georef.json`` (RANSAC), ``p<stem>.georef-snap.json`` (OSM snap),
 ``p<stem>.georef-street.json`` (street solver), and ``p<stem>.georef-final.json``
 (the arbiter's answer, which is what gets published). ``status`` says what the
-writing stage concluded; ``ACCEPTED`` means "this channel stands behind this
+writing stage concluded; ``VALID`` means "this channel stands behind this
 pose". Anything else is a pose the channel produced and declined -- still on
 disk, still weighable, no longer publishable by that channel.
 """
@@ -27,7 +27,7 @@ import json
 from pathlib import Path
 
 # The channel stands behind this pose.
-ACCEPTED = "fitted"
+VALID = "fitted"
 
 # Verdicts a channel can record against its own pose. Each was once a filename.
 MISSCALE = "misscale"  # scale disagrees with the volume family / printed note
@@ -39,21 +39,26 @@ CONTRADICTED = "contradicted"  # the page's printed adjacency claims say otherwi
 
 
 def status(doc: dict) -> str:
-    """The verdict recorded in a sidecar doc; ACCEPTED when it records none.
+    """The verdict recorded in a sidecar doc; VALID when it records none.
 
     Absent means accepted: a stage that has nothing to complain about writes no
-    status, so pre-existing sidecars and the common case both read as ACCEPTED.
+    status, so pre-existing sidecars and the common case both read as VALID.
     """
-    return doc.get("status") or ACCEPTED
+    return doc.get("status") or VALID
 
 
-def accepted(doc: dict) -> bool:
+def internally_valid(doc: dict) -> bool:
     """Whether this doc is a pose its own channel stands behind.
+
+    INTERNALLY valid: valid by the writing channel's own lights, which is a
+    much weaker claim than correct. Nobody external accepts anything here --
+    the stage that wrote the sidecar recorded that it has no objection to what
+    it produced, and the arbiter treats that as one input among many.
 
     Requires both a pose (corners) and an unblemished verdict, so a
     neighborhood-only sidecar is never mistaken for a fit.
     """
-    return bool(doc.get("corners")) and status(doc) == ACCEPTED
+    return bool(doc.get("corners")) and status(doc) == VALID
 
 
 def rejected_poses(doc: dict) -> list[dict]:

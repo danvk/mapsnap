@@ -208,7 +208,7 @@ def page_fit_state(volume: Path, stem: str) -> tuple[str, dict | None]:
         state = sidecar.status(doc)
         if state in LEGACY_UNLISTED_VERDICTS:
             return "none", None
-        return ("fitted" if state == sidecar.ACCEPTED else state), doc
+        return ("fitted" if state == sidecar.VALID else state), doc
     for variant in GEOREF_VARIANTS[1:]:  # legacy renamed-aside layout
         path = volume / f"{stem}.{variant}.json"
         if path.exists():

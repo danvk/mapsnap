@@ -52,7 +52,7 @@ from mapsnap.streets import (
     is_number_only,
     normalize_street,
 )
-from mapsnap.utils import default_centerlines, haversine_m, image_stem
+from mapsnap.utils import default_centerlines, image_stem
 
 
 @dataclass
@@ -246,15 +246,10 @@ def fit_keymap_affine(
 _FT_PER_DEG_LAT: float = math.pi * 20_925_524.0 / 180.0  # feet per degree latitude
 
 
-def _restore_demoted(output_path: str, demoted_doc: dict) -> None:
-    """Put a demoted pose back as the page's sidecar after a retry lost to it."""
-    Path(output_path).write_text(json.dumps(demoted_doc, indent=2))
-
-
 def _accepted(georef_path: str) -> bool:
     """Whether a georef sidecar on disk holds a pose this channel stands behind."""
     try:
-        return sidecar.accepted(json.loads(Path(georef_path).read_text()))
+        return sidecar.internally_valid(json.loads(Path(georef_path).read_text()))
     except (OSError, json.JSONDecodeError):
         return False
 
@@ -350,17 +345,6 @@ WEAK_PARTNER_CONFIDENCE = 0.05
 # line for drop_collinear_dominated. 20 px admits Nashville p9's 4 px 3RD/7TH offset while
 # keeping genuinely parallel streets (a block apart) separate.
 COLLINEAR_PERP_TOLERANCE_PX = 20.0
-
-# Confidence a detection must clear to count as evidence that a page belongs at its key-map
-# location (see has_confident_street_in_radius / the key-map-outlier rejection).
-KEYMAP_OUTLIER_MIN_CONFIDENCE = 0.5
-
-# The key-map-outlier rejection trusts a page's key-map location only when its key-map regions
-# cluster within this many radii of each other. A multi-panel page (e.g. an index sheet split
-# across the map) has its number detected in far-apart regions, so its single (lat, lon) is not a
-# reliable anchor — LA's p1499 series spans 6 km at a 472 m radius, and its correct fits land far
-# from that point. Above this ratio the check is skipped rather than reject a good fit.
-KEYMAP_OUTLIER_MAX_REGION_SPREAD_RATIO = 3.0
 
 
 def is_split_page(stem: str) -> bool:
@@ -2282,71 +2266,6 @@ def _init_worker(
     )
 
 
-def keymap_center_distance_m(
-    center: tuple[float, float], keymap: dict | None
-) -> float | None:
-    """Distance (m) from a fitted (lon, lat) page center to the page's key-map location.
-
-    Returns None when there is no key-map location to measure against.
-    """
-    if not keymap or keymap.get("lat") is None or keymap.get("lon") is None:
-        return None
-    lon, lat = center
-    return haversine_m(lat, lon, keymap["lat"], keymap["lon"])
-
-
-def keymap_location_is_anchored(keymap: dict | None) -> bool:
-    """Whether a page's key-map regions are tight enough for its location to anchor a check.
-
-    True when the page has at most one key-map region, or when all its regions cluster within
-    ``KEYMAP_OUTLIER_MAX_REGION_SPREAD_RATIO`` radii of each other. A multi-panel page detected in
-    far-apart regions (LA's p1499 spans 6 km) fails this, so the key-map-outlier rejection is
-    skipped for it rather than reject a correct fit against an unreliable single location.
-    """
-    if not keymap or keymap.get("radius_m") is None:
-        return False
-    centroids = [
-        (sum(p[0] for p in ring) / len(ring), sum(p[1] for p in ring) / len(ring))
-        for ring in (keymap.get("regions") or [])
-        if ring
-    ]
-    if len(centroids) <= 1:
-        return True
-    spread_m = max(
-        haversine_m(a[1], a[0], b[1], b[0]) for a in centroids for b in centroids
-    )
-    return spread_m <= KEYMAP_OUTLIER_MAX_REGION_SPREAD_RATIO * keymap["radius_m"]
-
-
-def has_confident_street_in_radius(
-    labels_path: str, in_radius_streets: set[str], min_confidence: float
-) -> bool:
-    """Whether any confident detection names a street inside the key-map radius.
-
-    This is the evidence that a page truly belongs at its key-map location: an OCR read that
-    both clears ``min_confidence`` and canonically matches a street within the radius. It gates
-    the key-map-outlier rejection, so a page with no such local evidence — whose key-map location
-    may itself be unreliable — is never rejected merely for landing elsewhere.
-    """
-    for detection in load_detections(labels_path):
-        if (
-            detection.get("confidence", 0.0) >= min_confidence
-            and canonical_street_match(detection.get("text", ""), in_radius_streets)
-            is not None
-        ):
-            return True
-    return False
-
-
-def _doc_inlier_count(path: str) -> int:
-    """Number of inlier street matches recorded in a written georef sidecar."""
-    try:
-        doc = json.loads(Path(path).read_text())
-    except (OSError, ValueError):
-        return 0
-    return sum(1 for street in doc.get("streets") or [] if street.get("inlier"))
-
-
 def _process_one_image(image_path: str) -> tuple[str, ProcessResult]:
     """Georeference one image using _worker_state, capturing its log to a <stem>.txt sidecar.
 
@@ -2492,12 +2411,6 @@ def _process_one_image(image_path: str) -> tuple[str, ProcessResult]:
                             if broadened.scale_deg_per_px is not None
                             else None
                         )
-                        distance_m = (
-                            keymap_center_distance_m(broadened.center, keymap)
-                            if broadened.center is not None
-                            else None
-                        )
-                        radius_m = (keymap or {}).get("radius_m")
                         if (
                             fitted is not None
                             and prior is not None
@@ -2512,99 +2425,6 @@ def _process_one_image(image_path: str) -> tuple[str, ProcessResult]:
                             # rejection isn't a no-op on disk.
                             if os.path.exists(output_path):
                                 os.remove(output_path)
-                        elif (
-                            distance_m is not None
-                            and radius_m is not None
-                            and distance_m > radius_m
-                            and keymap_location_is_anchored(keymap)
-                            and has_confident_street_in_radius(
-                                labels_path,
-                                set(near.keys()),
-                                KEYMAP_OUTLIER_MIN_CONFIDENCE,
-                            )
-                        ):
-                            print(
-                                f"  rejecting broadened fit: placed {distance_m:.0f} m from "
-                                f"the key-map location ({distance_m / radius_m:.1f}x the "
-                                f"{radius_m:.0f} m radius) despite confident in-radius streets"
-                            )
-                            # Keep the pose (it records where the page was wrongly
-                            # placed) but stop claiming it: the arbiter weighs this
-                            # pose against the others, and for the p55 class it is
-                            # sometimes the right one.
-                            sidecar.demote(
-                                output_path,
-                                sidecar.KEYMAP_OUTLIER,
-                                {
-                                    "distance_m": round(distance_m),
-                                    "radius_m": round(radius_m),
-                                },
-                            )
-                            # Hold the demoted pose in memory: the retry below
-                            # writes over the same sidecar, and whichever pose
-                            # loses still has to survive for the arbiter.
-                            demoted_doc = json.loads(Path(output_path).read_text())
-                            # Failure with nofit_written set: the page stays unplaced and the
-                            # redundant nofit sidecar is suppressed (the outlier one stands in).
-                            result = ProcessResult(success=False, nofit_written=True)
-                            # #259: the rectangle vocabulary is what reintroduced the
-                            # quadrant ambiguity (aliased 3-inlier poses near-tie within
-                            # 0.9%), so retry with the *neighborhood* vocabulary — inherently
-                            # in-radius and quadrant-free — at relaxed size floors, which
-                            # admits the below-floor cross-street reads the strict pass
-                            # starved on (Fargo p58__2: 14 px labels vs a 20 px floor).
-                            # Accept only a fit at least as well-supported as the one just
-                            # rejected — a weaker fit around a wrong key-map location
-                            # (Fargo p55) must not be conjured into existence.
-                            retried = run(
-                                near,
-                                near_cos_phi,
-                                size_fraction=KEYMAP_RETRY_SIZE_FRACTION,
-                            )
-                            if retried.success:
-                                rejected_inliers = sum(
-                                    1
-                                    for street in demoted_doc.get("streets") or []
-                                    if street.get("inlier")
-                                )
-                                retried_inliers = _doc_inlier_count(output_path)
-                                retried_scale = (
-                                    deg_per_px_to_px_per_ft(retried.scale_deg_per_px)
-                                    if retried.scale_deg_per_px is not None
-                                    else None
-                                )
-                                if (
-                                    retried_scale is not None
-                                    and prior is not None
-                                    and not broadened_scale_plausible(
-                                        retried_scale, prior
-                                    )
-                                ):
-                                    print(
-                                        "  rejecting in-radius retry: "
-                                        f"{retried_scale:.3f} px/ft is "
-                                        f"{retried_scale / prior:.2f}x the key-map "
-                                        f"region prior {prior:.3f} px/ft"
-                                    )
-                                    _restore_demoted(output_path, demoted_doc)
-                                elif retried_inliers < rejected_inliers:
-                                    print(
-                                        "  rejecting in-radius retry: "
-                                        f"{retried_inliers} inliers < the rejected "
-                                        f"fit's {rejected_inliers}"
-                                    )
-                                    _restore_demoted(output_path, demoted_doc)
-                                else:
-                                    print(
-                                        "  accepting in-radius retry: "
-                                        f"{retried_inliers} inliers >= the rejected "
-                                        f"fit's {rejected_inliers}"
-                                    )
-                                    # The retry's pose is the channel's answer;
-                                    # the key-map outlier rides along as a
-                                    # rejected pose for the arbiter to weigh.
-                                    sidecar.attach_rejected(output_path, [demoted_doc])
-                                    result = retried
                         else:
                             result = broadened
             elif rectangle_index is not None:

@@ -111,7 +111,7 @@ class Verdict:
 def _accepted(path: Path) -> bool:
     """Whether a channel sidecar holds a pose its channel stands behind."""
     try:
-        return sidecar.accepted(json.loads(path.read_text()))
+        return sidecar.internally_valid(json.loads(path.read_text()))
     except (OSError, ValueError):
         return False
 

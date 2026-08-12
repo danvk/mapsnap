@@ -17,14 +17,14 @@ def posed_doc() -> dict:
 def test_absent_status_reads_as_accepted():
     # A stage with nothing to complain about writes no status, so every
     # pre-existing sidecar in the corpus reads as accepted.
-    assert sidecar.status(posed_doc()) == sidecar.ACCEPTED
-    assert sidecar.accepted(posed_doc())
+    assert sidecar.status(posed_doc()) == sidecar.VALID
+    assert sidecar.internally_valid(posed_doc())
 
 
 def test_poseless_doc_is_never_accepted():
     # A neighborhood-only sidecar records that the channel was asked and had no
     # answer; it must not be mistaken for a fit just because no status is set.
-    assert not sidecar.accepted({"keymap": {"lat": 1, "lon": 2}})
+    assert not sidecar.internally_valid({"keymap": {"lat": 1, "lon": 2}})
 
 
 def test_demote_keeps_the_pose_and_records_why(tmp_path):
@@ -33,7 +33,7 @@ def test_demote_keeps_the_pose_and_records_why(tmp_path):
     sidecar.demote(path, sidecar.MISSCALE, {"px_per_ft": 0.5})
     doc = json.loads(path.read_text())
     assert sidecar.status(doc) == sidecar.MISSCALE
-    assert not sidecar.accepted(doc)
+    assert not sidecar.internally_valid(doc)
     # The whole point: the pose survives its demotion, so the arbiter can weigh
     # it. Under the rename convention this file simply ceased to exist.
     assert doc["corners"] == posed_doc()["corners"]
@@ -60,7 +60,7 @@ def test_attach_rejected_carries_a_second_pose(tmp_path):
     loser = {**posed_doc(), "status": sidecar.KEYMAP_OUTLIER}
     sidecar.attach_rejected(path, [loser])
     doc = json.loads(path.read_text())
-    assert sidecar.accepted(doc)
+    assert sidecar.internally_valid(doc)
     (rejected,) = sidecar.rejected_poses(doc)
     assert sidecar.status(rejected) == sidecar.KEYMAP_OUTLIER
-    assert not sidecar.accepted(rejected)
+    assert not sidecar.internally_valid(rejected)
