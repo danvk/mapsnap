@@ -19,6 +19,12 @@ interface VolumeMapProps {
    * truth box beneath its generated outline. Empty when the volume has no truth data.
    */
   truthPages: PageGeo[];
+  /**
+   * Boundary of the OSM relation the volume's streets were downloaded from, one
+   * ring per member way. Drawn as a red outline: any page footprint crossing it
+   * covers ground whose streets are absent from the vocabulary.
+   */
+  osmRelationWays: [number, number][][] | null;
   /** Whether the missing-page footprints are drawn and clickable. */
   showMissing: boolean;
   /**
@@ -263,6 +269,22 @@ export function VolumeMap(props: VolumeMapProps) {
           'line-color': '#333333',
           'line-width': 1.5,
           'line-dasharray': [3, 2],
+        },
+      });
+      // The OSM relation the street network was downloaded from. A red ring, drawn
+      // above the sheets so it stays legible over warped imagery.
+      map.addSource('osm-relation', {
+        type: 'geojson',
+        data: EMPTY_FEATURES,
+      });
+      map.addLayer({
+        id: 'osm-relation-line',
+        type: 'line',
+        source: 'osm-relation',
+        paint: {
+          'line-color': '#e11d48',
+          'line-width': 2.5,
+          'line-opacity': 0.9,
         },
       });
       // Adjacency claim boxes: blue where the claimed neighbor claims back (mutual), red for
@@ -607,6 +629,27 @@ export function VolumeMap(props: VolumeMapProps) {
       ),
     });
   }, [props.adjacencyClaims, props.selectedStem, mapReady]);
+
+  // The OSM relation boundary, one LineString per member way.
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !mapReady) return;
+    const source = map.getSource<maplibregl.GeoJSONSource>('osm-relation');
+    if (!source) return;
+    const ways = props.osmRelationWays;
+    source.setData(
+      !ways
+        ? EMPTY_FEATURES
+        : {
+            type: 'FeatureCollection',
+            features: ways.map((way) => ({
+              type: 'Feature',
+              properties: {},
+              geometry: { type: 'LineString', coordinates: way },
+            })),
+          },
+    );
+  }, [props.osmRelationWays, mapReady]);
 
   // Missing-page footprints: one translucent white polygon per un-fitted page
   // at its truth clip ring, shown only when the toggle is on.

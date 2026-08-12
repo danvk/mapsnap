@@ -135,8 +135,7 @@ def main() -> None:
                 "mapsnap",
                 "download-osm",
                 args.relation,
-                "--output",
-                str(dir_path / "streets.osm.json"),
+                str(dir_path),
             ]
         )
 

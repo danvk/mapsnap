@@ -70,3 +70,30 @@ def test_exits_immediately_on_non_transient_error(monkeypatch):
         dl.download_osm("query", max_attempts=5, initial_delay=0.01)
     # A client error (400) is not retried.
     assert len(calls) == 1
+
+
+# --- output directory + relation boundary ---
+
+
+def run_main(monkeypatch, argv, responses):
+    """Run main() with Overpass stubbed, returning the queries it issued."""
+    import sys
+
+    queries = []
+
+    def fake_download(query, **_):
+        queries.append(query)
+        return responses[len(queries) - 1]
+
+    monkeypatch.setattr(dl, "download_osm", fake_download)
+    monkeypatch.setattr(sys, "argv", ["mapsnap download-osm", *argv])
+    dl.main()
+    return queries
+
+
+STREETS = {"elements": [{"type": "way", "id": 1}]}
+BOUNDARY = {
+    "elements": [
+        {"type": "relation", "tags": {"name": "Richmond"}, "members": [{"type": "way"}]}
+    ]
+}

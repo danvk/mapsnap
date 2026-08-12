@@ -271,6 +271,49 @@ export function registerIiifApi(
     }
   });
 
+  // The boundary of the OSM relation this volume's streets were downloaded from
+  // (data/<volume>/r<id>.json, saved by the coverage sweep). The viewer draws it
+  // so a page whose ground falls OUTSIDE the download is visible as such: those
+  // pages' streets are missing from the vocabulary entirely, which is why
+  // richmond p383 and fargo's Moorhead sheets cannot be fit at all.
+  router.get('/iiif-api/osm-relation', async (_params, request) => {
+    const { volume } = request.query;
+    if (!isSafeVolume(volume)) {
+      throw new HTTPError(400, `invalid volume: ${volume}`);
+    }
+    try {
+      const dir = join(dataDir, volume);
+      // Which relation the streets came from is recorded in the volume's own
+      // manifest, so a leftover r<id>.json from an earlier download is ignored
+      // rather than drawing a boundary the current streets did not come from.
+      const manifest = JSON.parse(
+        await readFile(join(dir, 'mapsnap.json'), 'utf8'),
+      );
+      const name: unknown = manifest?.params?.relation;
+      if (typeof name !== 'string' || !/^r\d+$/.test(name)) {
+        return { relation: null };
+      }
+      const doc = JSON.parse(await readFile(join(dir, `${name}.json`), 'utf8'));
+      const element = doc.elements?.[0];
+      if (!element) return { relation: null };
+      const ways = (element.members ?? [])
+        .filter((m: any) => m.type === 'way' && Array.isArray(m.geometry))
+        .map((m: any) =>
+          m.geometry.map((p: any) => [p.lon, p.lat] as [number, number]),
+        )
+        .filter((w: unknown[]) => w.length >= 2);
+      return {
+        relation: {
+          id: name,
+          name: element.tags?.name ?? null,
+          ways,
+        },
+      };
+    } catch {
+      return { relation: null };
+    }
+  });
+
   // A volume's page files: every page-image stem, plus the ones with a failed-georef
   // sidecar and that sidecar's kind, so the viewer can link an un-georeferenced page to
   // its georef-<kind>.json file and — for a volume with no truth annotation — work out
