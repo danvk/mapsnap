@@ -588,6 +588,7 @@ export function VolumeViewer() {
           }
           hasAdjacency={adjacencyData !== null}
           compareFooter={compareFooter}
+          oimSlug={selectedVolume?.oimSlug ?? null}
           keymaps={keymaps}
           volume={selection?.volume ?? ''}
           onClose={() => setSelectedStem(null)}

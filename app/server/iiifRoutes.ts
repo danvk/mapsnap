@@ -52,19 +52,40 @@ const GEOREF_SIDECAR_PATTERN = /^(.+)\.georef(?:-[a-z0-9-]+)?\.json$/i;
  */
 const itemCountCache = new Map<
   string,
-  { mtimeMs: number; itemCount: number }
+  { mtimeMs: number; itemCount: number; oimSlug?: string }
 >();
 
-async function annotationItemCount(
+/**
+ * OIM map slug from a truth file's mosaic id, e.g.
+ * ".../iiif/mosaic/sanborn09064_008/main-content/" -> "sanborn09064_008".
+ *
+ * Only the VOLUME is derivable offline. A per-page link would need OIM's
+ * document id, and the annotation's own id is a IIIF resource id in a
+ * different namespace: richmond p315 is resource 81359, and OIM's own page for
+ * 81359 is a different sheet entirely (#298).
+ */
+function oimSlugOf(page: GeorefAnnotationPage): string | undefined {
+  const id = (page as { id?: unknown }).id;
+  const match =
+    typeof id === 'string' ? id.match(/\/iiif\/mosaic\/([^/]+)\//) : null;
+  return match?.[1];
+}
+
+async function annotationFacts(
   path: string,
   mtimeMs: number,
-): Promise<number | null> {
+): Promise<{ itemCount: number; oimSlug?: string } | null> {
   const hit = itemCountCache.get(path);
-  if (hit && hit.mtimeMs === mtimeMs) return hit.itemCount;
+  if (hit && hit.mtimeMs === mtimeMs) return hit;
   const page = await readAnnotationPage(path);
   if (!page) return null;
-  itemCountCache.set(path, { mtimeMs, itemCount: page.items.length });
-  return page.items.length;
+  const facts = {
+    mtimeMs,
+    itemCount: page.items.length,
+    oimSlug: oimSlugOf(page),
+  };
+  itemCountCache.set(path, facts);
+  return facts;
 }
 
 async function readAnnotationPage(
@@ -142,6 +163,7 @@ export function registerIiifApi(
           PAGE_IMAGE_PATTERN.test(f),
         ).length;
         if (pageCount === 0) return null;
+        let oimSlug: string | undefined;
         const annotations = (
           await Promise.all(
             files
@@ -149,20 +171,22 @@ export function registerIiifApi(
               .map(async (file): Promise<AnnotationFileInfo | null> => {
                 const path = join(dataDir, name, file);
                 const info = await stat(path);
-                const itemCount = await annotationItemCount(path, info.mtimeMs);
-                return itemCount === null
-                  ? null
-                  : {
-                      name: file,
-                      modifiedMs: Math.round(info.mtimeMs),
-                      itemCount,
-                    };
+                const facts = await annotationFacts(path, info.mtimeMs);
+                if (!facts) return null;
+                if (file === 'main.iiif.json' && facts.oimSlug) {
+                  oimSlug = facts.oimSlug;
+                }
+                return {
+                  name: file,
+                  modifiedMs: Math.round(info.mtimeMs),
+                  itemCount: facts.itemCount,
+                };
               }),
           )
         ).filter((a): a is AnnotationFileInfo => a !== null);
         if (annotations.length === 0) return null;
         annotations.sort((a, b) => b.modifiedMs - a.modifiedMs);
-        return { name, pageCount, annotations };
+        return { name, pageCount, annotations, oimSlug };
       }),
     );
     const volumes = built.filter((v): v is VolumeInfo => v !== null);

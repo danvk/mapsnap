@@ -80,6 +80,8 @@ interface InfoPanelProps {
   /** The compare table's summary footer, shown in the no-selection view; "" if none. */
   compareFooter: string;
   /** The volume's key-map sheets, linked to their visualizations in the no-selection view. */
+  /** OIM map slug for the volume, when its truth came from there (#298). */
+  oimSlug: string | null;
   keymaps: KeymapInfo[];
   /** Volume directory name, e.g. "brooklyn_ny_1906_vol_6". */
   volume: string;
@@ -216,6 +218,7 @@ export function InfoPanel(props: InfoPanelProps) {
     selectedNote,
     hasAdjacency,
     compareFooter,
+    oimSlug,
     keymaps,
     volume,
     runArtifacts,
@@ -399,6 +402,19 @@ export function InfoPanel(props: InfoPanelProps) {
           {median(pages.map((p) => p.scalePixelsPerFoot)).toFixed(2)} px/ft
         </dd>
       </dl>
+      {oimSlug && (
+        <div className="page-info-keymaps">
+          Truth source:{' '}
+          <a
+            href={`https://oldinsurancemaps.net/map/${oimSlug}`}
+            target="_blank"
+            rel="noreferrer"
+            title="This volume on oldinsurancemaps.net, where the truth georeferences were made"
+          >
+            OIM {oimSlug} ↗
+          </a>
+        </div>
+      )}
       {keymaps.length > 0 && (
         <div className="page-info-keymaps">
           Keymaps:{' '}

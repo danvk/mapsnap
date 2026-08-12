@@ -167,6 +167,14 @@ export interface RunArtifactsResponse {
   stems: string[];
 }
 
+/** One volume's OIM identity, for linking out to the truth source. */
+export interface OimLink {
+  /** Map slug, e.g. "sanborn09064_008". */
+  slug: string;
+  /** The volume's page on oldinsurancemaps.net. */
+  url: string;
+}
+
 /** Response of GET /iiif-api/keymaps — a volume's key-map sheets, for the info-panel links. */
 export interface KeymapsResponse {
   keymaps: KeymapInfo[];
