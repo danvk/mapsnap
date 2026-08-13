@@ -1,5 +1,7 @@
 """Unit tests for street-name helpers (now in streets.py)."""
 
+import json
+
 import numpy as np
 
 from mapsnap.detect_text import (
@@ -660,3 +662,51 @@ def test_lab_to_hex_renders_a_swatch_of_the_lab_colour():
 
 def _hex_channels(value: str) -> tuple[int, int, int]:
     return int(value[1:3], 16), int(value[3:5], 16), int(value[5:7], 16)
+
+
+# --- recognizer-aware --resume ---
+
+
+def write_streets(path, command):
+    path.write_text(json.dumps({"command": command, "streets": []}))
+
+
+def test_cached_recognizer_reads_the_weights_from_the_command(tmp_path):
+    from mapsnap.detect_text import cached_recognizer
+
+    p = tmp_path / "p1.streets.json"
+    write_streets(
+        p,
+        ["mapsnap ocr", "--recognizer-weights", "models/street_recognizer.pt", "x.jpg"],
+    )
+    assert cached_recognizer(p) == "street_recognizer.pt"
+    write_streets(p, ["mapsnap ocr", "--centerlines", "c.geojson", "x.jpg"])
+    assert cached_recognizer(p) is None
+
+
+def test_resume_skips_only_reads_from_the_same_recognizer(tmp_path):
+    """The bug this exists for: --resume tested existence alone, so a run with
+    new weights kept old reads. 15 pages sat on stock weights for a month."""
+    from mapsnap.detect_text import reads_are_current
+
+    stock = tmp_path / "stock.streets.json"
+    write_streets(stock, ["mapsnap ocr", "x.jpg"])
+    tuned = tmp_path / "tuned.streets.json"
+    write_streets(
+        tuned,
+        [
+            "mapsnap ocr",
+            "--recognizer-weights",
+            "/abs/models/street_recognizer.pt",
+            "x.jpg",
+        ],
+    )
+
+    # Running with the fine-tuned model: the stock read is stale, the tuned one current.
+    assert not reads_are_current(stock, "models/street_recognizer.pt")
+    assert reads_are_current(tuned, "models/street_recognizer.pt")
+    # ...and with --stock-recognizer, the reverse.
+    assert reads_are_current(stock, None)
+    assert not reads_are_current(tuned, None)
+    # A page with no read at all is always due.
+    assert not reads_are_current(tmp_path / "missing.streets.json", None)

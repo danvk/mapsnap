@@ -607,6 +607,49 @@ def box_key(bbox) -> tuple[tuple[int, int], ...]:
     return tuple((round(float(x)), round(float(y))) for x, y in bbox)
 
 
+DEFAULT_RECOGNIZER_WEIGHTS = (
+    Path(__file__).resolve().parent.parent / "models" / "street_recognizer.pt"
+)
+"""The fine-tuned street recognizer, used unless --stock-recognizer is passed.
+
+Measured against the stock EasyOCR model on held-out volumes: fargo +13.4 and
+richmond +8.5 land-weighted points, neither in training. Shipping it as the
+default means a run has to opt OUT of the better reads rather than remember to
+opt in -- 15 pages of the corpus were still on stock weights months after the
+model landed, purely because a re-OCR had been run without the flag.
+"""
+
+
+def cached_recognizer(streets_path: Path) -> str | None:
+    """Which recognizer produced a cached read, by weights filename, or None.
+
+    ``streets.json`` records the command that wrote it, so the weights are
+    recoverable. None means EasyOCR's stock model -- either no flag was passed
+    or the file predates the flag.
+    """
+    try:
+        command = json.loads(streets_path.read_text()).get("command") or []
+    except (OSError, ValueError):
+        return None
+    for i, token in enumerate(command):
+        if token == "--recognizer-weights" and i + 1 < len(command):
+            return Path(command[i + 1]).name
+    return None
+
+
+def reads_are_current(streets_path: Path, weights: str | None) -> bool:
+    """Whether a cached read exists AND came from the recognizer now in use.
+
+    ``--resume`` used to test only that the file existed, so a re-run with
+    different weights silently kept the old reads. That is how 15 pages across
+    8 volumes stayed on EasyOCR's stock model for a month after the fine-tuned
+    one shipped: each was skipped by a --resume run whose weights differed.
+    """
+    if not streets_path.exists():
+        return False
+    return cached_recognizer(streets_path) == (Path(weights).name if weights else None)
+
+
 def load_recognizer_weights(reader: easyocr.Reader, weights_path: str) -> None:
     """Swap fine-tuned recognizer weights (#265) into an EasyOCR reader.
 
@@ -1206,13 +1249,19 @@ def main() -> None:
     )
     parser.add_argument(
         "--recognizer-weights",
-        default=None,
+        default=str(DEFAULT_RECOGNIZER_WEIGHTS),
         metavar="PT",
         help=(
-            "Path to fine-tuned recognizer weights (a state_dict from "
+            "Fine-tuned recognizer weights (a state_dict from "
             "mapsnap.train_street_recognizer) to load in place of EasyOCR's "
-            "stock model. Detection, vocabulary, and decoding are unchanged."
+            "stock model (default: %(default)s). Detection, vocabulary, and "
+            "decoding are unchanged. Pass --stock-recognizer for EasyOCR's."
         ),
+    )
+    parser.add_argument(
+        "--stock-recognizer",
+        action="store_true",
+        help="Use EasyOCR's own recognizer instead of the fine-tuned weights.",
     )
     parser.add_argument(
         "--craft-scale",
@@ -1319,7 +1368,10 @@ def main() -> None:
         images = [
             p
             for p in images
-            if not (Path(p).parent / (image_stem(p) + ".streets.json")).exists()
+            if not reads_are_current(
+                Path(p).parent / (image_stem(p) + ".streets.json"),
+                args.recognizer_weights,
+            )
         ]
         print(
             f"Resuming: {len(images)}/{len(args.images)} remaining images to process.",
@@ -1336,6 +1388,14 @@ def main() -> None:
             file=sys.stderr,
         )
         args.num_workers = 1
+
+    if args.stock_recognizer:
+        args.recognizer_weights = None
+    elif args.recognizer_weights and not Path(args.recognizer_weights).exists():
+        sys.exit(
+            f"Recognizer weights not found: {args.recognizer_weights}\n"
+            "Pass --stock-recognizer to use EasyOCR's model instead."
+        )
 
     if args.num_workers > 1:
         initargs = (

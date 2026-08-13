@@ -125,9 +125,35 @@ def gather_inputs(dir_path: Path, centerlines: Path, truth: Path | None) -> dict
 
     Returns the ``inputs`` block recorded in the manifest. ``boxes.json`` is hashed for
     provenance but is not archived (it's CRAFT output, georef-independent, and large).
+
+    Reads are hashed for the EFFECTIVE pages only -- the ones `mapsnap georef`
+    is actually given. A split page's parent keeps its old `p12.streets.json`
+    after the split, but `list_pages` hands georef `p12__1`/`p12__2` instead, so
+    folding the parent in claimed a file as an input that cannot change any
+    result. Eight of the eighteen truth volumes carry such a leftover, and the
+    stale hash both muddied provenance and made the file look live enough that
+    an audit of recognizer coverage mis-reported 15 pages as needing re-OCR.
     """
-    streets = sorted(dir_path.glob("p*.streets.json"))
-    boxes = sorted(dir_path.glob("p*.boxes.json"))
+    effective = {path.stem for path in list_pages(dir_path)}
+    if not effective:
+        # No page images to go by (a bare sidecar directory). Hashing nothing
+        # would make every such directory hash alike, so fall back to the glob.
+        effective = {
+            path.name[: -len(".streets.json")]
+            for path in dir_path.glob("p*.streets.json")
+        } | {
+            path.name[: -len(".boxes.json")] for path in dir_path.glob("p*.boxes.json")
+        }
+    streets = sorted(
+        path
+        for path in dir_path.glob("p*.streets.json")
+        if path.name[: -len(".streets.json")] in effective
+    )
+    boxes = sorted(
+        path
+        for path in dir_path.glob("p*.boxes.json")
+        if path.name[: -len(".boxes.json")] in effective
+    )
     inputs: dict = {
         "centerlines_sha": file_sha256(centerlines),
         "streets": {"count": len(streets), "combined_sha": combined_sha256(streets)},
