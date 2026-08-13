@@ -250,14 +250,8 @@ def synth_strip(
     if len(xs) == 0:
         return synth_strip(fonts, tiles, rng)
     cx, cy = xs.mean(), ys.mean()
-    # The jitter range must cover the localizer's real candidate offsets: CNN
-    # centers land up to ~17 working px from the glyph (chicago's 8N candidate
-    # sits 8.5 px BELOW the number, and the v3 model read blank there -- reads
-    # died wherever the offset left the training envelope, which was the whole
-    # remaining chicago regression). Vertical especially: candidates ride the
-    # patch grid, not the type's baseline.
-    jx = float(rng.uniform(-16, 16)) * ss
-    jy = float(rng.uniform(-12, 12)) * ss
+    jx = float(rng.uniform(-12, 12)) * ss
+    jy = float(rng.uniform(-6, 6)) * ss
     x0 = int(np.clip(cx - crop_w / 2 + jx, 0, arr.shape[1] - crop_w))
     y0 = int(np.clip(cy - crop_h / 2 + jy, 0, arr.shape[0] - crop_h))
     crop = arr[y0 : y0 + crop_h, x0 : x0 + crop_w]
