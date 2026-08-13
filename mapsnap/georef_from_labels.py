@@ -246,22 +246,6 @@ def fit_keymap_affine(
 _FT_PER_DEG_LAT: float = math.pi * 20_925_524.0 / 180.0  # feet per degree latitude
 
 
-def _accepted(georef_path: str) -> bool:
-    """Whether a georef sidecar on disk holds a pose this channel stands behind."""
-    try:
-        return sidecar.internally_valid(json.loads(Path(georef_path).read_text()))
-    except (OSError, json.JSONDecodeError):
-        return False
-
-
-def _dist_km(a: tuple[float, float], b: tuple[float, float]) -> float:
-    """Approximate great-circle distance in km between two (lon, lat) points."""
-    cos_lat = math.cos(math.radians((a[1] + b[1]) / 2))
-    dlat_km = (b[1] - a[1]) * 111.0
-    dlon_km = (b[0] - a[0]) * 111.0 * cos_lat
-    return math.sqrt(dlat_km**2 + dlon_km**2)
-
-
 def affine_scale_deg_per_px(A: np.ndarray) -> float:
     """Return the scale (degrees latitude per pixel) from a 2×3 similarity affine."""
     return float(math.sqrt(A[1, 0] ** 2 + A[1, 1] ** 2))
@@ -3203,9 +3187,9 @@ def process_deferred_image(
     within 1.5× page dimensions agreeing picks a direction; otherwise north-up).
 
     Across (scale candidate × world candidate) fits the one with the most inlier labels —
-    then the lowest total residual — is kept. Confirmed fits (≥2 neighbours) are written
-    to output_path (.georef.json); unconfirmed fits are written to a .georef-1gcp.json
-    sidecar and returned success=False.
+    then the lowest total residual — is kept and written to output_path
+    (.georef.json), with the neighbour-confirmation verdict (≥2 agreeing
+    rotations) recorded in the doc's one_gcp block for the arbiter to weigh.
     """
     image_path: str = deferred["image_path"]
     output_path: str = deferred["output_path"]
@@ -3312,18 +3296,15 @@ def process_deferred_image(
         keymap=keymap,
         truth_polygons=truth_polygons,
     )
-    if not decision.confirmed:
-        # The pose exists but nothing corroborated its single GCP. It stays in
-        # the page's own sidecar, unclaimed, for the arbiter to weigh against
-        # the geometry channels' poses and against leaving the page unplaced.
-        sidecar.demote(
-            output_path,
-            sidecar.ONE_GCP,
-            {"method": decision.method, "n_agree": decision.n_agree},
-        )
-    return ProcessResult(
-        success=decision.confirmed, scale_deg_per_px=scale, center=center
-    )
+    # The confirmation verdict is recorded in the sidecar's one_gcp block but no
+    # longer demotes (#270 phase 4). Its signal -- one effective GCP -- is what
+    # the arbiter's keep prior is conditioned on: an unconfirmed single-GCP pose
+    # carries ~0 prior and must stand on its evidence, while the old veto made
+    # the PAGE unplaced, taxing every candidate 1.25 of entry penalty. Graded
+    # against truth, the veto was wrong half the time it fired (3 of 6
+    # gradeable: hudson p64/p67 at 17 ft and philadelphia p265 at 20 ft thrown
+    # away, against columbus p233 and philadelphia p259 correctly removed).
+    return ProcessResult(success=True, scale_deg_per_px=scale, center=center)
 
 
 def main() -> None:
@@ -3488,16 +3469,6 @@ def main() -> None:
             "deleted when its fitted scale is not near the reference scale, nor at a clean "
             "~0.5x or ~2x multiple of it (a differently-scaled sheet). Reference is --scale "
             "if given, else the volume's consensus scale."
-        ),
-    )
-    parser.add_argument(
-        "--min-distance-for-outlier-km",
-        type=float,
-        default=1.5,
-        metavar="KM",
-        help=(
-            "Rename georefs whose center is more than this many km from every other "
-            "georeferenced page to .georef-outlier.json (default: %(default)s). Set to 0 to disable."
         ),
     )
     parser.add_argument(
@@ -4012,43 +3983,6 @@ def main() -> None:
                     )
         if n_dropped:
             print(f"Dropped {n_dropped} scale outlier(s).", file=sys.stderr)
-
-    # Drop georef files whose center is far from every other georeferenced page.
-    # Only meaningful with a real sample: with a handful of pages every page is
-    # "far from the rest" of nothing — a 2-image key-map run (Brooklyn's p0+p0b
-    # halves, centroids 2.1 km apart but each sheet 4 km across) dropped both
-    # perfectly-fit halves. Five georeferenced pages is the floor for calling
-    # anything an outlier.
-    if args.min_distance_for_outlier_km > 0 and len(location_records) >= 5:
-        # Only pages RANSAC still stands behind: a page the scale check just
-        # demoted must not anchor "far from the rest" for anybody else. That
-        # used to follow from the file having been renamed away; now it is the
-        # recorded verdict that says so.
-        active = [
-            (p, c)
-            for p, c in location_records
-            if os.path.exists(derive_paths(p)[1]) and _accepted(derive_paths(p)[1])
-        ]
-        n_dropped = 0
-        for img_path, center in active:
-            other_centers = [c for p, c in active if p != img_path]
-            min_dist_km = min(_dist_km(center, other) for other in other_centers)
-            if min_dist_km > args.min_distance_for_outlier_km:
-                _, out_path, _ = derive_paths(img_path)
-                sidecar.demote(
-                    out_path,
-                    sidecar.OUTLIER,
-                    {"km_from_closest": round(min_dist_km, 2)},
-                )
-                n_success -= 1
-                n_dropped += 1
-                print(
-                    f"Dropped location outlier {img_path}: "
-                    f"{min_dist_km:.1f} km from closest map",
-                    file=sys.stderr,
-                )
-        if n_dropped:
-            print(f"Dropped {n_dropped} location outlier(s).", file=sys.stderr)
 
     if len(args.images) > 1:
         print(f"\n{n_success}/{len(args.images)} images georeferenced", file=sys.stderr)
