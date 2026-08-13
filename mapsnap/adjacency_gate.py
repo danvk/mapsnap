@@ -162,15 +162,30 @@ def load_fitted_pages(volume: Path, adjacency: dict) -> dict[str, FittedPage]:
 def stamp_worlds(
     adjacency: dict, page: FittedPage, other_stem: str
 ) -> list[tuple[float, float]]:
-    """World (lon, lat) of ``page``'s printed claims of ``other_stem``'s key."""
+    """World (lon, lat) of ``page``'s printed claims of ``other_stem``'s key.
+
+    Detection fractions are PARENT-image-relative (adjacency scans the parent
+    sheet even for split panels, #135), while a panel stem's pose maps
+    split-image pixels to world. The unit's recorded ``panel_bbox`` (the crop,
+    in parent pixels — split images are exact bbox crops at native resolution)
+    translates between the two frames; unsplit pages have no bbox and the
+    parent frame IS the pose frame.
+    """
     want = (page_key(other_stem) or "").upper()
     out: list[tuple[float, float]] = []
-    for det in adjacency["pages"].get(page.stem, {}).get("detections", []):
+    info = adjacency["pages"].get(page.stem, {})
+    bbox = info.get("panel_bbox")
+    for det in info.get("detections", []):
         key = str(det.get("key") or det.get("number") or "").upper()
         if not det.get("claim") or key != want:
             continue
-        px = det["x_frac"] * page.width
-        py = det["y_frac"] * page.height
+        px = det["x_frac"] * info.get("width", page.width)
+        py = det["y_frac"] * info.get("height", page.height)
+        if bbox:
+            bx0, by0, bx1, by1 = bbox
+            if bx1 > bx0 and by1 > by0:
+                px = (px - bx0) * page.width / (bx1 - bx0)
+                py = (py - by0) * page.height / (by1 - by0)
         a = page.affine
         out.append(
             (

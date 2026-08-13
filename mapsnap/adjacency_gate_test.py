@@ -285,3 +285,37 @@ def test_fine_pair_over_metric_bar_is_still_contradicted(tmp_path):
     pages = load_fitted_pages(volume, adjacency)
     contradictions, _ = edge_contradictions(adjacency, pages)
     assert [(c.a, c.b) for c in contradictions] == [("p2", "p3")]
+
+
+def test_stamp_worlds_translates_panel_frame():
+    """A panel unit's detection (parent-frame fracs) maps through the panel crop."""
+    import numpy as np
+
+    from mapsnap.adjacency_gate import FittedPage, stamp_worlds
+
+    # Identity-ish pose over a 40x100 split image cropped from parent x:[60,100].
+    page = FittedPage(
+        stem="p63__2",
+        affine=np.array([[1.0, 0.0, 0.0], [0.0, 1.0, 0.0]]),
+        width=40,
+        height=100,
+        channel_paths=[],
+        gcps=4,
+        theta_deg=0.0,
+        log_scale=0.0,
+    )
+    adjacency = {
+        "pages": {
+            "p63__2": {
+                "width": 100,
+                "height": 100,
+                "panel_bbox": [60.0, 0.0, 100.0, 100.0],
+                "detections": [
+                    {"key": "64", "claim": True, "x_frac": 0.8, "y_frac": 0.5}
+                ],
+            }
+        }
+    }
+    worlds = stamp_worlds(adjacency, page, "p64")
+    # Parent pixel (80, 50) -> split pixel (20, 50) -> identity affine.
+    assert worlds == [(20.0, 50.0)]

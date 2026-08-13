@@ -2,12 +2,14 @@ import math
 from pathlib import Path
 
 from mapsnap.page_adjacency import (
+    assign_panel,
     bbox_gap,
     claim_height_floor,
     classify_edge,
     is_claim,
     mutual_edges,
     one_sided_edges,
+    page_panels,
     polygon_rotation_deg,
     resolve_page_key,
     single_digit_height_band,
@@ -278,3 +280,43 @@ def test_is_text_veto():
     assert not is_text_veto("31NJ", 0.9, 0.5)  # number + short annotation: keep
     assert not is_text_veto("AL", 0.88, 0.95)  # genuine "41": digits read wins
     assert not is_text_veto("", 0.9, 0.1)
+
+
+def test_page_panels_unsplit_is_single_unit(tmp_path: Path):
+    units = page_panels(tmp_path, "p7", 100, 200)
+    assert [u[0] for u in units] == ["p7"]
+    assert units[0][2] == (0.0, 0.0, 100.0, 200.0)
+
+
+def test_page_panels_reads_panel_polygons(tmp_path: Path):
+    (tmp_path / "p63.panels.json").write_text(
+        '{"panels": [[[0,0],[60,0],[60,100],[0,100],[0,0]],'
+        " [[60,0],[100,0],[100,100],[60,100],[60,0]]]}"
+    )
+    units = page_panels(tmp_path, "p63", 100, 100)
+    assert [u[0] for u in units] == ["p63__1", "p63__2"]
+    assert units[0][2] == (0.0, 0.0, 60.0, 100.0)
+    assert units[1][2] == (60.0, 0.0, 100.0, 100.0)
+
+
+def test_assign_panel_inside_and_gutter(tmp_path: Path):
+    (tmp_path / "p63.panels.json").write_text(
+        '{"panels": [[[0,0],[60,0],[60,100],[0,100],[0,0]],'
+        " [[65,0],[100,0],[100,100],[65,100],[65,0]]]}"
+    )
+    units = page_panels(tmp_path, "p63", 100, 100)
+    assert assign_panel((30, 50), units)[0] == "p63__1"
+    # A margin number in the gutter between panels attaches to the nearest one.
+    assert assign_panel((63, 50), units)[0] == "p63__2"
+
+
+def test_is_claim_rejects_explicit_zero():
+    detection = {
+        "key": None,
+        "number": 0,
+        "edge": "L",
+        "height": 40.0,
+        "confidence": 0.99,
+        "polygon": [[0, 0], [20, 0], [20, 40], [0, 40]],
+    }
+    assert not is_claim(detection, "7")

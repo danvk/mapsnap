@@ -93,8 +93,11 @@ CLAIM_HEIGHT_FRACTION = 0.75
 def volume_page_images(volume: Path) -> list[Path]:
     """The whole-page images to scan: top-level ``p*.jpg``, skipping split panels and key maps.
 
-    Split panels (``__`` stems) are cuts of a parent sheet, so the printed margin references
-    live on the parent; the parent is scanned even when panels supersede it for OCR. Key-map
+    Split panels (``__`` stems) are cuts of a parent sheet, so the parent image is what gets
+    SCANNED — its margin numbers are intact where a panel crop would clip them at the cut
+    line — but detections are then ATTRIBUTED to panels via ``<stem>.panels.json`` (#135):
+    Sanborn prints adjacency references per panel, and each panel has its own pose in the
+    pipeline, so a claim is only usable evidence when it names which panel made it. Key-map
     sheets are excluded: their faces are covered in page numbers, which would all read as
     spurious claims.
 
@@ -118,6 +121,67 @@ def volume_page_images(volume: Path) -> list[Path]:
             continue
         images.append(image)
     return images
+
+
+def page_panels(
+    volume: Path, stem: str, width: int, height: int
+) -> list[tuple[str, list[list[float]], tuple[float, float, float, float]]]:
+    """The attribution units of a page: (unit_stem, polygon, bbox) per panel.
+
+    A split page's ``<stem>.panels.json`` (parent pixel coords, panel order matching the
+    ``__k`` split indices) yields one unit per panel; an unsplit page is a single unit
+    covering the whole image. Panels are returned even when no ``p<stem>__k.jpg`` exists on
+    disk (OIM panels that never became pages): their claims still reciprocate a neighbor's,
+    and consumers that need a pose simply find no sidecar for the stem.
+    """
+    panels_path = volume / f"{stem}.panels.json"
+    if not panels_path.exists():
+        bbox = (0.0, 0.0, float(width), float(height))
+        return [
+            (stem, [[0.0, 0.0], [width, 0.0], [width, height], [0.0, height]], bbox)
+        ]
+    doc = json.loads(panels_path.read_text())
+    units = []
+    for index, polygon in enumerate(doc.get("panels") or []):
+        xs = [p[0] for p in polygon]
+        ys = [p[1] for p in polygon]
+        units.append(
+            (
+                f"{stem}__{index + 1}",
+                [[float(x), float(y)] for x, y in polygon],
+                (min(xs), min(ys), max(xs), max(ys)),
+            )
+        )
+    if not units:
+        bbox = (0.0, 0.0, float(width), float(height))
+        return [
+            (stem, [[0.0, 0.0], [width, 0.0], [width, height], [0.0, height]], bbox)
+        ]
+    return units
+
+
+def assign_panel(
+    point: tuple[float, float],
+    units: list[tuple[str, list[list[float]], tuple[float, float, float, float]]],
+) -> tuple[str, tuple[float, float, float, float]]:
+    """The (unit_stem, bbox) whose polygon the point falls in, else the nearest one.
+
+    Nearest matters: a printed reference sits on or just past its panel's neat line — in
+    the gutter between panels or the sheet margin — so strict point-in-polygon would orphan
+    exactly the detections adjacency exists to find.
+    """
+    from shapely.geometry import Point, Polygon
+
+    p = Point(point)
+    best = None
+    for stem, polygon, bbox in units:
+        distance = Polygon(polygon).distance(p)
+        if best is None or distance < best[0]:
+            best = (distance, stem, bbox)
+        if distance == 0.0:
+            break
+    assert best is not None
+    return best[1], best[2]
 
 
 def classify_edge(x_frac: float, y_frac: float, band: float = EDGE_BAND) -> str:
@@ -284,6 +348,8 @@ def digit_detections(
     reader,
     valid_keys: set[str],
     craft_boxes: tuple[list, list] | None = None,
+    units: list[tuple[str, list[list[float]], tuple[float, float, float, float]]]
+    | None = None,
 ) -> list[dict]:
     """All digit reads on one page that resolve to a valid volume page key.
 
@@ -351,10 +417,26 @@ def digit_detections(
             letter_text = str(letter_read[1])
         resolved = resolve_page_key(text, letter_text, valid_keys)
         if resolved is None:
-            continue
+            # An explicit printed "0" means "no neighbor on this side" (#135) —
+            # negative evidence worth recording, not a failed resolution. Only a
+            # clean bare-zero read qualifies; anything longer is a house number.
+            if text.strip() == "0" and not letter_text.strip().strip("0Oo"):
+                resolved = (None, "zero")
+            else:
+                continue
         key, via = resolved
         x_frac = sum(p[0] for p in bbox) / 4 / width
         y_frac = sum(p[1] for p in bbox) / 4 / height
+        # Attribute the detection to its panel; the edge classification is
+        # panel-relative (a number on an interior cut line is at ITS PANEL's
+        # edge even though it is nowhere near the page's).
+        panel_stem: str | None = None
+        panel_x_frac, panel_y_frac = x_frac, y_frac
+        if units is not None:
+            panel_stem, (bx0, by0, bx1, by1) = assign_panel((cx, cy), units)
+            if bx1 > bx0 and by1 > by0:
+                panel_x_frac = (cx - bx0) / (bx1 - bx0)
+                panel_y_frac = (cy - by0) / (by1 - by0)
         glyph_height = float(max(p[1] for p in bbox) - min(p[1] for p in bbox))
         nearest_box = min(
             (
@@ -368,17 +450,18 @@ def digit_detections(
             {
                 "key": key,
                 "via": via,
-                "number": int("".join(c for c in key if c.isdigit())),
+                "number": int("".join(c for c in key if c.isdigit())) if key else 0,
                 "text": text,
                 "confidence": round(float(confidence), 4),
                 "polygon": [[int(p[0]), int(p[1])] for p in bbox],
                 "height": round(glyph_height, 1),
                 "x_frac": round(x_frac, 4),
                 "y_frac": round(y_frac, 4),
-                "edge": classify_edge(x_frac, y_frac),
+                "edge": classify_edge(panel_x_frac, panel_y_frac),
                 "nearest_box": round(nearest_box, 1)
                 if nearest_box != math.inf
                 else None,
+                **({"panel": panel_stem} if panel_stem is not None else {}),
             }
         )
     return detections
@@ -451,7 +534,8 @@ def is_claim(
     coincidence, so reciprocity alone cannot vouch for them.
     """
     if (
-        detection["key"] == own_key
+        detection["key"] is None  # an explicit "0": no-neighbor evidence, not a claim
+        or detection["key"] == own_key
         or detection["edge"] == "center"
         or detection["height"] < min_height
         or detection["confidence"] < min_confidence
@@ -617,13 +701,29 @@ def main() -> None:
                 f"No usable CRAFT boxes for {image.name} (missing, or computed at "
                 f"different image dimensions).\nRun: {craft_hint([str(image)])}"
             )
-        pages[stem] = {
-            "key": page_key(stem),
-            "number": page_number(stem),
-            "width": width,
-            "height": height,
-            "detections": digit_detections(image, reader, valid_keys, craft_boxes),
-        }
+        # One unit per panel (#135): the parent image is scanned, but claims are
+        # attributed and gated per panel, because each panel has its own pose and
+        # its own printed margin references. Unsplit pages are one unit.
+        units = page_panels(args.volume, stem, width, height)
+        detections = digit_detections(
+            image, reader, valid_keys, craft_boxes, units=units
+        )
+        for unit_stem, _polygon, unit_bbox in units:
+            unit_detections = [
+                d for d in detections if d.get("panel", unit_stem) == unit_stem
+            ]
+            pages[unit_stem] = {
+                "key": page_key(unit_stem),
+                "number": page_number(unit_stem),
+                "width": width,
+                "height": height,
+                **(
+                    {"parent": stem, "panel_bbox": [round(v, 1) for v in unit_bbox]}
+                    if unit_stem != stem
+                    else {}
+                ),
+                "detections": unit_detections,
+            }
 
     def compute_claims(
         height_band: tuple[float, float] | None,
@@ -691,6 +791,7 @@ def main() -> None:
         )
 
     claims_by_page = compute_claims(height_band, min_gap, claim_floor)
+    no_neighbor: dict[str, list[str]] = {}
     for stem, page in pages.items():
         for detection in page["detections"]:
             detection["claim"] = is_claim(
@@ -702,6 +803,22 @@ def main() -> None:
                 height_band=height_band,
                 min_gap=min_gap,
             )
+            # An explicit "0" that would have qualified as a claim (same physical
+            # bar, including full single-digit strictness) is recorded as
+            # no-neighbor evidence for its unit's edge: the map ends there (#135).
+            if detection["key"] is None and is_claim(
+                {
+                    **detection,
+                    "key": "\x00",
+                },  # sentinel: run every check but the key ones
+                page["key"],
+                min_height=claim_floor,
+                min_confidence=args.min_confidence,
+                single_digit_min_confidence=args.single_digit_min_confidence,
+                height_band=height_band,
+                min_gap=min_gap,
+            ):
+                no_neighbor.setdefault(stem, []).append(detection["edge"])
 
     edges = mutual_edges(claims_by_page)
     one_sided = one_sided_edges(claims_by_page)
@@ -718,6 +835,9 @@ def main() -> None:
         "pages": pages,
         "adjacency": [list(edge) for edge in edges],
         "one_sided": [list(edge) for edge in one_sided],
+        "no_neighbor": {
+            stem: sorted(edges) for stem, edges in sorted(no_neighbor.items())
+        },
     }
     output = args.output or (args.volume / "adjacency.json")
     output.write_text(json.dumps(doc, indent=2))
