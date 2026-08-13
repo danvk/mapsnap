@@ -57,6 +57,8 @@ import statistics
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from mapsnap.keymap.fit_keymap import collapse_skeleton_keys
+
 PROXIMITY_FACTOR = 1.5
 """How many page-pitches apart two printed numbers may be and still count as
 neighbours (see proximity_graph)."""
@@ -672,7 +674,8 @@ def plan_volume_repairs(
     mutual, one_sided = adjacency_graphs(volume)
     if not mutual:
         return [], {}
-    volume_keys = volume_page_keys(volume)
+    # Skeleton twins are not key-map expectations: the sheet names 201 once.
+    volume_keys = collapse_skeleton_keys(volume_page_keys(volume))
     splits = split_multiplicity(volume)
 
     sheet_panels: list[SheetNumbers] = []
