@@ -7,9 +7,11 @@ it: digit strings rendered in fonts matched to the two Sanborn families,
 composited over background tiles harvested from real key-map sheets, with the
 three letter-suffix conventions the corpus actually uses:
 
-- ``underline``: the letter smaller, with a bar beneath (columbia, richmond);
-- ``quotes``: the letter followed by a double-quote-like tick (los_angeles);
-- ``plain``: the letter at full size, unadorned (nashville).
+- ``underline``: the letter as a SUPERSCRIPT with a bar directly beneath it
+  (columbia, richmond -- ``53E`` reads as a raised E over an underline);
+- ``quotes``: the letter as a superscript with a ditto mark directly beneath
+  it, like an underline made of quotes (los_angeles's ``1499O``);
+- ``plain``: the letter at full size on the baseline, unadorned (nashville).
 
 Backgrounds come from the labelled sheets themselves via the same safe-crop
 logic the trainer's negatives use, so the clutter is the real thing: street
@@ -144,38 +146,57 @@ def render_number(
 ) -> Image.Image:
     """The number (and any suffix adornment) as an L-mode image, white background.
 
-    The suffix letter renders per ``style``: smaller with a bar beneath
-    (columbia/richmond), followed by a double-quote tick (los_angeles), or at
-    full size (nashville). ``none`` means the text is digits only.
+    Suffix letters are SUPERSCRIPTS -- top-aligned with the digits, smaller --
+    for the underline and quotes styles (matching columbia's ``53E`` and
+    los_angeles's ``1499O``); the adornment sits directly beneath the letter.
+    ``plain`` is nashville's convention: full size, on the baseline.
     """
     digits = text.rstrip("ABCDEFGHIJKLMNOPQRS") if style != "none" else text
     letter = text[len(digits) :]
     size = int(rng.integers(26, 40))
     font = ImageFont.truetype(font_path, size)
-    small = ImageFont.truetype(font_path, max(14, int(size * 0.62)))
+    small = ImageFont.truetype(font_path, max(14, int(size * 0.60)))
 
     canvas = Image.new("L", (CRNN_WIDTH * 2, CRNN_HEIGHT * 2), 255)
     draw = ImageDraw.Draw(canvas)
     ink = int(rng.integers(10, 90))
-    x, y = 20, 30
+    x, y = 40, 30
     draw.text((x, y), digits, font=font, fill=ink)
     dx = draw.textlength(digits, font=font)
     if letter:
         if style == "plain":
             draw.text((x + dx + 2, y), letter, font=font, fill=ink)
-        elif style == "underline":
+        else:
+            # Superscript: the letter's top aligns with the digits' top.
             lx = x + dx + 3
-            ly = y + int(size * 0.30)
+            ly = y
             draw.text((lx, ly), letter, font=small, fill=ink)
             lw = draw.textlength(letter, font=small)
-            uy = ly + int(size * 0.62) + 2
-            draw.line([(lx - 1, uy), (lx + lw + 1, uy)], fill=ink, width=2)
-        elif style == "quotes":
-            # los_angeles renders the double-quote UNDER the raised letter.
-            lx = x + dx + 3
-            draw.text((lx, y), letter, font=small, fill=ink)
-            draw.text((lx + 1, y + int(size * 0.55)), '"', font=small, fill=ink)
+            small_h = small.size
+            under_y = ly + small_h + 2
+            if style == "underline":
+                draw.line(
+                    [(lx - 1, under_y), (lx + lw + 1, under_y)], fill=ink, width=2
+                )
+            else:  # quotes: a ditto mark centered directly beneath the letter
+                qw = draw.textlength('"', font=small)
+                draw.text((lx + (lw - qw) / 2, under_y - 4), '"', font=small, fill=ink)
     return canvas
+
+
+def embolden(arr: np.ndarray, rng: np.random.Generator) -> np.ndarray:
+    """Thicken ink strokes toward the Sanborn fat-face weight.
+
+    Brooklyn-style numerals are far heavier than any system didone -- extreme
+    thick/thin contrast, the 2's top-left curling like a comma. No installed
+    face matches, so a minimum filter (ink is dark) widens the strokes of the
+    closest fonts instead; combined with Bodoni 72's ball terminals this gets
+    within teaching distance of the printed weight.
+    """
+    if rng.random() < 0.5:
+        k = int(rng.integers(2, 4))
+        return cv2.erode(arr, np.ones((k, k), np.uint8))
+    return arr
 
 
 def synth_strip(
@@ -187,16 +208,20 @@ def synth_strip(
 
     Composites a rendered number over a real background tile (multiplicative,
     so the sheet's own lines show through the glyph gaps exactly as print
-    does), then adds the clutter the corpus actually exhibits: street lines
-    THROUGH the number, dots, and the occasional stray small text.
+    does), then adds the clutter the corpus actually exhibits: a NEIGHBORING
+    page number partially visible at an edge (adjacent key-map numbers are
+    often one crop-width apart -- chicago's strips routinely contain two; the
+    label is the centered one and central_group drops the neighbor), street
+    lines THROUGH the number, dots, and stray small block-number text.
     """
     text, style = random_page_key(rng)
-    number = render_number(text, style, fonts[int(rng.integers(len(fonts)))], rng)
+    font_path = fonts[int(rng.integers(len(fonts)))]
+    number = render_number(text, style, font_path, rng)
 
     # Rotate slightly and crop off-center, like the localizer's candidates.
     angle = float(rng.uniform(-5, 5))
     number = number.rotate(angle, resample=Image.BILINEAR, fillcolor=255)
-    arr = np.asarray(number, dtype=np.float32) / 255.0
+    arr = embolden(np.asarray(number, dtype=np.uint8), rng).astype(np.float32) / 255.0
     ys, xs = np.where(arr < 0.9)
     if len(xs) == 0:
         return synth_strip(fonts, tiles, rng)
@@ -207,10 +232,34 @@ def synth_strip(
     y0 = int(np.clip(cy - CRNN_HEIGHT / 2 + jy, 0, arr.shape[0] - CRNN_HEIGHT))
     glyph = arr[y0 : y0 + CRNN_HEIGHT, x0 : x0 + CRNN_WIDTH]
 
+    # A neighboring page number, clipped at the left or right edge.
+    if rng.random() < 0.35:
+        n_text, n_style = random_page_key(rng)
+        neighbor = render_number(n_text, n_style, font_path, rng)
+        n_arr = (
+            embolden(np.asarray(neighbor, dtype=np.uint8), rng).astype(np.float32)
+            / 255.0
+        )
+        nys, nxs = np.where(n_arr < 0.9)
+        if len(nxs):
+            ncx, ncy = nxs.mean(), nys.mean()
+            ny0 = int(np.clip(ncy - CRNN_HEIGHT / 2, 0, n_arr.shape[0] - CRNN_HEIGHT))
+            visible = int(rng.integers(8, 34))  # how much of the neighbor shows
+            if rng.random() < 0.5:  # at the right edge
+                nx0 = int(np.clip(ncx - visible, 0, n_arr.shape[1] - visible))
+                patch = n_arr[ny0 : ny0 + CRNN_HEIGHT, nx0 : nx0 + visible]
+                glyph = glyph.copy()
+                glyph[:, CRNN_WIDTH - visible :] *= patch
+            else:  # at the left edge
+                nx0 = int(np.clip(ncx, 0, n_arr.shape[1] - visible))
+                patch = n_arr[ny0 : ny0 + CRNN_HEIGHT, nx0 : nx0 + visible]
+                glyph = glyph.copy()
+                glyph[:, :visible] *= patch
+
     tile = tiles[int(rng.integers(len(tiles)))].astype(np.float32) / 255.0
     strip = tile * glyph  # print multiplies: ink darkens whatever is beneath
 
-    # Clutter: lines through the number, dots, stray text fragments.
+    # Clutter: lines through the number, dots, stray small block numbers.
     strip8 = (strip * 255).astype(np.uint8)
     for _ in range(int(rng.integers(0, 3))):
         p1 = (int(rng.integers(0, CRNN_WIDTH)), int(rng.integers(0, CRNN_HEIGHT)))
@@ -220,6 +269,19 @@ def synth_strip(
         center = (int(rng.integers(0, CRNN_WIDTH)), int(rng.integers(0, CRNN_HEIGHT)))
         cv2.circle(
             strip8, center, int(rng.integers(1, 3)), int(rng.integers(20, 90)), -1
+        )
+    if rng.random() < 0.3:
+        junk = str(rng.integers(10, 999))
+        org = (int(rng.integers(0, CRNN_WIDTH - 20)), int(rng.integers(8, CRNN_HEIGHT)))
+        cv2.putText(
+            strip8,
+            junk,
+            org,
+            cv2.FONT_HERSHEY_SIMPLEX,
+            0.3,
+            int(rng.integers(60, 130)),
+            1,
+            cv2.LINE_AA,
         )
 
     # Scan-quality degradation: mild blur and noise.
