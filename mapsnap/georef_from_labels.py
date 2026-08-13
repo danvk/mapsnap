@@ -246,22 +246,6 @@ def fit_keymap_affine(
 _FT_PER_DEG_LAT: float = math.pi * 20_925_524.0 / 180.0  # feet per degree latitude
 
 
-def _accepted(georef_path: str) -> bool:
-    """Whether a georef sidecar on disk holds a pose this channel stands behind."""
-    try:
-        return sidecar.internally_valid(json.loads(Path(georef_path).read_text()))
-    except (OSError, json.JSONDecodeError):
-        return False
-
-
-def _dist_km(a: tuple[float, float], b: tuple[float, float]) -> float:
-    """Approximate great-circle distance in km between two (lon, lat) points."""
-    cos_lat = math.cos(math.radians((a[1] + b[1]) / 2))
-    dlat_km = (b[1] - a[1]) * 111.0
-    dlon_km = (b[0] - a[0]) * 111.0 * cos_lat
-    return math.sqrt(dlat_km**2 + dlon_km**2)
-
-
 def affine_scale_deg_per_px(A: np.ndarray) -> float:
     """Return the scale (degrees latitude per pixel) from a 2×3 similarity affine."""
     return float(math.sqrt(A[1, 0] ** 2 + A[1, 1] ** 2))
@@ -3491,16 +3475,6 @@ def main() -> None:
         ),
     )
     parser.add_argument(
-        "--min-distance-for-outlier-km",
-        type=float,
-        default=1.5,
-        metavar="KM",
-        help=(
-            "Rename georefs whose center is more than this many km from every other "
-            "georeferenced page to .georef-outlier.json (default: %(default)s). Set to 0 to disable."
-        ),
-    )
-    parser.add_argument(
         "--disable-one-gcp-fits",
         action="store_true",
         default=False,
@@ -4012,43 +3986,6 @@ def main() -> None:
                     )
         if n_dropped:
             print(f"Dropped {n_dropped} scale outlier(s).", file=sys.stderr)
-
-    # Drop georef files whose center is far from every other georeferenced page.
-    # Only meaningful with a real sample: with a handful of pages every page is
-    # "far from the rest" of nothing — a 2-image key-map run (Brooklyn's p0+p0b
-    # halves, centroids 2.1 km apart but each sheet 4 km across) dropped both
-    # perfectly-fit halves. Five georeferenced pages is the floor for calling
-    # anything an outlier.
-    if args.min_distance_for_outlier_km > 0 and len(location_records) >= 5:
-        # Only pages RANSAC still stands behind: a page the scale check just
-        # demoted must not anchor "far from the rest" for anybody else. That
-        # used to follow from the file having been renamed away; now it is the
-        # recorded verdict that says so.
-        active = [
-            (p, c)
-            for p, c in location_records
-            if os.path.exists(derive_paths(p)[1]) and _accepted(derive_paths(p)[1])
-        ]
-        n_dropped = 0
-        for img_path, center in active:
-            other_centers = [c for p, c in active if p != img_path]
-            min_dist_km = min(_dist_km(center, other) for other in other_centers)
-            if min_dist_km > args.min_distance_for_outlier_km:
-                _, out_path, _ = derive_paths(img_path)
-                sidecar.demote(
-                    out_path,
-                    sidecar.OUTLIER,
-                    {"km_from_closest": round(min_dist_km, 2)},
-                )
-                n_success -= 1
-                n_dropped += 1
-                print(
-                    f"Dropped location outlier {img_path}: "
-                    f"{min_dist_km:.1f} km from closest map",
-                    file=sys.stderr,
-                )
-        if n_dropped:
-            print(f"Dropped {n_dropped} location outlier(s).", file=sys.stderr)
 
     if len(args.images) > 1:
         print(f"\n{n_success}/{len(args.images)} images georeferenced", file=sys.stderr)
