@@ -1,8 +1,10 @@
-"""A tiny CRNN that reads a page number's digit string from a crop around its center.
+"""A tiny CRNN that reads a page number (digits + optional letter suffix) from a crop.
 
 The CNN localizer (mapsnap.keymap.detect_numbers_cnn) already finds page-number centers at ~99%
-recall, so this recognizer is fed a fixed crop around each center and reads the 1-3 digit
-string directly — no CRAFT boxing, no EasyOCR. Architecture: a small conv stack collapses
+recall, so this recognizer is fed a fixed crop around each center and reads the page key
+directly — 1-4 digits plus an optional letter suffix (columbia's underlined ``53B``,
+los_angeles's quote-marked ``1499K``, nashville's full-size ``9A``) — no CRAFT boxing,
+no EasyOCR. Architecture: a small conv stack collapses
 the crop's height to a width-sequence, a BiLSTM adds context, and a linear head emits
 per-step class logits decoded with CTC.
 
@@ -21,47 +23,54 @@ from mapsnap.keymap.keymap_patches import NUMBER_MAX_H_FULL, SCALE
 
 # Crop input size fed to the CRNN (grayscale).
 CRNN_HEIGHT = 48
-CRNN_WIDTH = 96
+CRNN_WIDTH = 160
 
 # Fixed crop box around the candidate center, in working-scale px (mapped to the image's
-# own scale per call). Wide enough for a 3-digit number (~70px at working scale) with
-# margin, tight enough to mostly exclude neighboring blocks.
-BOX_HALF_W_WORKING = 55
+# own scale per call). Wide enough for a 4-digit number plus a letter suffix (~115px at
+# working scale: los_angeles's ``1499P`` filled the old 110px box to its edges), tight
+# enough to mostly exclude neighboring blocks. Width per glyph at the resized CRNN input
+# is unchanged (160/160 vs the old 96/110).
+BOX_HALF_W_WORKING = 80
 BOX_HALF_H_WORKING = 30
 
-# Classes: index 0 is the CTC blank; 1..10 map to digits '0'..'9'.
+# Classes: index 0 is the CTC blank; 1.. map through CHARSET (digits then letters).
+# Letters exist so suffixed page keys are READABLE: the previous digits-only charset
+# made keys like 1499K unexpressible, and the decode-side never-guess rule then blanked
+# entire lettered series (#316).
+CHARSET = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ"
+CHAR_TO_INDEX = {c: i + 1 for i, c in enumerate(CHARSET)}
 BLANK_INDEX = 0
-NUM_CLASSES = 11
+NUM_CLASSES = len(CHARSET) + 1
 
 IMAGENET_GRAY_MEAN = [0.5]
 IMAGENET_GRAY_STD = [0.5]
 
 
 def encode_text(text: str) -> list[int]:
-    """Encode a digit string to CTC class indices (digit d -> d + 1)."""
-    return [int(c) + 1 for c in text if c.isdigit()]
+    """Encode a page-key string to CTC class indices via CHARSET (unknown chars skipped)."""
+    return [CHAR_TO_INDEX[c] for c in text.upper() if c in CHAR_TO_INDEX]
 
 
 def ctc_greedy_decode(indices: list[int]) -> str:
-    """Collapse a per-timestep argmax index sequence to a digit string (CTC rule)."""
+    """Collapse a per-timestep argmax index sequence to a string (CTC rule)."""
     out: list[str] = []
     prev = -1
     for idx in indices:
         if idx != prev and idx != BLANK_INDEX:
-            out.append(str(idx - 1))
+            out.append(CHARSET[idx - 1])
         prev = idx
     return "".join(out)
 
 
-def ctc_log_likelihood(log_probs: np.ndarray, digits: str) -> float:
-    """Log P(digit string | window) under the standard CTC forward algorithm.
+def ctc_log_likelihood(log_probs: np.ndarray, text: str) -> float:
+    """Log P(text | window) under the standard CTC forward algorithm.
 
     ``log_probs`` is a (T, classes) slice of the CRNN's output (blank at index
-    0, digit d at index d+1). Unlike the greedy decode, this scores an
-    *arbitrary* digit string against the window, so competing page numbers can
-    be compared on likelihood — the evidence behind the conflict-repair pass.
+    0, characters mapped through CHARSET). Unlike the greedy decode, this
+    scores an *arbitrary* page-key string against the window, so competing
+    page keys — including lettered ones — can be compared on likelihood.
     """
-    labels = [int(c) + 1 for c in digits]
+    labels = encode_text(text)
     extended = [BLANK_INDEX]
     for label in labels:
         extended.extend((label, BLANK_INDEX))
@@ -174,18 +183,18 @@ def _conv_block(in_ch: int, out_ch: int, pool: tuple[int, int]) -> nn.Sequential
 class CRNN(nn.Module):
     """Conv stack -> BiLSTM -> per-timestep class logits (log-softmax for CTC).
 
-    For a 48x96 grayscale input the conv stack yields a length-24 width sequence with the
-    height collapsed to 1; the BiLSTM and linear head produce (T=24, N, NUM_CLASSES).
+    For a 48x160 grayscale input the conv stack yields a length-40 width sequence with the
+    height collapsed to 1; the BiLSTM and linear head produce (T=40, N, NUM_CLASSES).
     """
 
     def __init__(self) -> None:
         super().__init__()
         self.cnn = nn.Sequential(
-            _conv_block(1, 32, (2, 2)),  # 48x96 -> 24x48
-            _conv_block(32, 64, (2, 2)),  # -> 12x24
-            _conv_block(64, 128, (2, 1)),  # -> 6x24
-            _conv_block(128, 128, (2, 1)),  # -> 3x24
-            _conv_block(128, 128, (3, 1)),  # -> 1x24
+            _conv_block(1, 32, (2, 2)),  # 48x160 -> 24x80
+            _conv_block(32, 64, (2, 2)),  # -> 12x40
+            _conv_block(64, 128, (2, 1)),  # -> 6x40
+            _conv_block(128, 128, (2, 1)),  # -> 3x40
+            _conv_block(128, 128, (3, 1)),  # -> 1x40
         )
         self.rnn = nn.LSTM(128, 64, bidirectional=True, batch_first=False)
         self.head = nn.Linear(128, NUM_CLASSES)

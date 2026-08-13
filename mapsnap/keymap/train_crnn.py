@@ -23,6 +23,7 @@ from mapsnap.keymap.crnn_model import (
     BLANK_INDEX,
     BOX_HALF_H_WORKING,
     BOX_HALF_W_WORKING,
+    CHAR_TO_INDEX,
     build_crnn,
     decode_batch,
     encode_text,
@@ -128,7 +129,8 @@ def build_split(
             if not encode_text(text):
                 continue
             strips.append(number_strip(image, px, py, factor))
-            texts.append("".join(c for c in text if c.isdigit()))
+            # Letters kept: the model reads what the sheet prints (9A, 1499K).
+            texts.append("".join(c for c in text.upper() if c in CHAR_TO_INDEX))
             positives += 1
         if negative_ratio > 0 and rng is not None:
             negatives = sample_negative_strips(
@@ -196,6 +198,17 @@ def main() -> None:
         ),
     )
     parser.add_argument(
+        "--synthetic",
+        type=int,
+        default=0,
+        metavar="N",
+        help=(
+            "Add N synthetic strips (mapsnap.keymap.synth_strips): fonts matched "
+            "to the corpus's two families, real key-map background tiles, and "
+            "the three letter-suffix conventions. Deterministic in --seed."
+        ),
+    )
+    parser.add_argument(
         "--exclude",
         default="",
         metavar="KEYS",
@@ -232,6 +245,15 @@ def main() -> None:
     train_strips, train_texts = build_split(
         train_images, negative_ratio=args.negative_ratio, rng=rng
     )
+    if args.synthetic > 0:
+        from mapsnap.keymap.synth_strips import generate
+
+        synth_strips, synth_texts = generate(
+            args.synthetic, args.data_dir, seed=args.seed
+        )
+        train_strips.extend(synth_strips)
+        train_texts.extend(synth_texts)
+        print(f"added {len(synth_strips)} synthetic strips")
     val_strips, val_texts = build_split(
         val_images, negative_ratio=args.negative_ratio, rng=rng
     )
