@@ -3187,9 +3187,9 @@ def process_deferred_image(
     within 1.5× page dimensions agreeing picks a direction; otherwise north-up).
 
     Across (scale candidate × world candidate) fits the one with the most inlier labels —
-    then the lowest total residual — is kept. Confirmed fits (≥2 neighbours) are written
-    to output_path (.georef.json); unconfirmed fits are written to a .georef-1gcp.json
-    sidecar and returned success=False.
+    then the lowest total residual — is kept and written to output_path
+    (.georef.json), with the neighbour-confirmation verdict (≥2 agreeing
+    rotations) recorded in the doc's one_gcp block for the arbiter to weigh.
     """
     image_path: str = deferred["image_path"]
     output_path: str = deferred["output_path"]
@@ -3296,18 +3296,15 @@ def process_deferred_image(
         keymap=keymap,
         truth_polygons=truth_polygons,
     )
-    if not decision.confirmed:
-        # The pose exists but nothing corroborated its single GCP. It stays in
-        # the page's own sidecar, unclaimed, for the arbiter to weigh against
-        # the geometry channels' poses and against leaving the page unplaced.
-        sidecar.demote(
-            output_path,
-            sidecar.ONE_GCP,
-            {"method": decision.method, "n_agree": decision.n_agree},
-        )
-    return ProcessResult(
-        success=decision.confirmed, scale_deg_per_px=scale, center=center
-    )
+    # The confirmation verdict is recorded in the sidecar's one_gcp block but no
+    # longer demotes (#270 phase 4). Its signal -- one effective GCP -- is what
+    # the arbiter's keep prior is conditioned on: an unconfirmed single-GCP pose
+    # carries ~0 prior and must stand on its evidence, while the old veto made
+    # the PAGE unplaced, taxing every candidate 1.25 of entry penalty. Graded
+    # against truth, the veto was wrong half the time it fired (3 of 6
+    # gradeable: hudson p64/p67 at 17 ft and philadelphia p265 at 20 ft thrown
+    # away, against columbus p233 and philadelphia p259 correctly removed).
+    return ProcessResult(success=True, scale_deg_per_px=scale, center=center)
 
 
 def main() -> None:
