@@ -155,13 +155,17 @@ def train_transform() -> transforms.Compose:
 
     Translation is deliberately large: at inference the crop is centered on the CNN
     candidate, which is off the true center by up to ~a localizer stride, so the CRNN must
-    read off-center digits. Training only on well-centered crops leaves it brittle.
+    read off-center digits. Training only on well-centered crops leaves it brittle. The
+    vertical fraction is larger than the horizontal because the strip is squat (48 px to
+    160): 0.3 of the height is ~14 px, and real candidates land 8-17 working px below the
+    glyph (they ride the patch grid, not the baseline) -- chicago reads died at exactly the
+    offsets 0.15 left uncovered.
     """
     return transforms.Compose(
         [
             transforms.ToPILImage(),
             transforms.RandomAffine(
-                degrees=4, translate=(0.15, 0.15), scale=(0.85, 1.15)
+                degrees=4, translate=(0.15, 0.3), scale=(0.85, 1.15)
             ),
             transforms.ColorJitter(brightness=0.3, contrast=0.3),
             transforms.ToTensor(),
