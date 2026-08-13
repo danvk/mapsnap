@@ -49,7 +49,7 @@ from collections.abc import Iterable
 from pathlib import Path
 
 from mapsnap.keymap.adjacency_assign import repair_volume
-from mapsnap.keymap.fit_keymap import volume_page_keys
+from mapsnap.keymap.fit_keymap import collapse_skeleton_keys, volume_page_keys
 from mapsnap.keymap.records import keymap_path, page_key_sort
 from mapsnap.utils import default_centerlines, run_cmd
 
@@ -104,7 +104,7 @@ def valid_page_spec(keymap_images: list[Path]) -> str:
     """
     keys: set[str] = set()
     for volume in {keymap_volume_dir(image) for image in keymap_images}:
-        keys |= volume_page_keys(volume)
+        keys |= collapse_skeleton_keys(volume_page_keys(volume))
     return format_page_spec(key for key in keys if page_key_sort(key)[0] >= 1)
 
 

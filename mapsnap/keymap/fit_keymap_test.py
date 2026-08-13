@@ -160,3 +160,35 @@ def test_load_detections_keeps_lettered_keys(tmp_path):
     path.write_text(json.dumps(doc))
     detections = load_detections(path)
     assert [(d.key, d.number) for d in detections] == [("35A", 35), ("51", 51)]
+
+
+# --- skeleton collapse ---
+
+
+def test_collapse_skeleton_keys_drops_the_twin_only():
+    from mapsnap.keymap.fit_keymap import collapse_skeleton_keys
+
+    # The philadelphia shape: every S key has its bare twin -> the S goes.
+    assert collapse_skeleton_keys({"201", "201S", "202", "202S", "7"}) == {
+        "201",
+        "202",
+        "7",
+    }
+    # A lone skeleton with no bare twin is kept: the sheet presumably names it.
+    assert collapse_skeleton_keys({"35S", "36"}) == {"35S", "36"}
+    # Letter pages that merely END in other letters are untouched.
+    assert collapse_skeleton_keys({"12N", "55W", "1499K"}) == {"12N", "55W", "1499K"}
+    # Compound suffixes are kept, not raised on (unlike compare's skeleton
+    # rule): a decode vocabulary must not take the pipeline down.
+    assert collapse_skeleton_keys({"6NS", "6N"}) == {"6NS", "6N"}
+
+
+def test_collapse_skeleton_keys_is_why_reads_stop_landing_on_skeletons():
+    from mapsnap.keymap.fit_keymap import collapse_skeleton_keys
+
+    # The live-pollution case: philadelphia reads snapped onto 219S/227S/232S
+    # -- keys the printed sheet does not contain. With the vocabulary
+    # collapsed, those keys simply are not available to snap onto.
+    pages = collapse_skeleton_keys({"219", "219S", "227", "227S"})
+    assert "219S" not in pages and "227S" not in pages
+    assert pages == {"219", "227"}

@@ -311,6 +311,33 @@ def volume_page_numbers(volume: Path) -> set[int]:
     return numbers
 
 
+def collapse_skeleton_keys(keys: set[str]) -> set[str]:
+    """Drop skeleton twins: a printed key map shows ``201`` once, never ``201S``.
+
+    ``pNs`` is a stripped-down copy of the same map as ``pN``, so wherever a
+    set of page keys stands for "what the key map can name", the skeleton must
+    not be a separate expectation: as a coverage denominator it deflates every
+    skeleton-heavy volume (philadelphia's key map can never name 58 of its 120
+    keys), and as a decode vocabulary it is a trap -- reads have been snapped
+    onto never-printed keys (philadelphia ``219S``, miami ``10S``), planting
+    the location under a key the sheet does not contain.
+
+    Only the exact pair collapses: ``NS`` with a bare ``N`` present. A lone
+    ``NS`` (no bare twin on disk) is kept -- the sheet presumably names it.
+    Compound suffixes like ``6NS`` are kept too, unlike compare's skeleton
+    rule which raises: a decode vocabulary must not take the pipeline down
+    over one odd stem, and keeping a key is the conservative direction here.
+    Measured across the 18 truth volumes every ``<digits>S`` family is exactly
+    such a pair (miami, new_orleans_1896, philadelphia, washington_dc), and
+    no volume has a directional bare+S pair this could confuse.
+    """
+    return {
+        key
+        for key in keys
+        if not (re.fullmatch(r"\d+S", key, re.IGNORECASE) and key[:-1] in keys)
+    }
+
+
 def volume_page_keys(volume: Path) -> set[str]:
     """All page keys present in the volume, letter suffixes included.
 
