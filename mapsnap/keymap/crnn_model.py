@@ -164,15 +164,8 @@ def train_transform() -> transforms.Compose:
     return transforms.Compose(
         [
             transforms.ToPILImage(),
-            # fill=255: the affine's exposed edge must be paper, not the default
-            # black. At 0.3 vertical translate the black bars swept the top and
-            # bottom margins -- exactly where superscript suffix letters and
-            # their underline/ditto marks live -- and the model trained with
-            # them stopped reading letters (LA cover 93 -> 84, columbia exact
-            # 75 -> 59, nashville's inline A gone). Real crops never have black
-            # edges; an off-center real crop shows more sheet.
             transforms.RandomAffine(
-                degrees=4, translate=(0.15, 0.25), scale=(0.85, 1.15), fill=255
+                degrees=4, translate=(0.15, 0.3), scale=(0.85, 1.15)
             ),
             transforms.ColorJitter(brightness=0.3, contrast=0.3),
             transforms.ToTensor(),
