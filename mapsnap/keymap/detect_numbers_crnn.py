@@ -164,6 +164,69 @@ def read_candidates(
     return results, strips
 
 
+# Vertical offsets (working px) each candidate is read at; the best read wins.
+# The recognizer reads a glyph-centered strip near-perfectly on every volume
+# probed (chicago's 8N, nashville's 12A, hudson's 92) but degrades on the
+# localizer's off-center candidates, which ride the CNN's patch grid and land
+# up to ~17 working px from the glyph -- mostly BELOW it. Stretching training
+# augmentation over that range traded suffix-letter accuracy for offset
+# robustness in every combination tried (a black-bar affine fill erased the
+# superscripts; a paper fill degraded everything), so the offset problem is
+# solved at inference instead: deliver the model a centered strip.
+READ_OFFSETS_WORKING = (0.0, -8.0, 8.0)
+
+
+@torch.no_grad()
+def read_best_offset(
+    image: np.ndarray,
+    centers: list[tuple[float, float]],
+    factor: float,
+    crnn: torch.nn.Module,
+    device,
+    *,
+    pages: list[str],
+    valid_pages: set[str],
+) -> tuple[
+    list[tuple[float, float]],
+    list[tuple[float, list[int]]],
+    list[np.ndarray],
+]:
+    """Read every candidate at each READ_OFFSETS_WORKING and keep its best read.
+
+    Best = highest (snaps-to-valid-page, raw length, confidence); a read that
+    names a real page beats a longer invalid one, so a well-centered offset
+    that sees the whole number wins over one that catches a fragment or merges
+    a neighbor. Ties keep the unshifted read (it is first). Returns the chosen
+    (center, read, strip) triple per candidate -- the shifted center, so the
+    located box and any downstream re-reads use the geometry the read came
+    from.
+    """
+    variants = []
+    for offset in READ_OFFSETS_WORKING:
+        shifted = [(cx, cy + offset / factor) for cx, cy in centers]
+        reads, strips = read_candidates(image, shifted, factor, crnn, device)
+        variants.append((shifted, reads, strips))
+
+    def quality(read: tuple[float, list[int]]) -> tuple[int, int, float]:
+        confidence, path = read
+        group = central_group(path)
+        if group is None:
+            return (0, 0, 0.0)
+        raw = ctc_greedy_decode(path[group[0] : group[1] + 1])
+        snapped = snap_to_pages(raw, pages)
+        return (2 if snapped in valid_pages else 1, len(raw), confidence)
+
+    best_centers, best_reads, best_strips = [], [], []
+    for i in range(len(centers)):
+        shifted, reads, strips = max(
+            variants, key=lambda variant: quality(variant[1][i])
+        )
+        best_centers.append(shifted[i])
+        best_reads.append(reads[i])
+        best_strips.append(strips[i])
+    return best_centers, best_reads, best_strips
+
+
 # Half-widths (working px) for the narrow-detection re-read, tighter than the default
 # BOX_HALF_W_WORKING=55 so a squished multi-digit number resolves into separate digits.
 REREAD_HALF_WIDTHS_WORKING = [30.0, 38.0]
@@ -513,11 +576,13 @@ def detect_and_read(
     centers, factor = detect_candidate_centers(
         image, cnn, device, stride=stride, threshold=threshold, nms_dist=nms_dist
     )
-    reads, strips = read_candidates(image, centers, factor, crnn, device)
+    valid_pages = set(pages)
+    centers, reads, strips = read_best_offset(
+        image, centers, factor, crnn, device, pages=pages, valid_pages=valid_pages
+    )
 
     # Decode and box only the central number of each crop, dropping a neighbor caught in the
     # wide window.
-    valid_pages = set(pages)
     found: list[tuple[list[list[int]], str, float]] = []
     for (cx, cy), (confidence, path), strip in zip(centers, reads, strips):
         group = central_group(path)
