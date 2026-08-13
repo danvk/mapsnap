@@ -224,9 +224,12 @@ def greedy_paths(log_probs: torch.Tensor) -> list[list[int]]:
     return [row.tolist() for row in best]
 
 
-# A blank run of at least this many timesteps separates two numbers (within a number, digits
-# are <=2-3 blanks apart; between adjacent numbers the whitespace is ~7+ blanks).
-GAP_STEPS = 4
+# A blank run of at least this many timesteps separates two numbers. The letter-charset
+# model fires one sharp peak per glyph, so digits within a number can sit 4-5 blanks
+# apart (hudson's 92 fired as 9....2 and was truncated to 9 at the old gap of 4), and
+# nashville's spaced inline suffix ("43 A") must merge into one group; between adjacent
+# numbers the whitespace is ~7+ blanks.
+GAP_STEPS = 6
 
 
 def central_group(path: list[int], *, gap: int = GAP_STEPS) -> tuple[int, int] | None:

@@ -29,7 +29,7 @@ import cv2
 import numpy as np
 from PIL import Image, ImageDraw, ImageFont
 
-from mapsnap.keymap.crnn_model import CRNN_HEIGHT, CRNN_WIDTH
+from mapsnap.keymap.crnn_model import BOX_HALF_H_WORKING, CRNN_HEIGHT, CRNN_WIDTH
 
 # Matched by eye against real strips (chicago/hudson/LA digits are a didone;
 # columbia a slab-ish serif; nashville a grotesque). Missing faces are skipped
@@ -141,60 +141,77 @@ def random_page_key(rng: np.random.Generator) -> tuple[str, str]:
     return digits + letter, style
 
 
+# Glyphs are rendered at this multiple of the strip scale, then the crop is
+# INTER_AREA-downsampled to strip size. Rendering AT strip scale put every
+# stroke on the same sub-pixel phase, and the trained model's conv features
+# locked to that phase: on real sheets its reads alternated blank/correct with
+# a 4-working-px (one conv timestep) period as the crop slid across chicago's
+# 8N. Supersampled rendering with a continuous-jitter crop gives synthetic ink
+# the same continuous phase and anti-aliased edges as a downsampled scan.
+SUPERSAMPLE = 4
+
+
 def render_number(
     text: str, style: str, font_path: str, rng: np.random.Generator
 ) -> Image.Image:
     """The number (and any suffix adornment) as an L-mode image, white background.
 
-    Suffix letters are SUPERSCRIPTS -- top-aligned with the digits, smaller --
-    for the underline and quotes styles (matching columbia's ``53E`` and
-    los_angeles's ``1499O``); the adornment sits directly beneath the letter.
-    ``plain`` is nashville's convention: full size, on the baseline.
+    Rendered at SUPERSAMPLE x strip scale (the caller downsamples). Suffix
+    letters are SUPERSCRIPTS -- top-aligned with the digits, smaller -- for the
+    underline and quotes styles (matching columbia's ``53E`` and los_angeles's
+    ``1499O``); the adornment sits directly beneath the letter. ``plain`` is
+    nashville's convention: full size, on the baseline.
     """
+    ss = SUPERSAMPLE
     digits = text.rstrip("ABCDEFGHIJKLMNOPQRS") if style != "none" else text
     letter = text[len(digits) :]
-    size = int(rng.integers(26, 40))
+    size = int(rng.integers(26, 40)) * ss
     font = ImageFont.truetype(font_path, size)
-    small = ImageFont.truetype(font_path, max(14, int(size * 0.60)))
+    small = ImageFont.truetype(font_path, max(14 * ss, int(size * 0.60)))
 
-    canvas = Image.new("L", (CRNN_WIDTH * 2, CRNN_HEIGHT * 2), 255)
+    canvas = Image.new("L", (CRNN_WIDTH * 2 * ss, CRNN_HEIGHT * 2 * ss), 255)
     draw = ImageDraw.Draw(canvas)
     ink = int(rng.integers(10, 90))
-    x, y = 40, 30
+    x, y = 40 * ss, 30 * ss
     draw.text((x, y), digits, font=font, fill=ink)
     dx = draw.textlength(digits, font=font)
     if letter:
         if style == "plain":
-            draw.text((x + dx + 2, y), letter, font=font, fill=ink)
+            draw.text((x + dx + 2 * ss, y), letter, font=font, fill=ink)
         else:
             # Superscript: the letter's top aligns with the digits' top.
-            lx = x + dx + 3
+            lx = x + dx + 3 * ss
             ly = y
             draw.text((lx, ly), letter, font=small, fill=ink)
             lw = draw.textlength(letter, font=small)
             small_h = small.size
-            under_y = ly + small_h + 2
+            under_y = ly + small_h + 2 * ss
             if style == "underline":
                 draw.line(
-                    [(lx - 1, under_y), (lx + lw + 1, under_y)], fill=ink, width=2
+                    [(lx - ss, under_y), (lx + lw + ss, under_y)],
+                    fill=ink,
+                    width=2 * ss,
                 )
             else:  # quotes: a ditto mark centered directly beneath the letter
                 qw = draw.textlength('"', font=small)
-                draw.text((lx + (lw - qw) / 2, under_y - 4), '"', font=small, fill=ink)
+                draw.text(
+                    (lx + (lw - qw) / 2, under_y - 4 * ss), '"', font=small, fill=ink
+                )
     return canvas
 
 
-def embolden(arr: np.ndarray, rng: np.random.Generator) -> np.ndarray:
+def embolden(arr: np.ndarray, rng: np.random.Generator, ss: int = 1) -> np.ndarray:
     """Thicken ink strokes toward the Sanborn fat-face weight.
 
     Brooklyn-style numerals are far heavier than any system didone -- extreme
     thick/thin contrast, the 2's top-left curling like a comma. No installed
     face matches, so a minimum filter (ink is dark) widens the strokes of the
     closest fonts instead; combined with Bodoni 72's ball terminals this gets
-    within teaching distance of the printed weight.
+    within teaching distance of the printed weight. ``ss`` scales the kernel so
+    the widening is the same 1-2 strip-scale pixels on a supersampled render.
     """
     if rng.random() < 0.5:
-        k = int(rng.integers(2, 4))
+        k = (int(rng.integers(2, 4)) - 1) * ss + 1
         return cv2.erode(arr, np.ones((k, k), np.uint8))
     return arr
 
@@ -219,42 +236,51 @@ def synth_strip(
     number = render_number(text, style, font_path, rng)
 
     # Rotate slightly and crop off-center, like the localizer's candidates.
+    # Everything glyph-shaped happens at SUPERSAMPLE scale; the single
+    # INTER_AREA resize at the end downsamples through the same vertical
+    # squeeze the pipeline applies (a 160x60 working strip -> 160x48 input),
+    # with a continuous-phase crop origin.
+    ss = SUPERSAMPLE
+    crop_w, crop_h = CRNN_WIDTH * ss, 2 * BOX_HALF_H_WORKING * ss
     angle = float(rng.uniform(-5, 5))
     number = number.rotate(angle, resample=Image.BILINEAR, fillcolor=255)
-    arr = embolden(np.asarray(number, dtype=np.uint8), rng).astype(np.float32) / 255.0
+    arr = embolden(np.asarray(number, dtype=np.uint8), rng, ss).astype(np.float32)
+    arr /= 255.0
     ys, xs = np.where(arr < 0.9)
     if len(xs) == 0:
         return synth_strip(fonts, tiles, rng)
     cx, cy = xs.mean(), ys.mean()
-    jx = float(rng.uniform(-12, 12))
-    jy = float(rng.uniform(-6, 6))
-    x0 = int(np.clip(cx - CRNN_WIDTH / 2 + jx, 0, arr.shape[1] - CRNN_WIDTH))
-    y0 = int(np.clip(cy - CRNN_HEIGHT / 2 + jy, 0, arr.shape[0] - CRNN_HEIGHT))
-    glyph = arr[y0 : y0 + CRNN_HEIGHT, x0 : x0 + CRNN_WIDTH]
+    jx = float(rng.uniform(-12, 12)) * ss
+    jy = float(rng.uniform(-6, 6)) * ss
+    x0 = int(np.clip(cx - crop_w / 2 + jx, 0, arr.shape[1] - crop_w))
+    y0 = int(np.clip(cy - crop_h / 2 + jy, 0, arr.shape[0] - crop_h))
+    crop = arr[y0 : y0 + crop_h, x0 : x0 + crop_w]
 
     # A neighboring page number, clipped at the left or right edge.
     if rng.random() < 0.35:
         n_text, n_style = random_page_key(rng)
         neighbor = render_number(n_text, n_style, font_path, rng)
         n_arr = (
-            embolden(np.asarray(neighbor, dtype=np.uint8), rng).astype(np.float32)
+            embolden(np.asarray(neighbor, dtype=np.uint8), rng, ss).astype(np.float32)
             / 255.0
         )
         nys, nxs = np.where(n_arr < 0.9)
         if len(nxs):
             ncx, ncy = nxs.mean(), nys.mean()
-            ny0 = int(np.clip(ncy - CRNN_HEIGHT / 2, 0, n_arr.shape[0] - CRNN_HEIGHT))
-            visible = int(rng.integers(8, 34))  # how much of the neighbor shows
+            ny0 = int(np.clip(ncy - crop_h / 2, 0, n_arr.shape[0] - crop_h))
+            visible = int(rng.integers(8, 34)) * ss  # how much of the neighbor shows
             if rng.random() < 0.5:  # at the right edge
                 nx0 = int(np.clip(ncx - visible, 0, n_arr.shape[1] - visible))
-                patch = n_arr[ny0 : ny0 + CRNN_HEIGHT, nx0 : nx0 + visible]
-                glyph = glyph.copy()
-                glyph[:, CRNN_WIDTH - visible :] *= patch
+                patch = n_arr[ny0 : ny0 + crop_h, nx0 : nx0 + visible]
+                crop = crop.copy()
+                crop[:, crop_w - visible :] *= patch
             else:  # at the left edge
                 nx0 = int(np.clip(ncx, 0, n_arr.shape[1] - visible))
-                patch = n_arr[ny0 : ny0 + CRNN_HEIGHT, nx0 : nx0 + visible]
-                glyph = glyph.copy()
-                glyph[:, :visible] *= patch
+                patch = n_arr[ny0 : ny0 + crop_h, nx0 : nx0 + visible]
+                crop = crop.copy()
+                crop[:, :visible] *= patch
+
+    glyph = cv2.resize(crop, (CRNN_WIDTH, CRNN_HEIGHT), interpolation=cv2.INTER_AREA)
 
     tile = tiles[int(rng.integers(len(tiles)))].astype(np.float32) / 255.0
     strip = tile * glyph  # print multiplies: ink darkens whatever is beneath
