@@ -92,6 +92,8 @@ def test_auto_run_id_truncates_sha():
 
 
 def test_gather_inputs_records_streets_and_truth(tmp_path):
+    (tmp_path / "p1.jpg").touch()
+    (tmp_path / "p2.jpg").touch()
     _write(tmp_path / "p1.streets.json", "s1")
     _write(tmp_path / "p2.streets.json", "s2")
     _write(tmp_path / "p1.boxes.json", "b1")
@@ -418,3 +420,31 @@ def test_archive_differs_distrusts_an_unreadable_manifest(tmp_path):
     run.mkdir(parents=True)
     _write(run / "manifest.json", "{not json")
     assert archive_differs(run, {}, {"sha": "a" * 40}, []) is not None
+
+
+def test_gather_inputs_ignores_a_superseded_split_parent(tmp_path):
+    """A split parent's leftover reads are not an input: georef never sees them.
+
+    `list_pages` hands georef the panels instead, so folding p1.streets.json in
+    claimed a file that cannot change any result -- and made the stale file look
+    live enough to mis-read an audit of recognizer coverage.
+    """
+    (tmp_path / "p1__1.jpg").touch()
+    (tmp_path / "p1__2.jpg").touch()
+    _write(tmp_path / "p1__1.streets.json", "a")
+    _write(tmp_path / "p1__2.streets.json", "b")
+    parent = _write(tmp_path / "p1.streets.json", "stale")
+    centerlines = _write(tmp_path / "centerlines.geojson", "lines")
+
+    before = gather_inputs(tmp_path, centerlines, None)
+    assert before["streets"]["count"] == 2
+    parent.unlink()
+    assert gather_inputs(tmp_path, centerlines, None) == before
+
+
+def test_gather_inputs_falls_back_when_there_are_no_page_images(tmp_path):
+    # A bare sidecar directory still hashes its reads; hashing nothing would
+    # make every such directory hash alike.
+    _write(tmp_path / "p1.streets.json", "s1")
+    centerlines = _write(tmp_path / "centerlines.geojson", "lines")
+    assert gather_inputs(tmp_path, centerlines, None)["streets"]["count"] == 1
