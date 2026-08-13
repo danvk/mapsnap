@@ -5,7 +5,7 @@ Trained weights for the key-map page-number pipeline (`mapsnap.keymap`).
 | File | What it is | Trainer | Device |
 |---|---|---|---|
 | `number_detector.pt` | CNN **localizer** — a MobileNetV3-small patch classifier that finds page-number centers | `mapsnap.keymap.train_number_detector` | GPU (MPS/CUDA) |
-| `number_crnn.pt` | CRNN **recognizer** — reads the digit string from a crop around each center | `mapsnap.keymap.train_crnn` | CPU |
+| `number_crnn.pt` | CRNN **recognizer** — reads the page key (digits + optional letter suffix) from a crop around each center | `mapsnap.keymap.train_crnn` | CPU |
 
 Both are consumed by `python -m mapsnap.keymap.detect_numbers_crnn` (and the localizer alone by `python -m mapsnap.keymap.detect_numbers_cnn --debug`).
 
@@ -32,15 +32,18 @@ Fine-tunes a pretrained MobileNetV3-small on positive (label-centered) vs negati
 ### 2. Recognizer → `number_crnn.pt`
 
 ```sh
-uv run python -m mapsnap.keymap.train_crnn --val-image hudson_co_nj_1950_vol_9/p0 --epochs 250
+uv run python -m mapsnap.keymap.train_crnn --val-image hudson_co_nj_1950_vol_9/p0 --synthetic 12000
 ```
 
 Crops a fixed strip around each labeled number (plus empty-target "no-number" negatives so the model learns to reject the localizer's false positives) and trains the CRNN with CTC, saving the best weights by exact-match accuracy. Defaults: `--epochs 40`, `--batch-size 64`, `--lr 1e-3`, `--negative-ratio 0.5`, `--seed 0`, `--data-dir data`.
 
-Two things to know:
+The charset is digits **plus letters** (#316), so suffixed page keys (columbia's underlined `53E`, los_angeles's quote-marked `1499K`, nashville's inline `9A`) are readable. Letters are rare in the hand labels, so training leans on synthesis:
 
-- **Pass `--epochs 250`.** The 40-epoch default badly underfits (val exact-match ~0.16); ~250 epochs reaches ~0.95+.
-- **It runs on CPU by design** — `nn.CTCLoss` is not reliable on MPS, and the model/data are small enough that CPU training takes only a couple of minutes.
+- **Pass `--synthetic 12000`.** Adds strips from `mapsnap.keymap.synth_strips`: matched fonts over real background tiles, the three suffix-adornment conventions, partial neighbor numbers at strip edges. With them 40 epochs reaches ~0.95 val exact-match; without them letters are undertrained. (The old digits-only advice to run 250 epochs is superseded — the synthetic pool is what fixed the underfit.)
+- **The generator's realism is load-bearing.** Two trained-in failures came from subtle render/scan mismatches: strips rendered at final scale phase-locked the conv features (reads alternated blank/correct with a one-timestep period on real sheets), and strips without the pipeline's 160x60 -> 160x48 vertical squeeze taught the wrong glyph proportions. `synth_strips` renders at 4x and downsamples through a continuous-jitter crop for this reason; keep it that way.
+- **It runs on CPU by design** — `nn.CTCLoss` is not reliable on MPS, and the model/data are small enough that CPU training takes ~45 minutes with the synthetic pool.
+
+Off-center robustness is handled at **inference**, not training: `detect_numbers_crnn` reads every candidate at three vertical offsets and keeps the best read (`read_best_offset`). Widening training translation to cover the localizer's offset range was tried and traded letter accuracy for offset robustness in every combination.
 
 ## Verifying a retrain
 
