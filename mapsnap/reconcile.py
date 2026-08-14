@@ -775,9 +775,19 @@ def build_nodes(volume: Path, sidecar_dir: Path, vctx) -> dict[str, PageNode]:
     """PageNodes for every base page and split panel with any hypothesis."""
     snap_records, street_records = load_channel_records(volume)
     nodes: dict[str, PageNode] = {}
-    for unit in [*vctx.units, *vctx.panel_units]:
+    all_units = [*vctx.units, *vctx.panel_units]
+    stems = {u.stem for u in all_units}
+    for unit in all_units:
         base = panel_base(unit.stem)
         if base is not None and any(u.stem == unit.stem for u in vctx.units):
+            continue
+        # A split page's PARENT is never publishable: its panels supersede it
+        # (list_pages semantics), and the parent's only poses are stale
+        # candidates from before the split. Left as an energy contest, a claim
+        # or evidence term can nudge such a pose over the abstention bar --
+        # philadelphia p203 published a pre-split snap alias at 473 ft while
+        # its panel held the real fit at 10.6 -- so supersession is a rule.
+        if any(s.startswith(unit.stem + "__") for s in stems):
             continue
         hypotheses, published = collect_hypotheses(
             sidecar_dir,
