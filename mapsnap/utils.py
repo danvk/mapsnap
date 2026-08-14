@@ -31,9 +31,24 @@ def haversine_m(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
 
 
 def run_cmd(cmd: list[str]) -> None:
-    """Print and run a subprocess command, exiting with its return code on failure."""
+    """Print and run a subprocess command, exiting with its return code on failure.
+
+    A stage killed by a SIGNAL (negative returncode) is retried once: #296 is
+    a sporadic, non-input-deterministic SIGSEGV inside snap's chamfer_refine
+    (two captures, different pages and lines, same volume rerun passes), and
+    the stage caches -- snap's incremental candidates.jsonl above all -- make
+    a retry resume in seconds. One retry converts a dead overnight lane into
+    a logged hiccup; a second failure still kills the run, so a genuinely
+    broken stage cannot loop.
+    """
     print("+ " + " ".join(cmd), flush=True)
     result = subprocess.run(cmd, check=False)
+    if result.returncode < 0:
+        print(
+            f"stage died with signal {-result.returncode} (#296); retrying once",
+            flush=True,
+        )
+        result = subprocess.run(cmd, check=False)
     if result.returncode != 0:
         sys.exit(result.returncode)
 

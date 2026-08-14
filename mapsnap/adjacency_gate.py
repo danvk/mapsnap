@@ -162,15 +162,30 @@ def load_fitted_pages(volume: Path, adjacency: dict) -> dict[str, FittedPage]:
 def stamp_worlds(
     adjacency: dict, page: FittedPage, other_stem: str
 ) -> list[tuple[float, float]]:
-    """World (lon, lat) of ``page``'s printed claims of ``other_stem``'s key."""
+    """World (lon, lat) of ``page``'s printed claims of ``other_stem``'s key.
+
+    Detection fractions are PARENT-image-relative (adjacency scans the parent
+    sheet even for split panels, #135), while a panel stem's pose maps
+    split-image pixels to world. The unit's recorded ``panel_bbox`` (the crop,
+    in parent pixels — split images are exact bbox crops at native resolution)
+    translates between the two frames; unsplit pages have no bbox and the
+    parent frame IS the pose frame.
+    """
     want = (page_key(other_stem) or "").upper()
     out: list[tuple[float, float]] = []
-    for det in adjacency["pages"].get(page.stem, {}).get("detections", []):
+    info = adjacency["pages"].get(page.stem, {})
+    bbox = info.get("panel_bbox")
+    for det in info.get("detections", []):
         key = str(det.get("key") or det.get("number") or "").upper()
         if not det.get("claim") or key != want:
             continue
-        px = det["x_frac"] * page.width
-        py = det["y_frac"] * page.height
+        px = det["x_frac"] * info.get("width", page.width)
+        py = det["y_frac"] * info.get("height", page.height)
+        if bbox:
+            bx0, by0, bx1, by1 = bbox
+            if bx1 > bx0 and by1 > by0:
+                px = (px - bx0) * page.width / (bx1 - bx0)
+                py = (py - by0) * page.height / (by1 - by0)
         a = page.affine
         out.append(
             (
@@ -224,13 +239,27 @@ def edge_contradictions(
 def hard_signal(
     page: FittedPage, median_theta_deg: float, median_log_scale: float
 ) -> str | None:
-    """The demotion-licensing signal, or None when the fit looks structurally sound."""
+    """The demotion-licensing signal, or None when the fit looks structurally sound.
+
+    Both pose deviations are FAMILY-relative, not raw volume-median-relative
+    (#256): volumes legitimately contain 90-deg-rotated sheets (fargo has
+    seven at ~91 deg; grand_rapids panel p724__2 sits at 91) and half/double
+    scale families (fargo: 65 pages at one rung, 11 at a 2x rung), and a raw
+    median comparison hands every minority-family page a permanent demotion
+    license -- an 8-GCP 11 ft fargo fit died that way, and the first per-panel
+    A/B demoted champaign's correct 2x inset p23__1 [scale_dev=0.67]. Rotation
+    is compared mod 90 (sheet rotations are quarter-turns); scale against the
+    nearest log-2 rung of the volume median (the SAME/HALF/DOUBLE family
+    structure the georef scale bands already model).
+    """
     if page.gcps <= GATE_MAX_GCPS:
         return f"gcps={page.gcps}"
-    rot = abs((page.theta_deg - median_theta_deg + 180.0) % 360.0 - 180.0)
+    rot = abs((page.theta_deg - median_theta_deg + 45.0) % 90.0 - 45.0)
     if rot > GATE_ROT_DEV_DEG:
         return f"rot_dev={rot:.0f}deg"
-    scale = abs(page.log_scale - median_log_scale)
+    dev = page.log_scale - median_log_scale
+    rung = round(dev / math.log(2.0))
+    scale = abs(dev - rung * math.log(2.0))
     if scale > GATE_SCALE_DEV_LOG:
         return f"scale_dev={scale:.2f}"
     return None
