@@ -432,6 +432,7 @@ def archive_fit_run(
     iiif_path: Path | None,
     compare_txt: Path | None,
     label: str | None = None,
+    stage_seconds: dict[str, float] | None = None,
 ) -> Path:
     """Build the manifest for a completed ``mapsnap fit`` run and archive it.
 
@@ -450,6 +451,8 @@ def archive_fit_run(
         iiif_path,
         label,
     )
+    if stage_seconds:
+        manifest["stage_seconds"] = stage_seconds
     return archive_run(dir_path, run_id, manifest, iiif_path, compare_txt)
 
 
