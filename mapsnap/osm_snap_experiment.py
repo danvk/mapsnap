@@ -69,6 +69,11 @@ LOCAL_CHALLENGE_RADIUS_M = 150.0
 
 RESCUE_STATES = {"nofit", "misscale", "1gcp", "outlier", "none"}
 
+# Rotation-prior sigma for a demoted pose used as a search seed (#315). Wide
+# enough that the ladder still explores, tight enough that the demoted fit's
+# orientation -- its most trustworthy component -- ranks first.
+DEMOTED_SEED_SIGMA_DEG = 10.0
+
 
 def artifacts_dir(volume: Path) -> Path:
     return volume / "artifacts" / "osm_snap"
@@ -359,10 +364,16 @@ def load_panel_units(volume: Path) -> list[PageUnit]:
         keymap_centers: list[tuple[float, float]] = []
         keymap_radius = 0.0
         keymap_regions = None
+        demoted_affine = None
         if georef is not None:
             if state == "fitted":
                 gen_affine = page_world_affine(georef)
                 effective_gcps = effective_gcp_count(georef)
+            else:
+                try:
+                    demoted_affine = page_world_affine(georef)
+                except (KeyError, TypeError, ValueError):
+                    demoted_affine = None  # nofit-style doc: no corners
             keymap = georef.get("keymap") or {}
             keymap_centers = [tuple(c) for c in keymap.get("centers", [])]
             keymap_radius = float(keymap.get("radius_m") or 0.0)
@@ -378,6 +389,7 @@ def load_panel_units(volume: Path) -> list[PageUnit]:
                 truth=truth,
                 split_truth=False,
                 gen_affine=gen_affine,
+                demoted_affine=demoted_affine,
                 inlier_intersections=effective_gcps,
                 inlier_streets=0,
                 keymap_centers=keymap_centers,
@@ -880,6 +892,37 @@ def page_record(vctx: VolumeContext, unit: PageUnit) -> dict:
                     "radius_m": round(ctx.radius_m, 1),
                     "radius_source": "local-challenge",
                 }
+    if unit.fit_state in RESCUE_STATES and unit.demoted_affine is not None:
+        # #315: a demoted pose is denied publication, not usefulness. The
+        # rescue search from key-map/hint centers failed on every page whose
+        # demoted pose was a good init (richmond p353 unplaced vs 8.4 ft when
+        # seeded from its own 3.06x-mis-scaled fit), so the demoted pose's
+        # CENTER joins the search and its rotation becomes a prior. Position
+        # and angle only -- its scale is often the very reason it was demoted,
+        # and the matcher sweeps the volume rungs regardless. Candidates found
+        # from this seed face the same rescue bars, stamp gate, and reconciler
+        # entry as any other: the demotion itself stands.
+        a = unit.demoted_affine
+        lon_c = float(a[0, 0] * unit.width / 2 + a[0, 1] * unit.height / 2 + a[0, 2])
+        lat_c = float(a[1, 0] * unit.width / 2 + a[1, 1] * unit.height / 2 + a[1, 2])
+        if (lon_c, lat_c) not in ctx.search_centers:
+            ctx.search_centers = [*ctx.search_centers, (lon_c, lat_c)]
+        theta = math.degrees(math.atan2(-a[1, 0], a[0, 0]))
+        ctx.rotation_priors = [
+            *ctx.rotation_priors,
+            RotationPrior(
+                theta_deg=theta, sigma_deg=DEMOTED_SEED_SIGMA_DEG, source="demoted-pose"
+            ),
+        ]
+        record["search"]["centers"].append([round(lon_c, 7), round(lat_c, 7)])
+        record["search"]["demoted_seed"] = True
+        record["priors"]["rotation"].append(
+            {
+                "theta_deg": round(theta, 2),
+                "sigma_deg": DEMOTED_SEED_SIGMA_DEG,
+                "source": "demoted-pose",
+            }
+        )
     candidates = snap_page(ctx, vctx.feature_index)
     if unit.fit_state in RESCUE_STATES:
         # A contradiction-demoted page may only be re-adopted at a pose that

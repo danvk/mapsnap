@@ -103,6 +103,11 @@ class PageUnit:
     keymap_centers: list[tuple[float, float]]
     keymap_radius_m: float
     keymap_regions: list[list[list[float]]] | None = None
+    # A pose its channel produced and DECLINED (misscale/outlier/contradicted
+    # sidecar with corners). Never an incumbent; #315 uses it only to seed
+    # snap's search, because a demoted pose is measurably a good init (refine
+    # fixed richmond p353's 3.06x scale error from one).
+    demoted_affine: np.ndarray | None = None
     anchor_truth: bool = False
     anchor_free: bool = False
     rmse_ft: float | None = None  # generated-vs-truth RMSE
