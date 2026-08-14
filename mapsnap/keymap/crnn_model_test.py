@@ -95,11 +95,11 @@ def test_central_group_all_blank_is_none():
 
 
 def test_locate_number_brackets_digits():
-    # 48x96 strip: white with a dark digit-like block at rows 12..32, cols 40..60.
+    # 48x160 strip: white with a dark digit-like block at rows 12..32, cols 40..60.
     strip = np.full((CRNN_HEIGHT, CRNN_WIDTH), 255, dtype=np.uint8)
     strip[12:32, 40:60] = 0
-    # 24-step path (cell width 4): the number spans cols 40..60 -> timesteps 10..15.
-    box = locate_number(strip, (10, 15), 24, (0, 0, CRNN_WIDTH, CRNN_HEIGHT))
+    # 40-step path (cell width CRNN_WIDTH/40 = 4): cols 40..60 -> timesteps 10..15.
+    box = locate_number(strip, (10, 15), 40, (0, 0, CRNN_WIDTH, CRNN_HEIGHT))
     xs = [p[0] for p in box]
     ys = [p[1] for p in box]
     # Box is much tighter than the full crop and brackets the dark block.
@@ -138,3 +138,24 @@ def test_ctc_log_likelihood_two_digits():
         log_probs[t_step, idx] = -0.01
     assert ctc_log_likelihood(log_probs, "47") > ctc_log_likelihood(log_probs, "4")
     assert ctc_log_likelihood(log_probs, "47") > ctc_log_likelihood(log_probs, "48")
+
+
+def test_charset_round_trips_lettered_page_keys():
+    """Letters are first-class: 1499K and 9A must encode and decode (#316)."""
+    from mapsnap.keymap.crnn_model import (
+        BLANK_INDEX,
+        ctc_greedy_decode,
+        encode_text,
+    )
+
+    for text in ("1499K", "9A", "53B", "384"):
+        indices = encode_text(text)
+        assert len(indices) == len(text)
+        # Interleave blanks so CTC collapse reproduces repeated chars exactly.
+        path: list[int] = []
+        for i in indices:
+            path += [i, BLANK_INDEX]
+        assert ctc_greedy_decode(path) == text
+    # Lowercase input normalizes; junk is skipped, not crashed on.
+    assert encode_text("9a") == encode_text("9A")
+    assert ctc_greedy_decode([]) == ""
