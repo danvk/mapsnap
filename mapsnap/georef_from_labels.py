@@ -82,6 +82,11 @@ class IntersectionGCP:
     pixel_dist: float  # distance between label centers
     feat_a: LabelFeature
     feat_b: LabelFeature
+    # Provenance for the #229 affected-the-fit accounting: whether #99 moved
+    # this GCP's geo, and whether #106 kept it as a divergent (non-primary)
+    # crossing the pre-#106 tiebreak would have discarded.
+    straightened: bool = False
+    divergent_kept: bool = False
 
 
 @dataclass
@@ -848,7 +853,16 @@ _CLUSTER_THRESHOLD_FT: float = 60.0
 # numbers as a floor, not an exact census.
 from collections import Counter as _Counter
 
-SPECIAL_CASE_COUNTS: "_Counter[str]" = _Counter()
+# The affected-the-fit keys are pre-seeded to zero so the summary line always
+# shows them: "seed_veto_changed_winner=0" against 74 vetoes is the
+# removability evidence itself, not a missing datum.
+SPECIAL_CASE_COUNTS: "_Counter[str]" = _Counter(
+    {
+        "seed_veto_changed_winner": 0,
+        "straightened_in_winning_seed": 0,
+        "divergent_kept_in_winning_seed": 0,
+    }
+)
 
 DUP_CROSSING_TOL_FRACTION: float = 0.05
 
@@ -878,9 +892,16 @@ def _dedupe_crossings_by_pixel(
                 break
         else:
             clusters.append([candidate])
-    if len(clusters) > 1:
-        SPECIAL_CASE_COUNTS["divergent_crossings_kept"] += len(clusters) - 1
-    return [min(cluster, key=lambda g: g.pixel_dist) for cluster in clusters]
+    representatives = [min(cluster, key=lambda g: g.pixel_dist) for cluster in clusters]
+    if len(representatives) > 1:
+        SPECIAL_CASE_COUNTS["divergent_crossings_kept"] += len(representatives) - 1
+        # The pre-#106 tiebreak kept only the globally closest-labels crossing;
+        # every other representative exists because of the fix.
+        primary = min(representatives, key=lambda g: g.pixel_dist)
+        for rep in representatives:
+            if rep is not primary:
+                rep.divergent_kept = True
+    return representatives
 
 
 def _cluster_geo_coords(
@@ -1176,12 +1197,14 @@ def find_intersection_gcps(
                 # If a street curves through the shared vertex, the vertex sits off the
                 # straight axis the map draws; use the straight-axis crossing instead so the
                 # geo matches the straight-line pixel crossing (no-op for straight junctions).
+                geo_was_straightened = False
                 if unique_intersection:
                     straightened = straight_intersection_geo(
                         geo, block_index.get(text_a, []), block_index.get(text_b, [])
                     )
                     if straightened is not None:
                         geo = straightened
+                        geo_was_straightened = True
                         SPECIAL_CASE_COUNTS["intersection_geo_straightened"] += 1
                 # Each (fa, fb) instance pair gives one candidate crossing for this world node.
                 # Crossings that coincide (genuine duplicate labels) later collapse to one GCP;
@@ -1206,6 +1229,7 @@ def find_intersection_gcps(
                                 pixel_dist=pixel_dist,
                                 feat_a=fa,
                                 feat_b=fb,
+                                straightened=geo_was_straightened,
                             )
                         )
                 gcps.extend(_dedupe_crossings_by_pixel(candidates, tol_px))
@@ -1451,6 +1475,9 @@ def ransac_hybrid(
     best_inliers: list[int] = []
     best_score = -float("inf")
     best_pair: tuple[int, int] | None = None
+    # #229: the best score among seed pairs the #98 rotation veto rejected. If
+    # it beats the eventual winner, the veto changed this page's outcome.
+    best_vetoed_score = -float("inf")
 
     print("Candidate intersections:")
     for a in gcps:
@@ -1547,6 +1574,9 @@ def ransac_hybrid(
             is_rotation_outlier(f, block_index, A, dir_threshold) for f in seed_feats
         ):
             SPECIAL_CASE_COUNTS["seed_rotation_vetoed"] += 1
+            best_vetoed_score = max(
+                best_vetoed_score, float(len(inliers)) * pos_threshold - err
+            )
             if debug:
                 print(f"  {i1} {i2} REJECTED ({len(inliers)}) seed rotation outlier")
             continue
@@ -1584,6 +1614,14 @@ def ransac_hybrid(
                 file=sys.stderr,
             )
 
+    if best_vetoed_score > best_score:
+        SPECIAL_CASE_COUNTS["seed_veto_changed_winner"] += 1
+    if best_pair is not None:
+        for index in best_pair:
+            if gcps[index].straightened:
+                SPECIAL_CASE_COUNTS["straightened_in_winning_seed"] += 1
+            if gcps[index].divergent_kept:
+                SPECIAL_CASE_COUNTS["divergent_kept_in_winning_seed"] += 1
     return best_A, best_inliers, best_pair
 
 
