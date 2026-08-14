@@ -245,6 +245,15 @@ def hard_signal(
     rot = abs((page.theta_deg - median_theta_deg + 180.0) % 360.0 - 180.0)
     if rot > GATE_ROT_DEV_DEG:
         return f"rot_dev={rot:.0f}deg"
+    # Scale deviation from the VOLUME median licenses nothing for a split
+    # panel: insets are drawn at their own scales (a 100ft-per-inch inset on a
+    # 200ft volume sits at |log dev| ~0.69), so the #256 multi-family flaw
+    # fires on exactly the pages #135 gave the gate reach over. Measured: the
+    # first per-panel A/B demoted champaign p23__1 [scale_dev=0.67], a correct
+    # inset fit, costing the volume 4.0 score points. Rotation stays licensed:
+    # insets share the sheet's orientation.
+    if "__" in page.stem:
+        return None
     scale = abs(page.log_scale - median_log_scale)
     if scale > GATE_SCALE_DEV_LOG:
         return f"scale_dev={scale:.2f}"
