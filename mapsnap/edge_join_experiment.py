@@ -258,9 +258,18 @@ def load_page_units(volume: Path) -> list[PageUnit]:
         keymap_centers: list[tuple[float, float]] = []
         keymap_radius = 0.0
         keymap_regions = None
+        demoted_affine = None
         if georef is not None:
             if state == "fitted":
                 gen_affine = page_world_affine(georef)
+            else:
+                # #315: a declined pose (misscale/outlier/contradicted) still
+                # anchors snap's rescue search; nofit-style docs have no
+                # corners and stay None.
+                try:
+                    demoted_affine = page_world_affine(georef)
+                except (KeyError, TypeError, ValueError):
+                    demoted_affine = None
             inlier_int = sum(
                 1 for i in georef.get("intersections", []) if i.get("inlier")
             )
@@ -279,6 +288,7 @@ def load_page_units(volume: Path) -> list[PageUnit]:
             truth=truth,
             split_truth=stem in split_truth_parents,
             gen_affine=gen_affine,
+            demoted_affine=demoted_affine,
             inlier_intersections=inlier_int,
             inlier_streets=inlier_str,
             keymap_centers=keymap_centers,
