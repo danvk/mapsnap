@@ -239,22 +239,27 @@ def edge_contradictions(
 def hard_signal(
     page: FittedPage, median_theta_deg: float, median_log_scale: float
 ) -> str | None:
-    """The demotion-licensing signal, or None when the fit looks structurally sound."""
+    """The demotion-licensing signal, or None when the fit looks structurally sound.
+
+    Both pose deviations are FAMILY-relative, not raw volume-median-relative
+    (#256): volumes legitimately contain 90-deg-rotated sheets (fargo has
+    seven at ~91 deg; grand_rapids panel p724__2 sits at 91) and half/double
+    scale families (fargo: 65 pages at one rung, 11 at a 2x rung), and a raw
+    median comparison hands every minority-family page a permanent demotion
+    license -- an 8-GCP 11 ft fargo fit died that way, and the first per-panel
+    A/B demoted champaign's correct 2x inset p23__1 [scale_dev=0.67]. Rotation
+    is compared mod 90 (sheet rotations are quarter-turns); scale against the
+    nearest log-2 rung of the volume median (the SAME/HALF/DOUBLE family
+    structure the georef scale bands already model).
+    """
     if page.gcps <= GATE_MAX_GCPS:
         return f"gcps={page.gcps}"
-    rot = abs((page.theta_deg - median_theta_deg + 180.0) % 360.0 - 180.0)
+    rot = abs((page.theta_deg - median_theta_deg + 45.0) % 90.0 - 45.0)
     if rot > GATE_ROT_DEV_DEG:
         return f"rot_dev={rot:.0f}deg"
-    # Scale deviation from the VOLUME median licenses nothing for a split
-    # panel: insets are drawn at their own scales (a 100ft-per-inch inset on a
-    # 200ft volume sits at |log dev| ~0.69), so the #256 multi-family flaw
-    # fires on exactly the pages #135 gave the gate reach over. Measured: the
-    # first per-panel A/B demoted champaign p23__1 [scale_dev=0.67], a correct
-    # inset fit, costing the volume 4.0 score points. Rotation stays licensed:
-    # insets share the sheet's orientation.
-    if "__" in page.stem:
-        return None
-    scale = abs(page.log_scale - median_log_scale)
+    dev = page.log_scale - median_log_scale
+    rung = round(dev / math.log(2.0))
+    scale = abs(dev - rung * math.log(2.0))
     if scale > GATE_SCALE_DEV_LOG:
         return f"scale_dev={scale:.2f}"
     return None
