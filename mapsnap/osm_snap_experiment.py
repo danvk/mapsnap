@@ -680,18 +680,28 @@ def build_page_context(
     ):
         if all(haversine_m(lat, lon, b, a) > 50.0 for a, b in centers):
             centers = centers + [(lon, lat)]
+    seed_affine = None
     if unit.fit_state == "fitted" and unit.gen_affine is not None:
         # For arbitration the incumbent pose itself is the natural search
         # init — it also reaches fitted pages the keymap never placed.
+        seed_affine = unit.gen_affine
+    elif unit.demoted_affine is not None:
+        # #315: a demoted pose is denied publication, not usefulness. It
+        # anchors the rescue search exactly as an incumbent would — which
+        # also reaches demoted pages the keymap never placed (richmond p353:
+        # misscale, no keymap location, previously status no_keymap with no
+        # search at all; its own 3.06x-mis-scaled pose is a good init).
+        seed_affine = unit.demoted_affine
+    if seed_affine is not None:
         lon_c = (
-            unit.gen_affine[0, 0] * unit.width / 2
-            + unit.gen_affine[0, 1] * unit.height / 2
-            + unit.gen_affine[0, 2]
+            seed_affine[0, 0] * unit.width / 2
+            + seed_affine[0, 1] * unit.height / 2
+            + seed_affine[0, 2]
         )
         lat_c = (
-            unit.gen_affine[1, 0] * unit.width / 2
-            + unit.gen_affine[1, 1] * unit.height / 2
-            + unit.gen_affine[1, 2]
+            seed_affine[1, 0] * unit.width / 2
+            + seed_affine[1, 1] * unit.height / 2
+            + seed_affine[1, 2]
         )
         if all(haversine_m(lat_c, lon_c, b, a) > 50.0 for a, b in centers):
             centers = centers + [(lon_c, lat_c)]
@@ -893,20 +903,12 @@ def page_record(vctx: VolumeContext, unit: PageUnit) -> dict:
                     "radius_source": "local-challenge",
                 }
     if unit.fit_state in RESCUE_STATES and unit.demoted_affine is not None:
-        # #315: a demoted pose is denied publication, not usefulness. The
-        # rescue search from key-map/hint centers failed on every page whose
-        # demoted pose was a good init (richmond p353 unplaced vs 8.4 ft when
-        # seeded from its own 3.06x-mis-scaled fit), so the demoted pose's
-        # CENTER joins the search and its rotation becomes a prior. Position
-        # and angle only -- its scale is often the very reason it was demoted,
-        # and the matcher sweeps the volume rungs regardless. Candidates found
-        # from this seed face the same rescue bars, stamp gate, and reconciler
-        # entry as any other: the demotion itself stands.
+        # #315: the demoted pose's center joined the search in
+        # build_page_context; here its rotation — the pose's most trustworthy
+        # component (its scale is often the very reason for the demotion) —
+        # enters as a prior, and the record is marked so the debugger can show
+        # the seed's provenance.
         a = unit.demoted_affine
-        lon_c = float(a[0, 0] * unit.width / 2 + a[0, 1] * unit.height / 2 + a[0, 2])
-        lat_c = float(a[1, 0] * unit.width / 2 + a[1, 1] * unit.height / 2 + a[1, 2])
-        if (lon_c, lat_c) not in ctx.search_centers:
-            ctx.search_centers = [*ctx.search_centers, (lon_c, lat_c)]
         theta = math.degrees(math.atan2(-a[1, 0], a[0, 0]))
         ctx.rotation_priors = [
             *ctx.rotation_priors,
@@ -914,7 +916,6 @@ def page_record(vctx: VolumeContext, unit: PageUnit) -> dict:
                 theta_deg=theta, sigma_deg=DEMOTED_SEED_SIGMA_DEG, source="demoted-pose"
             ),
         ]
-        record["search"]["centers"].append([round(lon_c, 7), round(lat_c, 7)])
         record["search"]["demoted_seed"] = True
         record["priors"]["rotation"].append(
             {
