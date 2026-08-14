@@ -786,8 +786,17 @@ def build_nodes(volume: Path, sidecar_dir: Path, vctx) -> dict[str, PageNode]:
         # candidates from before the split. Left as an energy contest, a claim
         # or evidence term can nudge such a pose over the abstention bar --
         # philadelphia p203 published a pre-split snap alias at 473 ft while
-        # its panel held the real fit at 10.6 -- so supersession is a rule.
+        # its panel held the real fit at 10.6 -- so supersession is a rule:
+        # the parent's node offers ONLY the unplaced state, and its final
+        # sidecar (corners: null) still claims the page key per the contract.
         if any(s.startswith(unit.stem + "__") for s in stems):
+            nodes[unit.stem] = PageNode(
+                unit=unit,
+                is_panel=False,
+                base=None,
+                hypotheses=[Hypothesis(source=UNPLACED, affine=None)],
+                published_index=None,
+            )
             continue
         hypotheses, published = collect_hypotheses(
             sidecar_dir,
