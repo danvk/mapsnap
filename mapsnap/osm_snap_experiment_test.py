@@ -512,3 +512,35 @@ def test_refine_requires_informative_challenger_evidence():
     record = fitted_record(incumbent_ver=-0.249, challenger_ver=0.35, shift_m=15.0)
     record["incumbent"]["effective_gcps"] = 14
     assert refine_adoption(record) is not None
+
+
+def test_load_page_units_populates_demoted_affine(tmp_path):
+    """A declined pose (misscale) loads as demoted_affine; a fitted one as gen_affine.
+
+    Two near-identical loaders build PageUnits (this module's panel loader and
+    edge_join_experiment.load_page_units for base pages); the #315 fix was
+    silently a no-op TWICE because only one of them populated the field. This
+    pins the base loader.
+    """
+    import json as json_module
+
+    from PIL import Image
+
+    from mapsnap.osm_snap_experiment import load_page_units
+
+    corners = [[-96.0, 46.0], [-95.9, 46.0], [-95.9, 45.9], [-96.0, 45.9]]
+    for stem, doc in [
+        ("p1", {"width": 40, "height": 30, "status": "misscale", "corners": corners}),
+        ("p2", {"width": 40, "height": 30, "corners": corners}),
+        ("p3", {"width": 40, "height": 30, "status": "nofit"}),
+    ]:
+        Image.new("RGB", (40, 30)).save(tmp_path / f"{stem}.jpg")
+        (tmp_path / f"{stem}.georef.json").write_text(json_module.dumps(doc))
+    units = {u.stem: u for u in load_page_units(tmp_path)}
+    assert units["p1"].fit_state == "misscale"
+    assert units["p1"].demoted_affine is not None
+    assert units["p1"].gen_affine is None
+    assert units["p2"].fit_state == "fitted"
+    assert units["p2"].gen_affine is not None
+    assert units["p2"].demoted_affine is None
+    assert units["p3"].demoted_affine is None
