@@ -840,6 +840,16 @@ _CLUSTER_THRESHOLD_FT: float = 60.0
 # read as a street (New Orleans p153's "LIBERTY IRON WORKS" mis-read as S Liberty St, whose
 # diagonal box throws its crossing ~1200 px off the real street's) yields two genuinely different
 # image points for one world node, and only by keeping both can RANSAC pick the consistent one.
+# How often each RANSAC special case fires (#229): the legacy edge-case fixes
+# (#97/#98/#99/#106/#117) predate the snap channel, and whether each still
+# earns its complexity is an empirical question. Counted per process and
+# reported once per `mapsnap georef` invocation; with --num-workers the
+# workers' counts are not aggregated (the default is serial), so treat the
+# numbers as a floor, not an exact census.
+from collections import Counter as _Counter
+
+SPECIAL_CASE_COUNTS: "_Counter[str]" = _Counter()
+
 DUP_CROSSING_TOL_FRACTION: float = 0.05
 
 
@@ -868,6 +878,8 @@ def _dedupe_crossings_by_pixel(
                 break
         else:
             clusters.append([candidate])
+    if len(clusters) > 1:
+        SPECIAL_CASE_COUNTS["divergent_crossings_kept"] += len(clusters) - 1
     return [min(cluster, key=lambda g: g.pixel_dist) for cluster in clusters]
 
 
@@ -1170,6 +1182,7 @@ def find_intersection_gcps(
                     )
                     if straightened is not None:
                         geo = straightened
+                        SPECIAL_CASE_COUNTS["intersection_geo_straightened"] += 1
                 # Each (fa, fb) instance pair gives one candidate crossing for this world node.
                 # Crossings that coincide (genuine duplicate labels) later collapse to one GCP;
                 # divergent ones (a mislabel like p153's "LIBERTY IRON WORKS") are kept apart so
@@ -1533,6 +1546,7 @@ def ransac_hybrid(
         if any(
             is_rotation_outlier(f, block_index, A, dir_threshold) for f in seed_feats
         ):
+            SPECIAL_CASE_COUNTS["seed_rotation_vetoed"] += 1
             if debug:
                 print(f"  {i1} {i2} REJECTED ({len(inliers)}) seed rotation outlier")
             continue
@@ -2749,6 +2763,7 @@ def prepare_label_features(
             min_long_side=min_long_side,
             perp_tolerance_px=collinear_perp_tolerance_px,
         )
+        SPECIAL_CASE_COUNTS["collinear_discount_withheld"] += len(dominated)
         # Only surface drops that would otherwise have been admitted; a detection the
         # size/confidence gate would reject anyway is not informative, just log noise.
         loggable = [
@@ -2908,6 +2923,7 @@ def process_image(
     # an affine, so when every GCP collapses onto a single image point there is just one
     # control point: defer to the median-scale 1-GCP fit, which tries each world candidate.
     if len(_distinct_pixel_gcps(gcps)) == 1:
+        SPECIAL_CASE_COUNTS["jog_single_pixel_defer"] += 1
         ix = f"{gcps[0].feat_a.raw_text} x {gcps[0].feat_b.raw_text}"
         descr = (
             ix
@@ -3779,6 +3795,17 @@ def main() -> None:
     if scales and len(args.images) > 1 and ref_scale_px_per_ft is not None:
         print(
             f"\nReference scale: {ref_scale_px_per_ft:.4f} px/ft ({len(scales)} images)",
+            file=sys.stderr,
+        )
+        print(
+            "RANSAC special-cases: "
+            + (
+                ", ".join(
+                    f"{name}={count}"
+                    for name, count in sorted(SPECIAL_CASE_COUNTS.items())
+                )
+                or "none fired"
+            ),
             file=sys.stderr,
         )
 
