@@ -183,158 +183,6 @@ def backfill_backgrounds(image_path: str) -> int:
     return sum(1 for det in detections if "background" in det)
 
 
-def _underline_rule_mask(
-    gray: np.ndarray,
-    box,
-    ink_threshold: int,
-    min_run: int,
-    max_thickness: int,
-    low_fraction: float,
-    max_ink_fraction: float,
-):
-    """(rule mask, ink mask, clipped box) for one box, or None if it has no rule.
-
-    Shared by :func:`_erase_underlines` and :func:`underline_rule_boxes` so the
-    pixels that get repainted and the boxes we report as underlined can never
-    disagree.
-    """
-    height, width = gray.shape
-    x0, x1 = max(0, int(box[0])), min(width, int(box[1]))
-    y0, y1 = max(0, int(box[2])), min(height, int(box[3]))
-    if x1 - x0 < min_run or y1 - y0 < 3:
-        return None
-    ink = (gray[y0:y1, x0:x1] < ink_threshold).astype(np.uint8)
-    # A crop that is mostly ink is not a label -- CRAFT boxes sometimes land on
-    # hatching or a dark blob, where every bottom row holds a long horizontal run
-    # and the rule below would happily erase one. Legible labels run ~18-30% ink;
-    # the blobs that motivated this check run >90%.
-    if ink.mean() > max_ink_fraction:
-        return None
-    runs = cv2.morphologyEx(
-        ink, cv2.MORPH_OPEN, cv2.getStructuringElement(cv2.MORPH_RECT, (min_run, 1))
-    )
-    count, labels, stats, _ = cv2.connectedComponentsWithStats(runs, connectivity=8)
-    rule = np.zeros_like(ink)
-    for index in range(1, count):
-        left, top, run_w, run_h, _area = stats[index]
-        if (
-            run_h > max_thickness
-            or run_w < min_run
-            or top + run_h < (y1 - y0) * low_fraction
-        ):
-            continue
-        # A digit's crossbar is also long, thin, horizontal and low in the box --
-        # the "4" in Fargo p60__1's 14TH is exactly that, and erasing it turned
-        # the read into "6TH". What separates them is what lies BELOW: a crossbar
-        # has the rest of its glyph under it, a rule has nothing. Measure only the
-        # rule's own columns; a neighbouring descender says nothing about this run.
-        below = ink[top + run_h :, left : left + run_w]
-        if below.size and below.sum() > 0.15 * run_w:
-            continue
-        rule[labels == index] = 1
-    if not rule.any():
-        return None
-    return rule, ink, (x0, x1, y0, y1)
-
-
-def underline_rule_boxes(
-    img_array: np.ndarray,
-    boxes: list,
-    ink_threshold: int = 175,
-    min_run: int = 12,
-    max_thickness: int = 4,
-    low_fraction: float = 0.6,
-    max_ink_fraction: float = 0.6,
-) -> set[int]:
-    """Indices of ``boxes`` where :func:`_erase_underlines` removes a rule.
-
-    Reported per detection so the scope of the rule is visible in the debugger
-    rather than inferred: a label tagged ``underline`` was read from pixels this
-    pass altered.
-    """
-    gray = img_array.mean(axis=2)
-    hits: set[int] = set()
-    for index, box in enumerate(boxes):
-        if (
-            _underline_rule_mask(
-                gray,
-                box,
-                ink_threshold,
-                min_run,
-                max_thickness,
-                low_fraction,
-                max_ink_fraction,
-            )
-            is not None
-        ):
-            hits.add(index)
-    return hits
-
-
-def _erase_underlines(
-    img_array: np.ndarray,
-    boxes: list,
-    ink_threshold: int = 175,
-    min_run: int = 12,
-    max_thickness: int = 4,
-    low_fraction: float = 0.6,
-    max_ink_fraction: float = 0.6,
-) -> np.ndarray:
-    """Return a copy of img_array with dashed underline STROKES painted white.
-
-    Sanborn maps rule a line under the ordinal suffix of a numbered street
-    ("10<u>TH</u>"). CRAFT includes it in the box, and it both fuses the
-    characters above it and adds a strong horizontal edge the recognizer has to
-    explain.
-
-    This removes the rule itself and nothing else. The previous implementation
-    painted out whole rows of the box, which cannot work: the rule shares rows
-    with the glyphs, so any threshold that reached the top of the rule also
-    erased the bottoms of the digits beside it. On Fargo p60__1 that left a 1px
-    bar fusing T and H *and* clipped the "1" and "0", scoring below what doing
-    nothing scored (issue #250).
-
-    A rule is found as a connected component of ink that is long
-    (>= ``min_run`` px), thin (<= ``max_thickness`` px tall) and low in the box
-    (its bottom past ``low_fraction`` of the height). Only those pixels are
-    whitened, so glyph pixels on the same rows survive. Boxes that are more than
-    ``max_ink_fraction`` ink are skipped outright: they are not text. ``ink_threshold`` is
-    deliberately looser than a binarization threshold: the rule's top row is
-    often anti-aliased to mid-grey and is exactly the row the old scan missed.
-    """
-    img_out = img_array.copy()
-    gray = img_array.mean(axis=2)
-    for box in boxes:
-        found = _underline_rule_mask(
-            gray,
-            box,
-            ink_threshold,
-            min_run,
-            max_thickness,
-            low_fraction,
-            max_ink_fraction,
-        )
-        if found is None:
-            continue
-        rule, ink, (x0, x1, y0, y1) = found
-        region = img_out[y0:y1, x0:x1]
-        paper = region[~ink.astype(bool)]
-        # Paint the rule out in the label's own paper colour, not pure white.
-        # 255 is a pathological value for the recognizer: on Fargo p60__1's 8TH,
-        # filling with 255 scores 0.733 while the measured paper (254, 254, 251)
-        # scores 0.949 -- and so does every other non-255 fill tried (250, 240,
-        # and Queens' much warmer 203/194/173). Reproducible across repeats.
-        value = (
-            np.median(paper, axis=0).astype(np.uint8)
-            if len(paper)
-            else np.array([254, 254, 254], np.uint8)
-        )
-        # Never repaint a pixel that was not ink to begin with.
-        region[(rule & ink).astype(bool)] = value
-        img_out[y0:y1, x0:x1] = region
-    return img_out
-
-
 def boxes_path(image_path: str) -> str:
     """Return the path for the CRAFT boxes cache file (<stem>.boxes.json)."""
     stem = image_stem(image_path)
@@ -602,11 +450,6 @@ def filter_args(argv: list[str], image: str) -> list[str]:
     return [arg for arg in argv if not arg.endswith(".jpg") or arg == image]
 
 
-def box_key(bbox) -> tuple[tuple[int, int], ...]:
-    """Hashable identity for a recognizer bbox, stable across recognition passes."""
-    return tuple((round(float(x)), round(float(y))) for x, y in bbox)
-
-
 DEFAULT_RECOGNIZER_WEIGHTS = (
     Path(__file__).resolve().parent.parent / "models" / "street_recognizer.pt"
 )
@@ -667,98 +510,6 @@ def load_recognizer_weights(reader: easyocr.Reader, weights_path: str) -> None:
     print(f"Recognizer weights: {weights_path}", file=sys.stderr)
 
 
-def legacy_erase_rows(
-    img_array: np.ndarray,
-    boxes: list,
-    dark_coverage: float = 0.25,
-    scan_fraction: float = 0.25,
-) -> tuple[np.ndarray, list[int]]:
-    """The pre-#250 row-painting eraser, kept as an arbitration candidate.
-
-    Scans the bottom ``scan_fraction`` of each box and paints any row with
-    >= ``dark_coverage`` dark pixels white. Low precision, high recall — it
-    fires on glyph bottoms as happily as on rules — which is exactly why it
-    survives here: Nashville's tiny squished ordinals (20x8 px boxes, rules
-    6-10 px long) sit below the precise detector's min_run, and this variant
-    is what read them at 0.6-0.9 confidence. It never decides a read on its
-    own; :func:`choose_best_read` keeps it only when it beats both the raw
-    and the precisely-erased read.
-
-    Returns the (possibly) painted copy and the indices of boxes painted.
-    """
-    img_out = img_array.copy()
-    gray = img_array.mean(axis=2)
-    height, width = gray.shape
-    fired: list[int] = []
-    for index, (x_min, x_max, y_min, y_max) in enumerate(boxes):
-        x_min, x_max, y_min, y_max = int(x_min), int(x_max), int(y_min), int(y_max)
-        crop_h = y_max - y_min
-        scan_start = y_max - max(1, int(crop_h * scan_fraction))
-        col_start, col_end = max(0, x_min), min(width, x_max)
-        painted = False
-        for row in range(scan_start, y_max):
-            if row >= height:
-                break
-            row_pixels = gray[row, col_start:col_end]
-            if len(row_pixels) and (row_pixels < 128).mean() >= dark_coverage:
-                img_out[row, col_start:col_end] = 255
-                painted = True
-        if painted:
-            fired.append(index)
-    return img_out, fired
-
-
-def choose_best_read(
-    main: tuple[str, float],
-    main_is_erased: bool,
-    raw: tuple[str, float] | None,
-    legacy: tuple[str, float] | None,
-) -> tuple[str, float, str]:
-    """Pick the best of up to three reads of one box; returns (text, confidence, source).
-
-    ``main`` is the batch read (on the precisely-erased image when the rule fired
-    there, else effectively raw); ``raw`` and ``legacy`` are optional re-reads of the
-    untouched crop and the legacy row-painted crop. No single variant dominates:
-    precise erasure rescues Fargo's large-rule ordinals but 450 of its 926 changed
-    reads lost confidence (BROADWAY 0.9997 -> 0.2921) — hence the raw vote — while
-    Nashville's small-rule ordinals are invisible to the precise detector and only
-    the legacy row-paint reads them (2ND 0.965 vs 0.127 raw). Highest confidence
-    wins; ties keep the earlier candidate (main, then raw, then legacy). Source is
-    "erased", "raw", or "legacy".
-    """
-    candidates = [(main[0], main[1], "erased" if main_is_erased else "raw")]
-    if raw is not None:
-        candidates.append((raw[0], raw[1], "raw"))
-    if legacy is not None:
-        candidates.append((legacy[0], legacy[1], "legacy"))
-    best = candidates[0]
-    for candidate in candidates[1:]:
-        if candidate[1] > best[1]:
-            best = candidate
-    return best
-
-
-def _read_boxes(
-    reader: easyocr.Reader,
-    img_array: np.ndarray,
-    boxes: list,
-    recognize_kwargs: dict,
-) -> dict[tuple[tuple[int, int], ...], tuple[str, float]]:
-    """Recognize ``boxes`` on ``img_array``, keyed by :func:`box_key` of the returned bbox.
-
-    Both this and the main pass are handed the same box list, so the recognizer returns
-    the same bboxes and the two reads of a box pair up by key.
-    """
-    if not boxes:
-        return {}
-    return {
-        box_key(bbox): (text, float(confidence))
-        for bbox, text, confidence in reader.recognize(
-            img_array, list(boxes), [], **recognize_kwargs
-        )
-    }
-
-
 def _recognize_pass(
     reader: easyocr.Reader,
     img: Image.Image,
@@ -814,32 +565,8 @@ def _recognize_pass(
                 )
                 >= min_long_side
             ]
-        rule_indices = underline_rule_boxes(rotated_array, horizontal_list)
-        rotated_clean = (
-            _erase_underlines(rotated_array, horizontal_list)
-            if rule_indices
-            else rotated_array
-        )
         results = reader.recognize(
-            rotated_clean, horizontal_list, free_list, **recognize_kwargs
-        )
-        # Re-read the boxes an eraser touched and let choose_best_read keep the
-        # highest-confidence variant: raw for boxes the precise rule fired on, and
-        # the legacy row-paint wherever it would have painted (its recall covers
-        # the small faint rules the precise detector misses). Costs extra
-        # recognition calls only on affected boxes.
-        original_reads = _read_boxes(
-            reader,
-            rotated_array,
-            [horizontal_list[i] for i in rule_indices],
-            recognize_kwargs,
-        )
-        legacy_image, legacy_indices = legacy_erase_rows(rotated_array, horizontal_list)
-        legacy_reads = _read_boxes(
-            reader,
-            legacy_image,
-            [horizontal_list[i] for i in legacy_indices],
-            recognize_kwargs,
+            rotated_array, horizontal_list, free_list, **recognize_kwargs
         )
         for bbox, text, confidence in results:
             # Reject boxes that are taller than wide in rotated-image coordinates.
@@ -857,24 +584,14 @@ def _recognize_pass(
             elif angle == 270:
                 # PIL rotate(270) is CW; inverse: (rx, ry) -> (ry, H-1-rx)
                 polygon = [[y, orig_height - 1 - x] for x, y in polygon]
-            key = box_key(bbox)
-            text, confidence, source = choose_best_read(
-                (text, float(confidence)),
-                key in original_reads,
-                original_reads.get(key),
-                legacy_reads.get(key),
+            detections.append(
+                {
+                    "polygon": polygon,
+                    "text": text,
+                    "confidence": round(float(confidence), 4),
+                    "angle": angle,
+                }
             )
-            detection = {
-                "polygon": polygon,
-                "text": text,
-                "confidence": round(confidence, 4),
-                "angle": angle,
-            }
-            # Flag only when an erased variant actually won, so the badge marks
-            # reads an eraser changed rather than every box one touched.
-            if source != "raw" and (key in original_reads or key in legacy_reads):
-                detection["underline_removed"] = True
-            detections.append(detection)
     return detections
 
 

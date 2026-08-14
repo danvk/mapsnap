@@ -203,28 +203,15 @@ def crop_to_data_uri(crop: np.ndarray, scale: int = 3) -> str:
 
 
 def cmd_render_review(args: argparse.Namespace) -> None:
-    """HTML sheet: real artifact fixtures vs synthesized corruptions."""
-    fixtures_dir = Path(__file__).resolve().parent.parent / "testdata/erase_underlines"
-    cases = json.loads((fixtures_dir / "cases.json").read_text())
+    """HTML sheet of training crops with synthesized corruptions, for review."""
     rows = [
         "<h1>OCR augmentation review</h1>",
         (
-            "<p>Top: the 16 real fixtures (before-erasure crops). Below: "
-            "training crops with synthesized corruptions — three variants "
-            "each. Judge whether the synthetic artifacts are plausible "
-            "stand-ins for the real ones.</p>"
+            "<p>Training crops with synthesized corruptions — three variants "
+            "each. Judge whether the artifacts look like the corpus.</p>"
         ),
-        "<h2>Real artifacts (testdata/erase_underlines)</h2>",
+        "<h2>Synthesized (train split sample)</h2>",
     ]
-    for case in cases:
-        crop = np.array(
-            Image.open(fixtures_dir / f"{case['name']}.before.png").convert("L")
-        )
-        rows.append(
-            f"<div class='item'><img src='{crop_to_data_uri(crop)}'>"
-            f"<span>{case['name']}</span></div>"
-        )
-    rows.append("<h2>Synthesized (train split sample)</h2>")
     train = load_split(args.cache_dir, "train")
     fragments = load_fragments(args.cache_dir)
     rng = np.random.default_rng(7)
