@@ -122,6 +122,17 @@ def snap_to_pages(text: str, pages: list[str], max_distance: int = 1) -> str:
             return family[0]
         if family:
             return text  # ambiguous lettered family: never guess a letter
+    else:
+        # The mirror rule (#318 nashville): a LETTERED read whose stem names a
+        # page in a volume with no lettered variant of it adopts the stem.
+        # Nashville prints "4 A" (the A names the volume, 1A) but LoC's page
+        # names are bare, so the letter-accurate read "4A" snapped to nothing
+        # -- distance-1 repair is ambiguous (4A ~ 4/41/44) -- and p4 lost its
+        # location prior, unplacing it. Digits-era truncation accidentally
+        # produced the right key; this makes it deliberate.
+        stem = key_stem(text)
+        if stem in pages and not any(p != stem and key_stem(p) == stem for p in pages):
+            return stem
     best_distance = min(levenshtein(text, p) for p in pages)
     if best_distance > max_distance:
         return text
