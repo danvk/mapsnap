@@ -7,18 +7,14 @@ import numpy as np
 from mapsnap.detect_text import (
     NON_STREET_TEXT,
     _axis_starts,
-    _erase_underlines,
     _iou_xxyy,
     _iter_tiles,
     _merge_vocab_passes,
     _nms_bboxes,
     annotate_backgrounds,
-    box_key,
-    choose_best_read,
     filter_args,
     has_split_panels,
     lab_to_hex,
-    legacy_erase_rows,
     page_lab,
     page_vocabs,
     region_color,
@@ -287,7 +283,6 @@ def test_non_street_text_all_uppercase():
 
 
 # ---------------------------------------------------------------------------
-# _erase_underlines (golden-image cases live in erase_underlines_test.py)
 # ---------------------------------------------------------------------------
 
 
@@ -299,159 +294,17 @@ def _make_img(height: int, width: int, dark_rows: list[int]) -> np.ndarray:
     return img
 
 
-def test_erase_underlines_removes_a_full_width_rule():
-    # A dark row low in the box with nothing beneath it: a rule.
-    img = _make_img(50, 100, dark_rows=[17])
-    result = _erase_underlines(img, [[0, 100, 0, 20]])
-    assert result[17, :, :].min() == 255  # row 17 is now white
-    assert result[16, :, :].max() == 255  # row above (light) untouched
-
-
-def test_erase_underlines_no_underline_unchanged():
-    # No dark rows — returned image should equal the input.
-    img = _make_img(50, 100, dark_rows=[])
-    result = _erase_underlines(img, [[0, 100, 0, 20]])
-    assert np.array_equal(result, img)
-
-
-def test_erase_underlines_does_not_mutate_input():
-    img = _make_img(50, 100, dark_rows=[17])
-    original = img.copy()
-    _erase_underlines(img, [[0, 100, 0, 20]])
-    assert np.array_equal(img, original)
-
-
-def test_erase_underlines_ignores_a_rule_high_in_the_box():
-    # Row 2 is nowhere near the baseline, so it is text, not a rule.
-    img = _make_img(50, 100, dark_rows=[2])
-    result = _erase_underlines(img, [[0, 100, 0, 20]])
-    assert result[2, :, :].min() == 0  # row 2 still dark
-
-
-def test_erase_underlines_keeps_a_bar_with_glyph_beneath_it():
-    """A digit crossbar looks like a rule until you check what is under it.
-
-    Erasing the crossbar of the "4" in Fargo p60__1's 14TH turned the read into
-    "6TH" and dropped it below the acceptance floor; the ink-beneath check is
-    what prevents that (issue #250). The stem must be narrower than the opening
-    kernel, or it is itself read as part of the rule.
-    """
-    img = _make_img(50, 100, dark_rows=[15])
-    img[16:19, 48:54, :] = 0  # a 6px stem continuing below the bar
-    result = _erase_underlines(img, [[0, 100, 0, 20]])
-    assert result[15, :, :].min() == 0  # the bar survives
-
-
-def test_erase_underlines_preserves_row_above_underline():
-    # Row 14 (text) and row 17 (underline) both dark; only row 17 is in scan window.
-    img = _make_img(50, 100, dark_rows=[14, 17])
-    result = _erase_underlines(img, [[0, 100, 0, 20]])
-    assert result[17, :, :].min() == 255  # underline erased
-    assert result[14, :, :].max() == 0  # text row above scan window intact
-
-
 # ---------------------------------------------------------------------------
-# choose_best_read
 # ---------------------------------------------------------------------------
 
 
-def test_choose_best_read_keeps_erased_when_it_scores_higher():
-    # Fargo p60__1 8TH: unreadable under the rule, clean once it is painted out.
-    assert choose_best_read(("8TH", 0.9529), True, ("8TH", 0.1244), None) == (
-        "8TH",
-        0.9529,
-        "erased",
-    )
-
-
-def test_choose_best_read_keeps_raw_when_erasure_hurts():
-    # Fargo p9c BROADWAY: a confident read the precise eraser wrecked.
-    assert choose_best_read(("BROADWAY", 0.2921), True, ("BROADWAY", 0.9997), None) == (
-        "BROADWAY",
-        0.9997,
-        "raw",
-    )
-
-
-def test_choose_best_read_legacy_wins_small_rule_ordinals():
-    # Nashville p3 2ND: the rule is too small for the precise detector, so main
-    # IS the raw read — only the legacy row-paint recovers the label.
-    assert choose_best_read(("2ND", 0.127), False, None, ("2ND", 0.965)) == (
-        "2ND",
-        0.965,
-        "legacy",
-    )
-
-
-def test_choose_best_read_takes_the_winning_text_not_just_its_score():
-    assert choose_best_read(("133", 0.20), True, ("13TH", 0.80), ("1E3", 0.30)) == (
-        "13TH",
-        0.80,
-        "raw",
-    )
-
-
-def test_choose_best_read_without_alternatives_keeps_main():
-    assert choose_best_read(("MAIN", 0.5), False, None, None) == ("MAIN", 0.5, "raw")
-
-
-def test_choose_best_read_prefers_main_on_a_tie():
-    assert choose_best_read(("A", 0.5), True, ("B", 0.5), ("C", 0.5)) == (
-        "A",
-        0.5,
-        "erased",
-    )
-
-
 # ---------------------------------------------------------------------------
-# legacy_erase_rows
 # ---------------------------------------------------------------------------
-
-
-def test_legacy_erase_rows_paints_a_dark_bottom_row_and_reports_the_box():
-    img = _make_img(50, 100, dark_rows=[47])
-    result, fired = legacy_erase_rows(img, [[0, 100, 0, 50]])
-    assert fired == [0]
-    assert result[47, :, :].min() == 255
-
-
-def test_legacy_erase_rows_leaves_a_clean_box_alone():
-    img = _make_img(50, 100, dark_rows=[])
-    result, fired = legacy_erase_rows(img, [[0, 100, 0, 50]])
-    assert fired == []
-    assert (result == img).all()
-
-
-def test_legacy_erase_rows_ignores_dark_rows_above_the_scan_window():
-    # Row 20 is dark but sits above the bottom quarter of the box: not painted.
-    img = _make_img(50, 100, dark_rows=[20])
-    result, fired = legacy_erase_rows(img, [[0, 100, 0, 50]])
-    assert fired == []
-    assert result[20, :, :].max() == 0
-
-
-def test_legacy_erase_rows_does_not_mutate_input():
-    img = _make_img(50, 100, dark_rows=[47])
-    copy = img.copy()
-    legacy_erase_rows(img, [[0, 100, 0, 50]])
-    assert (img == copy).all()
 
 
 # ---------------------------------------------------------------------------
 # box_key
 # ---------------------------------------------------------------------------
-
-
-def test_box_key_is_stable_across_float_and_int_bboxes():
-    assert box_key([[1.0, 2.0], [9.0, 2.0], [9.0, 8.0], [1.0, 8.0]]) == box_key(
-        [[1, 2], [9, 2], [9, 8], [1, 8]]
-    )
-
-
-def test_box_key_distinguishes_different_boxes():
-    assert box_key([[0, 0], [4, 0], [4, 4], [0, 4]]) != box_key(
-        [[0, 0], [5, 0], [5, 4], [0, 4]]
-    )
 
 
 # ---------------------------------------------------------------------------
