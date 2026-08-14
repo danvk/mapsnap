@@ -90,6 +90,9 @@ interface InfoPanelProps {
    * nowhere to put it, in which case the labels stay plain links.
    */
   onOpenDebugView?: (files: string[], label: string) => void;
+  /** Opens the snap-channel explorer for the selected page (#325); absent when
+   * the volume has no snap record for it. */
+  onOpenSnapView?: () => void;
   /**
    * The run's own artifact directory and the page stems it holds sidecars for,
    * from GET /iiif-api/run-artifacts. Links prefer these over the top-level
@@ -223,6 +226,7 @@ export function InfoPanel(props: InfoPanelProps) {
     volume,
     runArtifacts,
     onOpenDebugView,
+    onOpenSnapView,
     onClose,
   } = props;
 
@@ -355,6 +359,11 @@ export function InfoPanel(props: InfoPanelProps) {
               onOpen={onOpenDebugView}
             />
           ))}
+          {onOpenSnapView && (
+            <button className="debug-view-link" onClick={onOpenSnapView}>
+              snap
+            </button>
+          )}
         </div>
       </div>
     );

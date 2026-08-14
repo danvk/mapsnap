@@ -891,3 +891,87 @@ tr.relaxed {
 .detection-text-filter .filter-count {
   color: #666;
 }
+
+/* Snap-channel explorer (#325). Matches the app's light styling. */
+.snap-panel-slot {
+  position: absolute;
+  bottom: 8px;
+  left: 8px;
+  max-width: 720px;
+  max-height: 55%;
+  overflow: auto;
+  background: #fff;
+  border: 1px solid #d1d5db;
+  border-radius: 6px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
+  padding: 8px 12px;
+  font-size: 13px;
+  z-index: 5;
+}
+.snap-panel-header {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+}
+.snap-panel-header button {
+  margin-left: auto;
+}
+.snap-meta,
+.snap-search,
+.snap-note {
+  color: #6b7280;
+  font-size: 12px;
+  margin: 4px 0;
+}
+.snap-table {
+  border-collapse: collapse;
+  width: 100%;
+}
+.snap-table th,
+.snap-table td {
+  padding: 2px 8px;
+  text-align: left;
+  border-bottom: 1px solid #e5e7eb;
+}
+.snap-table td.num {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+.snap-table tr.selected {
+  background: #dbeafe;
+}
+.snap-table tr.snap-best td:first-child {
+  font-weight: 600;
+}
+.snap-bar-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 2px 0;
+}
+.snap-bar-label {
+  width: 90px;
+  color: #374151;
+  font-size: 12px;
+}
+.snap-bar-track {
+  flex: 1;
+  height: 8px;
+  background: #e5e7eb;
+  border-radius: 4px;
+  overflow: hidden;
+}
+.snap-bar-fill {
+  display: block;
+  height: 100%;
+  background: #059669;
+}
+.snap-bar-penalty {
+  background: #dc2626;
+}
+.snap-bar-value {
+  width: 52px;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  font-size: 12px;
+}
