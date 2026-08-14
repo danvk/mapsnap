@@ -565,17 +565,6 @@ def _recognize_pass(
                 )
                 >= min_long_side
             ]
-        # Underline/dash erasure used to run here, with a three-vote
-        # arbitration between raw, precise-rule-erased, and legacy row-paint
-        # reads (#250/#263). The fine-tuned recognizer (#279) made all of it
-        # moot: measured over every testdata/erase_underlines fixture, erasure
-        # never changes its decoded text for the better -- the #264 dashed-line
-        # case reads S. NEIL at 0.959 RAW vs 0.776 erased -- and its one
-        # remaining behavioural effect was converting a low-confidence misread
-        # into a confidently wrong one (nashville_4th: raw UITH@0.373, erased
-        # ITH@0.982). The recognizer learned struck-through glyphs; the
-        # training-time underline augmentation in train_street_recognizer is
-        # what keeps it that way.
         results = reader.recognize(
             rotated_array, horizontal_list, free_list, **recognize_kwargs
         )

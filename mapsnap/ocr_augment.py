@@ -2,8 +2,8 @@
 
 Fine-tuning the recognizer on clean inlier crops alone would teach it nothing
 about the artifacts that actually break reads. This module corrupts clean
-training crops with the three measured artifact classes, using geometry taken
-from the real cases in ``testdata/erase_underlines/`` (see the ranges below),
+training crops with the three measured artifact classes, using geometry measured
+from real corpus cases (the ranges below),
 plus the junk that surrounds labels on the sheets:
 
 - **underline rules**: 2-3 px thick, fused to the glyph bottoms (the measured
