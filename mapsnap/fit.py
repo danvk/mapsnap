@@ -5,6 +5,7 @@ import glob
 import json
 import subprocess
 import sys
+import time
 from pathlib import Path
 
 from mapsnap import experiments
@@ -195,33 +196,53 @@ def main() -> None:
 
     clear_derived_sidecars(dir_path)
 
-    run_cmd(
-        ["mapsnap", "georef", *images, "--centerlines", str(centerlines), *georef_extra]
+    # Wall-clock per stage, printed at the end and recorded in the manifest —
+    # the input the #320 incremental-fit work needs, and the first thing anyone
+    # asks when a fit is slow ("which stage?") that mtime archaeology used to
+    # answer badly.
+    stage_seconds: dict[str, float] = {}
+
+    def timed(stage: str, cmd: list[str]) -> None:
+        started = time.perf_counter()
+        run_cmd(cmd)
+        stage_seconds[stage] = round(time.perf_counter() - started, 1)
+        print(f"[{stage}: {stage_seconds[stage]:.0f}s]", flush=True)
+
+    timed(
+        "georef",
+        [
+            "mapsnap",
+            "georef",
+            *images,
+            "--centerlines",
+            str(centerlines),
+            *georef_extra,
+        ],
     )
 
     # Demote fits that contradict their own printed mutual-adjacency claims
     # (adjacency edges are ~100% precise, so a contradicted, weakly-supported
     # fit is wrong). The demotion leaves partner-stamp re-search hints that
     # snap's rescue picks up, so it runs before snap. No adjacency.json: no-op.
-    run_cmd(["mapsnap", "adjacency-gate", str(dir_path)])
+    timed("adjacency-gate", ["mapsnap", "adjacency-gate", str(dir_path)])
 
     # The geometry-first snap channel: rescue unplaced pages, arbitrate fits
     # OSM contradicts, refine mid-tier fits. Writes pN.georef-snap.json.
     if not args.no_snap:
         # Both passes are per-page and CPU-bound, so one --num-workers governs
         # both; the rest of the georef passthrough is georef-only.
-        run_cmd(["mapsnap", "snap", str(dir_path), *worker_flag(georef_extra)])
+        timed("snap", ["mapsnap", "snap", str(dir_path), *worker_flag(georef_extra)])
         # The street-constraint channel: fit key-map-prior pages from their
         # street labels. Writes pN.georef-street.json. Runs after snap because
         # its referee shares machinery with the snap channel; skipped with
         # --no-snap for the same reason.
-        run_cmd(["mapsnap", "street-solve", str(dir_path)])
+        timed("street-solve", ["mapsnap", "street-solve", str(dir_path)])
 
     # The arbiter (#270) weighs every pose the channels produced -- including
     # the ones they rejected -- against each other and against not publishing
     # at all, jointly across the volume, and writes the answer for EVERY page
     # as pN.georef-final.json (poseless when it declines to place the page).
-    run_cmd(["mapsnap", "reconcile", str(dir_path), "--publish"])
+    timed("reconcile", ["mapsnap", "reconcile", str(dir_path), "--publish"])
 
     output_iiif = dir_path / f"{run_id}.iiif.json"
     # One glob, one channel. Publication used to be first-glob-wins over three
@@ -230,7 +251,8 @@ def main() -> None:
     # The arbiter answers for every page instead, so there is nothing to
     # prioritize between (#270 phase 3).
     georef_glob = str(dir_path / "*.georef-final.json")
-    run_cmd(
+    timed(
+        "iiif",
         [
             "mapsnap",
             "iiif",
@@ -240,7 +262,7 @@ def main() -> None:
             str(centerlines),
             "--output",
             str(output_iiif),
-        ]
+        ],
     )
 
     # Compare against OIM, if truth data is available.
@@ -269,6 +291,15 @@ def main() -> None:
         output_iiif,
         compare_txt,
         args.label,
+        stage_seconds=stage_seconds,
+    )
+    total = sum(stage_seconds.values())
+    print(
+        "Stage times: "
+        + "  ".join(
+            f"{stage} {seconds:.0f}s" for stage, seconds in stage_seconds.items()
+        )
+        + f"  (total {total:.0f}s)"
     )
     manifest = json.loads((archived / "manifest.json").read_text())
     score = manifest.get("metrics", {}).get("score")
