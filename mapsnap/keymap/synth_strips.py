@@ -243,7 +243,7 @@ def synth_strip(
     ss = SUPERSAMPLE
     crop_w, crop_h = CRNN_WIDTH * ss, 2 * BOX_HALF_H_WORKING * ss
     angle = float(rng.uniform(-5, 5))
-    number = number.rotate(angle, resample=Image.BILINEAR, fillcolor=255)
+    number = number.rotate(angle, resample=Image.Resampling.BILINEAR, fillcolor=255)
     arr = embolden(np.asarray(number, dtype=np.uint8), rng, ss).astype(np.float32)
     arr /= 255.0
     ys, xs = np.where(arr < 0.9)
