@@ -52,7 +52,7 @@ from mapsnap.streets import (
     is_number_only,
     normalize_street,
 )
-from mapsnap.utils import default_centerlines, image_stem
+from mapsnap.utils import default_centerlines, image_stem, pose_is_upside_down
 
 
 @dataclass
@@ -1569,6 +1569,15 @@ def ransac_hybrid(
         # p7's VAN BRUNT, ~3° off but ~115 ft beyond the truncated end). Seeds are the pair's
         # four source features; is_rotation_outlier identifies each by its own center, so an
         # ambiguous label's dropped canonical expansion (Detroit p94's KORTE) isn't faulted.
+        # A pose whose text reads upside-down is corpus-impossible (#324:
+        # 0 of 1,332 truth pages land in the 112-247 deg zone) -- it is the
+        # street/avenue grid alias reading the sheet 180 off (miami p18/p76).
+        # Vetoed outright, before the softer rotation-outlier check.
+        if pose_is_upside_down(A):
+            SPECIAL_CASE_COUNTS["upside_down_vetoed"] += 1
+            if debug:
+                print(f"  {i1} {i2} REJECTED upside-down pose")
+            continue
         seed_feats = (a.feat_a, a.feat_b, b.feat_a, b.feat_b)
         if any(
             is_rotation_outlier(f, block_index, A, dir_threshold) for f in seed_feats

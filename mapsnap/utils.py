@@ -290,3 +290,31 @@ def list_pages(dir_path: Path) -> list[Path]:
         for p in images
         if "__" in p.stem or p.stem.split("__")[0] not in split_parents
     ]
+
+
+# The corpus-measured implausible-rotation zone (#324): the rotation of a
+# page's +x axis vs geographic east, over 1,332 truth pages across 18 volumes,
+# never lands between 112 and 247 degrees. Sheets rotate freely to +/-90 and
+# to arbitrary grid-aligned angles, but Sanborn never printed a sheet whose
+# text reads upside-down -- a pose in this zone means the fit aliased onto the
+# wrong grid axis (miami p18/p76: streets swapped for avenues, 180 off).
+UPSIDE_DOWN_DEG = (112.0, 247.0)
+
+
+def pose_text_theta_deg(affine) -> float:
+    """Rotation of a page-px -> lon/lat pose's +x axis vs geographic east, [0, 360)."""
+    import math
+
+    lat = float(affine[1][2])
+    kx = 111320.0 * math.cos(math.radians(lat))
+    ky = 110540.0
+    return (
+        math.degrees(math.atan2(float(affine[1][0]) * ky, float(affine[0][0]) * kx))
+        % 360.0
+    )
+
+
+def pose_is_upside_down(affine) -> bool:
+    """Whether a pose renders the page's text upside-down (see UPSIDE_DOWN_DEG)."""
+    theta = pose_text_theta_deg(affine)
+    return UPSIDE_DOWN_DEG[0] <= theta <= UPSIDE_DOWN_DEG[1]
