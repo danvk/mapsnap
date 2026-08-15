@@ -302,7 +302,11 @@ def main() -> None:
         + f"  (total {total:.0f}s)"
     )
     manifest = json.loads((archived / "manifest.json").read_text())
-    score = manifest.get("metrics", {}).get("score")
+    # The #300 sheet-equal score lives under metrics.truth (truth_metrics
+    # computes it); the old top-level lookup never matched, so fit's own Score
+    # line silently never printed and compare's legacy land-weighted footer
+    # was the only "Score:" in the log -- the metric confusion behind #330.
+    score = manifest.get("metrics", {}).get("truth", {}).get("score")
     if score:
         print(
             f"\nScore: {score['net']:.1%} "

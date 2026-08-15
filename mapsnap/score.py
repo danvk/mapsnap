@@ -430,6 +430,27 @@ def main() -> None:
     summaries: list[ScoreSummary] = []
     for path in args.generated:
         generated = Path(path)
+        # A truth set with split panels REQUIRES the volume's oim/ panels dir:
+        # without it every split panel goes unmatched and counts unplaced,
+        # silently cratering split-heavy volumes (champaign scored 70.0 instead
+        # of 97.1 when the 2026-08-14 archives were scored from a directory
+        # with no oim/ -- the #330 scare). Fail loudly instead.
+        volume_dir = generated.parent
+        truth_path = Path(args.truth) if args.truth else volume_dir / "main.iiif.json"
+        if truth_path.exists() and not (volume_dir / "oim").is_dir():
+            truth_doc = json.loads(truth_path.read_text())
+            has_splits = any(
+                "__" in str(item.get("label") or "")
+                or "[" in str(item.get("label") or "")
+                for item in truth_doc.get("items", [])
+            )
+            if has_splits:
+                sys.exit(
+                    f"{volume_dir} has no oim/ panels directory, but its truth "
+                    f"contains split panels -- scoring here would silently count "
+                    f"every split as unplaced. Score the volume-root IIIF (which "
+                    f"sits beside oim/), not an archive copy."
+                )
         pages = volume_page_scores(
             generated, street_near_m=args.street_near_m, truth=args.truth
         )

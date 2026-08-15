@@ -572,8 +572,12 @@ def print_table(rows: list[dict], missing: list[dict]) -> None:
             for r in landed
             if r.get("rmse_ft") is not None and r["rmse_ft"] >= 200.0
         )
+        # The pre-#300 land-weighted figures, clearly labelled as such: the
+        # authoritative sheet-equal score prints from `mapsnap fit` (via the
+        # manifest) and `mapsnap score`. An unlabelled "Score:" here spent a
+        # week being mistaken for the project metric (#330).
         print(
-            f"Score: {100 * (good - disaster) / total_land:.1f}% "
+            f"Land-weighted (legacy): {100 * (good - disaster) / total_land:.1f}% "
             f"(<=25ft {100 * good / total_land:.1f}% of land, "
             f">=200ft {100 * disaster / total_land:.1f}%, "
             f"total {total_land / 1e6:.2f} km2)"
