@@ -28,6 +28,21 @@ interface VolumeMapProps {
   /** Whether the missing-page footprints are drawn and clickable. */
   showMissing: boolean;
   /**
+   * A snap-debugger pose overlay (#325): the selected candidate's P(road) map
+   * warped to its pose. Null removes the layer. The image is the cached
+   * road-probability PNG; the corners come straight from the candidate's
+   * world_affine, so what you see is exactly what the matcher scored.
+   */
+  snapOverlay: {
+    url: string;
+    corners: [
+      [number, number],
+      [number, number],
+      [number, number],
+      [number, number],
+    ];
+  } | null;
+  /**
    * Show only the selected page's warped image, hiding every other sheet.
    * No-op while nothing is selected -- isolating "nothing" would blank the map.
    */
@@ -122,6 +137,7 @@ export function VolumeMap(props: VolumeMapProps) {
     missingPages,
     truthPages,
     showMissing,
+    snapOverlay,
     isolateSelected,
     selectedItemIndex,
     onSelectPage,
@@ -450,6 +466,43 @@ export function VolumeMap(props: VolumeMapProps) {
       setMapReady(false);
     };
   }, []);
+
+  // The snap-debugger pose overlay (#325): the selected candidate's P(road)
+  // map as an image source at the pose's corner coordinates. Added/updated/
+  // removed reactively; drawn above the warped sheets so alignment against
+  // the basemap's streets is directly visible.
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !mapReady) return;
+    const existing = map.getSource('snap-overlay') as
+      | maplibregl.ImageSource
+      | undefined;
+    if (!snapOverlay) {
+      if (existing) {
+        if (map.getLayer('snap-overlay')) map.removeLayer('snap-overlay');
+        map.removeSource('snap-overlay');
+      }
+      return;
+    }
+    if (existing) {
+      existing.updateImage({
+        url: snapOverlay.url,
+        coordinates: snapOverlay.corners,
+      });
+    } else {
+      map.addSource('snap-overlay', {
+        type: 'image',
+        url: snapOverlay.url,
+        coordinates: snapOverlay.corners,
+      });
+      map.addLayer({
+        id: 'snap-overlay',
+        type: 'raster',
+        source: 'snap-overlay',
+        paint: { 'raster-opacity': 0.75 },
+      });
+    }
+  }, [mapReady, snapOverlay]);
 
   // Show the annotation's pages, replacing any previous volume's, and fit the view.
   useEffect(() => {

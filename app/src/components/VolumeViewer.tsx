@@ -32,6 +32,9 @@ import {
   unfittedPages,
 } from '../iiif/pages';
 import { DebugView } from '../App';
+import { SnapPanel } from './SnapPanel';
+import { parseSnapRecords, poseCorners, rankedCandidates } from '../snap';
+import type { SnapRecord } from '../snap';
 import { InfoPanel, type RunArtifacts } from './InfoPanel';
 import { PageList } from './PageList';
 import { VolumeMap } from './VolumeMap';
@@ -126,6 +129,19 @@ export function VolumeViewer() {
     files: string[];
     label: string;
   } | null>(null);
+  // Snap-channel records for the volume (candidates.jsonl, #325), keyed by
+  // page stem; empty when the volume has no snap artifacts.
+  const [snapRecords, setSnapRecords] = useState<Map<string, SnapRecord>>(
+    new Map(),
+  );
+  // Whether the snap panel is open for the selected page, and which pose row
+  // is highlighted (index into rankedCandidates, -1 for the incumbent).
+  const [snapOpen, setSnapOpen] = useState(false);
+  const [snapSelected, setSnapSelected] = useState<number | null>(null);
+  useEffect(() => {
+    setSnapOpen(false);
+    setSnapSelected(null);
+  }, [selectedStem]);
   // The selected volume's adjacency.json (per-page claims + mutual graph), or null when absent.
   const [osmRelation, setOsmRelation] = useState<{
     id: string;
@@ -268,6 +284,20 @@ export function VolumeViewer() {
         setGeorefSidecars(new Map());
         setVolumeStems([]);
       });
+    setSnapRecords(new Map());
+    setSnapOpen(false);
+    setSnapSelected(null);
+    // The snap channel's per-page record (#325). JSONL, so fetched as text; a
+    // volume without snap artifacts 404s into the SPA fallback, which fails
+    // the parse harmlessly (no rows -> empty map).
+    fetch(`/data/${volumeName}/artifacts/osm_snap/candidates.jsonl`)
+      .then((r) => (r.ok ? r.text() : ''))
+      .then((text) => {
+        if (!cancelled) setSnapRecords(parseSnapRecords(text));
+      })
+      .catch(() => {
+        if (!cancelled) setSnapRecords(new Map());
+      });
     setAdjacencyData(null);
     fetchAdjacency(volumeName)
       .then((data) => {
@@ -355,6 +385,27 @@ export function VolumeViewer() {
         missingPages.find((p) => p.stem === selectedStem) ??
         null);
   const selectedItemIndex = selectedPage?.itemIndex ?? null;
+  // The selected page's snap record and, when a pose row is highlighted, the
+  // P(road) overlay for it (image at the pose's own corner coordinates).
+  const snapRecord =
+    selectedStem !== null ? (snapRecords.get(selectedStem) ?? null) : null;
+  const snapOverlay = useMemo(() => {
+    if (!snapOpen || !snapRecord || snapSelected === null || !volumeName)
+      return null;
+    const pose =
+      snapSelected === -1
+        ? snapRecord.incumbent
+        : rankedCandidates(snapRecord)[snapSelected];
+    if (!pose?.world_affine) return null;
+    return {
+      url: `/data/${volumeName}/artifacts/edge_join/roadprob/${snapRecord.target}.png`,
+      corners: poseCorners(
+        pose.world_affine,
+        snapRecord.width,
+        snapRecord.height,
+      ),
+    };
+  }, [snapOpen, snapRecord, snapSelected, volumeName]);
   const selectedIsMissing =
     selectedPage !== null &&
     selectedItemIndex !== null &&
@@ -541,6 +592,7 @@ export function VolumeViewer() {
             it keeps its layout box, so nothing resizes either. */}
         <div className="volume-map-slot" aria-hidden={debugView !== null}>
           <VolumeMap
+            snapOverlay={snapOverlay}
             annotation={annotation}
             pages={pages}
             missingPages={missingPages}
@@ -567,6 +619,16 @@ export function VolumeViewer() {
             }
             onLoadResult={setLoadResult}
           />
+          {snapOpen && snapRecord && (
+            <div className="snap-panel-slot">
+              <SnapPanel
+                record={snapRecord}
+                selected={snapSelected}
+                onSelect={setSnapSelected}
+                onClose={() => setSnapOpen(false)}
+              />
+            </div>
+          )}
           {debugView && (
             <div className="volume-viewer-debug">
               <DebugView
@@ -579,6 +641,7 @@ export function VolumeViewer() {
         </div>
         <InfoPanel
           onOpenDebugView={(files, label) => setDebugView({ files, label })}
+          onOpenSnapView={snapRecord ? () => setSnapOpen(true) : undefined}
           runArtifacts={runArtifacts}
           pages={pages}
           missingCount={missingPages.length}
