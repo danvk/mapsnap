@@ -215,3 +215,27 @@ def test_label_letter_page_key():
     assert label_to_page_key("Los Angeles, Calif. | 1949 | Vol. 14 pb") == "pb"
     # A trailing non-page word must not become a page key.
     assert label_to_page_key("Los Angeles, Calif. | 1949 | key map") is None
+
+
+def test_pose_is_upside_down():
+    """The 112-247 deg zone flags; 0/90/270-deg poses do not (#324)."""
+    import math
+
+    from mapsnap.utils import pose_is_upside_down, pose_text_theta_deg
+
+    def pose(theta_deg: float, scale: float = 2e-6, lat: float = 40.0):
+        t = math.radians(theta_deg)
+        # Page +x rotated theta from east; lat row carries the y-flip like a
+        # real page->lon/lat affine (lat decreases with page y).
+        kx = 111320.0 * math.cos(math.radians(lat))
+        ky = 110540.0
+        return [
+            [scale * math.cos(t) / kx * 111320.0, 0.0, -96.0],
+            [scale * math.sin(t) / ky * 110540.0, -scale, lat],
+        ]
+
+    for theta in (0, 45, 90, 111, 248, 270, 315):
+        assert not pose_is_upside_down(pose(theta)), theta
+    for theta in (113, 150, 180, 210, 246):
+        assert pose_is_upside_down(pose(theta)), theta
+    assert abs(pose_text_theta_deg(pose(180)) - 180.0) < 1.0

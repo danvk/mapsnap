@@ -60,7 +60,7 @@ from mapsnap.osm_snap import (
     snap_page,
 )
 from mapsnap.streets import Block, build_block_index
-from mapsnap.utils import default_centerlines, haversine_m
+from mapsnap.utils import default_centerlines, haversine_m, pose_is_upside_down
 
 # Pages the rescue channel may place: everything the iiif glob does not see.
 LOCAL_CHALLENGE_RADIUS_M = 150.0
@@ -925,6 +925,17 @@ def page_record(vctx: VolumeContext, unit: PageUnit) -> dict:
             }
         )
     candidates = snap_page(ctx, vctx.feature_index)
+    # #324: a candidate whose pose reads the page upside-down is
+    # corpus-impossible (0/1,332 truth pages in the zone); snap's rotation
+    # ladder has admitted 180-off aliases before (detroit p77 at 116 deg,
+    # 687 ft). Marked implausible the same way the stamp gate does, so it can
+    # never win rescue, challenge, or refinement.
+    for candidate in candidates:
+        if pose_is_upside_down(candidate.world_affine):
+            candidate.plausible = False
+            candidate.gate_reasons.append("upside-down")
+            candidate.verification = -math.inf
+
     if unit.fit_state in RESCUE_STATES:
         # A contradiction-demoted page may only be re-adopted at a pose that
         # satisfies the invariant that demoted it: its printed claim of a
