@@ -34,139 +34,147 @@ Test data comes from hand-geocoding by volunteers on OldInsuranceMaps.net:
   <tbody>
     <tr>
       <td><a href="https://oldinsurancemaps.net/map/sanborn01778_006">Champaign, Ill. 1915</a></td>
-      <td align="right">29/33 (88%)</td>
-      <td align="right">92.7%</td>
-      <td align="right">0.2%</td>
-      <td align="right"><b>92.5%</b></td>
+      <td align="right">28/33 (85%)</td>
+      <td align="right">97.7%</td>
+      <td align="right">0.6%</td>
+      <td align="right"><b>97.1%</b></td>
       <td><a href="https://dev.viewer.allmaps.org/?url=https%3A%2F%2Fraw.githubusercontent.com%2Fdanvk%2Fmapsnap%2Frefs%2Fheads%2Fmain%2Fgallery%2Fchampaign_ill_1915.iiif.json">view</a></td>
     </tr>
     <tr>
       <td><a href="https://oldinsurancemaps.net/map/sanborn03376_029">New Orleans 1951 Vol 5</a></td>
-      <td align="right">104/109 (95%)</td>
-      <td align="right">93.1%</td>
-      <td align="right">0.9%</td>
-      <td align="right"><b>92.2%</b></td>
+      <td align="right">102/109 (94%)</td>
+      <td align="right">93.4%</td>
+      <td align="right">0.0%</td>
+      <td align="right"><b>93.4%</b></td>
       <td><a href="https://dev.viewer.allmaps.org/?url=https%3A%2F%2Fraw.githubusercontent.com%2Fdanvk%2Fmapsnap%2Frefs%2Fheads%2Fmain%2Fgallery%2Fnew_orleans_la_1951_vol_5.iiif.json">view</a></td>
     </tr>
     <tr>
-      <td><a href="https://oldinsurancemaps.net/map/sanborn05791_053">Brooklyn 1939 Vol 1</a></td>
-      <td align="right">54/62 (87%)</td>
-      <td align="right">87.9%</td>
-      <td align="right">0.0%</td>
-      <td align="right"><b>87.9%</b></td>
-      <td><a href="https://dev.viewer.allmaps.org/?url=https%3A%2F%2Fraw.githubusercontent.com%2Fdanvk%2Fmapsnap%2Frefs%2Fheads%2Fmain%2Fgallery%2Fbrooklyn_ny_1939_vol_1.iiif.json">view</a></td>
-    </tr>
-    <tr>
-      <td><a href="https://oldinsurancemaps.net/map/sanborn01227_003">Washington DC 1916 Vol 2</a></td>
-      <td align="right">119/134 (89%)</td>
-      <td align="right">86.5%</td>
-      <td align="right">1.6%</td>
-      <td align="right"><b>84.9%</b></td>
-      <td><a href="https://dev.viewer.allmaps.org/?url=https%3A%2F%2Fraw.githubusercontent.com%2Fdanvk%2Fmapsnap%2Frefs%2Fheads%2Fmain%2Fgallery%2Fwashington_dc_1916_vol_2.iiif.json">view</a></td>
-    </tr>
-    <tr>
-      <td><a href="https://oldinsurancemaps.net/loc/sanborn07905_031">Philadelphia 1950 Vol 3</a></td>
-      <td align="right">61/65 (94%)</td>
-      <td align="right">84.0%</td>
-      <td align="right">0.0%</td>
-      <td align="right"><b>84.0%</b></td>
-      <td><a href="https://dev.viewer.allmaps.org/?url=https%3A%2F%2Fraw.githubusercontent.com%2Fdanvk%2Fmapsnap%2Frefs%2Fheads%2Fmain%2Fgallery%2Fphiladelphia_pa_1950_vol_3.iiif.json">view</a></td>
-    </tr>
-    <tr>
-      <td><a href="https://oldinsurancemaps.net/map/sanborn03376_006">New Orleans 1896 Vol 2</a></td>
-      <td align="right">86/91 (95%)</td>
-      <td align="right">83.5%</td>
-      <td align="right">0.1%</td>
-      <td align="right"><b>83.4%</b></td>
-      <td><a href="https://dev.viewer.allmaps.org/?url=https%3A%2F%2Fraw.githubusercontent.com%2Fdanvk%2Fmapsnap%2Frefs%2Fheads%2Fmain%2Fgallery%2Fnew_orleans_la_1896_vol_2.iiif.json">view</a></td>
-    </tr>
-    <tr>
-      <td><a href="https://oldinsurancemaps.net/map/sanborn01790_085">Chicago 1950 Vol 1</a></td>
-      <td align="right">100/111 (90%)</td>
-      <td align="right">79.5%</td>
-      <td align="right">0.0%</td>
-      <td align="right"><b>79.5%</b></td>
-      <td><a href="https://dev.viewer.allmaps.org/?url=https%3A%2F%2Fraw.githubusercontent.com%2Fdanvk%2Fmapsnap%2Frefs%2Fheads%2Fmain%2Fgallery%2Fchicago_il_1950_vol_1.iiif.json">view</a></td>
-    </tr>
-    <tr>
       <td><a href="https://oldinsurancemaps.net/map/sanborn00656_064">Los Angeles 1949 Vol 14</a></td>
-      <td align="right">117/129 (91%)</td>
-      <td align="right">79.8%</td>
-      <td align="right">0.6%</td>
-      <td align="right"><b>79.2%</b></td>
+      <td align="right">127/129 (98%)</td>
+      <td align="right">90.9%</td>
+      <td align="right">1.2%</td>
+      <td align="right"><b>89.8%</b></td>
       <td><a href="https://dev.viewer.allmaps.org/?url=https%3A%2F%2Fraw.githubusercontent.com%2Fdanvk%2Fmapsnap%2Frefs%2Fheads%2Fmain%2Fgallery%2Flos_angeles_ca_1949_vol_14.iiif.json">view</a></td>
     </tr>
     <tr>
       <td><a href="https://oldinsurancemaps.net/loc/sanborn06656_014">Columbus 1951 Vol 3</a></td>
       <td align="right">98/105 (93%)</td>
-      <td align="right">78.8%</td>
-      <td align="right">0.3%</td>
-      <td align="right"><b>78.4%</b></td>
+      <td align="right">88.5%</td>
+      <td align="right">0.5%</td>
+      <td align="right"><b>88.0%</b></td>
       <td><a href="https://dev.viewer.allmaps.org/?url=https%3A%2F%2Fraw.githubusercontent.com%2Fdanvk%2Fmapsnap%2Frefs%2Fheads%2Fmain%2Fgallery%2Fcolumbus_oh_1951_vol_3.iiif.json">view</a></td>
     </tr>
     <tr>
+      <td><a href="https://oldinsurancemaps.net/map/sanborn05791_053">Brooklyn 1939 Vol 1</a></td>
+      <td align="right">54/62 (87%)</td>
+      <td align="right">88.2%</td>
+      <td align="right">0.4%</td>
+      <td align="right"><b>87.7%</b></td>
+      <td><a href="https://dev.viewer.allmaps.org/?url=https%3A%2F%2Fraw.githubusercontent.com%2Fdanvk%2Fmapsnap%2Frefs%2Fheads%2Fmain%2Fgallery%2Fbrooklyn_ny_1939_vol_1.iiif.json">view</a></td>
+    </tr>
+    <tr>
+      <td><a href="https://oldinsurancemaps.net/loc/sanborn07905_031">Philadelphia 1950 Vol 3</a></td>
+      <td align="right">62/65 (95%)</td>
+      <td align="right">86.5%</td>
+      <td align="right">0.6%</td>
+      <td align="right"><b>85.9%</b></td>
+      <td><a href="https://dev.viewer.allmaps.org/?url=https%3A%2F%2Fraw.githubusercontent.com%2Fdanvk%2Fmapsnap%2Frefs%2Fheads%2Fmain%2Fgallery%2Fphiladelphia_pa_1950_vol_3.iiif.json">view</a></td>
+    </tr>
+    <tr>
+      <td><a href="https://oldinsurancemaps.net/map/sanborn01227_003">Washington DC 1916 Vol 2</a></td>
+      <td align="right">120/134 (90%)</td>
+      <td align="right">86.0%</td>
+      <td align="right">0.9%</td>
+      <td align="right"><b>85.1%</b></td>
+      <td><a href="https://dev.viewer.allmaps.org/?url=https%3A%2F%2Fraw.githubusercontent.com%2Fdanvk%2Fmapsnap%2Frefs%2Fheads%2Fmain%2Fgallery%2Fwashington_dc_1916_vol_2.iiif.json">view</a></td>
+    </tr>
+    <tr>
       <td><a href="https://oldinsurancemaps.net/map/sanborn04720_021">Kansas City 1951 Vol 4</a></td>
-      <td align="right">128/142 (90%)</td>
-      <td align="right">79.6%</td>
-      <td align="right">2.5%</td>
-      <td align="right"><b>77.1%</b></td>
+      <td align="right">131/142 (92%)</td>
+      <td align="right">81.8%</td>
+      <td align="right">0.2%</td>
+      <td align="right"><b>81.6%</b></td>
       <td><a href="https://dev.viewer.allmaps.org/?url=https%3A%2F%2Fraw.githubusercontent.com%2Fdanvk%2Fmapsnap%2Frefs%2Fheads%2Fmain%2Fgallery%2Fkansas_city_mo_1951_vol_4.iiif.json">view</a></td>
     </tr>
     <tr>
+      <td><a href="https://oldinsurancemaps.net/map/sanborn01790_085">Chicago 1950 Vol 1</a></td>
+      <td align="right">102/111 (92%)</td>
+      <td align="right">80.9%</td>
+      <td align="right">0.9%</td>
+      <td align="right"><b>80.0%</b></td>
+      <td><a href="https://dev.viewer.allmaps.org/?url=https%3A%2F%2Fraw.githubusercontent.com%2Fdanvk%2Fmapsnap%2Frefs%2Fheads%2Fmain%2Fgallery%2Fchicago_il_1950_vol_1.iiif.json">view</a></td>
+    </tr>
+    <tr>
       <td><a href="https://oldinsurancemaps.net/loc/sanborn01309_018">Miami 1950 Vol 1</a></td>
-      <td align="right">74/93 (80%)</td>
-      <td align="right">75.1%</td>
-      <td align="right">3.5%</td>
-      <td align="right"><b>71.6%</b></td>
+      <td align="right">82/93 (88%)</td>
+      <td align="right">80.3%</td>
+      <td align="right">1.8%</td>
+      <td align="right"><b>78.5%</b></td>
       <td><a href="https://dev.viewer.allmaps.org/?url=https%3A%2F%2Fraw.githubusercontent.com%2Fdanvk%2Fmapsnap%2Frefs%2Fheads%2Fmain%2Fgallery%2Fmiami_fl_1950_vol_1.iiif.json">view</a></td>
     </tr>
     <tr>
-      <td><a href="https://oldinsurancemaps.net/map/sanborn03985_041">Detroit 1929 Vol 11</a></td>
-      <td align="right">86/103 (83%)</td>
-      <td align="right">69.7%</td>
-      <td align="right">1.3%</td>
-      <td align="right"><b>68.5%</b></td>
-      <td><a href="https://dev.viewer.allmaps.org/?url=https%3A%2F%2Fraw.githubusercontent.com%2Fdanvk%2Fmapsnap%2Frefs%2Fheads%2Fmain%2Fgallery%2Fdetroit_mich_1929_vol_11.iiif.json">view</a></td>
-    </tr>
-    <tr>
       <td><a href="https://oldinsurancemaps.net/map/sanborn04023_023">Grand Rapids 1953 Vol 7</a></td>
-      <td align="right">64/83 (77%)</td>
-      <td align="right">71.2%</td>
-      <td align="right">3.0%</td>
-      <td align="right"><b>68.3%</b></td>
+      <td align="right">69/83 (83%)</td>
+      <td align="right">83.6%</td>
+      <td align="right">5.2%</td>
+      <td align="right"><b>78.5%</b></td>
       <td><a href="https://dev.viewer.allmaps.org/?url=https%3A%2F%2Fraw.githubusercontent.com%2Fdanvk%2Fmapsnap%2Frefs%2Fheads%2Fmain%2Fgallery%2Fgrand_rapids_mi_1953_vol7.iiif.json">view</a></td>
     </tr>
     <tr>
-      <td><a href="https://oldinsurancemaps.net/map/sanborn08356_019">Nashville 1957 Vol 1A</a></td>
-      <td align="right">60/71 (85%)</td>
-      <td align="right">66.3%</td>
-      <td align="right">0.6%</td>
-      <td align="right"><b>65.7%</b></td>
-      <td><a href="https://dev.viewer.allmaps.org/?url=https%3A%2F%2Fraw.githubusercontent.com%2Fdanvk%2Fmapsnap%2Frefs%2Fheads%2Fmain%2Fgallery%2Fnashville_tn_1957_vol1a.iiif.json">view</a></td>
-    </tr>
-    <tr>
-      <td><a href="https://oldinsurancemaps.net/loc/sanborn08131_010">Columbia, S.C. 1956 Vol 1</a></td>
-      <td align="right">77/87 (89%)</td>
-      <td align="right">67.4%</td>
-      <td align="right">3.9%</td>
-      <td align="right"><b>63.4%</b></td>
-      <td><a href="https://dev.viewer.allmaps.org/?url=https%3A%2F%2Fraw.githubusercontent.com%2Fdanvk%2Fmapsnap%2Frefs%2Fheads%2Fmain%2Fgallery%2Fcolumbia_sc_1956_vol_1.iiif.json">view</a></td>
+      <td><a href="https://www.loc.gov/item/sanborn09064_008/">Richmond, Va. 1925 Vol 3</a></td>
+      <td align="right">87/92 (95%)</td>
+      <td align="right">78.7%</td>
+      <td align="right">0.2%</td>
+      <td align="right"><b>78.5%</b></td>
+      <td><a href="https://dev.viewer.allmaps.org/?url=https%3A%2F%2Fraw.githubusercontent.com%2Fdanvk%2Fmapsnap%2Frefs%2Fheads%2Fmain%2Fgallery%2Frichmond_va_1925_vol_3.iiif.json">view</a></td>
     </tr>
     <tr>
       <td><a href="https://oldinsurancemaps.net/loc/sanborn06536_012">Fargo, N.D. 1958</a></td>
-      <td align="right">81/115 (70%)</td>
-      <td align="right">58.6%</td>
-      <td align="right">6.5%</td>
-      <td align="right"><b>52.1%</b></td>
+      <td align="right">94/115 (82%)</td>
+      <td align="right">80.4%</td>
+      <td align="right">2.2%</td>
+      <td align="right"><b>78.3%</b></td>
       <td><a href="https://dev.viewer.allmaps.org/?url=https%3A%2F%2Fraw.githubusercontent.com%2Fdanvk%2Fmapsnap%2Frefs%2Fheads%2Fmain%2Fgallery%2Ffargo_nd_1958.iiif.json">view</a></td>
     </tr>
     <tr>
+      <td><a href="https://oldinsurancemaps.net/map/sanborn03985_041">Detroit 1929 Vol 11</a></td>
+      <td align="right">84/103 (82%)</td>
+      <td align="right">77.5%</td>
+      <td align="right">1.1%</td>
+      <td align="right"><b>76.5%</b></td>
+      <td><a href="https://dev.viewer.allmaps.org/?url=https%3A%2F%2Fraw.githubusercontent.com%2Fdanvk%2Fmapsnap%2Frefs%2Fheads%2Fmain%2Fgallery%2Fdetroit_mich_1929_vol_11.iiif.json">view</a></td>
+    </tr>
+    <tr>
+      <td><a href="https://oldinsurancemaps.net/map/sanborn03376_006">New Orleans 1896 Vol 2</a></td>
+      <td align="right">87/91 (96%)</td>
+      <td align="right">79.9%</td>
+      <td align="right">3.5%</td>
+      <td align="right"><b>76.4%</b></td>
+      <td><a href="https://dev.viewer.allmaps.org/?url=https%3A%2F%2Fraw.githubusercontent.com%2Fdanvk%2Fmapsnap%2Frefs%2Fheads%2Fmain%2Fgallery%2Fnew_orleans_la_1896_vol_2.iiif.json">view</a></td>
+    </tr>
+    <tr>
       <td><a href="https://oldinsurancemaps.net/map/sanborn05511_036">Hudson County 1950 Vol 9</a></td>
-      <td align="right">71/95 (75%)</td>
-      <td align="right">50.6%</td>
-      <td align="right">0.0%</td>
-      <td align="right"><b>50.6%</b></td>
+      <td align="right">76/95 (80%)</td>
+      <td align="right">75.9%</td>
+      <td align="right">0.4%</td>
+      <td align="right"><b>75.5%</b></td>
       <td><a href="https://dev.viewer.allmaps.org/?url=https%3A%2F%2Fraw.githubusercontent.com%2Fdanvk%2Fmapsnap%2Frefs%2Fheads%2Fmain%2Fgallery%2Fhudson_co_nj_1950_vol_9.iiif.json">view</a></td>
+    </tr>
+    <tr>
+      <td><a href="https://oldinsurancemaps.net/loc/sanborn08131_010">Columbia, S.C. 1956 Vol 1</a></td>
+      <td align="right">80/87 (92%)</td>
+      <td align="right">75.6%</td>
+      <td align="right">2.1%</td>
+      <td align="right"><b>73.5%</b></td>
+      <td><a href="https://dev.viewer.allmaps.org/?url=https%3A%2F%2Fraw.githubusercontent.com%2Fdanvk%2Fmapsnap%2Frefs%2Fheads%2Fmain%2Fgallery%2Fcolumbia_sc_1956_vol_1.iiif.json">view</a></td>
+    </tr>
+    <tr>
+      <td><a href="https://oldinsurancemaps.net/map/sanborn08356_019">Nashville 1957 Vol 1A</a></td>
+      <td align="right">64/71 (90%)</td>
+      <td align="right">71.4%</td>
+      <td align="right">0.2%</td>
+      <td align="right"><b>71.2%</b></td>
+      <td><a href="https://dev.viewer.allmaps.org/?url=https%3A%2F%2Fraw.githubusercontent.com%2Fdanvk%2Fmapsnap%2Frefs%2Fheads%2Fmain%2Fgallery%2Fnashville_tn_1957_vol1a.iiif.json">view</a></td>
     </tr>
   </tbody>
 </table>
@@ -175,7 +183,7 @@ Test data comes from hand-geocoding by volunteers on OldInsuranceMaps.net:
 
 Each **sheet** carries the same weight, split across its panels by the paper area each occupies, and discounted by the share of the sheet that is usable land (approximated by proximity to an OSM street). So a sheet counts for no more because it is physically large, but a sheet that is mostly harbour counts for less than a dense downtown one.
 
-> **Note:** the table above predates this weighting and is not comparable to it; it will be regenerated from the next full corpus run.
+Results are from the 2026-08-14 corpus run; the mean score across the 18 volumes is **82.0%**.
 
 You can view the fits on Allmaps or get the IIIF files from the `gallery` directory. For notes on poor fits, see [test data notes].
 
