@@ -2563,7 +2563,13 @@ def select_argmax(
                         continue
             top = record["candidates"][0]
             score = top.get("select_score")
-            margin = distinct_margin(record)
+            # Pose-aware twins only for RESCUE: a fitted page's challenger
+            # must beat the legacy (conservative) ambiguity test -- the
+            # unscoped fix flipped nashville p6 (11 ft -> 425 ft) through
+            # this very path's "energy" choice.
+            margin = distinct_margin(
+                record, pose_aware=record.get("fit_state") in RESCUE_STATES
+            )
             corroborated = (
                 record.get("fit_state") in RESCUE_STATES
                 and score is not None
