@@ -96,6 +96,9 @@ class VolumeContext:
     radius_m: float
     radius_source: str
     median_theta_deg: float | None
+    # Lazily-built map of stem -> FittedPage for neighbor-stamp priors
+    # (#335 phase 2); None until the first unplaced page asks for it.
+    stamp_fitted: dict | None = None
 
 
 def ring_centroid(ring: list[list[float]]) -> tuple[float, float]:
@@ -664,6 +667,43 @@ def volume_note_calibration(vctx: VolumeContext) -> tuple[float, str]:
     return _note_calibration_cache[key]
 
 
+def neighbor_stamp_centers(
+    vctx, stem: str, limit: int = 4
+) -> list[tuple[float, float]]:
+    """Incoming-claim stamp positions from PLACED neighbors (#335 phase 2).
+
+    A neighbor's printed claim of this page, mapped through the neighbor's own
+    published pose, is a world point on the shared boundary — measured over
+    the corpus's unplaced truth pages: mutual-claim stamps sit at median 178 m
+    from truth (83 pages), one-sided at 416 m (24 more). This was previously
+    computed only for gate-DEMOTED pages (contradiction hints); every unplaced
+    page with placed claiming neighbors gets it now. Mutual-claim stamps rank
+    first (the ~100%-precision tier); the rescue bars absorb the junk tail of
+    one-sided claims.
+    """
+    adjacency = vctx.adjacency
+    if not adjacency:
+        return []
+    if vctx.stamp_fitted is None:
+        from mapsnap.adjacency_gate import load_fitted_pages
+
+        vctx.stamp_fitted = load_fitted_pages(vctx.volume, adjacency)
+    from mapsnap.adjacency_gate import stamp_worlds
+
+    mutual_pairs = {frozenset(edge) for edge in adjacency.get("adjacency", [])}
+    mutual_pts: list[tuple[float, float]] = []
+    oneside_pts: list[tuple[float, float]] = []
+    for nstem, neighbor in vctx.stamp_fitted.items():
+        if nstem == stem:
+            continue
+        for point in stamp_worlds(adjacency, neighbor, stem):
+            if frozenset((nstem, stem)) in mutual_pairs:
+                mutual_pts.append(point)
+            else:
+                oneside_pts.append(point)
+    return (mutual_pts + oneside_pts)[:limit]
+
+
 def build_page_context(
     vctx: VolumeContext, unit: PageUnit
 ) -> tuple[PageContext | None, str]:
@@ -689,6 +729,13 @@ def build_page_context(
     for lon, lat in unit.gcp_hints:
         if all(haversine_m(lat, lon, b, a) > 50.0 for a, b in centers):
             centers = centers + [(lon, lat)]
+    # Neighbor-stamp priors (#335 phase 2): only for pages the pipeline did
+    # not place — fitted pages neither need them nor should have their
+    # local-challenge search widened by them.
+    if unit.fit_state != "fitted":
+        for lon, lat in neighbor_stamp_centers(vctx, unit.stem):
+            if all(haversine_m(lat, lon, b, a) > 50.0 for a, b in centers):
+                centers = centers + [(lon, lat)]
     seed_affine = None
     if unit.fit_state == "fitted" and unit.gen_affine is not None:
         # For arbitration the incumbent pose itself is the natural search
