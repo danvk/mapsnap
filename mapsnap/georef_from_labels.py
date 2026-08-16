@@ -99,6 +99,10 @@ class ProcessResult:
     rotation: float | None = None  # directed rotation in radians, set on success
     deferred: dict | None = None  # set when deferred (exactly 1 GCP, needs scale)
     nofit_written: bool = False  # process_image already wrote a --debug nofit sidecar
+    # Clustered world positions of the page's candidate GCPs when no fit was
+    # reached (#335): a failed RANSAC still located matched street crossings,
+    # and those clusters seed snap's rescue search like contradiction hints do.
+    gcp_hints: list[tuple[float, float]] | None = None
 
 
 def label_features(labels: list[dict]) -> list[LabelFeature]:
@@ -1121,6 +1125,41 @@ def straight_intersection_geo(
         lon0 + float(point[0]) / (cos0 * _FT_PER_DEG_LAT),
         lat0 + float(point[1]) / _FT_PER_DEG_LAT,
     )
+
+
+def cluster_gcp_hints(
+    gcps: list["IntersectionGCP"], tol_m: float = 100.0, max_hints: int = 3
+) -> list[tuple[float, float]]:
+    """Up to ``max_hints`` clustered world positions of candidate GCPs (#335).
+
+    A page that failed to fit still matched street pairs to OSM crossings;
+    their positions cluster near the page's true location when the matches are
+    right (measured corpus-wide: p25 124 m, median 206 m on unplaced truth
+    pages) and scatter on aliases. Single-linkage clusters within ``tol_m``,
+    largest first -- the biggest cluster is the mutually-consistent story.
+    """
+    import math as _math
+
+    clusters: list[list[tuple[float, float]]] = []
+    for gcp in gcps:
+        lon, lat = gcp.geo
+        ky = 110540.0
+        kx = 111320.0 * _math.cos(_math.radians(lat))
+        for cluster in clusters:
+            if any(
+                _math.hypot((lon - x) * kx, (lat - y) * ky) <= tol_m for x, y in cluster
+            ):
+                cluster.append((lon, lat))
+                break
+        else:
+            clusters.append([(lon, lat)])
+    clusters.sort(key=len, reverse=True)
+    hints = []
+    for cluster in clusters[:max_hints]:
+        xs = sorted(x for x, _ in cluster)
+        ys = sorted(y for _, y in cluster)
+        hints.append((xs[len(xs) // 2], ys[len(ys) // 2]))
+    return hints
 
 
 def find_intersection_gcps(
@@ -2485,17 +2524,26 @@ def _process_one_image(image_path: str) -> tuple[str, ProcessResult]:
     # the channel was asked and had no answer. Skip this when process_image already wrote a
     # richer --debug nofit sidecar (with seed-pair fits) to the same path.
     if (
-        keymap is not None
+        (keymap is not None or result.gcp_hints)
         and not result.success
         and result.deferred is None
         and not result.nofit_written
     ):
         nofit: dict = {
             "status": sidecar.NOFIT,
-            "keymap": keymap,
             "streets": [],
             "intersections": [],
         }
+        if keymap is not None:
+            nofit["keymap"] = keymap
+        # Candidate-GCP location hints (#335): a failed fit's matched street
+        # crossings, clustered. Snap's rescue reads these as search centers
+        # like contradiction hints; for a keymap-less page they are the only
+        # location evidence on disk.
+        if result.gcp_hints:
+            nofit["gcp_hints"] = [
+                [round(lon, 7), round(lat, 7)] for lon, lat in result.gcp_hints
+            ]
         from mapsnap.printed_scale import printed_scale_ft as _note_read
 
         _note = _note_read(Path(derive_paths(image_path)[0]))
@@ -2982,7 +3030,7 @@ def process_image(
                 f"Only 1 distinct intersection: {descr}; skipping (use --disable-one-gcp-fits to suppress).",
                 file=sys.stderr,
             )
-            return ProcessResult(success=False)
+            return ProcessResult(success=False, gcp_hints=cluster_gcp_hints(gcps))
         print(
             f"Only 1 distinct intersection: {descr}; deferring for median-scale processing.",
             file=sys.stderr,
@@ -3052,8 +3100,12 @@ def process_image(
                 truth_polygons=truth_polygons,
                 gcp_pair_records=pair_records,
             )
-            return ProcessResult(success=False, nofit_written=True)
-        return ProcessResult(success=False)
+            return ProcessResult(
+                success=False,
+                nofit_written=True,
+                gcp_hints=cluster_gcp_hints(gcps),
+            )
+        return ProcessResult(success=False, gcp_hints=cluster_gcp_hints(gcps))
     print(
         f"RANSAC: {len(inlier_feat_indices)} / {len(features)} inlier labels",
         file=sys.stderr,

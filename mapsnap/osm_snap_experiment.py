@@ -365,6 +365,7 @@ def load_panel_units(volume: Path) -> list[PageUnit]:
         keymap_radius = 0.0
         keymap_regions = None
         demoted_affine = None
+        gcp_hints: list[tuple[float, float]] = []
         if georef is not None:
             if state == "fitted":
                 gen_affine = page_world_affine(georef)
@@ -377,6 +378,7 @@ def load_panel_units(volume: Path) -> list[PageUnit]:
             keymap = georef.get("keymap") or {}
             keymap_centers = [tuple(c) for c in keymap.get("centers", [])]
             keymap_radius = float(keymap.get("radius_m") or 0.0)
+            gcp_hints = [tuple(h) for h in georef.get("gcp_hints") or []]
             keymap_regions = keymap.get("regions") or None
 
         units.append(
@@ -390,6 +392,7 @@ def load_panel_units(volume: Path) -> list[PageUnit]:
                 split_truth=False,
                 gen_affine=gen_affine,
                 demoted_affine=demoted_affine,
+                gcp_hints=gcp_hints,
                 inlier_intersections=effective_gcps,
                 inlier_streets=0,
                 keymap_centers=keymap_centers,
@@ -678,6 +681,12 @@ def build_page_context(
     for lon, lat in contradiction_centers(
         vctx.volume, panel_base(unit.stem) or unit.stem
     ):
+        if all(haversine_m(lat, lon, b, a) > 50.0 for a, b in centers):
+            centers = centers + [(lon, lat)]
+    # Candidate-GCP hints (#335): a failed fit's matched crossings, weighed
+    # like contradiction hints -- for a keymap-less page they are the only
+    # centers, which is what makes rescue reachable at all there.
+    for lon, lat in unit.gcp_hints:
         if all(haversine_m(lat, lon, b, a) > 50.0 for a, b in centers):
             centers = centers + [(lon, lat)]
     seed_affine = None
