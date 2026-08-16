@@ -726,9 +726,16 @@ def build_page_context(
     # Candidate-GCP hints (#335): a failed fit's matched crossings, weighed
     # like contradiction hints -- for a keymap-less page they are the only
     # centers, which is what makes rescue reachable at all there.
-    for lon, lat in unit.gcp_hints:
-        if all(haversine_m(lat, lon, b, a) > 50.0 for a, b in centers):
-            centers = centers + [(lon, lat)]
+    # Like the stamp centers below, hints only serve pages with NO other
+    # centers: the volume-energy arbitration is a joint optimization, and
+    # widening an existing pool re-ranked nashville p6's rescue from its
+    # correct 11 ft pose to a 4x-scale 425 ft one. Both richmond conversions
+    # (p353 6.1 ft, p348 12.7 ft) are no_keymap pages whose hints are their
+    # only centers, so the narrow scope keeps every measured win.
+    if not centers:
+        for lon, lat in unit.gcp_hints:
+            if all(haversine_m(lat, lon, b, a) > 50.0 for a, b in centers):
+                centers = centers + [(lon, lat)]
     # Neighbor-stamp priors (#335 phase 2): ONLY for unplaced pages with no
     # other search centers — the keymap-less class (schenectady's 100-114
     # block) where nothing else reaches. Widening an existing search proved
