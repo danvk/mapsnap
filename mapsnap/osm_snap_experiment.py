@@ -1339,14 +1339,32 @@ def distinct_margin(record: dict) -> float | None:
     if not candidates or candidates[0].get("select_score") is None:
         return None
     top = candidates[0]
+
+    def pose_center(c):
+        # The candidate's REFINED pose center, not its search center: two
+        # searches from different hint centers converge to the same lock
+        # (richmond p353's 6 ft and 10 ft twins came from hint clusters 250 m
+        # apart), and twin-ness is a property of where the pose LANDED.
+        a = c.get("world_affine")
+        if a is None:
+            return c["center"]
+        w = record.get("width") or 0
+        h = record.get("height") or 0
+        return (
+            a[0][0] * w / 2 + a[0][1] * h / 2 + a[0][2],
+            a[1][0] * w / 2 + a[1][1] * h / 2 + a[1][2],
+        )
+
+    top_center = pose_center(top)
     for candidate in candidates[1:]:
         if candidate.get("select_score") is None:
             continue
+        cand_center = pose_center(candidate)
         separation = haversine_m(
-            top["center"][1],
-            top["center"][0],
-            candidate["center"][1],
-            candidate["center"][0],
+            top_center[1],
+            top_center[0],
+            cand_center[1],
+            cand_center[0],
         )
         theta_gap = abs(
             (candidate["theta_deg"] - top["theta_deg"] + 180.0) % 360.0 - 180.0
