@@ -1374,7 +1374,7 @@ DISTINCT_SEPARATION_M = 100.0
 DISTINCT_THETA_DEG = 10.0
 
 
-def distinct_margin(record: dict) -> float | None:
+def distinct_margin(record: dict, pose_aware: bool = True) -> float | None:
     """Rank-1's select_score lead over the best *distinct* alternative lock.
 
     Near-identical twins (the same lock found from two search centers, within
@@ -1420,8 +1420,14 @@ def distinct_margin(record: dict) -> float | None:
             # 14.65 deg apart while their refined poses coincided, so the
             # rung-based gap called the winner's duplicate a distinct rival
             # and the margin bar abstained on a correct placement.
+            #
+            # pose_aware=False keeps the legacy rung-theta comparison for the
+            # CHALLENGE path: replacing a placed page is the risky direction,
+            # and the rung-collapse conservatism was functioning as a brake --
+            # scoping it away flipped nashville p6 (11 ft -> 425 ft) the first
+            # time the fix ran unscoped.
             a = c.get("world_affine")
-            if a is None:
+            if not pose_aware or a is None:
                 return c["theta_deg"]
             return math.degrees(math.atan2(-a[1][0], a[0][0]))
 
@@ -2039,7 +2045,7 @@ def arbitrate_challenge(record: dict, arbitrate_gate: float) -> dict | None:
     score = top.get("select_score")
     if score is None or score < arbitrate_gate:
         return None
-    margin = distinct_margin(record)
+    margin = distinct_margin(record, pose_aware=False)
     if margin is None or margin < PRODUCTION_GATE_MARGIN:
         return None
     disagreement = grid_rmse_ft_between(
