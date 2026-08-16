@@ -729,13 +729,15 @@ def build_page_context(
     for lon, lat in unit.gcp_hints:
         if all(haversine_m(lat, lon, b, a) > 50.0 for a, b in centers):
             centers = centers + [(lon, lat)]
-    # Neighbor-stamp priors (#335 phase 2): only for pages the pipeline did
-    # not place — fitted pages neither need them nor should have their
-    # local-challenge search widened by them.
-    if unit.fit_state != "fitted":
-        for lon, lat in neighbor_stamp_centers(vctx, unit.stem):
-            if all(haversine_m(lat, lon, b, a) > 50.0 for a, b in centers):
-                centers = centers + [(lon, lat)]
+    # Neighbor-stamp priors (#335 phase 2): ONLY for unplaced pages with no
+    # other search centers — the keymap-less class (schenectady's 100-114
+    # block) where nothing else reaches. Widening an existing search proved
+    # harmful even with worse-ranked additions: the volume-energy arbitration
+    # is a joint optimization over the candidate pool, and adding stamp
+    # candidates to nashville p6 (which already had 4 centers) re-ranked its
+    # selection from the correct 11 ft pose to a 4x-scale 425 ft one.
+    if unit.fit_state != "fitted" and not centers:
+        centers = list(neighbor_stamp_centers(vctx, unit.stem))
     seed_affine = None
     if unit.fit_state == "fitted" and unit.gen_affine is not None:
         # For arbitration the incumbent pose itself is the natural search
