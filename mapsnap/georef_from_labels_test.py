@@ -1853,3 +1853,21 @@ def test_haversine_m_one_degree_latitude():
     # One degree of latitude is ~111 km anywhere on the globe.
     assert abs(haversine_m(0.0, 0.0, 1.0, 0.0) - 111_320) < 500
     assert haversine_m(38.9, -77.0, 38.9, -77.0) == 0.0
+
+
+def test_cluster_gcp_hints_ranks_consistent_cluster_first():
+    """The mutually-consistent cluster outranks a lone alias; tol merges near points."""
+    from types import SimpleNamespace
+
+    from mapsnap.georef_from_labels import cluster_gcp_hints
+
+    def gcp(lon, lat):
+        return SimpleNamespace(geo=(lon, lat))
+
+    near = [gcp(-96.0000, 46.0000), gcp(-96.0003, 46.0002), gcp(-96.0001, 46.0004)]
+    alias = [gcp(-96.1, 46.1)]
+    hints = cluster_gcp_hints(near + alias)
+    assert len(hints) == 2
+    # Largest cluster (the 3 near points) first, its median inside the group.
+    assert abs(hints[0][0] - -96.0001) < 1e-3 and abs(hints[0][1] - 46.0002) < 1e-3
+    assert cluster_gcp_hints([]) == []
