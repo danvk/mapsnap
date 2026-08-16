@@ -3094,7 +3094,17 @@ def process_image(
                 labels_path,
                 centerlines_path,
                 initial_pair=None,
-                extra_fields={"nofit": True, "status": sidecar.NOFIT},
+                extra_fields={
+                    "nofit": True,
+                    "status": sidecar.NOFIT,
+                    # #335: the failed fit's clustered candidate-GCP positions
+                    # -- this path writes the sidecar itself, so the hints must
+                    # ride extra_fields (the wrapper skips nofit_written pages).
+                    "gcp_hints": [
+                        [round(lon, 7), round(lat, 7)]
+                        for lon, lat in cluster_gcp_hints(gcps)
+                    ],
+                },
                 parameters=parameters,
                 keymap=keymap,
                 truth_polygons=truth_polygons,
