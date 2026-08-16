@@ -1366,8 +1366,20 @@ def distinct_margin(record: dict) -> float | None:
             cand_center[1],
             cand_center[0],
         )
+
+        def pose_theta(c):
+            # The REFINED pose's rotation, not the ladder rung it started
+            # from: richmond p353's two 6-10 ft twins carried rung thetas
+            # 14.65 deg apart while their refined poses coincided, so the
+            # rung-based gap called the winner's duplicate a distinct rival
+            # and the margin bar abstained on a correct placement.
+            a = c.get("world_affine")
+            if a is None:
+                return c["theta_deg"]
+            return math.degrees(math.atan2(-a[1][0], a[0][0]))
+
         theta_gap = abs(
-            (candidate["theta_deg"] - top["theta_deg"] + 180.0) % 360.0 - 180.0
+            (pose_theta(candidate) - pose_theta(top) + 180.0) % 360.0 - 180.0
         )
         if separation > DISTINCT_SEPARATION_M or theta_gap > DISTINCT_THETA_DEG:
             # Candidates are sorted by select_score, so the first distinct
