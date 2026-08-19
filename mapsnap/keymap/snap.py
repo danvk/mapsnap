@@ -602,7 +602,12 @@ def volume_pose_medians(volume: Path) -> tuple[float, float] | None:
         for channel in ("georef-street", "georef-snap", "georef"):
             path = volume / f"{page.stem}.{channel}.json"
             if path.exists():
-                affine = page_world_affine(json.loads(path.read_text()))
+                # Post-#270 sidecars exist even for declined/poseless fits;
+                # skip anything without corners instead of crashing.
+                try:
+                    affine = page_world_affine(json.loads(path.read_text()))
+                except (KeyError, TypeError, ValueError):
+                    continue
                 scales.append(affine_m_per_px(affine))
                 thetas.append(metric_theta(affine))
                 break
@@ -636,9 +641,11 @@ def published_rotations(volume: Path) -> dict[int, float]:
         for channel in ("georef-street", "georef-snap", "georef"):
             path = volume / f"{page.stem}.{channel}.json"
             if path.exists():
-                rotations[number] = metric_theta(
-                    page_world_affine(json.loads(path.read_text()))
-                )
+                try:
+                    affine = page_world_affine(json.loads(path.read_text()))
+                except (KeyError, TypeError, ValueError):
+                    continue  # poseless post-#270 sidecar
+                rotations[number] = metric_theta(affine)
                 break
     return rotations
 
