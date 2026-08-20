@@ -545,3 +545,105 @@ def test_attach_land_annotates_rows_and_strips_rings(tmp_path):
     rows2 = [{"page_key": "p1", "truth_ring": ring}]
     attach_land(rows2, [], tmp_path / "absent.geojson")
     assert rows2[0]["area_m2"] is None and "truth_ring" not in rows2[0]
+
+
+def _write_centerlines_near_split_volume(tmp_path):
+    # One street through both p7 panel footprints (lon -74.0.. and -73.99..).
+    (tmp_path / "centerlines.geojson").write_text(
+        json.dumps(
+            {
+                "type": "FeatureCollection",
+                "features": [
+                    {
+                        "type": "Feature",
+                        "properties": {"name": "MAIN ST"},
+                        "geometry": {
+                            "type": "LineString",
+                            "coordinates": [[-74.001, 40.0001], [-73.989, 40.0001]],
+                        },
+                    }
+                ],
+            }
+        )
+    )
+
+
+def test_sheet_equal_score_footer_matches_mapsnap_score(tmp_path, capsys):
+    from mapsnap.compare_iiif_georef import print_sheet_equal_score
+
+    truth_path, gen_path = _split_volume(
+        tmp_path,
+        [
+            ("x p7 [1]", -74.0, "https://x/p7__1/georef"),
+            ("x p7 [2]", -73.99, "https://x/p7__2/georef"),
+        ],
+        gen_panels=[
+            [[0, 0], [200, 0], [200, 200], [0, 200]],
+            [[200, 0], [400, 0], [400, 200], [200, 200]],
+        ],
+    )
+    _write_centerlines_near_split_volume(tmp_path)
+    print_sheet_equal_score(truth_path, gen_path)
+    out = capsys.readouterr().out
+    # Generated matches truth panel-for-panel, so the score is perfect.
+    assert "Score: 100.0%" in out
+    assert "2/2 pages placed" in out
+
+
+def test_sheet_equal_score_footer_notes_missing_centerlines(tmp_path, capsys):
+    from mapsnap.compare_iiif_georef import print_sheet_equal_score
+
+    truth_path, gen_path = _split_volume(
+        tmp_path, [("x p7 [1]", -74.0), ("x p7 [2]", -73.99)]
+    )
+    print_sheet_equal_score(truth_path, gen_path)
+    out = capsys.readouterr().out
+    assert "Score: unavailable" in out
+    assert "centerlines.geojson" in out
+
+
+def test_sheet_equal_score_footer_refuses_splits_without_oim(tmp_path, capsys):
+    import shutil
+
+    from mapsnap.compare_iiif_georef import print_sheet_equal_score
+
+    truth_path, gen_path = _split_volume(
+        tmp_path, [("x p7 [1]", -74.0), ("x p7 [2]", -73.99)]
+    )
+    _write_centerlines_near_split_volume(tmp_path)
+    shutil.rmtree(tmp_path / "oim")
+    print_sheet_equal_score(truth_path, gen_path)
+    out = capsys.readouterr().out
+    assert "Score: unavailable" in out
+    assert "oim/" in out
+
+
+def test_truth_scores_perfectly_against_itself(tmp_path):
+    # An OIM truth file in the generated seat: each '[N]' item is a panel
+    # fit, so every truth panel must pair with its own annotation instead of
+    # all grading under whichever item comes first in the file.
+    from mapsnap.compare_iiif_georef import compare_pages
+
+    truth_path, _ = _split_volume(tmp_path, [("x p7 [1]", -74.0), ("x p7 [2]", -73.99)])
+    rows, missing = compare_pages(truth_path, truth_path)
+    assert missing == []
+    assert sorted(r["page_key"] for r in rows) == ["p7__1", "p7__2"]
+    assert all(r["rmse_ft"] < 1.0 for r in rows)
+
+
+def test_own_leaked_label_marker_still_grades_whole_canvas(tmp_path):
+    # Our writer leaks a '[N]' label marker onto whole-page placements of
+    # sheets it never split (the annotation has no '__N' id and displays the
+    # whole canvas). The whole-canvas grading rule must still apply: sibling
+    # panels grade under the same transform rather than going unplaced.
+    from mapsnap.compare_iiif_georef import compare_pages
+
+    truth_path, gen_path = _split_volume(tmp_path, [("x p7 [1]", -74.0)])
+    gen = json.loads(gen_path.read_text())
+    gen["items"][0]["metadata"] = [{"label": "streets", "value": "3"}]
+    gen_path.write_text(json.dumps(gen))
+    rows, missing = compare_pages(truth_path, gen_path)
+    assert missing == []
+    by_key = {r["page_key"]: r for r in rows}
+    assert by_key["p7__1"]["rmse_ft"] < 25.0
+    assert by_key["p7__2"]["rmse_ft"] > 1000.0

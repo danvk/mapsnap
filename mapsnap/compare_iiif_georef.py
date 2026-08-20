@@ -606,6 +606,46 @@ def print_table(rows: list[dict], missing: list[dict]) -> None:
             )
 
 
+def print_sheet_equal_score(truth_path: Path, generated_path: Path) -> None:
+    """Print the #300 sheet-equal score footer, or one line saying why not.
+
+    The number matches ``mapsnap score`` and the Score line of ``mapsnap fit``
+    exactly: the volume is the GENERATED file's directory, whose oim/ panels
+    and centerlines.geojson supply the split weights and land fractions. The
+    "Land-weighted (legacy)" footer above it predates #300.
+    """
+    # Imported here because score.py imports compare_pages from this module.
+    from mapsnap.score import summarize, volume_page_scores
+
+    volume = generated_path.parent
+    if default_centerlines(volume) is None:
+        print(
+            f"\nScore: unavailable -- {volume} has no centerlines.geojson "
+            "(needed for land weights)"
+        )
+        return
+    if not (volume / "oim").is_dir():
+        # The #330 trap: scoring a directory with no oim/ silently counts
+        # every split panel as unplaced. Refuse rather than mislead.
+        truth_doc = json.loads(truth_path.read_text())
+        has_splits = any(
+            "__" in str(item.get("label") or "") or "[" in str(item.get("label") or "")
+            for item in truth_doc.get("items", [])
+        )
+        if has_splits:
+            print(
+                f"\nScore: unavailable -- truth has split panels but {volume} "
+                "has no oim/ panels directory; score the volume-root IIIF"
+            )
+            return
+    summary = summarize(volume_page_scores(generated_path, truth=truth_path))
+    print(
+        f"\nScore: {summary.net_score:.1%} "
+        f"(<=25ft {summary.good_share:.1%}, >=200ft {summary.disaster_share:.1%}, "
+        f"{summary.n_placed}/{summary.n_pages} pages placed)"
+    )
+
+
 def print_tsv(rows: list[dict], missing: list[dict]) -> None:
     """Print all results as TSV for copy/paste into a spreadsheet.
 
@@ -672,6 +712,22 @@ def annotation_split_index(item: dict) -> int | None:
     """Return split number N from a generated annotation id like '...__N/georef'."""
     m = re.search(r"__(\d+)/", item.get("id", ""))
     return int(m.group(1)) if m else None
+
+
+def annotation_is_own_output(item: dict) -> bool:
+    """True when the annotation came from make_iiif_georef rather than OIM.
+
+    Our writer always emits "streets"/"intersections" metadata entries (99/99
+    across the archived generated files); OIM annotations never do (0/150 on
+    an OIM truth set). The distinction decides how a '[N]'-labeled item with
+    no '__N' id suffix is graded: ours are whole-page placements whose label
+    marker leaked from the truth-side label source, while OIM's are genuine
+    panel fits displayed over one panel only.
+    """
+    return any(
+        entry.get("label") in ("streets", "intersections")
+        for entry in item.get("metadata") or []
+    )
 
 
 def ring_to_polygon(ring: list[list[float]]) -> ShapelyPolygon:
@@ -855,6 +911,7 @@ def compare_pages(
         def generated_region(
             gen: dict,
             gen_polygons: dict[int, ShapelyPolygon] = gen_polygons,
+            truth_polygons: dict[int, ShapelyPolygon] = truth_polygons,
             canvas_polygon: ShapelyPolygon = canvas_polygon,
         ) -> ShapelyPolygon | None:
             # The polygons are bound as defaults rather than captured: this page's
@@ -862,6 +919,23 @@ def compare_pages(
             gen_index = annotation_split_index(gen)
             if gen_index is not None:
                 return gen_polygons.get(gen_index)
+            label_index = label_split_index(gen)
+            if label_index is not None and not annotation_is_own_output(gen):
+                # An OIM-shaped item labeled '[N]' is a PANEL fit, not a
+                # whole-page placement: grading it over the whole canvas hands
+                # its siblings' regions to the wrong transform (an OIM truth
+                # file scored against itself lost 28 net points this way). Its
+                # region resolves exactly as the truth side resolves it —
+                # panels.json first, GCP-verified selector as the fallback
+                # (selectors can sit in the crop's frame, OIM#402).
+                region = truth_polygons.get(label_index)
+                if region is not None:
+                    return region
+                return selector_split_polygons([gen]).get(label_index)
+            # Our own annotations without a '__N' id suffix are whole-page
+            # placements even when their label says '[N]' — the marker leaks
+            # from the truth-side label source on sheets our pipeline never
+            # split — so the whole-canvas grading rule applies.
             return canvas_polygon
 
         # Grade every truth panel over ITS OWN region, against whatever
@@ -955,6 +1029,7 @@ def main() -> None:
         print_tsv(rows, missing)
     else:
         print_table(rows, missing)
+        print_sheet_equal_score(Path(args.truth), Path(args.generated))
 
     if args.csv:
         fields = [
