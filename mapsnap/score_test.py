@@ -114,6 +114,9 @@ def test_summarize_net_score_subtracts_disasters():
     assert s.good_share == 0.25
     assert s.disaster_share == 0.25
     assert s.net_score == 0.0  # the disaster cancels the success
+    # Reporting bands: p2's 100ft lands in 50-200ft; nothing in 25-50ft.
+    assert s.fair_share == 0.0
+    assert s.poor_share == 0.25
 
 
 def test_summarize_ignores_sheet_size():

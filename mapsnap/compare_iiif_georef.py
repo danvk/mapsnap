@@ -641,7 +641,8 @@ def print_sheet_equal_score(truth_path: Path, generated_path: Path) -> None:
     summary = summarize(volume_page_scores(generated_path, truth=truth_path))
     print(
         f"\nScore: {summary.net_score:.1%} "
-        f"(<=25ft {summary.good_share:.1%}, >=200ft {summary.disaster_share:.1%}, "
+        f"(<=25ft {summary.good_share:.1%}, 25-50ft {summary.fair_share:.1%}, "
+        f"50-200ft {summary.poor_share:.1%}, >=200ft {summary.disaster_share:.1%}, "
         f"{summary.n_placed}/{summary.n_pages} pages placed)"
     )
 
