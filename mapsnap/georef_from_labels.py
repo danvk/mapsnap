@@ -1463,8 +1463,8 @@ def promotable_runner_up(georef: dict, ref_scale_px_per_ft: float) -> dict | Non
     for pose in georef.get("runner_up_poses") or []:
         if pose.get("score_ratio", 0.0) < RUNNER_UP_PROMOTE_MIN_RATIO:
             break  # records are score-ordered
-        pair_px = pose.get("pair_px")
-        if not pair_px or len(pair_px) != 2:
+        pair_px, pair_geo = pose.get("pair_px"), pose.get("pair_geo")
+        if not pair_px or len(pair_px) != 2 or not pair_geo or len(pair_geo) != 2:
             continue
         try:
             m_per_px = page_scale_m_per_px(
@@ -1553,7 +1553,15 @@ def select_runner_up_poses(
                 # address (see ransac_hybrid's force_pair_pixels).
                 "pair": [int(pair[0]), int(pair[1])],
                 "pair_px": [
-                    [round(float(px), 2), round(float(py), 2)] for px, py in pair_pixels
+                    [round(float(px), 2), round(float(py), 2)]
+                    for (px, py), _geo in pair_pixels
+                ],
+                # A crossing PIXEL can carry several world candidates (a
+                # jogging street's two crossings share one pixel), so the geo
+                # side disambiguates which candidate this pose used.
+                "pair_geo": [
+                    [round(float(lon), 7), round(float(lat), 7)]
+                    for _px, (lon, lat) in pair_pixels
                 ],
             }
         )
@@ -1613,13 +1621,15 @@ def ransac_hybrid(
         # strict-first/relaxed-retry cascade falls through to the tier that
         # can.
         resolved = []
-        for want_x, want_y in force_pair_pixels:
+        for (want_x, want_y), (want_lon, want_lat) in force_pair_pixels:
             match = next(
                 (
                     i
                     for i, gcp in enumerate(gcps)
                     if abs(gcp.pixel[0] - want_x) <= 1.0
                     and abs(gcp.pixel[1] - want_y) <= 1.0
+                    and abs(gcp.geo[0] - want_lon) <= 1e-5
+                    and abs(gcp.geo[1] - want_lat) <= 1e-5
                 ),
                 None,
             )
@@ -1695,7 +1705,7 @@ def ransac_hybrid(
                     A,
                     len(inliers),
                     pair_idx,
-                    (a.pixel, b.pixel),
+                    ((a.pixel, a.geo), (b.pixel, b.geo)),
                 )
             )
 
@@ -2337,8 +2347,8 @@ def _promote_runner_up(
     original_sidecar = Path(out_path).read_text()
     saved_force = _worker_state.get("force_pair_pixels")
     _worker_state["force_pair_pixels"] = (
-        tuple(pose["pair_px"][0]),
-        tuple(pose["pair_px"][1]),
+        (tuple(pose["pair_px"][0]), tuple(pose["pair_geo"][0])),
+        (tuple(pose["pair_px"][1]), tuple(pose["pair_geo"][1])),
     )
     try:
         _, result = _process_one_image(img_path)

@@ -1868,7 +1868,7 @@ def test_select_runner_up_poses_keeps_distinct_near_ties():
         return np.array([[c * scale, -s * scale, dlon], [s * scale, c * scale, 40.0]])
 
     best = pose(0.0)
-    px = ((10.0, 20.0), (30.0, 40.0))
+    px = (((10.0, 20.0), (-80.0, 25.0)), ((30.0, 40.0), (-80.1, 25.1)))
     scored = [
         (1.00, best, 9, (0, 1), px),
         (0.999, pose(0.001), 8, (0, 2), px),  # ~85 m away: distinct, kept
@@ -1882,6 +1882,7 @@ def test_select_runner_up_poses_keeps_distinct_near_ties():
     assert records[0]["inlier_streets"] == 8
     assert records[0]["pair"] == [0, 2]
     assert records[0]["pair_px"] == [[10.0, 20.0], [30.0, 40.0]]
+    assert records[0]["pair_geo"] == [[-80.0, 25.0], [-80.1, 25.1]]
     assert len(records[0]["corners"]) == 4
 
 
@@ -1899,7 +1900,7 @@ def test_select_runner_up_poses_drops_upside_down_and_caps():
         return np.array([[c * scale, -s * scale, dlon], [s * scale, c * scale, 40.0]])
 
     best = pose(0.0)
-    px = ((10.0, 20.0), (30.0, 40.0))
+    px = (((10.0, 20.0), (-80.0, 25.0)), ((30.0, 40.0), (-80.1, 25.1)))
     scored = [
         (1.0, best, 9, (0, 1), px),
         (0.99, pose(0.001, rot_deg=180.0), 9, (0, 2), px),
@@ -1937,11 +1938,13 @@ def test_promotable_runner_up_requires_plausible_scale_and_near_tie():
                 "score_ratio": 0.99,
                 "corners": corners(outlier),
                 "pair_px": [[1.0, 2.0], [3.0, 4.0]],
+                "pair_geo": [[-80.0, 25.0], [-80.1, 25.1]],
             },
             {
                 "score_ratio": 0.95,
                 "corners": corners(good),
                 "pair_px": [[5.0, 6.0], [7.0, 8.0]],
+                "pair_geo": [[-80.0, 25.0], [-80.1, 25.1]],
             },
             {"score_ratio": 0.92, "corners": corners(good)},  # no pair_px: skip
         ],
@@ -1950,7 +1953,12 @@ def test_promotable_runner_up_requires_plausible_scale_and_near_tie():
     assert pose is not None and pose["pair_px"] == [[5.0, 6.0], [7.0, 8.0]]
     # Below the 0.9 promotion bar nothing qualifies, however plausible.
     doc["runner_up_poses"] = [
-        {"score_ratio": 0.85, "corners": corners(good), "pair_px": [[5, 6], [7, 8]]}
+        {
+            "score_ratio": 0.85,
+            "corners": corners(good),
+            "pair_px": [[5, 6], [7, 8]],
+            "pair_geo": [[-80.0, 25.0], [-80.1, 25.1]],
+        }
     ]
     assert promotable_runner_up(doc, ref_scale_px_per_ft=1.0) is None
     assert promotable_runner_up({}, ref_scale_px_per_ft=1.0) is None
