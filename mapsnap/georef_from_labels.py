@@ -1440,9 +1440,53 @@ RUNNER_UP_DISTINCT_M = 30.0
 RUNNER_UP_DISTINCT_DEG = 1.5
 MAX_RUNNER_UP_POSES = 4
 
+# Promotion (#340): a runner-up may replace a scale-outlier winner only when
+# it nearly tied it. Promotion publishes an incumbent -- a stronger claim than
+# seeding a search -- so the bar sits well above the 0.7 emission floor.
+RUNNER_UP_PROMOTE_MIN_RATIO = 0.9
+
+
+def promotable_runner_up(georef: dict, ref_scale_px_per_ft: float) -> dict | None:
+    """The best-scoring runner-up whose scale the volume's rungs accept.
+
+    #340: when the WINNER is a scale outlier but a near-tie is not, the
+    near-tie is a far better bet than anything a rescue search will find --
+    miami p13's 99.9%-score runner-up IS the true pose at 10 ft, while the
+    misscale winner's rescue searched the wrong block and reconcile left the
+    page unplaced. Only near-ties carrying their seed pair qualify, so the
+    caller can refit the page through the normal path (force_pair) rather
+    than swap corners under stale GCP records.
+    """
+    from mapsnap.road_model import page_scale_m_per_px
+    from mapsnap.utils import FEET_PER_METER
+
+    for pose in georef.get("runner_up_poses") or []:
+        if pose.get("score_ratio", 0.0) < RUNNER_UP_PROMOTE_MIN_RATIO:
+            break  # records are score-ordered
+        pair = pose.get("pair")
+        if not pair or len(pair) != 2:
+            continue
+        try:
+            m_per_px = page_scale_m_per_px(
+                {
+                    "corners": pose["corners"],
+                    "width": georef["width"],
+                    "height": georef["height"],
+                }
+            )
+        except (KeyError, TypeError, ValueError):
+            continue
+        if m_per_px <= 0:
+            continue
+        px_per_ft = 1.0 / (m_per_px * FEET_PER_METER)
+        if is_scale_outlier(px_per_ft / ref_scale_px_per_ft):
+            continue
+        return pose
+    return None
+
 
 def select_runner_up_poses(
-    scored: list[tuple[float, np.ndarray, int]],
+    scored: list[tuple[float, np.ndarray, int, tuple[int, int]]],
     best_A: np.ndarray,
     size: tuple[int, int],
 ) -> list[dict]:
@@ -1458,7 +1502,7 @@ def select_runner_up_poses(
     if not scored:
         return []
     width, height = size
-    best_score = max(score for score, _, _ in scored)
+    best_score = max(score for score, _, _, _ in scored)
     if best_score <= 0:
         return []
 
@@ -1479,7 +1523,7 @@ def select_runner_up_poses(
 
     kept: list[tuple[tuple[float, float], float]] = []
     records: list[dict] = []
-    for score, A, n_streets in sorted(scored, key=lambda entry: -entry[0]):
+    for score, A, n_streets, pair in sorted(scored, key=lambda entry: -entry[0]):
         if score < RUNNER_UP_MIN_SCORE_RATIO * best_score:
             break
         if pose_is_upside_down(A):
@@ -1500,6 +1544,10 @@ def select_runner_up_poses(
                 ],
                 "score_ratio": round(score / best_score, 4),
                 "inlier_streets": n_streets,
+                # The seed pair that produced this pose, so promotion (#340)
+                # can REFIT the page through the normal path via force_pair
+                # instead of swapping corners under stale GCP records.
+                "pair": [int(pair[0]), int(pair[1])],
             }
         )
         if len(records) >= MAX_RUNNER_UP_POSES:
@@ -1517,7 +1565,7 @@ def ransac_hybrid(
     force_pair: tuple[int, int] | None = None,
     debug: bool = False,
     pair_records: list[dict] | None = None,
-    scored_sink: list[tuple[float, np.ndarray, int]] | None = None,
+    scored_sink: list[tuple[float, np.ndarray, int, tuple[int, int]]] | None = None,
 ) -> tuple[np.ndarray | None, list[int], tuple[int, int] | None]:
     """Find the best similarity affine using intersection GCPs as seeds, label-based inlier scoring.
 
@@ -1606,7 +1654,7 @@ def ransac_hybrid(
             # pair_records): a vetoed near-tie can still be the true pose, and
             # the runner-up channel's consumer re-judges with its own evidence.
             scored_sink.append(
-                (float(len(inliers)) * pos_threshold - err, A, len(inliers))
+                (float(len(inliers)) * pos_threshold - err, A, len(inliers), pair_idx)
             )
 
         # Record this pair's fit for the interactive debugger (only when --debug supplies a
@@ -2215,6 +2263,66 @@ def correct_square_feature_dirs(
 
         if best_dir is not None:
             feat.dir_pix = round(best_dir % math.pi, 4)
+
+
+def _promote_runner_up(
+    img_path: str,
+    out_path: str,
+    ref_scale_px_per_ft: float,
+    worker_initargs: tuple,
+    demoted_detail: dict,
+) -> bool:
+    """Refit a scale-outlier page from its best rung-plausible runner-up (#340).
+
+    Returns True when the page was refit and stays published. The refit runs
+    the ordinary per-page pipeline with the runner-up's seed pair forced, so
+    the promoted sidecar carries its own coherent inliers/GCPs. The promoted
+    fit's scale is re-verified afterwards; a refit that lands back outside the
+    rungs (or fails) leaves the original sidecar for the caller to demote.
+    """
+    from mapsnap.road_model import page_scale_m_per_px
+    from mapsnap.utils import FEET_PER_METER
+
+    try:
+        georef = json.loads(Path(out_path).read_text())
+    except (OSError, json.JSONDecodeError):
+        return False
+    pose = promotable_runner_up(georef, ref_scale_px_per_ft)
+    if pose is None:
+        return False
+    if not _worker_state:
+        _init_worker(*worker_initargs)
+    saved_force = _worker_state.get("force_intersection")
+    _worker_state["force_intersection"] = (int(pose["pair"][0]), int(pose["pair"][1]))
+    try:
+        _, result = _process_one_image(img_path)
+    finally:
+        _worker_state["force_intersection"] = saved_force
+    if not result.success:
+        return False
+    try:
+        promoted = json.loads(Path(out_path).read_text())
+        promoted_px_per_ft = 1.0 / (page_scale_m_per_px(promoted) * FEET_PER_METER)
+    except (OSError, json.JSONDecodeError, KeyError, ZeroDivisionError):
+        return False
+    if is_scale_outlier(promoted_px_per_ft / ref_scale_px_per_ft):
+        # The forced pair reproduced an off-rung pose after all; restore no
+        # publication claim -- the caller demotes the (rewritten) sidecar.
+        return False
+    promoted["promoted_from_runner_up"] = {
+        "score_ratio": pose["score_ratio"],
+        "pair": pose["pair"],
+        "demoted": demoted_detail,
+    }
+    Path(out_path).write_text(json.dumps(promoted, indent=2))
+    SPECIAL_CASE_COUNTS["misscale_promoted_runner_up"] += 1
+    print(
+        f"Promoted runner-up for {img_path}: seed pair {pose['pair']} at "
+        f"{pose['score_ratio']:.1%} of the demoted winner's score, "
+        f"{promoted_px_per_ft:.4f} px/ft (reference {ref_scale_px_per_ft:.4f})",
+        file=sys.stderr,
+    )
+    return True
 
 
 def derive_paths(image_path: str) -> tuple[str, str, str]:
@@ -3093,7 +3201,7 @@ def process_image(
     pair_records: list[dict] | None = [] if debug else None
     # Always collect scored poses: distinct near-ties are published as
     # runner_up_poses for the snap channel to arbitrate (select_runner_up_poses).
-    scored_poses: list[tuple[float, np.ndarray, int]] = []
+    scored_poses: list[tuple[float, np.ndarray, int, tuple[int, int]]] = []
     A, inlier_feat_indices, seed_pair = ransac_hybrid(
         gcps,
         features,
@@ -4128,6 +4236,26 @@ def main() -> None:
                         continue
                 _, out_path, _ = derive_paths(img_path)
                 if os.path.exists(out_path):
+                    # #340: before demoting, check whether a near-tie runner-up
+                    # carries a rung-plausible scale. If so, REFIT the page with
+                    # that pose's seed pair forced -- the promoted fit goes
+                    # through the normal path (its own inliers, GCPs, and
+                    # runner-ups), becomes the incumbent, and snap REFINES it
+                    # instead of rescuing a page whose search anchors on the
+                    # wrong pose (miami p13: misscale winner 1,195 ft; its
+                    # 99.9%-score runner-up is the true pose at 10 ft).
+                    if _promote_runner_up(
+                        img_path,
+                        out_path,
+                        ref_scale_px_per_ft,
+                        worker_initargs,
+                        demoted_detail={
+                            "px_per_ft": round(px_per_ft, 4),
+                            "reference_px_per_ft": round(ref_scale_px_per_ft, 4),
+                            "ratio": round(ratio, 3),
+                        },
+                    ):
+                        continue
                     sidecar.demote(
                         out_path,
                         sidecar.MISSCALE,

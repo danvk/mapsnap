@@ -1869,16 +1869,17 @@ def test_select_runner_up_poses_keeps_distinct_near_ties():
 
     best = pose(0.0)
     scored = [
-        (1.00, best, 9),
-        (0.999, pose(0.001), 8),  # ~85 m away: distinct, kept
-        (0.995, pose(0.0011), 8),  # ~9 m from the previous tie: merged away
-        (0.95, pose(1e-7), 9),  # co-located with the winner: dropped
-        (0.5, pose(0.005), 7),  # below the 70% score floor: dropped
+        (1.00, best, 9, (0, 1)),
+        (0.999, pose(0.001), 8, (0, 2)),  # ~85 m away: distinct, kept
+        (0.995, pose(0.0011), 8, (0, 3)),  # ~9 m from the previous tie: merged
+        (0.95, pose(1e-7), 9, (0, 4)),  # co-located with the winner: dropped
+        (0.5, pose(0.005), 7, (0, 5)),  # below the 70% score floor: dropped
     ]
     records = select_runner_up_poses(scored, best, (1000, 1000))
     assert len(records) == 1
     assert records[0]["score_ratio"] == 0.999
     assert records[0]["inlier_streets"] == 8
+    assert records[0]["pair"] == [0, 2]
     assert len(records[0]["corners"]) == 4
 
 
@@ -1896,9 +1897,46 @@ def test_select_runner_up_poses_drops_upside_down_and_caps():
         return np.array([[c * scale, -s * scale, dlon], [s * scale, c * scale, 40.0]])
 
     best = pose(0.0)
-    scored = [(1.0, best, 9), (0.99, pose(0.001, rot_deg=180.0), 9)]
-    scored += [(0.98 - 0.01 * i, pose(0.002 * (i + 2)), 8) for i in range(8)]
+    scored = [(1.0, best, 9, (0, 1)), (0.99, pose(0.001, rot_deg=180.0), 9, (0, 2))]
+    scored += [
+        (0.98 - 0.01 * i, pose(0.002 * (i + 2)), 8, (1, i + 2)) for i in range(8)
+    ]
     records = select_runner_up_poses(scored, best, (1000, 1000))
     # The 180-degree alias is corpus-impossible (#324) and never emitted.
     assert all(r["score_ratio"] != 0.99 for r in records)
     assert len(records) == MAX_RUNNER_UP_POSES
+
+
+def test_promotable_runner_up_requires_plausible_scale_and_near_tie():
+    from mapsnap.georef_from_labels import promotable_runner_up
+
+    def corners(scale: float):
+        # A 1000x1000 page at ~scale deg per px around (0 lon, 0 lat).
+        return [
+            [0.0, 0.0],
+            [1000 * scale, 0.0],
+            [1000 * scale, -1000 * scale],
+            [0.0, -1000 * scale],
+        ]
+
+    # ~1 px/ft at 2.74e-6 deg/px: within the reference band. 0.65x of it is
+    # the p13 class -- BETWEEN the legitimate 0.5x/1x family rungs, an outlier.
+    # (Exactly 0.5x would be a real rung and correctly NOT an outlier.)
+    good, outlier = 2.74e-6, 2.74e-6 / 0.65
+    doc = {
+        "width": 1000,
+        "height": 1000,
+        "runner_up_poses": [
+            {"score_ratio": 0.99, "corners": corners(outlier), "pair": [0, 1]},
+            {"score_ratio": 0.95, "corners": corners(good), "pair": [2, 3]},
+            {"score_ratio": 0.92, "corners": corners(good)},  # no pair: skipped
+        ],
+    }
+    pose = promotable_runner_up(doc, ref_scale_px_per_ft=1.0)
+    assert pose is not None and pose["pair"] == [2, 3]
+    # Below the 0.9 promotion bar nothing qualifies, however plausible.
+    doc["runner_up_poses"] = [
+        {"score_ratio": 0.85, "corners": corners(good), "pair": [2, 3]}
+    ]
+    assert promotable_runner_up(doc, ref_scale_px_per_ft=1.0) is None
+    assert promotable_runner_up({}, ref_scale_px_per_ft=1.0) is None
