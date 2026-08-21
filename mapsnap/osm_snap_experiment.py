@@ -953,6 +953,41 @@ def page_record(vctx: VolumeContext, unit: PageUnit) -> dict:
                     "radius_m": round(ctx.radius_m, 1),
                     "radius_source": "local-challenge",
                 }
+            # #342: RANSAC's near-tie runner-ups join the challenge as extra
+            # search centers + rotation priors -- but only under an incumbent
+            # the referee distrusts. No street-solve adoption has ever
+            # displaced an incumbent verifying above 0.73 (18 adoptions,
+            # 2026-08-14 corpus), so above RUNNER_UP_MAX_INCUMBENT_VER the
+            # ties are unbeatable noise and the pool stays untouched (the
+            # nashville p6 lesson: extra candidates can flip a healthy page).
+            # Runs after the local-challenge collapse, so each runner-up gets
+            # the same small-radius hunt an incumbent center does.
+            new_centers, thetas = runner_up_search_extras(
+                unit, incumbent.get("verification"), ctx.search_centers
+            )
+            if new_centers or thetas:
+                ctx.search_centers = [*ctx.search_centers, *new_centers]
+                for theta in thetas:
+                    ctx.rotation_priors = [
+                        *ctx.rotation_priors,
+                        RotationPrior(
+                            theta_deg=theta,
+                            sigma_deg=DEMOTED_SEED_SIGMA_DEG,
+                            source="ransac-runner-up",
+                        ),
+                    ]
+                    record["priors"]["rotation"].append(
+                        {
+                            "theta_deg": round(theta, 2),
+                            "sigma_deg": DEMOTED_SEED_SIGMA_DEG,
+                            "source": "ransac-runner-up",
+                        }
+                    )
+                if new_centers:
+                    record["search"]["runner_up_seeds"] = len(new_centers)
+                    record["search"]["centers"] = [
+                        [round(a, 7), round(b, 7)] for a, b in ctx.search_centers
+                    ]
     if unit.fit_state in RESCUE_STATES and unit.demoted_affine is not None:
         # #315: the demoted pose's center joined the search in
         # build_page_context; here its rotation — the pose's most trustworthy
