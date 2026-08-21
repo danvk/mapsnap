@@ -67,6 +67,7 @@ from mapsnap.compare_iiif_georef import (
 from mapsnap.utils import default_centerlines, source_id_to_page_key
 
 GOOD_FT = 25.0
+FAIR_FT = 50.0  # reporting band only (25-50ft / 50-200ft); no score effect
 DISASTER_FT = 200.0
 STREET_NEAR_M = 120.0
 GRID_N = 15  # land sampling grid per footprint (GRID_N x GRID_N candidate points)
@@ -117,6 +118,8 @@ class ScoreSummary:
     weight: float
     good_weight: float  # rmse <= good threshold
     disaster_weight: float  # placed at rmse >= disaster threshold
+    fair_weight: float = 0.0  # good threshold < rmse <= FAIR_FT
+    poor_weight: float = 0.0  # FAIR_FT < rmse < disaster threshold
 
     @property
     def good_share(self) -> float:
@@ -125,6 +128,14 @@ class ScoreSummary:
     @property
     def disaster_share(self) -> float:
         return self.disaster_weight / self.weight if self.weight else 0.0
+
+    @property
+    def fair_share(self) -> float:
+        return self.fair_weight / self.weight if self.weight else 0.0
+
+    @property
+    def poor_share(self) -> float:
+        return self.poor_weight / self.weight if self.weight else 0.0
 
     @property
     def net_score(self) -> float:
@@ -355,6 +366,16 @@ def summarize(
             p.weight
             for p in pages
             if p.rmse_ft is not None and p.rmse_ft >= disaster_ft
+        ),
+        fair_weight=sum(
+            p.weight
+            for p in pages
+            if p.rmse_ft is not None and good_ft < p.rmse_ft <= FAIR_FT
+        ),
+        poor_weight=sum(
+            p.weight
+            for p in pages
+            if p.rmse_ft is not None and FAIR_FT < p.rmse_ft < disaster_ft
         ),
     )
 

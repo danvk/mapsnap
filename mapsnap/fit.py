@@ -308,9 +308,17 @@ def main() -> None:
     # was the only "Score:" in the log -- the metric confusion behind #330.
     score = manifest.get("metrics", {}).get("truth", {}).get("score")
     if score:
+        # fair/poor bands are absent from manifests archived before they existed.
+        bands = ""
+        if "fair_share" in score:
+            bands = (
+                f"25-50ft {score['fair_share']:.1%}, "
+                f"50-200ft {score['poor_share']:.1%}, "
+            )
         print(
             f"\nScore: {score['net']:.1%} "
-            f"(<=25ft {score['good_share']:.1%}, >=200ft {score['disaster_share']:.1%}, "
+            f"(<=25ft {score['good_share']:.1%}, {bands}"
+            f">=200ft {score['disaster_share']:.1%}, "
             f"{score['n_placed']}/{score['n_pages']} pages placed)"
         )
     print(f"\nArchived run {run_id} to {archived}")
