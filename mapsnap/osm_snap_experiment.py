@@ -75,7 +75,7 @@ RESCUE_STATES = {"nofit", "misscale", "1gcp", "outlier", "none"}
 # orientation -- its most trustworthy component -- ranks first.
 DEMOTED_SEED_SIGMA_DEG = 10.0
 
-# #342: a fitted page's RANSAC runner-ups may join the challenge search only
+# #340: a fitted page's RANSAC runner-ups may join the challenge search only
 # when the incumbent verifies below this. Ceiling measured on the 2026-08-14
 # corpus: no cross-channel adoption ever displaced an incumbent above 0.73
 # verification (18 street-solve adoptions), while the healthy fits whose pools
@@ -715,7 +715,7 @@ def build_page_context(
         if all(haversine_m(lat_c, lon_c, b, a) > 50.0 for a, b in centers):
             centers = centers + [(lon_c, lat_c)]
     if unit.fit_state in RESCUE_STATES and unit.runner_up_affines:
-        # #342: a demoted fit's RANSAC runner-ups join the rescue search. The
+        # #340: a demoted fit's RANSAC runner-ups join the rescue search. The
         # demotion itself is the distrust signal (no verification gate needed,
         # unlike the fitted-incumbent path), and the demoted pose's own center
         # is often exactly the alias that earned the demotion -- miami p13's
@@ -971,7 +971,7 @@ def page_record(vctx: VolumeContext, unit: PageUnit) -> dict:
                     "radius_m": round(ctx.radius_m, 1),
                     "radius_source": "local-challenge",
                 }
-            # #342: RANSAC's near-tie runner-ups join the challenge as extra
+            # #340: RANSAC's near-tie runner-ups join the challenge as extra
             # search centers + rotation priors -- but only under an incumbent
             # the referee distrusts. No street-solve adoption has ever
             # displaced an incumbent verifying above 0.73 (18 adoptions,
@@ -1029,7 +1029,7 @@ def page_record(vctx: VolumeContext, unit: PageUnit) -> dict:
             }
         )
     if unit.fit_state in RESCUE_STATES and unit.runner_up_affines:
-        # #342: the runner-ups' bearings enter as priors exactly like the
+        # #340: the runner-ups' bearings enter as priors exactly like the
         # demoted pose's (their centers joined in build_page_context).
         for affine in unit.runner_up_affines:
             theta = math.degrees(math.atan2(-affine[1, 0], affine[0, 0]))

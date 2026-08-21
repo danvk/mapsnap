@@ -1431,7 +1431,7 @@ def _rank_pairs_by_consensus(
     return [(int(idx_i[k]), int(idx_j[k])) for k in order[:top_k] if counts[k] >= 0]
 
 
-# Runner-up emission (#342): near-ties kept for snap to arbitrate. Measured on
+# Runner-up emission (#340): near-ties kept for snap to arbitrate. Measured on
 # miami: 80/86 truth pages have a distinct pose at >=70% of the winner's score,
 # and on p13 the TRUE pose scored 99.9% of a 1,195 ft winner -- RANSAC's own
 # objective cannot break such ties, but snap's independent evidence can.

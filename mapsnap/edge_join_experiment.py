@@ -132,7 +132,7 @@ class PageUnit:
     # snap's search, because a demoted pose is measurably a good init (refine
     # fixed richmond p353's 3.06x scale error from one).
     demoted_affine: np.ndarray | None = None
-    # Distinct near-tie poses RANSAC scored but did not pick (#342): consumed
+    # Distinct near-tie poses RANSAC scored but did not pick (#340): consumed
     # by snap as extra challenge seeds when the incumbent verifies poorly.
     runner_up_affines: list[np.ndarray] = field(default_factory=list)
     anchor_truth: bool = False
