@@ -1463,8 +1463,8 @@ def promotable_runner_up(georef: dict, ref_scale_px_per_ft: float) -> dict | Non
     for pose in georef.get("runner_up_poses") or []:
         if pose.get("score_ratio", 0.0) < RUNNER_UP_PROMOTE_MIN_RATIO:
             break  # records are score-ordered
-        pair = pose.get("pair")
-        if not pair or len(pair) != 2:
+        pair_px = pose.get("pair_px")
+        if not pair_px or len(pair_px) != 2:
             continue
         try:
             m_per_px = page_scale_m_per_px(
@@ -1486,7 +1486,7 @@ def promotable_runner_up(georef: dict, ref_scale_px_per_ft: float) -> dict | Non
 
 
 def select_runner_up_poses(
-    scored: list[tuple[float, np.ndarray, int, tuple[int, int]]],
+    scored: list,
     best_A: np.ndarray,
     size: tuple[int, int],
 ) -> list[dict]:
@@ -1502,7 +1502,7 @@ def select_runner_up_poses(
     if not scored:
         return []
     width, height = size
-    best_score = max(score for score, _, _, _ in scored)
+    best_score = max(entry[0] for entry in scored)
     if best_score <= 0:
         return []
 
@@ -1523,7 +1523,9 @@ def select_runner_up_poses(
 
     kept: list[tuple[tuple[float, float], float]] = []
     records: list[dict] = []
-    for score, A, n_streets, pair in sorted(scored, key=lambda entry: -entry[0]):
+    for score, A, n_streets, pair, pair_pixels in sorted(
+        scored, key=lambda entry: -entry[0]
+    ):
         if score < RUNNER_UP_MIN_SCORE_RATIO * best_score:
             break
         if pose_is_upside_down(A):
@@ -1546,8 +1548,13 @@ def select_runner_up_poses(
                 "inlier_streets": n_streets,
                 # The seed pair that produced this pose, so promotion (#340)
                 # can REFIT the page through the normal path via force_pair
-                # instead of swapping corners under stale GCP records.
+                # instead of swapping corners under stale GCP records. Indices
+                # are tier-relative; the crossing PIXELS are the durable
+                # address (see ransac_hybrid's force_pair_pixels).
                 "pair": [int(pair[0]), int(pair[1])],
+                "pair_px": [
+                    [round(float(px), 2), round(float(py), 2)] for px, py in pair_pixels
+                ],
             }
         )
         if len(records) >= MAX_RUNNER_UP_POSES:
@@ -1565,7 +1572,8 @@ def ransac_hybrid(
     force_pair: tuple[int, int] | None = None,
     debug: bool = False,
     pair_records: list[dict] | None = None,
-    scored_sink: list[tuple[float, np.ndarray, int, tuple[int, int]]] | None = None,
+    scored_sink: list | None = None,
+    force_pair_pixels: tuple | None = None,
 ) -> tuple[np.ndarray | None, list[int], tuple[int, int] | None]:
     """Find the best similarity affine using intersection GCPs as seeds, label-based inlier scoring.
 
@@ -1593,6 +1601,34 @@ def ransac_hybrid(
     n = len(gcps)
     if n < 2:
         return None, [], None
+
+    if force_pair_pixels is not None:
+        # Content-addressed forcing (#340 promotion): resolve the recorded
+        # crossing PIXELS to this call's gcps indices. Indices are only
+        # meaningful within one tier's gcps list -- the keymap-restricted
+        # tier and the full-index tier build different lists (forcing p74's
+        # tier-2 indices in tier 1 read past the end of a 2-gcp list) -- but
+        # a crossing's pixel position identifies it in whichever tier can see
+        # it. A tier that cannot resolve both pixels returns no fit, so the
+        # strict-first/relaxed-retry cascade falls through to the tier that
+        # can.
+        resolved = []
+        for want_x, want_y in force_pair_pixels:
+            match = next(
+                (
+                    i
+                    for i, gcp in enumerate(gcps)
+                    if abs(gcp.pixel[0] - want_x) <= 1.0
+                    and abs(gcp.pixel[1] - want_y) <= 1.0
+                ),
+                None,
+            )
+            if match is None:
+                return None, [], None
+            resolved.append(match)
+        if resolved[0] == resolved[1]:
+            return None, [], None
+        force_pair = (resolved[0], resolved[1])
 
     total_pairs = n * (n - 1) // 2
 
@@ -1654,7 +1690,13 @@ def ransac_hybrid(
             # pair_records): a vetoed near-tie can still be the true pose, and
             # the runner-up channel's consumer re-judges with its own evidence.
             scored_sink.append(
-                (float(len(inliers)) * pos_threshold - err, A, len(inliers), pair_idx)
+                (
+                    float(len(inliers)) * pos_threshold - err,
+                    A,
+                    len(inliers),
+                    pair_idx,
+                    (a.pixel, b.pixel),
+                )
             )
 
         # Record this pair's fit for the interactive debugger (only when --debug supplies a
@@ -2292,32 +2334,47 @@ def _promote_runner_up(
         return False
     if not _worker_state:
         _init_worker(*worker_initargs)
-    saved_force = _worker_state.get("force_intersection")
-    _worker_state["force_intersection"] = (int(pose["pair"][0]), int(pose["pair"][1]))
+    original_sidecar = Path(out_path).read_text()
+    saved_force = _worker_state.get("force_pair_pixels")
+    _worker_state["force_pair_pixels"] = (
+        tuple(pose["pair_px"][0]),
+        tuple(pose["pair_px"][1]),
+    )
     try:
         _, result = _process_one_image(img_path)
+    except Exception as error:  # noqa: BLE001 -- a failed refit must never eat the sidecar
+        print(f"Runner-up refit failed for {img_path}: {error}", file=sys.stderr)
+        result = None
     finally:
-        _worker_state["force_intersection"] = saved_force
-    if not result.success:
-        return False
-    try:
-        promoted = json.loads(Path(out_path).read_text())
-        promoted_px_per_ft = 1.0 / (page_scale_m_per_px(promoted) * FEET_PER_METER)
-    except (OSError, json.JSONDecodeError, KeyError, ZeroDivisionError):
-        return False
-    if is_scale_outlier(promoted_px_per_ft / ref_scale_px_per_ft):
-        # The forced pair reproduced an off-rung pose after all; restore no
-        # publication claim -- the caller demotes the (rewritten) sidecar.
+        _worker_state["force_pair_pixels"] = saved_force
+    promoted: dict | None = None
+    promoted_px_per_ft = None
+    if result is not None and result.success:
+        try:
+            loaded = json.loads(Path(out_path).read_text())
+            promoted_px_per_ft = 1.0 / (page_scale_m_per_px(loaded) * FEET_PER_METER)
+            promoted = loaded
+        except (OSError, json.JSONDecodeError, KeyError, ZeroDivisionError):
+            promoted = None
+            promoted_px_per_ft = None
+    if (
+        promoted is None
+        or promoted_px_per_ft is None
+        or is_scale_outlier(promoted_px_per_ft / ref_scale_px_per_ft)
+    ):
+        # Refit failed or reproduced an off-rung pose after all: put the
+        # original fit back so the caller demotes exactly what it measured.
+        Path(out_path).write_text(original_sidecar)
         return False
     promoted["promoted_from_runner_up"] = {
         "score_ratio": pose["score_ratio"],
-        "pair": pose["pair"],
+        "pair_px": pose["pair_px"],
         "demoted": demoted_detail,
     }
     Path(out_path).write_text(json.dumps(promoted, indent=2))
     SPECIAL_CASE_COUNTS["misscale_promoted_runner_up"] += 1
     print(
-        f"Promoted runner-up for {img_path}: seed pair {pose['pair']} at "
+        f"Promoted runner-up for {img_path}: crossing pixels {pose['pair_px']} at "
         f"{pose['score_ratio']:.1%} of the demoted winner's score, "
         f"{promoted_px_per_ft:.4f} px/ft (reference {ref_scale_px_per_ft:.4f})",
         file=sys.stderr,
@@ -2555,6 +2612,7 @@ def _process_one_image(image_path: str) -> tuple[str, ProcessResult]:
             min_aspect_ratio=_worker_state["min_aspect_ratio"],
             edge_margin=_worker_state["edge_margin"],
             force_intersection=_worker_state["force_intersection"],
+            force_pair_pixels=_worker_state.get("force_pair_pixels"),
             one_gcp_fits=_worker_state["one_gcp_fits"],
             debug=_worker_state["debug"],
             parameters=_worker_state["parameters"],
@@ -3099,6 +3157,7 @@ def process_image(
     min_aspect_ratio: float = 2.0,
     edge_margin: float = 0.0,
     force_intersection: tuple[int, int] | None = None,
+    force_pair_pixels: tuple | None = None,
     one_gcp_fits: bool = False,
     debug: bool = False,
     parameters: dict | None = None,
@@ -3201,7 +3260,7 @@ def process_image(
     pair_records: list[dict] | None = [] if debug else None
     # Always collect scored poses: distinct near-ties are published as
     # runner_up_poses for the snap channel to arbitrate (select_runner_up_poses).
-    scored_poses: list[tuple[float, np.ndarray, int, tuple[int, int]]] = []
+    scored_poses: list = []
     A, inlier_feat_indices, seed_pair = ransac_hybrid(
         gcps,
         features,
@@ -3211,6 +3270,7 @@ def process_image(
         debug=debug,
         pair_records=pair_records,
         scored_sink=scored_poses,
+        force_pair_pixels=force_pair_pixels,
     )
     if A is None:
         print("RANSAC failed: no valid affine found.", file=sys.stderr)

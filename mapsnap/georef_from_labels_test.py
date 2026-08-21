@@ -1868,18 +1868,20 @@ def test_select_runner_up_poses_keeps_distinct_near_ties():
         return np.array([[c * scale, -s * scale, dlon], [s * scale, c * scale, 40.0]])
 
     best = pose(0.0)
+    px = ((10.0, 20.0), (30.0, 40.0))
     scored = [
-        (1.00, best, 9, (0, 1)),
-        (0.999, pose(0.001), 8, (0, 2)),  # ~85 m away: distinct, kept
-        (0.995, pose(0.0011), 8, (0, 3)),  # ~9 m from the previous tie: merged
-        (0.95, pose(1e-7), 9, (0, 4)),  # co-located with the winner: dropped
-        (0.5, pose(0.005), 7, (0, 5)),  # below the 70% score floor: dropped
+        (1.00, best, 9, (0, 1), px),
+        (0.999, pose(0.001), 8, (0, 2), px),  # ~85 m away: distinct, kept
+        (0.995, pose(0.0011), 8, (0, 3), px),  # ~9 m from previous tie: merged
+        (0.95, pose(1e-7), 9, (0, 4), px),  # co-located with winner: dropped
+        (0.5, pose(0.005), 7, (0, 5), px),  # below the 70% floor: dropped
     ]
     records = select_runner_up_poses(scored, best, (1000, 1000))
     assert len(records) == 1
     assert records[0]["score_ratio"] == 0.999
     assert records[0]["inlier_streets"] == 8
     assert records[0]["pair"] == [0, 2]
+    assert records[0]["pair_px"] == [[10.0, 20.0], [30.0, 40.0]]
     assert len(records[0]["corners"]) == 4
 
 
@@ -1897,9 +1899,13 @@ def test_select_runner_up_poses_drops_upside_down_and_caps():
         return np.array([[c * scale, -s * scale, dlon], [s * scale, c * scale, 40.0]])
 
     best = pose(0.0)
-    scored = [(1.0, best, 9, (0, 1)), (0.99, pose(0.001, rot_deg=180.0), 9, (0, 2))]
+    px = ((10.0, 20.0), (30.0, 40.0))
+    scored = [
+        (1.0, best, 9, (0, 1), px),
+        (0.99, pose(0.001, rot_deg=180.0), 9, (0, 2), px),
+    ]
     scored += [
-        (0.98 - 0.01 * i, pose(0.002 * (i + 2)), 8, (1, i + 2)) for i in range(8)
+        (0.98 - 0.01 * i, pose(0.002 * (i + 2)), 8, (1, i + 2), px) for i in range(8)
     ]
     records = select_runner_up_poses(scored, best, (1000, 1000))
     # The 180-degree alias is corpus-impossible (#324) and never emitted.
@@ -1927,16 +1933,24 @@ def test_promotable_runner_up_requires_plausible_scale_and_near_tie():
         "width": 1000,
         "height": 1000,
         "runner_up_poses": [
-            {"score_ratio": 0.99, "corners": corners(outlier), "pair": [0, 1]},
-            {"score_ratio": 0.95, "corners": corners(good), "pair": [2, 3]},
-            {"score_ratio": 0.92, "corners": corners(good)},  # no pair: skipped
+            {
+                "score_ratio": 0.99,
+                "corners": corners(outlier),
+                "pair_px": [[1.0, 2.0], [3.0, 4.0]],
+            },
+            {
+                "score_ratio": 0.95,
+                "corners": corners(good),
+                "pair_px": [[5.0, 6.0], [7.0, 8.0]],
+            },
+            {"score_ratio": 0.92, "corners": corners(good)},  # no pair_px: skip
         ],
     }
     pose = promotable_runner_up(doc, ref_scale_px_per_ft=1.0)
-    assert pose is not None and pose["pair"] == [2, 3]
+    assert pose is not None and pose["pair_px"] == [[5.0, 6.0], [7.0, 8.0]]
     # Below the 0.9 promotion bar nothing qualifies, however plausible.
     doc["runner_up_poses"] = [
-        {"score_ratio": 0.85, "corners": corners(good), "pair": [2, 3]}
+        {"score_ratio": 0.85, "corners": corners(good), "pair_px": [[5, 6], [7, 8]]}
     ]
     assert promotable_runner_up(doc, ref_scale_px_per_ft=1.0) is None
     assert promotable_runner_up({}, ref_scale_px_per_ft=1.0) is None
