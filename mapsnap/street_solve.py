@@ -386,41 +386,56 @@ def dedupe_scales(
     return kept
 
 
-def propose_translation(
-    first: StreetSegments,
-    second: StreetSegments,
-    line_a: tuple[np.ndarray, np.ndarray],
-    line_b: tuple[np.ndarray, np.ndarray],
-    psi_deg: float,
-    log_scale: float,
-    size: tuple[int, int],
-) -> StreetPose | None:
-    """The pose placing two labels exactly on two given (non-parallel) street lines.
+def batch_point_to_segments(
+    points: np.ndarray, starts: np.ndarray, ends: np.ndarray
+) -> tuple[np.ndarray, np.ndarray]:
+    """(min distance, bearing of the nearest segment) for MANY points at once.
 
-    With bearing and scale fixed, a label lying on a known line is one linear equation
-    in the translation; two independent lines determine it outright.
+    The vectorized twin of ``align_page_region.point_to_segments`` — the same
+    clipped projection and nearest-segment bearing, evaluated for an (N, 2)
+    array of points in one broadcast instead of N interpreted calls. Returns
+    (distances (N,), bearings (N,) in degrees mod 180).
     """
-    point_a, direction_a = line_a
-    point_b, direction_b = line_b
-    normal_a = np.array([direction_a[1], -direction_a[0]])
-    normal_b = np.array([direction_b[1], -direction_b[0]])
-    matrix = np.array([normal_a, normal_b])
-    if abs(float(np.linalg.det(matrix))) < 1e-6:
-        return None
-    base = (0.0, 0.0, psi_deg, log_scale)
-    offset_a = pose_world_of(base, first[0], size)
-    offset_b = pose_world_of(base, second[0], size)
-    rhs = np.array(
-        [
-            float(normal_a @ (point_a - offset_a)),
-            float(normal_b @ (point_b - offset_b)),
-        ]
-    )
-    try:
-        translation = np.linalg.solve(matrix, rhs)
-    except np.linalg.LinAlgError:
-        return None
-    return (float(translation[0]), float(translation[1]), psi_deg, log_scale)
+    delta = ends - starts  # (S, 2)
+    length_sq = (delta * delta).sum(axis=1)  # (S,)
+    diff = points[:, None, :] - starts[None]  # (N, S, 2)
+    t = np.clip((diff * delta).sum(axis=2) / np.maximum(length_sq, 1e-9), 0, 1)
+    projected = starts[None] + t[:, :, None] * delta[None]  # (N, S, 2)
+    distances = np.linalg.norm(points[:, None, :] - projected, axis=2)  # (N, S)
+    nearest = distances.argmin(axis=1)
+    segment_bearings = np.degrees(np.arctan2(delta[:, 0], delta[:, 1])) % 180.0
+    rows = np.arange(len(points))
+    return distances[rows, nearest], segment_bearings[nearest]
+
+
+LineEquation = tuple[
+    float, float, float, float
+]  # (normal_x, normal_y, n·point, bearing)
+
+
+def line_equations(
+    lines: list[tuple[np.ndarray, np.ndarray]],
+) -> list[LineEquation]:
+    """Each line as (normal, normal·point, bearing) scalars, precomputed once.
+
+    A label lying on a known line is one linear equation in the translation
+    (normal · (t + label_world) = normal · point); two independent lines
+    determine t outright. Extracting the coefficients here lets the consensus
+    search solve each pair in closed form instead of building numpy matrices
+    a million times per page.
+    """
+    equations: list[LineEquation] = []
+    for point, direction in lines:
+        normal_x, normal_y = float(direction[1]), float(-direction[0])
+        equations.append(
+            (
+                normal_x,
+                normal_y,
+                normal_x * float(point[0]) + normal_y * float(point[1]),
+                math.degrees(math.atan2(*direction)) % 180.0,
+            )
+        )
+    return equations
 
 
 def consensus_poses(
@@ -441,48 +456,97 @@ def consensus_poses(
     scored: list[tuple[tuple[int, float], StreetPose, list[StreetSegments], str]] = []
     if lines is None:
         lines = [distinct_lines(c[3], c[4]) for c in constraints]
+    families = [street_name_family(c[2]) for c in constraints]
+    # constraint_bearing depends only on psi, which is fixed for this call, so
+    # every constraint's claimed bearing is one number for the whole search.
+    claimed = [constraint_bearing((0.0, 0.0, psi_deg, 0.0), c[1]) for c in constraints]
+    equations = [line_equations(choices) for choices in lines]
     for log_scale, scale_source in log_scales:
-        for i, first in enumerate(constraints):
+        # Propose: two labels pinned exactly onto two non-parallel street lines
+        # — each line is one linear equation in the translation, solved in
+        # closed form. The same placement reached from different pairs is
+        # merged HERE, on a 1 m grid, rather than scored repeatedly and
+        # deduplicated at 20 m afterwards.
+        bases = [
+            pose_world_of((0.0, 0.0, psi_deg, log_scale), c[0], size)
+            for c in constraints
+        ]
+        proposals: dict[tuple[float, float], StreetPose] = {}
+        for i in range(len(constraints)):
+            base_i = (float(bases[i][0]), float(bases[i][1]))
             for j in range(i + 1, len(constraints)):
-                second = constraints[j]
-                for line_a in lines[i]:
-                    for line_b in lines[j]:
-                        bearing_a = math.degrees(math.atan2(*line_a[1])) % 180.0
-                        bearing_b = math.degrees(math.atan2(*line_b[1])) % 180.0
+                base_j = (float(bases[j][0]), float(bases[j][1]))
+                for nax, nay, ndpa, bearing_a in equations[i]:
+                    rhs_a = ndpa - nax * base_i[0] - nay * base_i[1]
+                    for nbx, nby, ndpb, bearing_b in equations[j]:
                         if (
                             abs(angle_difference_mod180(bearing_a, bearing_b))
                             < gates.bearing_diversity_deg
                         ):
                             continue
-                        pose = propose_translation(
-                            first, second, line_a, line_b, psi_deg, log_scale, size
+                        det = nax * nby - nay * nbx
+                        if abs(det) < 1e-6:
+                            continue
+                        rhs_b = ndpb - nbx * base_j[0] - nby * base_j[1]
+                        tx = (rhs_a * nby - nay * rhs_b) / det
+                        ty = (nax * rhs_b - rhs_a * nbx) / det
+                        proposals.setdefault(
+                            (round(tx), round(ty)), (tx, ty, psi_deg, log_scale)
                         )
-                        if pose is None:
-                            continue
-                        inliers = [
-                            c for c in constraints if is_inlier(pose, c, size, gates)
-                        ]
-                        if len(inliers) < gates.min_inliers:
-                            continue
-                        if len(inliers) < gates.min_inlier_fraction * len(constraints):
-                            # Kansas City p576 slid a block on two streets while four
-                            # others disagreed; a correct pose explains most of them.
-                            continue
-                        if distinct_streets(inliers) < gates.min_distinct_streets:
-                            continue
-                        if bearing_spread(pose, inliers) < gates.bearing_diversity_deg:
-                            continue
-                        mean_position = float(
-                            np.mean([residuals_at(pose, c, size)[0] for c in inliers])
-                        )
-                        scored.append(
-                            (
-                                (len(inliers), -mean_position),
-                                pose,
-                                inliers,
-                                scale_source,
-                            )
-                        )
+        if not proposals:
+            continue
+        # Score every proposal against every constraint in one broadcast per
+        # constraint: with bearing and scale fixed, a proposal only TRANSLATES
+        # each label's world point (pose_world_of is base + t), so the per-pose
+        # residual loop collapses to array arithmetic. This was 97% of the
+        # channel's runtime as 14M scalar residuals_at calls (43 s on a
+        # constraint-heavy Kansas City page; ~2 s batched).
+        poses = list(proposals.values())
+        translations = np.array([(p[0], p[1]) for p in poses])
+        position = np.empty((len(poses), len(constraints)))
+        angle = np.empty_like(position)
+        for k, c in enumerate(constraints):
+            distances, bearings = batch_point_to_segments(
+                translations + bases[k], c[3], c[4]
+            )
+            position[:, k] = distances
+            angle[:, k] = (claimed[k] - bearings + 90.0) % 180.0 - 90.0
+        inlier_mask = (position <= gates.position_gate_m) & (
+            np.abs(angle) <= gates.angle_gate_deg
+        )
+        counts = inlier_mask.sum(axis=1)
+        for p, pose in enumerate(poses):
+            if counts[p] < gates.min_inliers:
+                continue
+            if counts[p] < gates.min_inlier_fraction * len(constraints):
+                # Kansas City p576 slid a block on two streets while four
+                # others disagreed; a correct pose explains most of them.
+                continue
+            indices = np.flatnonzero(inlier_mask[p])
+            inliers = [constraints[q] for q in indices]
+            if len({families[q] for q in indices}) < gates.min_distinct_streets:
+                continue
+            spread = max(
+                (
+                    abs(angle_difference_mod180(claimed[a], claimed[b]))
+                    for x, a in enumerate(indices)
+                    for b in indices[x + 1 :]
+                ),
+                default=0.0,
+            )
+            if spread < gates.bearing_diversity_deg:
+                continue
+            # The batch already holds every inlier's position residual; the
+            # mean falls out for free instead of a second residuals_at pass.
+            mean_position = float(position[p, indices].mean())
+            scored.append(
+                (
+                    (int(counts[p]), -mean_position),
+                    pose,
+                    inliers,
+                    scale_source,
+                )
+            )
     scored.sort(key=lambda entry: entry[0], reverse=True)
     kept: list[tuple[StreetPose, list[StreetSegments], str]] = []
     for _score, pose, inliers, scale_source in scored:

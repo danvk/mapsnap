@@ -338,3 +338,39 @@ def test_street_ending_short_still_constrains_the_page():
     after, _ = residuals_at(TRUE_POSE, extended, SIZE)
     assert before > 35.0  # measured to the polyline's end
     assert after < 1.0  # measured across to its line, where the label actually sits
+
+
+def test_batch_point_to_segments_matches_scalar():
+    import pytest
+
+    from mapsnap.keymap.align_page_region import point_to_segments
+    from mapsnap.street_solve import batch_point_to_segments
+
+    rng = np.random.default_rng(0)
+    starts = rng.uniform(-200.0, 200.0, (15, 2))
+    ends = starts + rng.uniform(-80.0, 80.0, (15, 2))
+    points = rng.uniform(-250.0, 250.0, (50, 2))
+    distances, bearings = batch_point_to_segments(points, starts, ends)
+    for k, point in enumerate(points):
+        distance, bearing = point_to_segments(point, starts, ends)
+        assert distances[k] == pytest.approx(distance, abs=1e-9)
+        assert bearings[k] == pytest.approx(bearing, abs=1e-9)
+
+
+def test_consensus_batch_scoring_matches_scalar_gates():
+    # Every kept proposal's inlier set, count, and mean residual must agree
+    # with the scalar is_inlier/residuals_at path the batch replaced.
+    from mapsnap.street_solve import DEFAULT_GATES, is_inlier
+
+    constraints = scene() + [
+        constraint_for(TRUE_POSE, "LIAR", (500.0, 200.0), 70.0, offset_m=(400.0, 0.0))
+    ]
+    proposals = consensus_poses(
+        constraints, TRUE_POSE[2], [(LOG_SCALE, "prior")], SIZE, DEFAULT_GATES
+    )
+    assert proposals, "the true pose must survive"
+    for pose, inliers, _source in proposals:
+        scalar = [c for c in constraints if is_inlier(pose, c, SIZE, DEFAULT_GATES)]
+        assert [c[2] for c in inliers] == [c[2] for c in scalar]
+        assert len(inliers) >= DEFAULT_GATES.min_inliers
+        assert bearing_spread(pose, inliers) >= DEFAULT_GATES.bearing_diversity_deg
