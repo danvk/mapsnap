@@ -345,6 +345,8 @@ def test_truth_metrics_includes_score(tmp_path):
     assert score == {
         "net": 1.0,
         "good_share": 1.0,
+        "fair_share": 0.0,
+        "poor_share": 0.0,
         "disaster_share": 0.0,
         "n_pages": 1,
         "n_placed": 1,

@@ -246,6 +246,8 @@ def truth_metrics(truth_path: Path, iiif_path: Path) -> dict:
         metrics["score"] = {
             "net": round(score.net_score, 4),
             "good_share": round(score.good_share, 4),
+            "fair_share": round(score.fair_share, 4),
+            "poor_share": round(score.poor_share, 4),
             "disaster_share": round(score.disaster_share, 4),
             "n_pages": score.n_pages,
             "n_placed": score.n_placed,
