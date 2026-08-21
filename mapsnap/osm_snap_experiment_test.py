@@ -546,32 +546,6 @@ def test_load_page_units_populates_demoted_affine(tmp_path):
     assert units["p3"].demoted_affine is None
 
 
-def test_runner_up_search_extras_gates_on_incumbent_verification():
-    from mapsnap.osm_snap_experiment import runner_up_search_extras
-
-    unit = make_unit("fitted")
-    runner_up = np.array(affine(lon_shift_m=500.0))
-    unit.runner_up_affines = [runner_up]
-    incumbent_center = (
-        float(np.array(affine())[0] @ [500.0, 500.0, 1.0]),
-        float(np.array(affine())[1] @ [500.0, 500.0, 1.0]),
-    )
-    # A well-verifying incumbent keeps its pool untouched.
-    centers, thetas = runner_up_search_extras(unit, 1.4, [incumbent_center])
-    assert centers == [] and thetas == []
-    # A distrusted incumbent admits the runner-up center and its rotation.
-    centers, thetas = runner_up_search_extras(unit, 0.3, [incumbent_center])
-    assert len(centers) == 1 and len(thetas) == 1
-    # A runner-up on top of an existing center adds no duplicate center but
-    # still offers its bearing.
-    unit.runner_up_affines = [np.array(affine())]
-    centers, thetas = runner_up_search_extras(unit, 0.3, [incumbent_center])
-    assert centers == [] and len(thetas) == 1
-    # No verification score at all: stay out of the pool.
-    unit.runner_up_affines = [runner_up]
-    assert runner_up_search_extras(unit, None, [incumbent_center]) == ([], [])
-
-
 def test_runner_up_affines_load_for_fitted_pages_only(tmp_path):
 
     from mapsnap.edge_join_experiment import runner_up_affines_of

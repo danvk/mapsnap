@@ -75,13 +75,6 @@ RESCUE_STATES = {"nofit", "misscale", "1gcp", "outlier", "none"}
 # orientation -- its most trustworthy component -- ranks first.
 DEMOTED_SEED_SIGMA_DEG = 10.0
 
-# #340: a fitted page's RANSAC runner-ups may join the challenge search only
-# when the incumbent verifies below this. Ceiling measured on the 2026-08-14
-# corpus: no cross-channel adoption ever displaced an incumbent above 0.73
-# verification (18 street-solve adoptions), while the healthy fits whose pools
-# must not be perturbed verify 1.2-1.8.
-RUNNER_UP_MAX_INCUMBENT_VER = 1.0
-
 
 def artifacts_dir(volume: Path) -> Path:
     return volume / "artifacts" / "osm_snap"
@@ -714,26 +707,6 @@ def build_page_context(
         )
         if all(haversine_m(lat_c, lon_c, b, a) > 50.0 for a, b in centers):
             centers = centers + [(lon_c, lat_c)]
-    if unit.fit_state in RESCUE_STATES and unit.runner_up_affines:
-        # #340: a demoted fit's RANSAC runner-ups join the rescue search. The
-        # demotion itself is the distrust signal (no verification gate needed,
-        # unlike the fitted-incumbent path), and the demoted pose's own center
-        # is often exactly the alias that earned the demotion -- miami p13's
-        # misscale seed searched 8 candidates around the wrong block while the
-        # true pose sat in runner_up_poses at 99.9% of the winner's score.
-        for affine in unit.runner_up_affines:
-            lon_r = float(
-                affine[0, 0] * unit.width / 2
-                + affine[0, 1] * unit.height / 2
-                + affine[0, 2]
-            )
-            lat_r = float(
-                affine[1, 0] * unit.width / 2
-                + affine[1, 1] * unit.height / 2
-                + affine[1, 2]
-            )
-            if all(haversine_m(lat_r, lon_r, b, a) > 50.0 for a, b in centers):
-                centers = centers + [(lon_r, lat_r)]
     if not centers:
         return None, "no_keymap"
     labels = page_label_features(vctx, unit)
@@ -852,46 +825,6 @@ def candidate_record(candidate: SnapCandidate, unit: PageUnit) -> dict:
     return record
 
 
-def runner_up_search_extras(
-    unit: PageUnit,
-    incumbent_verification: float | None,
-    search_centers: list[tuple[float, float]],
-) -> tuple[list[tuple[float, float]], list[float]]:
-    """(extra centers, rotation thetas) RANSAC's runner-ups add to a challenge.
-
-    Empty unless the incumbent verifies below RUNNER_UP_MAX_INCUMBENT_VER --
-    above it no cross-channel adoption has ever displaced an incumbent, and
-    extra candidates in a healthy page's pool are pure perturbation risk
-    (nashville p6). Centers within 50 m of an existing search center are not
-    duplicated; every runner-up's rotation is offered regardless, since a
-    co-located near-tie can still disagree in bearing.
-    """
-    if not unit.runner_up_affines or incumbent_verification is None:
-        return [], []
-    if incumbent_verification >= RUNNER_UP_MAX_INCUMBENT_VER:
-        return [], []
-    centers: list[tuple[float, float]] = []
-    thetas: list[float] = []
-    for affine in unit.runner_up_affines:
-        lon_r = float(
-            affine[0, 0] * unit.width / 2
-            + affine[0, 1] * unit.height / 2
-            + affine[0, 2]
-        )
-        lat_r = float(
-            affine[1, 0] * unit.width / 2
-            + affine[1, 1] * unit.height / 2
-            + affine[1, 2]
-        )
-        if all(
-            haversine_m(lat_r, lon_r, b, a) > 50.0
-            for a, b in [*search_centers, *centers]
-        ):
-            centers.append((lon_r, lat_r))
-        thetas.append(math.degrees(math.atan2(-affine[1, 0], affine[0, 0])))
-    return centers, thetas
-
-
 def page_record(vctx: VolumeContext, unit: PageUnit) -> dict:
     """Generate the full candidates.jsonl record for one page."""
     ctx, status = build_page_context(vctx, unit)
@@ -971,41 +904,6 @@ def page_record(vctx: VolumeContext, unit: PageUnit) -> dict:
                     "radius_m": round(ctx.radius_m, 1),
                     "radius_source": "local-challenge",
                 }
-            # #340: RANSAC's near-tie runner-ups join the challenge as extra
-            # search centers + rotation priors -- but only under an incumbent
-            # the referee distrusts. No street-solve adoption has ever
-            # displaced an incumbent verifying above 0.73 (18 adoptions,
-            # 2026-08-14 corpus), so above RUNNER_UP_MAX_INCUMBENT_VER the
-            # ties are unbeatable noise and the pool stays untouched (the
-            # nashville p6 lesson: extra candidates can flip a healthy page).
-            # Runs after the local-challenge collapse, so each runner-up gets
-            # the same small-radius hunt an incumbent center does.
-            new_centers, thetas = runner_up_search_extras(
-                unit, incumbent.get("verification"), ctx.search_centers
-            )
-            if new_centers or thetas:
-                ctx.search_centers = [*ctx.search_centers, *new_centers]
-                for theta in thetas:
-                    ctx.rotation_priors = [
-                        *ctx.rotation_priors,
-                        RotationPrior(
-                            theta_deg=theta,
-                            sigma_deg=DEMOTED_SEED_SIGMA_DEG,
-                            source="ransac-runner-up",
-                        ),
-                    ]
-                    record["priors"]["rotation"].append(
-                        {
-                            "theta_deg": round(theta, 2),
-                            "sigma_deg": DEMOTED_SEED_SIGMA_DEG,
-                            "source": "ransac-runner-up",
-                        }
-                    )
-                if new_centers:
-                    record["search"]["runner_up_seeds"] = len(new_centers)
-                    record["search"]["centers"] = [
-                        [round(a, 7), round(b, 7)] for a, b in ctx.search_centers
-                    ]
     if unit.fit_state in RESCUE_STATES and unit.demoted_affine is not None:
         # #315: the demoted pose's center joined the search in
         # build_page_context; here its rotation — the pose's most trustworthy
@@ -1028,27 +926,6 @@ def page_record(vctx: VolumeContext, unit: PageUnit) -> dict:
                 "source": "demoted-pose",
             }
         )
-    if unit.fit_state in RESCUE_STATES and unit.runner_up_affines:
-        # #340: the runner-ups' bearings enter as priors exactly like the
-        # demoted pose's (their centers joined in build_page_context).
-        for affine in unit.runner_up_affines:
-            theta = math.degrees(math.atan2(-affine[1, 0], affine[0, 0]))
-            ctx.rotation_priors = [
-                *ctx.rotation_priors,
-                RotationPrior(
-                    theta_deg=theta,
-                    sigma_deg=DEMOTED_SEED_SIGMA_DEG,
-                    source="ransac-runner-up",
-                ),
-            ]
-            record["priors"]["rotation"].append(
-                {
-                    "theta_deg": round(theta, 2),
-                    "sigma_deg": DEMOTED_SEED_SIGMA_DEG,
-                    "source": "ransac-runner-up",
-                }
-            )
-        record["search"]["runner_up_seeds"] = len(unit.runner_up_affines)
     candidates = snap_page(ctx, vctx.feature_index)
     # #324: a candidate whose pose reads the page upside-down is
     # corpus-impossible (0/1,332 truth pages in the zone); snap's rotation
