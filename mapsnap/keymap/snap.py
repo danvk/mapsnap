@@ -602,7 +602,12 @@ def volume_pose_medians(volume: Path) -> tuple[float, float] | None:
         for channel in ("georef-street", "georef-snap", "georef"):
             path = volume / f"{page.stem}.{channel}.json"
             if path.exists():
-                affine = page_world_affine(json.loads(path.read_text()))
+                # Post-#270 sidecars exist even for declined/poseless fits;
+                # skip anything without corners instead of crashing.
+                try:
+                    affine = page_world_affine(json.loads(path.read_text()))
+                except (KeyError, TypeError, ValueError):
+                    continue
                 scales.append(affine_m_per_px(affine))
                 thetas.append(metric_theta(affine))
                 break
@@ -636,9 +641,11 @@ def published_rotations(volume: Path) -> dict[int, float]:
         for channel in ("georef-street", "georef-snap", "georef"):
             path = volume / f"{page.stem}.{channel}.json"
             if path.exists():
-                rotations[number] = metric_theta(
-                    page_world_affine(json.loads(path.read_text()))
-                )
+                try:
+                    affine = page_world_affine(json.loads(path.read_text()))
+                except (KeyError, TypeError, ValueError):
+                    continue  # poseless post-#270 sidecar
+                rotations[number] = metric_theta(affine)
                 break
     return rotations
 
@@ -804,6 +811,87 @@ def snap_volume(
     return rows
 
 
+def apply_neighbor_offsets(volume: Path, output_dir: Path, k: int = 5) -> int:
+    """Correct each match by the local residual of already-placed pages (#211).
+
+    For every page the production pipeline placed AND this matcher located,
+    ``offset = published centre − matcher centre`` measures the key map's
+    local distortion there. Each matched page is then shifted by the
+    component-wise median offset of its ``k`` nearest calibrated neighbours
+    (nearest in matcher space, self excluded). Measured on Detroit over 89
+    truth pages: median error 33 → 27 ft, ≤100 ft 74 → 78; the global-offset
+    control was a wash, so the recovered error is locally-correlated key-map
+    warp, not rigid misregistration. Caveat: on edge-of-volume pages the
+    offsets extrapolate and can mildly degrade an already-excellent match.
+    Returns the number of corrected sidecars.
+    """
+    from mapsnap.road_model import page_world_affine
+
+    def centre(doc: dict) -> tuple[float, float] | None:
+        corners = doc.get("corners")
+        if not corners:
+            return None
+        return (
+            sum(p[0] for p in corners) / 4.0,
+            sum(p[1] for p in corners) / 4.0,
+        )
+
+    def metres(a: tuple[float, float], b: tuple[float, float]) -> float:
+        kx = 111320.0 * math.cos(math.radians(a[1]))
+        return math.hypot((a[0] - b[0]) * kx, (a[1] - b[1]) * 110540.0)
+
+    matched: dict[str, dict] = {}
+    for path in sorted(output_dir.glob("p*.georef.json")):
+        doc = json.loads(path.read_text())
+        if centre(doc) is not None:
+            matched[path.name[: -len(".georef.json")]] = doc
+    offsets: dict[str, tuple[float, float]] = {}
+    for stem, doc in matched.items():
+        final = volume / f"{stem}.georef-final.json"
+        if not final.exists():
+            continue
+        published = centre(json.loads(final.read_text()))
+        own = centre(doc)
+        if published is None or own is None:
+            continue
+        offsets[stem] = (published[0] - own[0], published[1] - own[1])
+    if len(offsets) < k:
+        print(
+            f"neighbor-offset: only {len(offsets)} calibration pages; skipping",
+            file=sys.stderr,
+        )
+        return 0
+
+    def median(values: list[float]) -> float:
+        ordered = sorted(values)
+        return ordered[len(ordered) // 2]
+
+    corrected = 0
+    for stem, doc in matched.items():
+        own = centre(doc)
+        if own is None:
+            continue
+        calibration_centres = {
+            s: c for s in offsets if s != stem and (c := centre(matched[s])) is not None
+        }
+        neighbours = sorted(
+            (metres(own, c), s) for s, c in calibration_centres.items()
+        )[:k]
+        if not neighbours:
+            continue
+        dx = median([offsets[s][0] for _, s in neighbours])
+        dy = median([offsets[s][1] for _, s in neighbours])
+        affine = page_world_affine(doc)
+        affine[0, 2] += dx
+        affine[1, 2] += dy
+        doc["corners"] = affine_corners(affine, (doc["height"], doc["width"]))
+        doc["neighbor_offset_m"] = [round(v, 2) for v in (dx * 111320.0, dy * 110540.0)]
+        (output_dir / f"{stem}.georef.json").write_text(json.dumps(doc, indent=2))
+        corrected += 1
+    print(f"neighbor-offset: corrected {corrected} pages", file=sys.stderr)
+    return corrected
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(
         description="Place pages by matching their P(road) map to the key map's."
@@ -826,6 +914,14 @@ def main() -> None:
         ),
     )
     parser.add_argument(
+        "--neighbor-offset",
+        action="store_true",
+        help=(
+            "After matching, shift each page by the median local residual of "
+            "production-placed pages (k=5 nearest): Detroit median 33 -> 27 ft."
+        ),
+    )
+    parser.add_argument(
         "--min-margin",
         type=float,
         default=0.0,
@@ -840,6 +936,8 @@ def main() -> None:
         min_margin=args.min_margin,
         smoothing=args.smoothing,
     )
+    if args.neighbor_offset:
+        apply_neighbor_offsets(args.volume, output_dir)
     if not rows:
         print("No pages placed.", file=sys.stderr)
         return
