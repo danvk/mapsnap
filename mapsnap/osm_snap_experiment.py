@@ -403,9 +403,7 @@ def load_panel_units(volume: Path) -> list[PageUnit]:
                 keymap_centers=keymap_centers,
                 keymap_radius_m=keymap_radius,
                 keymap_regions=keymap_regions,
-                runner_up_affines=runner_up_affines_of(
-                    georef if state == "fitted" else None, width, height
-                ),
+                runner_up_affines=runner_up_affines_of(georef, width, height),
             )
         )
     return units
@@ -716,6 +714,26 @@ def build_page_context(
         )
         if all(haversine_m(lat_c, lon_c, b, a) > 50.0 for a, b in centers):
             centers = centers + [(lon_c, lat_c)]
+    if unit.fit_state in RESCUE_STATES and unit.runner_up_affines:
+        # #342: a demoted fit's RANSAC runner-ups join the rescue search. The
+        # demotion itself is the distrust signal (no verification gate needed,
+        # unlike the fitted-incumbent path), and the demoted pose's own center
+        # is often exactly the alias that earned the demotion -- miami p13's
+        # misscale seed searched 8 candidates around the wrong block while the
+        # true pose sat in runner_up_poses at 99.9% of the winner's score.
+        for affine in unit.runner_up_affines:
+            lon_r = float(
+                affine[0, 0] * unit.width / 2
+                + affine[0, 1] * unit.height / 2
+                + affine[0, 2]
+            )
+            lat_r = float(
+                affine[1, 0] * unit.width / 2
+                + affine[1, 1] * unit.height / 2
+                + affine[1, 2]
+            )
+            if all(haversine_m(lat_r, lon_r, b, a) > 50.0 for a, b in centers):
+                centers = centers + [(lon_r, lat_r)]
     if not centers:
         return None, "no_keymap"
     labels = page_label_features(vctx, unit)
@@ -1010,6 +1028,27 @@ def page_record(vctx: VolumeContext, unit: PageUnit) -> dict:
                 "source": "demoted-pose",
             }
         )
+    if unit.fit_state in RESCUE_STATES and unit.runner_up_affines:
+        # #342: the runner-ups' bearings enter as priors exactly like the
+        # demoted pose's (their centers joined in build_page_context).
+        for affine in unit.runner_up_affines:
+            theta = math.degrees(math.atan2(-affine[1, 0], affine[0, 0]))
+            ctx.rotation_priors = [
+                *ctx.rotation_priors,
+                RotationPrior(
+                    theta_deg=theta,
+                    sigma_deg=DEMOTED_SEED_SIGMA_DEG,
+                    source="ransac-runner-up",
+                ),
+            ]
+            record["priors"]["rotation"].append(
+                {
+                    "theta_deg": round(theta, 2),
+                    "sigma_deg": DEMOTED_SEED_SIGMA_DEG,
+                    "source": "ransac-runner-up",
+                }
+            )
+        record["search"]["runner_up_seeds"] = len(unit.runner_up_affines)
     candidates = snap_page(ctx, vctx.feature_index)
     # #324: a candidate whose pose reads the page upside-down is
     # corpus-impossible (0/1,332 truth pages in the zone); snap's rotation

@@ -321,9 +321,7 @@ def load_page_units(volume: Path) -> list[PageUnit]:
             keymap_centers=keymap_centers,
             keymap_radius_m=keymap_radius,
             keymap_regions=keymap_regions,
-            runner_up_affines=runner_up_affines_of(
-                georef if state == "fitted" else None, width, height
-            ),
+            runner_up_affines=runner_up_affines_of(georef, width, height),
         )
         if truth is not None and gen_affine is not None:
             unit.rmse_ft = grid_rmse_ft_between(
