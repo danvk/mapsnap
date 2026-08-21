@@ -869,8 +869,13 @@ def apply_neighbor_offsets(volume: Path, output_dir: Path, k: int = 5) -> int:
     corrected = 0
     for stem, doc in matched.items():
         own = centre(doc)
+        if own is None:
+            continue
+        calibration_centres = {
+            s: c for s in offsets if s != stem and (c := centre(matched[s])) is not None
+        }
         neighbours = sorted(
-            (metres(own, centre(matched[s])), s) for s in offsets if s != stem
+            (metres(own, c), s) for s, c in calibration_centres.items()
         )[:k]
         if not neighbours:
             continue
