@@ -1853,3 +1853,52 @@ def test_haversine_m_one_degree_latitude():
     # One degree of latitude is ~111 km anywhere on the globe.
     assert abs(haversine_m(0.0, 0.0, 1.0, 0.0) - 111_320) < 500
     assert haversine_m(38.9, -77.0, 38.9, -77.0) == 0.0
+
+
+def test_select_runner_up_poses_keeps_distinct_near_ties():
+    import numpy as np
+
+    from mapsnap.georef_from_labels import select_runner_up_poses
+
+    # Winner at the origin; poses expressed as tiny lon/lat affines around 0N.
+    # 1e-5 deg lon ~ 1.1 m, so 200 px * 5e-6 ~ 111 m offsets are "distinct".
+    def pose(dlon: float, rot_deg: float = 0.0):
+        c, s = np.cos(np.radians(rot_deg)), np.sin(np.radians(rot_deg))
+        scale = 5e-6
+        return np.array([[c * scale, -s * scale, dlon], [s * scale, c * scale, 40.0]])
+
+    best = pose(0.0)
+    scored = [
+        (1.00, best, 9),
+        (0.999, pose(0.001), 8),  # ~85 m away: distinct, kept
+        (0.995, pose(0.0011), 8),  # ~9 m from the previous tie: merged away
+        (0.95, pose(1e-7), 9),  # co-located with the winner: dropped
+        (0.5, pose(0.005), 7),  # below the 70% score floor: dropped
+    ]
+    records = select_runner_up_poses(scored, best, (1000, 1000))
+    assert len(records) == 1
+    assert records[0]["score_ratio"] == 0.999
+    assert records[0]["inlier_streets"] == 8
+    assert len(records[0]["corners"]) == 4
+
+
+def test_select_runner_up_poses_drops_upside_down_and_caps():
+    import numpy as np
+
+    from mapsnap.georef_from_labels import (
+        MAX_RUNNER_UP_POSES,
+        select_runner_up_poses,
+    )
+
+    def pose(dlon: float, rot_deg: float = 0.0):
+        c, s = np.cos(np.radians(rot_deg)), np.sin(np.radians(rot_deg))
+        scale = 5e-6
+        return np.array([[c * scale, -s * scale, dlon], [s * scale, c * scale, 40.0]])
+
+    best = pose(0.0)
+    scored = [(1.0, best, 9), (0.99, pose(0.001, rot_deg=180.0), 9)]
+    scored += [(0.98 - 0.01 * i, pose(0.002 * (i + 2)), 8) for i in range(8)]
+    records = select_runner_up_poses(scored, best, (1000, 1000))
+    # The 180-degree alias is corpus-impossible (#324) and never emitted.
+    assert all(r["score_ratio"] != 0.99 for r in records)
+    assert len(records) == MAX_RUNNER_UP_POSES

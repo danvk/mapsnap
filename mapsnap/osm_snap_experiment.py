@@ -34,6 +34,7 @@ from mapsnap.edge_join_experiment import (
     keymap_region_adjacency,
     load_page_units,
     load_prob,
+    runner_up_affines_of,
     volume_median_scale,
 )
 from mapsnap.feature_index import FeatureIndex
@@ -73,6 +74,13 @@ RESCUE_STATES = {"nofit", "misscale", "1gcp", "outlier", "none"}
 # enough that the ladder still explores, tight enough that the demoted fit's
 # orientation -- its most trustworthy component -- ranks first.
 DEMOTED_SEED_SIGMA_DEG = 10.0
+
+# #342: a fitted page's RANSAC runner-ups may join the challenge search only
+# when the incumbent verifies below this. Ceiling measured on the 2026-08-14
+# corpus: no cross-channel adoption ever displaced an incumbent above 0.73
+# verification (18 street-solve adoptions), while the healthy fits whose pools
+# must not be perturbed verify 1.2-1.8.
+RUNNER_UP_MAX_INCUMBENT_VER = 1.0
 
 
 def artifacts_dir(volume: Path) -> Path:
@@ -395,6 +403,9 @@ def load_panel_units(volume: Path) -> list[PageUnit]:
                 keymap_centers=keymap_centers,
                 keymap_radius_m=keymap_radius,
                 keymap_regions=keymap_regions,
+                runner_up_affines=runner_up_affines_of(
+                    georef if state == "fitted" else None, width, height
+                ),
             )
         )
     return units
@@ -821,6 +832,46 @@ def candidate_record(candidate: SnapCandidate, unit: PageUnit) -> dict:
             1,
         )
     return record
+
+
+def runner_up_search_extras(
+    unit: PageUnit,
+    incumbent_verification: float | None,
+    search_centers: list[tuple[float, float]],
+) -> tuple[list[tuple[float, float]], list[float]]:
+    """(extra centers, rotation thetas) RANSAC's runner-ups add to a challenge.
+
+    Empty unless the incumbent verifies below RUNNER_UP_MAX_INCUMBENT_VER --
+    above it no cross-channel adoption has ever displaced an incumbent, and
+    extra candidates in a healthy page's pool are pure perturbation risk
+    (nashville p6). Centers within 50 m of an existing search center are not
+    duplicated; every runner-up's rotation is offered regardless, since a
+    co-located near-tie can still disagree in bearing.
+    """
+    if not unit.runner_up_affines or incumbent_verification is None:
+        return [], []
+    if incumbent_verification >= RUNNER_UP_MAX_INCUMBENT_VER:
+        return [], []
+    centers: list[tuple[float, float]] = []
+    thetas: list[float] = []
+    for affine in unit.runner_up_affines:
+        lon_r = float(
+            affine[0, 0] * unit.width / 2
+            + affine[0, 1] * unit.height / 2
+            + affine[0, 2]
+        )
+        lat_r = float(
+            affine[1, 0] * unit.width / 2
+            + affine[1, 1] * unit.height / 2
+            + affine[1, 2]
+        )
+        if all(
+            haversine_m(lat_r, lon_r, b, a) > 50.0
+            for a, b in [*search_centers, *centers]
+        ):
+            centers.append((lon_r, lat_r))
+        thetas.append(math.degrees(math.atan2(-affine[1, 0], affine[0, 0])))
+    return centers, thetas
 
 
 def page_record(vctx: VolumeContext, unit: PageUnit) -> dict:

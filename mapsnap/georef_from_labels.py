@@ -1431,6 +1431,82 @@ def _rank_pairs_by_consensus(
     return [(int(idx_i[k]), int(idx_j[k])) for k in order[:top_k] if counts[k] >= 0]
 
 
+# Runner-up emission (#342): near-ties kept for snap to arbitrate. Measured on
+# miami: 80/86 truth pages have a distinct pose at >=70% of the winner's score,
+# and on p13 the TRUE pose scored 99.9% of a 1,195 ft winner -- RANSAC's own
+# objective cannot break such ties, but snap's independent evidence can.
+RUNNER_UP_MIN_SCORE_RATIO = 0.7
+RUNNER_UP_DISTINCT_M = 30.0
+RUNNER_UP_DISTINCT_DEG = 1.5
+MAX_RUNNER_UP_POSES = 4
+
+
+def select_runner_up_poses(
+    scored: list[tuple[float, np.ndarray, int]],
+    best_A: np.ndarray,
+    size: tuple[int, int],
+) -> list[dict]:
+    """Distinct near-tie poses from the RANSAC scoring loop, as sidecar records.
+
+    RANSAC must publish one winner, but on gridded cities its objective is
+    nearly flat across block aliases. Each returned pose scored at least
+    RUNNER_UP_MIN_SCORE_RATIO of the best score, sits >RUNNER_UP_DISTINCT_M or
+    >RUNNER_UP_DISTINCT_DEG from the winner and from every other kept pose, and
+    is never upside-down (#324). Records carry the corner quad (the sidecar
+    pose convention), the score ratio, and the inlier street count.
+    """
+    if not scored:
+        return []
+    width, height = size
+    best_score = max(score for score, _, _ in scored)
+    if best_score <= 0:
+        return []
+
+    def centre(A: np.ndarray) -> tuple[float, float]:
+        return apply_affine(A, width / 2, height / 2)
+
+    def rotation_deg(A: np.ndarray) -> float:
+        return math.degrees(math.atan2(float(A[1][0]), float(A[0][0])))
+
+    best_centre, best_rot = centre(best_A), rotation_deg(best_A)
+    cos_lat = math.cos(math.radians(best_centre[1]))
+
+    def distinct(c1, r1, c2, r2) -> bool:
+        metres = math.hypot(
+            (c1[0] - c2[0]) * 111_320 * cos_lat, (c1[1] - c2[1]) * 110_540
+        )
+        return metres > RUNNER_UP_DISTINCT_M or abs(r1 - r2) > RUNNER_UP_DISTINCT_DEG
+
+    kept: list[tuple[tuple[float, float], float]] = []
+    records: list[dict] = []
+    for score, A, n_streets in sorted(scored, key=lambda entry: -entry[0]):
+        if score < RUNNER_UP_MIN_SCORE_RATIO * best_score:
+            break
+        if pose_is_upside_down(A):
+            continue
+        c, r = centre(A), rotation_deg(A)
+        if not distinct(c, r, best_centre, best_rot):
+            continue
+        if any(not distinct(c, r, c2, r2) for c2, r2 in kept):
+            continue
+        kept.append((c, r))
+        records.append(
+            {
+                "corners": [
+                    [round(v, 7) for v in apply_affine(A, 0, 0)],
+                    [round(v, 7) for v in apply_affine(A, width, 0)],
+                    [round(v, 7) for v in apply_affine(A, width, height)],
+                    [round(v, 7) for v in apply_affine(A, 0, height)],
+                ],
+                "score_ratio": round(score / best_score, 4),
+                "inlier_streets": n_streets,
+            }
+        )
+        if len(records) >= MAX_RUNNER_UP_POSES:
+            break
+    return records
+
+
 def ransac_hybrid(
     gcps: list[IntersectionGCP],
     features: list[LabelFeature],
@@ -1441,6 +1517,7 @@ def ransac_hybrid(
     force_pair: tuple[int, int] | None = None,
     debug: bool = False,
     pair_records: list[dict] | None = None,
+    scored_sink: list[tuple[float, np.ndarray, int]] | None = None,
 ) -> tuple[np.ndarray | None, list[int], tuple[int, int] | None]:
     """Find the best similarity affine using intersection GCPs as seeds, label-based inlier scoring.
 
@@ -1524,6 +1601,13 @@ def ransac_hybrid(
         inliers, err = label_inliers(
             features, block_index, A, pos_threshold, dir_threshold, debug=debug
         )
+        if scored_sink is not None:
+            # Every scored pose, recorded BEFORE the vetoes below (like
+            # pair_records): a vetoed near-tie can still be the true pose, and
+            # the runner-up channel's consumer re-judges with its own evidence.
+            scored_sink.append(
+                (float(len(inliers)) * pos_threshold - err, A, len(inliers))
+            )
 
         # Record this pair's fit for the interactive debugger (only when --debug supplies a
         # collector). Recorded before the rotation-outlier reject below so even pairs the
@@ -3007,6 +3091,9 @@ def process_image(
     # Under --debug, collect every scored seed pair's fit so the debugger can offer
     # interactive seed-pair exploration (see _finalize_georef's gcp_pairs output).
     pair_records: list[dict] | None = [] if debug else None
+    # Always collect scored poses: distinct near-ties are published as
+    # runner_up_poses for the snap channel to arbitrate (select_runner_up_poses).
+    scored_poses: list[tuple[float, np.ndarray, int]] = []
     A, inlier_feat_indices, seed_pair = ransac_hybrid(
         gcps,
         features,
@@ -3015,6 +3102,7 @@ def process_image(
         force_pair=force_intersection,
         debug=debug,
         pair_records=pair_records,
+        scored_sink=scored_poses,
     )
     if A is None:
         print("RANSAC failed: no valid affine found.", file=sys.stderr)
@@ -3083,6 +3171,7 @@ def process_image(
             A = affine
             residuals = _inlier_residuals(features, block_index, A, inlier_feat_indices)
 
+    runner_ups = select_runner_up_poses(scored_poses, A, (img_w, img_h))
     scale, center = _finalize_georef(
         A,
         features,
@@ -3098,6 +3187,7 @@ def process_image(
         parameters=parameters,
         keymap=keymap,
         truth_polygons=truth_polygons,
+        extra_fields={"runner_up_poses": runner_ups} if runner_ups else None,
     )
     rotation = math.atan2(float(A[1, 0]), float(-A[1, 1]))
     return ProcessResult(
