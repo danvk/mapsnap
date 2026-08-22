@@ -1962,3 +1962,56 @@ def test_promotable_runner_up_requires_plausible_scale_and_near_tie():
     ]
     assert promotable_runner_up(doc, ref_scale_px_per_ft=1.0) is None
     assert promotable_runner_up({}, ref_scale_px_per_ft=1.0) is None
+
+
+def _divided_cross_blocks(separation_deg_lon: float):
+    """MAIN crossed by divided CROSS: two carriageways separation_deg_lon apart."""
+    lon1, lon2 = -90.0, -90.0 - separation_deg_lon
+    main = Block(
+        "MAIN",
+        np.array([[-90.02, 30.0], [lon2, 30.0], [lon1, 30.0], [-89.98, 30.0]]),
+    )
+    cross = [
+        Block("CROSS", np.array([[lon1, 29.99], [lon1, 30.0], [lon1, 30.01]])),
+        Block("CROSS", np.array([[lon2, 29.99], [lon2, 30.0], [lon2, 30.01]])),
+    ]
+    return {"MAIN": [main], "CROSS": cross}
+
+
+def test_find_intersection_gcps_emits_centroid_for_divided_road():
+    import pytest
+
+    from mapsnap.georef_from_labels import find_intersection_gcps
+
+    # Carriageways ~95 ft apart: above the 60 ft cluster merge, inside the
+    # 250 ft centroid span. One image crossing, three world interpretations.
+    block_index = _divided_cross_blocks(0.0003)
+    features = [
+        _rh_feat("MAIN", (500.0, 200.0), 0.0),
+        _rh_feat("CROSS", (520.0, 400.0), math.pi / 2),
+    ]
+    gcps = find_intersection_gcps(features, block_index, (1000, 1000))
+    assert len(gcps) == 3
+    assert sum(1 for g in gcps if g.centroid) == 1
+    synthetic = next(g for g in gcps if g.centroid)
+    assert synthetic.geo[0] == pytest.approx(-90.00015)
+    assert synthetic.geo[1] == pytest.approx(30.0)
+    # All three claim the same image point: alternatives, not extra control points.
+    assert all(
+        math.hypot(g.pixel[0] - gcps[0].pixel[0], g.pixel[1] - gcps[0].pixel[1]) < 5.0
+        for g in gcps
+    )
+
+
+def test_find_intersection_gcps_no_centroid_past_span_cap():
+    from mapsnap.georef_from_labels import find_intersection_gcps
+
+    # ~315 ft apart: two genuinely distinct intersections, no synthetic midpoint.
+    block_index = _divided_cross_blocks(0.001)
+    features = [
+        _rh_feat("MAIN", (500.0, 200.0), 0.0),
+        _rh_feat("CROSS", (520.0, 400.0), math.pi / 2),
+    ]
+    gcps = find_intersection_gcps(features, block_index, (1000, 1000))
+    assert len(gcps) == 2
+    assert not any(g.centroid for g in gcps)

@@ -87,6 +87,10 @@ class IntersectionGCP:
     # crossing the pre-#106 tiebreak would have discarded.
     straightened: bool = False
     divergent_kept: bool = False
+    # #27: a synthetic candidate at the joint centroid of a multi-cluster
+    # crossing (a divided road's carriageways), offered ALONGSIDE the
+    # per-cluster candidates for RANSAC and the runner-up channel to judge.
+    centroid: bool = False
 
 
 @dataclass
@@ -861,6 +865,8 @@ SPECIAL_CASE_COUNTS: "_Counter[str]" = _Counter(
         "seed_veto_changed_winner": 0,
         "straightened_in_winning_seed": 0,
         "divergent_kept_in_winning_seed": 0,
+        "centroid_candidates_emitted": 0,
+        "centroid_in_winning_seed": 0,
     }
 )
 
@@ -1123,6 +1129,63 @@ def straight_intersection_geo(
     )
 
 
+# #27: emit a joint-centroid candidate only when a pair's crossing clusters
+# plausibly describe ONE intersection event (carriageways of a divided road, a
+# short jog). Wider spans are genuinely distinct intersections or a mislabel.
+CENTROID_SPAN_MAX_FT = 250.0
+
+
+def _geo_span_ft(geos: list[tuple[float, float]]) -> float:
+    """Largest pairwise distance in feet among a few (lon, lat) points."""
+    mean_lat = sum(g[1] for g in geos) / len(geos)
+    ft_lon = _FT_PER_DEG_LAT * math.cos(math.radians(mean_lat))
+    return max(
+        (
+            math.hypot((a[0] - b[0]) * ft_lon, (a[1] - b[1]) * _FT_PER_DEG_LAT)
+            for i, a in enumerate(geos)
+            for b in geos[i + 1 :]
+        ),
+        default=0.0,
+    )
+
+
+def _pair_crossing_candidates(
+    feats_a: list[LabelFeature],
+    feats_b: list[LabelFeature],
+    geo: tuple[float, float],
+    *,
+    straightened: bool = False,
+    centroid: bool = False,
+) -> list["IntersectionGCP"]:
+    """One candidate crossing per (label A instance, label B instance) pair.
+
+    The pixel crossing comes from the two labels' long axes; ``geo`` is the world
+    location every candidate claims. Instances whose axes are parallel produce
+    no crossing and are skipped.
+    """
+    candidates: list[IntersectionGCP] = []
+    for fa in feats_a:
+        for fb in feats_b:
+            ca, cb = np.array(fa.center), np.array(fb.center)
+            crossing = pixel_line_intersection(ca, fa.dir_pix, cb, fb.dir_pix)
+            if crossing is None:
+                continue
+            candidates.append(
+                IntersectionGCP(
+                    label_a=fa.text,
+                    label_b=fb.text,
+                    pixel=crossing,
+                    geo=geo,
+                    pixel_dist=float(np.linalg.norm(ca - cb)),
+                    feat_a=fa,
+                    feat_b=fb,
+                    straightened=straightened,
+                    centroid=centroid,
+                )
+            )
+    return candidates
+
+
 def find_intersection_gcps(
     features: list[LabelFeature],
     block_index: dict[str, list[Block]],
@@ -1191,9 +1254,11 @@ def find_intersection_gcps(
             # axis" is meaningless and would fabricate a large bogus shift (Brooklyn p26: COURT
             # jogs across BRYANT, mistriggering a 175 ft move that breaks the fit).
             unique_intersection = len(geo_clusters) == 1
+            cluster_geos: list[tuple[float, float]] = []
             for cluster in geo_clusters:
                 cluster_pts = np.array(cluster)
                 geo = (float(cluster_pts[:, 0].mean()), float(cluster_pts[:, 1].mean()))
+                cluster_geos.append(geo)
                 # If a street curves through the shared vertex, the vertex sits off the
                 # straight axis the map draws; use the straight-axis crossing instead so the
                 # geo matches the straight-line pixel crossing (no-op for straight junctions).
@@ -1210,29 +1275,44 @@ def find_intersection_gcps(
                 # Crossings that coincide (genuine duplicate labels) later collapse to one GCP;
                 # divergent ones (a mislabel like p153's "LIBERTY IRON WORKS") are kept apart so
                 # RANSAC can choose. See _dedupe_crossings_by_pixel / DUP_CROSSING_TOL_FRACTION.
-                candidates: list[IntersectionGCP] = []
-                for fa in feats_by_text[text_a]:
-                    for fb in feats_by_text[text_b]:
-                        ca, cb = np.array(fa.center), np.array(fb.center)
-                        pixel_dist = float(np.linalg.norm(ca - cb))
-                        crossing = pixel_line_intersection(
-                            ca, fa.dir_pix, cb, fb.dir_pix
-                        )
-                        if crossing is None:
-                            continue
-                        candidates.append(
-                            IntersectionGCP(
-                                label_a=text_a,
-                                label_b=text_b,
-                                pixel=crossing,
-                                geo=geo,
-                                pixel_dist=pixel_dist,
-                                feat_a=fa,
-                                feat_b=fb,
-                                straightened=geo_was_straightened,
-                            )
-                        )
-                gcps.extend(_dedupe_crossings_by_pixel(candidates, tol_px))
+                gcps.extend(
+                    _dedupe_crossings_by_pixel(
+                        _pair_crossing_candidates(
+                            feats_by_text[text_a],
+                            feats_by_text[text_b],
+                            geo,
+                            straightened=geo_was_straightened,
+                        ),
+                        tol_px,
+                    )
+                )
+            # #27: several clusters within one block's span are ONE image crossing
+            # with alternative world interpretations -- a divided road's carriageways
+            # (Sanborn usually draws the single centre street, whose crossing is the
+            # carriageways' midpoint) or a jogging street's two true crossings (where
+            # the midpoint is fiction). No distance threshold can tell those apart, so
+            # the joint centroid joins the per-cluster candidates as one more
+            # alternative for RANSAC -- and the runner-up channel (#340) -- to judge.
+            # Clusters spanning more than CENTROID_SPAN_MAX_FT are genuinely distinct
+            # intersections (or a mislabel), where a synthetic midpoint means nothing.
+            if len(cluster_geos) >= 2 and _geo_span_ft(cluster_geos) <= (
+                CENTROID_SPAN_MAX_FT
+            ):
+                centre = (
+                    sum(g[0] for g in cluster_geos) / len(cluster_geos),
+                    sum(g[1] for g in cluster_geos) / len(cluster_geos),
+                )
+                added = _dedupe_crossings_by_pixel(
+                    _pair_crossing_candidates(
+                        feats_by_text[text_a],
+                        feats_by_text[text_b],
+                        centre,
+                        centroid=True,
+                    ),
+                    tol_px,
+                )
+                SPECIAL_CASE_COUNTS["centroid_candidates_emitted"] += len(added)
+                gcps.extend(added)
 
     return sorted(gcps, key=lambda g: g.pixel_dist)
 
@@ -1815,6 +1895,8 @@ def ransac_hybrid(
                 SPECIAL_CASE_COUNTS["straightened_in_winning_seed"] += 1
             if gcps[index].divergent_kept:
                 SPECIAL_CASE_COUNTS["divergent_kept_in_winning_seed"] += 1
+            if gcps[index].centroid:
+                SPECIAL_CASE_COUNTS["centroid_in_winning_seed"] += 1
     return best_A, best_inliers, best_pair
 
 
@@ -1902,6 +1984,7 @@ def _finalize_georef(
             )
             <= 0.001,
             "initial": i in initial_set,
+            **({"centroid": True} if gcp.centroid else {}),
         }
         for i, gcp in enumerate(gcps)
     ]
