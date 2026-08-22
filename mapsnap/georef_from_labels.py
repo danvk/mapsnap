@@ -1431,6 +1431,145 @@ def _rank_pairs_by_consensus(
     return [(int(idx_i[k]), int(idx_j[k])) for k in order[:top_k] if counts[k] >= 0]
 
 
+# Runner-up emission (#340): near-ties kept for snap to arbitrate. Measured on
+# miami: 80/86 truth pages have a distinct pose at >=70% of the winner's score,
+# and on p13 the TRUE pose scored 99.9% of a 1,195 ft winner -- RANSAC's own
+# objective cannot break such ties, but snap's independent evidence can.
+RUNNER_UP_MIN_SCORE_RATIO = 0.7
+RUNNER_UP_DISTINCT_M = 30.0
+RUNNER_UP_DISTINCT_DEG = 1.5
+MAX_RUNNER_UP_POSES = 4
+
+# Promotion (#340): a runner-up may replace a scale-outlier winner only when
+# it nearly tied it. Promotion publishes an incumbent -- a stronger claim than
+# seeding a search -- so the bar sits well above the 0.7 emission floor.
+RUNNER_UP_PROMOTE_MIN_RATIO = 0.9
+
+
+def promotable_runner_up(georef: dict, ref_scale_px_per_ft: float) -> dict | None:
+    """The best-scoring runner-up whose scale the volume's rungs accept.
+
+    #340: when the WINNER is a scale outlier but a near-tie is not, the
+    near-tie is a far better bet than anything a rescue search will find --
+    miami p13's 99.9%-score runner-up IS the true pose at 10 ft, while the
+    misscale winner's rescue searched the wrong block and reconcile left the
+    page unplaced. Only near-ties carrying their seed pair qualify, so the
+    caller can refit the page through the normal path (force_pair) rather
+    than swap corners under stale GCP records.
+    """
+    from mapsnap.road_model import page_scale_m_per_px
+    from mapsnap.utils import FEET_PER_METER
+
+    for pose in georef.get("runner_up_poses") or []:
+        if pose.get("score_ratio", 0.0) < RUNNER_UP_PROMOTE_MIN_RATIO:
+            break  # records are score-ordered
+        pair_px, pair_geo = pose.get("pair_px"), pose.get("pair_geo")
+        if not pair_px or len(pair_px) != 2 or not pair_geo or len(pair_geo) != 2:
+            continue
+        try:
+            m_per_px = page_scale_m_per_px(
+                {
+                    "corners": pose["corners"],
+                    "width": georef["width"],
+                    "height": georef["height"],
+                }
+            )
+        except (KeyError, TypeError, ValueError):
+            continue
+        if m_per_px <= 0:
+            continue
+        px_per_ft = 1.0 / (m_per_px * FEET_PER_METER)
+        if is_scale_outlier(px_per_ft / ref_scale_px_per_ft):
+            continue
+        return pose
+    return None
+
+
+def select_runner_up_poses(
+    scored: list,
+    best_A: np.ndarray,
+    size: tuple[int, int],
+) -> list[dict]:
+    """Distinct near-tie poses from the RANSAC scoring loop, as sidecar records.
+
+    RANSAC must publish one winner, but on gridded cities its objective is
+    nearly flat across block aliases. Each returned pose scored at least
+    RUNNER_UP_MIN_SCORE_RATIO of the best score, sits >RUNNER_UP_DISTINCT_M or
+    >RUNNER_UP_DISTINCT_DEG from the winner and from every other kept pose, and
+    is never upside-down (#324). Records carry the corner quad (the sidecar
+    pose convention), the score ratio, and the inlier street count.
+    """
+    if not scored:
+        return []
+    width, height = size
+    best_score = max(entry[0] for entry in scored)
+    if best_score <= 0:
+        return []
+
+    def centre(A: np.ndarray) -> tuple[float, float]:
+        return apply_affine(A, width / 2, height / 2)
+
+    def rotation_deg(A: np.ndarray) -> float:
+        return math.degrees(math.atan2(float(A[1][0]), float(A[0][0])))
+
+    best_centre, best_rot = centre(best_A), rotation_deg(best_A)
+    cos_lat = math.cos(math.radians(best_centre[1]))
+
+    def distinct(c1, r1, c2, r2) -> bool:
+        metres = math.hypot(
+            (c1[0] - c2[0]) * 111_320 * cos_lat, (c1[1] - c2[1]) * 110_540
+        )
+        return metres > RUNNER_UP_DISTINCT_M or abs(r1 - r2) > RUNNER_UP_DISTINCT_DEG
+
+    kept: list[tuple[tuple[float, float], float]] = []
+    records: list[dict] = []
+    for score, A, n_streets, pair, pair_pixels in sorted(
+        scored, key=lambda entry: -entry[0]
+    ):
+        if score < RUNNER_UP_MIN_SCORE_RATIO * best_score:
+            break
+        if pose_is_upside_down(A):
+            continue
+        c, r = centre(A), rotation_deg(A)
+        if not distinct(c, r, best_centre, best_rot):
+            continue
+        if any(not distinct(c, r, c2, r2) for c2, r2 in kept):
+            continue
+        kept.append((c, r))
+        records.append(
+            {
+                "corners": [
+                    [round(v, 7) for v in apply_affine(A, 0, 0)],
+                    [round(v, 7) for v in apply_affine(A, width, 0)],
+                    [round(v, 7) for v in apply_affine(A, width, height)],
+                    [round(v, 7) for v in apply_affine(A, 0, height)],
+                ],
+                "score_ratio": round(score / best_score, 4),
+                "inlier_streets": n_streets,
+                # The seed pair that produced this pose, so promotion (#340)
+                # can REFIT the page through the normal path via force_pair
+                # instead of swapping corners under stale GCP records. Indices
+                # are tier-relative; the crossing PIXELS are the durable
+                # address (see ransac_hybrid's force_pair_pixels).
+                "pair": [int(pair[0]), int(pair[1])],
+                "pair_px": [
+                    [round(float(px), 2), round(float(py), 2)]
+                    for (px, py), _geo in pair_pixels
+                ],
+                # A crossing PIXEL can carry several world candidates (a
+                # jogging street's two crossings share one pixel), so the geo
+                # side disambiguates which candidate this pose used.
+                "pair_geo": [
+                    [round(float(lon), 7), round(float(lat), 7)]
+                    for _px, (lon, lat) in pair_pixels
+                ],
+            }
+        )
+        if len(records) >= MAX_RUNNER_UP_POSES:
+            break
+    return records
+
+
 def ransac_hybrid(
     gcps: list[IntersectionGCP],
     features: list[LabelFeature],
@@ -1441,6 +1580,8 @@ def ransac_hybrid(
     force_pair: tuple[int, int] | None = None,
     debug: bool = False,
     pair_records: list[dict] | None = None,
+    scored_sink: list | None = None,
+    force_pair_pixels: tuple | None = None,
 ) -> tuple[np.ndarray | None, list[int], tuple[int, int] | None]:
     """Find the best similarity affine using intersection GCPs as seeds, label-based inlier scoring.
 
@@ -1468,6 +1609,36 @@ def ransac_hybrid(
     n = len(gcps)
     if n < 2:
         return None, [], None
+
+    if force_pair_pixels is not None:
+        # Content-addressed forcing (#340 promotion): resolve the recorded
+        # crossing PIXELS to this call's gcps indices. Indices are only
+        # meaningful within one tier's gcps list -- the keymap-restricted
+        # tier and the full-index tier build different lists (forcing p74's
+        # tier-2 indices in tier 1 read past the end of a 2-gcp list) -- but
+        # a crossing's pixel position identifies it in whichever tier can see
+        # it. A tier that cannot resolve both pixels returns no fit, so the
+        # strict-first/relaxed-retry cascade falls through to the tier that
+        # can.
+        resolved = []
+        for (want_x, want_y), (want_lon, want_lat) in force_pair_pixels:
+            match = next(
+                (
+                    i
+                    for i, gcp in enumerate(gcps)
+                    if abs(gcp.pixel[0] - want_x) <= 1.0
+                    and abs(gcp.pixel[1] - want_y) <= 1.0
+                    and abs(gcp.geo[0] - want_lon) <= 1e-5
+                    and abs(gcp.geo[1] - want_lat) <= 1e-5
+                ),
+                None,
+            )
+            if match is None:
+                return None, [], None
+            resolved.append(match)
+        if resolved[0] == resolved[1]:
+            return None, [], None
+        force_pair = (resolved[0], resolved[1])
 
     total_pairs = n * (n - 1) // 2
 
@@ -1524,6 +1695,19 @@ def ransac_hybrid(
         inliers, err = label_inliers(
             features, block_index, A, pos_threshold, dir_threshold, debug=debug
         )
+        if scored_sink is not None:
+            # Every scored pose, recorded BEFORE the vetoes below (like
+            # pair_records): a vetoed near-tie can still be the true pose, and
+            # the runner-up channel's consumer re-judges with its own evidence.
+            scored_sink.append(
+                (
+                    float(len(inliers)) * pos_threshold - err,
+                    A,
+                    len(inliers),
+                    pair_idx,
+                    ((a.pixel, a.geo), (b.pixel, b.geo)),
+                )
+            )
 
         # Record this pair's fit for the interactive debugger (only when --debug supplies a
         # collector). Recorded before the rotation-outlier reject below so even pairs the
@@ -2133,6 +2317,81 @@ def correct_square_feature_dirs(
             feat.dir_pix = round(best_dir % math.pi, 4)
 
 
+def _promote_runner_up(
+    img_path: str,
+    out_path: str,
+    ref_scale_px_per_ft: float,
+    worker_initargs: tuple,
+    demoted_detail: dict,
+) -> bool:
+    """Refit a scale-outlier page from its best rung-plausible runner-up (#340).
+
+    Returns True when the page was refit and stays published. The refit runs
+    the ordinary per-page pipeline with the runner-up's seed pair forced, so
+    the promoted sidecar carries its own coherent inliers/GCPs. The promoted
+    fit's scale is re-verified afterwards; a refit that lands back outside the
+    rungs (or fails) leaves the original sidecar for the caller to demote.
+    """
+    from mapsnap.road_model import page_scale_m_per_px
+    from mapsnap.utils import FEET_PER_METER
+
+    try:
+        georef = json.loads(Path(out_path).read_text())
+    except (OSError, json.JSONDecodeError):
+        return False
+    pose = promotable_runner_up(georef, ref_scale_px_per_ft)
+    if pose is None:
+        return False
+    if not _worker_state:
+        _init_worker(*worker_initargs)
+    original_sidecar = Path(out_path).read_text()
+    saved_force = _worker_state.get("force_pair_pixels")
+    _worker_state["force_pair_pixels"] = (
+        (tuple(pose["pair_px"][0]), tuple(pose["pair_geo"][0])),
+        (tuple(pose["pair_px"][1]), tuple(pose["pair_geo"][1])),
+    )
+    try:
+        _, result = _process_one_image(img_path)
+    except Exception as error:  # noqa: BLE001 -- a failed refit must never eat the sidecar
+        print(f"Runner-up refit failed for {img_path}: {error}", file=sys.stderr)
+        result = None
+    finally:
+        _worker_state["force_pair_pixels"] = saved_force
+    promoted: dict | None = None
+    promoted_px_per_ft = None
+    if result is not None and result.success:
+        try:
+            loaded = json.loads(Path(out_path).read_text())
+            promoted_px_per_ft = 1.0 / (page_scale_m_per_px(loaded) * FEET_PER_METER)
+            promoted = loaded
+        except (OSError, json.JSONDecodeError, KeyError, ZeroDivisionError):
+            promoted = None
+            promoted_px_per_ft = None
+    if (
+        promoted is None
+        or promoted_px_per_ft is None
+        or is_scale_outlier(promoted_px_per_ft / ref_scale_px_per_ft)
+    ):
+        # Refit failed or reproduced an off-rung pose after all: put the
+        # original fit back so the caller demotes exactly what it measured.
+        Path(out_path).write_text(original_sidecar)
+        return False
+    promoted["promoted_from_runner_up"] = {
+        "score_ratio": pose["score_ratio"],
+        "pair_px": pose["pair_px"],
+        "demoted": demoted_detail,
+    }
+    Path(out_path).write_text(json.dumps(promoted, indent=2))
+    SPECIAL_CASE_COUNTS["misscale_promoted_runner_up"] += 1
+    print(
+        f"Promoted runner-up for {img_path}: crossing pixels {pose['pair_px']} at "
+        f"{pose['score_ratio']:.1%} of the demoted winner's score, "
+        f"{promoted_px_per_ft:.4f} px/ft (reference {ref_scale_px_per_ft:.4f})",
+        file=sys.stderr,
+    )
+    return True
+
+
 def derive_paths(image_path: str) -> tuple[str, str, str]:
     """Derive labels, output, and per-page log paths from an image path.
 
@@ -2363,6 +2622,7 @@ def _process_one_image(image_path: str) -> tuple[str, ProcessResult]:
             min_aspect_ratio=_worker_state["min_aspect_ratio"],
             edge_margin=_worker_state["edge_margin"],
             force_intersection=_worker_state["force_intersection"],
+            force_pair_pixels=_worker_state.get("force_pair_pixels"),
             one_gcp_fits=_worker_state["one_gcp_fits"],
             debug=_worker_state["debug"],
             parameters=_worker_state["parameters"],
@@ -2907,6 +3167,7 @@ def process_image(
     min_aspect_ratio: float = 2.0,
     edge_margin: float = 0.0,
     force_intersection: tuple[int, int] | None = None,
+    force_pair_pixels: tuple | None = None,
     one_gcp_fits: bool = False,
     debug: bool = False,
     parameters: dict | None = None,
@@ -3007,6 +3268,9 @@ def process_image(
     # Under --debug, collect every scored seed pair's fit so the debugger can offer
     # interactive seed-pair exploration (see _finalize_georef's gcp_pairs output).
     pair_records: list[dict] | None = [] if debug else None
+    # Always collect scored poses: distinct near-ties are published as
+    # runner_up_poses for the snap channel to arbitrate (select_runner_up_poses).
+    scored_poses: list = []
     A, inlier_feat_indices, seed_pair = ransac_hybrid(
         gcps,
         features,
@@ -3015,6 +3279,8 @@ def process_image(
         force_pair=force_intersection,
         debug=debug,
         pair_records=pair_records,
+        scored_sink=scored_poses,
+        force_pair_pixels=force_pair_pixels,
     )
     if A is None:
         print("RANSAC failed: no valid affine found.", file=sys.stderr)
@@ -3083,6 +3349,7 @@ def process_image(
             A = affine
             residuals = _inlier_residuals(features, block_index, A, inlier_feat_indices)
 
+    runner_ups = select_runner_up_poses(scored_poses, A, (img_w, img_h))
     scale, center = _finalize_georef(
         A,
         features,
@@ -3098,6 +3365,7 @@ def process_image(
         parameters=parameters,
         keymap=keymap,
         truth_polygons=truth_polygons,
+        extra_fields={"runner_up_poses": runner_ups} if runner_ups else None,
     )
     rotation = math.atan2(float(A[1, 0]), float(-A[1, 1]))
     return ProcessResult(
@@ -4038,6 +4306,26 @@ def main() -> None:
                         continue
                 _, out_path, _ = derive_paths(img_path)
                 if os.path.exists(out_path):
+                    # #340: before demoting, check whether a near-tie runner-up
+                    # carries a rung-plausible scale. If so, REFIT the page with
+                    # that pose's seed pair forced -- the promoted fit goes
+                    # through the normal path (its own inliers, GCPs, and
+                    # runner-ups), becomes the incumbent, and snap REFINES it
+                    # instead of rescuing a page whose search anchors on the
+                    # wrong pose (miami p13: misscale winner 1,195 ft; its
+                    # 99.9%-score runner-up is the true pose at 10 ft).
+                    if _promote_runner_up(
+                        img_path,
+                        out_path,
+                        ref_scale_px_per_ft,
+                        worker_initargs,
+                        demoted_detail={
+                            "px_per_ft": round(px_per_ft, 4),
+                            "reference_px_per_ft": round(ref_scale_px_per_ft, 4),
+                            "ratio": round(ratio, 3),
+                        },
+                    ):
+                        continue
                     sidecar.demote(
                         out_path,
                         sidecar.MISSCALE,
