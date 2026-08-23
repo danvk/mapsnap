@@ -60,7 +60,11 @@ export function statsByItemIndex(
   const byKey = new Map(rows.map((row) => [row.genPageKey, row]));
   const stats = new Map<number, PageCompareStats>();
   for (const page of pages) {
-    const row = byKey.get(page.stem);
+    // Sidecar keys are normalized to lowercase (compareTxt.ts); page stems
+    // keep the disk file's case, and lettered sheets are uppercase on some
+    // volumes (asheville p3C). Match case-insensitively or those pages
+    // silently lose their compare colors.
+    const row = byKey.get(page.stem.toLowerCase());
     if (!row) continue;
     stats.set(page.itemIndex, {
       rmseFt: row.rmseFt,
