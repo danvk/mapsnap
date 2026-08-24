@@ -112,3 +112,21 @@ def test_channel_writers_and_arbiter_agree_on_names(tmp_path):
     assert channels == set(CHANNEL_ORDER), (
         f"channels written {channels} != channels arbitrated {set(CHANNEL_ORDER)}"
     )
+
+
+def test_clear_derived_sidecars_clears_snap_caches(tmp_path: Path):
+    # #342: a fit must never inherit a previous run's snap candidate or
+    # selection records -- cache temperature alone flipped KC pages 7.4 <-> 282 ft.
+    (tmp_path / "p1.georef.json").write_text("{}")
+    snap = tmp_path / "artifacts" / "osm_snap"
+    street = tmp_path / "artifacts" / "street_solve"
+    snap.mkdir(parents=True)
+    street.mkdir(parents=True)
+    (snap / "candidates.jsonl").write_text("{}\n")
+    (snap / "selection_volume.jsonl").write_text("{}\n")
+    (street / "candidates.jsonl").write_text("{}\n")
+    removed = clear_derived_sidecars(tmp_path)
+    assert removed == 4
+    assert not (snap / "candidates.jsonl").exists()
+    assert not (snap / "selection_volume.jsonl").exists()
+    assert not (street / "candidates.jsonl").exists()
