@@ -1817,12 +1817,14 @@ def cmd_sweep_refine(volumes: list[Path], recompute: bool = False) -> None:
 # per-page rescue score/margin gates, the volume-energy conservative elbow,
 # and the arbitration score gate.
 # Absolute verification bars are calibrated to the road UNet's score
-# distribution. v3 (30-volume retrain) lifts genuine poses' verification by
-# +0.10 median over v1 (164 identical incumbent poses, detroit+richmond:
-# median 1.055 -> 1.159, driven by inlier_frac and chamfer), so the absolute
-# bars move with it -- otherwise rescues that used to fail the bar clear it
-# on the lift alone (detroit p61/p8/p93 vacuum-fills at 358-591 ft). Gap
-# comparisons (challenge margins) are shift-invariant and stay unchanged.
+# distribution. v4 (30-volume retrain at v1's width; #173 uniform sampling)
+# lifts verification over v1 by +0.05 median on good poses and +0.13 on the
+# rest (164 identical incumbent poses, detroit+richmond: absolute median
+# 1.055 -> 1.199, driven by inlier_frac and chamfer), so the absolute bars
+# carry a +0.10 offset inside that band -- otherwise rescues that used to
+# fail the bar clear it on the lift alone (detroit p61/p8/p93 vacuum-fills
+# at 358-591 ft under uncalibrated v3). Gap comparisons (challenge margins)
+# are shift-invariant and stay unchanged.
 PRODUCTION_GATE_SCORE = 1.35
 PRODUCTION_GATE_MARGIN = 0.25
 PRODUCTION_ARBITRATE_GATE = 1.6
