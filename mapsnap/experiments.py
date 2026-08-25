@@ -402,18 +402,20 @@ def archive_run(
     # poses this run actually weighed (#270). Without these the baseline is
     # unrecoverable once any post-run experiment re-matches: the files live at
     # fixed paths and are overwritten in place.
+    # Globbed, not enumerated: clear_derived_sidecars deletes every
+    # candidates/selection file at the next fit's start, so anything the
+    # archive misses is destroyed rather than merely stale -- and the
+    # selection variants have grown before (selection_volume, selection_argmax
+    # were never in the old hardcoded list).
     for channel in ("osm_snap", "street_solve"):
         channel_dir = artifacts_dir / channel
-        for name in (
-            "candidates.jsonl",
-            "selection_arbitrate.jsonl",
-            "selection_union.jsonl",
+        for source in (
+            *sorted(channel_dir.glob("candidates.jsonl")),
+            *sorted(channel_dir.glob("selection_*.jsonl")),
         ):
-            source = channel_dir / name
-            if source.exists():
-                target_dir = run_dir / channel
-                target_dir.mkdir(exist_ok=True)
-                shutil.copy2(source, target_dir / name)
+            target_dir = run_dir / channel
+            target_dir.mkdir(exist_ok=True)
+            shutil.copy2(source, target_dir / source.name)
     if iiif_path is not None and iiif_path.exists():
         shutil.copy2(iiif_path, run_dir / iiif_path.name)
     if compare_txt is not None and compare_txt.exists():
