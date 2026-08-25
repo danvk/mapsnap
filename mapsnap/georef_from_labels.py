@@ -2286,6 +2286,7 @@ def _init_worker(
     truth_by_page: dict[int, list[list[list[float]]]] | None = None,
     keep_labels_on_fill: bool = False,
     collinear_perp_tolerance_px: float = COLLINEAR_PERP_TOLERANCE_PX,
+    embed_locator: KeymapLocator | None = None,
 ) -> None:
     """Populate _worker_state once per worker process (or once in the main process)."""
     _worker_state.update(
@@ -2305,6 +2306,7 @@ def _init_worker(
         parameters=parameters,
         high_confidence_size_fraction=high_confidence_size_fraction,
         locator=locator,
+        embed_locator=embed_locator,
         geojson_features=geojson_features or [],
         rectangle_index=rectangle_index,
         truth_by_page=truth_by_page or None,
@@ -2345,7 +2347,10 @@ def _process_one_image(image_path: str) -> tuple[str, ProcessResult]:
         truth_by_page.get(number) if truth_by_page and number is not None else None
     )
     key = page_key(image_stem(image_path))
-    keymap = locator.page_keymap(key) if locator is not None else None
+    # Embed keymap data from the unfloored locator: the floor gates only the
+    # vocabulary restriction, not the sidecar transport to snap/street-solve.
+    embed = _worker_state.get("embed_locator") or locator
+    keymap = embed.page_keymap(key) if embed is not None else None
 
     def run(
         block_index: dict, cos_phi: float, size_fraction: float = 1.0
@@ -3659,7 +3664,19 @@ def main() -> None:
     # neighborhood and, if that starves the fit, against the whole key-map rectangle (a
     # volume-wide box every page sits in — far smaller than the full centerlines).
     keymap_files = resolve_keymaps(args.keymap, args.ignore_keymap, args.images)
+    # The sidecar keymap field (centers/radius/regions) is transport to
+    # osm-snap and street-solve and is embedded regardless of the megapixel
+    # floor -- the floor guards only the vocabulary restriction. Below the
+    # floor these differ: embed_locator exists while locator stays None.
+    embed_keymap_files = resolve_keymaps(
+        args.keymap, args.ignore_keymap, args.images, apply_floor=False
+    )
     locator = None
+    embed_locator = None
+    if embed_keymap_files:
+        embed_locator = KeymapLocator.from_keymaps(
+            embed_keymap_files, args.keymap_radius
+        )
     rectangle_index: tuple[dict[str, list[Block]], float] | None = None
     if keymap_files:
         print(
@@ -3667,6 +3684,8 @@ def main() -> None:
             file=sys.stderr,
         )
         locator = KeymapLocator.from_keymaps(keymap_files, args.keymap_radius)
+        if embed_keymap_files == keymap_files:
+            embed_locator = locator
         rectangle = locator.rectangle_features(geojson["features"])
         if rectangle:
             rectangle_bi = build_block_index(
@@ -3786,6 +3805,7 @@ def main() -> None:
         truth_by_page,
         args.keep_labels_on_fill,
         args.collinear_perp_tolerance,
+        embed_locator,
     )
     if args.num_workers > 1:
         with multiprocessing.Pool(
