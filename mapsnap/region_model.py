@@ -187,16 +187,26 @@ def cmd_train(args: argparse.Namespace) -> None:
         sys.exit("empty validation set")
 
     model = UNet(base=args.base, in_channels=3, norm="group").to(device)
+    if args.init is not None:
+        model.load_state_dict(torch.load(args.init, map_location=device))
+        print(f"initialized from {args.init}")
     # Start at the positive-class prior instead of either constant attractor:
     # this task has two degenerate poles (all-region scores ~0.5 IoU by area,
     # all-background scores 0) and both trap a zero-initialized output. The
     # prior is measured from the training labels themselves.
-    prior = float(np.mean([float((m > 127).mean()) for _, m in train_pairs]) or 0.5)
-    prior = min(max(prior, 0.05), 0.95)
-    with torch.no_grad():
-        model.head.bias.fill_(math.log(prior / (1 - prior)))
-    print(f"output bias initialized to prior {prior:.3f}")
+    if args.init is None:
+        prior = float(np.mean([float((m > 127).mean()) for _, m in train_pairs]) or 0.5)
+        prior = min(max(prior, 0.05), 0.95)
+        with torch.no_grad():
+            bias = model.head.bias
+            assert bias is not None
+            bias.fill_(math.log(prior / (1 - prior)))
+        print(f"output bias initialized to prior {prior:.3f}")
     optimizer = torch.optim.Adam(model.parameters(), lr=args.learning_rate)
+    # Cosine decay to zero over the run: the plateau this model reaches is a
+    # refinement plateau (boundaries, not blobs), where a decaying step is
+    # what buys the last points.
+    schedule = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=args.epochs)
     best = 0.0
     for epoch in range(1, args.epochs + 1):
         started = time.time()
@@ -224,6 +234,7 @@ def cmd_train(args: argparse.Namespace) -> None:
             torch.nn.utils.clip_grad_value_(model.parameters(), 1.0)
             optimizer.step()
             losses.append(float(loss))
+        schedule.step()
         model.eval()
         iou = page_iou(model, val_pairs, device)
         marker = ""
@@ -277,6 +288,12 @@ def main() -> None:
     train.add_argument("--learning-rate", type=float, default=3e-4)
     train.add_argument("--base", type=int, default=24)
     train.add_argument("--output", type=Path, default=REGION_MODEL_PATH)
+    train.add_argument(
+        "--init",
+        type=Path,
+        default=None,
+        help="Continue from these weights (skips the prior bias init).",
+    )
     predict = sub.add_parser("predict")
     predict.add_argument("images", nargs="+")
     predict.add_argument("--model", type=Path, default=REGION_MODEL_PATH)
