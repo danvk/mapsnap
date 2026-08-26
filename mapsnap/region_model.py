@@ -17,6 +17,7 @@ load-bearing: coloured blocks vs white margins), letterboxed to a fixed square.
 """
 
 import argparse
+import math
 import sys
 import time
 from pathlib import Path
@@ -112,12 +113,18 @@ def volume_examples(volume: Path) -> list[tuple[Path, np.ndarray]]:
     return examples
 
 
+def standardize(image: np.ndarray) -> np.ndarray:
+    """Per-image zero-mean/unit-variance floats: white-dominant pages give raw
+    0-1 inputs almost no dynamic range, which starves the spatial gradients and
+    feeds the all-positive attractor this task is prone to."""
+    x = image.astype(np.float32)
+    return (x - x.mean()) / (x.std() + 1e-6)
+
+
 def to_tensors(
     pairs: list[tuple[np.ndarray, np.ndarray]], device
 ) -> tuple[torch.Tensor, torch.Tensor]:
-    images = np.stack([p.astype(np.float32) / 255.0 for p, _ in pairs]).transpose(
-        0, 3, 1, 2
-    )
+    images = np.stack([standardize(p) for p, _ in pairs]).transpose(0, 3, 1, 2)
     labels = np.stack([(m > 127).astype(np.float32) for _, m in pairs])[:, None]
     return torch.from_numpy(images).to(device), torch.from_numpy(labels).to(device)
 
@@ -125,21 +132,19 @@ def to_tensors(
 def augment(
     image: np.ndarray, mask: np.ndarray, rng: np.random.Generator
 ) -> tuple[np.ndarray, np.ndarray]:
-    """Random 90-degree rotation and flip, applied to image and mask together."""
-    k = int(rng.integers(0, 4))
-    if k:
-        image, mask = np.rot90(image, k), np.rot90(mask, k)
+    """Random flips only: whole pages have a canonical layout (margins, sheet
+    numbers), so 90-degree rotations fight the global cues this model needs."""
     if rng.random() < 0.5:
         image, mask = np.fliplr(image), np.fliplr(mask)
+    if rng.random() < 0.5:
+        image, mask = np.flipud(image), np.flipud(mask)
     return np.ascontiguousarray(image), np.ascontiguousarray(mask)
 
 
 def predict_region(model, image: np.ndarray, device) -> np.ndarray:
     """P(content region) in [0,1] at the image's own resolution."""
     boxed = letterbox(image)
-    tensor = torch.from_numpy(
-        boxed.astype(np.float32).transpose(2, 0, 1)[None] / 255.0
-    ).to(device)
+    tensor = torch.from_numpy(standardize(boxed).transpose(2, 0, 1)[None]).to(device)
     with torch.no_grad():
         prob = torch.sigmoid(model(tensor))[0, 0].cpu().numpy()
     height, width = image.shape[:2]
@@ -181,7 +186,16 @@ def cmd_train(args: argparse.Namespace) -> None:
     if not val_pairs:
         sys.exit("empty validation set")
 
-    model = UNet(base=args.base, in_channels=3).to(device)
+    model = UNet(base=args.base, in_channels=3, norm="group").to(device)
+    # Start at the positive-class prior instead of either constant attractor:
+    # this task has two degenerate poles (all-region scores ~0.5 IoU by area,
+    # all-background scores 0) and both trap a zero-initialized output. The
+    # prior is measured from the training labels themselves.
+    prior = float(np.mean([float((m > 127).mean()) for _, m in train_pairs]) or 0.5)
+    prior = min(max(prior, 0.05), 0.95)
+    with torch.no_grad():
+        model.head.bias.fill_(math.log(prior / (1 - prior)))
+    print(f"output bias initialized to prior {prior:.3f}")
     optimizer = torch.optim.Adam(model.parameters(), lr=args.learning_rate)
     best = 0.0
     for epoch in range(1, args.epochs + 1):
@@ -201,6 +215,13 @@ def cmd_train(args: argparse.Namespace) -> None:
             ) + torch.nn.functional.binary_cross_entropy_with_logits(logits, labels)
             optimizer.zero_grad()
             loss.backward()
+            # Whole pale pages are mostly near-constant paper, so some
+            # BatchNorm channels see tiny batch variance and their 1/sigma
+            # amplifies first-layer gradients by ~1e6 (measured) -- one step
+            # at any usable LR destroys the encoder and the model collapses
+            # to a constant. Clipping keeps the trunk alive; road-model
+            # patches never hit this because crops have variance everywhere.
+            torch.nn.utils.clip_grad_value_(model.parameters(), 1.0)
             optimizer.step()
             losses.append(float(loss))
         model.eval()
@@ -225,7 +246,7 @@ def cmd_predict(args: argparse.Namespace) -> None:
     device = select_device()
     state = torch.load(args.model, map_location=device)
     base = state["enc1.block.0.weight"].shape[0]
-    model = UNet(base=base, in_channels=3).to(device)
+    model = UNet(base=base, in_channels=3, norm="group").to(device)
     model.load_state_dict(state)
     model.eval()
     args.out_dir.mkdir(parents=True, exist_ok=True)
