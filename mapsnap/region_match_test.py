@@ -1,7 +1,7 @@
 """Tests for the region-match candidate generator (#226 phase 2)."""
 
-
 import numpy as np
+import pytest
 from shapely.geometry import Polygon
 
 from mapsnap.region_match import match_page, outline_area_px, page_outline
@@ -53,3 +53,36 @@ def test_match_page_emits_a_ladder_without_upside_down_aliases():
     assert len(candidates) >= 2, "the ladder is the point: emit, do not resolve"
     assert candidates == sorted(candidates, key=lambda c: -c.iou)
     assert all(abs(c.rotation_deg) < 90 for c in candidates), "no upside-down poses"
+
+
+def test_fixed_scale_fit_holds_the_scale_and_recovers_rotation():
+    import math
+
+    from mapsnap.keymap.fit_keymap import similarity_apply
+    from mapsnap.region_match import fixed_scale_fit
+
+    # A square rotated 30 degrees and scaled 2x, with the reflection the
+    # page-to-world convention uses.
+    scale, angle = 2.0, math.radians(30)
+    a, b = scale * math.cos(angle), scale * math.sin(angle)
+    truth = (a, b, 15.0, -7.0)
+    source = [(0.0, 0.0), (10.0, 0.0), (10.0, 10.0), (0.0, 10.0)]
+    target = [similarity_apply(truth, p) for p in source]
+    fitted = fixed_scale_fit(source, target, scale)
+    assert math.hypot(fitted[0], fitted[1]) == pytest.approx(scale, abs=1e-9)
+    for got, want in zip(fitted, truth):
+        assert got == pytest.approx(want, abs=1e-6)
+
+
+def test_fixed_scale_fit_ignores_a_conflicting_scale_in_the_data():
+    import math
+
+    from mapsnap.region_match import fixed_scale_fit
+
+    # Correspondences that imply scale 3, fitted at a locked scale of 1: the
+    # returned model must keep 1 (this is what stops ICP overwriting the
+    # volume's scale prior).
+    source = [(0.0, 0.0), (1.0, 0.0), (1.0, 1.0), (0.0, 1.0)]
+    target = [(0.0, 0.0), (3.0, 0.0), (3.0, 3.0), (0.0, 3.0)]
+    fitted = fixed_scale_fit(source, target, 1.0)
+    assert math.hypot(fitted[0], fitted[1]) == pytest.approx(1.0, abs=1e-9)

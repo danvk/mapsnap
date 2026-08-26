@@ -27,6 +27,7 @@ import numpy as np
 import torch
 from shapely.geometry.base import BaseGeometry
 
+from mapsnap.edge_join_experiment import volume_median_scale
 from mapsnap.keymap.align_page_region import (
     Model,
     icp_refine,
@@ -121,17 +122,74 @@ def model_rotation_deg(model: Model) -> float:
     return math.degrees(math.atan2(model[1], model[0]))
 
 
+def fixed_scale_fit(source: list[Point], target: list[Point], scale: float) -> Model:
+    """Best reflected similarity from ``source`` to ``target`` at a KNOWN scale.
+
+    The mapped point is s*R(theta)*p with R the reflection [[c, s], [s, -c]],
+    so the optimum is theta = atan2(B, A) over the centred correspondences
+    (A = sum(qx*px - qy*py), B = sum(qx*py + qy*px)) and the translation
+    follows. Fitting scale as well -- what similarity_fit does -- is what let
+    ICP overwrite the volume's scale prior with the shape correspondence's own
+    ~20% bias.
+    """
+    source_array = np.array(source, dtype=float)
+    target_array = np.array(target, dtype=float)
+    source_centre = source_array.mean(axis=0)
+    target_centre = target_array.mean(axis=0)
+    p = source_array - source_centre
+    q = target_array - target_centre
+    a_term = float((q[:, 0] * p[:, 0] - q[:, 1] * p[:, 1]).sum())
+    b_term = float((q[:, 0] * p[:, 1] + q[:, 1] * p[:, 0]).sum())
+    angle = math.atan2(b_term, a_term)
+    a = scale * math.cos(angle)
+    b = scale * math.sin(angle)
+    tx = target_centre[0] - (a * source_centre[0] + b * source_centre[1])
+    ty = target_centre[1] - (b * source_centre[0] - a * source_centre[1])
+    return (a, b, float(tx), float(ty))
+
+
+def fixed_scale_icp(
+    source: list[Point],
+    target: list[Point],
+    model: Model,
+    iterations: int,
+    scale: float,
+) -> Model:
+    """icp_refine with the scale held at ``scale`` (see fixed_scale_fit)."""
+    target_array = np.array(target)
+    for _ in range(iterations):
+        matched: list[Point] = []
+        for point in source:
+            transformed = similarity_apply(model, point)
+            distances = np.hypot(
+                target_array[:, 0] - transformed[0], target_array[:, 1] - transformed[1]
+            )
+            nearest = target_array[int(distances.argmin())]
+            matched.append((float(nearest[0]), float(nearest[1])))
+        model = fixed_scale_fit(source, matched, scale)
+    return model
+
+
 def match_page(
     outline: list[Point],
     region: BaseGeometry,
     size: tuple[int, int],
     origin: Point,
+    volume_scale_m_per_px: float | None = None,
 ) -> list[RegionCandidate]:
     """Shape-matched placements of one page, best IoU first.
 
-    Scale comes from the area ratio (the region prior family_scale already
-    trusts), translation from centroid correspondence, and rotation from a
-    sweep — then ICP polishes each and shape IoU ranks them.
+    Translation comes from centroid correspondence and rotation from a sweep,
+    then ICP polishes each and shape IoU ranks them.
+
+    Scale prefers the VOLUME's median fitted scale over the shape's area
+    ratio. Measured on detroit/hudson/NO-1896, the area ratio is biased ~20-25%
+    small (median ratio 0.75-0.83 against truth, essentially none within 5%):
+    the model's content region and the key map's drawn region are not the same
+    fraction of their respective frames, and that mismatch enters as scale
+    error. Sheets in a volume share a scale family, so the volume's own fits
+    are the better estimate; the area ratio remains the fallback for a volume
+    with no fitted page.
     """
     target_ring = polygon_exterior(region)
     if len(target_ring) < 3 or region.area <= 0:
@@ -139,7 +197,7 @@ def match_page(
     source_area = outline_area_px(outline)
     if source_area <= 0:
         return []
-    scale = math.sqrt(region.area / source_area)
+    scale = volume_scale_m_per_px or math.sqrt(region.area / source_area)
     source_ring = resample_ring(outline, RING_POINTS)
     target_resampled = resample_ring(target_ring, RING_POINTS)
     source_centroid = ring_centroid(source_ring)
@@ -151,7 +209,12 @@ def match_page(
         angle = math.radians(step * ROTATION_STEP_DEG)
         unit = (math.cos(angle), math.sin(angle))
         model = similarity_from_pose(unit, scale, source_centroid, target_centroid)
-        model = icp_refine(source_ring, target_resampled, model, ICP_ITERATIONS)
+        if volume_scale_m_per_px:
+            model = fixed_scale_icp(
+                source_ring, target_resampled, model, ICP_ITERATIONS, scale
+            )
+        else:
+            model = icp_refine(source_ring, target_resampled, model, ICP_ITERATIONS)
         placed = transformed_page_polygon(source_ring, model)
         iou = polygon_iou(placed, region)
         if iou < MIN_IOU:
@@ -219,8 +282,11 @@ def run_volume(volume: Path, args: argparse.Namespace) -> list[dict]:
     device = select_device()
     model = load_region_model(args.model, device)
 
+    units = load_page_units(volume)
+    volume_scale = volume_median_scale(units) or None
+    print(f"volume scale: {volume_scale} m/px (median of fitted pages)")
     records = []
-    for unit in load_page_units(volume):
+    for unit in units:
         if unit.fit_state == "fitted" and not args.all_pages:
             continue
         key = unit.stem[1:]
@@ -247,7 +313,11 @@ def run_volume(volume: Path, args: argparse.Namespace) -> list[dict]:
         )
         region = region_polygon_metres(rings, origin)
         candidates = match_page(
-            outline, region, (image.shape[1], image.shape[0]), origin
+            outline,
+            region,
+            (image.shape[1], image.shape[0]),
+            origin,
+            volume_scale_m_per_px=volume_scale,
         )
         if not candidates:
             record["status"] = "no-match"
