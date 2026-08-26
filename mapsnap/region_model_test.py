@@ -64,3 +64,21 @@ def test_letterbox_preserves_aspect_on_white():
     assert boxed.shape == (64, 64, 3)
     assert boxed[10, 10].tolist() == [0, 0, 0]  # content, top-left anchored
     assert boxed[50, 10].tolist() == [255, 255, 255]  # pad below a 2:1 image
+
+
+def test_truth_region_mask_require_all_rejects_partial_labels():
+    # A split sheet whose second panel is gated out (OIM#402 crop frame) would
+    # otherwise yield a mask covering only the first panel -- a wrong label.
+    good = selector_item(
+        [(0, 0), (100, 0), (100, 100), (0, 100)],
+        label="x p7 [1]",
+        gcps=[gcp(50, 50), gcp(20, 80)],
+    )
+    bad = selector_item(
+        [(0, 0), (100, 0), (100, 100), (0, 100)],
+        label="x p7 [2]",
+        gcps=[gcp(300, 150), gcp(350, 180)],
+    )
+    assert truth_region_mask([good, bad], (100, 50)) is not None
+    assert truth_region_mask([good, bad], (100, 50), require_all=True) is None
+    assert truth_region_mask([good], (100, 50), require_all=True) is not None

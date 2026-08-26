@@ -40,7 +40,7 @@ REGION_MODEL_PATH = Path(__file__).resolve().parent.parent / "models" / "region_
 
 
 def truth_region_mask(
-    items: list[dict], jpg_size: tuple[int, int]
+    items: list[dict], jpg_size: tuple[int, int], *, require_all: bool = False
 ) -> np.ndarray | None:
     """The union of a page's truth selector polygons as a uint8 mask in jpg pixels.
 
@@ -49,10 +49,17 @@ def truth_region_mask(
     frame (OIM#402), and an unguarded crop-frame polygon would paint the wrong
     part of the sheet. Whole-page selectors (the paper mask) carry no such
     hazard. Returns None when no usable selector exists.
+
+    ``require_all`` rejects a page when ANY of its annotations failed to paint:
+    a split sheet whose second panel was gated out yields a mask covering a
+    fraction of its real content (hudson p92: 5.8% of the page), which is a
+    wrong label rather than a hard one — it teaches the model to under-predict
+    and then scores a correct prediction at IoU 0.06. 4.4% of labeled pages
+    corpus-wide are partial this way.
     """
     width, height = jpg_size
     mask = np.zeros((height, width), np.uint8)
-    painted = False
+    painted = 0
     for item in items:
         selector = (item.get("target") or {}).get("selector") or {}
         if selector.get("type") != "SvgSelector":
@@ -70,8 +77,10 @@ def truth_region_mask(
             [[x * width / sw, y * height / sh] for x, y in points], np.int32
         )
         cv2.fillPoly(mask, [ring], 255)
-        painted = True
-    return mask if painted else None
+        painted += 1
+    if not painted or (require_all and painted < len(items)):
+        return None
+    return mask
 
 
 def letterbox(image: np.ndarray, size: int = INPUT_SIZE) -> np.ndarray:
@@ -107,7 +116,9 @@ def volume_examples(volume: Path) -> list[tuple[Path, np.ndarray]]:
         image = cv2.imread(str(jpg))
         if image is None:
             continue
-        mask = truth_region_mask(items, (image.shape[1], image.shape[0]))
+        mask = truth_region_mask(
+            items, (image.shape[1], image.shape[0]), require_all=True
+        )
         if mask is not None:
             examples.append((jpg, mask))
     return examples
