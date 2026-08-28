@@ -1138,16 +1138,14 @@ def cluster_gcp_hints(
     pages) and scatter on aliases. Single-linkage clusters within ``tol_m``,
     largest first -- the biggest cluster is the mutually-consistent story.
     """
-    import math as _math
-
     clusters: list[list[tuple[float, float]]] = []
     for gcp in gcps:
         lon, lat = gcp.geo
         ky = 110540.0
-        kx = 111320.0 * _math.cos(_math.radians(lat))
+        kx = 111320.0 * math.cos(math.radians(lat))
         for cluster in clusters:
             if any(
-                _math.hypot((lon - x) * kx, (lat - y) * ky) <= tol_m for x, y in cluster
+                math.hypot((lon - x) * kx, (lat - y) * ky) <= tol_m for x, y in cluster
             ):
                 cluster.append((lon, lat))
                 break
