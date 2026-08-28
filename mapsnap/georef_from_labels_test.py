@@ -1857,12 +1857,10 @@ def test_haversine_m_one_degree_latitude():
 
 def test_cluster_gcp_hints_ranks_consistent_cluster_first():
     """The mutually-consistent cluster outranks a lone alias; tol merges near points."""
-    from types import SimpleNamespace
-
     from mapsnap.georef_from_labels import cluster_gcp_hints
 
-    def gcp(lon, lat):
-        return SimpleNamespace(geo=(lon, lat))
+    def gcp(lon: float, lat: float) -> IntersectionGCP:
+        return _make_gcp((0.0, 0.0), (lon, lat))
 
     near = [gcp(-96.0000, 46.0000), gcp(-96.0003, 46.0002), gcp(-96.0001, 46.0004)]
     alias = [gcp(-96.1, 46.1)]
