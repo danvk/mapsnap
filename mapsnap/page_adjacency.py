@@ -36,6 +36,7 @@ import math
 import re
 import sys
 from collections import defaultdict
+from collections.abc import Callable
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -609,6 +610,84 @@ def mutual_edges(claims_by_page: dict[str, set[str]]) -> list[tuple[str, str]]:
     return sorted(edges)
 
 
+SIDE_OPPOSITE = {"T": "B", "B": "T", "L": "R", "R": "L"}
+
+
+def side_components(edge: str | None) -> set[str]:
+    """The T/B/L/R components of a classify_edge code ("BL" -> {"B", "L"})."""
+    return {c for c in (edge or "") if c in SIDE_OPPOSITE}
+
+
+def claimed_sides(
+    pages: dict[str, dict], resolve: Callable[[str], list[str]]
+) -> dict[tuple[str, str], set[str]]:
+    """(claimer stem, claimed stem) -> the side components the claim sits on."""
+    sides: dict[tuple[str, str], set[str]] = defaultdict(set)
+    for stem, page in pages.items():
+        for detection in page["detections"]:
+            if not detection.get("claim") or detection.get("key") is None:
+                continue
+            for other in resolve(detection["key"]):
+                if other != stem:
+                    sides[(stem, other)] |= side_components(detection.get("edge"))
+    return dict(sides)
+
+
+def triangle_promoted_edges(
+    mutual: list[tuple[str, str]],
+    one_sided: list[tuple[str, str]],
+    sides: dict[tuple[str, str], set[str]],
+) -> list[dict]:
+    """One-sided claims a mutual-edge triangle vouches for (#353).
+
+    A one-sided claim u->v inherits the mutual tier's trust when some page w is
+    mutually adjacent to BOTH endpoints -- unless w places u and v on opposing
+    sides of itself. That case is a collinear run (u-w-v in a line, so u and v
+    are two steps apart and never touch), which is what the pattern's failures
+    look like: LA p1464->p1466 via p1465 at 396 m, nashville p29->p31 via p30
+    at 128 m.
+
+    Both side readings come from w's own detections, so image-relative sides are
+    directly comparable and the page's unknown world rotation cancels -- unlike
+    a comparison across two different pages.
+
+    Measured on hudson/LA/nashville: 72 promotions, 72 correct against truth
+    footprint adjacency; the rejected opposing case is 5/10. Callers should
+    still weight these below true mutual edges -- the cohort is verified by
+    geometry, not by a second printed number.
+    """
+    mutual_set = {frozenset(edge) for edge in mutual}
+    neighbors: dict[str, set[str]] = defaultdict(set)
+    for a, b in mutual:
+        neighbors[a].add(b)
+        neighbors[b].add(a)
+    promoted = []
+    for claimer, target in one_sided:
+        for w in sorted(neighbors[claimer] & neighbors[target]):
+            if frozenset((claimer, target)) in mutual_set:
+                break
+            side_u = sides.get((w, claimer), set())
+            side_v = sides.get((w, target), set())
+            if not side_u or not side_v:
+                continue
+            if side_u & side_v:
+                geometry = "shared-component"
+            elif any(SIDE_OPPOSITE[c] in side_v for c in side_u):
+                continue  # collinear run through w: u and v do not touch
+            else:
+                geometry = "perpendicular"
+            promoted.append(
+                {
+                    "claimer": claimer,
+                    "target": target,
+                    "via": w,
+                    "geometry": geometry,
+                }
+            )
+            break
+    return promoted
+
+
 def one_sided_edges(claims_by_page: dict[str, set[str]]) -> list[tuple[str, str]]:
     """Directed claims that resolve to a real page but are not reciprocated.
 
@@ -822,6 +901,9 @@ def main() -> None:
 
     edges = mutual_edges(claims_by_page)
     one_sided = one_sided_edges(claims_by_page)
+    promoted = triangle_promoted_edges(
+        edges, one_sided, claimed_sides(pages, claim_resolver(claims_by_page))
+    )
     doc = {
         "timestamp": datetime.now(UTC).isoformat(),
         "command": sys.argv[:],
@@ -835,6 +917,10 @@ def main() -> None:
         "pages": pages,
         "adjacency": [list(edge) for edge in edges],
         "one_sided": [list(edge) for edge in one_sided],
+        # One-sided claims a mutual triangle vouches for (#353). Kept separate
+        # from "adjacency" so consumers opt in: verified by geometry, not by a
+        # reciprocating printed number.
+        "promoted": promoted,
         "no_neighbor": {
             stem: sorted(edges) for stem, edges in sorted(no_neighbor.items())
         },
@@ -844,7 +930,8 @@ def main() -> None:
     total_claims = sum(len(c) for c in claims_by_page.values())
     print(
         f"Wrote {output}: {len(pages)} pages, {total_claims} directed claims, "
-        f"{len(edges)} mutual edges, {len(one_sided)} one-sided.",
+        f"{len(edges)} mutual edges, {len(one_sided)} one-sided "
+        f"({len(promoted)} triangle-promoted).",
         file=sys.stderr,
     )
 
