@@ -257,6 +257,21 @@ def _assign_blocks_to_pages(
     return assignment
 
 
+def safe_unary_union(geoms: list[BaseGeometry]) -> BaseGeometry:
+    """unary_union with a make_valid retry (see safe_overlay).
+
+    Masks arrive from earlier overlay chains and can carry self-intersections
+    that GEOS rejects with a side-location conflict (richmond, 2026-08-28
+    baseline: TopologyException at the coverage-gap union). Validity repair
+    here only perturbs the repaired mask by slivers, which downstream
+    gap-filling treats like any other boundary noise.
+    """
+    try:
+        return cast(BaseGeometry, unary_union(geoms))
+    except GEOSException:
+        return cast(BaseGeometry, unary_union([make_valid(g) for g in geoms]))
+
+
 def safe_overlay(a: BaseGeometry, b: BaseGeometry, op: str) -> BaseGeometry | None:
     """Boolean overlay of two geometries, or None if GEOS can't do it.
 
@@ -604,8 +619,8 @@ def _fill_coverage_gaps(
     Convexity improvement is used only to break ties when multiple pages could absorb
     the same overlapping gap area.
     """
-    page_union = unary_union(page_polys)
-    mask_union = unary_union([m for m in masks if m is not None])
+    page_union = safe_unary_union(page_polys)
+    mask_union = safe_unary_union([m for m in masks if m is not None])
     total_gaps = page_union.difference(mask_union)
     if total_gaps.is_empty:
         return masks
