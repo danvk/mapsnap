@@ -439,10 +439,12 @@ def test_stamp_corroborated_rescue_relaxes_the_gates():
             "candidates": candidates,
         }
 
-    # KC p551 shape: true pose at 0.77 within the stamp bound, rivals gated
+    # KC p551 shape: true pose within the stamp bound, rivals gated
     # implausible (select_score None) -> adopted under the relaxed bar.
+    # (0.77 was its v1-era score; the v3 recalibration shifted the bars and
+    # the scores together, so the fixture tracks: 0.87 vs the 0.8 bar.)
     (choice,) = select_argmax(
-        [rec([cand(0.77, sep=24.0), {"select_score": None}])],
+        [rec([cand(0.87, sep=24.0), {"select_score": None}])],
         PRODUCTION_GATE_SCORE,
         PRODUCTION_GATE_MARGIN,
     )
@@ -461,9 +463,9 @@ def test_stamp_corroborated_rescue_relaxes_the_gates():
     )
     assert choice["chosen"] is None and "margin" in choice["reason"]
 
-    # Without stamp corroboration the normal bar stands (0.77 < 1.25)...
+    # Without stamp corroboration the normal bar stands (0.87 < 1.35)...
     (choice,) = select_argmax(
-        [rec([cand(0.77)])], PRODUCTION_GATE_SCORE, PRODUCTION_GATE_MARGIN
+        [rec([cand(0.87)])], PRODUCTION_GATE_SCORE, PRODUCTION_GATE_MARGIN
     )
     assert choice["chosen"] is None
     # ...and a fitted page's record never takes the relaxed path.

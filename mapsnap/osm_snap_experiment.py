@@ -1816,11 +1816,20 @@ def cmd_sweep_refine(volumes: list[Path], recompute: bool = False) -> None:
 # The frozen production gates (dev-swept; `mapsnap snap` uses these): the
 # per-page rescue score/margin gates, the volume-energy conservative elbow,
 # and the arbitration score gate.
-PRODUCTION_GATE_SCORE = 1.25
+# Absolute verification bars are calibrated to the road UNet's score
+# distribution. v4 (30-volume retrain at v1's width; #173 uniform sampling)
+# lifts verification over v1 by +0.05 median on good poses and +0.13 on the
+# rest (164 identical incumbent poses, detroit+richmond: absolute median
+# 1.055 -> 1.199, driven by inlier_frac and chamfer), so the absolute bars
+# carry a +0.10 offset inside that band -- otherwise rescues that used to
+# fail the bar clear it on the lift alone (detroit p61/p8/p93 vacuum-fills
+# at 358-591 ft under uncalibrated v3). Gap comparisons (challenge margins)
+# are shift-invariant and stay unchanged.
+PRODUCTION_GATE_SCORE = 1.35
 PRODUCTION_GATE_MARGIN = 0.25
-PRODUCTION_ARBITRATE_GATE = 1.5
+PRODUCTION_ARBITRATE_GATE = 1.6
 
-STAMP_RESCUE_SCORE = 0.7
+STAMP_RESCUE_SCORE = 0.8
 """Relaxed rescue bar for stamp-corroborated candidates.
 
 A contradiction-demoted page's rescue candidate that lands its printed claim
