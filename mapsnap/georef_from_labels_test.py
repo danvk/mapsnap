@@ -2015,3 +2015,19 @@ def test_find_intersection_gcps_no_centroid_past_span_cap():
     gcps = find_intersection_gcps(features, block_index, (1000, 1000))
     assert len(gcps) == 2
     assert not any(g.centroid for g in gcps)
+
+
+def test_cluster_gcp_hints_ranks_consistent_cluster_first():
+    """The mutually-consistent cluster outranks a lone alias; tol merges near points."""
+    from mapsnap.georef_from_labels import cluster_gcp_hints
+
+    def gcp(lon: float, lat: float) -> IntersectionGCP:
+        return _make_gcp((0.0, 0.0), (lon, lat))
+
+    near = [gcp(-96.0000, 46.0000), gcp(-96.0003, 46.0002), gcp(-96.0001, 46.0004)]
+    alias = [gcp(-96.1, 46.1)]
+    hints = cluster_gcp_hints(near + alias)
+    assert len(hints) == 2
+    # Largest cluster (the 3 near points) first, its median inside the group.
+    assert abs(hints[0][0] - -96.0001) < 1e-3 and abs(hints[0][1] - 46.0002) < 1e-3
+    assert cluster_gcp_hints([]) == []

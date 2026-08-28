@@ -132,6 +132,10 @@ class PageUnit:
     # snap's search, because a demoted pose is measurably a good init (refine
     # fixed richmond p353's 3.06x scale error from one).
     demoted_affine: np.ndarray | None = None
+    # Clustered candidate-GCP world positions from a FAILED fit (#335):
+    # location evidence snap's rescue uses as search centers, recorded in the
+    # nofit sidecar. Empty for fitted pages.
+    gcp_hints: list[tuple[float, float]] = field(default_factory=list)
     # Distinct near-tie poses RANSAC scored but did not pick (#340): consumed
     # by snap as extra challenge seeds when the incumbent verifies poorly.
     runner_up_affines: list[np.ndarray] = field(default_factory=list)
@@ -305,6 +309,9 @@ def load_page_units(volume: Path) -> list[PageUnit]:
             keymap_centers = [tuple(c) for c in keymap.get("centers", [])]
             keymap_radius = float(keymap.get("radius_m") or 0.0)
             keymap_regions = keymap.get("regions") or None
+            gcp_hints = [tuple(h) for h in georef.get("gcp_hints") or []]
+        else:
+            gcp_hints = []
 
         unit = PageUnit(
             stem=stem,
@@ -316,6 +323,7 @@ def load_page_units(volume: Path) -> list[PageUnit]:
             split_truth=stem in split_truth_parents,
             gen_affine=gen_affine,
             demoted_affine=demoted_affine,
+            gcp_hints=gcp_hints,
             inlier_intersections=inlier_int,
             inlier_streets=inlier_str,
             keymap_centers=keymap_centers,

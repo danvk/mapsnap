@@ -34,10 +34,11 @@ from mapsnap.utils import image_stem
 
 # Random patches sampled from each page per epoch.
 PATCHES_PER_PAGE = 6
-# Fraction of training patches constrained to the page-margin band, where the
-# seam strips the edge-join matcher depends on live.
-EDGE_FRACTION = 0.5
-# Width of that band in pixels (~75m at the 25%-scale ~0.24 m/px).
+# Width of the page-margin band in pixels (~75m at the 25%-scale ~0.24 m/px).
+# Only the VALIDATION edge-IoU metric reads this now: #173 dropped the edge
+# oversampling of training patches, which served the edge-join matcher's seam
+# strips -- since #152 the model's consumer is fit refinement, which reads it
+# wherever OSM features are, so training samples uniformly.
 EDGE_BAND_PX = 320
 
 
@@ -84,27 +85,14 @@ def sample_patch(
 
     The rotation augmentation matters here: adjacent Sanborn sheets are drawn grid-aligned
     rather than north-up, so at inference the model sees corridors at arbitrary angles.
-    EDGE_FRACTION of patches are pinned to the page-margin band: the edge-join matcher
-    reads the model exclusively in seam strips, where content is sketchier (duplicated
-    margin blocks, big sheet numbers) than in the page interior.
+    Sampling is uniform over the page (#173): the model's consumer is fit
+    refinement, which reads it wherever OSM features are, not the edge-join
+    seam strips the old edge oversampling served.
     """
     height, width = gray.shape
     y_max, x_max = max(1, height - PATCH), max(1, width - PATCH)
-    if rng.random() < EDGE_FRACTION:
-        side = int(rng.integers(0, 4))
-        band_y = min(EDGE_BAND_PX, y_max)
-        band_x = min(EDGE_BAND_PX, x_max)
-        if side == 0:  # top
-            y, x = rng.integers(0, band_y), rng.integers(0, x_max)
-        elif side == 1:  # bottom
-            y, x = rng.integers(y_max - band_y, y_max), rng.integers(0, x_max)
-        elif side == 2:  # left
-            y, x = rng.integers(0, y_max), rng.integers(0, band_x)
-        else:  # right
-            y, x = rng.integers(0, y_max), rng.integers(x_max - band_x, x_max)
-    else:
-        y = rng.integers(0, y_max)
-        x = rng.integers(0, x_max)
+    y = rng.integers(0, y_max)
+    x = rng.integers(0, x_max)
     patch = gray[y : y + PATCH, x : x + PATCH]
     label = mask[y : y + PATCH, x : x + PATCH]
     k = int(rng.integers(0, 4))
