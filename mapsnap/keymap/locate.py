@@ -238,13 +238,25 @@ def discover_keymaps(image_paths: list[str]) -> list[Path]:
 
 
 def resolve_keymaps(
-    explicit: list[str] | None, ignore: bool, image_paths: list[str]
+    explicit: list[str] | None,
+    ignore: bool,
+    image_paths: list[str],
+    *,
+    apply_floor: bool = True,
 ) -> list[Path]:
     """The key-map files ``ocr``/``georef`` should use, applying the shared flag precedence.
 
     ``--ignore-keymap`` (``ignore``) turns the feature off; otherwise an explicit ``--keymap``
     list wins, and with neither the key maps are auto-discovered next to the images (see
     :func:`discover_keymaps`). Centralized so both commands resolve key maps identically.
+
+    ``apply_floor=False`` skips the megapixel floor: the floor exists to stop
+    per-page-number VOCABULARY restriction on scans whose numbers truncate, but
+    the georef sidecar's keymap field (centers, radius, regions) is transport
+    to osm-snap and street-solve, which carry their own guards and are
+    documented to keep working below the floor. Dropping the locator entirely
+    severed that transport on asheville (23.8 MP): every sidecar's keymap was
+    null and snap lost its search centers and region priors.
     """
     if ignore:
         return []
@@ -254,7 +266,7 @@ def resolve_keymaps(
     return [
         keymap_json
         for keymap_json in discover_keymaps(image_paths)
-        if above_megapixel_floor(keymap_json)
+        if not apply_floor or above_megapixel_floor(keymap_json)
     ]
 
 

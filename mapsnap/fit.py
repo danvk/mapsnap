@@ -110,6 +110,23 @@ def clear_derived_sidecars(dir_path: Path) -> int:
     for path in sorted(dir_path.glob(DERIVED_SIDECAR_GLOB)):
         path.unlink()
         removed += 1
+    # The snap candidate/selection caches are derived state too (#342). Inside
+    # a fit they can only ever hit for pages whose records carry no
+    # georef_mtime (demoted/failure classes) -- every fitted page's record is
+    # invalidated by the georef rewrite above -- and those hits are exactly
+    # the cache-temperature flips #342 measured (KC p566__1 at 7.4 vs 282 ft
+    # on cache state alone, ~2 net points). Measured across all 18 truth
+    # volumes, a fully cold snap stage costs 3 minutes per corpus run (4,958s
+    # warm vs 5,113s cold), so the cache buys nothing a fit can keep. The
+    # files remain useful within a run and for standalone `mapsnap snap`
+    # iteration; a fit just never inherits a previous run's records.
+    for cache in (
+        *sorted((dir_path / "artifacts" / "osm_snap").glob("candidates.jsonl")),
+        *sorted((dir_path / "artifacts" / "osm_snap").glob("selection_*.jsonl")),
+        *sorted((dir_path / "artifacts" / "street_solve").glob("candidates.jsonl")),
+    ):
+        cache.unlink()
+        removed += 1
     if removed:
         print(f"Cleared {removed} derived georef sidecar(s) from {dir_path}")
     return removed

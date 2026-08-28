@@ -51,3 +51,12 @@ describe('statsByItemIndex', () => {
     });
   });
 });
+
+describe('statsByItemIndex casing', () => {
+  it('pairs uppercase lettered stems with lowercase sidecar keys', () => {
+    // compareTxt normalizes keys to lowercase; disk stems keep their case
+    // (asheville p3C). The join must not lose those pages' colors.
+    const stats = statsByItemIndex([row('p3c', 12)], [page('p3C', 7)]);
+    expect(stats.get(7)?.rmseFt).toBe(12);
+  });
+});

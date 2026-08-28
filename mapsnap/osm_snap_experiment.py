@@ -97,6 +97,9 @@ class VolumeContext:
     radius_m: float
     radius_source: str
     median_theta_deg: float | None
+    # Lazily-built map of stem -> FittedPage for neighbor-stamp priors
+    # (#335 phase 2); None until the first unplaced page asks for it.
+    stamp_fitted: dict | None = None
 
 
 def ring_centroid(ring: list[list[float]]) -> tuple[float, float]:
@@ -366,6 +369,7 @@ def load_panel_units(volume: Path) -> list[PageUnit]:
         keymap_radius = 0.0
         keymap_regions = None
         demoted_affine = None
+        gcp_hints: list[tuple[float, float]] = []
         if georef is not None:
             if state == "fitted":
                 gen_affine = page_world_affine(georef)
@@ -378,6 +382,7 @@ def load_panel_units(volume: Path) -> list[PageUnit]:
             keymap = georef.get("keymap") or {}
             keymap_centers = [tuple(c) for c in keymap.get("centers", [])]
             keymap_radius = float(keymap.get("radius_m") or 0.0)
+            gcp_hints = [tuple(h) for h in georef.get("gcp_hints") or []]
             keymap_regions = keymap.get("regions") or None
 
         units.append(
@@ -391,6 +396,7 @@ def load_panel_units(volume: Path) -> list[PageUnit]:
                 split_truth=False,
                 gen_affine=gen_affine,
                 demoted_affine=demoted_affine,
+                gcp_hints=gcp_hints,
                 inlier_intersections=effective_gcps,
                 inlier_streets=0,
                 keymap_centers=keymap_centers,
@@ -663,6 +669,43 @@ def volume_note_calibration(vctx: VolumeContext) -> tuple[float, str]:
     return _note_calibration_cache[key]
 
 
+def neighbor_stamp_centers(
+    vctx, stem: str, limit: int = 4
+) -> list[tuple[float, float]]:
+    """Incoming-claim stamp positions from PLACED neighbors (#335 phase 2).
+
+    A neighbor's printed claim of this page, mapped through the neighbor's own
+    published pose, is a world point on the shared boundary — measured over
+    the corpus's unplaced truth pages: mutual-claim stamps sit at median 178 m
+    from truth (83 pages), one-sided at 416 m (24 more). This was previously
+    computed only for gate-DEMOTED pages (contradiction hints); every unplaced
+    page with placed claiming neighbors gets it now. Mutual-claim stamps rank
+    first (the ~100%-precision tier); the rescue bars absorb the junk tail of
+    one-sided claims.
+    """
+    adjacency = vctx.adjacency
+    if not adjacency:
+        return []
+    if vctx.stamp_fitted is None:
+        from mapsnap.adjacency_gate import load_fitted_pages
+
+        vctx.stamp_fitted = load_fitted_pages(vctx.volume, adjacency)
+    from mapsnap.adjacency_gate import stamp_worlds
+
+    mutual_pairs = {frozenset(edge) for edge in adjacency.get("adjacency", [])}
+    mutual_pts: list[tuple[float, float]] = []
+    oneside_pts: list[tuple[float, float]] = []
+    for nstem, neighbor in vctx.stamp_fitted.items():
+        if nstem == stem:
+            continue
+        for point in stamp_worlds(adjacency, neighbor, stem):
+            if frozenset((nstem, stem)) in mutual_pairs:
+                mutual_pts.append(point)
+            else:
+                oneside_pts.append(point)
+    return (mutual_pts + oneside_pts)[:limit]
+
+
 def build_page_context(
     vctx: VolumeContext, unit: PageUnit
 ) -> tuple[PageContext | None, str]:
@@ -682,6 +725,28 @@ def build_page_context(
     ):
         if all(haversine_m(lat, lon, b, a) > 50.0 for a, b in centers):
             centers = centers + [(lon, lat)]
+    # Candidate-GCP hints (#335): a failed fit's matched crossings, weighed
+    # like contradiction hints -- for a keymap-less page they are the only
+    # centers, which is what makes rescue reachable at all there.
+    # Like the stamp centers below, hints only serve pages with NO other
+    # centers: the volume-energy arbitration is a joint optimization, and
+    # widening an existing pool re-ranked nashville p6's rescue from its
+    # correct 11 ft pose to a 4x-scale 425 ft one. Both richmond conversions
+    # (p353 6.1 ft, p348 12.7 ft) are no_keymap pages whose hints are their
+    # only centers, so the narrow scope keeps every measured win.
+    if not centers:
+        for lon, lat in unit.gcp_hints:
+            if all(haversine_m(lat, lon, b, a) > 50.0 for a, b in centers):
+                centers = centers + [(lon, lat)]
+    # Neighbor-stamp priors (#335 phase 2): ONLY for unplaced pages with no
+    # other search centers — the keymap-less class (schenectady's 100-114
+    # block) where nothing else reaches. Widening an existing search proved
+    # harmful even with worse-ranked additions: the volume-energy arbitration
+    # is a joint optimization over the candidate pool, and adding stamp
+    # candidates to nashville p6 (which already had 4 centers) re-ranked its
+    # selection from the correct 11 ft pose to a 4x-scale 425 ft one.
+    if unit.fit_state != "fitted" and not centers:
+        centers = list(neighbor_stamp_centers(vctx, unit.stem))
     seed_affine = None
     if unit.fit_state == "fitted" and unit.gen_affine is not None:
         # For arbitration the incumbent pose itself is the natural search
@@ -1320,7 +1385,7 @@ DISTINCT_SEPARATION_M = 100.0
 DISTINCT_THETA_DEG = 10.0
 
 
-def distinct_margin(record: dict) -> float | None:
+def distinct_margin(record: dict, pose_aware: bool = True) -> float | None:
     """Rank-1's select_score lead over the best *distinct* alternative lock.
 
     Near-identical twins (the same lock found from two search centers, within
@@ -1332,17 +1397,53 @@ def distinct_margin(record: dict) -> float | None:
     if not candidates or candidates[0].get("select_score") is None:
         return None
     top = candidates[0]
+
+    def pose_center(c):
+        # The candidate's REFINED pose center, not its search center: two
+        # searches from different hint centers converge to the same lock
+        # (richmond p353's 6 ft and 10 ft twins came from hint clusters 250 m
+        # apart), and twin-ness is a property of where the pose LANDED.
+        a = c.get("world_affine")
+        if a is None:
+            return c["center"]
+        w = record.get("width") or 0
+        h = record.get("height") or 0
+        return (
+            a[0][0] * w / 2 + a[0][1] * h / 2 + a[0][2],
+            a[1][0] * w / 2 + a[1][1] * h / 2 + a[1][2],
+        )
+
+    top_center = pose_center(top)
     for candidate in candidates[1:]:
         if candidate.get("select_score") is None:
             continue
+        cand_center = pose_center(candidate)
         separation = haversine_m(
-            top["center"][1],
-            top["center"][0],
-            candidate["center"][1],
-            candidate["center"][0],
+            top_center[1],
+            top_center[0],
+            cand_center[1],
+            cand_center[0],
         )
+
+        def pose_theta(c):
+            # The REFINED pose's rotation, not the ladder rung it started
+            # from: richmond p353's two 6-10 ft twins carried rung thetas
+            # 14.65 deg apart while their refined poses coincided, so the
+            # rung-based gap called the winner's duplicate a distinct rival
+            # and the margin bar abstained on a correct placement.
+            #
+            # pose_aware=False keeps the legacy rung-theta comparison for the
+            # CHALLENGE path: replacing a placed page is the risky direction,
+            # and the rung-collapse conservatism was functioning as a brake --
+            # scoping it away flipped nashville p6 (11 ft -> 425 ft) the first
+            # time the fix ran unscoped.
+            a = c.get("world_affine")
+            if not pose_aware or a is None:
+                return c["theta_deg"]
+            return math.degrees(math.atan2(-a[1][0], a[0][0]))
+
         theta_gap = abs(
-            (candidate["theta_deg"] - top["theta_deg"] + 180.0) % 360.0 - 180.0
+            (pose_theta(candidate) - pose_theta(top) + 180.0) % 360.0 - 180.0
         )
         if separation > DISTINCT_SEPARATION_M or theta_gap > DISTINCT_THETA_DEG:
             # Candidates are sorted by select_score, so the first distinct
@@ -1818,11 +1919,20 @@ def cmd_sweep_refine(volumes: list[Path], recompute: bool = False) -> None:
 # The frozen production gates (dev-swept; `mapsnap snap` uses these): the
 # per-page rescue score/margin gates, the volume-energy conservative elbow,
 # and the arbitration score gate.
-PRODUCTION_GATE_SCORE = 1.25
+# Absolute verification bars are calibrated to the road UNet's score
+# distribution. v4 (30-volume retrain at v1's width; #173 uniform sampling)
+# lifts verification over v1 by +0.05 median on good poses and +0.13 on the
+# rest (164 identical incumbent poses, detroit+richmond: absolute median
+# 1.055 -> 1.199, driven by inlier_frac and chamfer), so the absolute bars
+# carry a +0.10 offset inside that band -- otherwise rescues that used to
+# fail the bar clear it on the lift alone (detroit p61/p8/p93 vacuum-fills
+# at 358-591 ft under uncalibrated v3). Gap comparisons (challenge margins)
+# are shift-invariant and stay unchanged.
+PRODUCTION_GATE_SCORE = 1.35
 PRODUCTION_GATE_MARGIN = 0.25
-PRODUCTION_ARBITRATE_GATE = 1.5
+PRODUCTION_ARBITRATE_GATE = 1.6
 
-STAMP_RESCUE_SCORE = 0.7
+STAMP_RESCUE_SCORE = 0.8
 """Relaxed rescue bar for stamp-corroborated candidates.
 
 A contradiction-demoted page's rescue candidate that lands its printed claim
@@ -1955,7 +2065,7 @@ def arbitrate_challenge(record: dict, arbitrate_gate: float) -> dict | None:
     score = top.get("select_score")
     if score is None or score < arbitrate_gate:
         return None
-    margin = distinct_margin(record)
+    margin = distinct_margin(record, pose_aware=False)
     if margin is None or margin < PRODUCTION_GATE_MARGIN:
         return None
     disagreement = grid_rmse_ft_between(
@@ -2473,7 +2583,13 @@ def select_argmax(
                         continue
             top = record["candidates"][0]
             score = top.get("select_score")
-            margin = distinct_margin(record)
+            # Pose-aware twins only for RESCUE: a fitted page's challenger
+            # must beat the legacy (conservative) ambiguity test -- the
+            # unscoped fix flipped nashville p6 (11 ft -> 425 ft) through
+            # this very path's "energy" choice.
+            margin = distinct_margin(
+                record, pose_aware=record.get("fit_state") in RESCUE_STATES
+            )
             corroborated = (
                 record.get("fit_state") in RESCUE_STATES
                 and score is not None

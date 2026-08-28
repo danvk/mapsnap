@@ -497,3 +497,21 @@ def test_megapixel_floor_sits_in_the_corpus_gap():
     a future sheet landing near the floor means the assumption needs rechecking.
     """
     assert 25.0 < MIN_KEYMAP_MEGAPIXELS < 42.0
+
+
+def test_resolve_keymaps_apply_floor_false_keeps_sub_floor_sheets(tmp_path: Path):
+    """The sidecar-embed resolver must see sub-floor keymaps.
+
+    The floor guards only the vocabulary restriction; the georef sidecar's
+    keymap field is transport to osm-snap and street-solve. Dropping the
+    locator entirely nulled every asheville/columbia sidecar's keymap and
+    silently severed snap's search centers and region priors.
+    """
+    (tmp_path / "raw").mkdir(exist_ok=True)
+    write_keymap_pair(tmp_path / "raw", "p0", 4400, 5517)  # columbia-size: sub-floor
+    floored = resolve_keymaps(None, False, [str(tmp_path / "p5.jpg")])
+    unfloored = resolve_keymaps(
+        None, False, [str(tmp_path / "p5.jpg")], apply_floor=False
+    )
+    assert floored == []
+    assert [p.name for p in unfloored] == ["p0.keymap.json"]

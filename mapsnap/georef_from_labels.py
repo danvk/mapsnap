@@ -99,6 +99,10 @@ class ProcessResult:
     rotation: float | None = None  # directed rotation in radians, set on success
     deferred: dict | None = None  # set when deferred (exactly 1 GCP, needs scale)
     nofit_written: bool = False  # process_image already wrote a --debug nofit sidecar
+    # Clustered world positions of the page's candidate GCPs when no fit was
+    # reached (#335): a failed RANSAC still located matched street crossings,
+    # and those clusters seed snap's rescue search like contradiction hints do.
+    gcp_hints: list[tuple[float, float]] | None = None
 
 
 def label_features(labels: list[dict]) -> list[LabelFeature]:
@@ -1121,6 +1125,39 @@ def straight_intersection_geo(
         lon0 + float(point[0]) / (cos0 * _FT_PER_DEG_LAT),
         lat0 + float(point[1]) / _FT_PER_DEG_LAT,
     )
+
+
+def cluster_gcp_hints(
+    gcps: list["IntersectionGCP"], tol_m: float = 100.0, max_hints: int = 3
+) -> list[tuple[float, float]]:
+    """Up to ``max_hints`` clustered world positions of candidate GCPs (#335).
+
+    A page that failed to fit still matched street pairs to OSM crossings;
+    their positions cluster near the page's true location when the matches are
+    right (measured corpus-wide: p25 124 m, median 206 m on unplaced truth
+    pages) and scatter on aliases. Single-linkage clusters within ``tol_m``,
+    largest first -- the biggest cluster is the mutually-consistent story.
+    """
+    clusters: list[list[tuple[float, float]]] = []
+    for gcp in gcps:
+        lon, lat = gcp.geo
+        ky = 110540.0
+        kx = 111320.0 * math.cos(math.radians(lat))
+        for cluster in clusters:
+            if any(
+                math.hypot((lon - x) * kx, (lat - y) * ky) <= tol_m for x, y in cluster
+            ):
+                cluster.append((lon, lat))
+                break
+        else:
+            clusters.append([(lon, lat)])
+    clusters.sort(key=len, reverse=True)
+    hints = []
+    for cluster in clusters[:max_hints]:
+        xs = sorted(x for x, _ in cluster)
+        ys = sorted(y for _, y in cluster)
+        hints.append((xs[len(xs) // 2], ys[len(ys) // 2]))
+    return hints
 
 
 def find_intersection_gcps(
@@ -2545,6 +2582,7 @@ def _init_worker(
     truth_by_page: dict[int, list[list[list[float]]]] | None = None,
     keep_labels_on_fill: bool = False,
     collinear_perp_tolerance_px: float = COLLINEAR_PERP_TOLERANCE_PX,
+    embed_locator: KeymapLocator | None = None,
 ) -> None:
     """Populate _worker_state once per worker process (or once in the main process)."""
     _worker_state.update(
@@ -2564,6 +2602,7 @@ def _init_worker(
         parameters=parameters,
         high_confidence_size_fraction=high_confidence_size_fraction,
         locator=locator,
+        embed_locator=embed_locator,
         geojson_features=geojson_features or [],
         rectangle_index=rectangle_index,
         truth_by_page=truth_by_page or None,
@@ -2604,7 +2643,10 @@ def _process_one_image(image_path: str) -> tuple[str, ProcessResult]:
         truth_by_page.get(number) if truth_by_page and number is not None else None
     )
     key = page_key(image_stem(image_path))
-    keymap = locator.page_keymap(key) if locator is not None else None
+    # Embed keymap data from the unfloored locator: the floor gates only the
+    # vocabulary restriction, not the sidecar transport to snap/street-solve.
+    embed = _worker_state.get("embed_locator") or locator
+    keymap = embed.page_keymap(key) if embed is not None else None
 
     def run(
         block_index: dict, cos_phi: float, size_fraction: float = 1.0
@@ -2745,17 +2787,26 @@ def _process_one_image(image_path: str) -> tuple[str, ProcessResult]:
     # the channel was asked and had no answer. Skip this when process_image already wrote a
     # richer --debug nofit sidecar (with seed-pair fits) to the same path.
     if (
-        keymap is not None
+        (keymap is not None or result.gcp_hints)
         and not result.success
         and result.deferred is None
         and not result.nofit_written
     ):
         nofit: dict = {
             "status": sidecar.NOFIT,
-            "keymap": keymap,
             "streets": [],
             "intersections": [],
         }
+        if keymap is not None:
+            nofit["keymap"] = keymap
+        # Candidate-GCP location hints (#335): a failed fit's matched street
+        # crossings, clustered. Snap's rescue reads these as search centers
+        # like contradiction hints; for a keymap-less page they are the only
+        # location evidence on disk.
+        if result.gcp_hints:
+            nofit["gcp_hints"] = [
+                [round(lon, 7), round(lat, 7)] for lon, lat in result.gcp_hints
+            ]
         from mapsnap.printed_scale import printed_scale_ft as _note_read
 
         _note = _note_read(Path(derive_paths(image_path)[0]))
@@ -3243,7 +3294,7 @@ def process_image(
                 f"Only 1 distinct intersection: {descr}; skipping (use --disable-one-gcp-fits to suppress).",
                 file=sys.stderr,
             )
-            return ProcessResult(success=False)
+            return ProcessResult(success=False, gcp_hints=cluster_gcp_hints(gcps))
         print(
             f"Only 1 distinct intersection: {descr}; deferring for median-scale processing.",
             file=sys.stderr,
@@ -3312,14 +3363,28 @@ def process_image(
                 labels_path,
                 centerlines_path,
                 initial_pair=None,
-                extra_fields={"nofit": True, "status": sidecar.NOFIT},
+                extra_fields={
+                    "nofit": True,
+                    "status": sidecar.NOFIT,
+                    # #335: the failed fit's clustered candidate-GCP positions
+                    # -- this path writes the sidecar itself, so the hints must
+                    # ride extra_fields (the wrapper skips nofit_written pages).
+                    "gcp_hints": [
+                        [round(lon, 7), round(lat, 7)]
+                        for lon, lat in cluster_gcp_hints(gcps)
+                    ],
+                },
                 parameters=parameters,
                 keymap=keymap,
                 truth_polygons=truth_polygons,
                 gcp_pair_records=pair_records,
             )
-            return ProcessResult(success=False, nofit_written=True)
-        return ProcessResult(success=False)
+            return ProcessResult(
+                success=False,
+                nofit_written=True,
+                gcp_hints=cluster_gcp_hints(gcps),
+            )
+        return ProcessResult(success=False, gcp_hints=cluster_gcp_hints(gcps))
     print(
         f"RANSAC: {len(inlier_feat_indices)} / {len(features)} inlier labels",
         file=sys.stderr,
@@ -3927,7 +3992,19 @@ def main() -> None:
     # neighborhood and, if that starves the fit, against the whole key-map rectangle (a
     # volume-wide box every page sits in — far smaller than the full centerlines).
     keymap_files = resolve_keymaps(args.keymap, args.ignore_keymap, args.images)
+    # The sidecar keymap field (centers/radius/regions) is transport to
+    # osm-snap and street-solve and is embedded regardless of the megapixel
+    # floor -- the floor guards only the vocabulary restriction. Below the
+    # floor these differ: embed_locator exists while locator stays None.
+    embed_keymap_files = resolve_keymaps(
+        args.keymap, args.ignore_keymap, args.images, apply_floor=False
+    )
     locator = None
+    embed_locator = None
+    if embed_keymap_files:
+        embed_locator = KeymapLocator.from_keymaps(
+            embed_keymap_files, args.keymap_radius
+        )
     rectangle_index: tuple[dict[str, list[Block]], float] | None = None
     if keymap_files:
         print(
@@ -3935,6 +4012,8 @@ def main() -> None:
             file=sys.stderr,
         )
         locator = KeymapLocator.from_keymaps(keymap_files, args.keymap_radius)
+        if embed_keymap_files == keymap_files:
+            embed_locator = locator
         rectangle = locator.rectangle_features(geojson["features"])
         if rectangle:
             rectangle_bi = build_block_index(
@@ -4054,6 +4133,7 @@ def main() -> None:
         truth_by_page,
         args.keep_labels_on_fill,
         args.collinear_perp_tolerance,
+        embed_locator,
     )
     if args.num_workers > 1:
         with multiprocessing.Pool(
