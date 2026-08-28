@@ -546,3 +546,16 @@ def test_load_page_units_populates_demoted_affine(tmp_path):
     assert units["p2"].gen_affine is not None
     assert units["p2"].demoted_affine is None
     assert units["p3"].demoted_affine is None
+
+
+def test_runner_up_affines_load_for_fitted_pages_only(tmp_path):
+
+    from mapsnap.edge_join_experiment import runner_up_affines_of
+
+    corners = [[-80.0, 25.0], [-79.99, 25.0], [-79.99, 24.99], [-80.0, 24.99]]
+    georef = {"runner_up_poses": [{"corners": corners, "score_ratio": 0.98}]}
+    affines = runner_up_affines_of(georef, 1000, 1000)
+    assert len(affines) == 1
+    assert affines[0].shape == (2, 3)
+    assert runner_up_affines_of(None, 1000, 1000) == []
+    assert runner_up_affines_of({"runner_up_poses": [{"bad": 1}]}, 1000, 1000) == []

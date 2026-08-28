@@ -86,6 +86,30 @@ class TruthFit:
     transform_type: str
 
 
+def runner_up_affines_of(georef: dict | None, width: int, height: int) -> list:
+    """Affines for a fitted sidecar's runner_up_poses entries (empty if none).
+
+    Shared by both PageUnit loaders (this module's and osm_snap_experiment's
+    panel loader) so the runner-up channel cannot fall out of sync between
+    base pages and split panels.
+    """
+    from mapsnap.road_model import page_world_affine
+
+    if not georef:
+        return []
+    affines = []
+    for pose in georef.get("runner_up_poses") or []:
+        try:
+            affines.append(
+                page_world_affine(
+                    {"corners": pose["corners"], "width": width, "height": height}
+                )
+            )
+        except (KeyError, TypeError, ValueError):
+            continue
+    return affines
+
+
 @dataclass
 class PageUnit:
     """One base (unsplit) page of a volume with everything the harness needs."""
@@ -112,6 +136,9 @@ class PageUnit:
     # location evidence snap's rescue uses as search centers, recorded in the
     # nofit sidecar. Empty for fitted pages.
     gcp_hints: list[tuple[float, float]] = field(default_factory=list)
+    # Distinct near-tie poses RANSAC scored but did not pick (#340): consumed
+    # by snap as extra challenge seeds when the incumbent verifies poorly.
+    runner_up_affines: list[np.ndarray] = field(default_factory=list)
     anchor_truth: bool = False
     anchor_free: bool = False
     rmse_ft: float | None = None  # generated-vs-truth RMSE
@@ -302,6 +329,7 @@ def load_page_units(volume: Path) -> list[PageUnit]:
             keymap_centers=keymap_centers,
             keymap_radius_m=keymap_radius,
             keymap_regions=keymap_regions,
+            runner_up_affines=runner_up_affines_of(georef, width, height),
         )
         if truth is not None and gen_affine is not None:
             unit.rmse_ft = grid_rmse_ft_between(

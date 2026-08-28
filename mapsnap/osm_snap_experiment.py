@@ -34,6 +34,7 @@ from mapsnap.edge_join_experiment import (
     keymap_region_adjacency,
     load_page_units,
     load_prob,
+    runner_up_affines_of,
     volume_median_scale,
 )
 from mapsnap.feature_index import FeatureIndex
@@ -401,6 +402,7 @@ def load_panel_units(volume: Path) -> list[PageUnit]:
                 keymap_centers=keymap_centers,
                 keymap_radius_m=keymap_radius,
                 keymap_regions=keymap_regions,
+                runner_up_affines=runner_up_affines_of(georef, width, height),
             )
         )
     return units
