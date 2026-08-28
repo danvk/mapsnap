@@ -320,3 +320,61 @@ def test_is_claim_rejects_explicit_zero():
         "polygon": [[0, 0], [20, 0], [20, 40], [0, 40]],
     }
     assert not is_claim(detection, "7")
+
+
+def test_side_components_parses_corners():
+    from mapsnap.page_adjacency import side_components
+
+    assert side_components("BL") == {"B", "L"}
+    assert side_components("T") == {"T"}
+    assert side_components("center") == set()
+    assert side_components(None) == set()
+
+
+def test_triangle_promoted_edges_accepts_l_corner_and_shared_side():
+    from mapsnap.page_adjacency import triangle_promoted_edges
+
+    # w=p20 is mutual with both p23 and p24 and prints them on its own bottom
+    # edge (B and BL share a component), so the one-sided p24->p23 is vouched.
+    mutual = [("p20", "p23"), ("p20", "p24")]
+    sides = {("p20", "p24"): {"B"}, ("p20", "p23"): {"B", "L"}}
+    promoted = triangle_promoted_edges(mutual, [("p24", "p23")], sides)
+    assert [(p["claimer"], p["target"], p["via"]) for p in promoted] == [
+        ("p24", "p23", "p20")
+    ]
+    assert promoted[0]["geometry"] == "shared-component"
+
+    # Perpendicular sides (an L-corner around w) also promote.
+    sides = {("p20", "p24"): {"T"}, ("p20", "p23"): {"L"}}
+    promoted = triangle_promoted_edges(mutual, [("p24", "p23")], sides)
+    assert promoted and promoted[0]["geometry"] == "perpendicular"
+
+
+def test_triangle_promoted_edges_rejects_the_collinear_run():
+    from mapsnap.page_adjacency import triangle_promoted_edges
+
+    # The measured failure mode: w prints one endpoint left and the other
+    # right, so u-w-v is a straight run and u, v are two steps apart
+    # (LA p1464->p1466 via p1465, 396 m from truth-adjacent).
+    mutual = [("p1465", "p1464"), ("p1465", "p1466")]
+    sides = {("p1465", "p1464"): {"L"}, ("p1465", "p1466"): {"R"}}
+    assert triangle_promoted_edges(mutual, [("p1464", "p1466")], sides) == []
+    # A corner that still contains an opposing component is rejected too.
+    sides = {("p1465", "p1464"): {"T", "R"}, ("p1465", "p1466"): {"L"}}
+    assert triangle_promoted_edges(mutual, [("p1464", "p1466")], sides) == []
+
+
+def test_triangle_promoted_edges_needs_a_shared_mutual_neighbor():
+    from mapsnap.page_adjacency import triangle_promoted_edges
+
+    # No w mutual with both endpoints: nothing to vouch for the claim.
+    mutual = [("p20", "p24")]
+    sides = {("p20", "p24"): {"B"}, ("p20", "p23"): {"B"}}
+    assert triangle_promoted_edges(mutual, [("p24", "p23")], sides) == []
+    # Sides missing on either side of the triangle: no verdict, no promotion.
+    assert (
+        triangle_promoted_edges(
+            [("p20", "p23"), ("p20", "p24")], [("p24", "p23")], {("p20", "p24"): {"B"}}
+        )
+        == []
+    )
