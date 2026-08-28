@@ -641,15 +641,15 @@ def _fill_coverage_gaps(
         for j, (mask_j, page_poly_j) in enumerate(zip(masks, page_polys)):
             if mask_j is None:
                 continue
-            sub = gap_piece.intersection(page_poly_j)
-            if sub.is_empty:
+            sub = safe_overlay(gap_piece, page_poly_j, "intersection")
+            if sub is None or sub.is_empty:
                 continue
             for piece in _collect_polygons(sub):
                 if piece.area < mask_j.area * min_gap_fraction:
                     continue  # ignore tiny fragments
-                candidate = mask_j.union(piece)
+                candidate = safe_overlay(mask_j, piece, "union")
                 if not isinstance(candidate, Polygon):
-                    continue  # piece doesn't connect to mask; skip
+                    continue  # piece doesn't connect to mask (or GEOS balked); skip
                 improvement = _convexity_ratio(candidate) - _convexity_ratio(mask_j)
                 assignments.append((improvement, j, piece))
 
@@ -658,19 +658,19 @@ def _fill_coverage_gaps(
         assignments.sort(key=lambda t: (-t[0], t[1]))
 
         for _, j, piece in assignments:
-            unclaimed = piece.difference(claimed)
-            if unclaimed.is_empty:
+            unclaimed = safe_overlay(piece, claimed, "difference")
+            if unclaimed is None or unclaimed.is_empty:
                 continue
             added = False
             for sub in _collect_polygons(unclaimed):
                 cur = new_masks[j]
                 if cur is None:
                     continue
-                candidate = cur.union(sub)
+                candidate = safe_overlay(cur, sub, "union")
                 if not isinstance(candidate, Polygon):
                     continue
                 new_masks[j] = candidate
-                claimed = claimed.union(sub)
+                claimed = safe_overlay(claimed, sub, "union") or claimed
                 modified.add(j)
                 added = True
             if added:
