@@ -556,6 +556,88 @@ def is_claim(
     return True
 
 
+def qualifying_claim(
+    detection: dict,
+    page: dict,
+    height: float,
+    *,
+    min_confidence: float = MIN_CONF,
+    single_digit_min_confidence: float = SINGLE_DIGIT_MIN_CONF,
+    height_band: tuple[float, float] | None = None,
+    min_gap: float | None = None,
+) -> bool:
+    """is_claim for one detection at a given height floor, thresholds bundled."""
+    return is_claim(
+        detection,
+        page["key"],
+        min_height=height,
+        min_confidence=min_confidence,
+        single_digit_min_confidence=single_digit_min_confidence,
+        height_band=height_band,
+        min_gap=min_gap,
+    )
+
+
+def sub_floor_rescues(
+    pages: dict[str, dict],
+    claims_by_page: dict[str, set[str]],
+    *,
+    floor: float,
+    min_height: float = MIN_HEIGHT,
+    min_confidence: float = MIN_CONF,
+    single_digit_min_confidence: float = SINGLE_DIGIT_MIN_CONF,
+    height_band: tuple[float, float] | None = None,
+    min_gap: float | None = None,
+) -> dict[str, set[str]]:
+    """Sub-floor single-digit claims that a MULTI-DIGIT claim reciprocates.
+
+    The calibrated height floor (CLAIM_HEIGHT_FRACTION) exists because junk
+    single digits reciprocate by coincidence -- but they reciprocate with each
+    other, not with a solid two-digit reference. So a single digit that clears
+    every other bar (corpus MIN_HEIGHT, the strict single-digit confidence
+    floor, the size band, the isolation gap, rotation) and is claimed back by a
+    qualifying multi-digit claim has better corroboration than its own printed
+    size can provide, and is admitted.
+
+    This is the targeted alternative to lowering the floor globally, which
+    measurement rejected: at 0.70 nashville gains 2 correct edges and 5 wrong
+    ones, and its mutual tier drops 100% -> 97.5%.
+
+    Returns stem -> rescued claim keys, to union into ``claims_by_page``.
+    """
+    thresholds = {
+        "min_confidence": min_confidence,
+        "single_digit_min_confidence": single_digit_min_confidence,
+        "height_band": height_band,
+        "min_gap": min_gap,
+    }
+    resolve = claim_resolver(claims_by_page)
+    multi_digit_targets: dict[str, set[str]] = defaultdict(set)
+    for stem, page in pages.items():
+        for detection in page["detections"]:
+            number = detection["number"]
+            if (
+                number is not None
+                and number >= 10
+                and qualifying_claim(detection, page, floor, **thresholds)
+            ):
+                multi_digit_targets[stem].update(resolve(detection["key"]))
+    rescued: dict[str, set[str]] = defaultdict(set)
+    for stem, page in pages.items():
+        for detection in page["detections"]:
+            number = detection["number"]
+            if number is None or number >= 10:
+                continue
+            if qualifying_claim(detection, page, floor, **thresholds):
+                continue  # already a claim on its own merits
+            if not qualifying_claim(detection, page, min_height, **thresholds):
+                continue  # fails something other than the calibrated floor
+            for other in resolve(detection["key"]):
+                if other != stem and stem in multi_digit_targets.get(other, set()):
+                    rescued[stem].add(detection["key"])
+    return dict(rescued)
+
+
 def claim_resolver(claims_by_page: dict[str, set[str]]):
     """resolve(claim key) -> stems carrying it, shared by both edge builders.
 
@@ -870,6 +952,18 @@ def main() -> None:
         )
 
     claims_by_page = compute_claims(height_band, min_gap, claim_floor)
+    rescued = sub_floor_rescues(
+        pages,
+        claims_by_page,
+        floor=claim_floor,
+        min_height=args.min_height,
+        min_confidence=args.min_confidence,
+        single_digit_min_confidence=args.single_digit_min_confidence,
+        height_band=height_band,
+        min_gap=min_gap,
+    )
+    for stem, keys in rescued.items():
+        claims_by_page[stem] |= keys
     no_neighbor: dict[str, list[str]] = {}
     for stem, page in pages.items():
         for detection in page["detections"]:
@@ -882,6 +976,27 @@ def main() -> None:
                 height_band=height_band,
                 min_gap=min_gap,
             )
+            # A sub-floor single digit vouched for by a multi-digit reciprocal
+            # is a claim too, flagged so consumers (and the debugger) can see
+            # that its corroboration is reciprocity, not printed size.
+            if (
+                not detection["claim"]
+                and detection["key"] in rescued.get(stem, set())
+                and qualifying_claim(
+                    detection,
+                    page,
+                    args.min_height,
+                    min_confidence=args.min_confidence,
+                    single_digit_min_confidence=args.single_digit_min_confidence,
+                    height_band=height_band,
+                    min_gap=min_gap,
+                )
+            ):
+                # Only the detection that actually cleared every other bar is
+                # the claim -- a page often carries several reads of the same
+                # key, and the others stay non-claims.
+                detection["claim"] = True
+                detection["sub_floor_rescue"] = True
             # An explicit "0" that would have qualified as a claim (same physical
             # bar, including full single-digit strictness) is recorded as
             # no-neighbor evidence for its unit's edge: the map ends there (#135).
@@ -931,7 +1046,8 @@ def main() -> None:
     print(
         f"Wrote {output}: {len(pages)} pages, {total_claims} directed claims, "
         f"{len(edges)} mutual edges, {len(one_sided)} one-sided "
-        f"({len(promoted)} triangle-promoted).",
+        f"({len(promoted)} triangle-promoted, "
+        f"{sum(len(k) for k in rescued.values())} sub-floor rescued).",
         file=sys.stderr,
     )
 

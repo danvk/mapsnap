@@ -378,3 +378,98 @@ def test_triangle_promoted_edges_needs_a_shared_mutual_neighbor():
         )
         == []
     )
+
+
+def _page(key, dets):
+    return {"key": key, "number": int(key), "detections": dets}
+
+
+def _det(key, height, *, edge="T", conf=0.99, gap=99.0):
+    return {
+        "key": key,
+        "number": int(key),
+        "text": key,
+        "confidence": conf,
+        "height": height,
+        "edge": edge,
+        "nearest_box": gap,
+        "polygon": [[0, 0], [20, 0], [20, height], [0, height]],
+    }
+
+
+def test_sub_floor_rescue_admits_a_multi_digit_reciprocated_single_digit():
+    from mapsnap.page_adjacency import sub_floor_rescues
+
+    # p10 reads "9" at 32px, below a 34.5px calibrated floor; p9 reads "10" at
+    # 46px, comfortably above it. The two-digit reciprocal vouches for the
+    # short one (hudson p10->p9, the case that motivated this).
+    pages = {
+        "p10": _page("10", [_det("9", 32.0)]),
+        "p9": _page("9", [_det("10", 46.0)]),
+    }
+    claims = {"p10": set(), "p9": {"10"}}
+    rescued = sub_floor_rescues(pages, claims, floor=34.5, min_height=28.0)
+    assert rescued == {"p10": {"9"}}
+
+
+def test_sub_floor_rescue_ignores_single_digit_only_reciprocity():
+    from mapsnap.page_adjacency import sub_floor_rescues
+
+    # Two short single digits pointing at each other is exactly the junk the
+    # height floor exists to reject -- coincidental reciprocity, no two-digit
+    # reference anywhere.
+    pages = {"p9": _page("9", [_det("8", 30.0)]), "p8": _page("8", [_det("9", 30.0)])}
+    assert sub_floor_rescues(pages, {"p9": set(), "p8": set()}, floor=34.5) == {}
+
+
+def test_sub_floor_rescue_respects_every_other_bar():
+    from mapsnap.page_adjacency import sub_floor_rescues
+
+    partner = _page("9", [_det("10", 46.0)])
+    # Below the corpus MIN_HEIGHT: too small to be a reference at all.
+    pages = {"p10": _page("10", [_det("9", 12.0)]), "p9": partner}
+    assert sub_floor_rescues(pages, {"p10": set(), "p9": {"10"}}, floor=34.5) == {}
+    # Under the strict single-digit confidence floor.
+    pages = {"p10": _page("10", [_det("9", 32.0, conf=0.5)]), "p9": partner}
+    assert (
+        sub_floor_rescues(
+            pages,
+            {"p10": set(), "p9": {"10"}},
+            floor=34.5,
+            single_digit_min_confidence=0.9,
+        )
+        == {}
+    )
+    # Touching a sibling box: a fragment of a larger number, not a reference.
+    pages = {"p10": _page("10", [_det("9", 32.0, gap=1.0)]), "p9": partner}
+    assert (
+        sub_floor_rescues(pages, {"p10": set(), "p9": {"10"}}, floor=34.5, min_gap=13.8)
+        == {}
+    )
+    # Outside the calibrated single-digit size band.
+    pages = {"p10": _page("10", [_det("9", 32.0)]), "p9": partner}
+    assert (
+        sub_floor_rescues(
+            pages, {"p10": set(), "p9": {"10"}}, floor=34.5, height_band=(33.0, 64.0)
+        )
+        == {}
+    )
+
+
+def test_sub_floor_rescue_keys_do_not_vouch_for_other_reads_of_the_same_key():
+    from mapsnap.page_adjacency import qualifying_claim, sub_floor_rescues
+
+    # p10 carries two reads of "9": a clean 32px one and a junk 12px one. The
+    # rescue is keyed by claim key, so the junk read must still fail its own
+    # qualification check (this is what the sidecar flag is gated on).
+    good, junk = _det("9", 32.0), _det("9", 12.0, conf=0.2)
+    pages = {
+        "p10": _page("10", [good, junk]),
+        "p9": _page("9", [_det("10", 46.0)]),
+    }
+    rescued = sub_floor_rescues(
+        pages, {"p10": set(), "p9": {"10"}}, floor=34.5, min_height=28.0
+    )
+    assert rescued == {"p10": {"9"}}
+    assert qualifying_claim(good, pages["p10"], 28.0)
+    assert not qualifying_claim(junk, pages["p10"], 28.0)
