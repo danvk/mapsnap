@@ -828,3 +828,16 @@ def test_safe_overlay_passes_through_non_polygon_result():
     touching = safe_overlay(a, b, "intersection")
     assert touching is not None
     assert _collect_polygons(touching) == []
+
+
+def test_svg_fallback_uses_panel_rect_for_split_pages():
+    # A maskless SPLIT page must fall back to its panel rectangle, not the
+    # whole canvas -- the whole-canvas fallback drew the full sheet for
+    # fargo p72__1 (top panel, 2026-08-28 baseline).
+    georef = {"width": 1665, "height": 917}
+    svg = geo_polygon_to_svg(None, georef, 6660, 8070, (0.0, 0.0, 6660.0, 3666.7))
+    assert "8070" not in svg
+    assert 'points="0.0,3666.7 0.0,0.0 6660.0,0.0 6660.0,3666.7 0.0,3666.7"' in svg
+    # Unsplit pages keep the full-page fallback.
+    svg = geo_polygon_to_svg(None, {"width": 1665, "height": 2018}, 6660, 8070, None)
+    assert 'points="0,8070 0,0 6660,0 6660,8070 0,8070"' in svg

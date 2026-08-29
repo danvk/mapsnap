@@ -933,6 +933,17 @@ def geo_polygon_to_svg(
     georef_height = float(georef["height"])
 
     def fallback_rect() -> str:
+        # A split annotation's fallback is its PANEL rectangle, not the page:
+        # maskless split pages (isolated poses have no street blocks to build
+        # a mask from) were emitting whole-canvas selectors, so the viewer
+        # drew the full sheet for a panel (fargo p72__1, 2026-08-28 baseline).
+        if split_canvas is not None:
+            cx0, cy0, cw0, ch0 = split_canvas
+            x1, y1 = round(cx0 + cw0, 1), round(cy0 + ch0, 1)
+            return (
+                f'<svg><polygon points="{cx0},{y1} {cx0},{cy0} '
+                f'{x1},{cy0} {x1},{y1} {cx0},{y1}" /></svg>'
+            )
         return (
             f'<svg><polygon points="0,{source_height} 0,0 '
             f'{source_width},0 {source_width},{source_height} 0,{source_height}" /></svg>'
