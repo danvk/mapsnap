@@ -915,6 +915,7 @@ def geo_polygon_to_svg(
     source_width: int,
     source_height: int,
     split_canvas: tuple[float, float, float, float] | None = None,
+    panel_ring_canvas: list[tuple[float, float]] | None = None,
 ) -> str:
     """Convert a geo-space Shapely Polygon to an IIIF SvgSelector string.
 
@@ -926,17 +927,38 @@ def geo_polygon_to_svg(
         canvas_x = cx + pixel_x * (cw / georef_width)
         canvas_y = cy + pixel_y * (ch / georef_height)
 
-    Falls back to the standard full-page rectangle when geo_polygon is
-    None or empty. Raises ValueError for MultiPolygon input.
+    ``panel_ring_canvas`` is the split panel's polygon in canvas coordinates.
+    A split annotation's selector must NEVER include content outside its own
+    panel, whatever the mask says: block-based masks are built from the pose's
+    street structure and routinely extend past the panel seam (90 of 184 split
+    selectors in the 2026-08-28 corpus leaked, fargo p12__1's L-shaped panel by
+    32% of its area), and the maskless fallback used to emit the whole page
+    (fargo p72__1). Masks are intersected with the ring; the maskless fallback
+    IS the ring. Falls back to the full-page rectangle only for unsplit pages.
+    Raises ValueError for MultiPolygon input.
     """
     georef_width = float(georef["width"])
     georef_height = float(georef["height"])
 
+    ring_polygon = (
+        Polygon(panel_ring_canvas).buffer(0)
+        if panel_ring_canvas and len(panel_ring_canvas) >= 3
+        else None
+    )
+
+    def ring_svg(polygon: Polygon) -> str:
+        points = " ".join(
+            f"{round(x, 1)},{round(y, 1)}" for x, y in polygon.exterior.coords
+        )
+        return f'<svg><polygon points="{points}" /></svg>'
+
     def fallback_rect() -> str:
-        # A split annotation's fallback is its PANEL rectangle, not the page:
+        # A split annotation's fallback is its PANEL POLYGON, not the page:
         # maskless split pages (isolated poses have no street blocks to build
         # a mask from) were emitting whole-canvas selectors, so the viewer
         # drew the full sheet for a panel (fargo p72__1, 2026-08-28 baseline).
+        if ring_polygon is not None and not ring_polygon.is_empty:
+            return ring_svg(ring_polygon)
         if split_canvas is not None:
             cx0, cy0, cw0, ch0 = split_canvas
             x1, y1 = round(cx0 + cw0, 1), round(cy0 + ch0, 1)
@@ -976,7 +998,20 @@ def geo_polygon_to_svg(
         return round(cx + px * scale_x, 1), round(cy + py * scale_y, 1)
 
     coords = list(geo_polygon.exterior.coords)
-    points = " ".join(
-        f"{x},{y}" for x, y in (geo_to_canvas(lon, lat) for lon, lat in coords)
-    )
+    canvas_points = [geo_to_canvas(lon, lat) for lon, lat in coords]
+    if ring_polygon is not None and not ring_polygon.is_empty:
+        # Clip the mask to the panel: keep the largest surviving piece, or the
+        # ring itself if the mask misses the panel entirely (degenerate pose).
+        mask_polygon = Polygon(canvas_points).buffer(0)
+        clipped = mask_polygon.intersection(ring_polygon)
+        pieces = (
+            [g for g in clipped.geoms if isinstance(g, Polygon)]
+            if hasattr(clipped, "geoms")
+            else ([clipped] if isinstance(clipped, Polygon) else [])
+        )
+        pieces = [g for g in pieces if not g.is_empty and g.area > 0]
+        if not pieces:
+            return ring_svg(ring_polygon)
+        return ring_svg(max(pieces, key=lambda g: g.area))
+    points = " ".join(f"{x},{y}" for x, y in canvas_points)
     return f'<svg><polygon points="{points}" /></svg>'
