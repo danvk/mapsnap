@@ -21,6 +21,7 @@ number of color pixels and improves convexity.
 
 import math
 import sys
+from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import cast
@@ -257,7 +258,7 @@ def _assign_blocks_to_pages(
     return assignment
 
 
-def safe_unary_union(geoms: list[BaseGeometry]) -> BaseGeometry:
+def safe_unary_union(geoms: Sequence[BaseGeometry]) -> BaseGeometry:
     """unary_union with a make_valid retry (see safe_overlay).
 
     Masks arrive from earlier overlay chains and can carry self-intersections

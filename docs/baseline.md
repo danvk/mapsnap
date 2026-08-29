@@ -114,6 +114,13 @@ resuming would produce a corpus that silently mixes two recognizers.
 That makes the OCR lane much slower than a normal re-run (which reuses reads
 and only re-recognizes new panels), so budget for it.
 
+## Fixing bugs found along the way
+
+You can fix small issues that arise while running the pipeline. Commit these
+changes on the same branch as the baseline update and include them in the PR.
+Do not commit directly to `main` or push commits directly onto `origin/main`.
+This avoids breaking CI (see #360).
+
 ## Reading the results
 
 ```sh
