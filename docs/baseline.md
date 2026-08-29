@@ -12,7 +12,7 @@ caches did.
 ## The volume set
 
 The scored corpus is every volume with all three of `mapsnap.json`,
-`centerlines.geojson` and `main.iiif.json` (truth) — 17 as of 2026-08-10.
+`centerlines.geojson` and `main.iiif.json` (truth) — 20 as of 2026-08-28.
 Volumes with the first two but no truth can be run, but they contribute
 nothing to a score comparison.
 
@@ -57,9 +57,9 @@ of them silently corrupts the comparison.
    rm -f data/*/p*.contradiction.json
    ```
 
-Also worth clearing when the relevant code changed: `artifacts/osm_snap/candidates.jsonl`
-records for stems that are now split parents (#275) — a stale `fitted` record
-lets snap resurrect a whole-page fit for a page that no longer exists whole.
+(Since #349, `fit` deletes `artifacts/osm_snap/` and `artifacts/street_solve/`
+candidates and selection files itself, so the old #275 stale-candidates
+pre-flight is no longer needed — every fit is cold-cache by construction.)
 
 ## Two lanes, small volumes first
 
@@ -113,6 +113,12 @@ resuming would produce a corpus that silently mixes two recognizers.
 
 That makes the OCR lane much slower than a normal re-run (which reuses reads
 and only re-recognizes new panels), so budget for it.
+
+**Resumed reads are only valid when the key maps did not change either.** OCR
+vocabularies are keymap-restricted where a usable key map exists, so a baseline
+that regenerates the keymap chain (the normal case — `rerun` always rebuilds
+it) must re-OCR from scratch: delete `p*.streets.json` up front. The 2026-08-28
+run initially resumed reads and had to be restarted.
 
 ## Reading the results
 
