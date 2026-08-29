@@ -454,6 +454,7 @@ def make_annotation(
 
     gcp_pts = georef_gcp_points(georef)
     split_canvas: tuple[float, float, float, float] | None = None
+    panel_ring_canvas: list[tuple[float, float]] | None = None
 
     if split_index is None:
         # Full page: scale 25%-page coordinates up to the full canvas.
@@ -494,6 +495,11 @@ def make_annotation(
             round(split_cw, 1),
             round(split_ch, 1),
         )
+        # The panel's own polygon in canvas coordinates: the hard boundary a
+        # split selector may never escape, whatever the mask computed.
+        panel_ring_canvas = [
+            (pt[0] * page_scale_x, pt[1] * page_scale_y) for pt in ring
+        ]
 
         resource_coords_list = [
             [
@@ -544,7 +550,12 @@ def make_annotation(
             "selector": {
                 "type": "SvgSelector",
                 "value": geo_polygon_to_svg(
-                    geo_mask, georef, source_width, source_height, split_canvas
+                    geo_mask,
+                    georef,
+                    source_width,
+                    source_height,
+                    split_canvas,
+                    panel_ring_canvas,
                 ),
             },
         },

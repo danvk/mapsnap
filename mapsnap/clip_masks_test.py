@@ -828,3 +828,53 @@ def test_safe_overlay_passes_through_non_polygon_result():
     touching = safe_overlay(a, b, "intersection")
     assert touching is not None
     assert _collect_polygons(touching) == []
+
+
+def test_svg_fallback_uses_panel_rect_for_split_pages():
+    # A maskless SPLIT page must fall back to its panel rectangle, not the
+    # whole canvas -- the whole-canvas fallback drew the full sheet for
+    # fargo p72__1 (top panel, 2026-08-28 baseline).
+    georef = {"width": 1665, "height": 917}
+    svg = geo_polygon_to_svg(None, georef, 6660, 8070, (0.0, 0.0, 6660.0, 3666.7))
+    assert "8070" not in svg
+    assert 'points="0.0,3666.7 0.0,0.0 6660.0,0.0 6660.0,3666.7 0.0,3666.7"' in svg
+    # Unsplit pages keep the full-page fallback.
+    svg = geo_polygon_to_svg(None, {"width": 1665, "height": 2018}, 6660, 8070, None)
+    assert 'points="0,8070 0,0 6660,0 6660,8070 0,8070"' in svg
+
+
+def test_split_selector_never_escapes_the_panel_ring():
+    from shapely.geometry import Polygon as ShapelyPolygon
+
+    # L-shaped panel (fargo p12__1's class): bbox spans the whole canvas, so
+    # only the RING can express the boundary. Maskless fallback = the ring.
+    ring = [
+        (0.0, 0.0),
+        (400.0, 0.0),
+        (400.0, 2000.0),
+        (1000.0, 2000.0),
+        (1000.0, 4000.0),
+        (0.0, 4000.0),
+    ]
+    georef = {"width": 250, "height": 1000}
+    svg = geo_polygon_to_svg(None, georef, 1000, 4000, (0.0, 0.0, 1000.0, 4000.0), ring)
+    assert "400.0,2000.0" in svg and "1000.0,2000.0" in svg  # the L's notch survives
+
+    # A mask that leaks past the ring gets clipped to it: build a georef whose
+    # pixel frame maps 1:1 onto the canvas so the geo mask is easy to reason
+    # about, then hand in a full-canvas mask.
+
+    georef = {
+        "width": 1000,
+        "height": 4000,
+        "corners": [[0.0, 0.0], [0.001, 0.0], [0.001, -0.004], [0.0, -0.004]],
+    }
+    full = ShapelyPolygon([(0.0, 0.0), (0.001, 0.0), (0.001, -0.004), (0.0, -0.004)])
+    svg = geo_polygon_to_svg(full, georef, 1000, 4000, (0.0, 0.0, 1000.0, 4000.0), ring)
+    pts = [
+        tuple(map(float, p.split(",")))
+        for p in svg.split('points="')[1].split('"')[0].split()
+    ]
+    clipped = ShapelyPolygon(pts)
+    ring_poly = ShapelyPolygon(ring)
+    assert clipped.difference(ring_poly.buffer(1.0)).area < 1.0  # nothing outside
