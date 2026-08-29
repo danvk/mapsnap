@@ -1,5 +1,12 @@
 # Claude Code Instructions
 
+## Pull Requests
+
+- Don't commit directly to `main`. Always go through a pull request.
+- Don't merge PRs unless explicitly told to.
+- Don't include issue numbers in PR titles. Put them in the body instead.
+- Use GitHub keyword phrases like "Fixes #123" or "Resolves #234" to make PRs automatically close issues.
+
 ## Coding guidelines
 
 - Avoid abbrevs: `const startDate = r.tags['start_date']`, not `const sd = ...`.
