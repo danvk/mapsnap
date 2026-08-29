@@ -863,7 +863,6 @@ def test_split_selector_never_escapes_the_panel_ring():
     # A mask that leaks past the ring gets clipped to it: build a georef whose
     # pixel frame maps 1:1 onto the canvas so the geo mask is easy to reason
     # about, then hand in a full-canvas mask.
-    import numpy as np
 
     georef = {
         "width": 1000,

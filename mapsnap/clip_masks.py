@@ -30,7 +30,7 @@ import numpy as np
 from PIL import Image, ImageDraw
 from shapely import make_valid
 from shapely.errors import GEOSException
-from shapely.geometry import LineString, MultiPolygon, Polygon
+from shapely.geometry import GeometryCollection, LineString, MultiPolygon, Polygon
 from shapely.geometry import mapping as geom_mapping
 from shapely.geometry import shape as geom_shape
 from shapely.geometry.base import BaseGeometry, BaseMultipartGeometry
@@ -1005,12 +1005,14 @@ def geo_polygon_to_svg(
         # ring itself if the mask misses the panel entirely (degenerate pose).
         mask_polygon = Polygon(canvas_points).buffer(0)
         clipped = mask_polygon.intersection(ring_polygon)
-        pieces = (
-            [g for g in clipped.geoms if isinstance(g, Polygon)]
-            if hasattr(clipped, "geoms")
-            else ([clipped] if isinstance(clipped, Polygon) else [])
+        parts = (
+            list(clipped.geoms)
+            if isinstance(clipped, (MultiPolygon, GeometryCollection))
+            else [clipped]
         )
-        pieces = [g for g in pieces if not g.is_empty and g.area > 0]
+        pieces = [
+            g for g in parts if isinstance(g, Polygon) and not g.is_empty and g.area > 0
+        ]
         if not pieces:
             return ring_svg(ring_polygon)
         return ring_svg(max(pieces, key=lambda g: g.area))
