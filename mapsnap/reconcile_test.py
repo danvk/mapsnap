@@ -457,3 +457,40 @@ def test_contradicted_term_follows_the_verdict_not_the_filename():
     flagged.scores["verification"] = 1.0
     unary_energy(flagged, False, 600.0, None, None)
     assert flagged.unary - plain.unary == pytest.approx(W_CONTRADICTED)
+
+
+def test_overlap_edges_connect_colliding_non_neighbors():
+    # A page whose hypothesis footprint can intersect another sheet's gets an
+    # overlap edge even with no adjacency between them (fargo p72__1 under
+    # p18); distant pages get nothing (bbox prefilter).
+    near_a = scored("georef", affine(0), verification=1.9, gcps=4)
+    near_b = scored("georef", affine(2), verification=1.2, gcps=2)
+    far = scored("georef", affine(50_000), verification=1.5, gcps=3)
+    nodes = {
+        "p1": make_node("p1", [near_a, scored(UNPLACED, None, 0)]),
+        "p2": make_node("p2", [near_b, scored(UNPLACED, None, 0)]),
+        "p3": make_node("p3", [far, scored(UNPLACED, None, 0)]),
+    }
+    edges = build_edges(nodes, {})
+    assert ("overlap", "p1", "p2") in edges
+    assert not any(a == "p3" or b == "p3" for _, a, b in edges)
+    # A stamp pair keeps its stamp edge and gains no overlap edge on top.
+    adjacency = {"adjacency": [["p1", "p2"]]}
+    kinds = [k for k, a, b in build_edges(nodes, adjacency) if {a, b} == {"p1", "p2"}]
+    assert kinds == ["stamp"]
+
+
+def test_overlap_factor_unplaces_a_page_parked_on_another():
+    # p2's only pose sits fully inside p1's strong pose; with the overlap
+    # edge live, the joint solution prefers UNPLACED for the weak collider.
+    strong = scored("georef", affine(0), verification=1.9, gcps=5)
+    collider = scored("georef", affine(1), verification=1.45, gcps=2)
+    nodes = {
+        "p1": make_node("p1", [strong, scored(UNPLACED, None, 0)]),
+        "p2": make_node("p2", [collider, scored(UNPLACED, None, 0)]),
+    }
+    edges = build_edges(nodes, {})
+    assert ("overlap", "p1", "p2") in edges
+    assignment = solve(nodes, edges, {}, 0.0, (-74.0, LAT0))
+    assert nodes["p1"].hypotheses[assignment["p1"]].source == "georef"
+    assert nodes["p2"].hypotheses[assignment["p2"]].source == UNPLACED

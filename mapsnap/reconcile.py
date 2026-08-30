@@ -877,10 +877,43 @@ def score_nodes(vctx, nodes: dict[str, PageNode], note_ratios: dict) -> None:
             )
 
 
+def hypothesis_bbox(node: PageNode) -> tuple[float, float, float, float] | None:
+    """Union lon/lat bbox over a node's posed hypotheses (None if all UNPLACED)."""
+    lons: list[float] = []
+    lats: list[float] = []
+    for hypothesis in node.hypotheses:
+        affine = hypothesis.affine
+        if affine is None:
+            continue
+        for x, y in (
+            (0, 0),
+            (node.unit.width, 0),
+            (node.unit.width, node.unit.height),
+            (0, node.unit.height),
+        ):
+            lons.append(affine[0, 0] * x + affine[0, 1] * y + affine[0, 2])
+            lats.append(affine[1, 0] * x + affine[1, 1] * y + affine[1, 2])
+    if not lons:
+        return None
+    return min(lons), min(lats), max(lons), max(lats)
+
+
 def build_edges(
     nodes: dict[str, PageNode], adjacency: dict
 ) -> list[tuple[str, str, str]]:
-    """(kind, a, b) edges: mutual-stamp pairs, no duplicates."""
+    """(kind, a, b) edges: mutual-stamp pairs plus overlap pairs, no duplicates.
+
+    Overlap edges connect every pair of pages whose hypothesis footprints can
+    intersect (union-bbox prefilter over all posed hypotheses), so the overlap
+    factor can see a page parked on top of non-neighbors — the fargo p72__1
+    class, 66% under p18 at its published pose with no stamp edge to carry the
+    evidence. Two exclusions: stamp pairs (mutually claiming neighbors overlap
+    legitimately at seams; the factor evicted stamp-agreeing 10 ft fits in
+    gate run 1) and sibling panels of one sheet (an inset legitimately depicts
+    ground its sibling also covers — kansas_city p526, both fits correct). A
+    mis-split sibling collision still surfaces through the wrong panel's
+    overlap with OTHER sheets (grand_rapids p819__1 sits on p11/p16, 66-70%).
+    """
     edges: list[tuple[str, str, str]] = []
     seen: set[tuple[str, str]] = set()
     for a, b in adjacency.get("adjacency", []) if adjacency else []:
@@ -889,6 +922,29 @@ def build_edges(
             if key not in seen:
                 seen.add(key)
                 edges.append(("stamp", key[0], key[1]))
+    boxes = {stem: hypothesis_bbox(node) for stem, node in nodes.items()}
+    stems = sorted(nodes)
+    for i, a in enumerate(stems):
+        box_a = boxes[a]
+        if box_a is None:
+            continue
+        for b in stems[i + 1 :]:
+            if (a, b) in seen:
+                continue
+            if panel_base(a) is not None and panel_base(a) == panel_base(b):
+                continue  # siblings: legitimate inset overlap (KC p526)
+            box_b = boxes[b]
+            if box_b is None:
+                continue
+            if (
+                box_a[0] > box_b[2]
+                or box_b[0] > box_a[2]
+                or box_a[1] > box_b[3]
+                or box_b[1] > box_a[3]
+            ):
+                continue
+            seen.add((a, b))
+            edges.append(("overlap", a, b))
     return edges
 
 
