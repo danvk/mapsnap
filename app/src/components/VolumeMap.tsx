@@ -133,6 +133,7 @@ function selectionFeatures(
 export function VolumeMap(props: VolumeMapProps) {
   const {
     annotation,
+    fitVolumeKey,
     pages,
     missingPages,
     truthPages,
@@ -149,6 +150,19 @@ export function VolumeMap(props: VolumeMapProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<maplibregl.Map | null>(null);
   const layerRef = useRef<WarpedMapLayer | null>(null);
+
+  // Panel polygons per parent stem, from the volume's pN.panels.json (25%-jpg
+  // frame). null = fetched and absent. The SvgSelector is split INTERSECT
+  // mask, so it under-covers the panel wherever the content mask bites; the
+  // panels.json ring is the split itself, which is what the off-panel grey
+  // must hole out (#303) — pixels inside the split but outside the mask stay
+  // at full brightness, exactly like an unsplit page's out-of-mask area.
+  const panelDocsRef = useRef<
+    Map<
+      string,
+      { width: number; height: number; panels: [number, number][][] } | null
+    >
+  >(new Map());
   const [mapReady, setMapReady] = useState(false);
   // Whether the map has been fit to a loaded annotation.
   const [positioned, setPositioned] = useState(false);
@@ -582,29 +596,102 @@ export function VolumeMap(props: VolumeMapProps) {
         : [];
     source?.setData(selectionFeatures(page, truthRings));
 
-    // Grey the parts of THIS page's uncut sheet outside its own clip polygon,
-    // so the cut is visible on the image being looked at. Outer ring = the
-    // full image rectangle, hole = the panel's clip; siblings' fits are left
-    // alone (they may legitimately be placed elsewhere). Only for a page that
-    // is itself a panel — a whole page has no off-panel area.
+    // Grey the parts of THIS page's uncut sheet outside its own SPLIT, so the
+    // cut is visible on the image being looked at. Outer ring = the full
+    // image rectangle; hole = the panel polygon from pN.panels.json (the
+    // split itself — the SvgSelector is split∩mask and would wrongly dim
+    // in-split pixels the mask clipped). While the panels file loads, or when
+    // it is missing, the selector ring stands in. Siblings' fits are left
+    // alone. Only for a page that is itself a panel.
     const offpanel = map.getSource<maplibregl.GeoJSONSource>('offpanel-mask');
-    offpanel?.setData(
-      page.splitIndex === null
-        ? EMPTY_FEATURES
-        : {
-            type: 'FeatureCollection',
-            features: [
-              {
-                type: 'Feature',
-                properties: {},
-                geometry: {
-                  type: 'Polygon',
-                  coordinates: [page.rectRing, page.clipRing],
-                },
-              },
-            ],
+    // panels.json describes the parent sheet at 25% scale, and the served
+    // annotation is rescaled into that same frame (see rewriteAnnotationPage),
+    // so plain fractional coordinates line up with the page corners. Gray the
+    // OTHER panels' polygons directly rather than cutting this panel out of
+    // the sheet rect as a hole: panel rings share edges with the sheet
+    // boundary, and a hole touching its outer ring degenerates triangulation.
+    const maskFromPanels = (doc: {
+      width: number;
+      height: number;
+      panels: [number, number][][];
+    }): FeatureCollection | null => {
+      const panelIndex = page.splitIndex === null ? -1 : page.splitIndex - 1;
+      const selectedRing = doc.panels[panelIndex];
+      if (!selectedRing || doc.width <= 0 || doc.height <= 0) return null;
+      const [nw, ne, , sw] = page.corners;
+      const toGeo = (x: number, y: number): [number, number] => {
+        const fx = x / doc.width;
+        const fy = y / doc.height;
+        return [
+          (nw[0] ?? 0) +
+            ((ne[0] ?? 0) - (nw[0] ?? 0)) * fx +
+            ((sw[0] ?? 0) - (nw[0] ?? 0)) * fy,
+          (nw[1] ?? 0) +
+            ((ne[1] ?? 0) - (nw[1] ?? 0)) * fx +
+            ((sw[1] ?? 0) - (nw[1] ?? 0)) * fy,
+        ];
+      };
+      return {
+        type: 'FeatureCollection',
+        features: doc.panels
+          .filter((ring, i) => i !== panelIndex && ring.length >= 4)
+          .map((ring) => ({
+            type: 'Feature',
+            properties: {},
+            geometry: {
+              type: 'Polygon',
+              coordinates: [ring.map(([x, y]) => toGeo(x, y))],
+            },
+          })),
+      };
+    };
+    // Fallback while panels.json loads (or is absent): hole out the selector,
+    // which is split∩mask — close, but dims mask-clipped pixels in the split.
+    const selectorFallback = (): FeatureCollection => ({
+      type: 'FeatureCollection',
+      features: [
+        {
+          type: 'Feature',
+          properties: {},
+          geometry: {
+            type: 'Polygon',
+            coordinates: [page.rectRing, page.clipRing],
           },
-    );
+        },
+      ],
+    });
+    if (page.splitIndex === null) {
+      offpanel?.setData(EMPTY_FEATURES);
+    } else {
+      const parent = page.stem.split('__')[0];
+      const cacheKey = `${fitVolumeKey}/${parent}`;
+      const cached = panelDocsRef.current.get(cacheKey);
+      offpanel?.setData(
+        (cached ? maskFromPanels(cached) : null) ?? selectorFallback(),
+      );
+      if (!panelDocsRef.current.has(cacheKey) && fitVolumeKey) {
+        const selectedAtFetch = selectedItemIndex;
+        fetch(`/data/${fitVolumeKey}/${parent}.panels.json`)
+          .then((r) => (r.ok ? r.json() : null))
+          .then(
+            (
+              doc: {
+                width: number;
+                height: number;
+                panels: [number, number][][];
+              } | null,
+            ) => {
+              panelDocsRef.current.set(cacheKey, doc);
+              // Re-apply only if this page is still the selection.
+              if (doc && selectedAtFetch === selectedItemIndex) {
+                const mask = maskFromPanels(doc);
+                if (mask) offpanel?.setData(mask);
+              }
+            },
+          )
+          .catch(() => panelDocsRef.current.set(cacheKey, null));
+      }
+    }
     const mapId = mapIdsRef.current[page.itemIndex];
     if (mapId) {
       layer.bringMapsToFront([mapId]);
