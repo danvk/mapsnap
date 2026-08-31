@@ -338,24 +338,26 @@ export function VolumeMap(props: VolumeMapProps) {
           'line-dasharray': [2, 2],
         },
       });
-      // The OTHER panels of a selected split sheet, greyed out. Added before
-      // the selection layers so it draws beneath them: selecting one panel of a
-      // sheet otherwise gives no clue where the cut runs, since the neighbouring
-      // panel looks like more of the same map (#303).
-      map.addSource('sibling-panels', {
+      // The selected panel's own sheet, greyed OUTSIDE its clip polygon: a
+      // ring-with-hole over the page's full image rectangle whose hole is the
+      // panel's clip, so everything on the uncut sheet that is not this panel
+      // dims. Selecting one panel otherwise gives no clue where the cut runs
+      // (#303) — and greying the SIBLING's fit instead (the first fix) marked
+      // the wrong thing entirely when the sibling was placed elsewhere.
+      map.addSource('offpanel-mask', {
         type: 'geojson',
         data: EMPTY_FEATURES,
       });
       map.addLayer({
-        id: 'sibling-panels-fill',
+        id: 'offpanel-mask-fill',
         type: 'fill',
-        source: 'sibling-panels',
+        source: 'offpanel-mask',
         paint: { 'fill-color': '#111827', 'fill-opacity': 0.45 },
       });
       map.addLayer({
-        id: 'sibling-panels-outline',
+        id: 'offpanel-mask-outline',
         type: 'line',
-        source: 'sibling-panels',
+        source: 'offpanel-mask',
         paint: {
           'line-color': '#111827',
           'line-width': 1,
@@ -566,7 +568,7 @@ export function VolumeMap(props: VolumeMapProps) {
       source?.setData(EMPTY_FEATURES);
       // Deselecting must clear the grey too, or it stays over the sheet.
       map
-        .getSource<maplibregl.GeoJSONSource>('sibling-panels')
+        .getSource<maplibregl.GeoJSONSource>('offpanel-mask')
         ?.setData(EMPTY_FEATURES);
       return;
     }
@@ -580,25 +582,27 @@ export function VolumeMap(props: VolumeMapProps) {
         : [];
     source?.setData(selectionFeatures(page, truthRings));
 
-    // Grey the sheet's other panels so the cut is visible. Keyed on pageKey,
-    // which splits share, and only for a page that is itself a panel.
-    const siblings = map.getSource<maplibregl.GeoJSONSource>('sibling-panels');
-    siblings?.setData(
+    // Grey the parts of THIS page's uncut sheet outside its own clip polygon,
+    // so the cut is visible on the image being looked at. Outer ring = the
+    // full image rectangle, hole = the panel's clip; siblings' fits are left
+    // alone (they may legitimately be placed elsewhere). Only for a page that
+    // is itself a panel — a whole page has no off-panel area.
+    const offpanel = map.getSource<maplibregl.GeoJSONSource>('offpanel-mask');
+    offpanel?.setData(
       page.splitIndex === null
         ? EMPTY_FEATURES
         : {
             type: 'FeatureCollection',
-            features: pages
-              .filter(
-                (other) =>
-                  other.pageKey === page.pageKey &&
-                  other.itemIndex !== page.itemIndex,
-              )
-              .map((other): FeatureCollection['features'][0] => ({
+            features: [
+              {
                 type: 'Feature',
                 properties: {},
-                geometry: { type: 'Polygon', coordinates: [other.clipRing] },
-              })),
+                geometry: {
+                  type: 'Polygon',
+                  coordinates: [page.rectRing, page.clipRing],
+                },
+              },
+            ],
           },
     );
     const mapId = mapIdsRef.current[page.itemIndex];
