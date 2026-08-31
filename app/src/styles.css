@@ -943,35 +943,3 @@ tr.relaxed {
 .snap-table tr.snap-best td:first-child {
   font-weight: 600;
 }
-.snap-bar-row {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  margin: 2px 0;
-}
-.snap-bar-label {
-  width: 90px;
-  color: #374151;
-  font-size: 12px;
-}
-.snap-bar-track {
-  flex: 1;
-  height: 8px;
-  background: #e5e7eb;
-  border-radius: 4px;
-  overflow: hidden;
-}
-.snap-bar-fill {
-  display: block;
-  height: 100%;
-  background: #059669;
-}
-.snap-bar-penalty {
-  background: #dc2626;
-}
-.snap-bar-value {
-  width: 52px;
-  text-align: right;
-  font-variant-numeric: tabular-nums;
-  font-size: 12px;
-}

@@ -18,38 +18,6 @@ interface SnapPanelProps {
   onClose: () => void;
 }
 
-// A component bar: label, value in [0, 1]-ish range, red for penalties.
-function EvidenceBar({
-  label,
-  value,
-  max,
-  penalty,
-  detail,
-}: {
-  label: string;
-  value: number | undefined;
-  max: number;
-  penalty?: boolean;
-  detail?: string;
-}) {
-  if (value == null) return null;
-  const frac = Math.max(0, Math.min(1, Math.abs(value) / max));
-  return (
-    <div className="snap-bar-row" title={detail}>
-      <span className="snap-bar-label">{label}</span>
-      <span className="snap-bar-track">
-        <span
-          className={
-            penalty ? 'snap-bar-fill snap-bar-penalty' : 'snap-bar-fill'
-          }
-          style={{ width: `${Math.round(frac * 100)}%` }}
-        />
-      </span>
-      <span className="snap-bar-value">{value.toFixed(3)}</span>
-    </div>
-  );
-}
-
 function CandidateRow({
   label,
   candidate,
@@ -134,11 +102,19 @@ export function SnapPanel({
         <thead>
           <tr>
             <th>pose</th>
-            <th>select</th>
-            <th>verif</th>
-            <th>inlier</th>
-            <th>ncc</th>
-            <th>chamfer</th>
+            <th title="the ranking score gates compare against (rescue bar 1.25)">
+              select
+            </th>
+            <th title="inlier_frac + ncc_fine − chamfer penalty">verif</th>
+            <th title="share of P(road) pixels within the chamfer inlier distance of OSM">
+              inlier
+            </th>
+            <th title="fine-scale normalized cross-correlation, P(road) vs OSM raster">
+              ncc
+            </th>
+            <th title="mean P(road)→OSM distance in metres (penalty)">
+              chamfer
+            </th>
             <th>θ</th>
             <th>scale src</th>
             <th>truth</th>
@@ -173,45 +149,10 @@ export function SnapPanel({
         </p>
       )}
 
-      {activeCandidate && (
-        <div className="snap-evidence">
-          <EvidenceBar
-            label="inlier_frac"
-            value={activeCandidate.inlier_frac}
-            max={1}
-            detail="share of P(road) pixels within the chamfer inlier distance of OSM"
-          />
-          <EvidenceBar
-            label="ncc_fine"
-            value={activeCandidate.ncc_fine}
-            max={1}
-            detail="fine-scale normalized cross-correlation, P(road) vs OSM raster"
-          />
-          <EvidenceBar
-            label="chamfer"
-            value={activeCandidate.chamfer_mean_m}
-            max={30}
-            penalty
-            detail="mean P(road)→OSM distance in metres (penalty)"
-          />
-          <EvidenceBar
-            label="verification"
-            value={activeCandidate.verification}
-            max={1.5}
-            detail="inlier_frac + ncc_fine − chamfer penalty"
-          />
-          <EvidenceBar
-            label="select"
-            value={activeCandidate.select_score}
-            max={3}
-            detail="the ranking score gates compare against (rescue bar 1.25)"
-          />
-          {(activeCandidate.gate_reasons?.length ?? 0) > 0 && (
-            <p className="snap-note">
-              gates: {activeCandidate.gate_reasons!.join(' · ')}
-            </p>
-          )}
-        </div>
+      {activeCandidate && (activeCandidate.gate_reasons?.length ?? 0) > 0 && (
+        <p className="snap-note">
+          gates: {activeCandidate.gate_reasons!.join(' · ')}
+        </p>
       )}
     </div>
   );
