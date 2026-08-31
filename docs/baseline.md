@@ -120,6 +120,13 @@ that regenerates the keymap chain (the normal case — `rerun` always rebuilds
 it) must re-OCR from scratch: delete `p*.streets.json` up front. The 2026-08-28
 run initially resumed reads and had to be restarted.
 
+## Fixing bugs found along the way
+
+You can fix small issues that arise while running the pipeline. Commit these
+changes on the same branch as the baseline update and include them in the PR.
+Do not commit directly to `main` or push commits directly onto `origin/main`.
+This avoids breaking CI (see #360).
+
 ## Reading the results
 
 ```sh
