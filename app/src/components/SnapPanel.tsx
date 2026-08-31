@@ -1,4 +1,4 @@
-import { rankedCandidates } from '../snap';
+import { groupRotationPriors, rankedCandidates } from '../snap';
 import type { SnapCandidate, SnapRecord } from '../snap';
 
 /**
@@ -71,6 +71,7 @@ export function SnapPanel({
         ? (record.incumbent ?? null)
         : (ranked[selected] ?? null);
   const activeCandidate = active as SnapCandidate | null;
+  const priorGroups = groupRotationPriors(record.priors?.rotation ?? []);
 
   return (
     <div className="snap-panel">
@@ -89,13 +90,16 @@ export function SnapPanel({
           {record.search.centers.length === 1 ? '' : 's'} · radius{' '}
           {Math.round(record.search.radius_m)} m ({record.search.radius_source})
           {record.search.demoted_seed && ' · demoted-pose seed'}
-          {' · priors: '}
-          {(record.priors?.rotation ?? [])
-            .map(
-              (p) => `${p.theta_deg.toFixed(0)}°±${p.sigma_deg} (${p.source})`,
-            )
-            .join(', ') || 'none'}
+          {' · priors:'}
+          {priorGroups.length === 0 && ' none'}
         </p>
+      )}
+      {record.search && priorGroups.length > 0 && (
+        <ul className="snap-priors">
+          {priorGroups.map((line) => (
+            <li key={line}>{line}</li>
+          ))}
+        </ul>
       )}
 
       <table className="snap-table">

@@ -937,6 +937,10 @@ tr.relaxed {
   text-align: right;
   font-variant-numeric: tabular-nums;
 }
+.snap-priors {
+  margin: 2px 0;
+  padding-left: 22px;
+}
 .snap-table tr.selected {
   background: #dbeafe;
 }
