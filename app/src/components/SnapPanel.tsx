@@ -32,7 +32,7 @@ function EvidenceBar({
   penalty?: boolean;
   detail?: string;
 }) {
-  if (value === undefined) return null;
+  if (value == null) return null;
   const frac = Math.max(0, Math.min(1, Math.abs(value) / max));
   return (
     <div className="snap-bar-row" title={detail}>
@@ -76,16 +76,14 @@ function CandidateRow({
       <td className="num">{c.inlier_frac?.toFixed(2) ?? '—'}</td>
       <td className="num">{c.ncc_fine?.toFixed(2) ?? '—'}</td>
       <td className="num">
-        {c.chamfer_mean_m !== undefined
-          ? `${c.chamfer_mean_m.toFixed(1)}m`
-          : '—'}
+        {c.chamfer_mean_m != null ? `${c.chamfer_mean_m.toFixed(1)}m` : '—'}
       </td>
       <td className="num">
-        {c.theta_deg !== undefined ? `${c.theta_deg.toFixed(1)}°` : '—'}
+        {c.theta_deg != null ? `${c.theta_deg.toFixed(1)}°` : '—'}
       </td>
       <td>{c.scale_source ?? '—'}</td>
       <td className="num">
-        {c.rmse_ft !== undefined ? `${c.rmse_ft.toFixed(0)}ft` : ''}
+        {c.rmse_ft != null ? `${c.rmse_ft.toFixed(0)}ft` : ''}
       </td>
     </tr>
   );

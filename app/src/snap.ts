@@ -73,6 +73,21 @@ export interface SnapRecord {
   candidates?: SnapCandidate[];
 }
 
+// Recursively drop null-valued keys: the pipeline writes JSON null for
+// unscored fields (e.g. an unverifiable candidate's select_score), but
+// consumers type these as optional numbers and guard with undefined checks.
+function stripNulls(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(stripNulls);
+  if (value !== null && typeof value === 'object') {
+    const out: Record<string, unknown> = {};
+    for (const [key, entry] of Object.entries(value)) {
+      if (entry !== null) out[key] = stripNulls(entry);
+    }
+    return out;
+  }
+  return value;
+}
+
 /** Parse candidates.jsonl text into a stem-keyed map (later rows win). */
 export function parseSnapRecords(jsonl: string): Map<string, SnapRecord> {
   const records = new Map<string, SnapRecord>();
@@ -80,7 +95,7 @@ export function parseSnapRecords(jsonl: string): Map<string, SnapRecord> {
     const trimmed = line.trim();
     if (!trimmed) continue;
     try {
-      const record = JSON.parse(trimmed) as SnapRecord;
+      const record = stripNulls(JSON.parse(trimmed)) as SnapRecord;
       if (record.target) records.set(record.target, record);
     } catch {
       // A truncated final line (interrupted run) is not an error worth surfacing.
