@@ -23,6 +23,7 @@ from pathlib import Path
 from tqdm import tqdm
 
 from mapsnap.detect_text import boxes_path, write_craft_boxes
+from mapsnap.panel_boxes import derive_boxes_for_panel_image
 
 
 def expand_images(patterns: list[str]) -> list[str]:
@@ -143,19 +144,38 @@ def main() -> None:
         print("All images already have current boxes.", file=sys.stderr)
         return
 
-    import easyocr
-
-    reader = easyocr.Reader(["en"], gpu=not args.no_gpu, verbose=False)
-    for image in tqdm(todo, smoothing=0):
-        write_craft_boxes(
-            image,
-            reader,
-            min_size=args.min_size,
-            link_threshold=args.link_threshold,
-            craft_scale=args.craft_scale,
-            tile_size=args.tile_size,
+    # Parents before panels, so a panel's derivation (#361) can see boxes its
+    # parent wrote earlier in this same invocation.
+    todo.sort(key=lambda image: ("__" in Path(image).stem, image))
+    derived = 0
+    detect: list[str] = []
+    for image in todo:
+        if derive_boxes_for_panel_image(image):
+            derived += 1
+        else:
+            detect.append(image)
+    if derived:
+        print(
+            f"Derived {derived} panel box file(s) from parents (#361).",
+            file=sys.stderr,
         )
-    print(f"Wrote boxes for {len(todo)} image(s).", file=sys.stderr)
+    if detect:
+        import easyocr
+
+        reader = easyocr.Reader(["en"], gpu=not args.no_gpu, verbose=False)
+        for image in tqdm(detect, smoothing=0):
+            write_craft_boxes(
+                image,
+                reader,
+                min_size=args.min_size,
+                link_threshold=args.link_threshold,
+                craft_scale=args.craft_scale,
+                tile_size=args.tile_size,
+            )
+    print(
+        f"Wrote boxes for {len(todo)} image(s) ({derived} derived).",
+        file=sys.stderr,
+    )
 
 
 if __name__ == "__main__":
