@@ -3147,6 +3147,7 @@ def prepare_label_features(
                 file=sys.stderr,
             )
     labels_data = []
+    unmatched: list[dict] = []
     for det in all_detections:
         is_promoted = det.get("promoted")
         if is_promoted:
@@ -3175,6 +3176,15 @@ def prepare_label_features(
             ):
                 continue
         canonicals = canonical_street_matches(det["text"], normalized_streets)
+        if not canonicals:
+            # The one drop in this function that would otherwise leave no trace: the loop
+            # below is simply a no-op, and "Filtered detections" counts what survived
+            # canonicalization, so the loss does not show up as a delta either. A confident,
+            # gate-passing read that names no known street is worth seeing -- it is usually
+            # a name the centerlines carry under an unstrippable leading word ("JOHNSTON"
+            # for Nashville's Jo Johnston Avenue), which no later stage can recover (#373).
+            unmatched.append(det)
+            continue
         # Deduplicate by block-list identity: aliases like "HENRY" and "HENRY STREET"
         # map to the *same list object* in block_index (set by build_block_index), so
         # id() detects them as duplicates and keeps only the longest (most specific) name.
@@ -3193,6 +3203,16 @@ def prepare_label_features(
             else:
                 entry = det
             labels_data.append(entry)
+
+    if unmatched:
+        print(
+            f"Dropped {len(unmatched)} admitted detection(s) matching no street: "
+            + ", ".join(
+                f"{d['text']}({d.get('short_side', 0):.0f}px,{d.get('confidence', 0):.2f})"
+                for d in unmatched
+            ),
+            file=sys.stderr,
+        )
 
     print(f"Filtered detections: {len(labels_data)}")
 
