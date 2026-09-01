@@ -8,14 +8,17 @@ here with the failure modes that motivated them (see the osm-snap PR).
 import dataclasses
 
 import numpy as np
+import pytest
 
 from mapsnap import osm_snap_experiment
 from mapsnap.edge_join_experiment import PageUnit
 from mapsnap.feature_index import FeatureIndex
+from mapsnap.osm_snap import ScalePrior
 from mapsnap.osm_snap_experiment import (
     SNAP_LOG_BEGIN,
     SNAP_LOG_END,
     VolumeContext,
+    affine_m_per_px,
     append_snap_logs,
     arbitrate_challenge,
     candidates_record_fresh,
@@ -28,6 +31,7 @@ from mapsnap.osm_snap_experiment import (
     refine_rule_outcome,
     rung_flip,
     snap_one_page,
+    with_incumbent_scale,
 )
 
 # A page-local degree scale of ~0.6 m/px at the test latitude.
@@ -689,3 +693,24 @@ def test_decision_block_unsearched_page_is_skipped():
     assert decision["page_verdict"] == "abstain"
     assert decision["bars"] == []
     assert decision["skipped"][0]["rule"] == "all"
+
+
+# --- incumbent scale rung -----------------------------------------------------
+
+
+def test_affine_m_per_px_reads_the_fixture_scale():
+    # The fixture is built at ~0.6 m/px.
+    assert affine_m_per_px(np.array(affine())) == pytest.approx(0.6, abs=0.01)
+
+
+def test_with_incumbent_scale_adds_a_missing_rung_and_dedupes_an_existing_one():
+    ladder = [ScalePrior(0.3, 0.05, "volume-median")]
+    # The fixture's 0.6 m/px is a 2x rung the ladder lacks: appended, median first.
+    added = with_incumbent_scale(ladder, np.array(affine()))
+    assert [p.source for p in added] == ["volume-median", "incumbent"]
+    assert added[1].m_per_px == pytest.approx(0.6, abs=0.01)
+    # Within ~16% of an existing rung: the ladder is returned unchanged.
+    same = with_incumbent_scale(
+        [ScalePrior(0.55, 0.05, "volume-median")], np.array(affine())
+    )
+    assert [p.source for p in same] == ["volume-median"]
