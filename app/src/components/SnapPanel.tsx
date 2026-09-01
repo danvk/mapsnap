@@ -1,4 +1,4 @@
-import { rankedCandidates } from '../snap';
+import { groupRotationPriors, rankedCandidates } from '../snap';
 import type { SnapCandidate, SnapRecord } from '../snap';
 
 /**
@@ -16,38 +16,6 @@ interface SnapPanelProps {
   selected: number | null;
   onSelect: (index: number | null) => void;
   onClose: () => void;
-}
-
-// A component bar: label, value in [0, 1]-ish range, red for penalties.
-function EvidenceBar({
-  label,
-  value,
-  max,
-  penalty,
-  detail,
-}: {
-  label: string;
-  value: number | undefined;
-  max: number;
-  penalty?: boolean;
-  detail?: string;
-}) {
-  if (value === undefined) return null;
-  const frac = Math.max(0, Math.min(1, Math.abs(value) / max));
-  return (
-    <div className="snap-bar-row" title={detail}>
-      <span className="snap-bar-label">{label}</span>
-      <span className="snap-bar-track">
-        <span
-          className={
-            penalty ? 'snap-bar-fill snap-bar-penalty' : 'snap-bar-fill'
-          }
-          style={{ width: `${Math.round(frac * 100)}%` }}
-        />
-      </span>
-      <span className="snap-bar-value">{value.toFixed(3)}</span>
-    </div>
-  );
 }
 
 function CandidateRow({
@@ -76,16 +44,14 @@ function CandidateRow({
       <td className="num">{c.inlier_frac?.toFixed(2) ?? '—'}</td>
       <td className="num">{c.ncc_fine?.toFixed(2) ?? '—'}</td>
       <td className="num">
-        {c.chamfer_mean_m !== undefined
-          ? `${c.chamfer_mean_m.toFixed(1)}m`
-          : '—'}
+        {c.chamfer_mean_m != null ? `${c.chamfer_mean_m.toFixed(1)}m` : '—'}
       </td>
       <td className="num">
-        {c.theta_deg !== undefined ? `${c.theta_deg.toFixed(1)}°` : '—'}
+        {c.theta_deg != null ? `${c.theta_deg.toFixed(1)}°` : '—'}
       </td>
       <td>{c.scale_source ?? '—'}</td>
       <td className="num">
-        {c.rmse_ft !== undefined ? `${c.rmse_ft.toFixed(0)}ft` : ''}
+        {c.rmse_ft != null ? `${c.rmse_ft.toFixed(0)}ft` : ''}
       </td>
     </tr>
   );
@@ -105,6 +71,7 @@ export function SnapPanel({
         ? (record.incumbent ?? null)
         : (ranked[selected] ?? null);
   const activeCandidate = active as SnapCandidate | null;
+  const priorGroups = groupRotationPriors(record.priors?.rotation ?? []);
 
   return (
     <div className="snap-panel">
@@ -123,24 +90,35 @@ export function SnapPanel({
           {record.search.centers.length === 1 ? '' : 's'} · radius{' '}
           {Math.round(record.search.radius_m)} m ({record.search.radius_source})
           {record.search.demoted_seed && ' · demoted-pose seed'}
-          {' · priors: '}
-          {(record.priors?.rotation ?? [])
-            .map(
-              (p) => `${p.theta_deg.toFixed(0)}°±${p.sigma_deg} (${p.source})`,
-            )
-            .join(', ') || 'none'}
+          {' · priors:'}
+          {priorGroups.length === 0 && ' none'}
         </p>
+      )}
+      {record.search && priorGroups.length > 0 && (
+        <ul className="snap-priors">
+          {priorGroups.map((line) => (
+            <li key={line}>{line}</li>
+          ))}
+        </ul>
       )}
 
       <table className="snap-table">
         <thead>
           <tr>
             <th>pose</th>
-            <th>select</th>
-            <th>verif</th>
-            <th>inlier</th>
-            <th>ncc</th>
-            <th>chamfer</th>
+            <th title="the ranking score gates compare against (rescue bar 1.25)">
+              select
+            </th>
+            <th title="inlier_frac + ncc_fine − chamfer penalty">verif</th>
+            <th title="share of P(road) pixels within the chamfer inlier distance of OSM">
+              inlier
+            </th>
+            <th title="fine-scale normalized cross-correlation, P(road) vs OSM raster">
+              ncc
+            </th>
+            <th title="mean P(road)→OSM distance in metres (penalty)">
+              chamfer
+            </th>
             <th>θ</th>
             <th>scale src</th>
             <th>truth</th>
@@ -175,45 +153,10 @@ export function SnapPanel({
         </p>
       )}
 
-      {activeCandidate && (
-        <div className="snap-evidence">
-          <EvidenceBar
-            label="inlier_frac"
-            value={activeCandidate.inlier_frac}
-            max={1}
-            detail="share of P(road) pixels within the chamfer inlier distance of OSM"
-          />
-          <EvidenceBar
-            label="ncc_fine"
-            value={activeCandidate.ncc_fine}
-            max={1}
-            detail="fine-scale normalized cross-correlation, P(road) vs OSM raster"
-          />
-          <EvidenceBar
-            label="chamfer"
-            value={activeCandidate.chamfer_mean_m}
-            max={30}
-            penalty
-            detail="mean P(road)→OSM distance in metres (penalty)"
-          />
-          <EvidenceBar
-            label="verification"
-            value={activeCandidate.verification}
-            max={1.5}
-            detail="inlier_frac + ncc_fine − chamfer penalty"
-          />
-          <EvidenceBar
-            label="select"
-            value={activeCandidate.select_score}
-            max={3}
-            detail="the ranking score gates compare against (rescue bar 1.25)"
-          />
-          {(activeCandidate.gate_reasons?.length ?? 0) > 0 && (
-            <p className="snap-note">
-              gates: {activeCandidate.gate_reasons!.join(' · ')}
-            </p>
-          )}
-        </div>
+      {activeCandidate && (activeCandidate.gate_reasons?.length ?? 0) > 0 && (
+        <p className="snap-note">
+          gates: {activeCandidate.gate_reasons!.join(' · ')}
+        </p>
       )}
     </div>
   );

@@ -73,6 +73,21 @@ export interface SnapRecord {
   candidates?: SnapCandidate[];
 }
 
+// Recursively drop null-valued keys: the pipeline writes JSON null for
+// unscored fields (e.g. an unverifiable candidate's select_score), but
+// consumers type these as optional numbers and guard with undefined checks.
+function stripNulls(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(stripNulls);
+  if (value !== null && typeof value === 'object') {
+    const out: Record<string, unknown> = {};
+    for (const [key, entry] of Object.entries(value)) {
+      if (entry !== null) out[key] = stripNulls(entry);
+    }
+    return out;
+  }
+  return value;
+}
+
 /** Parse candidates.jsonl text into a stem-keyed map (later rows win). */
 export function parseSnapRecords(jsonl: string): Map<string, SnapRecord> {
   const records = new Map<string, SnapRecord>();
@@ -80,7 +95,7 @@ export function parseSnapRecords(jsonl: string): Map<string, SnapRecord> {
     const trimmed = line.trim();
     if (!trimmed) continue;
     try {
-      const record = JSON.parse(trimmed) as SnapRecord;
+      const record = stripNulls(JSON.parse(trimmed)) as SnapRecord;
       if (record.target) records.set(record.target, record);
     } catch {
       // A truncated final line (interrupted run) is not an error worth surfacing.
@@ -103,6 +118,42 @@ export function poseCorners(
     affine[1][0] * x + affine[1][1] * y + affine[1][2],
   ];
   return [apply(0, 0), apply(width, 0), apply(width, height), apply(0, height)];
+}
+
+/**
+ * Rotation priors grouped for display: one line per distinct (θ, σ).
+ *
+ * The pipeline records one prior per vote (per label, per label pair), so the
+ * raw ladder is full of repeats — the multiplicity is the corroboration
+ * signal. Group by the rounded angle (−0 → 0, −180 → 180: same rotation) and
+ * sigma, keeping first-appearance order (rung priority), and aggregate the
+ * sources with ×N counts.
+ */
+export function groupRotationPriors(
+  priors: { theta_deg: number; sigma_deg: number; source: string }[],
+): string[] {
+  const groups = new Map<
+    string,
+    { label: string; counts: Map<string, number> }
+  >();
+  for (const prior of priors) {
+    let theta = Math.round(prior.theta_deg);
+    if (theta === 0) theta = 0; // normalize −0
+    if (theta === -180) theta = 180;
+    const label = `${theta}°±${prior.sigma_deg}`;
+    let group = groups.get(label);
+    if (!group) {
+      group = { label, counts: new Map() };
+      groups.set(label, group);
+    }
+    group.counts.set(prior.source, (group.counts.get(prior.source) ?? 0) + 1);
+  }
+  return [...groups.values()].map((group) => {
+    const sources = [...group.counts.entries()]
+      .map(([source, n]) => (n > 1 ? `${source} ×${n}` : source))
+      .join(', ');
+    return `${group.label} (${sources})`;
+  });
 }
 
 /** Candidates sorted by select_score descending (unscored last, order kept). */
