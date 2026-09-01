@@ -10,12 +10,17 @@ import math
 
 import cv2
 import numpy as np
+import pytest
 
 from mapsnap.edge_join import MatchParams
 from mapsnap.feature_index import FeatureIndex
 from mapsnap.georef_from_labels import LabelFeature
 from mapsnap.osm_snap import (
     CHAMFER_CLAMP_M,
+    W_CONTAIN,
+    W_NAME,
+    W_PRIOR,
+    NameAlignment,
     PageContext,
     RotationPrior,
     ScalePrior,
@@ -26,6 +31,7 @@ from mapsnap.osm_snap import (
     cluster_rotation,
     confident_theta_deg,
     dedupe_thetas,
+    directed_prior_residual_sigma,
     frame_around,
     frame_thetas,
     label_osm_rotations,
@@ -35,6 +41,7 @@ from mapsnap.osm_snap import (
     osm_rasters,
     page_scale_priors,
     pose_theta_deg,
+    selection_score,
     snap_page,
     wrap_deg,
 )
@@ -551,3 +558,47 @@ def test_merge_candidates_dedupes_same_lock() -> None:
     d = make_candidate(1.1, LON0 + near, theta=90.0)
     kept = merge_candidates([a, d], top_k=8)
     assert len(kept) == 2
+
+
+def test_selection_score_matches_the_candidate_property():
+    candidate = SnapCandidate(
+        world_affine=np.eye(2, 3),
+        center=(0.0, 0.0),
+        theta_deg=0.0,
+        theta_source="t",
+        scale_m_per_px=1.0,
+        scale_source="s",
+        scale_adjust=1.0,
+        ncc=0.0,
+        ncc_fine=0.0,
+        chamfer_mean_m=0.0,
+        inlier_frac=0.0,
+        n_points=0,
+        jtj_eig_ratio=1.0,
+        overlap_frac=1.0,
+        refine_shift_m=0.0,
+        center_dist_m=0.0,
+        verification=0.5,
+        region_containment=0.8,
+        prior_theta_residual_sigma=0.5,
+        name=NameAlignment(score=0.4, n_labels=5, n_hits=2),
+    )
+    assert candidate.select_score() == selection_score(0.5, 0.4, 0.8, 0.5)
+    assert selection_score(0.5, 0.4, 0.8, 0.5) == pytest.approx(
+        0.5 + W_NAME * 0.4 + W_CONTAIN * 0.8 + W_PRIOR * 0.5
+    )
+    assert selection_score(-math.inf, 0.4, 0.8, 0.5) == -math.inf
+    # Absent bonuses add nothing, exactly as the property behaves.
+    assert selection_score(0.5, None, None, None) == 0.5
+
+
+def test_directed_prior_residual_ignores_the_mod180_rung():
+    priors = [
+        RotationPrior(10.0, 4.0, "label-pair-exact"),
+        RotationPrior(-170.0, 4.0, "label-osm-mod180"),
+    ]
+    # 12 deg is half a sigma from the directed prior; the mod-180 entry that
+    # would match a 180-flip exactly does not count.
+    assert directed_prior_residual_sigma(priors, 12.0) == pytest.approx(0.5)
+    assert directed_prior_residual_sigma(priors, -170.0) == pytest.approx(45.0)
+    assert directed_prior_residual_sigma(priors[1:], 12.0) is None

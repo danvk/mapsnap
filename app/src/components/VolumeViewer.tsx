@@ -395,7 +395,9 @@ export function VolumeViewer() {
     const pose =
       snapSelected === -1
         ? snapRecord.incumbent
-        : rankedCandidates(snapRecord)[snapSelected];
+        : snapSelected === -2
+          ? snapRecord.truth_pose
+          : rankedCandidates(snapRecord)[snapSelected];
     if (!pose?.world_affine) return null;
     return {
       url: `/data/${volumeName}/artifacts/edge_join/roadprob/${snapRecord.target}.png`,

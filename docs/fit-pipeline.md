@@ -248,6 +248,17 @@ any change to which pages survive stage 1 perturbs snap's refinement on pages
 no gate touched (observed: nashville p4, 26.2 → 402.3 ft under the ±12%
 scale-band experiment).
 
+**Debugger records (#325 phase 2).** Each `candidates.jsonl` record also
+carries `truth_pose` — the truth affine scored with the ladder's own evidence
+and soft bonuses (`rank_pose`), present whenever truth exists, so the snap
+explorer can say whether the search never reached the right pose (truth
+outscores every candidate) or the evidence itself prefers a wrong one (a
+far-off candidate outscores truth) — and `decision`, the per-page bars
+(need/got/verdict) for the path the page's state selects, with the rules that
+cannot be judged from one record (panel sheet agreement, the volume energy
+committee, printed-note rung ratios) listed as skipped. The selection files
+remain the authority on what published; `decision` explains the per-page part.
+
 ---
 
 ## Stage 4: street-solve (`street_solve_run.py`)

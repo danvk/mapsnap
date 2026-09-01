@@ -58,6 +58,7 @@ from mapsnap.osm_snap import (
     label_osm_rotations,
     osm_rasters,
     page_scale_priors,
+    rank_pose,
     snap_page,
 )
 from mapsnap.streets import Block, build_block_index
@@ -991,6 +992,15 @@ def page_record(vctx: VolumeContext, unit: PageUnit) -> dict:
                 "source": "demoted-pose",
             }
         )
+    if unit.truth is not None:
+        # #325: the truth pose as a synthetic candidate, scored with the very
+        # same evidence, soft bonuses and prior ladder as the search (rank_pose). One row
+        # classifies every snap failure: truth outscoring every candidate is
+        # a SEARCH problem; a candidate outscoring truth is a DATA problem
+        # (the page's P(road)/OSM evidence prefers a wrong pose).
+        truth = rank_pose(ctx, vctx.feature_index, unit.truth.affine_local)
+        if truth is not None:
+            record["truth_pose"] = truth
     candidates = snap_page(ctx, vctx.feature_index)
     # #324: a candidate whose pose reads the page upside-down is
     # corpus-impossible (0/1,332 truth pages in the zone); snap's rotation
@@ -1038,6 +1048,7 @@ def page_record(vctx: VolumeContext, unit: PageUnit) -> dict:
         if len(scores) >= 2
         else (round(scores[0], 4) if scores else None)
     )
+    record["decision"] = decision_block(record)
     return record
 
 
@@ -2547,6 +2558,321 @@ def uncorroborated_margin(record: dict) -> float:
         if c.get("select_score") is not None and not stamp_corroborated(c)
     ]
     return top_score - max(rivals) if rivals else math.inf
+
+
+def decision_bar(
+    rule: str, need: str, got: object, verdict: str, note: str | None = None
+) -> dict:
+    """One need/got/verdict line of a decision trace (JSON-safe values)."""
+    if isinstance(got, float):
+        got = None if math.isinf(got) else round(got, 4)
+    bar: dict = {"rule": rule, "need": need, "got": got, "verdict": verdict}
+    if note:
+        bar["note"] = note
+    return bar
+
+
+def incumbent_disagreement_ft(record: dict) -> float | None:
+    """Grid RMSE between the incumbent pose and the top candidate, if both exist."""
+    incumbent = record.get("incumbent") or {}
+    candidates = record.get("candidates") or []
+    if not incumbent.get("world_affine") or not candidates:
+        return None
+    return grid_rmse_ft_between(
+        np.array(incumbent["world_affine"]),
+        np.array(candidates[0]["world_affine"]),
+        record["width"],
+        record["height"],
+    )
+
+
+def decision_block(
+    record: dict,
+    gate_score: float = PRODUCTION_GATE_SCORE,
+    gate_margin: float = PRODUCTION_GATE_MARGIN,
+    arbitrate_gate: float = PRODUCTION_ARBITRATE_GATE,
+    refine_margin: float = REFINE_VER_MARGIN,
+) -> dict:
+    """The per-page decision trace for the debugger (#325 phase 2).
+
+    Every bar the page's path applies, as need/got/verdict, plus the rules that
+    could not be judged from one record (volume-level committees, printed-note
+    rung ratios) listed as skipped with the reason. ``page_verdict`` is what the
+    per-page rules alone conclude -- it comes from the REAL rule functions
+    (select_argmax / arbitrate_challenge / refine_adoption / rung_flip), so it
+    cannot drift from production; the bars only explain it. The selection
+    files stay the authority on what published: a volume-level rule may still
+    accept a page these bars abstain on.
+    """
+    from mapsnap.adjacency_gate import STAMP_REHOME_M
+    from mapsnap.reconcile import ENTRY_MARGIN_MIN, ENTRY_SELECT_MIN
+
+    fit_state = record.get("fit_state")
+    path = (
+        "rescue"
+        if fit_state in RESCUE_STATES
+        else ("challenge" if fit_state == "fitted" else "none")
+    )
+    decision: dict = {
+        "path": path,
+        "page_verdict": "abstain" if path == "rescue" else "keep",
+        "bars": [],
+        "skipped": [],
+    }
+    bars: list[dict] = decision["bars"]
+    skipped: list[dict] = decision["skipped"]
+    candidates = record.get("candidates") or []
+    if record.get("status") != "ok" or not candidates:
+        skipped.append(
+            {"rule": "all", "reason": f"status {record.get('status')}, no candidates"}
+        )
+        return decision
+    top = candidates[0]
+    score = top.get("select_score")
+    stem = record.get("target", "")
+
+    if path == "rescue":
+        gates = top.get("gate_reasons") or []
+        bars.append(
+            decision_bar(
+                "plausible",
+                "top candidate passes the plausibility gates",
+                ", ".join(gates) if gates else "no gate reasons",
+                "pass" if score is not None else "fail",
+            )
+        )
+        corroborated = score is not None and stamp_corroborated(top)
+        median = top.get("stamp_median_m")
+        bars.append(
+            decision_bar(
+                "stamp-corroborated",
+                f"median partner stamp separation <= {STAMP_REHOME_M:g} m",
+                median,
+                "pass" if corroborated else ("n/a" if median is None else "fail"),
+                None if median is not None else "no hinting neighbors",
+            )
+        )
+        effective_gate = STAMP_RESCUE_SCORE if corroborated else gate_score
+        bars.append(
+            decision_bar(
+                "select",
+                f">= {effective_gate:g}"
+                + (" (stamp-corroborated bar)" if corroborated else ""),
+                score,
+                "pass" if score is not None and score >= effective_gate else "fail",
+            )
+        )
+        if score is None:
+            margin = None
+        elif corroborated:
+            margin = uncorroborated_margin(record)
+        else:
+            margin = distinct_margin(record, pose_aware=True)
+        bars.append(
+            decision_bar(
+                "margin",
+                f">= {gate_margin:g} over the best distinct rival",
+                margin,
+                "pass" if margin is not None and margin >= gate_margin else "fail",
+                "no distinct rival"
+                if margin is not None and math.isinf(margin)
+                else None,
+            )
+        )
+        choice = select_argmax([record], gate_score, gate_margin, {})[0]
+        decision["page_verdict"] = (
+            "rescue" if choice.get("chosen") is not None else "abstain"
+        )
+        decision["argmax_reason"] = choice.get("reason")
+        if panel_base(stem) is not None:
+            skipped.append(
+                {
+                    "rule": "sheet-agreement",
+                    "reason": "volume-level: judged against fitted siblings at "
+                    f"select time (solo bar {PANEL_SOLO_GATE:g} applied here)",
+                }
+            )
+        skipped.append(
+            {
+                "rule": "volume-energy",
+                "reason": "volume-level committee may still accept an abstained page",
+            }
+        )
+    elif path == "challenge":
+        incumbent = record.get("incumbent")
+        if not incumbent:
+            skipped.append(
+                {"rule": "challenge/refine", "reason": "no incumbent evaluation"}
+            )
+            return decision
+        inc_ver = incumbent.get("verification")
+        top_ver = top.get("verification")
+        inc_name = (incumbent.get("name") or {}).get("score") or 0.0
+        top_name = (top.get("name") or {}).get("score") or 0.0
+        disagreement = incumbent_disagreement_ft(record)
+        legacy_margin = distinct_margin(record, pose_aware=False)
+        if inc_ver is not None and inc_ver >= INCUMBENT_DEFENSIBLE_VERIFICATION:
+            skipped.append(
+                {
+                    "rule": "remote-search",
+                    "reason": "incumbent defensible: search collapsed to a local challenge",
+                }
+            )
+        bars.append(
+            decision_bar(
+                "challenge/select",
+                f">= {arbitrate_gate:g}",
+                score,
+                "pass" if score is not None and score >= arbitrate_gate else "fail",
+            )
+        )
+        bars.append(
+            decision_bar(
+                "challenge/margin",
+                f">= {gate_margin:g}",
+                legacy_margin,
+                "pass"
+                if legacy_margin is not None and legacy_margin >= gate_margin
+                else "fail",
+            )
+        )
+        bars.append(
+            decision_bar(
+                "challenge/disagreement",
+                f">= {ARBITRATE_MIN_DISAGREE_FT:g} ft from the incumbent",
+                disagreement,
+                "pass"
+                if disagreement is not None
+                and disagreement >= ARBITRATE_MIN_DISAGREE_FT
+                else "fail",
+            )
+        )
+        bars.append(
+            decision_bar(
+                "challenge/incumbent-indefensible",
+                f"incumbent verification < {INCUMBENT_DEFENSIBLE_VERIFICATION:g}",
+                inc_ver,
+                "pass"
+                if inc_ver is not None and inc_ver < INCUMBENT_DEFENSIBLE_VERIFICATION
+                else "fail",
+            )
+        )
+        bars.append(
+            decision_bar(
+                "challenge/verification",
+                "candidate verification > incumbent's",
+                top_ver,
+                "pass"
+                if top_ver is not None and inc_ver is not None and top_ver > inc_ver
+                else "fail",
+                f"incumbent {inc_ver}",
+            )
+        )
+        bars.append(
+            decision_bar(
+                "challenge/name-parity",
+                "candidate name score >= incumbent's",
+                top_name,
+                "pass" if top_name >= inc_name else "fail",
+                f"incumbent {inc_name}",
+            )
+        )
+        effective_gcps = incumbent.get("effective_gcps")
+        bars.append(
+            decision_bar(
+                "refine/effective-gcps",
+                f"incumbent effective GCPs >= {REFINE_MIN_EFFECTIVE_GCPS}",
+                effective_gcps,
+                "n/a"
+                if effective_gcps is None
+                else (
+                    "pass" if effective_gcps >= REFINE_MIN_EFFECTIVE_GCPS else "fail"
+                ),
+                "not recorded (pre-dates the field)"
+                if effective_gcps is None
+                else None,
+            )
+        )
+        bars.append(
+            decision_bar(
+                "refine/verification-floor",
+                f"candidate verification > {REFINE_MIN_VERIFICATION:g}",
+                top_ver,
+                "pass"
+                if top_ver is not None and top_ver > REFINE_MIN_VERIFICATION
+                else "fail",
+            )
+        )
+        bars.append(
+            decision_bar(
+                "refine/verification-margin",
+                f"candidate verification > incumbent's + {refine_margin:g}",
+                top_ver,
+                "pass"
+                if top_ver is not None
+                and inc_ver is not None
+                and top_ver > inc_ver + refine_margin
+                else "fail",
+                f"incumbent {inc_ver}",
+            )
+        )
+        bars.append(
+            decision_bar(
+                "refine/agreement",
+                f"< {ARBITRATE_MIN_DISAGREE_FT:g} ft from the incumbent",
+                disagreement,
+                "pass"
+                if disagreement is not None and disagreement < ARBITRATE_MIN_DISAGREE_FT
+                else "fail",
+            )
+        )
+        flip = rung_flip(record, note_ratio=None)
+        bars.append(
+            decision_bar(
+                "rung-flip",
+                "double-scale candidate over a half-scale incumbent, verification + name parity",
+                "flip" if flip is not None else "no flip",
+                "pass" if flip is not None else "n/a",
+                "printed-note ratio is applied at select time (volume-level)",
+            )
+        )
+        if arbitrate_challenge(record, arbitrate_gate) is not None:
+            decision["page_verdict"] = "challenge"
+        elif refine_adoption(record, refine_margin) is not None:
+            decision["page_verdict"] = "refine"
+        elif flip is not None:
+            decision["page_verdict"] = "rung-flip"
+        else:
+            decision["page_verdict"] = "keep"
+    else:
+        skipped.append(
+            {"rule": "all", "reason": f"fit_state {fit_state} is not searched"}
+        )
+        return decision
+
+    record_margin = record.get("margin")
+    note = "reconcile's entry bar applies only to pages the pipeline left unplaced"
+    bars.append(
+        decision_bar(
+            "reconcile-entry/select",
+            f">= {ENTRY_SELECT_MIN:g}",
+            score,
+            "pass" if score is not None and score >= ENTRY_SELECT_MIN else "fail",
+            note,
+        )
+    )
+    bars.append(
+        decision_bar(
+            "reconcile-entry/margin",
+            f">= {ENTRY_MARGIN_MIN:g}",
+            record_margin,
+            "pass"
+            if record_margin is not None and record_margin >= ENTRY_MARGIN_MIN
+            else "fail",
+            note,
+        )
+    )
+    return decision
 
 
 def select_argmax(

@@ -937,6 +937,29 @@ tr.relaxed {
   text-align: right;
   font-variant-numeric: tabular-nums;
 }
+.snap-decision {
+  margin: 4px 0;
+  font-size: 12px;
+}
+.snap-decision summary {
+  cursor: pointer;
+}
+.snap-decision ul {
+  margin: 2px 0;
+  padding-left: 22px;
+}
+.snap-bar-fail {
+  color: #b91c1c;
+}
+.snap-skipped {
+  color: #6b7280;
+}
+.snap-truth-search {
+  color: #b45309;
+}
+.snap-truth-alias {
+  color: #b91c1c;
+}
 .snap-priors {
   margin: 2px 0;
   padding-left: 22px;

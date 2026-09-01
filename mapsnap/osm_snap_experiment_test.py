@@ -20,6 +20,7 @@ from mapsnap.osm_snap_experiment import (
     arbitrate_challenge,
     candidates_record_fresh,
     canonicalize_refine_keys,
+    decision_block,
     init_worker,
     refine_adopt_set,
     refine_adoption,
@@ -559,3 +560,132 @@ def test_runner_up_affines_load_for_fitted_pages_only(tmp_path):
     assert affines[0].shape == (2, 3)
     assert runner_up_affines_of(None, 1000, 1000) == []
     assert runner_up_affines_of({"runner_up_poses": [{"bad": 1}]}, 1000, 1000) == []
+
+
+# --- #325 phase 2: the decision trace --------------------------------------
+
+
+def rescue_record(top_select: float, rival_select: float | None = None) -> dict:
+    """A rescue-state record with a plausible top candidate and optional rival."""
+    candidates = [
+        {
+            "world_affine": affine(),
+            "center": [-74.0 + 500 * SCALE_DEG, 39.99],
+            "theta_deg": 0.0,
+            "select_score": top_select,
+            "verification": top_select,
+            "plausible": True,
+            "gate_reasons": [],
+        }
+    ]
+    if rival_select is not None:
+        candidates.append(
+            {
+                "world_affine": affine(500.0),
+                "center": [-74.0 + 500 * SCALE_DEG + 500.0 / KX, 39.99],
+                "theta_deg": 0.0,
+                "select_score": rival_select,
+                "verification": rival_select,
+                "plausible": True,
+                "gate_reasons": [],
+            }
+        )
+    margin = top_select - rival_select if rival_select is not None else top_select
+    return {
+        "target": "p1",
+        "status": "ok",
+        "fit_state": "none",
+        "width": 1000,
+        "height": 1000,
+        "candidates": candidates,
+        "margin": round(margin, 4),
+    }
+
+
+def bars_by_rule(decision: dict) -> dict[str, dict]:
+    return {bar["rule"]: bar for bar in decision["bars"]}
+
+
+def test_decision_block_rescue_accepts_a_clear_winner():
+    decision = decision_block(rescue_record(2.0, 1.0))
+    assert decision["path"] == "rescue"
+    assert decision["page_verdict"] == "rescue"
+    bars = bars_by_rule(decision)
+    assert bars["select"]["verdict"] == "pass" and bars["select"]["got"] == 2.0
+    assert bars["margin"]["verdict"] == "pass" and bars["margin"]["got"] == 1.0
+    assert bars["stamp-corroborated"]["verdict"] == "n/a"
+    assert {s["rule"] for s in decision["skipped"]} == {"volume-energy"}
+
+
+def test_decision_block_rescue_reports_the_failing_bar():
+    # Below the production score gate: the verdict and the bar agree with
+    # select_argmax's own reason.
+    decision = decision_block(rescue_record(1.0, 0.2))
+    assert decision["page_verdict"] == "abstain"
+    assert bars_by_rule(decision)["select"]["verdict"] == "fail"
+    assert decision["argmax_reason"].startswith("score 1.00 <")
+    # Ambiguous near-tie: score clears, margin does not.
+    decision = decision_block(rescue_record(2.0, 1.9))
+    assert decision["page_verdict"] == "abstain"
+    bars = bars_by_rule(decision)
+    assert bars["select"]["verdict"] == "pass"
+    assert bars["margin"]["verdict"] == "fail"
+
+
+def test_decision_block_rescue_stamp_corroboration_relaxes_the_bar():
+    record = rescue_record(1.0)
+    record["candidates"][0]["stamp_median_m"] = 40.0
+    decision = decision_block(record)
+    bars = bars_by_rule(decision)
+    assert bars["stamp-corroborated"]["verdict"] == "pass"
+    assert "stamp-corroborated bar" in bars["select"]["need"]
+    assert decision["page_verdict"] == "rescue"
+
+
+def test_decision_block_challenge_matches_arbitrate_challenge():
+    record = fitted_record(incumbent_ver=-0.3, challenger_ver=1.5, shift_m=100.0)
+    decision = decision_block(record)
+    assert decision["path"] == "challenge"
+    assert decision["page_verdict"] == "challenge"
+    bars = bars_by_rule(decision)
+    assert all(
+        bars[rule]["verdict"] == "pass"
+        for rule in (
+            "challenge/select",
+            "challenge/margin",
+            "challenge/disagreement",
+            "challenge/incumbent-indefensible",
+            "challenge/verification",
+            "challenge/name-parity",
+        )
+    )
+    # A defensible incumbent blocks the challenge and is named as the reason.
+    record = fitted_record(incumbent_ver=0.6, challenger_ver=1.5, shift_m=100.0)
+    decision = decision_block(record)
+    assert decision["page_verdict"] == "keep"
+    assert (
+        bars_by_rule(decision)["challenge/incumbent-indefensible"]["verdict"] == "fail"
+    )
+    assert {s["rule"] for s in decision["skipped"]} >= {"remote-search"}
+
+
+def test_decision_block_refine_matches_refine_adoption():
+    record = fitted_record(incumbent_ver=0.6, challenger_ver=0.8, shift_m=15.0)
+    decision = decision_block(record)
+    assert decision["page_verdict"] == "refine"
+    bars = bars_by_rule(decision)
+    assert bars["refine/agreement"]["verdict"] == "pass"
+    assert bars["refine/verification-margin"]["verdict"] == "pass"
+    assert bars["challenge/disagreement"]["verdict"] == "fail"
+    # Same lock, no verification edge: keep.
+    record = fitted_record(incumbent_ver=0.6, challenger_ver=0.62, shift_m=15.0)
+    assert decision_block(record)["page_verdict"] == "keep"
+
+
+def test_decision_block_unsearched_page_is_skipped():
+    decision = decision_block(
+        {"target": "p1", "status": "no_prob", "fit_state": "none"}
+    )
+    assert decision["page_verdict"] == "abstain"
+    assert decision["bars"] == []
+    assert decision["skipped"][0]["rule"] == "all"
