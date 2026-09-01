@@ -15,6 +15,7 @@ from mapsnap.reconcile import (
     build_edges,
     collect_hypotheses,
     dedupe_hypotheses,
+    normalize_name_penalty,
     pairwise_energy,
     pose_scale_log2,
     published_channel,
@@ -457,3 +458,40 @@ def test_contradicted_term_follows_the_verdict_not_the_filename():
     flagged.scores["verification"] = 1.0
     unary_energy(flagged, False, 600.0, None, None)
     assert flagged.unary - plain.unary == pytest.approx(W_CONTRADICTED)
+
+
+def test_normalize_name_penalty_is_relative_within_the_page():
+    """Ordering is preserved; the best hypothesis keeps its distance to UNPLACED."""
+    good = Hypothesis(source="georef", affine=None)
+    alias = Hypothesis(source="snap:0", affine=None)
+    # good: 4 of 5 labels hit (small penalty); alias: none hit (large penalty)
+    good.scores.update({"name_reward": 0.5, "name": 0.5 - 0.07})
+    alias.scores.update({"name_reward": 0.0, "name": -0.36})
+    node = PageNode(
+        unit=None,  # type: ignore[arg-type]
+        is_panel=False,
+        base=None,
+        hypotheses=[good, alias],
+        published_index=0,
+    )
+    normalize_name_penalty(node)
+    # The page's smallest penalty is refunded to everyone, so the best
+    # hypothesis is back at its reward-only value ...
+    assert good.scores["name"] == pytest.approx(0.5)
+    # ... while the alias keeps the part of its penalty that is *relative*.
+    assert alias.scores["name"] == pytest.approx(-0.36 + 0.07)
+    assert good.scores["name"] > alias.scores["name"]
+
+
+def test_normalize_name_penalty_leaves_unpenalized_pages_alone():
+    hypothesis = Hypothesis(source="georef", affine=None)
+    hypothesis.scores.update({"name_reward": 0.4, "name": 0.4})
+    node = PageNode(
+        unit=None,  # type: ignore[arg-type]
+        is_panel=False,
+        base=None,
+        hypotheses=[hypothesis],
+        published_index=0,
+    )
+    normalize_name_penalty(node)
+    assert hypothesis.scores["name"] == pytest.approx(0.4)
