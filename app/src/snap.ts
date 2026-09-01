@@ -9,6 +9,14 @@
  * number shown in the UI was computed by the pipeline itself.
  */
 
+/** OCR street-name agreement with a pose (a boost, never a gate). */
+export interface SnapNameAlignment {
+  score: number;
+  n_labels: number;
+  n_hits: number;
+  hits?: { text: string; dist_m: number; angle_deg: number }[];
+}
+
 /** One candidate pose from the snap matcher, as recorded in candidates.jsonl. */
 export interface SnapCandidate {
   world_affine: [number, number, number][];
@@ -29,7 +37,7 @@ export interface SnapCandidate {
   refine_shift_m?: number;
   select_score?: number;
   verification?: number;
-  name?: number;
+  name?: SnapNameAlignment;
   plausible?: boolean;
   gate_reasons?: string[];
   /** Grid RMSE vs truth, present only when the volume has truth data. */
@@ -44,9 +52,35 @@ export interface SnapIncumbent {
   inlier_frac?: number;
   chamfer_mean_m?: number;
   n_points?: number;
-  name?: number;
+  name?: SnapNameAlignment;
   effective_gcps?: number;
   rmse_ft?: number;
+}
+
+/** The truth pose scored with the ladder's own evidence (#325 phase 2). */
+export interface SnapTruthPose extends SnapIncumbent {
+  select_score?: number;
+  theta_deg?: number;
+  region_containment?: number;
+  prior_theta_residual_sigma?: number;
+}
+
+/** One need/got/verdict line of the pipeline's decision trace. */
+export interface SnapDecisionBar {
+  rule: string;
+  need: string;
+  got: number | string | null;
+  verdict: 'pass' | 'fail' | 'n/a';
+  note?: string;
+}
+
+/** The per-page decision trace recorded at snap time (#325 phase 2). */
+export interface SnapDecision {
+  path: string;
+  page_verdict: string;
+  bars: SnapDecisionBar[];
+  skipped: { rule: string; reason: string }[];
+  argmax_reason?: string;
 }
 
 /** One page's full snap record. */
@@ -70,6 +104,8 @@ export interface SnapRecord {
     scale: { m_per_px: number; sigma_log: number; source: string }[];
   };
   incumbent?: SnapIncumbent;
+  truth_pose?: SnapTruthPose;
+  decision?: SnapDecision;
   candidates?: SnapCandidate[];
 }
 
@@ -161,4 +197,51 @@ export function rankedCandidates(record: SnapRecord): SnapCandidate[] {
   return [...(record.candidates ?? [])].sort(
     (a, b) => (b.select_score ?? -Infinity) - (a.select_score ?? -Infinity),
   );
+}
+
+/** How the truth pose fared against the ladder: the one-line failure class. */
+export interface TruthVerdict {
+  kind: 'search' | 'alias' | 'agrees';
+  detail: string;
+}
+
+/**
+ * Classify a page's snap outcome against its scored truth pose (#325).
+ *
+ * Truth outscoring every candidate means the search never reached the right
+ * pose (a search problem); a candidate far from truth outscoring it means the
+ * page's own evidence prefers a wrong pose (a data/aliasing problem); a top
+ * candidate near truth means the evidence agrees. Null without a scored truth.
+ */
+export function truthVerdict(record: SnapRecord): TruthVerdict | null {
+  const truth = record.truth_pose;
+  if (!truth || truth.select_score === undefined) return null;
+  const top = rankedCandidates(record).find(
+    (c) => c.select_score !== undefined,
+  );
+  const truthScore = truth.select_score.toFixed(2);
+  if (!top || top.select_score === undefined) {
+    return {
+      kind: 'search',
+      detail: `no plausible candidate; the truth pose scores ${truthScore}`,
+    };
+  }
+  const topScore = top.select_score.toFixed(2);
+  if (truth.select_score > top.select_score) {
+    return {
+      kind: 'search',
+      detail: `truth pose outscores every candidate (${truthScore} vs ${topScore}): the search never reached it`,
+    };
+  }
+  const rmse = top.rmse_ft;
+  if (rmse !== undefined && rmse > 200) {
+    return {
+      kind: 'alias',
+      detail: `a pose ${Math.round(rmse)} ft from truth outscores the truth pose (${topScore} vs ${truthScore}): the evidence prefers an alias`,
+    };
+  }
+  return {
+    kind: 'agrees',
+    detail: `top candidate is ${rmse === undefined ? 'near' : `${Math.round(rmse)} ft from`} truth and outscores it (${topScore} vs ${truthScore})`,
+  };
 }

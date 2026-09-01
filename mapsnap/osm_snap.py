@@ -151,18 +151,53 @@ class SnapCandidate:
 
     def select_score(self) -> float:
         """The ranking score: matcher verification plus soft evidence bonuses."""
-        if not math.isfinite(self.verification):
-            return -math.inf
-        score = self.verification
-        if self.name is not None:
-            score += W_NAME * self.name.score
-        if self.region_containment is not None:
-            score += W_CONTAIN * self.region_containment
-        if self.prior_theta_residual_sigma is not None:
-            # Signed: within 1 sigma earns the bonus, a gross disagreement
-            # (e.g. a 180-flip against agreeing directed priors) costs it.
-            score += W_PRIOR * max(-1.0, 1.0 - self.prior_theta_residual_sigma)
-        return score
+        return selection_score(
+            self.verification,
+            self.name.score if self.name is not None else None,
+            self.region_containment,
+            self.prior_theta_residual_sigma,
+        )
+
+
+def selection_score(
+    verification: float,
+    name_score: float | None,
+    region_containment: float | None,
+    prior_theta_residual_sigma: float | None,
+) -> float:
+    """The ranking score: matcher verification plus soft evidence bonuses.
+
+    One formula for the ladder's own candidates (SnapCandidate.select_score)
+    and for synthetic poses scored after the fact (rank_pose), so a truth pose
+    lands on the same footing as the search's candidates.
+    """
+    if not math.isfinite(verification):
+        return -math.inf
+    score = verification
+    if name_score is not None:
+        score += W_NAME * name_score
+    if region_containment is not None:
+        score += W_CONTAIN * region_containment
+    if prior_theta_residual_sigma is not None:
+        # Signed: within 1 sigma earns the bonus, a gross disagreement
+        # (e.g. a 180-flip against agreeing directed priors) costs it.
+        score += W_PRIOR * max(-1.0, 1.0 - prior_theta_residual_sigma)
+    return score
+
+
+def directed_prior_residual_sigma(
+    priors: list["RotationPrior"], theta_deg: float
+) -> float | None:
+    """How many sigmas a rotation sits from the nearest DIRECTED prior, or None.
+
+    Only directed priors can flag a 180-flip: the mod-180 rung emits both flips
+    as entries, so including it would let the wrong flip always match one of
+    the pair and pin the residual at zero.
+    """
+    directed = [p for p in priors if p.source != "label-osm-mod180"]
+    if not directed:
+        return None
+    return min(abs(wrap_deg(theta_deg - p.theta_deg)) / p.sigma_deg for p in directed)
 
 
 @dataclass
@@ -761,6 +796,53 @@ def evaluate_pose(
     return evaluation
 
 
+def rank_pose(
+    ctx: PageContext,
+    features: FeatureIndex,
+    world_affine: np.ndarray,
+    params: MatchParams = OSM_MATCH_PARAMS,
+) -> dict | None:
+    """Score an EXISTING pose with the ladder's FULL ranking features.
+
+    evaluate_pose's evidence plus the soft bonuses the search's own candidates
+    carry (key-map region containment, directed-prior rotation residual), so
+    the result has a ``select_score`` directly comparable with theirs. This is
+    what puts a synthetic candidate -- the truth pose in the debugger record
+    (#325) -- on the same footing as the ladder: if it outscores every
+    candidate the search never reached it; if a candidate outscores it the
+    page's evidence itself prefers a wrong pose. None when the pose cannot be
+    evaluated (see evaluate_pose).
+    """
+    evaluation = evaluate_pose(ctx, features, world_affine, params)
+    if evaluation is None:
+        return None
+    affine = np.asarray(world_affine, dtype=float)
+    theta = math.degrees(math.atan2(-affine[1, 0], affine[0, 0]))
+    containment = (
+        region_containment_frac(affine, (ctx.width, ctx.height), ctx.keymap_regions)
+        if ctx.keymap_regions
+        else None
+    )
+    residual = directed_prior_residual_sigma(ctx.rotation_priors, theta)
+    name = evaluation.get("name")
+    evaluation["world_affine"] = [[float(v) for v in row] for row in affine]
+    evaluation["theta_deg"] = round(theta, 2)
+    evaluation["select_score"] = round(
+        selection_score(
+            evaluation["verification"],
+            name["score"] if name is not None else None,
+            containment,
+            residual,
+        ),
+        4,
+    )
+    if containment is not None:
+        evaluation["region_containment"] = round(containment, 3)
+    if residual is not None:
+        evaluation["prior_theta_residual_sigma"] = round(residual, 2)
+    return evaluation
+
+
 def frame_thetas(
     ctx: PageContext,
     confident_deg: float | None,
@@ -943,17 +1025,9 @@ def snap_page(
                 if snap.region_containment < CONTAINMENT_MIN:
                     snap.plausible = False
                     snap.gate_reasons.append("containment")
-            # Only DIRECTED priors can flag a 180-flip: the mod-180 rung emits
-            # both flips as entries, so including it would let the wrong flip
-            # always match one of the pair and pin the residual at zero.
-            directed = [
-                p for p in ctx.rotation_priors if p.source != "label-osm-mod180"
-            ]
-            if directed:
-                snap.prior_theta_residual_sigma = min(
-                    abs(wrap_deg(candidate.theta_deg - p.theta_deg)) / p.sigma_deg
-                    for p in directed
-                )
+            snap.prior_theta_residual_sigma = directed_prior_residual_sigma(
+                ctx.rotation_priors, candidate.theta_deg
+            )
             if ctx.label_features and ctx.block_index:
                 snap.name = name_alignment(ctx.label_features, ctx.block_index, world)
             if not snap.plausible:

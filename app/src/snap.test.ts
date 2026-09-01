@@ -3,9 +3,10 @@ import {
   groupRotationPriors,
   parseSnapRecords,
   rankedCandidates,
+  truthVerdict,
 } from './snap';
 
-const affine = [
+const affine: [number, number, number][] = [
   [1, 0, 0],
   [0, 1, 0],
 ];
@@ -91,5 +92,77 @@ describe('groupRotationPriors', () => {
         { theta_deg: 12, sigma_deg: 15, source: 'b' },
       ]),
     ).toEqual(['12°±4 (a)', '12°±15 (b)']);
+  });
+});
+
+describe('truthVerdict', () => {
+  const base = {
+    target: 'p1',
+    status: 'ok',
+    fit_state: 'none',
+    width: 100,
+    height: 80,
+  };
+  const candidate = (select_score: number, rmse_ft: number) => ({
+    world_affine: affine,
+    center: [0, 0] as [number, number],
+    select_score,
+    rmse_ft,
+  });
+
+  it('is null without a scored truth pose', () => {
+    expect(
+      truthVerdict({ ...base, candidates: [candidate(1, 10)] }),
+    ).toBeNull();
+  });
+
+  it('flags a search problem when truth outscores every candidate', () => {
+    const verdict = truthVerdict({
+      ...base,
+      truth_pose: { world_affine: affine, select_score: 1.8 },
+      candidates: [candidate(1.2, 900)],
+    });
+    expect(verdict?.kind).toBe('search');
+    expect(verdict?.detail).toContain('1.80 vs 1.20');
+  });
+
+  it('flags an alias when a far-off candidate outscores truth', () => {
+    const verdict = truthVerdict({
+      ...base,
+      truth_pose: { world_affine: affine, select_score: 0.9 },
+      candidates: [candidate(1.02, 14713)],
+    });
+    expect(verdict?.kind).toBe('alias');
+    expect(verdict?.detail).toContain('14713 ft');
+  });
+
+  it('reports agreement when the top candidate is near truth', () => {
+    const verdict = truthVerdict({
+      ...base,
+      truth_pose: { world_affine: affine, select_score: 0.9 },
+      candidates: [candidate(1.1, 12)],
+    });
+    expect(verdict?.kind).toBe('agrees');
+  });
+
+  it('keeps truth_pose and decision through parsing', () => {
+    const line = JSON.stringify({
+      ...base,
+      truth_pose: {
+        world_affine: affine,
+        select_score: 1.5,
+        verification: null,
+      },
+      decision: {
+        path: 'rescue',
+        page_verdict: 'abstain',
+        bars: [{ rule: 'select', need: '>= 1.35', got: 1.0, verdict: 'fail' }],
+        skipped: [],
+      },
+    });
+    const record = parseSnapRecords(line).get('p1')!;
+    expect(record.truth_pose?.select_score).toBe(1.5);
+    expect('verification' in record.truth_pose!).toBe(false);
+    expect(record.decision?.bars[0]?.verdict).toBe('fail');
   });
 });

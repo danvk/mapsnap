@@ -1,5 +1,10 @@
-import { groupRotationPriors, rankedCandidates } from '../snap';
-import type { SnapCandidate, SnapRecord } from '../snap';
+import { groupRotationPriors, rankedCandidates, truthVerdict } from '../snap';
+import type {
+  SnapCandidate,
+  SnapDecisionBar,
+  SnapRecord,
+  SnapTruthPose,
+} from '../snap';
 
 /**
  * Per-page snap explorer (#325 phase 1): what the matcher searched, every
@@ -12,7 +17,7 @@ import type { SnapCandidate, SnapRecord } from '../snap';
 
 interface SnapPanelProps {
   record: SnapRecord;
-  /** Index into rankedCandidates(record), -1 for the incumbent, null for none. */
+  /** Index into rankedCandidates(record); -1 the incumbent, -2 the truth pose; null none. */
   selected: number | null;
   onSelect: (index: number | null) => void;
   onClose: () => void;
@@ -26,7 +31,7 @@ function CandidateRow({
   onClick,
 }: {
   label: string;
-  candidate: SnapCandidate | (SnapRecord['incumbent'] & object);
+  candidate: SnapCandidate | (SnapRecord['incumbent'] & object) | SnapTruthPose;
   isSelected: boolean;
   isBest: boolean;
   onClick: () => void;
@@ -57,6 +62,19 @@ function CandidateRow({
   );
 }
 
+// One decision bar as a line: "rule: need X, got Y — verdict (note)".
+function describeBar(bar: SnapDecisionBar): string {
+  const got =
+    bar.got === null
+      ? '—'
+      : typeof bar.got === 'number'
+        ? bar.got.toFixed(bar.got === Math.round(bar.got) ? 0 : 3)
+        : bar.got;
+  const symbol =
+    bar.verdict === 'pass' ? '✓' : bar.verdict === 'fail' ? '✗' : '–';
+  return `${symbol} ${bar.rule}: need ${bar.need}, got ${got}${bar.note ? ` (${bar.note})` : ''}`;
+}
+
 export function SnapPanel({
   record,
   selected,
@@ -69,9 +87,12 @@ export function SnapPanel({
       ? null
       : selected === -1
         ? (record.incumbent ?? null)
-        : (ranked[selected] ?? null);
+        : selected === -2
+          ? (record.truth_pose ?? null)
+          : (ranked[selected] ?? null);
   const activeCandidate = active as SnapCandidate | null;
   const priorGroups = groupRotationPriors(record.priors?.rotation ?? []);
+  const verdict = truthVerdict(record);
 
   return (
     <div className="snap-panel">
@@ -134,6 +155,15 @@ export function SnapPanel({
               onClick={() => onSelect(selected === -1 ? null : -1)}
             />
           )}
+          {record.truth_pose && (
+            <CandidateRow
+              label="truth"
+              candidate={record.truth_pose}
+              isSelected={selected === -2}
+              isBest={false}
+              onClick={() => onSelect(selected === -2 ? null : -2)}
+            />
+          )}
           {ranked.map((candidate, i) => (
             <CandidateRow
               key={i}
@@ -146,13 +176,37 @@ export function SnapPanel({
           ))}
         </tbody>
       </table>
-      {record.has_truth && (
-        <p className="snap-note">
-          truth column is each pose's grid RMSE; a truth-pose row (scored with
-          the same evidence) lands with the phase-2 pipeline record.
+      {verdict && (
+        <p className={`snap-note snap-truth-${verdict.kind}`}>
+          truth: {verdict.detail}
         </p>
       )}
-
+      {record.has_truth && !record.truth_pose && (
+        <p className="snap-note">
+          truth pose not scored in this record (re-run snap to add it).
+        </p>
+      )}
+      {record.decision && (
+        <details className="snap-decision">
+          <summary>
+            decision · {record.decision.path} → {record.decision.page_verdict}
+            {record.decision.argmax_reason &&
+              ` (${record.decision.argmax_reason})`}
+          </summary>
+          <ul>
+            {record.decision.bars.map((bar) => (
+              <li key={bar.rule} className={`snap-bar-${bar.verdict}`}>
+                {describeBar(bar)}
+              </li>
+            ))}
+            {record.decision.skipped.map((skip) => (
+              <li key={skip.rule} className="snap-skipped">
+                {skip.rule}: {skip.reason}
+              </li>
+            ))}
+          </ul>
+        </details>
+      )}
       {activeCandidate && (activeCandidate.gate_reasons?.length ?? 0) > 0 && (
         <p className="snap-note">
           gates: {activeCandidate.gate_reasons!.join(' · ')}
