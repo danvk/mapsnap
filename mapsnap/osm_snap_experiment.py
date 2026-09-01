@@ -48,6 +48,7 @@ from mapsnap.keymap.locate import KeymapLocator, usable_keymaps
 from mapsnap.osm_snap import (
     PageContext,
     RotationPrior,
+    ScalePrior,
     SnapCandidate,
     adjacency_keymap_rotations,
     affine_theta_deg,
@@ -707,6 +708,40 @@ def neighbor_stamp_centers(
     return (mutual_pts + oneside_pts)[:limit]
 
 
+# Two scale priors closer than this (natural log of their ratio, ~16%) are the
+# same rung; a new source only adds a rung the ladder lacks.
+SCALE_PRIOR_DEDUPE_LOG = 0.15
+
+
+def affine_m_per_px(world_affine: np.ndarray) -> float:
+    """Metres per page pixel of a page->lon/lat affine (its x-axis step)."""
+    lat = float(world_affine[1, 2])
+    kx = 111_320.0 * math.cos(math.radians(lat))
+    ky = 110_540.0
+    return math.hypot(float(world_affine[0, 0]) * kx, float(world_affine[1, 0]) * ky)
+
+
+def with_incumbent_scale(
+    scales: list[ScalePrior], incumbent_affine: np.ndarray
+) -> list[ScalePrior]:
+    """The scale ladder plus the incumbent pose's own rung, unless already on it.
+
+    Appended (the volume median keeps its priority) and deduped against every
+    existing prior at SCALE_PRIOR_DEDUPE_LOG, so pages at the volume's scale
+    see no change at all; only pages whose fit sits on another rung gain a
+    second family of candidates for the challenge/refine head-to-head.
+    """
+    scale = affine_m_per_px(incumbent_affine)
+    if not math.isfinite(scale) or scale <= 0:
+        return scales
+    if any(
+        abs(math.log(scale / prior.m_per_px)) <= SCALE_PRIOR_DEDUPE_LOG
+        for prior in scales
+    ):
+        return scales
+    return [*scales, ScalePrior(scale, 0.05, "incumbent")]
+
+
 def build_page_context(
     vctx: VolumeContext, unit: PageUnit
 ) -> tuple[PageContext | None, str]:
@@ -812,8 +847,21 @@ def build_page_context(
     if note is not None:
         calibration, _source = volume_note_calibration(vctx)
         implied = note_m_per_px(note[0], calibration)
-        if all(abs(math.log(implied / prior.m_per_px)) > 0.15 for prior in scales):
+        if all(
+            abs(math.log(implied / prior.m_per_px)) > SCALE_PRIOR_DEDUPE_LOG
+            for prior in scales
+        ):
             scales = [_ScalePrior(implied, 0.05, "printed-note"), *scales]
+    if unit.fit_state == "fitted" and unit.gen_affine is not None:
+        # A fitted page's own scale is the most trustworthy rung it has. The
+        # challenge search already trusts the incumbent's LOCATION (a
+        # defensible incumbent collapses the search onto it), yet the ladder
+        # never carried its scale: 91 correct incumbents corpus-wide sat on a
+        # rung no prior offered (richmond's 100 ft/in 365-389, nashville's
+        # small sheets, columbia's sectionals), so every candidate was born at
+        # the wrong size and refinement could never reach them (#325 truth
+        # row on richmond p365: truth select 2.35 vs best candidate 0.78).
+        scales = with_incumbent_scale(scales, unit.gen_affine)
     # Overlapping discs are one search; see cluster_search_centers.
     centers = cluster_search_centers(centers, 0.75 * radius)
     ctx = PageContext(
