@@ -619,6 +619,9 @@ def test_transfer_candidates_fires_on_the_failing_box_only():
     additions, provenance = transfer_candidates(
         angle_boxes_fixture(), detections, width, height
     )
+    # The additions are angle_boxes-shaped and carry the transferred footprints.
+    assert {a["angle"] for a in additions} == {0, 90, 270}
+    assert all(a["horizontal_list"] or a["free_list"] for a in additions)
     kinds = {(r["angle"], r["kind"]) for r in provenance}
     # The failing footprint is re-read in the other frames, and the 90deg
     # sub-piece (page bbox (150,100)-(300,132), 47% of the big box) joins 0deg.
