@@ -6,6 +6,7 @@ import numpy as np
 
 from mapsnap.detect_text import (
     NON_STREET_TEXT,
+    TRANSFER_FLOOR,
     _axis_starts,
     _iou_xxyy,
     _iter_tiles,
@@ -15,9 +16,12 @@ from mapsnap.detect_text import (
     filter_args,
     has_split_panels,
     lab_to_hex,
+    merge_transferred,
     page_lab,
     page_vocabs,
+    reading_order,
     region_color,
+    transfer_candidates,
 )
 from mapsnap.keymap.locate import KeymapLocator
 from mapsnap.streets import (
@@ -563,3 +567,152 @@ def test_resume_skips_only_reads_from_the_same_recognizer(tmp_path):
     assert not reads_are_current(tuned, None)
     # A page with no read at all is always due.
     assert not reads_are_current(tmp_path / "missing.streets.json", None)
+
+
+# --- cross-orientation transfer (#144) ---------------------------------------
+
+
+def test_reading_order_puts_the_long_axis_first_left_to_right():
+    # A diagonal quad listed short-edge-first (as CRAFT does for TILLARY).
+    quad = [[100, 107], [124, 100], [155, 203], [131, 210]]
+    tl, tr, br, bl = reading_order(quad)
+    # The first edge is the long axis and runs left to right.
+    assert (tr[0] - tl[0]) ** 2 + (tr[1] - tl[1]) ** 2 > (bl[0] - tl[0]) ** 2 + (
+        bl[1] - tl[1]
+    ) ** 2
+    assert tr[0] > tl[0]
+    assert sorted(map(tuple, [tl, tr, br, bl])) == sorted(map(tuple, quad))
+
+
+def angle_boxes_fixture() -> list[dict]:
+    # 0deg: one large wide box (a glommed label) and one confident-read box.
+    # 90deg: a clean sub-piece of the large box (the split that reads).
+    return [
+        {
+            "angle": 0,
+            "horizontal_list": [[100, 300, 100, 140], [400, 500, 100, 124]],
+            "free_list": [],
+        },
+        {"angle": 90, "horizontal_list": [[100, 132, 700, 850]], "free_list": []},
+        {"angle": 270, "horizontal_list": [], "free_list": []},
+    ]
+
+
+def test_transfer_candidates_fires_on_the_failing_box_only():
+    width = height = 1000
+    detections = [
+        # The large box read poorly...
+        {
+            "polygon": [[100, 100], [300, 100], [300, 140], [100, 140]],
+            "text": "13TH",
+            "confidence": 0.01,
+            "angle": 0,
+        },
+        # ...the small box read confidently.
+        {
+            "polygon": [[400, 100], [500, 100], [500, 124], [400, 124]],
+            "text": "MAIN",
+            "confidence": 0.99,
+            "angle": 0,
+        },
+    ]
+    additions, provenance = transfer_candidates(
+        angle_boxes_fixture(), detections, width, height
+    )
+    kinds = {(r["angle"], r["kind"]) for r in provenance}
+    # The failing footprint is re-read in the other frames, and the 90deg
+    # sub-piece (page bbox (150,100)-(300,132), 47% of the big box) joins 0deg.
+    assert (90, "footprint") in kinds and (270, "footprint") in kinds
+    assert (0, "split") in kinds
+    # The confident box triggers nothing of its own.
+    assert not any(r["page_bbox"][0] == 400 for r in provenance)
+
+
+def test_transfer_candidates_quiet_when_reads_are_confident():
+    detections = [
+        {
+            "polygon": [[100, 100], [300, 100], [300, 140], [100, 140]],
+            "text": "ELM",
+            "confidence": 0.9,
+            "angle": 0,
+        },
+        {
+            "polygon": [[400, 100], [500, 100], [500, 124], [400, 124]],
+            "text": "MAIN",
+            "confidence": 0.99,
+            "angle": 0,
+        },
+    ]
+    additions, provenance = transfer_candidates(
+        angle_boxes_fixture(), detections, 1000, 1000
+    )
+    assert additions == [] and provenance == []
+
+
+def test_merge_transferred_dedupes_and_floors():
+    existing = [
+        {
+            "polygon": [[0, 0], [100, 0], [100, 20], [0, 20]],
+            "text": "STATE",
+            "confidence": 0.29,
+            "angle": 270,
+        },
+        {
+            "polygon": [[500, 0], [600, 0], [600, 20], [500, 20]],
+            "text": "OAK",
+            "confidence": 1.0,
+            "angle": 0,
+        },
+    ]
+    provenance = [
+        {
+            "angle": 270,
+            "page_bbox": (0, 0, 100, 20),
+            "kind": "footprint",
+            "source_angle": 90,
+        },
+        {
+            "angle": 0,
+            "page_bbox": (500, 0, 600, 20),
+            "kind": "split",
+            "source_angle": 90,
+        },
+        {
+            "angle": 0,
+            "page_bbox": (200, 0, 300, 20),
+            "kind": "split",
+            "source_angle": 90,
+        },
+    ]
+    transferred = [
+        # Better read of the same footprint: replaces the 0.29 original.
+        {
+            "polygon": [[0, 0], [100, 0], [100, 20], [0, 20]],
+            "text": "STATE",
+            "confidence": 0.93,
+            "angle": 270,
+        },
+        # Near-tie twin of a confident existing read: the original wins.
+        {
+            "polygon": [[500, 0], [600, 0], [600, 20], [500, 20]],
+            "text": "OAK",
+            "confidence": 0.995,
+            "angle": 0,
+        },
+        # Below the floor: dropped.
+        {
+            "polygon": [[200, 0], [300, 0], [300, 20], [200, 20]],
+            "text": "JUNK",
+            "confidence": 0.1,
+            "angle": 0,
+        },
+    ]
+    merged = merge_transferred(existing, transferred, provenance)
+    by_text = {d["text"]: d for d in merged}
+    assert len(merged) == 2
+    assert by_text["STATE"]["confidence"] == 0.93
+    assert by_text["STATE"]["transferred"] is True
+    assert by_text["STATE"]["transfer_kind"] == "footprint"
+    assert by_text["STATE"]["transfer_source_angle"] == 90
+    assert "transferred" not in by_text["OAK"]
+    assert 0.1 < TRANSFER_FLOOR

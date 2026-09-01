@@ -18,6 +18,7 @@ from tqdm import tqdm
 
 from mapsnap.ctc_vocab_decode import HINT_STRINGS, generate_vocab_strings
 from mapsnap.keymap.locate import KeymapLocator, page_key, resolve_keymaps
+from mapsnap.panel_boxes import rotate_point, unrotate_point
 from mapsnap.streets import build_block_index, polygon_side_lengths
 from mapsnap.utils import default_centerlines, image_stem
 
@@ -620,6 +621,297 @@ def _merge_vocab_passes(primary: list[dict], fallback: list[dict]) -> list[dict]
     return merged
 
 
+# --- Cross-orientation box transfer (#144) -----------------------------------
+#
+# CRAFT segments the same text differently at 0/90/270: the natural orientation
+# can cut a word in half (brooklyn v2 p19 TILLARY), glom it with an adjacency
+# stamp (richmond p365 "373 HAMMOND"), or attach a prefix that poisons the
+# constrained decode (detroit p85 "S. TENNESSEE"). When a LARGE box fails to
+# read, the other orientations' differently-segmented footprints are re-read in
+# the frame where the text is upright, and the failing footprint itself is
+# re-read in the other frames. Transferred reads are flagged ``transferred``
+# (with ``transfer_kind`` and ``transfer_source_angle``) for downstream use.
+
+# A trigger box is at least this long and this wide-to-tall in its own frame
+# (TILLARY's polygon is 111x55, "S. TENNESSEE" 92x24).
+TRANSFER_MIN_LONG = 80
+TRANSFER_MIN_ASPECT = 2.0
+# A read at or above this confidence needs no help.
+TRANSFER_CONFIDENT = 0.3
+# Transferred reads below this are junk splits of titles/legends; drop them.
+TRANSFER_FLOOR = 0.2
+# Same-text overlap dedupe: within this confidence delta the EXISTING read wins,
+# so a transferred twin of a read we already had is never flagged as new.
+TRANSFER_TIE = 0.02
+
+
+def reading_order(quad: list) -> list[list[int]]:
+    """Order a quad [tl, tr, br, bl] with tl->tr along its long axis, left to right.
+
+    EasyOCR's four_point_transform takes the FIRST edge as the crop width, so a
+    quad rotated into another frame must be re-ordered or the warped crop comes
+    out sideways/mirrored (TILLARY read 'E' until this).
+    """
+    pts = [(float(x), float(y)) for x, y in quad]
+    cx = sum(q[0] for q in pts) / 4
+    cy = sum(q[1] for q in pts) / 4
+    e0 = (pts[1][0] - pts[0][0], pts[1][1] - pts[0][1])
+    e1 = (pts[2][0] - pts[1][0], pts[2][1] - pts[1][1])
+    ux, uy = e0 if math.hypot(*e0) >= math.hypot(*e1) else e1
+    norm = math.hypot(ux, uy) or 1.0
+    ux, uy = ux / norm, uy / norm
+    if ux < 0 or (ux == 0 and uy < 0):
+        ux, uy = -ux, -uy
+    nx, ny = -uy, ux
+    proj = [
+        ((q[0] - cx) * ux + (q[1] - cy) * uy, (q[0] - cx) * nx + (q[1] - cy) * ny, q)
+        for q in pts
+    ]
+    top = sorted([q for q in proj if q[1] < 0], key=lambda q: q[0])
+    bottom = sorted([q for q in proj if q[1] >= 0], key=lambda q: q[0])
+    if len(top) != 2:
+        return [[int(v) for v in q] for q in pts]
+    return [
+        [int(v) for v in top[0][2]],
+        [int(v) for v in top[1][2]],
+        [int(v) for v in bottom[1][2]],
+        [int(v) for v in bottom[0][2]],
+    ]
+
+
+def _page_bbox(pts: list, angle: int, width: int, height: int) -> tuple:
+    rw, rh = (width, height) if angle == 0 else (height, width)
+    cs = [unrotate_point(x, y, angle, rw, rh) for x, y in pts]
+    xs = [c[0] for c in cs]
+    ys = [c[1] for c in cs]
+    return (min(xs), min(ys), max(xs), max(ys))
+
+
+def _bbox_inter(a: tuple, b: tuple) -> float:
+    return max(0.0, min(a[2], b[2]) - max(a[0], b[0])) * max(
+        0.0, min(a[3], b[3]) - max(a[1], b[1])
+    )
+
+
+def _bbox_area(a: tuple) -> float:
+    return max(1.0, (a[2] - a[0]) * (a[3] - a[1]))
+
+
+def _bbox_iou(a: tuple, b: tuple) -> float:
+    i = _bbox_inter(a, b)
+    return i / (_bbox_area(a) + _bbox_area(b) - i) if i else 0.0
+
+
+def transfer_candidates(
+    angle_boxes: list[dict], detections: list[dict], width: int, height: int
+) -> tuple[list[dict], list[dict]]:
+    """Cross-orientation footprints to re-read, as angle_boxes-shaped additions.
+
+    A trigger is a large wide box in its own frame whose best read is below
+    TRANSFER_CONFIDENT. For each trigger the OTHER orientations' clean
+    split/merge footprints join the trigger's frame, and the trigger's own
+    footprint joins the other frames (horizontal boxes as rotated bboxes,
+    free polygons as reading-ordered quads). Returns (additions, provenance);
+    each provenance record carries the target angle, page-frame bbox,
+    transfer kind and source angle.
+    """
+    best_conf: dict[tuple, float] = {}
+    for det in detections:
+        xs = [p[0] for p in det["polygon"]]
+        ys = [p[1] for p in det["polygon"]]
+        key = (
+            det["angle"],
+            round(min(xs)),
+            round(min(ys)),
+            round(max(xs)),
+            round(max(ys)),
+        )
+        best_conf[key] = max(best_conf.get(key, 0.0), det["confidence"])
+    items: dict[int, list] = {}
+    for angle_data in angle_boxes:
+        angle = angle_data["angle"]
+        rw, rh = (width, height) if angle == 0 else (height, width)
+        entries = []
+        for x0, x1, y0, y1 in angle_data["horizontal_list"]:
+            pts = [(x0, y0), (x1, y0), (x1, y1), (x0, y1)]
+            entries.append(
+                (
+                    "h",
+                    _page_bbox(pts, angle, width, height),
+                    [unrotate_point(x, y, angle, rw, rh) for x, y in pts],
+                    x1 - x0,
+                    y1 - y0,
+                )
+            )
+        for poly in angle_data["free_list"]:
+            xs = [p[0] for p in poly]
+            ys = [p[1] for p in poly]
+            entries.append(
+                (
+                    "f",
+                    _page_bbox(poly, angle, width, height),
+                    [unrotate_point(x, y, angle, rw, rh) for x, y in poly],
+                    max(xs) - min(xs),
+                    max(ys) - min(ys),
+                )
+            )
+        items[angle] = entries
+    additions: dict[int, dict] = {
+        a: {"angle": a, "horizontal_list": [], "free_list": []} for a in items
+    }
+    provenance: list[dict] = []
+
+    def add(
+        target_angle: int,
+        kind: str,
+        page_box: tuple,
+        page_pts: list,
+        why: str,
+        source_angle: int,
+    ) -> None:
+        for _, q, _, _, _ in items[target_angle]:
+            if _bbox_iou(page_box, q) > 0.8:
+                return
+        for record in provenance:
+            if (
+                record["angle"] == target_angle
+                and _bbox_iou(page_box, record["page_bbox"]) > 0.8
+            ):
+                return
+        if kind == "h":
+            cs = [
+                rotate_point(x, y, target_angle, width, height)
+                for x, y in (
+                    (page_box[0], page_box[1]),
+                    (page_box[2], page_box[1]),
+                    (page_box[2], page_box[3]),
+                    (page_box[0], page_box[3]),
+                )
+            ]
+            xs = [c[0] for c in cs]
+            ys = [c[1] for c in cs]
+            additions[target_angle]["horizontal_list"].append(
+                [int(min(xs)), int(max(xs)), int(min(ys)), int(max(ys))]
+            )
+        else:
+            additions[target_angle]["free_list"].append(
+                reading_order(
+                    [
+                        rotate_point(x, y, target_angle, width, height)
+                        for x, y in page_pts
+                    ]
+                )
+            )
+        provenance.append(
+            {
+                "angle": target_angle,
+                "page_bbox": tuple(page_box),
+                "kind": why,
+                "source_angle": source_angle,
+            }
+        )
+
+    for angle, entries in items.items():
+        for kind, page_box, page_pts, w, h in entries:
+            if w < TRANSFER_MIN_LONG or w < TRANSFER_MIN_ASPECT * h:
+                continue
+            key = (
+                angle,
+                round(page_box[0]),
+                round(page_box[1]),
+                round(page_box[2]),
+                round(page_box[3]),
+            )
+            if best_conf.get(key, 0.0) >= TRANSFER_CONFIDENT:
+                continue
+            for other in items:
+                if other != angle:
+                    add(other, kind, page_box, page_pts, "footprint", angle)
+            for other, other_entries in items.items():
+                if other == angle:
+                    continue
+                for kind2, q, pts2, _, _ in other_entries:
+                    overlap = _bbox_inter(page_box, q)
+                    if not overlap:
+                        continue
+                    if (
+                        overlap >= 0.9 * _bbox_area(q)
+                        and 0.25 <= _bbox_area(q) / _bbox_area(page_box) <= 0.75
+                    ):
+                        add(angle, kind2, q, pts2, "split", other)
+                    elif (
+                        overlap >= 0.9 * _bbox_area(page_box)
+                        and 0.4 <= _bbox_area(page_box) / _bbox_area(q) <= 0.9
+                    ):
+                        add(angle, kind2, q, pts2, "merge", other)
+    filled = [
+        additions[a]
+        for a in additions
+        if additions[a]["horizontal_list"] or additions[a]["free_list"]
+    ]
+    return filled, provenance
+
+
+def merge_transferred(
+    detections: list[dict], transferred: list[dict], provenance: list[dict]
+) -> list[dict]:
+    """Merge transfer-pass reads into the main detections with dedupe.
+
+    Every transfer-pass read is flagged and given its provenance (matched by
+    page-frame IoU). Reads below TRANSFER_FLOOR are dropped. Same-text
+    overlapping pairs involving a transferred read keep the higher confidence,
+    with a TRANSFER_TIE margin preferring the existing read.
+    """
+
+    def bbox(det: dict) -> tuple:
+        xs = [p[0] for p in det["polygon"]]
+        ys = [p[1] for p in det["polygon"]]
+        return (min(xs), min(ys), max(xs), max(ys))
+
+    kept = []
+    for det in transferred:
+        if det["confidence"] < TRANSFER_FLOOR:
+            continue
+        det["transferred"] = True
+        rb = bbox(det)
+        for record in provenance:
+            if (
+                record["angle"] == det["angle"]
+                and _bbox_iou(rb, record["page_bbox"]) >= 0.5
+            ):
+                det["transfer_kind"] = record["kind"]
+                det["transfer_source_angle"] = record["source_angle"]
+                break
+        kept.append(det)
+    merged = detections + kept
+    drop: set[int] = set()
+    for i, a in enumerate(merged):
+        for j in range(i + 1, len(merged)):
+            b = merged[j]
+            if not a.get("transferred") and not b.get("transferred"):
+                continue
+            text = a["text"].strip().upper()
+            if not text or text != b["text"].strip().upper():
+                continue
+            ba, bb = bbox(a), bbox(b)
+            ca = ((ba[0] + ba[2]) / 2, (ba[1] + ba[3]) / 2)
+            cb = ((bb[0] + bb[2]) / 2, (bb[1] + bb[3]) / 2)
+            touching = (
+                _bbox_iou(ba, bb) >= 0.2
+                or (bb[0] <= ca[0] <= bb[2] and bb[1] <= ca[1] <= bb[3])
+                or (ba[0] <= cb[0] <= ba[2] and ba[1] <= cb[1] <= ba[3])
+            )
+            if not touching:
+                continue
+            if abs(a["confidence"] - b["confidence"]) < TRANSFER_TIE and a.get(
+                "transferred"
+            ) != b.get("transferred"):
+                drop.add(i if a.get("transferred") else j)
+            else:
+                drop.add(j if a["confidence"] >= b["confidence"] else i)
+    return [d for k, d in enumerate(merged) if k not in drop]
+
+
 def detect_text(
     image_path: str,
     vocab_strings: list[str],
@@ -632,6 +924,7 @@ def detect_text(
     craft_scale: float = 1.0,
     tile_size: int = 2560,
     fallback_vocab: list[str] | None = None,
+    transfer: bool = True,
 ) -> list[dict]:
     """Run CRAFT-based text detection at 0°, 90°, and 270° and return all results.
 
@@ -730,6 +1023,31 @@ def detect_text(
     all_detections = recognize(vocab_strings)
     if fallback_vocab is not None:
         all_detections = _merge_vocab_passes(all_detections, recognize(fallback_vocab))
+    if transfer:
+        # Cross-orientation transfer (#144): re-read failed large boxes with the
+        # other orientations' segmentation, through the same vocab passes.
+        additions, provenance = transfer_candidates(
+            angle_boxes, all_detections, orig_width, orig_height
+        )
+        if additions:
+
+            def recognize_added(vocab: list[str]) -> list[dict]:
+                return _recognize_pass(
+                    reader,
+                    img,
+                    additions,
+                    vocab=vocab,
+                    beam_width=beam_width,
+                    allowlist=allowlist,
+                    min_long_side=min_long_side,
+                    orig_width=orig_width,
+                    orig_height=orig_height,
+                )
+
+            extra = recognize_added(vocab_strings)
+            if fallback_vocab is not None:
+                extra = _merge_vocab_passes(extra, recognize_added(fallback_vocab))
+            all_detections = merge_transferred(all_detections, extra, provenance)
 
     for det in all_detections:
         pts = np.array(det["polygon"], dtype=float)
@@ -775,6 +1093,7 @@ def _worker_init(
     tile_size: int,
     gpu: bool,
     recognizer_weights: str | None,
+    transfer: bool = True,
 ) -> None:
     """Initialize per-worker state once per process: create the EasyOCR reader."""
     _worker_state["reader"] = easyocr.Reader(["en"], gpu=gpu, verbose=False)
@@ -788,6 +1107,7 @@ def _worker_init(
     _worker_state["beam_width"] = beam_width
     _worker_state["craft_scale"] = craft_scale
     _worker_state["tile_size"] = tile_size
+    _worker_state["transfer"] = transfer
 
 
 def _process_image(image_path: str) -> str:
@@ -803,6 +1123,7 @@ def _process_image(image_path: str) -> str:
         beam_width=_worker_state["beam_width"],
         craft_scale=_worker_state["craft_scale"],
         tile_size=_worker_state["tile_size"],
+        transfer=_worker_state["transfer"],
     )
     return image_path
 
@@ -913,6 +1234,15 @@ def main() -> None:
             "Do not use key maps. By default, when --keymap is not given, key-map detections "
             "files (<stem>.keymap.json with a sibling .georef.json) next to the images or under "
             "raw/ are discovered and used automatically; this flag turns that off."
+        ),
+    )
+    parser.add_argument(
+        "--no-transfer",
+        action="store_true",
+        help=(
+            "Disable the cross-orientation box transfer (#144): failed large boxes "
+            "are normally re-read using the other CRAFT orientations' segmentation. "
+            "For A/B controls and debugging."
         ),
     )
     parser.add_argument(
@@ -1126,6 +1456,7 @@ def main() -> None:
             args.tile_size,
             gpu,
             args.recognizer_weights,
+            not args.no_transfer,
         )
         with multiprocessing.Pool(
             args.num_workers,
@@ -1158,6 +1489,7 @@ def main() -> None:
                 craft_scale=args.craft_scale,
                 tile_size=args.tile_size,
                 fallback_vocab=fallback_vocab,
+                transfer=not args.no_transfer,
             )
 
 
