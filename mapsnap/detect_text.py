@@ -639,7 +639,11 @@ TRANSFER_MIN_ASPECT = 2.0
 # A read at or above this confidence needs no help.
 TRANSFER_CONFIDENT = 0.3
 # Transferred reads below this are junk splits of titles/legends; drop them.
-TRANSFER_FLOOR = 0.2
+# 0.5, not lower: the NO-1896 A/B's one damaging read was a 0.49-confidence
+# ORLEANS fragment whose name/rotation-prior contributions spawned a snap alias
+# that suppressed p162's refinement (15.7 -> 55.5 ft); every reviewed win
+# (TILLARY, HAMMOND, TENNESSEE, THALIA, BRIDGE) reads at 0.64+.
+TRANSFER_FLOOR = 0.5
 # Same-text overlap dedupe: within this confidence delta the EXISTING read wins,
 # so a transferred twin of a read we already had is never flagged as new.
 TRANSFER_TIE = 0.02
