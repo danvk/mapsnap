@@ -2,6 +2,8 @@ import { describe, expect, it } from 'vitest';
 import {
   groupRotationPriors,
   parseSnapRecords,
+  posePxPerFoot,
+  poseRotationDeg,
   rankedCandidates,
   truthVerdict,
 } from './snap';
@@ -164,5 +166,32 @@ describe('truthVerdict', () => {
     expect(record.truth_pose?.select_score).toBe(1.5);
     expect('verification' in record.truth_pose!).toBe(false);
     expect(record.decision?.bars[0]?.verdict).toBe('fail');
+  });
+});
+
+describe('pose rotation and scale', () => {
+  // ~0.6 m/px at 40°N, north-up: a00 = 0.6/kx, a11 = -0.6/ky.
+  const kx = 111_320 * Math.cos((40 * Math.PI) / 180);
+  const northUp: [number, number, number][] = [
+    [0.6 / kx, 0, -74],
+    [0, -0.6 / 110_540, 40],
+  ];
+
+  it('reads 0° and the metre scale off a north-up affine', () => {
+    expect(poseRotationDeg(northUp)).toBeCloseTo(0, 6);
+    expect(posePxPerFoot(northUp)).toBeCloseTo(1 / (0.6 * 3.28084), 4);
+  });
+
+  it('reads a rotated pose in the ladder convention', () => {
+    // snap's theta is atan2(-a10, a00) on the RAW affine entries (the same
+    // formula the pipeline uses for truth_pose.theta_deg and the demoted-pose
+    // prior), so a 30° pose is one whose raw entries carry that rotation.
+    const theta = (30 * Math.PI) / 180;
+    const c = 1e-5;
+    const rotated: [number, number, number][] = [
+      [c * Math.cos(theta), c * Math.sin(theta), -74],
+      [-c * Math.sin(theta), -c * Math.cos(theta), 40],
+    ];
+    expect(poseRotationDeg(rotated)).toBeCloseTo(30, 6);
   });
 });

@@ -103,6 +103,10 @@ describe('SnapPanel phase-2 records', () => {
     const html = render(record);
     expect(html).toContain('<td>truth</td>');
     expect(html).toContain('0.68'); // the truth row's select score
+    // θ and px/ft are derived from every row's affine, the incumbent included.
+    expect(html).toContain('rotation in snap');
+    expect((html.match(/0\.0°/g) ?? []).length).toBeGreaterThanOrEqual(4);
+    expect((html.match(/0\.35<\/td>/g) ?? []).length).toBeGreaterThanOrEqual(4);
     expect(html).toContain(
       'a pose 14713 ft from truth outscores the truth pose',
     );
