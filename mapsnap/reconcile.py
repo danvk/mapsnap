@@ -55,7 +55,13 @@ from mapsnap.edge_join_experiment import (
     PageUnit,
     grid_rmse_ft_between,
 )
-from mapsnap.osm_snap import W_CONTAIN, W_NAME, evaluate_pose, region_containment_frac
+from mapsnap.osm_snap import (
+    W_CONTAIN,
+    W_NAME,
+    evaluate_pose,
+    name_evidence_of,
+    region_containment_frac,
+)
 from mapsnap.road_model import effective_gcp_count, page_world_affine
 from mapsnap.utils import haversine_m
 
@@ -840,8 +846,8 @@ def score_nodes(vctx, nodes: dict[str, PageNode], note_ratios: dict) -> None:
                 evaluation = evaluate_pose(ctx, vctx.feature_index, hypothesis.affine)
                 if evaluation is not None:
                     hypothesis.scores["verification"] = evaluation["verification"]
-                    hypothesis.scores["name"] = (evaluation.get("name") or {}).get(
-                        "score", 0.0
+                    hypothesis.scores["name"] = (
+                        name_evidence_of(evaluation.get("name")) or 0.0
                     )
             else:
                 hypothesis.scores["context"] = status

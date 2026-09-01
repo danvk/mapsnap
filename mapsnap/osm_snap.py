@@ -74,6 +74,18 @@ W_NAME = 1.0
 W_CONTAIN = 0.3
 W_PRIOR = 0.1
 
+# Cost per eligible label that matches nothing at a pose (issue #375). The
+# reward half of name_alignment is floored at zero, so a pose whose labels all
+# land on the wrong ground scores the same as a page with no labels at all --
+# and a grid alias with strong P(road) shape evidence outranks the truth
+# (richmond p311: 0 of 9 labels hit, published 14,713 ft off, beating the
+# 18.8 ft pose by 0.046). Corpus-wide, zero hits with >=3 eligible labels
+# occurs in 0.8% of accurate poses and 43.3% of >=500 ft poses.
+W_NAME_MISS = 0.5
+# Below this many eligible labels a page says nothing either way, so the
+# penalty stays inert (one unmatched label is noise, not contradiction).
+NAME_MISS_MIN_LABELS = 3
+
 # The recipe validated by the issue-#128 exploration: generous overlap window
 # (the page may sit entirely inside the OSM frame, unlike an edge join) and a
 # deeper top-K since ranking happens downstream.
@@ -107,12 +119,53 @@ class ScalePrior:
 
 @dataclass
 class NameAlignment:
-    """OCR street-name agreement with a candidate pose (a boost, never a gate)."""
+    """OCR street-name agreement with a candidate pose (signed: see evidence)."""
 
     score: float
     n_labels: int
     n_hits: int
     hits: list[dict] = field(default_factory=list)
+
+    @property
+    def evidence(self) -> float:
+        """The signed term the ranking uses (see name_evidence)."""
+        return name_evidence(self.score, self.n_labels, self.n_hits)
+
+
+def name_evidence_of(name: dict | None) -> float | None:
+    """Signed name evidence from a serialized name block, or None when absent.
+
+    Records written before issue #375 carry no ``evidence`` key, so the value
+    is recomputed from the fields that were always logged.
+    """
+    if not name:
+        return None
+    if "evidence" in name:
+        return float(name["evidence"])
+    score, n_labels, n_hits = (
+        name.get("score"),
+        name.get("n_labels"),
+        name.get("n_hits"),
+    )
+    if score is None or n_labels is None or n_hits is None:
+        return None if score is None else float(score)
+    return name_evidence(float(score), int(n_labels), int(n_hits))
+
+
+def name_evidence(score: float, n_labels: int, n_hits: int) -> float:
+    """Name agreement as SIGNED evidence: hits earn, unmatched labels cost.
+
+    ``score`` is name_alignment's reward-only value, Sum(exp(-d/tau)) over hits
+    divided by (n_labels + 2); this undoes that denominator, charges
+    W_NAME_MISS per eligible label that found no match, and restores it. A
+    pose that matches every label is unchanged, a pose that matches none goes
+    negative, and pages with fewer than NAME_MISS_MIN_LABELS eligible labels
+    keep the old reward-only behaviour.
+    """
+    if n_labels < NAME_MISS_MIN_LABELS:
+        return score
+    denominator = n_labels + 2
+    return (score * denominator - W_NAME_MISS * (n_labels - n_hits)) / denominator
 
 
 @dataclass
@@ -153,7 +206,7 @@ class SnapCandidate:
         """The ranking score: matcher verification plus soft evidence bonuses."""
         return selection_score(
             self.verification,
-            self.name.score if self.name is not None else None,
+            self.name.evidence if self.name is not None else None,
             self.region_containment,
             self.prior_theta_residual_sigma,
         )
@@ -161,21 +214,25 @@ class SnapCandidate:
 
 def selection_score(
     verification: float,
-    name_score: float | None,
+    name_evidence_value: float | None,
     region_containment: float | None,
     prior_theta_residual_sigma: float | None,
 ) -> float:
-    """The ranking score: matcher verification plus soft evidence bonuses.
+    """The ranking score: matcher verification plus soft evidence terms.
 
     One formula for the ladder's own candidates (SnapCandidate.select_score)
     and for synthetic poses scored after the fact (rank_pose), so a truth pose
     lands on the same footing as the search's candidates.
+
+    ``name_evidence_value`` is the SIGNED name term (name_evidence), not
+    name_alignment's reward-only score: a pose whose labels match nothing pays
+    for it rather than merely failing to earn.
     """
     if not math.isfinite(verification):
         return -math.inf
     score = verification
-    if name_score is not None:
-        score += W_NAME * name_score
+    if name_evidence_value is not None:
+        score += W_NAME * name_evidence_value
     if region_containment is not None:
         score += W_CONTAIN * region_containment
     if prior_theta_residual_sigma is not None:
@@ -790,6 +847,7 @@ def evaluate_pose(
         name = name_alignment(ctx.label_features, ctx.block_index, world_affine)
         evaluation["name"] = {
             "score": round(name.score, 4),
+            "evidence": round(name.evidence, 4),
             "n_labels": name.n_labels,
             "n_hits": name.n_hits,
         }
@@ -830,7 +888,7 @@ def rank_pose(
     evaluation["select_score"] = round(
         selection_score(
             evaluation["verification"],
-            name["score"] if name is not None else None,
+            name_evidence_of(name),
             containment,
             residual,
         ),
