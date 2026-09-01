@@ -55,7 +55,7 @@ describe('parseSnapRecords', () => {
 });
 
 describe('groupRotationPriors', () => {
-  it('groups the fargo p17 ladder by rounded (θ, σ) with source counts', () => {
+  it('groups the fargo p17 ladder by rounded (θ, σ), sorted by angle, with source counts', () => {
     const prior = (theta_deg: number, source: string, sigma_deg = 4) => ({
       theta_deg,
       sigma_deg,
@@ -77,11 +77,11 @@ describe('groupRotationPriors', () => {
       prior(-16.0, 'volume-median-theta', 15),
     ];
     expect(groupRotationPriors(ladder)).toEqual([
-      '0°±4 (label-pair-exact ×2, label-osm-mod180 ×2)',
       '-17°±4 (label-pair-exact ×2, label-osm-mod180 ×2)',
-      '180°±4 (label-osm-mod180 ×2)',
-      '163°±4 (label-osm-mod180 ×2)',
       '-16°±15 (volume-median-theta)',
+      '0°±4 (label-pair-exact ×2, label-osm-mod180 ×2)',
+      '163°±4 (label-osm-mod180 ×2)',
+      '180°±4 (label-osm-mod180 ×2)',
     ]);
   });
 

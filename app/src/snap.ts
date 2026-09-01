@@ -162,15 +162,15 @@ export function poseCorners(
  * The pipeline records one prior per vote (per label, per label pair), so the
  * raw ladder is full of repeats — the multiplicity is the corroboration
  * signal. Group by the rounded angle (−0 → 0, −180 → 180: same rotation) and
- * sigma, keeping first-appearance order (rung priority), and aggregate the
- * sources with ×N counts.
+ * sigma, sorted by angle then sigma, and aggregate the sources with ×N counts
+ * (in first-appearance order, which is rung priority).
  */
 export function groupRotationPriors(
   priors: { theta_deg: number; sigma_deg: number; source: string }[],
 ): string[] {
   const groups = new Map<
     string,
-    { label: string; counts: Map<string, number> }
+    { theta: number; sigma: number; counts: Map<string, number> }
   >();
   for (const prior of priors) {
     let theta = Math.round(prior.theta_deg);
@@ -179,17 +179,19 @@ export function groupRotationPriors(
     const label = `${theta}°±${prior.sigma_deg}`;
     let group = groups.get(label);
     if (!group) {
-      group = { label, counts: new Map() };
+      group = { theta, sigma: prior.sigma_deg, counts: new Map() };
       groups.set(label, group);
     }
     group.counts.set(prior.source, (group.counts.get(prior.source) ?? 0) + 1);
   }
-  return [...groups.values()].map((group) => {
-    const sources = [...group.counts.entries()]
-      .map(([source, n]) => (n > 1 ? `${source} ×${n}` : source))
-      .join(', ');
-    return `${group.label} (${sources})`;
-  });
+  return [...groups.values()]
+    .sort((a, b) => a.theta - b.theta || a.sigma - b.sigma)
+    .map((group) => {
+      const sources = [...group.counts.entries()]
+        .map(([source, n]) => (n > 1 ? `${source} ×${n}` : source))
+        .join(', ');
+      return `${group.theta}°±${group.sigma} (${sources})`;
+    });
 }
 
 /** Candidates sorted by select_score descending (unscored last, order kept). */
