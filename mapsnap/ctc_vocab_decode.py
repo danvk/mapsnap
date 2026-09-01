@@ -424,7 +424,15 @@ def patch_easyocr_reader(
     trie_root = build_trie(vocab_strings)
     char_list: list[str] = reader.converter.character
 
-    original_predict = _recog.recognizer_predict
+    # Re-patching happens on every vocabulary switch (several times per page).
+    # Wrap the TRUE original, stashed once, or each call would nest another
+    # wrapper and the growing call stack eventually hits Python's recursion
+    # limit mid-inference (observed at ~1,000 patches: RecursionError inside
+    # torch's LSTM on the #144 A/B, where the transfer pass doubles the rate).
+    original_predict = getattr(_recog, "_mapsnap_original_recognizer_predict", None)
+    if original_predict is None:
+        original_predict = _recog.recognizer_predict
+        _recog._mapsnap_original_recognizer_predict = original_predict
 
     def _patched_recognizer_predict(
         model,
@@ -517,7 +525,10 @@ def patch_easyocr_reader(
     import easyocr.utils as _eu
     from easyocr.recognition import get_text as _get_text
 
-    original_recognize = easyocr.Reader.recognize
+    original_recognize = getattr(easyocr.Reader, "_mapsnap_original_recognize", None)
+    if original_recognize is None:
+        original_recognize = easyocr.Reader.recognize
+        easyocr.Reader._mapsnap_original_recognize = original_recognize
 
     def _patched_recognize(
         self,
