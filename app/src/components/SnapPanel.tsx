@@ -1,4 +1,10 @@
-import { groupRotationPriors, rankedCandidates, truthVerdict } from '../snap';
+import {
+  groupRotationPriors,
+  posePxPerFoot,
+  poseRotationDeg,
+  rankedCandidates,
+  truthVerdict,
+} from '../snap';
 import type {
   SnapCandidate,
   SnapDecisionBar,
@@ -51,8 +57,22 @@ function CandidateRow({
       <td className="num">
         {c.chamfer_mean_m != null ? `${c.chamfer_mean_m.toFixed(1)}m` : '—'}
       </td>
+      <td
+        className="num"
+        title={
+          c.theta_deg != null
+            ? `ladder seed ${c.theta_deg.toFixed(1)}° (${c.theta_source ?? '?'})`
+            : undefined
+        }
+      >
+        {c.world_affine
+          ? `${poseRotationDeg(c.world_affine).toFixed(1)}°`
+          : c.theta_deg != null
+            ? `${c.theta_deg.toFixed(1)}°`
+            : '—'}
+      </td>
       <td className="num">
-        {c.theta_deg != null ? `${c.theta_deg.toFixed(1)}°` : '—'}
+        {c.world_affine ? posePxPerFoot(c.world_affine).toFixed(2) : '—'}
       </td>
       <td>{c.scale_source ?? '—'}</td>
       <td className="num">
@@ -140,7 +160,12 @@ export function SnapPanel({
             <th title="mean P(road)→OSM distance in metres (penalty)">
               chamfer
             </th>
-            <th>θ</th>
+            <th title="the pose's rotation in snap's convention (the priors' angle); hover a cell for the ladder seed it started from">
+              θ
+            </th>
+            <th title="the pose's scale in working-frame pixels per foot (the page list's convention)">
+              px/ft
+            </th>
             <th>scale src</th>
             <th>truth</th>
           </tr>

@@ -194,6 +194,33 @@ export function groupRotationPriors(
     });
 }
 
+const FEET_PER_METER = 3.28084;
+
+/**
+ * A pose's rotation in degrees, in snap's own convention (the angle the
+ * rotation ladder and the priors use: atan2(-a10, a00) of the page->lon/lat
+ * affine, 0 for a north-up page). Derived from the pose itself, so it is the
+ * refined pose's rotation — a candidate's recorded `theta_deg` is only the
+ * ladder seed it started from.
+ */
+export function poseRotationDeg(affine: [number, number, number][]): number {
+  const [row0, row1] = affine;
+  return (Math.atan2(-(row1?.[0] ?? 0), row0?.[0] ?? 1) * 180) / Math.PI;
+}
+
+/**
+ * A pose's scale in pixels per foot, in the frame of the pixels the affine
+ * maps (snap's working-scale page), which is the page list's convention.
+ */
+export function posePxPerFoot(affine: [number, number, number][]): number {
+  const [row0, row1] = affine;
+  const lat = row1?.[2] ?? 0;
+  const kx = 111_320 * Math.cos((lat * Math.PI) / 180);
+  const ky = 110_540;
+  const metresPerPx = Math.hypot((row0?.[0] ?? 0) * kx, (row1?.[0] ?? 0) * ky);
+  return metresPerPx > 0 ? 1 / (metresPerPx * FEET_PER_METER) : NaN;
+}
+
 /** Candidates sorted by select_score descending (unscored last, order kept). */
 export function rankedCandidates(record: SnapRecord): SnapCandidate[] {
   return [...(record.candidates ?? [])].sort(
