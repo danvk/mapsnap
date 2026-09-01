@@ -1,5 +1,7 @@
 """Tests for ctc_vocab_decode helpers."""
 
+from typing import ClassVar
+
 import numpy as np
 
 from mapsnap.ctc_vocab_decode import (
@@ -290,22 +292,22 @@ def test_patch_easyocr_reader_is_idempotent_across_vocab_switches():
     import easyocr
     import easyocr.recognition as _recog
 
-    from mapsnap.ctc_vocab_decode import patch_easyocr_reader
+    from mapsnap.ctc_vocab_decode import _PATCH_ORIGINALS, patch_easyocr_reader
 
     class FakeConverter:
-        character = list("ABCDEFGHIJKLMNOPQRSTUVWXYZ ")
+        character: ClassVar[list[str]] = list("ABCDEFGHIJKLMNOPQRSTUVWXYZ ")
 
     class FakeReader:
         converter = FakeConverter()
 
     for i in range(50):
         patch_easyocr_reader(FakeReader(), ["MAIN", f"ELM{i}"], beam_width=5)
-    stash = _recog._mapsnap_original_recognizer_predict
+    stash = _PATCH_ORIGINALS["recognizer_predict"]
     assert stash.__name__ == "recognizer_predict"
     # The live patched function wraps the stash directly (depth 1, not 50).
     cells = [c.cell_contents for c in _recog.recognizer_predict.__closure__ or []]
     assert stash in cells
-    stash_rec = easyocr.Reader._mapsnap_original_recognize
+    stash_rec = _PATCH_ORIGINALS["recognize"]
     assert stash_rec.__name__ == "recognize"
     cells = [c.cell_contents for c in easyocr.Reader.recognize.__closure__ or []]
     assert stash_rec in cells

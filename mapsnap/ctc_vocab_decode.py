@@ -24,6 +24,7 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass, field
 from functools import lru_cache
+from typing import Any
 
 import numpy as np
 
@@ -204,6 +205,14 @@ def generate_vocab_strings(normalized_streets: set[str]) -> list[str]:
 class TrieNode:
     children: dict[str, TrieNode] = field(default_factory=dict)
     is_end: bool = False
+
+
+# The TRUE originals of the functions patch_easyocr_reader replaces, stashed on
+# first patch. Re-patching happens on every vocabulary switch (several times per
+# page); wrapping the previous wrapper instead grew the call stack by one frame
+# per patch and crashed long OCR runs with RecursionError inside torch's LSTM
+# (found by the #144 A/B, where the transfer pass doubles the patch rate).
+_PATCH_ORIGINALS: dict[str, Any] = {}
 
 
 def build_trie(strings: list[str]) -> TrieNode:
@@ -429,10 +438,9 @@ def patch_easyocr_reader(
     # wrapper and the growing call stack eventually hits Python's recursion
     # limit mid-inference (observed at ~1,000 patches: RecursionError inside
     # torch's LSTM on the #144 A/B, where the transfer pass doubles the rate).
-    original_predict = getattr(_recog, "_mapsnap_original_recognizer_predict", None)
-    if original_predict is None:
-        original_predict = _recog.recognizer_predict
-        _recog._mapsnap_original_recognizer_predict = original_predict
+    original_predict = _PATCH_ORIGINALS.setdefault(
+        "recognizer_predict", _recog.recognizer_predict
+    )
 
     def _patched_recognizer_predict(
         model,
@@ -525,10 +533,9 @@ def patch_easyocr_reader(
     import easyocr.utils as _eu
     from easyocr.recognition import get_text as _get_text
 
-    original_recognize = getattr(easyocr.Reader, "_mapsnap_original_recognize", None)
-    if original_recognize is None:
-        original_recognize = easyocr.Reader.recognize
-        easyocr.Reader._mapsnap_original_recognize = original_recognize
+    original_recognize = _PATCH_ORIGINALS.setdefault(
+        "recognize", easyocr.Reader.recognize
+    )
 
     def _patched_recognize(
         self,
