@@ -402,6 +402,21 @@
   vertical-align: middle;
 }
 
+#detections-table tr.inset td {
+  color: #c026d3;
+}
+
+.inset-badge {
+  display: inline-block;
+  margin-left: 4px;
+  padding: 0 5px;
+  border-radius: 8px;
+  background: #c026d3;
+  color: #fff;
+  font-size: 0.7em;
+  vertical-align: middle;
+}
+
 .adjacency-summary {
   padding: 6px 8px;
   border-bottom: 2px solid #bbb;

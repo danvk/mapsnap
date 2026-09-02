@@ -70,6 +70,7 @@ export function DetectionsTable(props: DetectionsTableProps) {
               det.ignore ? 'ignored' : '',
               det.hint ? 'hint' : '',
               det.fallback ? 'fallback' : '',
+              det.inset ? 'inset' : '',
               onFill ? 'on-fill' : '',
               relaxed ? 'relaxed' : '',
             ]
@@ -110,6 +111,14 @@ export function DetectionsTable(props: DetectionsTableProps) {
                       title="Read by the key-map rectangle fallback vocabulary, not the tighter page-neighborhood radius vocabulary"
                     >
                       fallback
+                    </span>
+                  )}
+                  {det.inset && (
+                    <span
+                      className="inset-badge"
+                      title="Inside a confirmed volume-index inset on this key map (#276): a volume number, not a page location. Skipped by every consumer of page-number reads."
+                    >
+                      inset
                     </span>
                   )}
                   {det.background && (
