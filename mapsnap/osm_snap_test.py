@@ -20,6 +20,7 @@ from mapsnap.osm_snap import (
     NAME_MISS_MIN_LABELS,
     W_CONTAIN,
     W_NAME,
+    W_NAME_MISS,
     W_PRIOR,
     NameAlignment,
     PageContext,
@@ -650,8 +651,23 @@ def test_name_evidence_charges_the_tail_only_not_a_per_miss_slope():
     assert name_evidence(0.142, 5, 1) == 0.142  # brooklyn p9's truth pose
     assert name_evidence(0.4235, 7, 4) == 0.4235  # nashville p24's truth pose
     # Only the zero-hit pose pays, and it pays more the more the page said.
-    assert name_evidence(0.0, 3, 0) == pytest.approx(-0.5 * 3 / 5)
-    assert name_evidence(0.0, 9, 0) < name_evidence(0.0, 3, 0)
+    assert name_evidence(0.0, 6, 0) == pytest.approx(-W_NAME_MISS * 6 / 8)
+    assert name_evidence(0.0, 9, 0) < name_evidence(0.0, 6, 0)
+
+
+def test_name_evidence_spares_thin_evidence_pages():
+    """Three eligible labels is not enough to call a pose contradicted.
+
+    Every page the corpus A/B damaged carried exactly 3 (detroit p93 and
+    brooklyn p13 went unplaced -> disaster, miami p74's correct 32.8 ft pose
+    matched 0 of 3 and went unplaced), while both rescues carry 9 and 10.
+    Across 13,326 fresh candidates the floor is also what sharpens the signal:
+    accurate-pose false positives fall 0.8% -> 0.4% going from 3 to 5.
+    """
+    assert NAME_MISS_MIN_LABELS >= 5
+    for n_labels in range(NAME_MISS_MIN_LABELS):
+        assert name_evidence(0.0, n_labels, 0) == 0.0
+    assert name_evidence(0.0, NAME_MISS_MIN_LABELS, 0) < 0.0
 
 
 def test_name_evidence_of_recomputes_for_pre_375_records():

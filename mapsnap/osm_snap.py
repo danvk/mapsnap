@@ -20,6 +20,7 @@ objects, and evaluates against truth; nothing in this module reads truth data.
 
 import dataclasses
 import math
+import os
 from dataclasses import dataclass, field
 
 import cv2
@@ -69,7 +70,12 @@ CALIBRATED_RADIUS_MARGIN_M = 100.0
 CALIBRATED_RADIUS_MIN_M = 150.0
 
 # select_score weights (hand-tuned; every term is logged per candidate so a
-# re-ranking experiment can refit them on cached candidates).
+# re-ranking experiment can refit them on cached candidates). The two
+# name-miss knobs read the environment (MAPSNAP_NAME_MISS,
+# MAPSNAP_NAME_MISS_MIN_LABELS) so an A/B or a sweep is ONE build with the arm
+# chosen at run time: `mapsnap fit` spawns every stage as a subprocess, and
+# the environment crosses that boundary where a CLI flag would have to be
+# threaded through each stage.
 W_NAME = 1.0
 W_CONTAIN = 0.3
 W_PRIOR = 0.1
@@ -88,10 +94,22 @@ W_PRIOR = 0.1
 # select score and stopped clearing PRODUCTION_GATE_SCORE, and brooklyn p9's
 # correct pose (1 of 5) was demoted under an alias that hits 4 of 5 because
 # sliding along a long avenue keeps a label near its own street.
-W_NAME_MISS = 0.5
+W_NAME_MISS = float(os.environ.get("MAPSNAP_NAME_MISS", "0.5"))
 # Below this many eligible labels a page says nothing either way, so the
-# penalty stays inert (one unmatched label is noise, not contradiction).
-NAME_MISS_MIN_LABELS = 3
+# penalty stays inert (a couple of unmatched labels are noise, not
+# contradiction). Measured on 13,326 fresh candidates across the 20 truth
+# volumes, raising the floor sharpens the signal because thin-evidence pages
+# are where an accurate pose legitimately matches nothing:
+#
+#   floor   accurate poses w/ zero hits   wrong poses w/ zero hits   ratio
+#     3                0.8%                        43.6%              51:1
+#     5                0.4%                        39.4%             105:1
+#     6                0.2%                        36.3%             199:1
+#
+# Every page the corpus A/B damaged carried exactly 3 eligible labels
+# (detroit p93, brooklyn p13, miami p74 -- a correct 32.8 ft pose matching
+# 0 of 3); both rescues carry 9 and 10 (richmond p311, p323).
+NAME_MISS_MIN_LABELS = int(os.environ.get("MAPSNAP_NAME_MISS_MIN_LABELS", "5"))
 
 # The recipe validated by the issue-#128 exploration: generous overlap window
 # (the page may sit entirely inside the OSM frame, unlike an edge join) and a
