@@ -15,6 +15,7 @@ Usage:
 
 import argparse
 import json
+import re
 from itertools import pairwise
 from pathlib import Path
 from typing import TypedDict
@@ -1228,6 +1229,71 @@ def write_panels(image_path: Path, panels: list, base: str) -> list[Path]:
     return out_paths
 
 
+# A panel edge within this fraction of the sheet's size counts as flush with it.
+FLUSH_EDGE_TOLERANCE = 0.02
+# A panel covering at least this fraction of the sheet is the sheet itself, not
+# something cut away from it.
+CUT_AWAY_MAX_AREA = 0.5
+
+
+def panel_flush_edges(
+    ring: list[list[float]] | list[tuple[float, float]], width: float, height: float
+) -> int:
+    """How many of the sheet's four edges a panel ring touches (0-4)."""
+    xs = [point[0] for point in ring]
+    ys = [point[1] for point in ring]
+    tol_x, tol_y = FLUSH_EDGE_TOLERANCE * width, FLUSH_EDGE_TOLERANCE * height
+    return sum(
+        (
+            min(xs) <= tol_x,
+            min(ys) <= tol_y,
+            max(xs) >= width - tol_x,
+            max(ys) >= height - tol_y,
+        )
+    )
+
+
+def is_keymap_sheet(stem: str) -> bool:
+    """Whether a page stem is a key-map candidate: page 0/1 families or a letter sheet.
+
+    Mirrors mapsnap.keymap.identify.candidate_keys (page numbers 0 and 1 with
+    any letter suffix -- p0, p0b, p0L, p1, p1N, p1a -- plus letter-only ids
+    like pa/pb), kept here as a plain regex so the splitter does not import
+    the key-map package.
+    """
+    if re.fullmatch(r"p[a-z]{1,2}", stem):
+        return True
+    match = re.fullmatch(r"p(\d+)[A-Za-z]{0,2}", stem)
+    return match is not None and int(match.group(1)) in (0, 1)
+
+
+def keymap_split_rejection(panels: list, width: float, height: float) -> str | None:
+    """Why a key-map sheet's split must be refused, or None when it may stand.
+
+    What a key-map sheet legitimately loses to a split is a boxed region in a
+    corner or along an edge -- a KEY legend, a "graphic map of volumes" inset
+    -- and every one of those is flush with at least two sheet edges. A cut-
+    away flush with fewer is the splitter latching onto the key map's own
+    linework: Chicago's 4% notch hanging off the top edge carried ten page
+    numbers that the key-map panel then never read. Measured over every split
+    key-map sheet in the corpus (9 panels): key-map panels are flush with four
+    edges, legitimate cut-aways with two, the one bad cut with one. Regular
+    map pages are not judged here: their panels are insets and composites of
+    every shape.
+    """
+    for index, panel in enumerate(panels, start=1):
+        x0, y0, x1, y1 = panel.bounds
+        if (x1 - x0) * (y1 - y0) >= CUT_AWAY_MAX_AREA * width * height:
+            continue  # the sheet itself, whatever was cut from it
+        flush = panel_flush_edges(list(panel.exterior.coords), width, height)
+        if flush < 2:
+            return (
+                f"panel {index} is flush with {flush} sheet edge(s), "
+                "not a boxed corner or edge region"
+            )
+    return None
+
+
 def remove_split_outputs(image_path: Path) -> None:
     """Delete any existing <base>__N.jpg panels and <base>.panels.json for image_path.
 
@@ -1299,6 +1365,18 @@ def process_image(image_path: Path, debug: bool = False) -> None:
         for index in range(1, len(previous_rings) + 1):
             remove_panel_sidecars(image_path, index)
         return
+    # A key-map sheet only gives up boxed edge regions; anything else is a bad
+    # cut and the sheet stands whole (#276). The stale panels were removed
+    # above; drop their sidecars too so nothing downstream keeps reading them.
+    if is_keymap_sheet(base):
+        rejection = keymap_split_rejection(panels, full_w, full_h)
+        if rejection:
+            print(f"{image_path.name}: key-map sheet, split rejected — {rejection}")
+            for index in range(1, len(previous_rings) + 1):
+                remove_panel_sidecars(image_path, index)
+            if raw_path.exists():
+                remove_split_outputs(raw_path)
+            return
     ordered = order_panels(panels, full_h)  # panels are in the uncropped frame
     out_paths = write_panels(image_path, ordered, base)
     print(

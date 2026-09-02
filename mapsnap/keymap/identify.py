@@ -52,7 +52,12 @@ from mapsnap.keymap.fit_keymap import (
 )
 from mapsnap.keymap.number_model import build_model, select_device
 from mapsnap.keymap.records import page_key_sort, write_keymaps_record
-from mapsnap.split import panels_json_path, read_panels_json
+from mapsnap.split import (
+    CUT_AWAY_MAX_AREA,
+    panel_flush_edges,
+    panels_json_path,
+    read_panels_json,
+)
 from mapsnap.utils import image_stem
 
 DEFAULT_CNN_WEIGHTS = Path("models/number_detector.pt")
@@ -136,28 +141,6 @@ def page_zero_stems(volume: Path) -> tuple[list[str], list[str]]:
     return unsplit, splits
 
 
-# A panel edge within this fraction of the sheet's size counts as flush with it.
-FLUSH_EDGE_TOLERANCE = 0.02
-# A panel covering at least this fraction of the sheet is the sheet itself, not
-# something cut away from it.
-CUT_AWAY_MAX_AREA = 0.5
-
-
-def panel_flush_edges(ring: list[list[float]], width: float, height: float) -> int:
-    """How many of the sheet's four edges a panel ring touches (0-4)."""
-    xs = [point[0] for point in ring]
-    ys = [point[1] for point in ring]
-    tol_x, tol_y = FLUSH_EDGE_TOLERANCE * width, FLUSH_EDGE_TOLERANCE * height
-    return sum(
-        (
-            min(xs) <= tol_x,
-            min(ys) <= tol_y,
-            max(xs) >= width - tol_x,
-            max(ys) >= height - tol_y,
-        )
-    )
-
-
 def legitimate_keymap_split(volume: Path, parent: str) -> bool:
     """Whether a split of a key-map sheet cut away real boxed regions, not a notch.
 
@@ -171,7 +154,11 @@ def legitimate_keymap_split(volume: Path, parent: str) -> bool:
     split key-map sheet in the corpus (9 panels): key-map panels are flush
     with four edges, legitimate cut-aways with two, the one bad cut with one.
 
-    Without a panels.json there is nothing to judge, so the split stands.
+    The splitter itself now refuses such a cut on a key-map sheet
+    (split.keymap_split_rejection), so this is the backstop for volumes split
+    by older code: it routes the key-map pipeline around the bad panels until
+    the next re-split removes them. Without a panels.json there is nothing to
+    judge, so the split stands.
     """
     path = panels_json_path(volume / f"{parent}.jpg")
     if not path.exists():

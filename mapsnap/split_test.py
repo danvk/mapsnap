@@ -12,6 +12,8 @@ from mapsnap.split import (
     assemble_panels,
     crop_border,
     invalidate_changed_panels,
+    is_keymap_sheet,
+    keymap_split_rejection,
     merge_collinear,
     order_panels,
     panel_basename,
@@ -170,6 +172,36 @@ def test_invalidate_changed_panels_keeps_unchanged_reads(tmp_path):
     (tmp_path / "p9__1.streets.json").touch()
     assert invalidate_changed_panels(tmp_path / "p9.jpg", new, new) == []
     assert (tmp_path / "p9__1.streets.json").exists()
+
+
+# --- key-map sheets refuse bad cuts (#276) ---
+
+
+def test_is_keymap_sheet_mirrors_the_key_map_candidates():
+    from mapsnap.keymap.identify import is_letter_page
+
+    for stem in ("p0", "p0b", "p0L", "p1", "p1N", "p1a", "pa", "pb"):
+        assert is_keymap_sheet(stem), stem
+    for stem in ("p2", "p57", "p1499m", "p125", "covr", "ind1"):
+        assert not is_keymap_sheet(stem), stem
+    assert is_letter_page("pa") and is_keymap_sheet("pa")
+
+
+def test_keymap_split_rejection_accepts_edge_boxes_and_refuses_notches():
+    sheet = box(0, 0, 1000, 2000)
+    key_box = box(770, 1640, 1000, 2000)  # bottom-right corner: two edges
+    inset = box(0, 1360, 320, 2000)  # bottom-left corner: two edges
+    notch = box(140, 0, 320, 580)  # hangs off the top edge only
+    assert (
+        keymap_split_rejection([sheet.difference(key_box), key_box], 1000, 2000) is None
+    )
+    assert keymap_split_rejection([sheet.difference(inset), inset], 1000, 2000) is None
+    reason = keymap_split_rejection(
+        [sheet.difference(notch).difference(key_box), notch, key_box], 1000, 2000
+    )
+    assert reason is not None and "panel 2" in reason and "1 sheet edge" in reason
+    # A panel the size of the sheet is never a cut-away, whatever its edges say.
+    assert keymap_split_rejection([sheet], 1000, 2000) is None
 
 
 # --- crop_border ---
