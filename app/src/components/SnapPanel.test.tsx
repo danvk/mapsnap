@@ -127,6 +127,23 @@ describe('SnapPanel phase-2 records', () => {
     );
   });
 
+  it('carries each score breakdown in a hover popover, not in the row', () => {
+    const html = render(record);
+    // Every row's select and verif cells carry a breakdown tooltip.
+    expect(
+      (html.match(/class="snap-breakdown" role="tooltip"/g) ?? []).length,
+    ).toBe(8);
+    // The truth row's name term, from its recorded alignment block.
+    expect(html).toContain('5/9 labels hit');
+    expect(html).toContain('record predates the signed term');
+    expect(html).toContain('no key-map region for this page');
+    // The fixture records no containment or prior, so the terms fall short
+    // of the recorded select and the popover says so.
+    expect(html).toContain('terms sum to 0.544, recorded 0.678');
+    // The incumbent has no recorded select score.
+    expect(html).toContain('not recorded for this pose');
+  });
+
   it('says when truth exists but was never scored', () => {
     const { truth_pose: _omit, ...unscored } = record;
     const html = render(unscored);
