@@ -14,6 +14,7 @@ from mapsnap.make_iiif_georef import (
     georef_gcp_points,
     georef_path_to_page_key,
     make_annotation,
+    own_label,
 )
 from mapsnap.split import write_panels_json
 
@@ -455,6 +456,66 @@ def _metadata_value(annotation: dict, label: str) -> str | None:
         if entry["label"] == label:
             return entry["value"]
     return None
+
+
+def test_own_label_carries_our_split_marker_not_the_reference_items():
+    """The label says what the id says: our panel number, or nothing (#343, #306).
+
+    The reference index keeps one OIM item per parent page (last one wins), so
+    copying its label verbatim leaked "[2]" onto unsplit placements and onto
+    both of our own panels.
+    """
+    reference = "Fargo, N.D. | 1958 p10 [2]"
+    # We fit the whole sheet: no marker at all, whatever the reference carried.
+    assert own_label(reference, None) == "Fargo, N.D. | 1958 p10"
+    # We fit panel 1: OUR number, not the reference item's.
+    assert own_label(reference, 1) == "Fargo, N.D. | 1958 p10 [1]"
+    # A reference with no marker still gains ours when we split the sheet.
+    assert own_label("Fargo, N.D. | 1958 p10", 2) == "Fargo, N.D. | 1958 p10 [2]"
+    # Untouched when nothing needs changing (the common whole-page case).
+    assert own_label("Chicago, Ill. | 1950 | Vol. 1 p16N", None) == (
+        "Chicago, Ill. | 1950 | Vol. 1 p16N"
+    )
+    # Stray whitespace around the marker does not survive into the output.
+    assert own_label("Page 6  [1] ", None) == "Page 6"
+
+
+def test_make_annotation_labels_match_their_ids(tmp_path):
+    """Label marker and id suffix never disagree — the ambiguity compare had to
+    heuristically resolve (annotation_is_own_output) is gone at the source."""
+    write_panels_json(
+        tmp_path / "p4.jpg",
+        [box(0, 0, 200, 200), box(0, 200, 200, 400)],
+        width=200,
+        height=400,
+    )
+    item = {
+        "label": "Test | 1900 p4 [2]",  # last-wins reference label
+        "target": {
+            "source": {
+                "id": "http://example/p4/info.json",
+                "type": "ImageService3",
+                "width": 800,
+                "height": 1600,
+            }
+        },
+    }
+    georef = make_georef(width=200, height=200, intersections=[])
+    panel_one = make_annotation(
+        item, georef, "p4__1", tmp_path / "p4__1.jpg", "http://x", "now"
+    )
+    assert panel_one["id"].endswith("p4__1/georef")
+    assert panel_one["label"] == "Test | 1900 p4 [1]"
+    whole = make_annotation(
+        item,
+        make_georef(width=200, height=400, intersections=[]),
+        "p4",
+        tmp_path / "p4.jpg",
+        "http://x",
+        "now",
+    )
+    assert whole["id"].endswith("p4/georef")
+    assert whole["label"] == "Test | 1900 p4"
 
 
 def test_make_annotation_split_uses_panels_json(tmp_path):
