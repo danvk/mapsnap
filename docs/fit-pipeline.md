@@ -11,7 +11,9 @@ stood, per-panel share and edge-flushness, stale sidecars removed),
 `keymap-plan` / `keymap-detect` (how the sheet was nominated and confirmed as a
 key map), `detect-numbers` (candidates, reads, valid page keys not read),
 `assignment-repair`, `cartouche` (the GRAPHIC MAP / KEY / INDEX words read and
-where), and, once #276 lands, `inset`. A rerun replaces a stage's section in
+where), and `inset` (each isolated small-number cluster, its no-snap re-read,
+the cartouche words near it, and the verdict; the confirmed masks are written
+to `raw/<stem>.inset.panels.json`). A rerun replaces a stage's section in
 place, each header carries a UTC timestamp, and `archive_run` copies the logs
 into `<run>/raw/`.
 

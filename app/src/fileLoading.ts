@@ -62,6 +62,7 @@ export function isKeymapJson(fileName: string): boolean {
     base.endsWith('.keymap.json') ||
     base.endsWith('.keymap-raw.json') ||
     base.endsWith('.cartouche.json') ||
+    base.endsWith('.inset.panels.json') ||
     base.endsWith('.regions.panels.json')
   );
 }
