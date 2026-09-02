@@ -566,20 +566,6 @@ def print_table(rows: list[dict], missing: list[dict]) -> None:
         f"\n{n_paired}/{n_truth_total} = {pct:.02f}% pages georeferenced ({n_missing} total losses)"
     )
 
-    landed = [r for r in rows + missing if r.get("land_m2") is not None]
-    total_land = sum(r["land_m2"] for r in landed)
-    if landed and total_land > 0:
-        good = sum(
-            r["land_m2"]
-            for r in landed
-            if r.get("rmse_ft") is not None and r["rmse_ft"] <= 25.0
-        )
-        disaster = sum(
-            r["land_m2"]
-            for r in landed
-            if r.get("rmse_ft") is not None and r["rmse_ft"] >= 200.0
-        )
-
     if rows:
         rmsers = np.array([r["rmse_ft"] for r in rows])
         rot_errs = np.abs([r["rot_err"] for r in rows])
