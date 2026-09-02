@@ -572,3 +572,16 @@ def test_keymap_sidecar_mtime_tracks_the_newest_sidecar(tmp_path):
     truth.write_text("{}")
     os.utime(truth, (9_000_000, 9_000_000))
     assert keymap_sidecar_mtime(tmp_path) == 2_000_000
+
+
+def test_planner_inputs_neutralize_masked_reads_in_place():
+    from mapsnap.keymap.adjacency_assign import planner_inputs
+
+    streets = [
+        {"text": "4", "inset": True, "polygon": [[0, 0], [2, 0], [2, 2], [0, 2]]},
+        {"text": "310", "polygon": [[4, 4], [6, 4], [6, 6], [4, 6]]},
+    ]
+    labels, centers = planner_inputs(streets)
+    # Same length as the records, so apply_repairs' indices still line up.
+    assert labels == ["", "310"]
+    assert centers[0] is None and centers[1] == (5.0, 5.0)

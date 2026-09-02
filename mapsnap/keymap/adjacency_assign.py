@@ -58,6 +58,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from mapsnap.keymap.fit_keymap import collapse_skeleton_keys
+from mapsnap.keymap.records import is_inset
 
 PROXIMITY_FACTOR = 1.5
 """How many page-pitches apart two printed numbers may be and still count as
@@ -514,6 +515,29 @@ def split_multiplicity(volume: Path) -> dict[str, int]:
     return counts
 
 
+def planner_inputs(
+    streets: list[dict],
+) -> tuple[list[str], list[tuple[float, float] | None]]:
+    """(labels, centers) for the repair planner, one entry per record.
+
+    Positions matter: apply_repairs indexes into the same list, so a read the
+    inset detector masked (#276) is neutralized in place -- an empty label and
+    no center -- rather than dropped. It then cites nothing, is cited by
+    nothing, and can never be relabelled.
+    """
+    labels = [
+        ""
+        if is_inset(street)
+        else (page_key_of(street.get("text", "")) or str(street.get("text", "")))
+        for street in streets
+    ]
+    centers = [
+        None if is_inset(street) else center
+        for street, center in zip(streets, detection_centers(streets))
+    ]
+    return labels, centers
+
+
 def detection_centers(streets: list[dict]) -> list[tuple[float, float] | None]:
     """Each page-number detection's centre, from its CRNN polygon."""
     centers: list[tuple[float, float] | None] = []
@@ -682,11 +706,7 @@ def plan_volume_repairs(
     geometry: dict[str, tuple[list[tuple[float, float] | None], float]] = {}
     for stem, doc in load_sheets(volume):
         streets = doc.get("streets", [])
-        labels = [
-            page_key_of(street.get("text", "")) or str(street.get("text", ""))
-            for street in streets
-        ]
-        centers = detection_centers(streets)
+        labels, centers = planner_inputs(streets)
         sheet_panels.append(SheetNumbers(stem, labels, proximity_graph(centers)))
         geometry[stem] = (centers, page_pitch(centers))
 

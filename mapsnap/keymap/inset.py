@@ -44,7 +44,7 @@ from shapely.geometry import MultiPoint, Point, Polygon, box
 
 from mapsnap.keymap.cartouche import cartouche_sidecar_path, is_specific
 from mapsnap.keymap.log import append_keymap_log
-from mapsnap.keymap.records import keymap_path, page_key_sort
+from mapsnap.keymap.records import INSET_FLAG, keymap_path, page_key_sort
 from mapsnap.utils import image_stem
 
 SMALL_MAX = 15  # a "small number": plausible volume index, 1..15
@@ -297,6 +297,32 @@ def detect_insets(
     )
 
 
+def annotate_keymap_reads(image_path: str | Path, result: InsetResult) -> int:
+    """Flag the reads inside the confirmed masks in <stem>.keymap.json; return how many.
+
+    The flag is recomputed from scratch on every run -- set on reads inside a
+    confirmed ring, removed from every other read -- so the file always says
+    what the current masks say. Consumers skip flagged reads through
+    records.is_inset; the reads themselves stay, so the debugger can show what
+    was masked and the detector can re-judge them next time.
+    """
+    path = Path(keymap_path(str(image_path)))
+    doc = json.loads(path.read_text())
+    rings = [Polygon(inset.ring).buffer(0) for inset in result.insets]
+    flagged = 0
+    for record in doc.get("streets", []):
+        inside = bool(rings) and any(
+            ring.contains(Point(polygon_center(record["polygon"]))) for ring in rings
+        )
+        if inside:
+            record[INSET_FLAG] = True
+            flagged += 1
+        else:
+            record.pop(INSET_FLAG, None)
+    path.write_text(json.dumps(doc, indent=2))
+    return flagged
+
+
 def inset_sidecar_path(image_path: str | Path) -> Path:
     """``<dir>/<stem>.inset.panels.json`` beside the key-map image."""
     image_path = Path(image_path)
@@ -397,7 +423,15 @@ def main() -> None:
             image, reread=not args.no_reread, crnn=crnn, device=device
         )
         path = write_inset_sidecar(image, result)
-        append_keymap_log(image, "inset", log_lines(result))
+        flagged = annotate_keymap_reads(image, result)
+        append_keymap_log(
+            image,
+            "inset",
+            [
+                *log_lines(result),
+                f"{flagged} read(s) flagged inset in the key-map reads file",
+            ],
+        )
         summary = "; ".join(inset.label() for inset in result.insets) or "none"
         print(
             f"{Path(image).name}: {len(result.insets)} inset(s) -> {path.name}: {summary}",
