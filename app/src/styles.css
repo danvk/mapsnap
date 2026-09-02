@@ -982,6 +982,56 @@ tr.relaxed {
 .snap-table tr.selected {
   background: #dbeafe;
 }
+/* Score cells carry a hover popover with the score's breakdown. The popover
+   is fixed-positioned from the cell's viewport rectangle (see ScoreCell), so
+   it escapes the panel's scroll clipping and overlays the rows below without
+   reflowing the table (selecting a row must not make it jump). */
+.snap-table td.snap-score {
+  cursor: help;
+}
+.snap-table td.snap-score > span {
+  text-decoration: underline dotted #9ca3af;
+  text-underline-offset: 2px;
+}
+.snap-breakdown {
+  display: none;
+  position: fixed;
+  z-index: 20;
+  padding: 6px 8px;
+  background: #fff;
+  border: 1px solid #d1d5db;
+  border-radius: 4px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+  font-size: 12px;
+  text-align: left;
+  white-space: nowrap;
+  cursor: default;
+}
+.snap-breakdown.open {
+  display: block;
+}
+.snap-breakdown table {
+  border-collapse: collapse;
+}
+.snap-breakdown td {
+  padding: 1px 6px 1px 0;
+  border: none;
+}
+.snap-breakdown td.num {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+.snap-breakdown-total td {
+  border-top: 1px solid #d1d5db;
+  font-weight: 600;
+}
+.snap-breakdown-missing {
+  color: #6b7280;
+}
+.snap-breakdown-note {
+  margin: 4px 0 0;
+  color: #b45309;
+}
 .snap-table tr.snap-best td:first-child {
   font-weight: 600;
 }

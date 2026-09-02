@@ -11,9 +11,12 @@
 
 /** OCR street-name agreement with a pose (a boost, never a gate). */
 export interface SnapNameAlignment {
+  /** Reward-only alignment: Σ exp(−d/25 m) over hits, / (n_labels + 2). */
   score: number;
   n_labels: number;
   n_hits: number;
+  /** The signed term the ranking uses (#375); absent on older records. */
+  evidence?: number;
   hits?: { text: string; dist_m: number; angle_deg: number }[];
 }
 
@@ -34,6 +37,8 @@ export interface SnapCandidate {
   n_points?: number;
   overlap_frac?: number;
   region_containment?: number;
+  /** Sigmas from the nearest directed rotation prior; absent without one. */
+  prior_theta_residual_sigma?: number;
   refine_shift_m?: number;
   select_score?: number;
   verification?: number;
@@ -272,5 +277,186 @@ export function truthVerdict(record: SnapRecord): TruthVerdict | null {
   return {
     kind: 'agrees',
     detail: `top candidate is ${rmse === undefined ? 'near' : `${Math.round(rmse)} ft from`} truth and outscores it (${topScore} vs ${truthScore})`,
+  };
+}
+
+// The ranking weights and the chamfer clamp, mirrored from the pipeline
+// (mapsnap/osm_snap.py W_NAME / W_CONTAIN / W_PRIOR, mapsnap/edge_join.py
+// CHAMFER_CLAMP_M). Records carry the terms and the totals but not the
+// weights; selectBreakdown flags a total that no longer adds up, which is how
+// a weight change upstream shows itself here.
+export const W_NAME = 1.0;
+export const W_CONTAIN = 0.3;
+export const W_PRIOR = 0.1;
+export const CHAMFER_CLAMP_M = 30.0;
+/** Records round scores to 4 decimals; a larger gap means the weights moved. */
+const BREAKDOWN_TOLERANCE = 0.01;
+
+/** One additive term of a score: its label, the product it contributes, how it was formed. */
+export interface ScoreTerm {
+  label: string;
+  /** The signed contribution to the total; null when the record lacks the input. */
+  value: number | null;
+  /** How the value was formed, or why it is missing. */
+  detail: string;
+}
+
+/** A score decomposed into the terms recorded for the pose. */
+export interface ScoreBreakdown {
+  /** The score name: "select" or "verif". */
+  label: string;
+  terms: ScoreTerm[];
+  /** Sum of the present terms; null when the base term is missing. */
+  total: number | null;
+  /** The score as the pipeline recorded it; null when not recorded. */
+  recorded: number | null;
+  /** Set when the terms do not add up to the recorded score. */
+  note?: string;
+}
+
+type Scored = {
+  verification?: number;
+  select_score?: number;
+  inlier_frac?: number;
+  ncc_fine?: number;
+  chamfer_mean_m?: number;
+  name?: SnapNameAlignment;
+  region_containment?: number;
+  prior_theta_residual_sigma?: number;
+};
+
+// Sum the present terms; null when the first (base) term is missing.
+function sumTerms(terms: ScoreTerm[]): number | null {
+  if (terms[0].value === null) return null;
+  return terms.reduce((acc, term) => acc + (term.value ?? 0), 0);
+}
+
+// The mismatch note, when the terms and the recorded total disagree.
+function mismatchNote(
+  total: number | null,
+  recorded: number | null,
+): string | undefined {
+  if (total === null || recorded === null) return undefined;
+  if (Math.abs(total - recorded) <= BREAKDOWN_TOLERANCE) return undefined;
+  return `terms sum to ${total.toFixed(3)}, recorded ${recorded.toFixed(3)}: the pipeline's weights differ from this view's`;
+}
+
+/**
+ * The matcher's verification score decomposed: inlier_frac + ncc_fine −
+ * chamfer_mean_m / CHAMFER_CLAMP_M (edge_join.JoinCandidate.verification_score).
+ */
+export function verificationBreakdown(pose: Scored): ScoreBreakdown {
+  const terms: ScoreTerm[] = [
+    {
+      label: 'inlier',
+      value: pose.inlier_frac ?? null,
+      detail:
+        pose.inlier_frac != null
+          ? 'share of P(road) pixels within the inlier distance of OSM'
+          : 'not recorded',
+    },
+    {
+      label: 'ncc',
+      value: pose.ncc_fine ?? null,
+      detail:
+        pose.ncc_fine != null
+          ? 'fine-scale correlation, P(road) vs OSM'
+          : 'not recorded',
+    },
+    {
+      label: 'chamfer',
+      value:
+        pose.chamfer_mean_m != null
+          ? -pose.chamfer_mean_m / CHAMFER_CLAMP_M
+          : null,
+      detail:
+        pose.chamfer_mean_m != null
+          ? `−${pose.chamfer_mean_m.toFixed(1)} m / ${CHAMFER_CLAMP_M} m`
+          : 'not recorded',
+    },
+  ];
+  const total = terms.every((term) => term.value !== null)
+    ? sumTerms(terms)
+    : null;
+  const recorded = pose.verification ?? null;
+  return {
+    label: 'verif',
+    terms,
+    total,
+    recorded,
+    note: mismatchNote(total, recorded),
+  };
+}
+
+/**
+ * The ranking score decomposed: verification plus the three soft-evidence
+ * terms (osm_snap.selection_score). A term the record lacks is shown as
+ * missing and contributes nothing, exactly as the pipeline skips a None term.
+ */
+export function selectBreakdown(pose: Scored): ScoreBreakdown {
+  const name = pose.name;
+  let nameTerm: ScoreTerm;
+  if (!name) {
+    nameTerm = {
+      label: 'name',
+      value: null,
+      detail: 'no street labels matched to OSM',
+    };
+  } else {
+    const evidence = name.evidence ?? name.score;
+    const hits = `${name.n_hits}/${name.n_labels} labels hit`;
+    const basis =
+      name.evidence != null
+        ? `signed evidence ${evidence.toFixed(3)}`
+        : `reward-only score ${evidence.toFixed(3)} (record predates the signed term)`;
+    nameTerm = {
+      label: 'name',
+      value: W_NAME * evidence,
+      detail: `${W_NAME} × ${basis}; ${hits}`,
+    };
+  }
+  const containment = pose.region_containment;
+  const containTerm: ScoreTerm =
+    containment != null
+      ? {
+          label: 'containment',
+          value: W_CONTAIN * containment,
+          detail: `${W_CONTAIN} × ${(containment * 100).toFixed(0)}% of the footprint inside the key-map region`,
+        }
+      : {
+          label: 'containment',
+          value: null,
+          detail: 'no key-map region for this page',
+        };
+  const sigma = pose.prior_theta_residual_sigma;
+  const priorTerm: ScoreTerm =
+    sigma != null
+      ? {
+          label: 'prior',
+          value: W_PRIOR * Math.max(-1, 1 - sigma),
+          detail: `${W_PRIOR} × max(−1, 1 − ${sigma.toFixed(2)}σ from the nearest directed rotation prior)`,
+        }
+      : { label: 'prior', value: null, detail: 'no directed rotation prior' };
+  const terms: ScoreTerm[] = [
+    {
+      label: 'verif',
+      value: pose.verification ?? null,
+      detail:
+        pose.verification != null
+          ? 'matcher verification (see its own breakdown)'
+          : 'not recorded (implausible pose scores −∞)',
+    },
+    nameTerm,
+    containTerm,
+    priorTerm,
+  ];
+  const total = sumTerms(terms);
+  const recorded = pose.select_score ?? null;
+  return {
+    label: 'select',
+    terms,
+    total,
+    recorded,
+    note: mismatchNote(total, recorded),
   };
 }

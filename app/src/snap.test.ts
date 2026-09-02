@@ -5,7 +5,9 @@ import {
   posePxPerFoot,
   poseRotationDeg,
   rankedCandidates,
+  selectBreakdown,
   truthVerdict,
+  verificationBreakdown,
 } from './snap';
 
 const affine: [number, number, number][] = [
@@ -193,5 +195,90 @@ describe('pose rotation and scale', () => {
       [-c * Math.sin(theta), -c * Math.cos(theta), 40],
     ];
     expect(poseRotationDeg(rotated)).toBeCloseTo(30, 6);
+  });
+});
+
+describe('selectBreakdown', () => {
+  // A candidate with every term recorded: select = verif + 1.0·name
+  // + 0.3·containment + 0.1·(1 − σ).
+  const full = {
+    verification: 0.17,
+    select_score: 0.825,
+    name: { score: 0.31, evidence: 0.31, n_labels: 15, n_hits: 6 },
+    region_containment: 0.95,
+    prior_theta_residual_sigma: 0.4,
+  };
+
+  it('adds the four terms back up to the recorded score', () => {
+    const b = selectBreakdown(full);
+    expect(b.terms.map((t) => t.label)).toEqual([
+      'verif',
+      'name',
+      'containment',
+      'prior',
+    ]);
+    expect(b.terms.map((t) => t.value)).toEqual([0.17, 0.31, 0.285, 0.06]);
+    expect(b.total).toBeCloseTo(0.825, 6);
+    expect(b.recorded).toBe(0.825);
+    expect(b.note).toBeUndefined();
+    expect(b.terms[1].detail).toContain('6/15 labels hit');
+    expect(b.terms[3].detail).toContain('0.40σ');
+  });
+
+  it('charges a gross prior disagreement at most the full weight', () => {
+    const b = selectBreakdown({ ...full, prior_theta_residual_sigma: 40 });
+    expect(b.terms[3].value).toBeCloseTo(-0.1, 6);
+  });
+
+  it('shows missing terms as missing and skips them, like the pipeline', () => {
+    const b = selectBreakdown({ verification: 0.5, select_score: 0.5 });
+    expect(b.terms.slice(1).map((t) => t.value)).toEqual([null, null, null]);
+    expect(b.terms[2].detail).toBe('no key-map region for this page');
+    expect(b.total).toBe(0.5);
+    expect(b.note).toBeUndefined();
+  });
+
+  it('falls back to the reward-only name score on a pre-#375 record', () => {
+    const b = selectBreakdown({
+      verification: 0.1,
+      select_score: 0.4,
+      name: { score: 0.3, n_labels: 4, n_hits: 2 },
+    });
+    expect(b.terms[1].value).toBeCloseTo(0.3, 6);
+    expect(b.terms[1].detail).toContain('predates the signed term');
+  });
+
+  it('flags a recorded score the terms no longer add up to', () => {
+    const b = selectBreakdown({ ...full, select_score: 0.9 });
+    expect(b.note).toContain('terms sum to 0.825, recorded 0.900');
+  });
+
+  it('has no total for an implausible pose', () => {
+    const b = selectBreakdown({ name: full.name });
+    expect(b.total).toBeNull();
+    expect(b.recorded).toBeNull();
+    expect(b.terms[0].detail).toContain('−∞');
+  });
+});
+
+describe('verificationBreakdown', () => {
+  it('is inlier + ncc − chamfer / 30 m', () => {
+    const b = verificationBreakdown({
+      inlier_frac: 0.52,
+      ncc_fine: 0.31,
+      chamfer_mean_m: 20.1,
+      verification: 0.16,
+    });
+    expect(b.terms.map((t) => t.label)).toEqual(['inlier', 'ncc', 'chamfer']);
+    expect(b.terms[2].value).toBeCloseTo(-0.67, 6);
+    expect(b.terms[2].detail).toBe('−20.1 m / 30 m');
+    expect(b.total).toBeCloseTo(0.16, 6);
+    expect(b.note).toBeUndefined();
+  });
+
+  it('has no total when a constituent was not recorded', () => {
+    const b = verificationBreakdown({ inlier_frac: 0.5, verification: 0.5 });
+    expect(b.total).toBeNull();
+    expect(b.terms[1].detail).toBe('not recorded');
   });
 });

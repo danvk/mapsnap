@@ -1,11 +1,15 @@
+import { useState } from 'react';
 import {
   groupRotationPriors,
   posePxPerFoot,
   poseRotationDeg,
   rankedCandidates,
+  selectBreakdown,
   truthVerdict,
+  verificationBreakdown,
 } from '../snap';
 import type {
+  ScoreBreakdown,
   SnapCandidate,
   SnapDecisionBar,
   SnapRecord,
@@ -29,6 +33,82 @@ interface SnapPanelProps {
   onClose: () => void;
 }
 
+// Room a popover needs below a cell before it is placed above it instead.
+const POPOVER_HEIGHT_PX = 160;
+
+// A score cell whose breakdown pops over the table on hover. The popover is
+// fixed-positioned from the cell's viewport rectangle, so it escapes the
+// panel's scroll clipping and showing it never reflows the rows (selecting a
+// row must not make the table jump). It is always in the markup, hidden
+// until hovered, so a static render carries the breakdown too.
+function ScoreCell({ breakdown }: { breakdown: ScoreBreakdown }) {
+  const shown = breakdown.recorded ?? breakdown.total;
+  const [anchor, setAnchor] = useState<React.CSSProperties | null>(null);
+  const show = (event: React.MouseEvent<HTMLTableCellElement>) => {
+    const rect = event.currentTarget.getBoundingClientRect();
+    const below = rect.bottom + POPOVER_HEIGHT_PX <= window.innerHeight;
+    setAnchor(
+      below
+        ? { left: rect.left, top: rect.bottom }
+        : { left: rect.left, bottom: window.innerHeight - rect.top },
+    );
+  };
+  return (
+    <td
+      className="num snap-score"
+      onMouseEnter={show}
+      onMouseLeave={() => setAnchor(null)}
+    >
+      <span>{shown != null ? shown.toFixed(2) : '—'}</span>
+      <div
+        className={'snap-breakdown' + (anchor ? ' open' : '')}
+        style={anchor ?? undefined}
+        role="tooltip"
+        onClick={(event) => event.stopPropagation()}
+      >
+        <table>
+          <tbody>
+            {breakdown.terms.map((term, i) => (
+              <tr
+                key={term.label}
+                className={term.value === null ? 'snap-breakdown-missing' : ''}
+              >
+                <td>
+                  {i === 0
+                    ? ''
+                    : term.value !== null && term.value < 0
+                      ? '−'
+                      : '+'}
+                </td>
+                <td>{term.label}</td>
+                <td className="num">
+                  {term.value !== null ? Math.abs(term.value).toFixed(3) : '—'}
+                </td>
+                <td>{term.detail}</td>
+              </tr>
+            ))}
+            <tr className="snap-breakdown-total">
+              <td>=</td>
+              <td>{breakdown.label}</td>
+              <td className="num">
+                {breakdown.total !== null ? breakdown.total.toFixed(3) : '—'}
+              </td>
+              <td>
+                {breakdown.recorded !== null
+                  ? `recorded ${breakdown.recorded.toFixed(4)}`
+                  : 'not recorded for this pose'}
+              </td>
+            </tr>
+          </tbody>
+        </table>
+        {breakdown.note && (
+          <p className="snap-breakdown-note">{breakdown.note}</p>
+        )}
+      </div>
+    </td>
+  );
+}
+
 function CandidateRow({
   label,
   candidate,
@@ -50,8 +130,8 @@ function CandidateRow({
       style={{ cursor: 'pointer' }}
     >
       <td>{label}</td>
-      <td className="num">{c.select_score?.toFixed(2) ?? '—'}</td>
-      <td className="num">{c.verification?.toFixed(2) ?? '—'}</td>
+      <ScoreCell breakdown={selectBreakdown(c)} />
+      <ScoreCell breakdown={verificationBreakdown(c)} />
       <td className="num">{c.inlier_frac?.toFixed(2) ?? '—'}</td>
       <td className="num">{c.ncc_fine?.toFixed(2) ?? '—'}</td>
       <td className="num">
@@ -147,10 +227,12 @@ export function SnapPanel({
         <thead>
           <tr>
             <th>pose</th>
-            <th title="the ranking score gates compare against (rescue bar 1.25)">
+            <th title="the ranking score gates compare against (rescue bar 1.25); hover a cell for its breakdown">
               select
             </th>
-            <th title="inlier_frac + ncc_fine − chamfer penalty">verif</th>
+            <th title="inlier_frac + ncc_fine − chamfer penalty; hover a cell for its breakdown">
+              verif
+            </th>
             <th title="share of P(road) pixels within the chamfer inlier distance of OSM">
               inlier
             </th>
