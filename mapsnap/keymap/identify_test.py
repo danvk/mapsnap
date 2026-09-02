@@ -6,6 +6,7 @@ from mapsnap.keymap.identify import (
     detection_plan,
     is_keymap,
     legitimate_keymap_split,
+    log_plan,
     page_zero_stems,
     panel_flush_edges,
     volume_valid_pages,
@@ -163,6 +164,27 @@ def test_detection_plan_keeps_a_split_of_edge_boxes(tmp_path: Path):
 def test_legitimate_keymap_split_without_panels_json_stands(tmp_path: Path):
     volume = make_volume(tmp_path, ["p0.jpg", "p0__1.jpg", "p0__2.jpg"])
     assert legitimate_keymap_split(volume, "p0") is True
+
+
+def test_log_plan_records_the_split_verdict_per_sheet(tmp_path: Path):
+    from mapsnap.keymap.log import read_section
+
+    volume = make_volume(tmp_path, ["p0.jpg", "p0__1.jpg", "p0__2.jpg", "p1N.jpg"])
+    _write_panels(volume, "p0", [_rect(0, 0, 1000, 2000), _rect(140, 0, 320, 580)])
+    assumed, to_test = detection_plan(volume)
+    log_plan(volume, assumed, to_test)
+    assert read_section(volume / "p0.jpg", "keymap-plan") == [
+        "split rejected (a cut-away is flush with <2 sheet edges): testing the parent sheet p0 whole"
+    ]
+    # A sheet with no panels and no panels.json has nothing to record.
+    assert read_section(volume / "p1N.jpg", "keymap-plan") is None
+    # An unsplit page-0 family is recorded as the convention it is.
+    (tmp_path / "plain").mkdir()
+    plain = make_volume(tmp_path / "plain", ["p0.jpg", "p5.jpg"])
+    log_plan(plain, *detection_plan(plain))
+    assert read_section(plain / "p0.jpg", "keymap-detect") == [
+        "page-0 sheet with no split panels: key map by convention"
+    ]
 
 
 def test_detection_plan_no_page_zero_uses_candidates(tmp_path: Path):

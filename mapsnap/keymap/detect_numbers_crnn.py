@@ -56,6 +56,7 @@ from mapsnap.keymap.fit_keymap import (
     key_stem,
     volume_page_keys,
 )
+from mapsnap.keymap.log import append_keymap_log
 from mapsnap.keymap.number_model import build_model, select_device
 from mapsnap.keymap.records import (
     detection_record,
@@ -685,6 +686,20 @@ def detect_and_read(
         f"{Path(image_path).name}: {len(centers)} candidates -> {len(detections)} read",
         file=sys.stderr,
     )
+    read_keys = sorted({d["text"] for d in detections}, key=page_key_sort)
+    lines = [
+        f"{len(centers)} candidates -> {len(detections)} read, {len(read_keys)} distinct"
+    ]
+    if pages:
+        missing = [p for p in pages if p not in read_keys]
+        lines.append(f"valid page keys: {len(pages)}; not read: {len(missing)}")
+        if missing:
+            lines.append(
+                "  missing: "
+                + ", ".join(missing[:40])
+                + (" …" if len(missing) > 40 else "")
+            )
+    append_keymap_log(image_path, "detect-numbers", lines)
     return detections
 
 

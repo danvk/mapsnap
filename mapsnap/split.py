@@ -28,6 +28,7 @@ from shapely.geometry import LineString, Point, Polygon, box
 from shapely.ops import polygonize, unary_union
 from skimage.morphology import medial_axis
 
+from mapsnap.keymap.log import append_keymap_log
 from mapsnap.utils import image_stem, jpeg_dimensions
 
 
@@ -1294,6 +1295,18 @@ def keymap_split_rejection(panels: list, width: float, height: float) -> str | N
     return None
 
 
+def panel_summary_lines(panels: list, width: float, height: float) -> list[str]:
+    """One line per panel: its share of the sheet and how many edges it is flush with."""
+    lines = []
+    for index, panel in enumerate(panels, start=1):
+        flush = panel_flush_edges(list(panel.exterior.coords), width, height)
+        share = 100 * panel.area / (width * height)
+        lines.append(
+            f"  panel {index}: {share:.0f}% of sheet, flush with {flush} edge(s)"
+        )
+    return lines
+
+
 def remove_split_outputs(image_path: Path) -> None:
     """Delete any existing <base>__N.jpg panels and <base>.panels.json for image_path.
 
@@ -1364,6 +1377,8 @@ def process_image(image_path: Path, debug: bool = False) -> None:
         print(f"{image_path.name}: single panel — not split")
         for index in range(1, len(previous_rings) + 1):
             remove_panel_sidecars(image_path, index)
+        if is_keymap_sheet(base):
+            append_keymap_log(image_path, "split", ["single panel — not split"])
         return
     # A key-map sheet only gives up boxed edge regions; anything else is a bad
     # cut and the sheet stands whole (#276). The stale panels were removed
@@ -1372,16 +1387,36 @@ def process_image(image_path: Path, debug: bool = False) -> None:
         rejection = keymap_split_rejection(panels, full_w, full_h)
         if rejection:
             print(f"{image_path.name}: key-map sheet, split rejected — {rejection}")
+            removed = []
             for index in range(1, len(previous_rings) + 1):
-                remove_panel_sidecars(image_path, index)
+                removed += remove_panel_sidecars(image_path, index)
             if raw_path.exists():
                 remove_split_outputs(raw_path)
+            append_keymap_log(
+                image_path,
+                "split",
+                [
+                    f"split rejected — {rejection}",
+                    *panel_summary_lines(panels, full_w, full_h),
+                    f"removed {len(removed)} stale panel sidecar(s) from an earlier split",
+                ],
+            )
             return
     ordered = order_panels(panels, full_h)  # panels are in the uncropped frame
     out_paths = write_panels(image_path, ordered, base)
     print(
         f"{image_path.name}: {len(panels)} panels → {', '.join(p.name for p in out_paths)}"
     )
+    if is_keymap_sheet(base):
+        append_keymap_log(
+            image_path,
+            "split",
+            [
+                f"split accepted: {len(ordered)} panels → "
+                + ", ".join(path.name for path in out_paths),
+                *panel_summary_lines(ordered, full_w, full_h),
+            ],
+        )
     changed = invalidate_changed_panels(
         image_path,
         previous_rings,

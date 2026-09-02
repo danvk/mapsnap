@@ -18,6 +18,7 @@ from mapsnap.split import (
     order_panels,
     panel_basename,
     panel_compactness,
+    panel_summary_lines,
     panels_json_path,
     read_panels_json,
     remove_panel_sidecars,
@@ -202,6 +203,16 @@ def test_keymap_split_rejection_accepts_edge_boxes_and_refuses_notches():
     assert reason is not None and "panel 2" in reason and "1 sheet edge" in reason
     # A panel the size of the sheet is never a cut-away, whatever its edges say.
     assert keymap_split_rejection([sheet], 1000, 2000) is None
+
+
+def test_panel_summary_lines_report_share_and_flush_edges():
+    sheet = box(0, 0, 1000, 2000)
+    inset = box(0, 1360, 320, 2000)
+    lines = panel_summary_lines([sheet.difference(inset), inset], 1000, 2000)
+    assert lines == [
+        "  panel 1: 90% of sheet, flush with 4 edge(s)",
+        "  panel 2: 10% of sheet, flush with 2 edge(s)",
+    ]
 
 
 # --- crop_border ---
