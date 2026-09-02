@@ -74,13 +74,20 @@ W_NAME = 1.0
 W_CONTAIN = 0.3
 W_PRIOR = 0.1
 
-# Cost per eligible label that matches nothing at a pose (issue #375). The
-# reward half of name_alignment is floored at zero, so a pose whose labels all
-# land on the wrong ground scores the same as a page with no labels at all --
-# and a grid alias with strong P(road) shape evidence outranks the truth
-# (richmond p311: 0 of 9 labels hit, published 14,713 ft off, beating the
-# 18.8 ft pose by 0.046). Corpus-wide, zero hits with >=3 eligible labels
-# occurs in 0.8% of accurate poses and 43.3% of >=500 ft poses.
+# Cost charged to a pose whose labels match NOTHING (issue #375). The reward
+# half of name_alignment is floored at zero, so such a pose scores the same as
+# a page with no labels at all -- and a grid alias with strong P(road) shape
+# evidence outranks the truth (richmond p311: 0 of 9 labels hit, published
+# 14,713 ft off, beating the 18.8 ft pose by 0.046).
+#
+# The penalty is a TAIL, not a slope. What the corpus shows is that *zero*
+# hits with >=3 eligible labels is damning: it happens in 0.8% of accurate
+# poses and 43.3% of >=500 ft poses. It shows nothing about 1-of-5 being worse
+# than 3-of-5 in proportion, and a first cut that charged per miss regressed
+# exactly there -- nashville p24 (a correct pose hitting 4 of 7) lost 0.17 of
+# select score and stopped clearing PRODUCTION_GATE_SCORE, and brooklyn p9's
+# correct pose (1 of 5) was demoted under an alias that hits 4 of 5 because
+# sliding along a long avenue keeps a label near its own street.
 W_NAME_MISS = 0.5
 # Below this many eligible labels a page says nothing either way, so the
 # penalty stays inert (one unmatched label is noise, not contradiction).
@@ -153,19 +160,22 @@ def name_evidence_of(name: dict | None) -> float | None:
 
 
 def name_evidence(score: float, n_labels: int, n_hits: int) -> float:
-    """Name agreement as SIGNED evidence: hits earn, unmatched labels cost.
+    """Name agreement as SIGNED evidence: matching nothing costs.
 
-    ``score`` is name_alignment's reward-only value, Sum(exp(-d/tau)) over hits
-    divided by (n_labels + 2); this undoes that denominator, charges
-    W_NAME_MISS per eligible label that found no match, and restores it. A
-    pose that matches every label is unchanged, a pose that matches none goes
-    negative, and pages with fewer than NAME_MISS_MIN_LABELS eligible labels
-    keep the old reward-only behaviour.
+    ``score`` is name_alignment's reward-only value. A pose that matches at
+    least one of its eligible labels keeps that value unchanged; a pose that
+    matches NONE of them, on a page carrying at least NAME_MISS_MIN_LABELS
+    eligible labels, is charged W_NAME_MISS scaled by the same
+    n_labels/(n_labels + 2) shape the reward uses -- so contradiction grows
+    with how much the page had to say, and a page with nothing to say is
+    unaffected.
+
+    Deliberately not a per-miss slope: see W_NAME_MISS for the regressions
+    that shape produced.
     """
-    if n_labels < NAME_MISS_MIN_LABELS:
+    if n_labels < NAME_MISS_MIN_LABELS or n_hits > 0:
         return score
-    denominator = n_labels + 2
-    return (score * denominator - W_NAME_MISS * (n_labels - n_hits)) / denominator
+    return score - W_NAME_MISS * n_labels / (n_labels + 2)
 
 
 @dataclass

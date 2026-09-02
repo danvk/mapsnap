@@ -635,6 +635,25 @@ def test_name_evidence_is_inert_without_enough_labels():
     assert name_evidence(0.7, 5, 5) == 0.7
 
 
+def test_name_evidence_charges_the_tail_only_not_a_per_miss_slope():
+    """Partial agreement is untouched; only matching *nothing* is contradiction.
+
+    The corpus statistic behind this term is about the zero-hit tail (0.8% of
+    accurate poses vs 43.3% of >=500 ft poses). It says nothing about 1-of-5
+    being proportionally worse than 3-of-5, and charging per miss regressed
+    real pages: brooklyn p9's correct pose hits 1 of 5 while the 399 ft alias
+    hits 4 of 5, and nashville p24's correct pose hits 4 of 7 and must keep
+    its score to clear the absolute production gate.
+    """
+    for n_hits in range(1, 6):
+        assert name_evidence(0.3, 5, n_hits) == 0.3
+    assert name_evidence(0.142, 5, 1) == 0.142  # brooklyn p9's truth pose
+    assert name_evidence(0.4235, 7, 4) == 0.4235  # nashville p24's truth pose
+    # Only the zero-hit pose pays, and it pays more the more the page said.
+    assert name_evidence(0.0, 3, 0) == pytest.approx(-0.5 * 3 / 5)
+    assert name_evidence(0.0, 9, 0) < name_evidence(0.0, 3, 0)
+
+
 def test_name_evidence_of_recomputes_for_pre_375_records():
     fresh = {"score": 0.4, "evidence": 0.1857, "n_labels": 5, "n_hits": 2}
     assert name_evidence_of(fresh) == pytest.approx(0.1857)
