@@ -298,10 +298,11 @@ precedence left to reason about: exactly one sidecar answers for each page.
 - A poseless `georef-final.json` leaves the page unplaced *and* claims its
   page key, so nothing else can supply a pose for it.
 - Truth comparison then cross-matches split panels: a truth panel with no fit
-  of its own is scored against another panel's fit — the `(p59__1)`-style
-  marker in compare output (#267). This is how an *unfitted* page (fargo
-  p59__2) can still contribute a disaster: the fit being graded belongs to
-  p59__1.
+  of its own is scored against another panel's fit — a row whose `page_truth`
+  and `page_gen` columns differ in compare output (#267; older archived tables
+  wrote a `(t)` marker with the generated key in trailing parens instead). This
+  is how an *unfitted* page (fargo p59__2) can still contribute a disaster: the
+  fit being graded belongs to p59__1.
 
 ---
 

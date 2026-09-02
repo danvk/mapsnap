@@ -8,10 +8,11 @@ from shapely.geometry import Polygon as ShapelyPolygon
 from mapsnap.compare_iiif_georef import (
     annotation_split_index,
     annotations_by_source,
+    gen_page_label,
     load_split_polygons,
-    page_label,
     parse_svg_polygon,
     polygon_iou,
+    print_table,
     split_numbers_disagree,
     truth_page_number,
     truth_polygon_world,
@@ -47,20 +48,84 @@ def test_annotations_by_source_null_ids_key_by_label(tmp_path):
 
 
 def test_split_numbering_annotations():
-    # Numbers agree → plain key, no disagreement.
+    # Numbers agree → the generated column repeats the truth key.
     agree = {"page_key": "p13__1", "gen_page_key": "p13__1"}
     assert split_numbers_disagree(agree) is False
-    assert page_label(agree) == "p13__1"
+    assert gen_page_label(agree) == "p13__1"
 
-    # Numbers disagree → '(t)' marker on the truth key.
+    # Numbers disagree → the generated column shows the key that was actually
+    # graded, instead of the old "(t)" marker plus trailing parenthetical.
     disagree = {"page_key": "p13__1", "gen_page_key": "p13__2"}
     assert split_numbers_disagree(disagree) is True
-    assert page_label(disagree) == "p13__1 (t)"
+    assert gen_page_label(disagree) == "p13__2"
 
-    # Full pages (no gen_page_key, e.g. missing rows) are never flagged.
+    # Full pages (no gen_page_key, e.g. missing rows) are never flagged and
+    # show a dash where the generated key would be.
     full = {"page_key": "p13"}
     assert split_numbers_disagree(full) is False
-    assert page_label(full) == "p13"
+    assert gen_page_label(full) == "—"
+
+
+def _paired_row(page_key: str, gen_page_key: str, rmse_ft: float) -> dict:
+    """A print_table row with every column filled (values are not under test)."""
+    return {
+        "page_key": page_key,
+        "gen_page_key": gen_page_key,
+        "n_truth": 5,
+        "n_gen": 4,
+        "n_streets": 3,
+        "n_intersections": 2,
+        "truth_px_per_ft": 6.0,
+        "gen_px_per_ft": 6.1,
+        "rmse_ft": rmse_ft,
+        "max_ft": rmse_ft * 2,
+        "trans_ft": rmse_ft / 2,
+        "rot_err": 0.1,
+        "scale_pct": -0.5,
+        "skew_deg": 0.2,
+        "aniso": 1.001,
+        "area_m2": 50_000.0,
+        "land_m2": 40_000.0,
+    }
+
+
+def test_print_table_carries_both_page_keys(capsys):
+    """Every row names the truth page AND the generated page it was graded against (#267).
+
+    The two coincide for whole pages and agreeing splits, and differ when OIM
+    and our splitter numbered a sheet's panels differently — which the old
+    single column expressed as "p13__1 (t) … (p13__2)", a format that misled
+    readers into taking a number off the wrong panel.
+    """
+    rows = [
+        _paired_row("p7", "p7", 8.0),
+        _paired_row("p13__1", "p13__2", 30.0),
+        _paired_row("p16N", "p16N__1", 60.0),
+    ]
+    missing = [
+        {
+            "page_key": "p12__2",
+            "n_truth": 3,
+            "skew_deg": -0.8,
+            "aniso": 1.009,
+            "area_m2": 15_900.0,
+            "land_m2": 15_900.0,
+        }
+    ]
+    print_table(rows, missing)
+    lines = capsys.readouterr().out.splitlines()
+    header = lines[0]
+    assert header.startswith("page_truth    page_gen      n_t")
+    assert "(t)" not in "\n".join(lines)
+    by_truth = {line.split()[0]: line for line in lines if line.startswith("p")}
+    assert by_truth["p7"].split()[1] == "p7"
+    assert by_truth["p13__1"].split()[1] == "p13__2"
+    assert by_truth["p16N"].split()[1] == "p16N__1"
+    assert not by_truth["p13__1"].rstrip().endswith(")")
+    # Unplaced truth pages keep the "(no fit)" trailer and show a dash for the
+    # generated key, so both readers and the viewer's parser see one shape.
+    assert by_truth["p12__2"].split()[1] == "—"
+    assert by_truth["p12__2"].rstrip().endswith("(no fit)")
 
 
 def _square(x: float, y: float, side: float) -> ShapelyPolygon:
