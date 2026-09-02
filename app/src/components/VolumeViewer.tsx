@@ -1,9 +1,9 @@
 import { useEffect, useMemo, useState } from 'react';
 import {
   keymapUnderlays,
-  underlayFromParam,
-  underlayParam,
-  type KeymapUnderlayMode,
+  underlayImageFromParam,
+  underlayImageParam,
+  type KeymapUnderlayImage,
 } from '../iiif/underlay';
 import type {
   GeorefAnnotationPage,
@@ -108,10 +108,15 @@ export function VolumeViewer() {
   const [isolateSelected, setIsolateSelected] = useState(
     () => initialParams.get('only') === '1',
   );
-  // The key-map underlay (#211): off, the sheet, or its P(road) map.
-  const [underlayMode, setUnderlayMode] = useState<KeymapUnderlayMode>(() =>
-    underlayFromParam(initialParams.get('underlay')),
+  // The key-map underlay (#211): which image, and how strongly it shows. The
+  // opacity is independent of the pages' so the two can be cross-faded.
+  const [underlayImage, setUnderlayImage] = useState<KeymapUnderlayImage>(() =>
+    underlayImageFromParam(initialParams.get('underlay')),
   );
+  const [keymapOpacity, setKeymapOpacity] = useState(() => {
+    const value = Number(initialParams.get('keymap'));
+    return Number.isFinite(value) ? Math.min(100, Math.max(0, value)) : 0;
+  });
   const [error, setError] = useState<string | null>(null);
   // Selection is tracked by page stem (stable across annotation files, unlike the item index).
   const [selectedStem, setSelectedStem] = useState<string | null>(() =>
@@ -335,6 +340,19 @@ export function VolumeViewer() {
     return () => window.removeEventListener('keydown', onKeydown);
   }, []);
 
+  // The same 0/50/100% cycle for the key-map underlay, on 'k'.
+  useEffect(() => {
+    function onKeydown(e: KeyboardEvent): void {
+      if (e.key !== 'k' || isTypingTarget(e.target)) return;
+      const steps = [0, 50, 100];
+      setKeymapOpacity(
+        (prev) => steps[(steps.indexOf(prev) + 1) % steps.length] ?? 0,
+      );
+    }
+    window.addEventListener('keydown', onKeydown);
+    return () => window.removeEventListener('keydown', onKeydown);
+  }, []);
+
   const pages = useMemo(
     () =>
       annotation ? pagesFromAnnotation(annotation as GeorefAnnotationPage) : [],
@@ -418,9 +436,13 @@ export function VolumeViewer() {
       ),
     };
   }, [snapOpen, snapRecord, snapSelected, volumeName]);
+  // Nothing is fetched until the underlay is actually turned up.
   const underlays = useMemo(
-    () => keymapUnderlays(keymaps, underlayMode),
-    [keymaps, underlayMode],
+    () =>
+      volumeName && keymapOpacity > 0
+        ? keymapUnderlays(volumeName, keymaps, underlayImage)
+        : [],
+    [volumeName, keymaps, underlayImage, keymapOpacity],
   );
   const selectedIsMissing =
     selectedPage !== null &&
@@ -448,7 +470,8 @@ export function VolumeViewer() {
       adj: showAdjacency ? '1' : null,
       osm: showOsmRelation ? null : '0',
       only: isolateSelected ? '1' : null,
-      underlay: underlayParam(underlayMode),
+      underlay: underlayImageParam(underlayImage),
+      keymap: keymapOpacity > 0 ? String(keymapOpacity) : null,
     });
   }, [
     selectedStem,
@@ -457,7 +480,8 @@ export function VolumeViewer() {
     showAdjacency,
     showOsmRelation,
     isolateSelected,
-    underlayMode,
+    underlayImage,
+    keymapOpacity,
   ]);
 
   function selectVolume(name: string): void {
@@ -581,38 +605,41 @@ export function VolumeViewer() {
               : 'OSM boundary'}
           </label>
         )}
-        {keymaps.some((keymap) => keymap.corners) && (
-          <label
-            className="rmse-color-control"
-            title="Draw the volume's georeferenced key map beneath the pages (#211). Dim the pages with the opacity slider to read them against it."
-          >
-            <input
-              type="checkbox"
-              checked={underlayMode !== 'off'}
-              onChange={(e) =>
-                setUnderlayMode(e.target.checked ? 'image' : 'off')
-              }
-            />
-            Key map
-          </label>
-        )}
-        {keymaps.some((keymap) => keymap.corners && keymap.hasRoadprob) && (
+        {keymaps.some((keymap) => keymap.hasGeoref && keymap.hasRoadprob) && (
           <label
             className="rmse-color-control"
             title="Show the key map's P(road) map (raw/<stem>.roadprob.png) in place of the sheet: what a key-map snap would match against."
           >
             <input
               type="checkbox"
-              checked={underlayMode === 'roadprob'}
-              disabled={underlayMode === 'off'}
+              checked={underlayImage === 'roadprob'}
               onChange={(e) =>
-                setUnderlayMode(e.target.checked ? 'roadprob' : 'image')
+                setUnderlayImage(e.target.checked ? 'roadprob' : 'sheet')
               }
             />
             as P(road)
           </label>
         )}
-        <div className="opacity-control">
+        {keymaps.some((keymap) => keymap.hasGeoref) && (
+          <div
+            className="opacity-control"
+            title="Key-map underlay opacity, independent of the pages' (#211). Press k to cycle 0/50/100%."
+          >
+            <label htmlFor="iiif-keymap-opacity-slider">Key map</label>
+            <input
+              type="range"
+              id="iiif-keymap-opacity-slider"
+              min={0}
+              max={100}
+              value={keymapOpacity}
+              onChange={(e) => setKeymapOpacity(Number(e.target.value))}
+            />
+          </div>
+        )}
+        <div
+          className="opacity-control"
+          title="Page opacity. Press p to cycle 0/50/100%."
+        >
           <label htmlFor="iiif-opacity-slider">Opacity</label>
           <input
             type="range"
@@ -643,6 +670,7 @@ export function VolumeViewer() {
           <VolumeMap
             snapOverlay={snapOverlay}
             keymapUnderlays={underlays}
+            keymapOpacity={keymapOpacity / 100}
             annotation={annotation}
             pages={pages}
             missingPages={missingPages}

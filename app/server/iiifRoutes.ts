@@ -6,6 +6,7 @@
  * (`/iiif-api/*`) on the shared crosswalk router.
  */
 
+import { existsSync } from 'fs';
 import { readdir, readFile, stat } from 'fs/promises';
 import { createRequire } from 'module';
 import { dirname, join } from 'path';
@@ -28,6 +29,7 @@ import {
   parseMissingTruthKeys,
 } from './compareTxt.ts';
 import { findVolumes, volumePages } from './adjacencyTruth.ts';
+import { keymapAnnotation } from './keymapAnnotation.ts';
 import { keymapInfos } from './keymapInfos.ts';
 import { runArtifactDir, runArtifactStems } from './runArtifacts.ts';
 import { withTiles } from './iiifAnnotations.ts';
@@ -426,5 +428,53 @@ export function registerIiifApi(
     return {
       keymaps: await keymapInfos(join(dataDir, volume, 'raw'), serviceBaseUrl),
     };
+  });
+
+  // One key map as a georeference annotation, for the underlay: the sheet or
+  // its P(road) map, warped by a thin-plate spline through the sheet's own
+  // GCPs -- the model keymap-snap places pages in (see keymapAnnotation).
+  router.get('/iiif-api/keymap-annotation', async (_params, request) => {
+    const { volume, stem, image } = request.query;
+    if (!isSafeVolume(volume) || !isSafeSegment(stem)) {
+      throw new HTTPError(400, `invalid key map: ${volume}/${stem}`);
+    }
+    if (image !== 'sheet' && image !== 'roadprob') {
+      throw new HTTPError(400, `invalid image: ${image}`);
+    }
+    const rawDir = join(dataDir, volume, 'raw');
+    let georef: unknown;
+    try {
+      georef = JSON.parse(
+        await readFile(join(rawDir, `${stem}.georef.json`), 'utf8'),
+      );
+    } catch {
+      throw new HTTPError(404, `no georef for key map ${volume}/${stem}`);
+    }
+    // The P(road) map is rendered in the sheet's own pixel frame, so one set
+    // of GCPs places either image.
+    const candidates =
+      image === 'roadprob'
+        ? [`${stem}.roadprob.png`]
+        : [`${stem}.jpg`, `${stem}.png`];
+    const file = candidates.find((name) => existsSync(join(rawDir, name)));
+    if (!file) {
+      throw new HTTPError(
+        404,
+        `no ${image} image for key map ${volume}/${stem}`,
+      );
+    }
+    const serviceUrl = `${request.protocol}://${request.get('host')}/iiif/${volume}/raw/${file}`;
+    const page = keymapAnnotation(
+      georef,
+      serviceUrl,
+      `keymap:${volume}/${stem}/${image}`,
+    );
+    if (!page) {
+      throw new HTTPError(
+        404,
+        `key map ${volume}/${stem} has no usable georeference`,
+      );
+    }
+    return page;
   });
 }

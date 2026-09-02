@@ -9,73 +9,59 @@
  * underlay is the first look at that: does the page's own P(road) map line up
  * with the key map's?
  *
- * The key map's georef is an affine, given by its four corners, so the sheet is
- * placed the way the snap pose overlay is: a maplibre image source at the
- * corner coordinates. The image is fetched through the key map's IIIF image
- * service (an absolute URL from the API, like the pages' tiles) at a bounded
- * size, since a full-resolution sheet is too large for one texture.
+ * Each key map is drawn from a georeference annotation the server builds
+ * (`/iiif-api/keymap-annotation`), warped by a thin-plate spline through the
+ * sheet's own GCPs -- the model keymap-snap places pages in, whose residuals
+ * are about half the shipped affine's. Rendering it with allmaps, the way the
+ * pages are rendered, is what makes the spline visible: a four-corner image
+ * would show the affine placement the pipeline does not use.
  */
 import type { KeymapInfo } from '../../server/api';
 
-export type KeymapUnderlayMode = 'off' | 'image' | 'roadprob';
+/** Which image to draw for a key map: the sheet, or its road-probability map. */
+export type KeymapUnderlayImage = 'sheet' | 'roadprob';
 
-export type Corners = [
-  [number, number],
-  [number, number],
-  [number, number],
-  [number, number],
-];
-
-/** One key map to draw: an image URL and the corner coordinates to pin it to. */
+/** One key map to draw, as the annotation URL that places it. */
 export interface KeymapUnderlay {
-  /** The key map's stem, e.g. "p0"; the layer id derives from it. */
+  /** The key map's stem, e.g. "p0". */
   id: string;
-  url: string;
-  /** Top-left, top-right, bottom-right, bottom-left, as maplibre wants them. */
-  corners: Corners;
+  /** Georeference annotation URL; allmaps fetches and warps it. */
+  annotationUrl: string;
 }
 
-/** Longest side, in pixels, of the image fetched for the underlay. */
-export const UNDERLAY_MAX_PX = 2400;
-
-/** The underlay mode a URL parameter names; anything unknown is off. */
-export function underlayFromParam(value: string | null): KeymapUnderlayMode {
-  return value === 'image' || value === 'roadprob' ? value : 'off';
+/** The image a URL parameter names; anything unknown is the sheet. */
+export function underlayImageFromParam(
+  value: string | null,
+): KeymapUnderlayImage {
+  return value === 'roadprob' ? 'roadprob' : 'sheet';
 }
 
-/** The URL parameter value for a mode; null (remove the parameter) when off. */
-export function underlayParam(mode: KeymapUnderlayMode): string | null {
-  return mode === 'off' ? null : mode;
-}
-
-/** The IIIF request for a service's image, best-fit inside UNDERLAY_MAX_PX square. */
-export function underlayImageUrl(
-  service: string,
-  format: 'jpg' | 'png',
-): string {
-  return `${service}/full/!${UNDERLAY_MAX_PX},${UNDERLAY_MAX_PX}/0/default.${format}`;
+/** The URL parameter value for an image; null (omit) for the default sheet. */
+export function underlayImageParam(image: KeymapUnderlayImage): string | null {
+  return image === 'roadprob' ? 'roadprob' : null;
 }
 
 /**
- * The underlays to draw in a mode: every key map with a georef and an image
- * service, as its sheet, or in P(road) mode only those with a road-probability
- * map. Nothing when off.
+ * The underlays to draw for a volume: every key map that has a georeference,
+ * or in P(road) mode only those that also have a road-probability map.
  */
 export function keymapUnderlays(
+  volume: string,
   keymaps: KeymapInfo[],
-  mode: KeymapUnderlayMode,
+  image: KeymapUnderlayImage,
 ): KeymapUnderlay[] {
-  if (mode === 'off') return [];
   const underlays: KeymapUnderlay[] = [];
   for (const keymap of keymaps) {
-    if (!keymap.corners || keymap.corners.length !== 4) continue;
-    const service =
-      mode === 'roadprob' ? keymap.roadprobService : keymap.imageService;
-    if (!service) continue;
+    if (!keymap.hasGeoref) continue;
+    if (image === 'roadprob' && !keymap.hasRoadprob) continue;
+    const query = new URLSearchParams({
+      volume,
+      stem: keymap.stem,
+      image,
+    });
     underlays.push({
       id: keymap.stem,
-      url: underlayImageUrl(service, mode === 'roadprob' ? 'png' : 'jpg'),
-      corners: keymap.corners as Corners,
+      annotationUrl: `/iiif-api/keymap-annotation?${query}`,
     });
   }
   return underlays;

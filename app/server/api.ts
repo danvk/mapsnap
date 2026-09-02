@@ -13,6 +13,7 @@
 
 import type { Endpoint, GetEndpoint } from 'crosswalk/dist/api-spec';
 import type {
+  GeorefAnnotationPage,
   RewrittenAnnotationResponse,
   VolumeListResponse,
 } from './iiifAnnotations.ts';
@@ -92,6 +93,13 @@ export interface KeymapDetectionsResponse {
 /** Query naming a volume directory. */
 export interface VolumeQuery {
   volume: string;
+}
+
+/** Query naming the underlay image of one key map: its sheet or its P(road) map. */
+export interface KeymapAnnotationQuery {
+  volume: string;
+  stem: string;
+  image: 'sheet' | 'roadprob';
 }
 
 /** Response of GET /api/adjacency-volumes. */
@@ -245,6 +253,9 @@ export interface API {
   };
   '/iiif-api/keymaps': {
     get: GetEndpoint<KeymapsResponse, VolumeQuery>;
+  };
+  '/iiif-api/keymap-annotation': {
+    get: GetEndpoint<GeorefAnnotationPage, KeymapAnnotationQuery>;
   };
   '/api/images': {
     get: GetEndpoint<KeymapImagesResponse>;
