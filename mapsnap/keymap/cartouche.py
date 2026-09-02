@@ -10,7 +10,11 @@ inside the inset's corner, one read weakly, and one (Kansas City) has no title
 at all. KEY reads at 0.88-1.0 on four sheets.
 
 This pass runs `detect_text` with ONLY those words as vocabulary and writes
-``raw/<stem>.cartouche.json`` next to the key map's other sidecars. The inset
+``raw/<stem>.cartouche.json`` next to the key map's other sidecars, in the
+``streets.json`` schema (image size plus a ``streets`` list of detect_text
+records) so the debugger loads it by drag-and-drop exactly like
+``<stem>.keymap.json``; each record additionally carries ``kind`` and
+``specific``. The inset
 detector (#276) consumes it as one corroborating signal among several -- a
 cartouche inside an isolated cluster of small page numbers is as strong a tell
 as there is -- and nothing else reads it. The words are kept out of the
@@ -26,6 +30,7 @@ from pathlib import Path
 
 from mapsnap.detect_text import detect_text
 from mapsnap.keymap.log import append_keymap_log
+from mapsnap.keymap.records import filter_args
 from mapsnap.utils import image_stem
 
 CARTOUCHE_VOCAB: list[str] = [
@@ -102,18 +107,19 @@ def cartouche_reads(
 ) -> list[dict]:
     """Cartouche-word reads on one sheet, best first.
 
-    Each read keeps detect_text's polygon (in the image's own pixel frame),
-    text, confidence and angle, plus ``kind`` (volumes | legend | corrections).
-    Requires the sheet's cached CRAFT boxes, like any detect_text call.
+    Each read is detect_text's full record (polygon in the image's own pixel
+    frame, text, confidence, angle, dir_pix, long/short side) plus ``kind``
+    (volumes | legend | corrections) and ``specific``. Requires the sheet's
+    cached CRAFT boxes, like any detect_text call.
     """
     reads = detect_text(str(image_path), CARTOUCHE_VOCAB, min_size=10, reader=reader)
     kept = [
         {
-            "text": read["text"],
-            "kind": CARTOUCHE_KIND[read["text"]],
+            **read,
             "confidence": round(float(read["confidence"]), 4),
-            "angle": read.get("angle", 0),
             "polygon": [[float(x), float(y)] for x, y in read["polygon"]],
+            "kind": CARTOUCHE_KIND[read["text"]],
+            "specific": is_specific(read["text"]),
         }
         for read in reads
         if read["text"] in CARTOUCHE_KIND and read["confidence"] >= min_confidence
@@ -122,22 +128,21 @@ def cartouche_reads(
 
 
 def write_cartouche_sidecar(image_path: str | Path, reads: list[dict]) -> Path:
-    """Write the reads for ``image_path`` and return the sidecar path."""
+    """Write the reads for ``image_path`` in the streets.json schema; return the path."""
+    from datetime import UTC, datetime
+
     from PIL import Image
 
     width, height = Image.open(image_path).size
     path = cartouche_sidecar_path(image_path)
-    path.write_text(
-        json.dumps(
-            {
-                "image": Path(image_path).name,
-                "width": width,
-                "height": height,
-                "reads": reads,
-            },
-            indent=1,
-        )
-    )
+    document = {
+        "width": width,
+        "height": height,
+        "timestamp": datetime.now(UTC).isoformat(),
+        "command": filter_args(sys.argv[:], str(image_path)),
+        "streets": reads,
+    }
+    path.write_text(json.dumps(document, indent=1))
     return path
 
 

@@ -51,6 +51,9 @@ def test_cartouche_reads_keeps_vocabulary_hits_above_the_floor(monkeypatch):
                 "text": "VOLUMES",
                 "confidence": 0.99,
                 "angle": 0,
+                "dir_pix": 0.0,
+                "long_side": 70,
+                "short_side": 20,
                 "polygon": [[10, 10], [80, 10], [80, 30], [10, 30]],
             },
             {
@@ -75,10 +78,12 @@ def test_cartouche_reads_keeps_vocabulary_hits_above_the_floor(monkeypatch):
 
     monkeypatch.setattr(cartouche, "detect_text", fake_detect_text)
     reads = cartouche_reads("any.jpg")
-    assert [(r["text"], r["kind"]) for r in reads] == [
-        ("VOLUMES", "volumes"),
-        ("GENERAL", "volumes"),
+    assert [(r["text"], r["kind"], r["specific"]) for r in reads] == [
+        ("VOLUMES", "volumes", True),
+        ("GENERAL", "volumes", False),
     ]
+    # detect_text's own fields ride along, so the file stays a streets.json.
+    assert reads[0]["dir_pix"] == 0.0 and reads[0]["long_side"] == 70
     assert reads[0]["polygon"] == [
         [10.0, 10.0],
         [80.0, 10.0],
@@ -93,13 +98,17 @@ def test_cartouche_reads_keeps_vocabulary_hits_above_the_floor(monkeypatch):
     ]
 
 
-def test_write_cartouche_sidecar_records_image_size(tmp_path: Path):
+def test_write_cartouche_sidecar_is_a_streets_json(tmp_path: Path):
+    """The debugger classifies a dropped file by content: an object with a
+    `streets` list whose entries carry `confidence` loads like any page's
+    reads, so the sidecar uses exactly that shape (as <stem>.keymap.json does)."""
     image = tmp_path / "p0.jpg"
     Image.new("RGB", (40, 30)).save(image)
     reads = [
         {
             "text": "KEY",
             "kind": "legend",
+            "specific": False,
             "confidence": 0.9,
             "angle": 0,
             "polygon": [[0, 0], [5, 0], [5, 5], [0, 5]],
@@ -108,8 +117,10 @@ def test_write_cartouche_sidecar_records_image_size(tmp_path: Path):
     path = write_cartouche_sidecar(image, reads)
     assert path == tmp_path / "p0.cartouche.json"
     data = json.loads(path.read_text())
-    assert (data["image"], data["width"], data["height"]) == ("p0.jpg", 40, 30)
-    assert data["reads"] == reads
+    assert (data["width"], data["height"]) == (40, 30)
+    assert data["streets"] == reads
+    assert "timestamp" in data and isinstance(data["command"], list)
+    assert "reads" not in data
 
 
 def test_cartouche_log_lines_mark_specific_words():
