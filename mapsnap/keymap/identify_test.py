@@ -1,10 +1,13 @@
+import json
 from pathlib import Path
 
 from mapsnap.keymap.identify import (
     candidate_keys,
     detection_plan,
     is_keymap,
+    legitimate_keymap_split,
     page_zero_stems,
+    panel_flush_edges,
     volume_valid_pages,
 )
 
@@ -98,6 +101,68 @@ def test_detection_plan_split_panels_tested_individually(tmp_path: Path):
     assumed, to_test = detection_plan(volume)
     assert assumed == []
     assert to_test == ["p0__1", "p0__2", "p1N"]
+
+
+def _write_panels(volume: Path, parent: str, rings: list[list[list[float]]]) -> None:
+    (volume / f"{parent}.panels.json").write_text(
+        json.dumps(
+            {"image": f"{parent}.jpg", "width": 1000, "height": 2000, "panels": rings}
+        )
+    )
+
+
+def _rect(x0: float, y0: float, x1: float, y1: float) -> list[list[float]]:
+    return [[x0, y0], [x1, y0], [x1, y1], [x0, y1], [x0, y0]]
+
+
+def test_panel_flush_edges_counts_touched_sheet_edges():
+    full = _rect(0, 0, 1000, 2000)
+    assert panel_flush_edges(full, 1000, 2000) == 4
+    corner = _rect(0, 1400, 300, 2000)  # bottom-left inset: left + bottom
+    assert panel_flush_edges(corner, 1000, 2000) == 2
+    notch = _rect(150, 0, 320, 600)  # hangs off the top edge only
+    assert panel_flush_edges(notch, 1000, 2000) == 1
+    floating = _rect(300, 300, 600, 900)
+    assert panel_flush_edges(floating, 1000, 2000) == 0
+    # Within 2% of an edge counts as flush (scan borders, polygon rounding).
+    nearly = _rect(15, 1400, 300, 1990)
+    assert panel_flush_edges(nearly, 1000, 2000) == 2
+
+
+def test_detection_plan_rejects_a_split_with_a_one_edge_notch(tmp_path: Path):
+    """Chicago: a 4% notch flush with one edge is the splitter chasing linework,
+    and testing the panels would lose the ten page numbers inside it. The
+    parent sheet is tested whole instead; the KEY box (two edges) is fine."""
+    volume = make_volume(
+        tmp_path, ["p0.jpg", "p0__1.jpg", "p0__2.jpg", "p0__3.jpg", "p1N.jpg", "p5.jpg"]
+    )
+    _write_panels(
+        volume,
+        "p0",
+        [
+            _rect(0, 0, 1000, 2000),
+            _rect(140, 0, 320, 580),
+            _rect(770, 1640, 1000, 2000),
+        ],
+    )
+    assert legitimate_keymap_split(volume, "p0") is False
+    assumed, to_test = detection_plan(volume)
+    assert assumed == []
+    assert to_test == ["p0", "p1N"]
+
+
+def test_detection_plan_keeps_a_split_of_edge_boxes(tmp_path: Path):
+    # Kansas City: the volume-index inset is a boxed corner region flush with
+    # two edges, so the panels are still confirmed one by one.
+    volume = make_volume(tmp_path, ["p0.jpg", "p0__1.jpg", "p0__2.jpg", "p1N.jpg"])
+    _write_panels(volume, "p0", [_rect(0, 0, 1000, 2000), _rect(0, 1360, 320, 2000)])
+    assert legitimate_keymap_split(volume, "p0") is True
+    assert detection_plan(volume) == ([], ["p0__1", "p0__2", "p1N"])
+
+
+def test_legitimate_keymap_split_without_panels_json_stands(tmp_path: Path):
+    volume = make_volume(tmp_path, ["p0.jpg", "p0__1.jpg", "p0__2.jpg"])
+    assert legitimate_keymap_split(volume, "p0") is True
 
 
 def test_detection_plan_no_page_zero_uses_candidates(tmp_path: Path):
