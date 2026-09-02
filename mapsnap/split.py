@@ -1315,8 +1315,10 @@ def keymap_corner_box_panels(
     candidates = box_candidates(lines, h, w, binary)
     boxes = corner_boxes(candidates, binary, h, w)
     log_lines = [
-        f"corner boxes: {len(boxes)} found among {len(candidates)} "
-        "box-thick candidate segment(s)"
+        (
+            f"corner boxes: {len(boxes)} found among {len(candidates)} "
+            "box-thick candidate segment(s)"
+        )
     ]
     for candidate in boxes:
         share = candidate.area / (h * w)

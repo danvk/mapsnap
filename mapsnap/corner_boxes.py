@@ -19,6 +19,7 @@ resulting panels to the full sheet.
 """
 
 from dataclasses import dataclass, field
+from itertools import pairwise
 from math import atan2, degrees, hypot
 from statistics import median
 
@@ -256,7 +257,7 @@ def box_polygon(
     if touched - {edge_a, edge_b}:
         return None
     chamfers = 0
-    for a, b in zip(ring, ring[1:], strict=False):
+    for a, b in pairwise(ring):
         if not off_axis(a, b):
             continue
         # A diagonal that reaches a sheet edge is a street or a fold cutting
