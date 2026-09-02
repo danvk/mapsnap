@@ -49,6 +49,9 @@ export function DetectionsOverlay(props: DetectionsOverlayProps) {
         const isSelected = selectedIndices.has(i);
         const isIgnored = det.ignore === true;
         const isHint = det.hint === true;
+        // A read inside a confirmed volume-index inset (#276): masked, and drawn as
+        // a group so the inset stands out from the key map around it.
+        const isInset = det.inset === true;
         // A label on a red/blue building fill is dropped before georeferencing, so draw it
         // like the other discarded reads rather than by its confidence.
         const isOnFill = isOnBuildingFill(det);
@@ -60,24 +63,28 @@ export function DetectionsOverlay(props: DetectionsOverlayProps) {
             ? '#2563eb'
             : det.mutual === false
               ? '#d97706'
-              : isIgnored
-                ? '#999'
-                : isHint
-                  ? '#7c3aed'
-                  : isOnFill
-                    ? '#be123c'
-                    : confidenceColor(det.confidence);
+              : isInset
+                ? '#c026d3'
+                : isIgnored
+                  ? '#999'
+                  : isHint
+                    ? '#7c3aed'
+                    : isOnFill
+                      ? '#be123c'
+                      : confidenceColor(det.confidence);
         const points = det.polygon
           .map(([x, y]) => toDisplay(x, y))
           .map(([dx, dy]) => `${dx},${dy}`)
           .join(' ');
-        const dashArray = isIgnored
-          ? '4 3'
-          : isHint
-            ? '3 2'
-            : isOnFill
-              ? '5 3'
-              : undefined;
+        const dashArray = isInset
+          ? '8 4'
+          : isIgnored
+            ? '4 3'
+            : isHint
+              ? '3 2'
+              : isOnFill
+                ? '5 3'
+                : undefined;
 
         const [lx, ly] = toDisplay(det.polygon[0][0], det.polygon[0][1]);
 
@@ -86,7 +93,7 @@ export function DetectionsOverlay(props: DetectionsOverlayProps) {
             <polygon
               points={points}
               fill={color}
-              fillOpacity={isSelected ? 0.25 : 0.05}
+              fillOpacity={isSelected ? 0.25 : isInset ? 0.18 : 0.05}
               stroke={color}
               strokeWidth={isSelected ? 2.5 : 1.2}
               strokeDasharray={dashArray}

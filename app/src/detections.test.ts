@@ -146,6 +146,25 @@ describe('filterDetections', () => {
     expect(result.map((r) => r.i)).toEqual([1, 2]);
   });
 
+  it('keeps inset-masked reads visible whatever the ignored toggle says', () => {
+    // A masked read is the thing to look at on a key map (#276); it is not `ignore`.
+    const dets = [
+      makeDetection({ text: '311', inset: true }),
+      makeDetection({ text: '310' }),
+    ];
+    const shown = filterDetections(dets, {
+      minConfidence: 0,
+      minShortSide: 0,
+      minLongSide: 0,
+      minAspectRatio: 0,
+      relaxation: false,
+      highConfidenceSizeFraction: 0.7,
+      showIgnored: false,
+      text: '',
+    });
+    expect(shown.map((r) => r.det.text)).toEqual(['311', '310']);
+  });
+
   it('hides ignored detections unless showIgnored is set', () => {
     const hidden = filterDetections(detections, {
       minConfidence: 0,

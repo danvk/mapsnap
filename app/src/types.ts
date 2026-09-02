@@ -49,6 +49,12 @@ export interface Detection {
   /** Read by the key-map rectangle fallback vocab rather than the tighter radius vocab. */
   fallback?: boolean;
   /**
+   * Inside a confirmed volume-index inset on a key-map sheet (#276): the read is a
+   * volume number, not a page location. Kept in the file so it can be seen; every
+   * consumer of page-number reads skips it.
+   */
+  inset?: boolean;
+  /**
    * An ordinal underline (the rule under "10<u>TH</u>") was painted out of this
    * box before recognition, so this read comes from altered pixels (#250).
    */
