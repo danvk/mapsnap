@@ -579,16 +579,6 @@ def print_table(rows: list[dict], missing: list[dict]) -> None:
             for r in landed
             if r.get("rmse_ft") is not None and r["rmse_ft"] >= 200.0
         )
-        # The pre-#300 land-weighted figures, clearly labelled as such: the
-        # authoritative sheet-equal score prints from `mapsnap fit` (via the
-        # manifest) and `mapsnap score`. An unlabelled "Score:" here spent a
-        # week being mistaken for the project metric (#330).
-        print(
-            f"Land-weighted (legacy): {100 * (good - disaster) / total_land:.1f}% "
-            f"(<=25ft {100 * good / total_land:.1f}% of land, "
-            f">=200ft {100 * disaster / total_land:.1f}%, "
-            f"total {total_land / 1e6:.2f} km2)"
-        )
 
     if rows:
         rmsers = np.array([r["rmse_ft"] for r in rows])
@@ -618,8 +608,7 @@ def print_sheet_equal_score(truth_path: Path, generated_path: Path) -> None:
 
     The number matches ``mapsnap score`` and the Score line of ``mapsnap fit``
     exactly: the volume is the GENERATED file's directory, whose oim/ panels
-    and centerlines.geojson supply the split weights and land fractions. The
-    "Land-weighted (legacy)" footer above it predates #300.
+    and centerlines.geojson supply the split weights and land fractions.
     """
     # Imported here because score.py imports compare_pages from this module.
     from mapsnap.score import summarize, volume_page_scores
