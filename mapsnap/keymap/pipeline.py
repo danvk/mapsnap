@@ -221,6 +221,14 @@ def main() -> None:
         ]
     )
 
+    # 1b. Read the sheet's cartouche words (GRAPHIC MAP OF VOLUMES, KEY, ...) into
+    #     <stem>.cartouche.json (#276). Nothing downstream in this pipeline reads
+    #     it yet; the inset detector will, as one corroborating signal that an
+    #     isolated cluster of small numbers is a volume-index map and not part of
+    #     the key map. Cheap: the CRAFT boxes are already cached by step 1's OCR
+    #     of the same sheet on earlier runs, and the vocabulary is fifteen words.
+    run_cmd([sys.executable, "-m", "mapsnap.keymap.cartouche", *image_args])
+
     # 2. Repair the page-number assignments against the printed adjacency graph
     #    (#213): a number misread as a shorter one (Detroit's 22 read as "2"),
     #    and a page whose number never read at all, are both settled by which

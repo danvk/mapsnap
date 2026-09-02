@@ -97,6 +97,10 @@ SUBCOMMANDS: dict[str, tuple[str, str]] = {
     ),
     "split-twopage": ("mapsnap.split_twopage", "Split two-page images in half"),
     "split": ("mapsnap.split", "Split map pages into individual panels"),
+    "keymap-cartouche": (
+        "mapsnap.keymap.cartouche",
+        "Read cartouche words (GRAPHIC MAP OF VOLUMES, KEY, ...) on key-map sheets (#276)",
+    ),
     "fix-truth-splits": (
         "mapsnap.fix_truth_splits",
         "Repair OIM-exported SvgSelectors for split pages (OIM#402)",
