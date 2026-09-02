@@ -201,6 +201,30 @@ def _label_parent_page_key(label: str) -> str | None:
     return key.split("__")[0] if key else None
 
 
+def own_label(reference_label: str, split_index: int | None) -> str:
+    """The label for OUR annotation: the reference item's label with OUR split marker.
+
+    The reference (OIM) file carries one item per panel, labeled "… p10 [1]" /
+    "… p10 [2]", and the index keys them by parent page with the last one
+    winning. Copying that label verbatim leaked its marker onto whatever we
+    wrote for the page: an unsplit placement said "[2]" while its id said
+    whole-page (#343, 22 items in the 2026-08-28 corpus), and both of our own
+    panels said the same "[2]" (#306, 59 duplicates). The id already carries
+    our panel number, so the label says the same thing: no marker when we fit
+    the whole sheet, "[N]" with OUR N when we fit panel N.
+
+      ("Fargo, N.D. | 1958 p10 [2]", None) -> "Fargo, N.D. | 1958 p10"
+      ("Fargo, N.D. | 1958 p10 [2]", 1)    -> "Fargo, N.D. | 1958 p10 [1]"
+      ("Fargo, N.D. | 1958 p10", 2)        -> "Fargo, N.D. | 1958 p10 [2]"
+
+    Our N and OIM's division number are independent orderings and can differ
+    (#379 narrows that for two-panel sheets); `mapsnap compare` pairs panels by
+    geometry, never by label, so grading is unaffected either way.
+    """
+    base = re.sub(r"\s*\[\d+\]\s*$", "", reference_label)
+    return base if split_index is None else f"{base} [{split_index}]"
+
+
 def _load_oim_index(data: dict) -> dict[str, dict]:
     """Build parent-page_key → item dict from an OIM IIIF AnnotationPage.
 
@@ -434,7 +458,6 @@ def make_annotation(
     source_type: str = source.get("type", "ImageService2")
     source_width: int = source["width"]
     source_height: int = source["height"]
-    label: str = item["label"]
 
     creator = {"id": creator_url, "type": "Person"}
     georef_width = georef["width"]
@@ -451,6 +474,7 @@ def make_annotation(
     if "__" in page_key:
         split_index = int(page_key.split("__")[1])
         canvas_id += f"__{split_index}"
+    label = own_label(item["label"], split_index)
 
     gcp_pts = georef_gcp_points(georef)
     split_canvas: tuple[float, float, float, float] | None = None
