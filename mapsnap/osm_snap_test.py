@@ -17,8 +17,10 @@ from mapsnap.feature_index import FeatureIndex
 from mapsnap.georef_from_labels import LabelFeature
 from mapsnap.osm_snap import (
     CHAMFER_CLAMP_M,
+    NAME_MISS_MIN_LABELS,
     W_CONTAIN,
     W_NAME,
+    W_NAME_MISS,
     W_PRIOR,
     NameAlignment,
     PageContext,
@@ -37,6 +39,8 @@ from mapsnap.osm_snap import (
     label_osm_rotations,
     merge_candidates,
     name_alignment,
+    name_evidence,
+    name_evidence_of,
     osm_distance_m,
     osm_rasters,
     page_scale_priors,
@@ -583,9 +587,12 @@ def test_selection_score_matches_the_candidate_property():
         prior_theta_residual_sigma=0.5,
         name=NameAlignment(score=0.4, n_labels=5, n_hits=2),
     )
-    assert candidate.select_score() == selection_score(0.5, 0.4, 0.8, 0.5)
-    assert selection_score(0.5, 0.4, 0.8, 0.5) == pytest.approx(
-        0.5 + W_NAME * 0.4 + W_CONTAIN * 0.8 + W_PRIOR * 0.5
+    # The candidate ranks on SIGNED name evidence (3 of 5 labels unmatched),
+    # not on name_alignment's reward-only score.
+    evidence = name_evidence(0.4, 5, 2)
+    assert candidate.select_score() == selection_score(0.5, evidence, 0.8, 0.5)
+    assert selection_score(0.5, evidence, 0.8, 0.5) == pytest.approx(
+        0.5 + W_NAME * evidence + W_CONTAIN * 0.8 + W_PRIOR * 0.5
     )
     assert selection_score(-math.inf, 0.4, 0.8, 0.5) == -math.inf
     # Absent bonuses add nothing, exactly as the property behaves.
@@ -602,3 +609,73 @@ def test_directed_prior_residual_ignores_the_mod180_rung():
     assert directed_prior_residual_sigma(priors, 12.0) == pytest.approx(0.5)
     assert directed_prior_residual_sigma(priors, -170.0) == pytest.approx(45.0)
     assert directed_prior_residual_sigma(priors[1:], 12.0) is None
+
+
+def test_name_evidence_charges_for_labels_that_match_nothing():
+    # richmond p311's published disaster: 9 eligible labels, not one hit. The
+    # reward-only score cannot distinguish it from a page with no labels.
+    assert name_evidence(0.0, 9, 0) == pytest.approx(-0.5 * 9 / 11)
+    assert NameAlignment(score=0.0, n_labels=9, n_hits=0).evidence < 0.0
+    # The 18.8 ft pose on the same page hits 5 of 9 and stays positive.
+    truth = NameAlignment(score=0.4099, n_labels=9, n_hits=5)
+    assert truth.evidence > 0.0
+    # ... and now outranks the alias, which it lost to by 0.046 before.
+    alias = NameAlignment(score=0.0, n_labels=9, n_hits=0)
+    assert selection_score(0.2288, truth.evidence, 0.786, 0.0) > selection_score(
+        0.8249, alias.evidence, 0.612, 0.88
+    )
+
+
+def test_name_evidence_is_inert_without_enough_labels():
+    # One or two labels say nothing either way, so the reward-only value stands.
+    for n_labels in range(NAME_MISS_MIN_LABELS):
+        assert name_evidence(0.1, n_labels, 0) == 0.1
+    # A page with no eligible labels is unchanged at zero, as before.
+    assert name_evidence(0.0, 0, 0) == 0.0
+    # A pose that matches every label pays nothing.
+    assert name_evidence(0.7, 5, 5) == 0.7
+
+
+def test_name_evidence_charges_the_tail_only_not_a_per_miss_slope():
+    """Partial agreement is untouched; only matching *nothing* is contradiction.
+
+    The corpus statistic behind this term is about the zero-hit tail (0.8% of
+    accurate poses vs 43.3% of >=500 ft poses). It says nothing about 1-of-5
+    being proportionally worse than 3-of-5, and charging per miss regressed
+    real pages: brooklyn p9's correct pose hits 1 of 5 while the 399 ft alias
+    hits 4 of 5, and nashville p24's correct pose hits 4 of 7 and must keep
+    its score to clear the absolute production gate.
+    """
+    for n_hits in range(1, 6):
+        assert name_evidence(0.3, 5, n_hits) == 0.3
+    assert name_evidence(0.142, 5, 1) == 0.142  # brooklyn p9's truth pose
+    assert name_evidence(0.4235, 7, 4) == 0.4235  # nashville p24's truth pose
+    # Only the zero-hit pose pays, and it pays more the more the page said.
+    assert name_evidence(0.0, 6, 0) == pytest.approx(-W_NAME_MISS * 6 / 8)
+    assert name_evidence(0.0, 9, 0) < name_evidence(0.0, 6, 0)
+
+
+def test_name_evidence_spares_thin_evidence_pages():
+    """Three eligible labels is not enough to call a pose contradicted.
+
+    Every page the corpus A/B damaged carried exactly 3 (detroit p93 and
+    brooklyn p13 went unplaced -> disaster, miami p74's correct 32.8 ft pose
+    matched 0 of 3 and went unplaced), while both rescues carry 9 and 10.
+    Across 13,326 fresh candidates the floor is also what sharpens the signal:
+    accurate-pose false positives fall 0.8% -> 0.4% going from 3 to 5.
+    """
+    assert NAME_MISS_MIN_LABELS >= 5
+    for n_labels in range(NAME_MISS_MIN_LABELS):
+        assert name_evidence(0.0, n_labels, 0) == 0.0
+    assert name_evidence(0.0, NAME_MISS_MIN_LABELS, 0) < 0.0
+
+
+def test_name_evidence_of_recomputes_for_pre_375_records():
+    fresh = {"score": 0.4, "evidence": 0.1857, "n_labels": 5, "n_hits": 2}
+    assert name_evidence_of(fresh) == pytest.approx(0.1857)
+    legacy = {"score": 0.4, "n_labels": 5, "n_hits": 2}
+    assert name_evidence_of(legacy) == pytest.approx(name_evidence(0.4, 5, 2))
+    assert name_evidence_of(None) is None
+    assert name_evidence_of({}) is None
+    # A record with a score but no counts keeps the reward-only value.
+    assert name_evidence_of({"score": 0.3}) == pytest.approx(0.3)

@@ -55,7 +55,13 @@ from mapsnap.edge_join_experiment import (
     PageUnit,
     grid_rmse_ft_between,
 )
-from mapsnap.osm_snap import W_CONTAIN, W_NAME, evaluate_pose, region_containment_frac
+from mapsnap.osm_snap import (
+    W_CONTAIN,
+    W_NAME,
+    evaluate_pose,
+    name_evidence_of,
+    region_containment_frac,
+)
 from mapsnap.road_model import effective_gcp_count, page_world_affine
 from mapsnap.utils import haversine_m
 
@@ -422,6 +428,34 @@ def apply_ambiguity_penalty(node: PageNode) -> None:
             if haversine_m(center[1], center[0], rc[1], rc[0]) > DISTINCT_M:
                 h.scores["ambiguous"] = True
                 break
+
+
+def normalize_name_penalty(node: "PageNode") -> None:
+    """Make the name-miss penalty relative within a page, never absolute.
+
+    A pose whose labels match nothing should lose to a pose whose labels match
+    (issue #375) — but UNPLACED is pinned at energy 0, so an absolute penalty
+    also drags every hypothesis toward abstention, which is a different claim:
+    that the page is unplaceable. Richmond p322 showed the difference, a
+    correct 13.5 ft RANSAC pose (verification -0.56, 0.25 of miss penalty)
+    tipped over the bar. Subtracting the page's smallest penalty keeps the
+    ordering among hypotheses exactly and leaves the best one's distance to
+    UNPLACED where the reward-only calibration put it.
+    """
+    penalties = [
+        (hypothesis.scores.get("name_reward") or 0.0)
+        - (hypothesis.scores.get("name") or 0.0)
+        for hypothesis in node.hypotheses
+        if "name" in hypothesis.scores
+    ]
+    if not penalties:
+        return
+    floor = min(penalties)
+    if floor <= 0.0:
+        return
+    for hypothesis in node.hypotheses:
+        if "name" in hypothesis.scores:
+            hypothesis.scores["name"] = (hypothesis.scores["name"] or 0.0) + floor
 
 
 def unary_energy(
@@ -840,9 +874,9 @@ def score_nodes(vctx, nodes: dict[str, PageNode], note_ratios: dict) -> None:
                 evaluation = evaluate_pose(ctx, vctx.feature_index, hypothesis.affine)
                 if evaluation is not None:
                     hypothesis.scores["verification"] = evaluation["verification"]
-                    hypothesis.scores["name"] = (evaluation.get("name") or {}).get(
-                        "score", 0.0
-                    )
+                    name_block = evaluation.get("name") or {}
+                    hypothesis.scores["name"] = name_evidence_of(name_block) or 0.0
+                    hypothesis.scores["name_reward"] = name_block.get("score", 0.0)
             else:
                 hypothesis.scores["context"] = status
             if regions:
@@ -865,6 +899,7 @@ def score_nodes(vctx, nodes: dict[str, PageNode], note_ratios: dict) -> None:
                     1,
                 )
         transfer_gcp_tiers(node)
+        normalize_name_penalty(node)
         apply_ambiguity_penalty(node)
         for i, hypothesis in enumerate(node.hypotheses):
             unary_energy(

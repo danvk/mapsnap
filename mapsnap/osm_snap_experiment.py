@@ -922,6 +922,7 @@ def candidate_record(candidate: SnapCandidate, unit: PageUnit) -> dict:
     if candidate.name is not None:
         record["name"] = {
             "score": round(candidate.name.score, 4),
+            "evidence": round(candidate.name.evidence, 4),
             "n_labels": candidate.name.n_labels,
             "n_hits": candidate.name.n_hits,
             "hits": candidate.name.hits,
