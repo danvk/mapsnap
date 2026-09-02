@@ -37,16 +37,23 @@ of them silently corrupts the comparison.
    uv run mapsnap split $(ls data/$VOL/p*.jpg | grep -v '__')
    ```
 
-2. **Delete sidecars orphaned by a split change.** When a page's panel count
-   drops, `remove_split_outputs` deletes the stale `pN__k.jpg` but nothing
-   removes that stem's `boxes.json` / `streets.json` / `txt` / `georef*.json`.
-   Delete any sidecar whose `.jpg` no longer exists.
+   Two-panel sheets number the panel holding the bottom-left corner first
+   (#379, matching OIM), so a volume split before that change renumbers about
+   half of its two-panel pages here — expect `p12__1` and `p12__2` to swap
+   meaning on those, in every artifact that names them.
 
-   Panel images that split *rewrites* get fresh mtimes, and `craft --resume`
-   compares mtimes, so those re-detect on their own. **`ocr --resume` does
-   not** — it skips on `.streets.json` existence alone, so a panel whose
-   pixels changed keeps its stale reads. Either pass `--recognizer-weights`
-   (which drops `--resume`, see below) or delete the affected `.streets.json`.
+2. **Let `split` drop the reads of panels that changed, then `ocr --resume`.**
+   `split` compares the new panel rings with the previous `panels.json` and
+   deletes every derived sidecar (`boxes.json` / `streets.json` / `txt` /
+   `georef*.json` / `contradiction.json`) of each panel whose ring moved, was
+   renumbered, or no longer exists — it prints which. Panels whose ring did not
+   change keep their reads and fits.
+
+   That matters because **`ocr --resume` skips on `.streets.json` existence
+   alone** (plus the recognizer weights): before this, a panel whose pixels
+   changed kept its stale reads. `craft --resume` compares mtimes and always
+   re-detected on its own. So after re-splitting, `ocr --resume` re-reads
+   exactly the panels that need it and nothing else.
 
 3. **Delete `p*.contradiction.json` (#258).** `fit`'s `clear_derived_sidecars`
    globs only `p*.georef*.json`, so adjacency-gate demotions survive into the
