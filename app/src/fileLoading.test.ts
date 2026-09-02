@@ -201,6 +201,7 @@ describe('isKeymapJson', () => {
     expect(isKeymapJson('p0.keymap-raw.json')).toBe(true);
     expect(isKeymapJson('/abs/raw/p1b.regions.panels.json')).toBe(true);
     expect(isKeymapJson('data/vol/raw/p0.cartouche.json')).toBe(true);
+    expect(isKeymapJson('data/vol/raw/p0.inset.panels.json')).toBe(true);
   });
 
   it('does not mistake a page’s own sidecars for a key map', () => {

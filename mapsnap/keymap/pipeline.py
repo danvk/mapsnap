@@ -229,6 +229,11 @@ def main() -> None:
     #     the key map. Cheap: the CRAFT boxes are already cached by step 1's OCR
     #     of the same sheet on earlier runs, and the vocabulary is fifteen words.
     run_cmd([sys.executable, "-m", "mapsnap.keymap.cartouche", *image_args])
+    # 1c. Find the volume-index insets (#276): isolated clusters of small
+    #     numbers, confirmed by a no-snap re-read or a cartouche word inside.
+    #     Writes <stem>.inset.panels.json; page-number consumers drop the
+    #     reads inside those rings.
+    run_cmd([sys.executable, "-m", "mapsnap.keymap.inset", *image_args])
 
     # 2. Repair the page-number assignments against the printed adjacency graph
     #    (#213): a number misread as a shorter one (Detroit's 22 read as "2"),

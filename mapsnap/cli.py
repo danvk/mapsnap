@@ -97,6 +97,10 @@ SUBCOMMANDS: dict[str, tuple[str, str]] = {
     ),
     "split-twopage": ("mapsnap.split_twopage", "Split two-page images in half"),
     "split": ("mapsnap.split", "Split map pages into individual panels"),
+    "keymap-inset": (
+        "mapsnap.keymap.inset",
+        "Find and mask volume-index insets on key-map sheets (#276)",
+    ),
     "keymap-cartouche": (
         "mapsnap.keymap.cartouche",
         "Read cartouche words (GRAPHIC MAP OF VOLUMES, KEY, ...) on key-map sheets (#276)",
