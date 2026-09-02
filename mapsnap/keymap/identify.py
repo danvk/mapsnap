@@ -50,6 +50,7 @@ from mapsnap.keymap.fit_keymap import (
     page_number,
     volume_page_keys,
 )
+from mapsnap.keymap.log import append_keymap_log
 from mapsnap.keymap.number_model import build_model, select_device
 from mapsnap.keymap.records import page_key_sort, write_keymaps_record
 from mapsnap.split import (
@@ -278,6 +279,36 @@ def load_models(
     return cnn, crnn, device
 
 
+def log_plan(volume: Path, assumed: list[str], to_test: list[str]) -> None:
+    """Record, per candidate sheet, how detection_plan disposed of it."""
+    for key in assumed:
+        append_keymap_log(
+            volume / f"{key}.jpg",
+            "keymap-detect",
+            ["page-0 sheet with no split panels: key map by convention"],
+        )
+    parents = {key.split("__")[0] for key in to_test}
+    for parent in sorted(parents):
+        panels = sorted(key for key in to_test if key.startswith(f"{parent}__"))
+        if not panels and not panels_json_path(volume / f"{parent}.jpg").exists():
+            continue
+        if panels:
+            lines = [
+                (
+                    "split stands (every cut-away flush with ≥2 sheet edges): "
+                    f"testing panels {', '.join(panels)} individually"
+                )
+            ]
+        else:
+            lines = [
+                (
+                    "split rejected (a cut-away is flush with <2 sheet edges): "
+                    f"testing the parent sheet {parent} whole"
+                )
+            ]
+        append_keymap_log(volume / f"{parent}.jpg", "keymap-plan", lines)
+
+
 def identify_keymaps(
     volume: Path,
     *,
@@ -305,6 +336,7 @@ def identify_keymaps(
         ]
     else:
         assumed, keys = detection_plan(volume)
+        log_plan(volume, assumed, keys)
         if assumed:
             for key in assumed:
                 print(
@@ -315,6 +347,7 @@ def identify_keymaps(
 
     cnn, crnn, device = load_models(cnn_weights, crnn_weights)
     confirmed: list[str] = []
+    verdicts: dict[str, list[str]] = {}
     for key in keys:
         image = volume / f"{key}.jpg"
         if not image.exists():
@@ -332,8 +365,14 @@ def identify_keymaps(
             f"coverage={coverage:5.2f} {'KEY MAP' if keymap else ''}",
             file=sys.stderr,
         )
+        verdicts.setdefault(key.split("__")[0], []).append(
+            f"{key}: {len(found)}/{len(valid_pages)} distinct valid page numbers read, "
+            f"coverage {coverage:.2f} → {'KEY MAP' if keymap else 'not a key map'}"
+        )
         if keymap:
             confirmed.append(key)
+    for parent, lines in verdicts.items():
+        append_keymap_log(volume / f"{parent}.jpg", "keymap-detect", lines)
     return sorted(confirmed, key=lambda key: (page_number(key) or 0, key))
 
 

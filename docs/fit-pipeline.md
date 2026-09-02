@@ -5,6 +5,16 @@ Stage structure as of #270 phase 3; the per-gate examples are from the
 rejection that used to rename a file now records a `status` inside it. Grep
 the page's `<stem>.txt` sidecar or the run's fit log for the quoted messages.
 
+Key-map sheets keep a second log, `raw/<stem>.keymap.txt`, beside their other
+key-map sidecars: one section per stage — `split` (whether the sheet's split
+stood, per-panel share and edge-flushness, stale sidecars removed),
+`keymap-plan` / `keymap-detect` (how the sheet was nominated and confirmed as a
+key map), `detect-numbers` (candidates, reads, valid page keys not read),
+`assignment-repair`, `cartouche` (the GRAPHIC MAP / KEY / INDEX words read and
+where), and, once #276 lands, `inset`. A rerun replaces a stage's section in
+place, each header carries a UTC timestamp, and `archive_run` copies the logs
+into `<run>/raw/`.
+
 `mapsnap fit DIR --tag T` runs six stages in a fixed order. Each stage
 communicates with the next entirely through per-page sidecar files:
 

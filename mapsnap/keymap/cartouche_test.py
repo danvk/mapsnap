@@ -10,6 +10,7 @@ from mapsnap.keymap.cartouche import (
     CARTOUCHE_KIND,
     CARTOUCHE_SPECIFIC,
     CARTOUCHE_VOCAB,
+    cartouche_log_lines,
     cartouche_reads,
     cartouche_sidecar_path,
     is_specific,
@@ -120,3 +121,26 @@ def test_write_cartouche_sidecar_is_a_streets_json(tmp_path: Path):
     assert data["streets"] == reads
     assert "timestamp" in data and isinstance(data["command"], list)
     assert "reads" not in data
+
+
+def test_cartouche_log_lines_mark_specific_words():
+    reads = [
+        {
+            "text": "GRAPHIC",
+            "kind": "volumes",
+            "confidence": 0.99,
+            "polygon": [[0, 0], [10, 0], [10, 4], [0, 4]],
+        },
+        {
+            "text": "MAP",
+            "kind": "volumes",
+            "confidence": 0.95,
+            "polygon": [[20, 20], [30, 20], [30, 24], [20, 24]],
+        },
+    ]
+    assert cartouche_log_lines(reads) == [
+        "2 cartouche read(s):",
+        "  GRAPHIC @0.99 (volumes, specific) at (5, 2)",
+        "  MAP @0.95 (volumes, weak) at (25, 22)",
+    ]
+    assert cartouche_log_lines([]) == ["no cartouche words read"]

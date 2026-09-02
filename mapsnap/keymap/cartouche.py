@@ -29,6 +29,7 @@ import sys
 from pathlib import Path
 
 from mapsnap.detect_text import detect_text
+from mapsnap.keymap.log import append_keymap_log
 from mapsnap.keymap.records import filter_args
 from mapsnap.utils import image_stem
 
@@ -145,6 +146,22 @@ def write_cartouche_sidecar(image_path: str | Path, reads: list[dict]) -> Path:
     return path
 
 
+def cartouche_log_lines(reads: list[dict]) -> list[str]:
+    """The decision-log lines for a sheet's cartouche reads, specific ones marked."""
+    if not reads:
+        return ["no cartouche words read"]
+    lines = [f"{len(reads)} cartouche read(s):"]
+    for read in reads:
+        xs = [point[0] for point in read["polygon"]]
+        ys = [point[1] for point in read["polygon"]]
+        mark = "specific" if is_specific(read["text"]) else "weak"
+        lines.append(
+            f"  {read['text']} @{read['confidence']:.2f} ({read['kind']}, {mark}) "
+            f"at ({sum(xs) / len(xs):.0f}, {sum(ys) / len(ys):.0f})"
+        )
+    return lines
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(
         description="Read cartouche words (GRAPHIC MAP OF VOLUMES, KEY, ...) on key-map sheets."
@@ -171,6 +188,7 @@ def main() -> None:
             image, reader=reader, min_confidence=args.min_confidence
         )
         path = write_cartouche_sidecar(image, reads)
+        append_keymap_log(image, "cartouche", cartouche_log_lines(reads))
         summary = (
             ", ".join(f"{r['text']}@{r['confidence']:.2f}" for r in reads[:6])
             or "nothing"

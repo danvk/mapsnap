@@ -50,6 +50,7 @@ from pathlib import Path
 
 from mapsnap.keymap.adjacency_assign import repair_volume
 from mapsnap.keymap.fit_keymap import collapse_skeleton_keys, volume_page_keys
+from mapsnap.keymap.log import append_keymap_log
 from mapsnap.keymap.records import keymap_path, page_key_sort
 from mapsnap.utils import default_centerlines, run_cmd
 
@@ -252,6 +253,15 @@ def main() -> None:
     else:
         note = " NOT applied (pass --repair-assignments to apply; see #239)"
     print(f"{len(repairs)} assignment repair(s){note}", file=sys.stderr)
+    repair_lines = [repair.describe() for repair in repairs] or [
+        "no assignment repairs"
+    ]
+    for image in images:
+        append_keymap_log(
+            image,
+            "assignment-repair",
+            [*repair_lines, f"status: {note.strip() or 'applied'}"],
+        )
     if args.dry_run:
         return
 

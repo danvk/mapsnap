@@ -398,6 +398,14 @@ def archive_run(
         shutil.copy2(georef, run_dir / georef.name)
     for log in sorted(dir_path.glob("p*.txt")):
         shutil.copy2(log, run_dir / log.name)
+    # The key-map pipeline's decision logs (split verdicts, identification,
+    # page-number reads, cartouche words) live under raw/; keep them with the
+    # run so a later baseline diff can see what the key map decided.
+    keymap_logs = sorted((dir_path / "raw").glob("*.keymap.txt"))
+    if keymap_logs:
+        (run_dir / "raw").mkdir(exist_ok=True)
+        for log in keymap_logs:
+            shutil.copy2(log, run_dir / "raw" / log.name)
     # Channel candidate stores, so a later reconcile/analysis pass can see the
     # poses this run actually weighed (#270). Without these the baseline is
     # unrecoverable once any post-run experiment re-matches: the files live at
