@@ -1,8 +1,10 @@
 import { describe, expect, it } from 'vitest';
 import {
+  hasTwoPageColumns,
   parseCompareFooter,
   parseCompareTxt,
   parseLandByPage,
+  parseMissingTruthKeys,
 } from './compareTxt.ts';
 
 const HEADER =
@@ -118,5 +120,69 @@ describe('land columns', () => {
     expect(
       parseLandByPage([oldHeader, '-'.repeat(100), oldRow].join('\n')),
     ).toBeNull();
+  });
+});
+
+// The two-key layout (#267): page_truth and page_gen lead every row. Rows built from a
+// real 2026-08-28 richmond table plus the three shapes that used to hide behind "(t)":
+// a whole page, a split whose numbering disagrees, a whole truth page we split, and a
+// truth-only "(no fit)" row.
+const HEADER2 =
+  'page_truth    page_gen      n_t n_g  str  int  t.px/ft  g.px/ft   rmse_ft    max_ft   trans_ft   rot_err  scale_%   skew°   aniso   area_km2   land_km2';
+const RULE2 = '-'.repeat(HEADER2.length);
+const TABLE2 = [
+  HEADER2,
+  RULE2,
+  'p311          p311            9   4    0    0     5.72     5.61      18.8      31.2       10.4    -0.31    +1.84   +2.13   1.067     0.0837     0.0837',
+  'p13__1        p13__2         10   2    9    6     2.97     3.00      10.5      16.3        8.6    -0.01    -1.12   -0.26   1.015     0.0412     0.0398',
+  'p16N          p16N__1         6   4    0    0     6.12     6.30      60.4     100.9       50.2    +4.88    -2.88   -0.19   1.006     0.0761     0.0761',
+  'p12__2        —               3   —    —    —        —        —         —         —          —        —        —   -3.62   1.015     0.0222     0.0176  (no fit)',
+  RULE2,
+  '',
+  '3/4 = 75.00% pages georeferenced (1 total losses)',
+].join('\n');
+
+describe('two page columns (#267)', () => {
+  it('detects the layout from the header', () => {
+    expect(hasTwoPageColumns(HEADER2)).toBe(true);
+    expect(hasTwoPageColumns(HEADER)).toBe(false);
+  });
+
+  it('keys paired rows by the page_gen column, not the truth key', () => {
+    const keys = parseCompareTxt(TABLE2).map((p) => p.genPageKey);
+    expect(keys).toEqual(['p311', 'p13__2', 'p16n__1']);
+  });
+
+  it('reads the metrics after both key columns', () => {
+    const p13 = parseCompareTxt(TABLE2).find((p) => p.genPageKey === 'p13__2')!;
+    expect(p13.rmseFt).toBe(10.5);
+    expect(p13.maxFt).toBe(16.3);
+    expect(p13.translationFt).toBe(8.6);
+    expect(p13.rotationErrorDegrees).toBe(-0.01);
+    expect(p13.scaleErrorPercent).toBe(-1.12);
+    expect(p13.skewDegrees).toBe(-0.26);
+    expect(p13.anisotropy).toBe(1.015);
+    expect(p13.landKm2).toBe(0.0398);
+  });
+
+  it('reports "(no fit)" rows by their truth key and keeps them out of pages', () => {
+    expect(parseMissingTruthKeys(TABLE2)).toEqual(['p12__2']);
+    expect(parseCompareTxt(TABLE2).some((p) => p.genPageKey === '—')).toBe(
+      false,
+    );
+  });
+
+  it('keys land by the truth page in both layouts', () => {
+    const land = parseLandByPage(TABLE2)!;
+    expect(land['p13__1']).toBe(0.0398);
+    expect(land['p12__2']).toBe(0.0176);
+    expect(land['p13__2']).toBeUndefined();
+  });
+
+  it('still reads the legacy single-column layout unchanged', () => {
+    const legacy = parseCompareTxt(TABLE).find(
+      (p) => p.genPageKey === 'p1499l',
+    )!;
+    expect(legacy.rmseFt).toBe(10.5);
   });
 });

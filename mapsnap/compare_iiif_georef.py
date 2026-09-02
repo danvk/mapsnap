@@ -500,9 +500,18 @@ def split_numbers_disagree(row: dict) -> bool:
     return gen_page_key is not None and gen_page_key != row["page_key"]
 
 
-def page_label(row: dict) -> str:
-    """Page column text: the truth page key, marked '(t)' when our numbering disagrees."""
-    return f"{row['page_key']} (t)" if split_numbers_disagree(row) else row["page_key"]
+def gen_page_label(row: dict) -> str:
+    """The generated-page column: the matched generated key, or a dash when unplaced.
+
+    The table carries BOTH keys (#267): the truth page key and the generated
+    page key. They coincide for whole pages and for splits whose numbering
+    agrees, and differ exactly when OIM and our splitter numbered the panels
+    differently — an unavoidable disagreement (OIM's numbering is the order a
+    volunteer drew the regions) that used to hide in a "(t)" marker plus a
+    trailing parenthetical, and misled readers into taking a number off the
+    wrong panel.
+    """
+    return row.get("gen_page_key") or "—"
 
 
 def fmt_km2(area_m2: float | None) -> str:
@@ -515,7 +524,7 @@ def print_table(rows: list[dict], missing: list[dict]) -> None:
     rows_sorted = sorted(rows, key=lambda r: r["rmse_ft"], reverse=True)
 
     header = (
-        f"{'Page':<13} {'n_t':>3} {'n_g':>3} {'str':>4} {'int':>4}  "
+        f"{'page_truth':<13} {'page_gen':<13} {'n_t':>3} {'n_g':>3} {'str':>4} {'int':>4}  "
         f"{'t.px/ft':>7}  {'g.px/ft':>7}  "
         f"{'rmse_ft':>8}  {'max_ft':>8}  {'trans_ft':>9}  "
         f"{'rot_err':>8}  {'scale_%':>7}  {'skew°':>6}  {'aniso':>6}  "
@@ -527,22 +536,20 @@ def print_table(rows: list[dict], missing: list[dict]) -> None:
     for r in rows_sorted:
         n_str = r["n_streets"] if r["n_streets"] is not None else "—"
         n_int = r["n_intersections"] if r["n_intersections"] is not None else "—"
-        # When the split numbers disagree, note the matched generated page in the trailing
-        # column (where missing rows show "(no fit)").
-        trailing = f"  ({r['gen_page_key']})" if split_numbers_disagree(r) else ""
         print(
-            f"{page_label(r):<13} {r['n_truth']:>3} {r['n_gen']:>3} {n_str!s:>4} {n_int!s:>4}  "
+            f"{r['page_key']:<13} {gen_page_label(r):<13} "
+            f"{r['n_truth']:>3} {r['n_gen']:>3} {n_str!s:>4} {n_int!s:>4}  "
             f"{r['truth_px_per_ft']:>7.2f}  {r['gen_px_per_ft']:>7.2f}  "
             f"{r['rmse_ft']:>8.1f}  {r['max_ft']:>8.1f}  {r['trans_ft']:>9.1f}  "
             f"{r['rot_err']:>+8.2f}  {r['scale_pct']:>+7.2f}  "
             f"{r['skew_deg']:>+6.2f}  {r['aniso']:>6.3f}  "
-            f"{fmt_km2(r.get('area_m2')):>9}  {fmt_km2(r.get('land_m2')):>9}{trailing}"
+            f"{fmt_km2(r.get('area_m2')):>9}  {fmt_km2(r.get('land_m2')):>9}"
         )
     if missing:
         missing_sorted = sorted(missing, key=lambda r: r["page_key"])
         for r in missing_sorted:
             print(
-                f"{r['page_key']:<13} {r['n_truth']:>3} {'—':>3} {'—':>4} {'—':>4}  "
+                f"{r['page_key']:<13} {'—':<13} {r['n_truth']:>3} {'—':>3} {'—':>4} {'—':>4}  "
                 f"{'—':>7}  {'—':>7}  "
                 f"{'—':>8}  {'—':>8}  {'—':>9}  "
                 f"{'—':>8}  {'—':>7}  "
@@ -655,6 +662,7 @@ def print_tsv(rows: list[dict], missing: list[dict]) -> None:
     """
     fields = [
         "page_key",
+        "gen_page_key",
         "n_truth",
         "n_gen",
         "n_streets",
@@ -671,7 +679,7 @@ def print_tsv(rows: list[dict], missing: list[dict]) -> None:
     ]
     print("\t".join(fields))
     for r in sorted(rows, key=lambda x: x["page_key"]):
-        print("\t".join(str(r[f]) for f in fields))
+        print("\t".join(str(r.get(f, "")) for f in fields))
     for r in sorted(missing, key=lambda x: x["page_key"]):
         row_vals = {f: "" for f in fields}
         row_vals["page_key"] = r["page_key"]

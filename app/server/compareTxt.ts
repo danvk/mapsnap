@@ -8,8 +8,15 @@
  *
  * The table (see compare_iiif_georef.print_table) has a header, a `---` rule, one row per truth
  * page — paired rows carry error metrics, `(no fit)` rows are truth-only — a closing `---`, then
- * summary lines. A paired row's Page column is the truth page key; when our split numbering
- * differs it is marked `(t)` and the generated key follows in trailing parens.
+ * summary lines. Two layouts exist, told apart by the header (#267):
+ *
+ * - current: `page_truth` and `page_gen` columns lead every row — the truth page key and the
+ *   generated page key it was paired with (`—` on `(no fit)` rows). They differ exactly when
+ *   OIM and our splitter numbered a sheet's panels differently.
+ * - legacy (archived runs): a single `Page` column holding the truth key; when the numbering
+ *   differed the key was marked `(t)` and the generated key followed in trailing parens.
+ *
+ * Old runs are never regenerated, so both layouts stay readable.
  */
 
 /** One paired page's truth-comparison error, keyed by the generated page's file stem. */
@@ -56,6 +63,11 @@ function isSeparator(line: string): boolean {
   return /^-{3,}$/.test(line.trim());
 }
 
+/** Whether a table header announces the two-key layout (`page_truth page_gen …`). */
+export function hasTwoPageColumns(header: string): boolean {
+  return /^\s*page_truth\s+page_gen\b/.test(header);
+}
+
 /** The truth page key of a `(no fit)` row, or null for any other line. */
 export function parseMissingRow(line: string): string | null {
   const trailing = line.match(/\s+\(no fit\)\s*$/);
@@ -83,6 +95,8 @@ export function parseLandByPage(text: string): Record<string, number> | null {
 }
 
 // The land pair of one row; only meaningful when the header carries land columns.
+// Layout-independent: the truth key leads every row in both layouts, and the land
+// pair trails it (a `—` in a two-key row's page_gen column is just another token).
 function parseRowLandKm2(line: string): [string, number] | null {
   let body = line;
   const trailing = body.match(/\s+\(([^)]*)\)\s*$/);
@@ -98,10 +112,15 @@ function parseRowLandKm2(line: string): [string, number] | null {
 }
 
 // Parse one data row; returns null for `(no fit)` (truth-only) rows and unparseable lines.
-function parseRow(line: string): ComparePageStats | null {
+// `twoPageColumns` says which layout the table's header announced (see the module doc).
+function parseRow(
+  line: string,
+  twoPageColumns: boolean,
+): ComparePageStats | null {
   let body = line;
   let genKeyOverride: string | null = null;
-  // A trailing "(…)" is either "(no fit)" or, when split numbers disagree, the generated key.
+  // A trailing "(…)" is either "(no fit)" or, in the legacy layout when split numbers
+  // disagree, the generated key.
   const trailing = body.match(/\s+\(([^)]*)\)\s*$/);
   if (trailing) {
     if (trailing[1] === 'no fit') return null;
@@ -110,8 +129,17 @@ function parseRow(line: string): ComparePageStats | null {
   }
   const tokens = body.trim().split(/\s+/);
   if (tokens.length < 2) return null;
-  const disagree = tokens[1] === '(t)';
-  const numeric = tokens.slice(disagree ? 2 : 1);
+  let genPageKey: string;
+  let numeric: string[];
+  if (twoPageColumns) {
+    // page_truth page_gen n_t n_g …
+    genPageKey = tokens[1] ?? '';
+    numeric = tokens.slice(2);
+  } else {
+    const disagree = tokens[1] === '(t)';
+    numeric = tokens.slice(disagree ? 2 : 1);
+    genPageKey = (disagree ? (genKeyOverride ?? tokens[0]) : tokens[0]) ?? '';
+  }
   // n_t n_g str int t.px g.px rmse max trans rot scale skew aniso
   const rmseFt = Number(numeric[6]);
   const maxFt = Number(numeric[7]);
@@ -133,8 +161,6 @@ function parseRow(line: string): ComparePageStats | null {
   const anisotropy = Number(numeric[12]);
   const areaKm2 = Number(numeric[13]);
   const landKm2 = Number(numeric[14]);
-  const genPageKey =
-    (disagree ? (genKeyOverride ?? tokens[0]) : tokens[0]) ?? '';
   return {
     genPageKey: genPageKey.toLowerCase(),
     rmseFt,
@@ -161,12 +187,13 @@ export function parseCompareTxt(text: string): ComparePageStats[] {
   if (!header || !header.includes('rmse_ft')) return [];
   const start = lines.findIndex(isSeparator);
   if (start < 0) return [];
+  const twoPageColumns = hasTwoPageColumns(header);
   const pages: ComparePageStats[] = [];
   for (let i = start + 1; i < lines.length; i++) {
     const line = lines[i]!;
     if (isSeparator(line)) break; // end of the data section
     if (line.trim() === '') continue;
-    const row = parseRow(line);
+    const row = parseRow(line, twoPageColumns);
     if (row) pages.push(row);
   }
   return pages;
