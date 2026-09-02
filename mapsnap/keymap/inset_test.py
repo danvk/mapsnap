@@ -7,6 +7,7 @@ from shapely.geometry import Point
 
 from mapsnap.keymap.inset import (
     Inset,
+    annotate_keymap_reads,
     cluster_reads,
     detect_insets,
     inset_rings,
@@ -197,3 +198,39 @@ def test_inset_label_reports_the_reread():
     assert not unconfirmed.confirmed and unconfirmed.label().endswith(
         "(re-read small 0/2)"
     )
+
+
+def test_annotate_keymap_reads_flags_masked_reads_and_clears_stale_flags(
+    tmp_path: Path,
+):
+    main = _grid(6, 6, 1500, 800, 300)
+    inset = [
+        _record("2", 300, 4300),
+        _record("3", 450, 4200),
+        _record("4", 250, 4450),
+        _record("311", 400, 4500),
+    ]
+    cartouche = [
+        {
+            "text": "VOLUMES",
+            "confidence": 0.9,
+            "polygon": [[300, 3950], [500, 3950], [500, 4000], [300, 4000]],
+        }
+    ]
+    image = _sheet(tmp_path, main + inset, cartouche)
+    result = detect_insets(image)
+    assert annotate_keymap_reads(image, result) == 4
+    doc = json.loads((image.parent / "p0.keymap.json").read_text())
+    flagged = sorted(r["text"] for r in doc["streets"] if r.get("inset"))
+    assert flagged == ["2", "3", "311", "4"]
+    assert all(
+        "inset" not in r
+        for r in doc["streets"]
+        if r["text"].isdigit() and int(r["text"]) >= 300 and r["text"] != "311"
+    )
+    # The detector re-judges from ALL reads, so a run that confirms nothing clears the flags.
+    (image.parent / "p0.cartouche.json").unlink()
+    result = detect_insets(image)
+    assert result.insets == [] and annotate_keymap_reads(image, result) == 0
+    doc = json.loads((image.parent / "p0.keymap.json").read_text())
+    assert not any(r.get("inset") for r in doc["streets"])

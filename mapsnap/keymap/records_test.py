@@ -3,6 +3,8 @@ import math
 from mapsnap.keymap.records import (
     detection_record,
     filter_args,
+    is_inset,
+    live_detections,
     parse_page_spec,
 )
 
@@ -61,3 +63,13 @@ def test_detection_record_dir_pix_in_unit_range():
 def test_filter_args_keeps_only_the_named_image():
     argv = ["detect", "--min-size", "60", "a.jpg", "b.jpg", "c.jpg"]
     assert filter_args(argv, "b.jpg") == ["detect", "--min-size", "60", "b.jpg"]
+
+
+def test_inset_flag_hides_a_read_from_consumers_without_deleting_it():
+    reads = [
+        {"text": "311", "inset": True},
+        {"text": "310"},
+        {"text": "5", "inset": False},
+    ]
+    assert [is_inset(r) for r in reads] == [True, False, False]
+    assert [r["text"] for r in live_detections(reads)] == ["310", "5"]

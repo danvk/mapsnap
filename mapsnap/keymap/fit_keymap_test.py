@@ -162,6 +162,18 @@ def test_load_detections_keeps_lettered_keys(tmp_path):
     assert [(d.key, d.number) for d in detections] == [("35A", 35), ("51", 51)]
 
 
+def test_load_detections_skips_reads_masked_as_inset(tmp_path):
+    doc = {
+        "streets": [
+            {"text": "311", "inset": True, "polygon": [[0, 0], [2, 0], [2, 2], [0, 2]]},
+            {"text": "310", "polygon": [[4, 4], [6, 4], [6, 6], [4, 6]]},
+        ]
+    }
+    path = tmp_path / "p0.keymap.json"
+    path.write_text(json.dumps(doc))
+    assert [d.key for d in load_detections(path)] == ["310"]
+
+
 # --- skeleton collapse ---
 
 

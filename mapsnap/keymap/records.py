@@ -79,6 +79,23 @@ def detection_record(bbox: list[list[float]], text: str, confidence: float) -> d
     }
 
 
+# Set on a <stem>.keymap.json record by the inset detector (#276) when the read
+# sits inside a confirmed volume-index inset. The record stays in the file --
+# the debugger shows it, and the detector re-judges it on every run -- but
+# every consumer of page-number reads skips it through is_inset().
+INSET_FLAG = "inset"
+
+
+def is_inset(record: dict) -> bool:
+    """Whether a key-map read was masked as part of a volume-index inset."""
+    return bool(record.get(INSET_FLAG))
+
+
+def live_detections(streets: list[dict]) -> list[dict]:
+    """The reads a consumer should act on: everything not masked as an inset."""
+    return [record for record in streets if not is_inset(record)]
+
+
 KEYMAPS_FILENAME = "keymaps.json"
 
 

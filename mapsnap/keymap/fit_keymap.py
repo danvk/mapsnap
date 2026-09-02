@@ -30,6 +30,7 @@ from pathlib import Path
 
 import numpy as np
 
+from mapsnap.keymap.records import live_detections
 from mapsnap.keymap.score_keymap_labels import point_in_polygon
 
 # Metres per degree of latitude (and of longitude after the cos(lat) correction).
@@ -202,12 +203,14 @@ def load_detections(keymap_path: Path) -> list[Detection]:
     """Load key-map page-number detections (page-key texts) with pixel centroids.
 
     A text must be a page key — digits with an optional letter suffix (``51``,
-    ``35F``) — anything else (a stray street-name read) is skipped. ``number``
-    holds the digit stem for numeric consumers; ``key`` the full canonical key.
+    ``35F``) — anything else (a stray street-name read) is skipped, and so is a
+    read the inset detector masked (records.is_inset): a volume-index inset's
+    numerals are not page locations. ``number`` holds the digit stem for
+    numeric consumers; ``key`` the full canonical key.
     """
     streets = json.loads(keymap_path.read_text())["streets"]
     detections: list[Detection] = []
-    for street in streets:
+    for street in live_detections(streets):
         text = str(street["text"])
         if not re.fullmatch(r"\d+[A-Za-z]{0,2}", text):
             continue

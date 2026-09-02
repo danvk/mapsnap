@@ -44,6 +44,7 @@ from pathlib import Path
 import cv2
 import numpy as np
 
+from mapsnap.keymap.inset import inset_rings
 from mapsnap.road_model import (
     invert_affine,
     page_scale_m_per_px,
@@ -285,10 +286,19 @@ def mapped_extent_mask(
     grown = within_px(mask, margin_px).astype(np.uint8)
     count, components = cv2.connectedComponents(grown)
     if count <= 2:
-        return grown
-    sizes = np.bincount(components.ravel())
-    sizes[0] = 0  # background
-    return (components == int(sizes.argmax())).astype(np.uint8)
+        extent = grown
+    else:
+        sizes = np.bincount(components.ravel())
+        sizes[0] = 0  # background
+        extent = (components == int(sizes.argmax())).astype(np.uint8)
+    # A confirmed volume-index inset (#276) is furniture whatever the regions
+    # say: its roads are real but drawn at another scale, so the affine's OSM
+    # label is wrong there. Cut it out of the supervised extent.
+    for ring in inset_rings(sheet.image_path):
+        cv2.fillPoly(
+            extent, [np.asarray(ring.exterior.coords, dtype=np.int32)], color=0
+        )
+    return extent
 
 
 def sheet_label(

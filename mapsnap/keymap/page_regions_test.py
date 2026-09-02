@@ -339,3 +339,27 @@ def test_pick_ladder_scale_prefers_the_finest_within_margin():
     assert pick_ladder_scale({3000: 1.6, 2250: 1.2, 1500: 0.4, 1000: 0.5}) == 1500
     # Infinite scores (no regions at all) never win.
     assert pick_ladder_scale({3000: float("inf"), 1500: 0.9}) == 1500
+
+
+def test_load_seeds_skips_reads_masked_as_inset(tmp_path):
+    import json
+
+    from mapsnap.keymap.page_regions import load_seeds
+
+    path = tmp_path / "p0.keymap.json"
+    path.write_text(
+        json.dumps(
+            {
+                "streets": [
+                    {
+                        "text": "4",
+                        "inset": True,
+                        "polygon": [[0, 0], [2, 0], [2, 2], [0, 2]],
+                    },
+                    {"text": "310", "polygon": [[4, 4], [6, 4], [6, 6], [4, 6]]},
+                ]
+            }
+        )
+    )
+    boxes, texts = load_seeds(path)
+    assert texts == ["310"] and len(boxes) == 1

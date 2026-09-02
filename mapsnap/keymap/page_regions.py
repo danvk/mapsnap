@@ -38,6 +38,8 @@ from scipy import ndimage as ndi
 from skimage.color import lab2rgb, rgb2lab
 from skimage.segmentation import watershed
 
+from mapsnap.keymap.records import live_detections
+
 Point = tuple[float, float]
 Box = tuple[float, float, float, float]  # x0, y0, x1, y1 (full-res pixels)
 ScaledBox = tuple[int, int, int, int]  # col0, row0, col1, row1 in label-image pixels
@@ -61,7 +63,7 @@ def load_seeds(keymap_path: Path) -> tuple[list[Box], list[str]]:
     streets = json.loads(keymap_path.read_text()).get("streets", [])
     boxes: list[Box] = []
     texts: list[str] = []
-    for street in streets:
+    for street in live_detections(streets):  # an inset's numerals seed nothing
         boxes.append(polygon_bounds(street["polygon"]))
         texts.append(str(street.get("text", "")))
     return boxes, texts
