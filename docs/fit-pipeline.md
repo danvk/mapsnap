@@ -7,7 +7,9 @@ the page's `<stem>.txt` sidecar or the run's fit log for the quoted messages.
 
 Key-map sheets keep a second log, `raw/<stem>.keymap.txt`, beside their other
 key-map sidecars: one section per stage — `split` (whether the sheet's split
-stood, per-panel share and edge-flushness, stale sidecars removed),
+stood, per-panel share and edge-flushness, stale sidecars removed, and any
+corner box the key-map-only detector cut away where the divider pipeline had
+left the sheet whole: a second key map, an index inset, a legend),
 `keymap-plan` / `keymap-detect` (how the sheet was nominated and confirmed as a
 key map), `detect-numbers` (candidates, reads, valid page keys not read),
 `assignment-repair`, `cartouche` (the GRAPHIC MAP / KEY / INDEX words read and
