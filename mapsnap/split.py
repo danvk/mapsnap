@@ -28,6 +28,7 @@ from shapely.geometry import LineString, Point, Polygon, box
 from shapely.ops import polygonize, unary_union
 from skimage.morphology import medial_axis
 
+from mapsnap.corner_boxes import BOX_MIN_THICK_PX, corner_boxes, panels_with_boxes
 from mapsnap.keymap.log import append_keymap_log
 from mapsnap.utils import image_stem, jpeg_dimensions
 
@@ -1268,6 +1269,69 @@ def is_keymap_sheet(stem: str) -> bool:
     return match is not None and int(match.group(1)) in (0, 1)
 
 
+def keymap_box_sheet(image_path: Path) -> bool:
+    """Whether a key-map candidate sheet is one the corner-box detector may cut.
+
+    The page-0 family and letter sheets are the key map in every volume censused
+    (mapsnap.keymap.identify.detection_plan); a page-1 sheet is only when the
+    volume has no page 0, and is otherwise an ordinary map page whose corner a
+    diagonal street or a fold could carve into a box-shaped panel.
+    """
+    stem = panel_basename(image_path)
+    if not is_keymap_sheet(stem):
+        return False
+    if re.fullmatch(r"p1[A-Za-z]{0,2}", stem):
+        return not any(image_path.parent.glob("p0*.jpg"))
+    return True
+
+
+def box_candidates(
+    lines: np.ndarray, h: int, w: int, binary: np.ndarray
+) -> list[tuple[float, float, float, float]]:
+    """Long segments at least BOX_MIN_THICK_PX thick, uncapped.
+
+    The corner-box detector's input (mapsnap.corner_boxes): the divider
+    pipeline's MAX_DIVIDER_CANDIDATES gate and its 5 px thickness floor are what
+    hide a key map's boxed regions, so this is the same merge and length filter
+    without them.
+    """
+    merged = merge_collinear(filter_segments(lines, h, w), MERGE_GAP_FRAC * min(h, w))
+    dist = cv2.distanceTransform((binary > 0).astype(np.uint8), cv2.DIST_L2, 5)
+    return [
+        seg
+        for seg in keep_long_segments(merged, h, w)
+        if segment_thickness(dist, seg) >= BOX_MIN_THICK_PX
+    ]
+
+
+def keymap_corner_box_panels(
+    lines: np.ndarray, h: int, w: int, binary: np.ndarray
+) -> tuple[list, list[str]]:
+    """Panels cut by the corner-box detector, in the full frame, with log lines.
+
+    No panels when no box is found, or when the boxes do not leave one clean
+    remainder; the log lines say what was found either way.
+    """
+    candidates = box_candidates(lines, h, w, binary)
+    boxes = corner_boxes(candidates, binary, h, w)
+    log_lines = [
+        (
+            f"corner boxes: {len(boxes)} found among {len(candidates)} "
+            "box-thick candidate segment(s)"
+        )
+    ]
+    for candidate in boxes:
+        share = candidate.area / (h * w)
+        log_lines.append(
+            f"  {'-'.join(candidate.corner)} box, {share:.1%} of the sheet: "
+            f"{candidate.detail}"
+        )
+    panels = panels_with_boxes([candidate.polygon for candidate in boxes], h, w)
+    if boxes and not panels:
+        log_lines.append("  boxes do not leave one clean remainder; sheet stands whole")
+    return expand_to_full_frame(panels, h, w, BORDER_PX), log_lines
+
+
 def keymap_split_rejection(panels: list, width: float, height: float) -> str | None:
     """Why a key-map sheet's split must be refused, or None when it may stand.
 
@@ -1373,35 +1437,51 @@ def process_image(image_path: Path, debug: bool = False) -> None:
 
     # A single panel covering the whole page means no split was found.
     is_single_full = len(panels) == 1 and panels[0].area >= 0.99 * full_h * full_w
+    # A key-map sheet only gives up boxed edge regions; anything else is a bad
+    # cut and the sheet stands whole (#276).
+    rejection = (
+        keymap_split_rejection(panels, full_w, full_h)
+        if is_keymap_sheet(base) and not is_single_full
+        else None
+    )
+    # Where the divider pipeline leaves a key-map sheet whole, look for the
+    # boxed corners its safety gates hide: a second key map, an index inset, a
+    # legend (mapsnap.corner_boxes).
+    box_lines: list[str] = []
+    if (is_single_full or rejection) and keymap_box_sheet(image_path):
+        box_panels, box_lines = keymap_corner_box_panels(lines, h, w, binary)
+        if box_panels:
+            panels, is_single_full, rejection = box_panels, False, None
+            print(f"{image_path.name}: key-map sheet, corner box(es) cut away")
     if is_single_full:
         print(f"{image_path.name}: single panel — not split")
         for index in range(1, len(previous_rings) + 1):
             remove_panel_sidecars(image_path, index)
         if is_keymap_sheet(base):
-            append_keymap_log(image_path, "split", ["single panel — not split"])
-        return
-    # A key-map sheet only gives up boxed edge regions; anything else is a bad
-    # cut and the sheet stands whole (#276). The stale panels were removed
-    # above; drop their sidecars too so nothing downstream keeps reading them.
-    if is_keymap_sheet(base):
-        rejection = keymap_split_rejection(panels, full_w, full_h)
-        if rejection:
-            print(f"{image_path.name}: key-map sheet, split rejected — {rejection}")
-            removed = []
-            for index in range(1, len(previous_rings) + 1):
-                removed += remove_panel_sidecars(image_path, index)
-            if raw_path.exists():
-                remove_split_outputs(raw_path)
             append_keymap_log(
-                image_path,
-                "split",
-                [
-                    f"split rejected — {rejection}",
-                    *panel_summary_lines(panels, full_w, full_h),
-                    f"removed {len(removed)} stale panel sidecar(s) from an earlier split",
-                ],
+                image_path, "split", ["single panel — not split", *box_lines]
             )
-            return
+        return
+    if rejection:
+        # The stale panels were removed above; drop their sidecars too so
+        # nothing downstream keeps reading them.
+        print(f"{image_path.name}: key-map sheet, split rejected — {rejection}")
+        removed = []
+        for index in range(1, len(previous_rings) + 1):
+            removed += remove_panel_sidecars(image_path, index)
+        if raw_path.exists():
+            remove_split_outputs(raw_path)
+        append_keymap_log(
+            image_path,
+            "split",
+            [
+                f"split rejected — {rejection}",
+                *panel_summary_lines(panels, full_w, full_h),
+                *box_lines,
+                f"removed {len(removed)} stale panel sidecar(s) from an earlier split",
+            ],
+        )
+        return
     ordered = order_panels(panels, full_h)  # panels are in the uncropped frame
     out_paths = write_panels(image_path, ordered, base)
     print(
@@ -1415,6 +1495,7 @@ def process_image(image_path: Path, debug: bool = False) -> None:
                 f"split accepted: {len(ordered)} panels → "
                 + ", ".join(path.name for path in out_paths),
                 *panel_summary_lines(ordered, full_w, full_h),
+                *box_lines,
             ],
         )
     changed = invalidate_changed_panels(
