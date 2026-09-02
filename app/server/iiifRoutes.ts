@@ -28,6 +28,7 @@ import {
   parseMissingTruthKeys,
 } from './compareTxt.ts';
 import { findVolumes, volumePages } from './adjacencyTruth.ts';
+import { keymapInfos } from './keymapInfos.ts';
 import { runArtifactDir, runArtifactStems } from './runArtifacts.ts';
 import { withTiles } from './iiifAnnotations.ts';
 import { isSafeSegment, isSafeVolume } from './volumePaths.ts';
@@ -415,29 +416,15 @@ export function registerIiifApi(
   });
 
   // A volume's key-map sheets and which visualization sidecars each has, so the viewer can link
-  // to them. Key maps are `raw/<stem>.keymap.json`; siblings <stem>.regions.panels.json and
-  // <stem>.georef.json are the region and georef views. ?volume=<dir> → { keymaps: [...] }.
+  // to them and draw the key-map underlay (see keymapInfos). ?volume=<dir> → { keymaps: [...] }.
   router.get('/iiif-api/keymaps', async (_params, request) => {
     const { volume } = request.query;
     if (!isSafeVolume(volume)) {
       throw new HTTPError(400, `invalid volume: ${volume}`);
     }
-    let files: string[];
-    try {
-      files = await readdir(join(dataDir, volume, 'raw'));
-    } catch {
-      return { keymaps: [] }; // no raw/ directory: volume has no key maps
-    }
-    const present = new Set(files);
-    const keymaps = files
-      .filter((file) => file.endsWith('.keymap.json'))
-      .map((file) => file.slice(0, -'.keymap.json'.length))
-      .sort()
-      .map((stem) => ({
-        stem,
-        hasRegions: present.has(`${stem}.regions.panels.json`),
-        hasGeoref: present.has(`${stem}.georef.json`),
-      }));
-    return { keymaps };
+    const serviceBaseUrl = `${request.protocol}://${request.get('host')}/iiif/${volume}/raw`;
+    return {
+      keymaps: await keymapInfos(join(dataDir, volume, 'raw'), serviceBaseUrl),
+    };
   });
 }

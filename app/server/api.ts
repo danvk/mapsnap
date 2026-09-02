@@ -148,6 +148,18 @@ export interface KeymapInfo {
   hasRegions: boolean;
   /** Whether a `raw/<stem>.georef.json` sidecar exists. */
   hasGeoref: boolean;
+  /** Whether a `raw/<stem>.roadprob.png` key-map P(road) map exists (#211). */
+  hasRoadprob: boolean;
+  /**
+   * The georef's four (lon, lat) corners of the raw sheet -- top-left,
+   * top-right, bottom-right, bottom-left -- when the georef has them. They
+   * place the key-map underlay.
+   */
+  corners?: [number, number][];
+  /** Absolute IIIF image service URL of the raw sheet (`.../raw/<stem>.jpg`), when present. */
+  imageService?: string;
+  /** Absolute IIIF image service URL of the key map's P(road) PNG, when present. */
+  roadprobService?: string;
 }
 
 /**

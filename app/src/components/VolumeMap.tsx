@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import maplibregl from 'maplibre-gl';
 import 'maplibre-gl/dist/maplibre-gl.css';
 import { WarpedMapLayer } from '@allmaps/maplibre';
+import type { KeymapUnderlay } from '../iiif/underlay';
 import type { FeatureCollection } from 'geojson';
 import { pointInPolygon } from '../geometry';
 import { hasFootprint, type PageGeo } from '../iiif/pages';
@@ -42,6 +43,11 @@ interface VolumeMapProps {
       [number, number],
     ];
   } | null;
+  /**
+   * The key-map underlay (#211): the volume's georeferenced key map(s) drawn
+   * beneath the pages, as the sheet or as its P(road) map. Empty removes them.
+   */
+  keymapUnderlays: KeymapUnderlay[];
   /**
    * Show only the selected page's warped image, hiding every other sheet.
    * No-op while nothing is selected -- isolating "nothing" would blank the map.
@@ -139,6 +145,7 @@ export function VolumeMap(props: VolumeMapProps) {
     truthPages,
     showMissing,
     snapOverlay,
+    keymapUnderlays,
     isolateSelected,
     selectedItemIndex,
     onSelectPage,
@@ -482,6 +489,54 @@ export function VolumeMap(props: VolumeMapProps) {
       setMapReady(false);
     };
   }, []);
+
+  // The key-map underlay (#211): each georeferenced key map as an image
+  // source at its corner coordinates, inserted BENEATH the pages layer so the
+  // pages (dimmed with the opacity slider) can be read against it. Reconciled
+  // against the previous set: a mode switch swaps the image in place.
+  const underlayIdsRef = useRef<Set<string>>(new Set());
+  useEffect(() => {
+    const map = mapRef.current;
+    const pagesLayer = layerRef.current;
+    if (!map || !pagesLayer || !mapReady) return;
+    const wanted = new Map(
+      keymapUnderlays.map((underlay) => [
+        `keymap-underlay-${underlay.id}`,
+        underlay,
+      ]),
+    );
+    for (const id of [...underlayIdsRef.current]) {
+      if (wanted.has(id)) continue;
+      if (map.getLayer(id)) map.removeLayer(id);
+      if (map.getSource(id)) map.removeSource(id);
+      underlayIdsRef.current.delete(id);
+    }
+    for (const [id, underlay] of wanted) {
+      const existing = map.getSource(id) as maplibregl.ImageSource | undefined;
+      if (existing) {
+        existing.updateImage({
+          url: underlay.url,
+          coordinates: underlay.corners,
+        });
+        continue;
+      }
+      map.addSource(id, {
+        type: 'image',
+        url: underlay.url,
+        coordinates: underlay.corners,
+      });
+      map.addLayer(
+        {
+          id,
+          type: 'raster',
+          source: id,
+          paint: { 'raster-opacity': 1, 'raster-fade-duration': 0 },
+        },
+        pagesLayer.id,
+      );
+      underlayIdsRef.current.add(id);
+    }
+  }, [mapReady, keymapUnderlays]);
 
   // The snap-debugger pose overlay (#325): the selected candidate's P(road)
   // map as an image source at the pose's corner coordinates. Added/updated/
