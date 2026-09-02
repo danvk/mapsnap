@@ -34,8 +34,9 @@ class PanelsJson(TypedDict):
     """Contents of a <stem>.panels.json sidecar.
 
     panels is a list of polygon rings (one per panel) in the pixel frame of the named
-    image, recorded via width/height. Panels are in reading order so panels[i-1]
-    corresponds to <base>__i.jpg.
+    image, recorded via width/height, ordered so panels[i-1] corresponds to
+    <base>__i.jpg. The order is OIM's for two-panel sheets (the panel holding the
+    sheet's bottom-left corner first) and reading order otherwise; see order_panels.
     """
 
     image: str
@@ -1096,14 +1097,103 @@ def compute_panels(
     return panels
 
 
-def order_panels(panels: list) -> list:
-    """Panels in reading order (top to bottom, then left to right).
+def order_panels(panels: list, height: float | None = None) -> list:
+    """Panels in the order their __N numbering will follow.
+
+    Two panels: the one holding the sheet's BOTTOM-LEFT corner comes first
+    (#379). That is OIM's numbering on every two-panel truth sheet in the corpus
+    -- 200 of 200, clean cuts, L-shaped cuts and corner insets alike -- because
+    OIM keeps region boundaries in a y-up frame whose origin is that corner. A
+    volunteer's division_number turns out to be the order the regions are drawn
+    and is unpredictable past two, so three or more panels keep reading order
+    (top to bottom, then left to right), which is as good as any. ``height`` is
+    the image height the panels were detected in; without it two panels fall
+    back to reading order.
 
     Ordering happens once, at the scale the panels were detected at, so a
     raw-resolution copy written from scaled polygons keeps identical numbering
     (the row-bucketing would bucket differently at 4x coordinates).
     """
+    if len(panels) == 2 and height is not None:
+        bottom_left = Point(0.0, float(height))
+        return sorted(panels, key=lambda p: p.distance(bottom_left))
     return sorted(panels, key=lambda p: (round(p.bounds[1] / 50), p.bounds[0]))
+
+
+# Everything derived from one panel image. A re-split that changes a panel's
+# ring -- or its number -- makes all of these describe a different picture,
+# and `mapsnap ocr --resume` keys only on a streets.json existing (plus the
+# recognizer weights), so a stale one would be silently reused.
+PANEL_SIDECAR_SUFFIXES = (
+    "boxes.json",
+    "streets.json",
+    "txt",
+    "contradiction.json",
+)
+
+
+def remove_panel_sidecars(image_path: Path, index: int) -> list[Path]:
+    """Delete every derived sidecar of <base>__index beside image_path; return them.
+
+    Covers the fixed suffixes above plus every georef variant
+    (<base>__index.georef*.json). The panel image itself is handled by
+    remove_split_outputs.
+    """
+    base = panel_basename(image_path)
+    stem = f"{base}__{index}"
+    removed: list[Path] = []
+    candidates = [
+        image_path.parent / f"{stem}.{suffix}" for suffix in PANEL_SIDECAR_SUFFIXES
+    ]
+    candidates += sorted(image_path.parent.glob(f"{stem}.georef*.json"))
+    for path in candidates:
+        if path.exists():
+            path.unlink()
+            removed.append(path)
+    return removed
+
+
+def rings_match(
+    a: list[list[float]], b: list[list[float]], tolerance: float = 0.5
+) -> bool:
+    """Whether two serialized panel rings describe the same polygon.
+
+    Compared as polygons, not vertex lists, so a ring that merely starts at a
+    different vertex or runs the other way round still matches -- a spurious
+    mismatch would cost a needless re-OCR, not correctness. ``tolerance`` is
+    the mean boundary displacement, in pixels, that still counts as the same
+    panel (the symmetric difference divided by the perimeter).
+    """
+    if len(a) < 3 or len(b) < 3:
+        return False
+    pa, pb = Polygon(a).buffer(0), Polygon(b).buffer(0)
+    perimeter = max(pa.length, pb.length)
+    if perimeter <= 0:
+        return pa.equals(pb)
+    return pa.symmetric_difference(pb).area <= tolerance * perimeter
+
+
+def invalidate_changed_panels(
+    image_path: Path,
+    old_rings: list[list[list[float]]],
+    new_rings: list[list[list[float]]],
+) -> list[int]:
+    """Drop the sidecars of every panel index whose ring changed; return those indices.
+
+    Compares the previous panels.json rings with the new ones index by index:
+    an index whose ring is unchanged keeps its OCR reads and fits, one whose
+    ring moved (or which no longer exists) loses them, so a later
+    ``mapsnap ocr --resume`` re-reads exactly the panels that need it. Renumbering
+    under #379 shows up here as two swapped rings.
+    """
+    changed: list[int] = []
+    for i in range(1, max(len(old_rings), len(new_rings)) + 1):
+        old = old_rings[i - 1] if i <= len(old_rings) else None
+        new = new_rings[i - 1] if i <= len(new_rings) else None
+        unchanged = old is not None and new is not None and rings_match(old, new)
+        if not unchanged and remove_panel_sidecars(image_path, i):
+            changed.append(i)
+    return changed
 
 
 def write_panels(image_path: Path, panels: list, base: str) -> list[Path]:
@@ -1155,6 +1245,13 @@ def process_image(image_path: Path, debug: bool = False) -> None:
     base = panel_basename(image_path)
     out_dir = image_path.parent
 
+    # Remember the previous panels so sidecars of panels that do not change
+    # can survive the re-split (see invalidate_changed_panels).
+    previous_path = panels_json_path(image_path)
+    previous_rings: list[list[list[float]]] = (
+        read_panels_json(previous_path)["panels"] if previous_path.exists() else []
+    )
+
     # Regenerate from scratch: drop any stale panels from a previous run.
     remove_split_outputs(image_path)
 
@@ -1199,12 +1296,24 @@ def process_image(image_path: Path, debug: bool = False) -> None:
     is_single_full = len(panels) == 1 and panels[0].area >= 0.99 * full_h * full_w
     if is_single_full:
         print(f"{image_path.name}: single panel — not split")
+        for index in range(1, len(previous_rings) + 1):
+            remove_panel_sidecars(image_path, index)
         return
-    ordered = order_panels(panels)
+    ordered = order_panels(panels, full_h)  # panels are in the uncropped frame
     out_paths = write_panels(image_path, ordered, base)
     print(
         f"{image_path.name}: {len(panels)} panels → {', '.join(p.name for p in out_paths)}"
     )
+    changed = invalidate_changed_panels(
+        image_path,
+        previous_rings,
+        read_panels_json(panels_json_path(image_path))["panels"],
+    )
+    if changed:
+        print(
+            f"  panels {changed} changed since the last split; their reads and "
+            "fits were removed (re-run ocr --resume)."
+        )
 
     # Mirror the split onto the full-resolution copy, if one exists: the key-map
     # pipeline needs raw/<panel>.jpg when the key map shares its sheet with

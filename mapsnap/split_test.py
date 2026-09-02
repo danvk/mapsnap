@@ -11,12 +11,16 @@ from mapsnap.split import (
     BORDER_PX,
     assemble_panels,
     crop_border,
+    invalidate_changed_panels,
     merge_collinear,
+    order_panels,
     panel_basename,
     panel_compactness,
     panels_json_path,
     read_panels_json,
+    remove_panel_sidecars,
     remove_split_outputs,
+    rings_match,
     seg_angle_deg,
     segment_thickness,
     write_panels_json,
@@ -64,6 +68,108 @@ def test_remove_split_outputs_deletes_panels_and_json(tmp_path):
     assert not (tmp_path / "p2__2.jpg").exists()
     assert not (tmp_path / "p2.panels.json").exists()
     assert (tmp_path / "p3__1.jpg").exists()
+
+
+# --- panel ordering (#379) and sidecar invalidation ---
+
+
+def test_order_panels_two_panels_bottom_left_first():
+    """OIM numbers the panel holding the sheet's bottom-left corner first (200/200)."""
+    top, bottom = box(0, 0, 100, 50), box(0, 50, 100, 100)
+    assert order_panels([top, bottom], height=100) == [bottom, top]
+    left, right = box(0, 0, 50, 100), box(50, 0, 100, 100)
+    assert order_panels([right, left], height=100) == [left, right]
+    # A bottom-left inset is numbered first; an inset in any other corner is
+    # second, behind the big panel that owns the bottom-left corner.
+    big_with_notch = box(0, 0, 100, 100).difference(box(0, 70, 30, 100))
+    inset_bottom_left = box(0, 70, 30, 100)
+    assert order_panels([big_with_notch, inset_bottom_left], height=100) == [
+        inset_bottom_left,
+        big_with_notch,
+    ]
+    big_notch_top_right = box(0, 0, 100, 100).difference(box(70, 0, 100, 30))
+    inset_top_right = box(70, 0, 100, 30)
+    assert order_panels([inset_top_right, big_notch_top_right], height=100) == [
+        big_notch_top_right,
+        inset_top_right,
+    ]
+
+
+def test_order_panels_reading_order_otherwise():
+    # Three or more panels: OIM's order is unpredictable, so reading order stays.
+    a, b, c = box(0, 0, 50, 50), box(50, 0, 100, 50), box(0, 50, 100, 100)
+    assert order_panels([c, b, a], height=100) == [a, b, c]
+    # Without a height, two panels also fall back to reading order.
+    top, bottom = box(0, 0, 100, 50), box(0, 50, 100, 100)
+    assert order_panels([bottom, top]) == [top, bottom]
+
+
+def test_rings_match_compares_polygons_not_vertex_lists():
+    ring = [[0.0, 0.0], [100.0, 0.0], [100.0, 50.0], [0.0, 50.0], [0.0, 0.0]]
+    nudged = [[0.3, 0.0], [100.0, 0.4], [100.0, 50.0], [0.0, 50.0], [0.0, 0.0]]
+    rotated_start = [[100.0, 0.0], [100.0, 50.0], [0.0, 50.0], [0.0, 0.0], [100.0, 0.0]]
+    reversed_ring = list(reversed(ring))
+    moved = [[0.0, 0.0], [100.0, 0.0], [100.0, 60.0], [0.0, 60.0], [0.0, 0.0]]
+    assert rings_match(ring, nudged)
+    assert rings_match(ring, rotated_start)
+    assert rings_match(ring, reversed_ring)
+    assert not rings_match(ring, moved)
+    assert not rings_match(ring, ring[:2])
+
+
+def test_remove_panel_sidecars_takes_every_derived_file_of_one_panel(tmp_path):
+    for name in (
+        "p5__1.boxes.json",
+        "p5__1.streets.json",
+        "p5__1.txt",
+        "p5__1.georef.json",
+        "p5__1.georef-final.json",
+        "p5__1.georef-snap.json",
+        "p5__1.jpg",  # the image is remove_split_outputs' job
+        "p5__2.streets.json",  # the sibling panel is untouched
+        "p50__1.streets.json",  # a different page sharing the prefix is untouched
+    ):
+        (tmp_path / name).touch()
+    removed = {path.name for path in remove_panel_sidecars(tmp_path / "p5.jpg", 1)}
+    assert removed == {
+        "p5__1.boxes.json",
+        "p5__1.streets.json",
+        "p5__1.txt",
+        "p5__1.georef.json",
+        "p5__1.georef-final.json",
+        "p5__1.georef-snap.json",
+    }
+    assert (tmp_path / "p5__1.jpg").exists()
+    assert (tmp_path / "p5__2.streets.json").exists()
+    assert (tmp_path / "p50__1.streets.json").exists()
+
+
+def test_invalidate_changed_panels_keeps_unchanged_reads(tmp_path):
+    """A re-split drops the reads of panels whose ring changed and only those.
+
+    `mapsnap ocr --resume` keys on a streets.json existing, so a panel that was
+    renumbered (#379) or re-cut would otherwise keep reads taken from a
+    different picture.
+    """
+    old: list[list[list[float]]] = [
+        [[0.0, 0.0], [100.0, 0.0], [100.0, 50.0], [0.0, 50.0], [0.0, 0.0]],
+        [[0.0, 50.0], [100.0, 50.0], [100.0, 100.0], [0.0, 100.0], [0.0, 50.0]],
+        [[0.0, 100.0], [100.0, 100.0], [100.0, 150.0], [0.0, 150.0], [0.0, 100.0]],
+    ]
+    # Panels 1 and 2 swap (renumbering); panel 3 disappears.
+    new = [old[1], old[0]]
+    for index in (1, 2, 3):
+        (tmp_path / f"p9__{index}.streets.json").touch()
+    (tmp_path / "p9__2.georef.json").touch()
+    changed = invalidate_changed_panels(tmp_path / "p9.jpg", old, new)
+    assert changed == [1, 2, 3]
+    assert not any((tmp_path / f"p9__{i}.streets.json").exists() for i in (1, 2, 3))
+    assert not (tmp_path / "p9__2.georef.json").exists()
+
+    # Identical rings keep everything.
+    (tmp_path / "p9__1.streets.json").touch()
+    assert invalidate_changed_panels(tmp_path / "p9.jpg", new, new) == []
+    assert (tmp_path / "p9__1.streets.json").exists()
 
 
 # --- crop_border ---
