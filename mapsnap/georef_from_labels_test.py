@@ -1978,3 +1978,81 @@ def test_cluster_gcp_hints_ranks_consistent_cluster_first():
     # Largest cluster (the 3 near points) first, its median inside the group.
     assert abs(hints[0][0] - -96.0001) < 1e-3 and abs(hints[0][1] - 46.0002) < 1e-3
     assert cluster_gcp_hints([]) == []
+
+
+def _street_block_index(names: list[str]) -> dict[str, list[Block]]:
+    """A block_index keyed by normalized street name, one throwaway block per street."""
+    return {
+        name: [
+            Block(street_name=name, coords=np.array([(-86.8, 36.16), (-86.79, 36.16)]))
+        ]
+        for name in names
+    }
+
+
+def test_prepare_label_features_logs_reads_that_match_no_street(tmp_path, capsys):
+    """A confident, gate-passing read naming no known street is reported, not dropped silently.
+
+    Nashville p24's "JOHNSTON" (conf 1.000) names Jo Johnston Avenue, whose leading "JO" the
+    prefix-anchored matcher cannot strip. It cleared every gate and then vanished with no log
+    line at all, because the canonicalization loop is simply a no-op on an empty match list
+    and "Filtered detections" counts what survived it (#373).
+    """
+    from mapsnap.georef_from_labels import prepare_label_features
+
+    labels_path = tmp_path / "p24.streets.json"
+    _write_streets_json(
+        labels_path,
+        [
+            _make_det(
+                "CHARLOTTE", 400, 1700, long_side=118.0, short_side=24.0, confidence=1.0
+            ),
+            _make_det(
+                "JOHNSTON", 900, 180, long_side=118.0, short_side=24.0, confidence=1.0
+            ),
+        ],
+    )
+    block_index = _street_block_index(["CHARLOTTE AVENUE", "JO JOHNSTON AVENUE"])
+
+    features = prepare_label_features(
+        str(labels_path),
+        block_index,
+        (1650, 2010),
+        min_confidence=0.5,
+        min_short_side=20.0,
+        min_long_side=40.0,
+        min_aspect_ratio=1.0,
+    )
+
+    assert [f.text for f in features] == ["CHARLOTTE AVENUE"]
+    err = capsys.readouterr().err
+    assert (
+        "Dropped 1 admitted detection(s) matching no street: JOHNSTON(24px,1.00)" in err
+    )
+
+
+def test_prepare_label_features_stays_quiet_when_every_read_matches(tmp_path, capsys):
+    """No line when there is nothing to report -- the log fires per page, so silence matters."""
+    from mapsnap.georef_from_labels import prepare_label_features
+
+    labels_path = tmp_path / "p25.streets.json"
+    _write_streets_json(
+        labels_path,
+        [
+            _make_det(
+                "CHARLOTTE", 400, 1700, long_side=118.0, short_side=24.0, confidence=1.0
+            )
+        ],
+    )
+
+    prepare_label_features(
+        str(labels_path),
+        _street_block_index(["CHARLOTTE AVENUE"]),
+        (1650, 2010),
+        min_confidence=0.5,
+        min_short_side=20.0,
+        min_long_side=40.0,
+        min_aspect_ratio=1.0,
+    )
+
+    assert "matching no street" not in capsys.readouterr().err
