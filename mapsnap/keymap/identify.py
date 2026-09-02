@@ -52,6 +52,7 @@ from mapsnap.keymap.fit_keymap import (
 )
 from mapsnap.keymap.number_model import build_model, select_device
 from mapsnap.keymap.records import page_key_sort, write_keymaps_record
+from mapsnap.split import panels_json_path, read_panels_json
 from mapsnap.utils import image_stem
 
 DEFAULT_CNN_WEIGHTS = Path("models/number_detector.pt")
@@ -135,6 +136,59 @@ def page_zero_stems(volume: Path) -> tuple[list[str], list[str]]:
     return unsplit, splits
 
 
+# A panel edge within this fraction of the sheet's size counts as flush with it.
+FLUSH_EDGE_TOLERANCE = 0.02
+# A panel covering at least this fraction of the sheet is the sheet itself, not
+# something cut away from it.
+CUT_AWAY_MAX_AREA = 0.5
+
+
+def panel_flush_edges(ring: list[list[float]], width: float, height: float) -> int:
+    """How many of the sheet's four edges a panel ring touches (0-4)."""
+    xs = [point[0] for point in ring]
+    ys = [point[1] for point in ring]
+    tol_x, tol_y = FLUSH_EDGE_TOLERANCE * width, FLUSH_EDGE_TOLERANCE * height
+    return sum(
+        (
+            min(xs) <= tol_x,
+            min(ys) <= tol_y,
+            max(xs) >= width - tol_x,
+            max(ys) >= height - tol_y,
+        )
+    )
+
+
+def legitimate_keymap_split(volume: Path, parent: str) -> bool:
+    """Whether a split of a key-map sheet cut away real boxed regions, not a notch.
+
+    What a key-map sheet legitimately loses to a split is a boxed region in a
+    corner or along an edge: the KEY legend (Detroit, Chicago), a "graphic map
+    of volumes" inset (Kansas City, New Orleans 1951). Every one of those is
+    flush with at least two sheet edges. A cut-away flush with fewer is the
+    splitter latching onto interior linework -- Chicago's 4% notch at the top
+    of the sheet, flush with one edge, carried ten page numbers (1-5, 17, 18,
+    31, 61, 64) that the key-map panel then never read. Measured over every
+    split key-map sheet in the corpus (9 panels): key-map panels are flush
+    with four edges, legitimate cut-aways with two, the one bad cut with one.
+
+    Without a panels.json there is nothing to judge, so the split stands.
+    """
+    path = panels_json_path(volume / f"{parent}.jpg")
+    if not path.exists():
+        return True
+    data = read_panels_json(path)
+    width, height = float(data["width"]), float(data["height"])
+    for ring in data["panels"]:
+        xs = [point[0] for point in ring]
+        ys = [point[1] for point in ring]
+        area = (max(xs) - min(xs)) * (max(ys) - min(ys))
+        if area >= CUT_AWAY_MAX_AREA * width * height:
+            continue  # the sheet itself, whatever was cut from it
+        if panel_flush_edges(ring, width, height) < 2:
+            return False
+    return True
+
+
 def detection_plan(volume: Path) -> tuple[list[str], list[str]]:
     """(keys assumed to be key maps untested, keys to confirm by coverage).
 
@@ -145,20 +199,25 @@ def detection_plan(volume: Path) -> tuple[list[str], list[str]]:
     composite page-0 sheet that has been split into panels: there the sheet
     mixes the key map with a volume-index map or symbol legend (Kansas City
     p0__2, New Orleans 1951 p0__1, New York 1905 p0__2), so each panel is
-    confirmed individually by coverage and the unsplit parent is dropped.
+    confirmed individually by coverage and the unsplit parent is dropped --
+    unless the split is not a legitimate one (legitimate_keymap_split), in
+    which case the panels are ignored and the parent sheet is tested whole.
     """
     page_zero, page_zero_splits = page_zero_stems(volume)
     if page_zero and not page_zero_splits:
         return page_zero, []
     # A candidate sheet that has been split into panels is tested panel-by-panel
     # (the composite may mix the key map with an index map or legend) and the
-    # unsplit parent is dropped.
+    # unsplit parent is dropped -- when the split cut away real boxed regions.
     keys: list[str] = []
     for key in candidate_keys(volume):
         panels = sorted(
             image_stem(str(image)) for image in volume.glob(f"{key}__*.jpg")
         )
-        keys.extend(panels or [key])
+        if panels and legitimate_keymap_split(volume, key):
+            keys.extend(panels)
+        else:
+            keys.append(key)
     return [], keys
 
 
