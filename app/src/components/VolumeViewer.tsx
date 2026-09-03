@@ -274,6 +274,9 @@ export function VolumeViewer() {
       .catch(() => {
         if (!cancelled) setOsmRelation(null);
       });
+    // Drop the previous volume's key maps now, or the underlay briefly asks
+    // for the new volume's key map by the old volume's stem.
+    setKeymaps([]);
     fetchKeymaps(volumeName)
       .then((list) => {
         if (!cancelled) setKeymaps(list);
@@ -440,19 +443,20 @@ export function VolumeViewer() {
   // stays loaded and opacity is only opacity. Clearing the allmaps layer at 0
   // and re-adding the same map at 50 left it blank until a zoom: the clear
   // aborts the in-flight tile fetches the re-add immediately repeats.
-  const [underlayArmed, setUnderlayArmed] = useState(false);
+  // The volume the underlay is armed for: the slider was above 0 while that
+  // volume was selected. Keyed by volume, so switching volumes with the
+  // slider already up arms the new one at once, and a slider parked at 0
+  // does not.
+  const [armedVolume, setArmedVolume] = useState<string | undefined>();
   useEffect(() => {
-    setUnderlayArmed(false);
-  }, [volumeName]);
-  useEffect(() => {
-    if (keymapOpacity > 0) setUnderlayArmed(true);
-  }, [keymapOpacity]);
+    if (keymapOpacity > 0 && volumeName) setArmedVolume(volumeName);
+  }, [keymapOpacity, volumeName]);
   const underlays = useMemo(
     () =>
-      volumeName && underlayArmed
+      volumeName && armedVolume === volumeName
         ? keymapUnderlays(volumeName, keymaps, underlayImage)
         : [],
-    [volumeName, keymaps, underlayImage, underlayArmed],
+    [volumeName, keymaps, underlayImage, armedVolume],
   );
   const selectedIsMissing =
     selectedPage !== null &&
