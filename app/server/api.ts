@@ -13,6 +13,7 @@
 
 import type { Endpoint, GetEndpoint } from 'crosswalk/dist/api-spec';
 import type {
+  GeorefAnnotationPage,
   RewrittenAnnotationResponse,
   VolumeListResponse,
 } from './iiifAnnotations.ts';
@@ -94,6 +95,13 @@ export interface VolumeQuery {
   volume: string;
 }
 
+/** Query naming the underlay image of one key map: its sheet or its P(road) map. */
+export interface KeymapAnnotationQuery {
+  volume: string;
+  stem: string;
+  image: 'sheet' | 'roadprob';
+}
+
 /** Response of GET /api/adjacency-volumes. */
 export interface AdjacencyVolumesResponse {
   volumes: { name: string; pageCount: number; labeledPages: number }[];
@@ -148,6 +156,18 @@ export interface KeymapInfo {
   hasRegions: boolean;
   /** Whether a `raw/<stem>.georef.json` sidecar exists. */
   hasGeoref: boolean;
+  /** Whether a `raw/<stem>.roadprob.png` key-map P(road) map exists (#211). */
+  hasRoadprob: boolean;
+  /**
+   * The georef's four (lon, lat) corners of the raw sheet -- top-left,
+   * top-right, bottom-right, bottom-left -- when the georef has them. They
+   * place the key-map underlay.
+   */
+  corners?: [number, number][];
+  /** Absolute IIIF image service URL of the raw sheet (`.../raw/<stem>.jpg`), when present. */
+  imageService?: string;
+  /** Absolute IIIF image service URL of the key map's P(road) PNG, when present. */
+  roadprobService?: string;
 }
 
 /**
@@ -233,6 +253,9 @@ export interface API {
   };
   '/iiif-api/keymaps': {
     get: GetEndpoint<KeymapsResponse, VolumeQuery>;
+  };
+  '/iiif-api/keymap-annotation': {
+    get: GetEndpoint<GeorefAnnotationPage, KeymapAnnotationQuery>;
   };
   '/api/images': {
     get: GetEndpoint<KeymapImagesResponse>;

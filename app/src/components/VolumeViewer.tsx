@@ -1,4 +1,10 @@
 import { useEffect, useMemo, useState } from 'react';
+import {
+  keymapUnderlays,
+  underlayImageFromParam,
+  underlayImageParam,
+  type KeymapUnderlayImage,
+} from '../iiif/underlay';
 import type {
   GeorefAnnotationPage,
   SkippedItem,
@@ -102,6 +108,15 @@ export function VolumeViewer() {
   const [isolateSelected, setIsolateSelected] = useState(
     () => initialParams.get('only') === '1',
   );
+  // The key-map underlay (#211): which image, and how strongly it shows. The
+  // opacity is independent of the pages' so the two can be cross-faded.
+  const [underlayImage, setUnderlayImage] = useState<KeymapUnderlayImage>(() =>
+    underlayImageFromParam(initialParams.get('underlay')),
+  );
+  const [keymapOpacity, setKeymapOpacity] = useState(() => {
+    const value = Number(initialParams.get('keymap'));
+    return Number.isFinite(value) ? Math.min(100, Math.max(0, value)) : 0;
+  });
   const [error, setError] = useState<string | null>(null);
   // Selection is tracked by page stem (stable across annotation files, unlike the item index).
   const [selectedStem, setSelectedStem] = useState<string | null>(() =>
@@ -259,6 +274,9 @@ export function VolumeViewer() {
       .catch(() => {
         if (!cancelled) setOsmRelation(null);
       });
+    // Drop the previous volume's key maps now, or the underlay briefly asks
+    // for the new volume's key map by the old volume's stem.
+    setKeymaps([]);
     fetchKeymaps(volumeName)
       .then((list) => {
         if (!cancelled) setKeymaps(list);
@@ -318,6 +336,19 @@ export function VolumeViewer() {
       if (e.key !== 'p' || isTypingTarget(e.target)) return;
       const steps = [0, 50, 100];
       setOpacity(
+        (prev) => steps[(steps.indexOf(prev) + 1) % steps.length] ?? 0,
+      );
+    }
+    window.addEventListener('keydown', onKeydown);
+    return () => window.removeEventListener('keydown', onKeydown);
+  }, []);
+
+  // The same 0/50/100% cycle for the key-map underlay, on 'k'.
+  useEffect(() => {
+    function onKeydown(e: KeyboardEvent): void {
+      if (e.key !== 'k' || isTypingTarget(e.target)) return;
+      const steps = [0, 50, 100];
+      setKeymapOpacity(
         (prev) => steps[(steps.indexOf(prev) + 1) % steps.length] ?? 0,
       );
     }
@@ -408,6 +439,25 @@ export function VolumeViewer() {
       ),
     };
   }, [snapOpen, snapRecord, snapSelected, volumeName]);
+  // Nothing is fetched until the underlay is first turned up; after that it
+  // stays loaded and opacity is only opacity. Clearing the allmaps layer at 0
+  // and re-adding the same map at 50 left it blank until a zoom: the clear
+  // aborts the in-flight tile fetches the re-add immediately repeats.
+  // The volume the underlay is armed for: the slider was above 0 while that
+  // volume was selected. Keyed by volume, so switching volumes with the
+  // slider already up arms the new one at once, and a slider parked at 0
+  // does not.
+  const [armedVolume, setArmedVolume] = useState<string | undefined>();
+  useEffect(() => {
+    if (keymapOpacity > 0 && volumeName) setArmedVolume(volumeName);
+  }, [keymapOpacity, volumeName]);
+  const underlays = useMemo(
+    () =>
+      volumeName && armedVolume === volumeName
+        ? keymapUnderlays(volumeName, keymaps, underlayImage)
+        : [],
+    [volumeName, keymaps, underlayImage, armedVolume],
+  );
   const selectedIsMissing =
     selectedPage !== null &&
     selectedItemIndex !== null &&
@@ -434,6 +484,8 @@ export function VolumeViewer() {
       adj: showAdjacency ? '1' : null,
       osm: showOsmRelation ? null : '0',
       only: isolateSelected ? '1' : null,
+      underlay: underlayImageParam(underlayImage),
+      keymap: keymapOpacity > 0 ? String(keymapOpacity) : null,
     });
   }, [
     selectedStem,
@@ -442,6 +494,8 @@ export function VolumeViewer() {
     showAdjacency,
     showOsmRelation,
     isolateSelected,
+    underlayImage,
+    keymapOpacity,
   ]);
 
   function selectVolume(name: string): void {
@@ -565,7 +619,41 @@ export function VolumeViewer() {
               : 'OSM boundary'}
           </label>
         )}
-        <div className="opacity-control">
+        {keymaps.some((keymap) => keymap.hasGeoref && keymap.hasRoadprob) && (
+          <label
+            className="rmse-color-control"
+            title="Show the key map's P(road) map (raw/<stem>.roadprob.png) in place of the sheet: what a key-map snap would match against."
+          >
+            <input
+              type="checkbox"
+              checked={underlayImage === 'roadprob'}
+              onChange={(e) =>
+                setUnderlayImage(e.target.checked ? 'roadprob' : 'sheet')
+              }
+            />
+            as P(road)
+          </label>
+        )}
+        {keymaps.some((keymap) => keymap.hasGeoref) && (
+          <div
+            className="opacity-control"
+            title="Key-map underlay opacity, independent of the pages' (#211). Press k to cycle 0/50/100%."
+          >
+            <label htmlFor="iiif-keymap-opacity-slider">Key map</label>
+            <input
+              type="range"
+              id="iiif-keymap-opacity-slider"
+              min={0}
+              max={100}
+              value={keymapOpacity}
+              onChange={(e) => setKeymapOpacity(Number(e.target.value))}
+            />
+          </div>
+        )}
+        <div
+          className="opacity-control"
+          title="Page opacity. Press p to cycle 0/50/100%."
+        >
           <label htmlFor="iiif-opacity-slider">Opacity</label>
           <input
             type="range"
@@ -595,6 +683,8 @@ export function VolumeViewer() {
         <div className="volume-map-slot" aria-hidden={debugView !== null}>
           <VolumeMap
             snapOverlay={snapOverlay}
+            keymapUnderlays={underlays}
+            keymapOpacity={keymapOpacity / 100}
             annotation={annotation}
             pages={pages}
             missingPages={missingPages}

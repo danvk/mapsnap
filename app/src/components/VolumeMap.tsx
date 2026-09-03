@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import maplibregl from 'maplibre-gl';
 import 'maplibre-gl/dist/maplibre-gl.css';
 import { WarpedMapLayer } from '@allmaps/maplibre';
+import type { KeymapUnderlay } from '../iiif/underlay';
 import type { FeatureCollection } from 'geojson';
 import { pointInPolygon } from '../geometry';
 import { hasFootprint, type PageGeo } from '../iiif/pages';
@@ -42,6 +43,13 @@ interface VolumeMapProps {
       [number, number],
     ];
   } | null;
+  /**
+   * The key-map underlay (#211): the volume's georeferenced key map(s) drawn
+   * beneath the pages, as the sheet or as its P(road) map. Empty removes them.
+   */
+  keymapUnderlays: KeymapUnderlay[];
+  /** Key-map underlay opacity in [0, 1], independent of the pages'. */
+  keymapOpacity: number;
   /**
    * Show only the selected page's warped image, hiding every other sheet.
    * No-op while nothing is selected -- isolating "nothing" would blank the map.
@@ -139,6 +147,8 @@ export function VolumeMap(props: VolumeMapProps) {
     truthPages,
     showMissing,
     snapOverlay,
+    keymapUnderlays,
+    keymapOpacity,
     isolateSelected,
     selectedItemIndex,
     onSelectPage,
@@ -150,6 +160,9 @@ export function VolumeMap(props: VolumeMapProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<maplibregl.Map | null>(null);
   const layerRef = useRef<WarpedMapLayer | null>(null);
+  const keymapLayerRef = useRef<WarpedMapLayer | null>(null);
+  // Read inside the underlay effect without making it depend on the value.
+  const keymapOpacityRef = useRef(0);
 
   // Panel polygons per parent stem, from the volume's pN.panels.json (25%-jpg
   // frame). null = fetched and absent. The SvgSelector is split INTERSECT
@@ -260,6 +273,13 @@ export function VolumeMap(props: VolumeMapProps) {
       'top-left',
     );
     map.on('load', () => {
+      // Added first, so it sits beneath the pages layer: the key map is the
+      // ground the pages are read against, never over them.
+      const keymapLayer = new WarpedMapLayer({
+        layerId: 'keymap-underlay-layer',
+      });
+      map.addLayer(keymapLayer);
+      keymapLayerRef.current = keymapLayer;
       const layer = new WarpedMapLayer();
       map.addLayer(layer);
       map.addSource('rmse-fills', {
@@ -479,9 +499,55 @@ export function VolumeMap(props: VolumeMapProps) {
       map.remove();
       mapRef.current = null;
       layerRef.current = null;
+      keymapLayerRef.current = null;
       setMapReady(false);
     };
   }, []);
+
+  // The key-map underlay (#211): each key map as its own georeference
+  // annotation on a second WarpedMapLayer, so allmaps applies the thin-plate
+  // spline through the sheet's GCPs -- the model keymap-snap places pages in.
+  // The layer sits BENEATH the pages layer, so the pages (dimmed with their
+  // own opacity slider) can be read against it.
+  useEffect(() => {
+    const layer = keymapLayerRef.current;
+    if (!layer || !mapReady) return;
+    layer.clear();
+    let cancelled = false;
+    for (const underlay of keymapUnderlays) {
+      layer
+        .addGeoreferenceAnnotationByUrl(underlay.annotationUrl)
+        .then((results) => {
+          if (cancelled) return;
+          for (const result of results) {
+            if (result instanceof Error) {
+              console.error(`key-map underlay ${underlay.id}`, result);
+            }
+          }
+          // A newly added map starts at full opacity, so reapply the current
+          // value rather than waiting for the next slider move.
+          layer.setLayerOptions(
+            { opacity: keymapOpacityRef.current },
+            { animate: false },
+          );
+        })
+        .catch((error: unknown) => {
+          if (!cancelled)
+            console.error(`key-map underlay ${underlay.id}`, error);
+        });
+    }
+    return () => {
+      cancelled = true;
+    };
+  }, [mapReady, keymapUnderlays]);
+
+  // Key-map opacity, independent of the pages'.
+  useEffect(() => {
+    keymapOpacityRef.current = keymapOpacity;
+    const layer = keymapLayerRef.current;
+    if (!layer || !mapReady) return;
+    layer.setLayerOptions({ opacity: keymapOpacity }, { animate: false });
+  }, [keymapOpacity, mapReady]);
 
   // The snap-debugger pose overlay (#325): the selected candidate's P(road)
   // map as an image source at the pose's corner coordinates. Added/updated/
