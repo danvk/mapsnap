@@ -42,6 +42,20 @@ of them silently corrupts the comparison.
    half of its two-panel pages here — expect `p12__1` and `p12__2` to swap
    meaning on those, in every artifact that names them.
 
+   A key-map sheet whose old split the #383 gate now rejects (Chicago's p0
+   notch) is cleaned up only beside the 25% image: the splitter removes the
+   stale `p0__N.jpg` panels and their sidecars there, but the key-map
+   pipeline's `raw/p0__N.*` copies (`keymap.json`, `georef.json`,
+   `regions.panels.json`, `streets.json`, `txt`, `boxes.json`, `jpg`) are not
+   its to touch and must be deleted by hand, or the key-map chain keeps
+   finding the dead panel. Check with `ls data/$VOL/raw/ | grep __`.
+
+   Deleting a split sheet's `boxes.json` before the run exercises craft's
+   parent-derivation path (#362) for its panels; the parents are detected
+   first and the panels remapped from them (fixed 2026-09-03: the loop used
+   to try every derivation before any detection, so a missing parent file
+   sent every panel to its own detection instead).
+
 2. **Let `split` drop the reads of panels that changed, then `ocr --resume`.**
    `split` compares the new panel rings with the previous `panels.json` and
    deletes every derived sidecar (`boxes.json` / `streets.json` / `txt` /
