@@ -436,13 +436,23 @@ export function VolumeViewer() {
       ),
     };
   }, [snapOpen, snapRecord, snapSelected, volumeName]);
-  // Nothing is fetched until the underlay is actually turned up.
+  // Nothing is fetched until the underlay is first turned up; after that it
+  // stays loaded and opacity is only opacity. Clearing the allmaps layer at 0
+  // and re-adding the same map at 50 left it blank until a zoom: the clear
+  // aborts the in-flight tile fetches the re-add immediately repeats.
+  const [underlayArmed, setUnderlayArmed] = useState(false);
+  useEffect(() => {
+    setUnderlayArmed(false);
+  }, [volumeName]);
+  useEffect(() => {
+    if (keymapOpacity > 0) setUnderlayArmed(true);
+  }, [keymapOpacity]);
   const underlays = useMemo(
     () =>
-      volumeName && keymapOpacity > 0
+      volumeName && underlayArmed
         ? keymapUnderlays(volumeName, keymaps, underlayImage)
         : [],
-    [volumeName, keymaps, underlayImage, keymapOpacity],
+    [volumeName, keymaps, underlayImage, underlayArmed],
   );
   const selectedIsMissing =
     selectedPage !== null &&
