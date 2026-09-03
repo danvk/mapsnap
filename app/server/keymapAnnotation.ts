@@ -11,11 +11,19 @@
  *
  * So the underlay is served as a georeference annotation carrying the sheet's
  * own GCPs with `transformation: thinPlateSpline`, which allmaps renders
- * directly. The one difference from the pipeline is smoothing: allmaps
- * interpolates the GCPs exactly while `keymap_model` smooths them
- * (TPS_SMOOTHING). On the corpus that moves the median by ~2 ft.
+ * directly. allmaps interpolates exactly, while `keymap_model` smooths
+ * (TPS_SMOOTHING), and that smoothing is what keeps straight streets straight
+ * between GCPs (see thinPlateSpline.ts). So the annotation's targets are not
+ * the raw OSM points but the smoothed spline's prediction at each GCP pixel:
+ * the exact spline allmaps fits through those reproduces the pipeline's
+ * surface (measured 0.0 ft apart on New Orleans 1896).
  */
 import type { GeorefAnnotationPage } from './iiifAnnotations.ts';
+import {
+  thinPlateSpline,
+  TPS_SMOOTHING,
+  type Point2,
+} from './thinPlateSpline.ts';
 
 /** One inlier intersection of a key-map georef: sheet pixel and its world point. */
 export interface KeymapGcp {
@@ -94,6 +102,33 @@ function corners(georef: unknown): [number, number][] | undefined {
     : undefined;
 }
 
+/**
+ * The smoothed key-map model's world point at each GCP pixel, in the frame
+ * `keymap_model` uses: metres from the first GCP, with the longitude scale at
+ * the GCPs' mean latitude.
+ */
+export function smoothedTargets(
+  gcps: KeymapGcp[],
+  smoothing: number = TPS_SMOOTHING,
+): [number, number][] {
+  const origin = [gcps[0].lon, gcps[0].lat];
+  const meanLat = gcps.reduce((sum, gcp) => sum + gcp.lat, 0) / gcps.length;
+  const lonScale = M_PER_DEG_LON_EQUATOR * Math.cos((meanLat * Math.PI) / 180);
+  const pixels: Point2[] = gcps.map((gcp) => [gcp.x, gcp.y]);
+  const metres: Point2[] = gcps.map((gcp) => [
+    (gcp.lon - origin[0]) * lonScale,
+    (gcp.lat - origin[1]) * M_PER_DEG_LAT,
+  ]);
+  return thinPlateSpline(
+    pixels,
+    metres,
+    smoothing,
+  )(pixels).map(([x, y]) => [
+    x / lonScale + origin[0],
+    y / M_PER_DEG_LAT + origin[1],
+  ]);
+}
+
 function feature(pixel: [number, number], world: [number, number]) {
   return {
     type: 'Feature' as const,
@@ -132,7 +167,8 @@ export function keymapAnnotation(
   let features: ReturnType<typeof feature>[];
   if (gcps.length >= MIN_KEYMAP_GCPS) {
     transformation = { type: 'thinPlateSpline' };
-    features = gcps.map((gcp) => feature([gcp.x, gcp.y], [gcp.lon, gcp.lat]));
+    const targets = smoothedTargets(gcps);
+    features = gcps.map((gcp, i) => feature([gcp.x, gcp.y], targets[i]));
   } else {
     const ring = corners(georef);
     if (!ring) return null;

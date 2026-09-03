@@ -3,6 +3,7 @@ import {
   consistentGcps,
   keymapAnnotation,
   MIN_KEYMAP_GCPS,
+  smoothedTargets,
   type KeymapGcp,
 } from './keymapAnnotation.ts';
 
@@ -79,6 +80,34 @@ describe('keymapAnnotation', () => {
       (item.target as unknown as { selector: { value: string } }).selector
         .value,
     ).toContain('points="0,0 6397,0 6397,7795 0,7795"');
+  });
+
+  it('hands allmaps the smoothed model targets, not the raw OSM points', () => {
+    // Noisy GCPs: the smoothed spline does not pass through them, so the
+    // annotation's targets differ from the inputs; an exact spline through
+    // the targets is then the pipeline's smoothed surface.
+    const noisy = inliers(40).map((gcp, i) => ({
+      ...gcp,
+      lat: gcp.lat + (i % 3 === 0 ? 0.0004 : 0),
+    }));
+    const page = keymapAnnotation(
+      { width: 6397, height: 7795, intersections: noisy },
+      SERVICE,
+      'id',
+    );
+    const body = page!.items[0].body as unknown as {
+      features: { geometry: { coordinates: number[] } }[];
+    };
+    const moved = body.features.filter(
+      (f, i) => Math.abs(f.geometry.coordinates[1] - noisy[i].lat) > 1e-6,
+    );
+    expect(moved.length).toBeGreaterThan(30);
+    // An affine field is left exactly alone, at any smoothing.
+    const clean = smoothedTargets(inliers(40));
+    clean.forEach(([lon, lat], i) => {
+      expect(lon).toBeCloseTo(inliers(40)[i].lon, 7);
+      expect(lat).toBeCloseTo(inliers(40)[i].lat, 7);
+    });
   });
 
   it('falls back to the affine corners when the sheet has too few GCPs', () => {
