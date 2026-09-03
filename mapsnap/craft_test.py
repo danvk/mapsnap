@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pytest
 
-from mapsnap.craft import expand_images, pending_images
+from mapsnap.craft import expand_images, pending_images, process_pending
 from mapsnap.detect_text import boxes_path, craft_hint, missing_boxes, require_boxes
 
 
@@ -76,3 +76,40 @@ def test_volume_craft_images_covers_panels_and_split_parents(tmp_path):
 
     stems = {Path(p).stem for p in volume_craft_images(tmp_path, ["p0"])}
     assert {"p1", "p2", "p2__1", "p2__2", "p0"} <= stems
+
+
+def test_process_pending_detects_parents_before_deriving_panels(tmp_path):
+    # A split sheet whose parent has NO boxes yet (deleted before a re-run):
+    # the parent must be detected first so the panel can be derived from it,
+    # and the panel must then not be detected on its own.
+    from PIL import Image
+
+    parent = tmp_path / "p12.jpg"
+    Image.new("RGB", (200, 100), "white").save(parent)
+    panel = tmp_path / "p12__1.jpg"
+    Image.new("RGB", (100, 100), "white").save(panel)
+    (tmp_path / "p12.panels.json").write_text(
+        json.dumps(
+            {
+                "image": "p12.jpg",
+                "width": 200,
+                "height": 100,
+                "panels": [
+                    [[0, 0], [100, 0], [100, 100], [0, 100]],
+                    [[100, 0], [200, 0], [200, 100], [100, 100]],
+                ],
+            }
+        )
+    )
+    detected: list[str] = []
+
+    def detect(image: str) -> None:
+        detected.append(Path(image).name)
+        Path(image).with_suffix(".boxes.json").write_text(
+            json.dumps({"width": 200, "height": 100, "boxes": [], "command": []})
+        )
+
+    derived, count = process_pending([str(panel), str(parent)], detect)
+    assert detected == ["p12.jpg"]
+    assert derived == 1 and count == 1
+    assert (tmp_path / "p12__1.boxes.json").exists()

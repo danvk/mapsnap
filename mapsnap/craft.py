@@ -18,6 +18,7 @@ command to run; this is the only command that runs CRAFT.
 import argparse
 import glob
 import sys
+from collections.abc import Callable
 from pathlib import Path
 
 from tqdm import tqdm
@@ -144,38 +145,61 @@ def main() -> None:
         print("All images already have current boxes.", file=sys.stderr)
         return
 
-    # Parents before panels, so a panel's derivation (#361) can see boxes its
-    # parent wrote earlier in this same invocation.
-    todo.sort(key=lambda image: ("__" in Path(image).stem, image))
+    reader = None
+
+    def detect(image: str) -> None:
+        nonlocal reader
+        if reader is None:
+            import easyocr
+
+            reader = easyocr.Reader(["en"], gpu=not args.no_gpu, verbose=False)
+        write_craft_boxes(
+            image,
+            reader,
+            min_size=args.min_size,
+            link_threshold=args.link_threshold,
+            craft_scale=args.craft_scale,
+            tile_size=args.tile_size,
+        )
+
+    derived, detected = process_pending(todo, detect)
+    print(
+        f"Wrote boxes for {len(todo)} image(s) ({derived} derived, "
+        f"{detected} detected).",
+        file=sys.stderr,
+    )
+
+
+def process_pending(todo: list[str], detect: Callable[[str], None]) -> tuple[int, int]:
+    """Detect parents, then derive panels from them, detecting what cannot be.
+
+    Order is the whole point. A panel's boxes are derived from its parent's
+    (#361), so the parent's detection has to have run first: deriving every
+    pending image before detecting any -- the previous shape of this loop --
+    meant a panel whose parent's boxes.json was missing (a fresh volume, or a
+    re-split that dropped it) never found them, fell through to its own
+    detection, and the derivation path was never taken in exactly the run
+    meant to exercise it. Returns (derived, detected) counts.
+    """
+    parents = [image for image in todo if "__" not in Path(image).stem]
+    panels = [image for image in todo if "__" in Path(image).stem]
+    for image in tqdm(parents, smoothing=0, disable=not parents):
+        detect(image)
     derived = 0
-    detect: list[str] = []
-    for image in todo:
+    leftover: list[str] = []
+    for image in panels:
         if derive_boxes_for_panel_image(image):
             derived += 1
         else:
-            detect.append(image)
+            leftover.append(image)
     if derived:
         print(
             f"Derived {derived} panel box file(s) from parents (#361).",
             file=sys.stderr,
         )
-    if detect:
-        import easyocr
-
-        reader = easyocr.Reader(["en"], gpu=not args.no_gpu, verbose=False)
-        for image in tqdm(detect, smoothing=0):
-            write_craft_boxes(
-                image,
-                reader,
-                min_size=args.min_size,
-                link_threshold=args.link_threshold,
-                craft_scale=args.craft_scale,
-                tile_size=args.tile_size,
-            )
-    print(
-        f"Wrote boxes for {len(todo)} image(s) ({derived} derived).",
-        file=sys.stderr,
-    )
+    for image in tqdm(leftover, smoothing=0, disable=not leftover):
+        detect(image)
+    return derived, len(parents) + len(leftover)
 
 
 if __name__ == "__main__":
