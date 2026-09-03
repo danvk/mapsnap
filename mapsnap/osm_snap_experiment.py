@@ -46,6 +46,7 @@ from mapsnap.keymap.align_page_region import (
 )
 from mapsnap.keymap.locate import KeymapLocator, usable_keymaps
 from mapsnap.osm_snap import (
+    KeymapTarget,
     PageContext,
     RotationPrior,
     ScalePrior,
@@ -57,6 +58,8 @@ from mapsnap.osm_snap import (
     evaluate_pose,
     frame_around,
     label_osm_rotations,
+    load_keymap_targets,
+    nearest_keymap_target,
     osm_rasters,
     page_scale_priors,
     rank_pose,
@@ -102,6 +105,9 @@ class VolumeContext:
     # Lazily-built map of stem -> FittedPage for neighbor-stamp priors
     # (#335 phase 2); None until the first unplaced page asks for it.
     stamp_fitted: dict | None = None
+    # The volume's key maps as snap targets (#211), when the run matches
+    # against the key map's P(road) map instead of OSM; None for OSM.
+    keymap_targets: list[KeymapTarget] | None = None
 
 
 def ring_centroid(ring: list[list[float]]) -> tuple[float, float]:
@@ -908,6 +914,7 @@ def candidate_record(candidate: SnapCandidate, unit: PageUnit) -> dict:
         else None,
         "plausible": candidate.plausible,
         "gate_reasons": candidate.gate_reasons,
+        "target": candidate.target,
     }
     if candidate.stamp_separation_m is not None:
         record["stamp_separation_m"] = round(candidate.stamp_separation_m, 1)
@@ -979,10 +986,20 @@ def page_record(vctx: VolumeContext, unit: PageUnit) -> dict:
             for p in ctx.scale_priors
         ],
     }
+    # The key map to match against, when the run targets key maps: the one
+    # whose sheet holds the page's first search centre (#211).
+    target = (
+        nearest_keymap_target(vctx.keymap_targets, ctx.search_centers[0])
+        if vctx.keymap_targets and ctx.search_centers
+        else None
+    )
+    record["match_target"] = "osm" if target is None else f"keymap:{target.stem}"
     if unit.fit_state == "fitted" and unit.gen_affine is not None:
         # Arbitration head-to-head: score the incumbent RANSAC pose with the
         # same evidence the challenger candidates carry.
-        incumbent = evaluate_pose(ctx, vctx.feature_index, unit.gen_affine)
+        incumbent = evaluate_pose(
+            ctx, vctx.feature_index, unit.gen_affine, target=target
+        )
         if incumbent is not None:
             incumbent["world_affine"] = [
                 [float(v) for v in row] for row in unit.gen_affine
@@ -1047,10 +1064,12 @@ def page_record(vctx: VolumeContext, unit: PageUnit) -> dict:
         # classifies every snap failure: truth outscoring every candidate is
         # a SEARCH problem; a candidate outscoring truth is a DATA problem
         # (the page's P(road)/OSM evidence prefers a wrong pose).
-        truth = rank_pose(ctx, vctx.feature_index, unit.truth.affine_local)
+        truth = rank_pose(
+            ctx, vctx.feature_index, unit.truth.affine_local, target=target
+        )
         if truth is not None:
             record["truth_pose"] = truth
-    candidates = snap_page(ctx, vctx.feature_index)
+    candidates = snap_page(ctx, vctx.feature_index, target=target)
     # #324: a candidate whose pose reads the page upside-down is
     # corpus-impossible (0/1,332 truth pages in the zone); snap's rotation
     # ladder has admitted 180-off aliases before (detroit p77 at 116 deg,
@@ -1201,11 +1220,19 @@ def cmd_candidates(
     vis: bool,
     *,
     num_workers: int = 1,
+    target: str = "osm",
 ) -> None:
-    """Generate candidates.jsonl for the volume's rescue targets."""
+    """Generate candidates.jsonl for the volume's rescue targets.
+
+    ``target="keymap"`` matches pages against the volume's key-map P(road)
+    maps instead of OSM (#211) and keeps its records apart, in
+    candidates-keymap.jsonl, so the OSM cache is untouched.
+    """
     out_dir = artifacts_dir(volume)
     out_dir.mkdir(parents=True, exist_ok=True)
-    out_path = out_dir / "candidates.jsonl"
+    out_path = out_dir / (
+        "candidates.jsonl" if target == "osm" else f"candidates-{target}.jsonl"
+    )
     units = load_page_units(volume)
     if not any(u.fit_state == "fitted" and u.gen_affine is not None for u in units):
         # Nothing to calibrate scale/radius/rotation against — and nothing for
@@ -1219,6 +1246,15 @@ def cmd_candidates(
             out_path.write_text("")
         return
     vctx = load_volume_context(volume, units)
+    if target == "keymap":
+        vctx.keymap_targets = load_keymap_targets(volume)
+        if not vctx.keymap_targets:
+            print(f"{volume.name}: no key map with a georef and a P(road) map.")
+            return
+        print(
+            f"{volume.name}: matching against key map(s) "
+            + ", ".join(t.stem for t in vctx.keymap_targets)
+        )
     existing: dict[str, dict] = {}
     if out_path.exists():
         for line in out_path.read_text().splitlines():
@@ -1302,8 +1338,8 @@ def cmd_candidates(
             write_contact_sheet(vctx, by_stem[stem], record, vis_dir)
         # Rewrite after every page so an interrupted run keeps its progress.
         with out_path.open("w") as handle:
-            for target in sorted(existing):
-                handle.write(json.dumps(existing[target]) + "\n")
+            for page_key in sorted(existing):
+                handle.write(json.dumps(existing[page_key]) + "\n")
 
     if num_workers > 1 and len(stale) > 1:
         # Matching is independent per page and CPU-bound. Workers rebuild the
@@ -3559,6 +3595,12 @@ def main() -> None:
         metavar="N",
         help="worker processes for the per-page matching pass (default: %(default)s)",
     )
+    p_cand.add_argument(
+        "--target",
+        choices=("osm", "keymap"),
+        default="osm",
+        help="match against OSM (default) or the key map's P(road) map (#211)",
+    )
 
     p_rep = sub.add_parser("report", help="ranking diagnostics vs truth")
     p_rep.add_argument("volume", type=Path, nargs="+")
@@ -3622,6 +3664,7 @@ def main() -> None:
             args.recompute,
             vis=not args.no_vis,
             num_workers=args.num_workers,
+            target=args.target,
         )
     elif args.command == "report":
         if args.sweep_refine:

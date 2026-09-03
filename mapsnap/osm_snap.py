@@ -19,9 +19,12 @@ objects, and evaluates against truth; nothing in this module reads truth data.
 """
 
 import dataclasses
+import json
 import math
 import os
+from collections.abc import Callable
 from dataclasses import dataclass, field
+from pathlib import Path
 
 import cv2
 import numpy as np
@@ -229,6 +232,9 @@ class SnapCandidate:
     # satisfies most of them).
     stamp_separation_m: float | None = None
     stamp_median_m: float | None = None
+    # What the page was matched against: "osm", or "keymap:<stem>" for the
+    # key map's P(road) map (#211).
+    target: str = "osm"
 
     def select_score(self) -> float:
         """The ranking score: matcher verification plus soft evidence bonuses."""
@@ -436,6 +442,184 @@ def osm_rasters(
             cv2.polylines(skeleton, [poly], False, 1, 1)
     valid = np.ones((rows, cols), dtype=bool)
     return prob, valid, skeleton.astype(bool)
+
+
+@dataclass
+class KeymapTarget:
+    """A key map's P(road) map as a snap target, in place of OSM (#211).
+
+    Where the street grid has changed since the survey there is nothing on OSM
+    for a page to lock onto and it lands on an alias. The key map is a
+    Sanborn-era drawing of the same streets, so its road-probability map can
+    stand in for OSM as the thing the page's P(road) is matched against. The
+    sheet is placed by the pipeline's own key-map model (keymap_model: a
+    smoothed thin-plate spline through the sheet's inlier intersections).
+
+    `model` is built lazily from `georef`, so a target pickles into a worker.
+    """
+
+    stem: str
+    georef: dict
+    prob: np.ndarray  # float32 in [0, 1], key-map pixels
+    image_path: Path
+    model_cache: Callable[[np.ndarray], np.ndarray] | None = field(
+        default=None, repr=False, compare=False
+    )
+
+    @property
+    def model(self) -> Callable[[np.ndarray], np.ndarray]:
+        """Key-map pixel (N, 2) -> lon/lat (N, 2)."""
+        if self.model_cache is None:
+            from mapsnap.keymap.snap import keymap_model
+
+            self.model_cache = keymap_model(self.georef)
+        return self.model_cache
+
+    def __getstate__(self) -> dict:
+        state = self.__dict__.copy()
+        state["model_cache"] = None
+        return state
+
+    def corner_centroid(self) -> tuple[float, float]:
+        corners = self.georef["corners"]
+        return (
+            sum(c[0] for c in corners) / len(corners),
+            sum(c[1] for c in corners) / len(corners),
+        )
+
+
+def load_keymap_targets(volume: Path) -> list[KeymapTarget]:
+    """Every key map of a volume with a georef and a P(road) map, by stem."""
+    raw = volume / "raw"
+    targets: list[KeymapTarget] = []
+    for keymap_json in sorted(raw.glob("*.keymap.json")):
+        stem = keymap_json.name[: -len(".keymap.json")]
+        georef_path = raw / f"{stem}.georef.json"
+        prob_path = raw / f"{stem}.roadprob.png"
+        if not georef_path.exists() or not prob_path.exists():
+            continue
+        image = cv2.imread(str(prob_path), cv2.IMREAD_GRAYSCALE)
+        if image is None:
+            continue
+        georef = json.loads(georef_path.read_text())
+        if not georef.get("corners"):
+            continue
+        image_path = next(
+            (
+                raw / f"{stem}.{ext}"
+                for ext in ("jpg", "png")
+                if (raw / f"{stem}.{ext}").exists()
+            ),
+            prob_path,
+        )
+        targets.append(
+            KeymapTarget(
+                stem=stem,
+                georef=georef,
+                prob=image.astype(np.float32) / 255.0,
+                image_path=image_path,
+            )
+        )
+    return targets
+
+
+def nearest_keymap_target(
+    targets: list[KeymapTarget], lonlat: tuple[float, float]
+) -> KeymapTarget | None:
+    """The key map whose corner quadrilateral contains the point, else the nearest."""
+    if not targets:
+        return None
+    from shapely.geometry import Point, Polygon
+
+    point = Point(lonlat)
+    for target in targets:
+        if Polygon(target.georef["corners"]).contains(point):
+            return target
+    return min(
+        targets,
+        key=lambda t: math.hypot(
+            (t.corner_centroid()[0] - lonlat[0]) * math.cos(math.radians(lonlat[1])),
+            t.corner_centroid()[1] - lonlat[1],
+        ),
+    )
+
+
+# Inverse-mapping grid step (raster cells) and Newton iterations for
+# keymap_rasters; the spline is near-affine over a search frame.
+KEYMAP_RASTER_GRID = 8
+KEYMAP_RASTER_NEWTON = 4
+KEYMAP_SKELETON_MIN_AREA = 100
+
+
+def keymap_rasters(
+    frame: FrameSpec, target: KeymapTarget
+) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """(prob, valid, skeleton) rasters of a key map's P(road) map in the frame.
+
+    The key-map analog of osm_rasters. Each raster cell is mapped back to a
+    key-map pixel by inverting the key-map model: a coarse grid of cells is
+    solved by Newton iteration with the model's tangent at the frame centre
+    as the Jacobian (the spline is near-affine over a frame), interpolated
+    to every cell, and the P(road) map is resampled through it. valid marks
+    cells that land on the sheet; skeleton is the thinned road mask, which
+    the chamfer distance transform is built from, as OSM's centerlines are.
+    """
+    from mapsnap.keymap.snap import local_tangent
+    from mapsnap.road_model import road_mask, road_skeleton
+
+    rows, cols = frame.shape
+    kx, ky = frame.metre_scales()
+    step = KEYMAP_RASTER_GRID
+    grid_rows = np.arange(0, rows + step, step, dtype=np.float64)
+    grid_cols = np.arange(0, cols + step, step, dtype=np.float64)
+    cc, rr = np.meshgrid(grid_cols, grid_rows)
+    lon = frame.origin[0] + (frame.x_min + cc * frame.res_m) / kx
+    lat = frame.origin[1] + (frame.y_max - rr * frame.res_m) / ky
+    wanted = np.column_stack([lon.ravel(), lat.ravel()])
+
+    # Seed every node from the tangent at the sheet point nearest the frame
+    # centre, then refine with the same Jacobian: Newton on a near-affine map.
+    centre_lonlat = (float(lon.mean()), float(lat.mean()))
+    height, width = target.prob.shape
+    seed_px = np.array([width / 2.0, height / 2.0])
+    tangent = local_tangent(target.model, (float(seed_px[0]), float(seed_px[1])))
+    jacobian = tangent[:, :2]
+    inverse = np.linalg.inv(jacobian)
+    seed_world = target.model(seed_px[None, :])[0]
+    pixels = seed_px + (np.array(centre_lonlat) - seed_world) @ inverse.T
+    tangent = local_tangent(target.model, (float(pixels[0]), float(pixels[1])))
+    inverse = np.linalg.inv(tangent[:, :2])
+    pixels = np.tile(pixels, (len(wanted), 1))
+    for _ in range(KEYMAP_RASTER_NEWTON):
+        pixels = pixels + (wanted - target.model(pixels)) @ inverse.T
+
+    map_x = pixels[:, 0].reshape(cc.shape).astype(np.float32)
+    map_y = pixels[:, 1].reshape(cc.shape).astype(np.float32)
+    # Interpolate the node grid at each cell's fractional node coordinate.
+    # (cv2.resize would do this with pixel-centre alignment, shifting every
+    # cell by nearly half a step.)
+    fine_r, fine_c = np.mgrid[0:rows, 0:cols]
+    node_c = (fine_c / step).astype(np.float32)
+    node_r = (fine_r / step).astype(np.float32)
+    full_x = cv2.remap(map_x, node_c, node_r, cv2.INTER_LINEAR)
+    full_y = cv2.remap(map_y, node_c, node_r, cv2.INTER_LINEAR)
+    valid = (full_x >= 0) & (full_x < width - 1) & (full_y >= 0) & (full_y < height - 1)
+    prob = cv2.remap(
+        target.prob, full_x, full_y, cv2.INTER_LINEAR, borderMode=cv2.BORDER_CONSTANT
+    )
+    prob[~valid] = 0.0
+    mask = road_mask(prob, threshold=0.5, min_area=KEYMAP_SKELETON_MIN_AREA)
+    skeleton = road_skeleton(mask)
+    return prob.astype(np.float32), valid, skeleton.astype(bool)
+
+
+def target_rasters(
+    frame: FrameSpec, features: FeatureIndex, target: KeymapTarget | None
+) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """The fixed rasters for a frame: OSM's, or the key map's when a target is given."""
+    if target is None:
+        return osm_rasters(frame, features)
+    return keymap_rasters(frame, target)
 
 
 def osm_distance_m(skeleton: np.ndarray, res_m: float = OSM_RES_M) -> np.ndarray:
@@ -812,6 +996,7 @@ def evaluate_pose(
     features: FeatureIndex,
     world_affine: np.ndarray,
     params: MatchParams = OSM_MATCH_PARAMS,
+    target: KeymapTarget | None = None,
 ) -> dict | None:
     """Score an EXISTING pose with the matcher's own evidence (no search).
 
@@ -839,7 +1024,7 @@ def evaluate_pose(
         sp.m_per_px for sp in ctx.scale_priors
     )
     frame = frame_around((lon_c, lat_c), half_m=diag_m / 2 + 100.0, res_m=res)
-    osm_prob, valid, skeleton = osm_rasters(frame, features)
+    osm_prob, valid, skeleton = target_rasters(frame, features, target)
     if not skeleton.any():
         return None
     distance = osm_distance_m(skeleton, res)
@@ -887,6 +1072,7 @@ def rank_pose(
     features: FeatureIndex,
     world_affine: np.ndarray,
     params: MatchParams = OSM_MATCH_PARAMS,
+    target: KeymapTarget | None = None,
 ) -> dict | None:
     """Score an EXISTING pose with the ladder's FULL ranking features.
 
@@ -899,7 +1085,7 @@ def rank_pose(
     page's evidence itself prefers a wrong pose. None when the pose cannot be
     evaluated (see evaluate_pose).
     """
-    evaluation = evaluate_pose(ctx, features, world_affine, params)
+    evaluation = evaluate_pose(ctx, features, world_affine, params, target)
     if evaluation is None:
         return None
     affine = np.asarray(world_affine, dtype=float)
@@ -974,6 +1160,7 @@ def snap_page(
     ctx: PageContext,
     features: FeatureIndex,
     params: MatchParams = OSM_MATCH_PARAMS,
+    target: KeymapTarget | None = None,
 ) -> list[SnapCandidate]:
     """Candidate placements of a page against OSM around its keymap location.
 
@@ -1006,7 +1193,7 @@ def snap_page(
     collected: list[SnapCandidate] = []
     for center in ctx.search_centers:
         frame = frame_around(center, half_m=half_m, res_m=res)
-        osm_prob, valid, skeleton = osm_rasters(frame, features)
+        osm_prob, valid, skeleton = target_rasters(frame, features, target)
         if not skeleton.any():
             continue
         distance = osm_distance_m(skeleton, res)
@@ -1097,6 +1284,7 @@ def snap_page(
                 center_dist_m=center_dist,
                 verification=candidate.verification_score(),
                 plausible=candidate.plausible,
+                target="osm" if target is None else f"keymap:{target.stem}",
             )
             if refine_shift > REFINE_SHIFT_MAX_M:
                 snap.plausible = False
