@@ -63,7 +63,7 @@ of them silently corrupts the comparison.
    `raw/<stem>.panels.json` exists), but delete the stale chain anyway: the
    debugger and one-off scripts glob `raw/*.keymap.json` and would list two key
    maps. The 2026-09-03 run loaded both on Schenectady and Los Angeles and
-   counted every page's region twice; see `data/2026-09-03-rerun.md`.
+   counted every page's region twice; see `baselines/2026-09-03.md`.
 
    Deleting a split sheet's `boxes.json` before the run exercises craft's
    parent-derivation path (#362) for its panels; the parents are detected
@@ -193,7 +193,21 @@ Interpretation rules learned the hard way:
 
 ## Recording the run
 
-Write `data/<TAG>-rerun.md` with the per-volume table (score, ≤25 ft share,
+Write `baselines/<TAG>.md` with the per-volume table (score, ≤25 ft share,
 disaster share, placed/total), the aggregate, wall-clock and lane timings, and
 a short note per volume that moved more than ~1 point. Past run reports are the
 only durable record of why a number changed.
+
+Then publish the run: copy each volume's tagged IIIF over its gallery file and
+regenerate the README's performance table from the compare footers (rows sorted
+by score, the `Results are from …` sentence updated with the tag and the
+20-volume mean). The gallery file is the volume-level `data/<VOL>/<TAG>.iiif.json`
+— never the archive copy under `artifacts/`, whose split annotations differ.
+
+```sh
+for v in data/*/; do cp $v/$TAG.iiif.json gallery/$(basename $v).iiif.json; done
+```
+
+The README rows carry the footer's `<=25ft`, `>=200ft` and `Score` percentages
+and `placed/total`; keep each volume's link cell (OIM or LOC) as it is. Commit
+the record, the gallery files and the README together on the baseline branch.
