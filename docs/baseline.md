@@ -25,8 +25,13 @@ done
 
 ## Pre-flight (do this before the lanes start)
 
-Three things the pipeline does not do for itself. All are cheap; skipping any
+Four things the pipeline does not do for itself. All are cheap; skipping any
 of them silently corrupts the comparison.
+
+0. **`git pull`, then check that `git log -1` is the commit you mean to
+   baseline.** The manifest records the sha, but only after the fact: the
+   2026-09-03 lanes started one commit behind `origin/main`, with #394 merged
+   on GitHub but never pulled, and ran the old craft path on every volume.
 
 1. **Re-split every parent page.** Splits change when `mapsnap/split.py`
    changes, and volumes that have not been re-split since carry stale panels.
@@ -49,6 +54,16 @@ of them silently corrupts the comparison.
    `regions.panels.json`, `streets.json`, `txt`, `boxes.json`, `jpg`) are not
    its to touch and must be deleted by hand, or the key-map chain keeps
    finding the dead panel. Check with `ls data/$VOL/raw/ | grep __`.
+
+   A re-split can also cut a *key-map* sheet for the first time (the corner-box
+   detector, #389: Schenectady's KEY legend, Los Angeles pa's Vol-13 box). The
+   chain then re-runs on the nominated panel (`raw/p0__1.*`) and the parent's
+   `raw/p0.keymap.json` / `.georef.json` / `.regions.panels.json` go stale. The
+   locator and the adjacency repair skip a split parent (its
+   `raw/<stem>.panels.json` exists), but delete the stale chain anyway: the
+   debugger and one-off scripts glob `raw/*.keymap.json` and would list two key
+   maps. The 2026-09-03 run loaded both on Schenectady and Los Angeles and
+   counted every page's region twice; see `data/2026-09-03-rerun.md`.
 
    Deleting a split sheet's `boxes.json` before the run exercises craft's
    parent-derivation path (#362) for its panels; the parents are detected

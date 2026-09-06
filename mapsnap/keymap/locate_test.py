@@ -515,3 +515,17 @@ def test_resolve_keymaps_apply_floor_false_keeps_sub_floor_sheets(tmp_path: Path
     )
     assert floored == []
     assert [p.name for p in unfloored] == ["p0.keymap.json"]
+
+
+def test_usable_keymaps_skips_a_split_parent(tmp_path: Path):
+    # The corner-box detector cut Schenectady's p0 into p0__1 (the key map) and
+    # p0__2 (its KEY legend); the parent's sidecars stayed behind. Loading both
+    # counted every page's region twice on the 2026-09-03 baseline.
+    make_keymap(tmp_path, "p0")
+    make_keymap(tmp_path, "p0__1")
+    assert usable_keymaps(tmp_path) == [
+        tmp_path / "p0.keymap.json",
+        tmp_path / "p0__1.keymap.json",
+    ]
+    (tmp_path / "p0.panels.json").write_text("{}")
+    assert usable_keymaps(tmp_path) == [tmp_path / "p0__1.keymap.json"]

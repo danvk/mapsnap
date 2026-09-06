@@ -58,7 +58,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from mapsnap.keymap.fit_keymap import collapse_skeleton_keys
-from mapsnap.keymap.records import is_inset
+from mapsnap.keymap.records import is_inset, split_parent
 
 PROXIMITY_FACTOR = 1.5
 """How many page-pitches apart two printed numbers may be and still count as
@@ -615,7 +615,7 @@ def load_sheets(volume: Path) -> list[tuple[str, dict]]:
     """
     sheets = []
     for keymap_path in sorted((volume / "raw").glob("*.keymap.json")):
-        if ".truth." in keymap_path.name:
+        if ".truth." in keymap_path.name or split_parent(keymap_path):
             continue
         stem = keymap_path.name[: -len(".keymap.json")]
         try:
