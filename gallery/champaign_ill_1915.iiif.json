@@ -24,8 +24,8 @@
           "value": "0"
         }
       ],
-      "created": "2026-08-29T19:28:05Z",
-      "modified": "2026-08-29T19:28:05Z",
+      "created": "2026-09-05T19:53:39Z",
+      "modified": "2026-09-05T19:53:39Z",
       "creator": [
         {
           "id": "https://oldinsurancemaps.net/profile/danvk",
@@ -162,8 +162,8 @@
           "value": "0"
         }
       ],
-      "created": "2026-08-29T19:28:05Z",
-      "modified": "2026-08-29T19:28:05Z",
+      "created": "2026-09-05T19:53:39Z",
+      "modified": "2026-09-05T19:53:39Z",
       "creator": [
         {
           "id": "https://oldinsurancemaps.net/profile/danvk",
@@ -300,8 +300,8 @@
           "value": "0"
         }
       ],
-      "created": "2026-08-29T19:28:05Z",
-      "modified": "2026-08-29T19:28:05Z",
+      "created": "2026-09-05T19:53:39Z",
+      "modified": "2026-09-05T19:53:39Z",
       "creator": [
         {
           "id": "https://oldinsurancemaps.net/profile/danvk",
@@ -443,19 +443,19 @@
         },
         {
           "label": "split_canvas_y",
-          "value": "0.0"
+          "value": "5765.5"
         },
         {
           "label": "split_canvas_w",
-          "value": "6450.0"
+          "value": "2513.2"
         },
         {
           "label": "split_canvas_h",
-          "value": "7650.0"
+          "value": "1884.5"
         }
       ],
-      "created": "2026-08-29T19:28:05Z",
-      "modified": "2026-08-29T19:28:05Z",
+      "created": "2026-09-05T19:53:39Z",
+      "modified": "2026-09-05T19:53:39Z",
       "creator": [
         {
           "id": "https://oldinsurancemaps.net/profile/danvk",
@@ -474,165 +474,11 @@
         },
         "selector": {
           "type": "SvgSelector",
-          "value": "<svg><polygon points=\"57.8,79.4 1893.3,5765.7 1967.4,5765.5 2143.1,6372.0 4959.8,5501.3 5510.8,7283.4 6450.0,6979.7 6450.0,86.1 3462.1,0.0 2552.4,292.8 1671.5,284.8 1672.9,50.3 57.8,79.4\" /></svg>"
-        }
-      },
-      "body": {
-        "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd410m:g4104m:g4104cm:g017781915:01778_1915-0013__1/gcps",
-        "type": "FeatureCollection",
-        "transformation": {
-          "type": "polynomial",
-          "options": {
-            "order": 1
-          }
-        },
-        "features": [
-          {
-            "type": "Feature",
-            "properties": {
-              "resourceCoords": [
-                0.0,
-                0.0
-              ],
-              "creator": {
-                "id": "https://oldinsurancemaps.net/profile/danvk",
-                "type": "Person"
-              },
-              "type": "corner"
-            },
-            "geometry": {
-              "type": "Point",
-              "coordinates": [
-                -88.24354160411866,
-                40.11680613270729
-              ]
-            }
-          },
-          {
-            "type": "Feature",
-            "properties": {
-              "resourceCoords": [
-                6450.0,
-                0.0
-              ],
-              "creator": {
-                "id": "https://oldinsurancemaps.net/profile/danvk",
-                "type": "Person"
-              },
-              "type": "corner"
-            },
-            "geometry": {
-              "type": "Point",
-              "coordinates": [
-                -88.23974637012189,
-                40.11589126709505
-              ]
-            }
-          },
-          {
-            "type": "Feature",
-            "properties": {
-              "resourceCoords": [
-                6450.0,
-                7650.0
-              ],
-              "creator": {
-                "id": "https://oldinsurancemaps.net/profile/danvk",
-                "type": "Person"
-              },
-              "type": "corner"
-            },
-            "geometry": {
-              "type": "Point",
-              "coordinates": [
-                -88.2411653161658,
-                40.11244875336688
-              ]
-            }
-          },
-          {
-            "type": "Feature",
-            "properties": {
-              "resourceCoords": [
-                0.0,
-                7650.0
-              ],
-              "creator": {
-                "id": "https://oldinsurancemaps.net/profile/danvk",
-                "type": "Person"
-              },
-              "type": "corner"
-            },
-            "geometry": {
-              "type": "Point",
-              "coordinates": [
-                -88.24496055016257,
-                40.113363618979115
-              ]
-            }
-          }
-        ]
-      }
-    },
-    {
-      "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd410m:g4104m:g4104cm:g017781915:01778_1915-0013__2/georef",
-      "type": "Annotation",
-      "@context": [
-        "http://iiif.io/api/extension/georef/1/context.json",
-        "http://iiif.io/api/presentation/3/context.json"
-      ],
-      "label": "Champaign, Ill. | 1915 p13 [1]",
-      "metadata": [
-        {
-          "label": "streets",
-          "value": "0"
-        },
-        {
-          "label": "intersections",
-          "value": "0"
-        },
-        {
-          "label": "split_canvas_x",
-          "value": "0.0"
-        },
-        {
-          "label": "split_canvas_y",
-          "value": "5765.5"
-        },
-        {
-          "label": "split_canvas_w",
-          "value": "2513.2"
-        },
-        {
-          "label": "split_canvas_h",
-          "value": "1884.5"
-        }
-      ],
-      "created": "2026-08-29T19:28:05Z",
-      "modified": "2026-08-29T19:28:05Z",
-      "creator": [
-        {
-          "id": "https://oldinsurancemaps.net/profile/danvk",
-          "type": "Person"
-        }
-      ],
-      "motivation": "georeferencing",
-      "target": {
-        "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd410m:g4104m:g4104cm:g017781915:01778_1915-0013__2/selector",
-        "type": "SpecificResource",
-        "source": {
-          "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd410m:g4104m:g4104cm:g017781915:01778_1915-0013/info.json",
-          "type": "ImageService2",
-          "height": 7650,
-          "width": 6450
-        },
-        "selector": {
-          "type": "SvgSelector",
           "value": "<svg><polygon points=\"280.1,7442.4 2435.1,7380.5 1967.4,5765.5 264.0,5770.0 280.1,7442.4\" /></svg>"
         }
       },
       "body": {
-        "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd410m:g4104m:g4104cm:g017781915:01778_1915-0013__2/gcps",
+        "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd410m:g4104m:g4104cm:g017781915:01778_1915-0013__1/gcps",
         "type": "FeatureCollection",
         "transformation": {
           "type": "polynomial",
@@ -729,6 +575,160 @@
       }
     },
     {
+      "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd410m:g4104m:g4104cm:g017781915:01778_1915-0013__2/georef",
+      "type": "Annotation",
+      "@context": [
+        "http://iiif.io/api/extension/georef/1/context.json",
+        "http://iiif.io/api/presentation/3/context.json"
+      ],
+      "label": "Champaign, Ill. | 1915 p13 [2]",
+      "metadata": [
+        {
+          "label": "streets",
+          "value": "0"
+        },
+        {
+          "label": "intersections",
+          "value": "0"
+        },
+        {
+          "label": "split_canvas_x",
+          "value": "0.0"
+        },
+        {
+          "label": "split_canvas_y",
+          "value": "0.0"
+        },
+        {
+          "label": "split_canvas_w",
+          "value": "6450.0"
+        },
+        {
+          "label": "split_canvas_h",
+          "value": "7650.0"
+        }
+      ],
+      "created": "2026-09-05T19:53:39Z",
+      "modified": "2026-09-05T19:53:39Z",
+      "creator": [
+        {
+          "id": "https://oldinsurancemaps.net/profile/danvk",
+          "type": "Person"
+        }
+      ],
+      "motivation": "georeferencing",
+      "target": {
+        "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd410m:g4104m:g4104cm:g017781915:01778_1915-0013__2/selector",
+        "type": "SpecificResource",
+        "source": {
+          "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd410m:g4104m:g4104cm:g017781915:01778_1915-0013/info.json",
+          "type": "ImageService2",
+          "height": 7650,
+          "width": 6450
+        },
+        "selector": {
+          "type": "SvgSelector",
+          "value": "<svg><polygon points=\"57.8,79.4 1893.3,5765.7 1967.4,5765.5 2143.1,6372.0 4959.8,5501.3 5510.8,7283.4 6450.0,6979.7 6450.0,86.1 3462.1,0.0 2552.4,292.8 1671.5,284.8 1672.9,50.3 57.8,79.4\" /></svg>"
+        }
+      },
+      "body": {
+        "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd410m:g4104m:g4104cm:g017781915:01778_1915-0013__2/gcps",
+        "type": "FeatureCollection",
+        "transformation": {
+          "type": "polynomial",
+          "options": {
+            "order": 1
+          }
+        },
+        "features": [
+          {
+            "type": "Feature",
+            "properties": {
+              "resourceCoords": [
+                0.0,
+                0.0
+              ],
+              "creator": {
+                "id": "https://oldinsurancemaps.net/profile/danvk",
+                "type": "Person"
+              },
+              "type": "corner"
+            },
+            "geometry": {
+              "type": "Point",
+              "coordinates": [
+                -88.24354160411866,
+                40.11680613270729
+              ]
+            }
+          },
+          {
+            "type": "Feature",
+            "properties": {
+              "resourceCoords": [
+                6450.0,
+                0.0
+              ],
+              "creator": {
+                "id": "https://oldinsurancemaps.net/profile/danvk",
+                "type": "Person"
+              },
+              "type": "corner"
+            },
+            "geometry": {
+              "type": "Point",
+              "coordinates": [
+                -88.23974637012189,
+                40.11589126709505
+              ]
+            }
+          },
+          {
+            "type": "Feature",
+            "properties": {
+              "resourceCoords": [
+                6450.0,
+                7650.0
+              ],
+              "creator": {
+                "id": "https://oldinsurancemaps.net/profile/danvk",
+                "type": "Person"
+              },
+              "type": "corner"
+            },
+            "geometry": {
+              "type": "Point",
+              "coordinates": [
+                -88.2411653161658,
+                40.11244875336688
+              ]
+            }
+          },
+          {
+            "type": "Feature",
+            "properties": {
+              "resourceCoords": [
+                0.0,
+                7650.0
+              ],
+              "creator": {
+                "id": "https://oldinsurancemaps.net/profile/danvk",
+                "type": "Person"
+              },
+              "type": "corner"
+            },
+            "geometry": {
+              "type": "Point",
+              "coordinates": [
+                -88.24496055016257,
+                40.113363618979115
+              ]
+            }
+          }
+        ]
+      }
+    },
+    {
       "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd410m:g4104m:g4104cm:g017781915:01778_1915-0014/georef",
       "type": "Annotation",
       "@context": [
@@ -746,8 +746,8 @@
           "value": "0"
         }
       ],
-      "created": "2026-08-29T19:28:05Z",
-      "modified": "2026-08-29T19:28:05Z",
+      "created": "2026-09-05T19:53:39Z",
+      "modified": "2026-09-05T19:53:39Z",
       "creator": [
         {
           "id": "https://oldinsurancemaps.net/profile/danvk",
@@ -884,8 +884,8 @@
           "value": "0"
         }
       ],
-      "created": "2026-08-29T19:28:05Z",
-      "modified": "2026-08-29T19:28:05Z",
+      "created": "2026-09-05T19:53:39Z",
+      "modified": "2026-09-05T19:53:39Z",
       "creator": [
         {
           "id": "https://oldinsurancemaps.net/profile/danvk",
@@ -1022,8 +1022,8 @@
           "value": "0"
         }
       ],
-      "created": "2026-08-29T19:28:05Z",
-      "modified": "2026-08-29T19:28:05Z",
+      "created": "2026-09-05T19:53:39Z",
+      "modified": "2026-09-05T19:53:39Z",
       "creator": [
         {
           "id": "https://oldinsurancemaps.net/profile/danvk",
@@ -1160,8 +1160,8 @@
           "value": "0"
         }
       ],
-      "created": "2026-08-29T19:28:05Z",
-      "modified": "2026-08-29T19:28:05Z",
+      "created": "2026-09-05T19:53:39Z",
+      "modified": "2026-09-05T19:53:39Z",
       "creator": [
         {
           "id": "https://oldinsurancemaps.net/profile/danvk",
@@ -1298,8 +1298,8 @@
           "value": "0"
         }
       ],
-      "created": "2026-08-29T19:28:05Z",
-      "modified": "2026-08-29T19:28:05Z",
+      "created": "2026-09-05T19:53:39Z",
+      "modified": "2026-09-05T19:53:39Z",
       "creator": [
         {
           "id": "https://oldinsurancemaps.net/profile/danvk",
@@ -1436,8 +1436,8 @@
           "value": "0"
         }
       ],
-      "created": "2026-08-29T19:28:05Z",
-      "modified": "2026-08-29T19:28:05Z",
+      "created": "2026-09-05T19:53:39Z",
+      "modified": "2026-09-05T19:53:39Z",
       "creator": [
         {
           "id": "https://oldinsurancemaps.net/profile/danvk",
@@ -1590,8 +1590,8 @@
           "value": "7650.0"
         }
       ],
-      "created": "2026-08-29T19:28:05Z",
-      "modified": "2026-08-29T19:28:05Z",
+      "created": "2026-09-05T19:53:39Z",
+      "modified": "2026-09-05T19:53:39Z",
       "creator": [
         {
           "id": "https://oldinsurancemaps.net/profile/danvk",
@@ -1717,7 +1717,7 @@
         "http://iiif.io/api/extension/georef/1/context.json",
         "http://iiif.io/api/presentation/3/context.json"
       ],
-      "label": "Champaign, Ill. | 1915 p20 [1]",
+      "label": "Champaign, Ill. | 1915 p20 [2]",
       "metadata": [
         {
           "label": "streets",
@@ -1744,8 +1744,8 @@
           "value": "4277.9"
         }
       ],
-      "created": "2026-08-29T19:28:05Z",
-      "modified": "2026-08-29T19:28:05Z",
+      "created": "2026-09-05T19:53:39Z",
+      "modified": "2026-09-05T19:53:39Z",
       "creator": [
         {
           "id": "https://oldinsurancemaps.net/profile/danvk",
@@ -1871,161 +1871,7 @@
         "http://iiif.io/api/extension/georef/1/context.json",
         "http://iiif.io/api/presentation/3/context.json"
       ],
-      "label": "Champaign, Ill. | 1915 p21 [2]",
-      "metadata": [
-        {
-          "label": "streets",
-          "value": "0"
-        },
-        {
-          "label": "intersections",
-          "value": "0"
-        },
-        {
-          "label": "split_canvas_x",
-          "value": "0.0"
-        },
-        {
-          "label": "split_canvas_y",
-          "value": "0.0"
-        },
-        {
-          "label": "split_canvas_w",
-          "value": "6450.0"
-        },
-        {
-          "label": "split_canvas_h",
-          "value": "7650.0"
-        }
-      ],
-      "created": "2026-08-29T19:28:05Z",
-      "modified": "2026-08-29T19:28:05Z",
-      "creator": [
-        {
-          "id": "https://oldinsurancemaps.net/profile/danvk",
-          "type": "Person"
-        }
-      ],
-      "motivation": "georeferencing",
-      "target": {
-        "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd410m:g4104m:g4104cm:g017781915:01778_1915-0021__1/selector",
-        "type": "SpecificResource",
-        "source": {
-          "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd410m:g4104m:g4104cm:g017781915:01778_1915-0021/info.json",
-          "type": "ImageService2",
-          "height": 7650,
-          "width": 6450
-        },
-        "selector": {
-          "type": "SvgSelector",
-          "value": "<svg><polygon points=\"5844.3,7458.7 5939.8,0.0 -0.0,-0.0 0.0,2622.7 4181.7,2621.9 4255.2,7434.7 5844.3,7458.7\" /></svg>"
-        }
-      },
-      "body": {
-        "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd410m:g4104m:g4104cm:g017781915:01778_1915-0021__1/gcps",
-        "type": "FeatureCollection",
-        "transformation": {
-          "type": "polynomial",
-          "options": {
-            "order": 1
-          }
-        },
-        "features": [
-          {
-            "type": "Feature",
-            "properties": {
-              "resourceCoords": [
-                0.0,
-                0.0
-              ],
-              "creator": {
-                "id": "https://oldinsurancemaps.net/profile/danvk",
-                "type": "Person"
-              },
-              "type": "corner"
-            },
-            "geometry": {
-              "type": "Point",
-              "coordinates": [
-                -88.26155921715565,
-                40.119422345132165
-              ]
-            }
-          },
-          {
-            "type": "Feature",
-            "properties": {
-              "resourceCoords": [
-                6450.0,
-                0.0
-              ],
-              "creator": {
-                "id": "https://oldinsurancemaps.net/profile/danvk",
-                "type": "Person"
-              },
-              "type": "corner"
-            },
-            "geometry": {
-              "type": "Point",
-              "coordinates": [
-                -88.25382040785125,
-                40.11947662618991
-              ]
-            }
-          },
-          {
-            "type": "Feature",
-            "properties": {
-              "resourceCoords": [
-                6450.0,
-                7650.0
-              ],
-              "creator": {
-                "id": "https://oldinsurancemaps.net/profile/danvk",
-                "type": "Person"
-              },
-              "type": "corner"
-            },
-            "geometry": {
-              "type": "Point",
-              "coordinates": [
-                -88.25373620983363,
-                40.112457771012316
-              ]
-            }
-          },
-          {
-            "type": "Feature",
-            "properties": {
-              "resourceCoords": [
-                0.0,
-                7650.0
-              ],
-              "creator": {
-                "id": "https://oldinsurancemaps.net/profile/danvk",
-                "type": "Person"
-              },
-              "type": "corner"
-            },
-            "geometry": {
-              "type": "Point",
-              "coordinates": [
-                -88.26147501913803,
-                40.11240348995457
-              ]
-            }
-          }
-        ]
-      }
-    },
-    {
-      "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd410m:g4104m:g4104cm:g017781915:01778_1915-0021__2/georef",
-      "type": "Annotation",
-      "@context": [
-        "http://iiif.io/api/extension/georef/1/context.json",
-        "http://iiif.io/api/presentation/3/context.json"
-      ],
-      "label": "Champaign, Ill. | 1915 p21 [2]",
+      "label": "Champaign, Ill. | 1915 p21 [1]",
       "metadata": [
         {
           "label": "streets",
@@ -2052,8 +1898,8 @@
           "value": "5028.1"
         }
       ],
-      "created": "2026-08-29T19:28:05Z",
-      "modified": "2026-08-29T19:28:05Z",
+      "created": "2026-09-05T19:53:39Z",
+      "modified": "2026-09-05T19:53:39Z",
       "creator": [
         {
           "id": "https://oldinsurancemaps.net/profile/danvk",
@@ -2062,7 +1908,7 @@
       ],
       "motivation": "georeferencing",
       "target": {
-        "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd410m:g4104m:g4104cm:g017781915:01778_1915-0021__2/selector",
+        "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd410m:g4104m:g4104cm:g017781915:01778_1915-0021__1/selector",
         "type": "SpecificResource",
         "source": {
           "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd410m:g4104m:g4104cm:g017781915:01778_1915-0021/info.json",
@@ -2076,7 +1922,7 @@
         }
       },
       "body": {
-        "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd410m:g4104m:g4104cm:g017781915:01778_1915-0021__2/gcps",
+        "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd410m:g4104m:g4104cm:g017781915:01778_1915-0021__1/gcps",
         "type": "FeatureCollection",
         "transformation": {
           "type": "polynomial",
@@ -2173,6 +2019,160 @@
       }
     },
     {
+      "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd410m:g4104m:g4104cm:g017781915:01778_1915-0021__2/georef",
+      "type": "Annotation",
+      "@context": [
+        "http://iiif.io/api/extension/georef/1/context.json",
+        "http://iiif.io/api/presentation/3/context.json"
+      ],
+      "label": "Champaign, Ill. | 1915 p21 [2]",
+      "metadata": [
+        {
+          "label": "streets",
+          "value": "0"
+        },
+        {
+          "label": "intersections",
+          "value": "0"
+        },
+        {
+          "label": "split_canvas_x",
+          "value": "0.0"
+        },
+        {
+          "label": "split_canvas_y",
+          "value": "0.0"
+        },
+        {
+          "label": "split_canvas_w",
+          "value": "6450.0"
+        },
+        {
+          "label": "split_canvas_h",
+          "value": "7650.0"
+        }
+      ],
+      "created": "2026-09-05T19:53:39Z",
+      "modified": "2026-09-05T19:53:39Z",
+      "creator": [
+        {
+          "id": "https://oldinsurancemaps.net/profile/danvk",
+          "type": "Person"
+        }
+      ],
+      "motivation": "georeferencing",
+      "target": {
+        "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd410m:g4104m:g4104cm:g017781915:01778_1915-0021__2/selector",
+        "type": "SpecificResource",
+        "source": {
+          "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd410m:g4104m:g4104cm:g017781915:01778_1915-0021/info.json",
+          "type": "ImageService2",
+          "height": 7650,
+          "width": 6450
+        },
+        "selector": {
+          "type": "SvgSelector",
+          "value": "<svg><polygon points=\"5844.3,7458.7 5939.8,0.0 -0.0,-0.0 0.0,2622.7 4181.7,2621.9 4255.2,7434.7 5844.3,7458.7\" /></svg>"
+        }
+      },
+      "body": {
+        "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd410m:g4104m:g4104cm:g017781915:01778_1915-0021__2/gcps",
+        "type": "FeatureCollection",
+        "transformation": {
+          "type": "polynomial",
+          "options": {
+            "order": 1
+          }
+        },
+        "features": [
+          {
+            "type": "Feature",
+            "properties": {
+              "resourceCoords": [
+                0.0,
+                0.0
+              ],
+              "creator": {
+                "id": "https://oldinsurancemaps.net/profile/danvk",
+                "type": "Person"
+              },
+              "type": "corner"
+            },
+            "geometry": {
+              "type": "Point",
+              "coordinates": [
+                -88.26155921715565,
+                40.119422345132165
+              ]
+            }
+          },
+          {
+            "type": "Feature",
+            "properties": {
+              "resourceCoords": [
+                6450.0,
+                0.0
+              ],
+              "creator": {
+                "id": "https://oldinsurancemaps.net/profile/danvk",
+                "type": "Person"
+              },
+              "type": "corner"
+            },
+            "geometry": {
+              "type": "Point",
+              "coordinates": [
+                -88.25382040785125,
+                40.11947662618991
+              ]
+            }
+          },
+          {
+            "type": "Feature",
+            "properties": {
+              "resourceCoords": [
+                6450.0,
+                7650.0
+              ],
+              "creator": {
+                "id": "https://oldinsurancemaps.net/profile/danvk",
+                "type": "Person"
+              },
+              "type": "corner"
+            },
+            "geometry": {
+              "type": "Point",
+              "coordinates": [
+                -88.25373620983363,
+                40.112457771012316
+              ]
+            }
+          },
+          {
+            "type": "Feature",
+            "properties": {
+              "resourceCoords": [
+                0.0,
+                7650.0
+              ],
+              "creator": {
+                "id": "https://oldinsurancemaps.net/profile/danvk",
+                "type": "Person"
+              },
+              "type": "corner"
+            },
+            "geometry": {
+              "type": "Point",
+              "coordinates": [
+                -88.26147501913803,
+                40.11240348995457
+              ]
+            }
+          }
+        ]
+      }
+    },
+    {
       "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd410m:g4104m:g4104cm:g017781915:01778_1915-0022/georef",
       "type": "Annotation",
       "@context": [
@@ -2190,8 +2190,8 @@
           "value": "0"
         }
       ],
-      "created": "2026-08-29T19:28:05Z",
-      "modified": "2026-08-29T19:28:05Z",
+      "created": "2026-09-05T19:53:39Z",
+      "modified": "2026-09-05T19:53:39Z",
       "creator": [
         {
           "id": "https://oldinsurancemaps.net/profile/danvk",
@@ -2333,7 +2333,7 @@
         },
         {
           "label": "split_canvas_y",
-          "value": "0.0"
+          "value": "2295.0"
         },
         {
           "label": "split_canvas_w",
@@ -2341,11 +2341,11 @@
         },
         {
           "label": "split_canvas_h",
-          "value": "3239.6"
+          "value": "5355.0"
         }
       ],
-      "created": "2026-08-29T19:28:05Z",
-      "modified": "2026-08-29T19:28:05Z",
+      "created": "2026-09-05T19:53:39Z",
+      "modified": "2026-09-05T19:53:39Z",
       "creator": [
         {
           "id": "https://oldinsurancemaps.net/profile/danvk",
@@ -2364,165 +2364,11 @@
         },
         "selector": {
           "type": "SvgSelector",
-          "value": "<svg><polygon points=\"-0.0,3239.6 45.3,3239.6 3472.3,3236.0 3471.5,2812.3 5683.8,2813.5 5681.8,2302.6 6065.5,2298.8 6082.7,184.6 785.6,133.5 785.5,0.0 -0.0,-0.0 -0.0,3239.6\" /></svg>"
-        }
-      },
-      "body": {
-        "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd410m:g4104m:g4104cm:g017781915:01778_1915-0023__1/gcps",
-        "type": "FeatureCollection",
-        "transformation": {
-          "type": "polynomial",
-          "options": {
-            "order": 1
-          }
-        },
-        "features": [
-          {
-            "type": "Feature",
-            "properties": {
-              "resourceCoords": [
-                0.0,
-                0.0
-              ],
-              "creator": {
-                "id": "https://oldinsurancemaps.net/profile/danvk",
-                "type": "Person"
-              },
-              "type": "corner"
-            },
-            "geometry": {
-              "type": "Point",
-              "coordinates": [
-                -88.25760011863616,
-                40.11275797878201
-              ]
-            }
-          },
-          {
-            "type": "Feature",
-            "properties": {
-              "resourceCoords": [
-                6450.0,
-                0.0
-              ],
-              "creator": {
-                "id": "https://oldinsurancemaps.net/profile/danvk",
-                "type": "Person"
-              },
-              "type": "corner"
-            },
-            "geometry": {
-              "type": "Point",
-              "coordinates": [
-                -88.24977333553879,
-                40.112790665573606
-              ]
-            }
-          },
-          {
-            "type": "Feature",
-            "properties": {
-              "resourceCoords": [
-                6450.0,
-                3239.6
-              ],
-              "creator": {
-                "id": "https://oldinsurancemaps.net/profile/danvk",
-                "type": "Person"
-              },
-              "type": "corner"
-            },
-            "geometry": {
-              "type": "Point",
-              "coordinates": [
-                -88.24975185847792,
-                40.10978306120129
-              ]
-            }
-          },
-          {
-            "type": "Feature",
-            "properties": {
-              "resourceCoords": [
-                0.0,
-                3239.6
-              ],
-              "creator": {
-                "id": "https://oldinsurancemaps.net/profile/danvk",
-                "type": "Person"
-              },
-              "type": "corner"
-            },
-            "geometry": {
-              "type": "Point",
-              "coordinates": [
-                -88.2575786415753,
-                40.10975037440969
-              ]
-            }
-          }
-        ]
-      }
-    },
-    {
-      "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd410m:g4104m:g4104cm:g017781915:01778_1915-0023__2/georef",
-      "type": "Annotation",
-      "@context": [
-        "http://iiif.io/api/extension/georef/1/context.json",
-        "http://iiif.io/api/presentation/3/context.json"
-      ],
-      "label": "Champaign, Ill. | 1915 p23 [1]",
-      "metadata": [
-        {
-          "label": "streets",
-          "value": "0"
-        },
-        {
-          "label": "intersections",
-          "value": "0"
-        },
-        {
-          "label": "split_canvas_x",
-          "value": "0.0"
-        },
-        {
-          "label": "split_canvas_y",
-          "value": "2295.0"
-        },
-        {
-          "label": "split_canvas_w",
-          "value": "6450.0"
-        },
-        {
-          "label": "split_canvas_h",
-          "value": "5355.0"
-        }
-      ],
-      "created": "2026-08-29T19:28:05Z",
-      "modified": "2026-08-29T19:28:05Z",
-      "creator": [
-        {
-          "id": "https://oldinsurancemaps.net/profile/danvk",
-          "type": "Person"
-        }
-      ],
-      "motivation": "georeferencing",
-      "target": {
-        "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd410m:g4104m:g4104cm:g017781915:01778_1915-0023__2/selector",
-        "type": "SpecificResource",
-        "source": {
-          "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd410m:g4104m:g4104cm:g017781915:01778_1915-0023/info.json",
-          "type": "ImageService2",
-          "height": 7650,
-          "width": 6450
-        },
-        "selector": {
-          "type": "SvgSelector",
           "value": "<svg><polygon points=\"6252.3,7360.4 6177.2,2297.7 5681.8,2302.6 5683.8,2813.5 3471.5,2812.3 3472.3,3236.0 0.0,3239.6 -0.0,7443.8 6252.3,7360.4\" /></svg>"
         }
       },
       "body": {
-        "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd410m:g4104m:g4104cm:g017781915:01778_1915-0023__2/gcps",
+        "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd410m:g4104m:g4104cm:g017781915:01778_1915-0023__1/gcps",
         "type": "FeatureCollection",
         "transformation": {
           "type": "polynomial",
@@ -2619,6 +2465,160 @@
       }
     },
     {
+      "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd410m:g4104m:g4104cm:g017781915:01778_1915-0023__2/georef",
+      "type": "Annotation",
+      "@context": [
+        "http://iiif.io/api/extension/georef/1/context.json",
+        "http://iiif.io/api/presentation/3/context.json"
+      ],
+      "label": "Champaign, Ill. | 1915 p23 [2]",
+      "metadata": [
+        {
+          "label": "streets",
+          "value": "0"
+        },
+        {
+          "label": "intersections",
+          "value": "0"
+        },
+        {
+          "label": "split_canvas_x",
+          "value": "0.0"
+        },
+        {
+          "label": "split_canvas_y",
+          "value": "0.0"
+        },
+        {
+          "label": "split_canvas_w",
+          "value": "6450.0"
+        },
+        {
+          "label": "split_canvas_h",
+          "value": "3239.6"
+        }
+      ],
+      "created": "2026-09-05T19:53:39Z",
+      "modified": "2026-09-05T19:53:39Z",
+      "creator": [
+        {
+          "id": "https://oldinsurancemaps.net/profile/danvk",
+          "type": "Person"
+        }
+      ],
+      "motivation": "georeferencing",
+      "target": {
+        "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd410m:g4104m:g4104cm:g017781915:01778_1915-0023__2/selector",
+        "type": "SpecificResource",
+        "source": {
+          "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd410m:g4104m:g4104cm:g017781915:01778_1915-0023/info.json",
+          "type": "ImageService2",
+          "height": 7650,
+          "width": 6450
+        },
+        "selector": {
+          "type": "SvgSelector",
+          "value": "<svg><polygon points=\"-0.0,3239.6 45.3,3239.6 3472.3,3236.0 3471.5,2812.3 5683.8,2813.5 5681.8,2302.6 6065.5,2298.8 6082.7,184.6 785.6,133.5 785.5,0.0 -0.0,-0.0 -0.0,3239.6\" /></svg>"
+        }
+      },
+      "body": {
+        "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd410m:g4104m:g4104cm:g017781915:01778_1915-0023__2/gcps",
+        "type": "FeatureCollection",
+        "transformation": {
+          "type": "polynomial",
+          "options": {
+            "order": 1
+          }
+        },
+        "features": [
+          {
+            "type": "Feature",
+            "properties": {
+              "resourceCoords": [
+                0.0,
+                0.0
+              ],
+              "creator": {
+                "id": "https://oldinsurancemaps.net/profile/danvk",
+                "type": "Person"
+              },
+              "type": "corner"
+            },
+            "geometry": {
+              "type": "Point",
+              "coordinates": [
+                -88.25760011863616,
+                40.11275797878201
+              ]
+            }
+          },
+          {
+            "type": "Feature",
+            "properties": {
+              "resourceCoords": [
+                6450.0,
+                0.0
+              ],
+              "creator": {
+                "id": "https://oldinsurancemaps.net/profile/danvk",
+                "type": "Person"
+              },
+              "type": "corner"
+            },
+            "geometry": {
+              "type": "Point",
+              "coordinates": [
+                -88.24977333553879,
+                40.112790665573606
+              ]
+            }
+          },
+          {
+            "type": "Feature",
+            "properties": {
+              "resourceCoords": [
+                6450.0,
+                3239.6
+              ],
+              "creator": {
+                "id": "https://oldinsurancemaps.net/profile/danvk",
+                "type": "Person"
+              },
+              "type": "corner"
+            },
+            "geometry": {
+              "type": "Point",
+              "coordinates": [
+                -88.24975185847792,
+                40.10978306120129
+              ]
+            }
+          },
+          {
+            "type": "Feature",
+            "properties": {
+              "resourceCoords": [
+                0.0,
+                3239.6
+              ],
+              "creator": {
+                "id": "https://oldinsurancemaps.net/profile/danvk",
+                "type": "Person"
+              },
+              "type": "corner"
+            },
+            "geometry": {
+              "type": "Point",
+              "coordinates": [
+                -88.2575786415753,
+                40.10975037440969
+              ]
+            }
+          }
+        ]
+      }
+    },
+    {
       "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd410m:g4104m:g4104cm:g017781915:01778_1915-0024/georef",
       "type": "Annotation",
       "@context": [
@@ -2636,8 +2636,8 @@
           "value": "0"
         }
       ],
-      "created": "2026-08-29T19:28:05Z",
-      "modified": "2026-08-29T19:28:05Z",
+      "created": "2026-09-05T19:53:39Z",
+      "modified": "2026-09-05T19:53:39Z",
       "creator": [
         {
           "id": "https://oldinsurancemaps.net/profile/danvk",
@@ -2757,13 +2757,13 @@
       }
     },
     {
-      "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd410m:g4104m:g4104cm:g017781915:01778_1915-0002__2/georef",
+      "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd410m:g4104m:g4104cm:g017781915:01778_1915-0002__1/georef",
       "type": "Annotation",
       "@context": [
         "http://iiif.io/api/extension/georef/1/context.json",
         "http://iiif.io/api/presentation/3/context.json"
       ],
-      "label": "Champaign, Ill. | 1915 p2 [2]",
+      "label": "Champaign, Ill. | 1915 p2 [1]",
       "metadata": [
         {
           "label": "streets",
@@ -2790,8 +2790,8 @@
           "value": "7650.0"
         }
       ],
-      "created": "2026-08-29T19:28:05Z",
-      "modified": "2026-08-29T19:28:05Z",
+      "created": "2026-09-05T19:53:39Z",
+      "modified": "2026-09-05T19:53:39Z",
       "creator": [
         {
           "id": "https://oldinsurancemaps.net/profile/danvk",
@@ -2800,7 +2800,7 @@
       ],
       "motivation": "georeferencing",
       "target": {
-        "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd410m:g4104m:g4104cm:g017781915:01778_1915-0002__2/selector",
+        "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd410m:g4104m:g4104cm:g017781915:01778_1915-0002__1/selector",
         "type": "SpecificResource",
         "source": {
           "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd410m:g4104m:g4104cm:g017781915:01778_1915-0002/info.json",
@@ -2814,7 +2814,7 @@
         }
       },
       "body": {
-        "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd410m:g4104m:g4104cm:g017781915:01778_1915-0002__2/gcps",
+        "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd410m:g4104m:g4104cm:g017781915:01778_1915-0002__1/gcps",
         "type": "FeatureCollection",
         "transformation": {
           "type": "polynomial",
@@ -2917,7 +2917,7 @@
         "http://iiif.io/api/extension/georef/1/context.json",
         "http://iiif.io/api/presentation/3/context.json"
       ],
-      "label": "Champaign, Ill. | 1915 p3 [3]",
+      "label": "Champaign, Ill. | 1915 p3 [1]",
       "metadata": [
         {
           "label": "streets",
@@ -2944,8 +2944,8 @@
           "value": "7650.0"
         }
       ],
-      "created": "2026-08-29T19:28:05Z",
-      "modified": "2026-08-29T19:28:05Z",
+      "created": "2026-09-05T19:53:39Z",
+      "modified": "2026-09-05T19:53:39Z",
       "creator": [
         {
           "id": "https://oldinsurancemaps.net/profile/danvk",
@@ -3098,8 +3098,8 @@
           "value": "7650.0"
         }
       ],
-      "created": "2026-08-29T19:28:05Z",
-      "modified": "2026-08-29T19:28:05Z",
+      "created": "2026-09-05T19:53:39Z",
+      "modified": "2026-09-05T19:53:39Z",
       "creator": [
         {
           "id": "https://oldinsurancemaps.net/profile/danvk",
@@ -3236,8 +3236,8 @@
           "value": "0"
         }
       ],
-      "created": "2026-08-29T19:28:05Z",
-      "modified": "2026-08-29T19:28:05Z",
+      "created": "2026-09-05T19:53:39Z",
+      "modified": "2026-09-05T19:53:39Z",
       "creator": [
         {
           "id": "https://oldinsurancemaps.net/profile/danvk",
@@ -3374,8 +3374,8 @@
           "value": "0"
         }
       ],
-      "created": "2026-08-29T19:28:05Z",
-      "modified": "2026-08-29T19:28:05Z",
+      "created": "2026-09-05T19:53:39Z",
+      "modified": "2026-09-05T19:53:39Z",
       "creator": [
         {
           "id": "https://oldinsurancemaps.net/profile/danvk",
@@ -3512,8 +3512,8 @@
           "value": "0"
         }
       ],
-      "created": "2026-08-29T19:28:05Z",
-      "modified": "2026-08-29T19:28:05Z",
+      "created": "2026-09-05T19:53:39Z",
+      "modified": "2026-09-05T19:53:39Z",
       "creator": [
         {
           "id": "https://oldinsurancemaps.net/profile/danvk",
@@ -3650,8 +3650,8 @@
           "value": "0"
         }
       ],
-      "created": "2026-08-29T19:28:05Z",
-      "modified": "2026-08-29T19:28:05Z",
+      "created": "2026-09-05T19:53:39Z",
+      "modified": "2026-09-05T19:53:39Z",
       "creator": [
         {
           "id": "https://oldinsurancemaps.net/profile/danvk",
@@ -3788,8 +3788,8 @@
           "value": "0"
         }
       ],
-      "created": "2026-08-29T19:28:05Z",
-      "modified": "2026-08-29T19:28:05Z",
+      "created": "2026-09-05T19:53:39Z",
+      "modified": "2026-09-05T19:53:39Z",
       "creator": [
         {
           "id": "https://oldinsurancemaps.net/profile/danvk",

@@ -24,8 +24,8 @@
           "value": "0"
         }
       ],
-      "created": "2026-08-29T19:28:19Z",
-      "modified": "2026-08-29T19:28:19Z",
+      "created": "2026-09-05T20:27:57Z",
+      "modified": "2026-09-05T20:27:57Z",
       "creator": [
         {
           "id": "https://oldinsurancemaps.net/profile/danvk",
@@ -162,8 +162,8 @@
           "value": "0"
         }
       ],
-      "created": "2026-08-29T19:28:19Z",
-      "modified": "2026-08-29T19:28:19Z",
+      "created": "2026-09-05T20:27:57Z",
+      "modified": "2026-09-05T20:27:57Z",
       "creator": [
         {
           "id": "https://oldinsurancemaps.net/profile/danvk",
@@ -300,8 +300,8 @@
           "value": "0"
         }
       ],
-      "created": "2026-08-29T19:28:19Z",
-      "modified": "2026-08-29T19:28:19Z",
+      "created": "2026-09-05T20:27:57Z",
+      "modified": "2026-09-05T20:27:57Z",
       "creator": [
         {
           "id": "https://oldinsurancemaps.net/profile/danvk",
@@ -438,8 +438,8 @@
           "value": "0"
         }
       ],
-      "created": "2026-08-29T19:28:19Z",
-      "modified": "2026-08-29T19:28:19Z",
+      "created": "2026-09-05T20:27:57Z",
+      "modified": "2026-09-05T20:27:57Z",
       "creator": [
         {
           "id": "https://oldinsurancemaps.net/profile/danvk",
@@ -576,8 +576,8 @@
           "value": "0"
         }
       ],
-      "created": "2026-08-29T19:28:19Z",
-      "modified": "2026-08-29T19:28:19Z",
+      "created": "2026-09-05T20:27:57Z",
+      "modified": "2026-09-05T20:27:57Z",
       "creator": [
         {
           "id": "https://oldinsurancemaps.net/profile/danvk",
@@ -714,8 +714,8 @@
           "value": "0"
         }
       ],
-      "created": "2026-08-29T19:28:19Z",
-      "modified": "2026-08-29T19:28:19Z",
+      "created": "2026-09-05T20:27:57Z",
+      "modified": "2026-09-05T20:27:57Z",
       "creator": [
         {
           "id": "https://oldinsurancemaps.net/profile/danvk",
@@ -852,8 +852,8 @@
           "value": "0"
         }
       ],
-      "created": "2026-08-29T19:28:19Z",
-      "modified": "2026-08-29T19:28:19Z",
+      "created": "2026-09-05T20:27:57Z",
+      "modified": "2026-09-05T20:27:57Z",
       "creator": [
         {
           "id": "https://oldinsurancemaps.net/profile/danvk",
@@ -990,8 +990,8 @@
           "value": "0"
         }
       ],
-      "created": "2026-08-29T19:28:19Z",
-      "modified": "2026-08-29T19:28:19Z",
+      "created": "2026-09-05T20:27:57Z",
+      "modified": "2026-09-05T20:27:57Z",
       "creator": [
         {
           "id": "https://oldinsurancemaps.net/profile/danvk",
@@ -1128,8 +1128,8 @@
           "value": "0"
         }
       ],
-      "created": "2026-08-29T19:28:19Z",
-      "modified": "2026-08-29T19:28:19Z",
+      "created": "2026-09-05T20:27:57Z",
+      "modified": "2026-09-05T20:27:57Z",
       "creator": [
         {
           "id": "https://oldinsurancemaps.net/profile/danvk",
@@ -1266,8 +1266,8 @@
           "value": "0"
         }
       ],
-      "created": "2026-08-29T19:28:19Z",
-      "modified": "2026-08-29T19:28:19Z",
+      "created": "2026-09-05T20:27:57Z",
+      "modified": "2026-09-05T20:27:57Z",
       "creator": [
         {
           "id": "https://oldinsurancemaps.net/profile/danvk",
@@ -1404,8 +1404,8 @@
           "value": "0"
         }
       ],
-      "created": "2026-08-29T19:28:19Z",
-      "modified": "2026-08-29T19:28:19Z",
+      "created": "2026-09-05T20:27:57Z",
+      "modified": "2026-09-05T20:27:57Z",
       "creator": [
         {
           "id": "https://oldinsurancemaps.net/profile/danvk",
@@ -1424,7 +1424,7 @@
         },
         "selector": {
           "type": "SvgSelector",
-          "value": "<svg><polygon points=\"880.3,6300.0 -0.0,6231.4 -0.0,253.3 134.8,263.5 140.3,0.0 6660.0,0.0 6660.0,753.9 6267.8,724.0 6276.9,2554.4 6660.0,2588.4 6660.0,8070.0 -0.0,8070.0 -0.0,6674.1 874.6,6687.0 880.3,6300.0\" /></svg>"
+          "value": "<svg><polygon points=\"-0.0,6275.3 -0.0,360.6 90.5,365.9 91.9,29.7 -0.0,0.0 6660.0,0.0 6660.0,749.5 6215.2,723.1 6255.1,2535.8 6660.0,2564.9 6660.0,8070.0 -0.0,8070.0 -0.0,6717.3 936.6,6715.8 935.8,6332.5 -0.0,6275.3\" /></svg>"
         }
       },
       "body": {
@@ -1453,8 +1453,8 @@
             "geometry": {
               "type": "Point",
               "coordinates": [
-                -85.64161289174552,
-                42.9274734797777
+                -85.6415583146202,
+                42.92757385382521
               ]
             }
           },
@@ -1474,8 +1474,8 @@
             "geometry": {
               "type": "Point",
               "coordinates": [
-                -85.63333811038012,
-                42.9278330078086
+                -85.6332559986495,
+                42.92783531357226
               ]
             }
           },
@@ -1495,8 +1495,8 @@
             "geometry": {
               "type": "Point",
               "coordinates": [
-                -85.63274302536199,
-                42.920489152435806
+                -85.63282627035724,
+                42.92041497032622
               ]
             }
           },
@@ -1516,8 +1516,8 @@
             "geometry": {
               "type": "Point",
               "coordinates": [
-                -85.64101780672739,
-                42.92012962440491
+                -85.64112858632794,
+                42.92015351057917
               ]
             }
           }
@@ -1542,8 +1542,8 @@
           "value": "0"
         }
       ],
-      "created": "2026-08-29T19:28:19Z",
-      "modified": "2026-08-29T19:28:19Z",
+      "created": "2026-09-05T20:27:57Z",
+      "modified": "2026-09-05T20:27:57Z",
       "creator": [
         {
           "id": "https://oldinsurancemaps.net/profile/danvk",
@@ -1562,7 +1562,7 @@
         },
         "selector": {
           "type": "SvgSelector",
-          "value": "<svg><polygon points=\"-0.0,6905.1 -0.0,0.0 2979.2,-0.0 4547.6,-0.0 6660.0,914.9 6660.0,8070.0 4008.0,8070.0 -0.0,6905.1\" /></svg>"
+          "value": "<svg><polygon points=\"-0.0,6905.1 -0.0,711.6 2652.2,-0.0 2979.2,-0.0 4547.6,-0.0 6660.0,928.4 6660.0,3451.9 6660.0,8070.0 4008.0,8070.0 -0.0,6905.1\" /></svg>"
         }
       },
       "body": {
@@ -1680,8 +1680,8 @@
           "value": "0"
         }
       ],
-      "created": "2026-08-29T19:28:19Z",
-      "modified": "2026-08-29T19:28:19Z",
+      "created": "2026-09-05T20:27:57Z",
+      "modified": "2026-09-05T20:27:57Z",
       "creator": [
         {
           "id": "https://oldinsurancemaps.net/profile/danvk",
@@ -1818,8 +1818,8 @@
           "value": "0"
         }
       ],
-      "created": "2026-08-29T19:28:19Z",
-      "modified": "2026-08-29T19:28:19Z",
+      "created": "2026-09-05T20:27:57Z",
+      "modified": "2026-09-05T20:27:57Z",
       "creator": [
         {
           "id": "https://oldinsurancemaps.net/profile/danvk",
@@ -1956,8 +1956,8 @@
           "value": "0"
         }
       ],
-      "created": "2026-08-29T19:28:19Z",
-      "modified": "2026-08-29T19:28:19Z",
+      "created": "2026-09-05T20:27:57Z",
+      "modified": "2026-09-05T20:27:57Z",
       "creator": [
         {
           "id": "https://oldinsurancemaps.net/profile/danvk",
@@ -2094,8 +2094,8 @@
           "value": "0"
         }
       ],
-      "created": "2026-08-29T19:28:19Z",
-      "modified": "2026-08-29T19:28:19Z",
+      "created": "2026-09-05T20:27:57Z",
+      "modified": "2026-09-05T20:27:57Z",
       "creator": [
         {
           "id": "https://oldinsurancemaps.net/profile/danvk",
@@ -2232,8 +2232,8 @@
           "value": "0"
         }
       ],
-      "created": "2026-08-29T19:28:19Z",
-      "modified": "2026-08-29T19:28:19Z",
+      "created": "2026-09-05T20:27:57Z",
+      "modified": "2026-09-05T20:27:57Z",
       "creator": [
         {
           "id": "https://oldinsurancemaps.net/profile/danvk",
@@ -2370,8 +2370,8 @@
           "value": "0"
         }
       ],
-      "created": "2026-08-29T19:28:19Z",
-      "modified": "2026-08-29T19:28:19Z",
+      "created": "2026-09-05T20:27:57Z",
+      "modified": "2026-09-05T20:27:57Z",
       "creator": [
         {
           "id": "https://oldinsurancemaps.net/profile/danvk",
@@ -2508,8 +2508,8 @@
           "value": "0"
         }
       ],
-      "created": "2026-08-29T19:28:19Z",
-      "modified": "2026-08-29T19:28:19Z",
+      "created": "2026-09-05T20:27:57Z",
+      "modified": "2026-09-05T20:27:57Z",
       "creator": [
         {
           "id": "https://oldinsurancemaps.net/profile/danvk",
@@ -2646,8 +2646,8 @@
           "value": "0"
         }
       ],
-      "created": "2026-08-29T19:28:19Z",
-      "modified": "2026-08-29T19:28:19Z",
+      "created": "2026-09-05T20:27:57Z",
+      "modified": "2026-09-05T20:27:57Z",
       "creator": [
         {
           "id": "https://oldinsurancemaps.net/profile/danvk",
@@ -2666,7 +2666,7 @@
         },
         "selector": {
           "type": "SvgSelector",
-          "value": "<svg><polygon points=\"-0.0,8070.0 -0.0,4526.1 662.4,4505.0 386.1,430.4 550.2,0.0 2999.1,0.0 3027.0,435.2 4238.6,437.4 4279.9,964.7 5649.8,876.8 5759.6,2266.8 6660.0,2195.7 6660.0,8070.0 -0.0,8070.0\" /></svg>"
+          "value": "<svg><polygon points=\"-0.0,8070.0 -0.0,4526.1 662.4,4505.0 386.1,430.4 550.2,0.0 2999.1,0.0 3027.0,435.2 4238.6,437.4 4279.9,964.7 5585.8,880.9 5670.2,2242.3 6660.0,2180.4 6660.0,8070.0 -0.0,8070.0\" /></svg>"
         }
       },
       "body": {
@@ -2773,7 +2773,7 @@
         "http://iiif.io/api/extension/georef/1/context.json",
         "http://iiif.io/api/presentation/3/context.json"
       ],
-      "label": "Grand Rapids, Mich. | 1953 | Vol. 7 p721 [3]",
+      "label": "Grand Rapids, Mich. | 1953 | Vol. 7 p721 [1]",
       "metadata": [
         {
           "label": "streets",
@@ -2800,8 +2800,8 @@
           "value": "3893.0"
         }
       ],
-      "created": "2026-08-29T19:28:19Z",
-      "modified": "2026-08-29T19:28:19Z",
+      "created": "2026-09-05T20:27:57Z",
+      "modified": "2026-09-05T20:27:57Z",
       "creator": [
         {
           "id": "https://oldinsurancemaps.net/profile/danvk",
@@ -2927,7 +2927,7 @@
         "http://iiif.io/api/extension/georef/1/context.json",
         "http://iiif.io/api/presentation/3/context.json"
       ],
-      "label": "Grand Rapids, Mich. | 1953 | Vol. 7 p721 [3]",
+      "label": "Grand Rapids, Mich. | 1953 | Vol. 7 p721 [5]",
       "metadata": [
         {
           "label": "streets",
@@ -2954,8 +2954,8 @@
           "value": "4848.0"
         }
       ],
-      "created": "2026-08-29T19:28:19Z",
-      "modified": "2026-08-29T19:28:19Z",
+      "created": "2026-09-05T20:27:57Z",
+      "modified": "2026-09-05T20:27:57Z",
       "creator": [
         {
           "id": "https://oldinsurancemaps.net/profile/danvk",
@@ -2974,7 +2974,7 @@
         },
         "selector": {
           "type": "SvgSelector",
-          "value": "<svg><polygon points=\"6660.0,3222.0 4707.6,3227.2 4725.1,7013.2 4896.1,6998.0 4900.9,7377.9 6660.0,7212.8 6660.0,3222.0\" /></svg>"
+          "value": "<svg><polygon points=\"6660.0,3222.0 4707.6,3227.2 4724.9,6958.7 4895.5,6946.4 4900.9,7377.9 6660.0,7212.8 6660.0,3222.0\" /></svg>"
         }
       },
       "body": {
@@ -3108,8 +3108,8 @@
           "value": "8070.0"
         }
       ],
-      "created": "2026-08-29T19:28:19Z",
-      "modified": "2026-08-29T19:28:19Z",
+      "created": "2026-09-05T20:27:57Z",
+      "modified": "2026-09-05T20:27:57Z",
       "creator": [
         {
           "id": "https://oldinsurancemaps.net/profile/danvk",
@@ -3235,7 +3235,7 @@
         "http://iiif.io/api/extension/georef/1/context.json",
         "http://iiif.io/api/presentation/3/context.json"
       ],
-      "label": "Grand Rapids, Mich. | 1953 | Vol. 7 p722 [1]",
+      "label": "Grand Rapids, Mich. | 1953 | Vol. 7 p722 [2]",
       "metadata": [
         {
           "label": "streets",
@@ -3262,8 +3262,8 @@
           "value": "2077.9"
         }
       ],
-      "created": "2026-08-29T19:28:19Z",
-      "modified": "2026-08-29T19:28:19Z",
+      "created": "2026-09-05T20:27:57Z",
+      "modified": "2026-09-05T20:27:57Z",
       "creator": [
         {
           "id": "https://oldinsurancemaps.net/profile/danvk",
@@ -3282,7 +3282,7 @@
         },
         "selector": {
           "type": "SvgSelector",
-          "value": "<svg><polygon points=\"2946.0,2963.3 2945.6,3284.8 2942.4,4956.8 6660.0,5041.2 6660.0,3016.9 3187.6,2966.9 2948.3,2963.3 2946.0,2963.3\" /></svg>"
+          "value": "<svg><polygon points=\"6660.0,3016.9 3187.6,2966.9 2948.3,2963.3 2946.0,2963.3 2945.6,3284.8 2942.4,4956.8 6660.0,5041.2 6660.0,3016.9\" /></svg>"
         }
       },
       "body": {
@@ -3383,13 +3383,13 @@
       }
     },
     {
-      "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd411m:g4114m:g4114gm:g04023195307:04023_07_1953-0724__1/georef",
+      "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd411m:g4114m:g4114gm:g04023195307:04023_07_1953-0724__2/georef",
       "type": "Annotation",
       "@context": [
         "http://iiif.io/api/extension/georef/1/context.json",
         "http://iiif.io/api/presentation/3/context.json"
       ],
-      "label": "Grand Rapids, Mich. | 1953 | Vol. 7 p724 [1]",
+      "label": "Grand Rapids, Mich. | 1953 | Vol. 7 p724 [2]",
       "metadata": [
         {
           "label": "streets",
@@ -3416,8 +3416,8 @@
           "value": "3994.2"
         }
       ],
-      "created": "2026-08-29T19:28:19Z",
-      "modified": "2026-08-29T19:28:19Z",
+      "created": "2026-09-05T20:27:57Z",
+      "modified": "2026-09-05T20:27:57Z",
       "creator": [
         {
           "id": "https://oldinsurancemaps.net/profile/danvk",
@@ -3426,7 +3426,7 @@
       ],
       "motivation": "georeferencing",
       "target": {
-        "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd411m:g4114m:g4114gm:g04023195307:04023_07_1953-0724__1/selector",
+        "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd411m:g4114m:g4114gm:g04023195307:04023_07_1953-0724__2/selector",
         "type": "SpecificResource",
         "source": {
           "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd411m:g4114m:g4114gm:g04023195307:04023_07_1953-0724",
@@ -3440,7 +3440,7 @@
         }
       },
       "body": {
-        "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd411m:g4114m:g4114gm:g04023195307:04023_07_1953-0724__1/gcps",
+        "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd411m:g4114m:g4114gm:g04023195307:04023_07_1953-0724__2/gcps",
         "type": "FeatureCollection",
         "transformation": {
           "type": "polynomial",
@@ -3543,7 +3543,7 @@
         "http://iiif.io/api/extension/georef/1/context.json",
         "http://iiif.io/api/presentation/3/context.json"
       ],
-      "label": "Grand Rapids, Mich. | 1953 | Vol. 7 p725 [3]",
+      "label": "Grand Rapids, Mich. | 1953 | Vol. 7 p725 [1]",
       "metadata": [
         {
           "label": "streets",
@@ -3570,8 +3570,8 @@
           "value": "8070.0"
         }
       ],
-      "created": "2026-08-29T19:28:19Z",
-      "modified": "2026-08-29T19:28:19Z",
+      "created": "2026-09-05T20:27:57Z",
+      "modified": "2026-09-05T20:27:57Z",
       "creator": [
         {
           "id": "https://oldinsurancemaps.net/profile/danvk",
@@ -3724,8 +3724,8 @@
           "value": "2005.5"
         }
       ],
-      "created": "2026-08-29T19:28:19Z",
-      "modified": "2026-08-29T19:28:19Z",
+      "created": "2026-09-05T20:27:57Z",
+      "modified": "2026-09-05T20:27:57Z",
       "creator": [
         {
           "id": "https://oldinsurancemaps.net/profile/danvk",
@@ -3851,7 +3851,7 @@
         "http://iiif.io/api/extension/georef/1/context.json",
         "http://iiif.io/api/presentation/3/context.json"
       ],
-      "label": "Grand Rapids, Mich. | 1953 | Vol. 7 p726 [2]",
+      "label": "Grand Rapids, Mich. | 1953 | Vol. 7 p726 [1]",
       "metadata": [
         {
           "label": "streets",
@@ -3878,8 +3878,8 @@
           "value": "8070.0"
         }
       ],
-      "created": "2026-08-29T19:28:19Z",
-      "modified": "2026-08-29T19:28:19Z",
+      "created": "2026-09-05T20:27:57Z",
+      "modified": "2026-09-05T20:27:57Z",
       "creator": [
         {
           "id": "https://oldinsurancemaps.net/profile/danvk",
@@ -4032,8 +4032,8 @@
           "value": "2364.6"
         }
       ],
-      "created": "2026-08-29T19:28:19Z",
-      "modified": "2026-08-29T19:28:19Z",
+      "created": "2026-09-05T20:27:57Z",
+      "modified": "2026-09-05T20:27:57Z",
       "creator": [
         {
           "id": "https://oldinsurancemaps.net/profile/danvk",
@@ -4170,8 +4170,8 @@
           "value": "0"
         }
       ],
-      "created": "2026-08-29T19:28:19Z",
-      "modified": "2026-08-29T19:28:19Z",
+      "created": "2026-09-05T20:27:57Z",
+      "modified": "2026-09-05T20:27:57Z",
       "creator": [
         {
           "id": "https://oldinsurancemaps.net/profile/danvk",
@@ -4297,7 +4297,7 @@
         "http://iiif.io/api/extension/georef/1/context.json",
         "http://iiif.io/api/presentation/3/context.json"
       ],
-      "label": "Grand Rapids, Mich. | 1953 | Vol. 7 p728 [2]",
+      "label": "Grand Rapids, Mich. | 1953 | Vol. 7 p728 [1]",
       "metadata": [
         {
           "label": "streets",
@@ -4324,8 +4324,8 @@
           "value": "8070.0"
         }
       ],
-      "created": "2026-08-29T19:28:19Z",
-      "modified": "2026-08-29T19:28:19Z",
+      "created": "2026-09-05T20:27:57Z",
+      "modified": "2026-09-05T20:27:57Z",
       "creator": [
         {
           "id": "https://oldinsurancemaps.net/profile/danvk",
@@ -4478,8 +4478,8 @@
           "value": "8070.0"
         }
       ],
-      "created": "2026-08-29T19:28:19Z",
-      "modified": "2026-08-29T19:28:19Z",
+      "created": "2026-09-05T20:27:57Z",
+      "modified": "2026-09-05T20:27:57Z",
       "creator": [
         {
           "id": "https://oldinsurancemaps.net/profile/danvk",
@@ -4605,7 +4605,7 @@
         "http://iiif.io/api/extension/georef/1/context.json",
         "http://iiif.io/api/presentation/3/context.json"
       ],
-      "label": "Grand Rapids, Mich. | 1953 | Vol. 7 p729 [1]",
+      "label": "Grand Rapids, Mich. | 1953 | Vol. 7 p729",
       "metadata": [
         {
           "label": "streets",
@@ -4616,8 +4616,8 @@
           "value": "0"
         }
       ],
-      "created": "2026-08-29T19:28:19Z",
-      "modified": "2026-08-29T19:28:19Z",
+      "created": "2026-09-05T20:27:57Z",
+      "modified": "2026-09-05T20:27:57Z",
       "creator": [
         {
           "id": "https://oldinsurancemaps.net/profile/danvk",
@@ -4754,8 +4754,8 @@
           "value": "0"
         }
       ],
-      "created": "2026-08-29T19:28:19Z",
-      "modified": "2026-08-29T19:28:19Z",
+      "created": "2026-09-05T20:27:57Z",
+      "modified": "2026-09-05T20:27:57Z",
       "creator": [
         {
           "id": "https://oldinsurancemaps.net/profile/danvk",
@@ -4774,7 +4774,7 @@
         },
         "selector": {
           "type": "SvgSelector",
-          "value": "<svg><polygon points=\"1649.3,8070.0 -0.0,8070.0 0.0,-0.0 3942.0,0.0 3953.1,683.5 4754.3,710.4 4768.1,1728.2 5769.7,1722.6 5816.9,7585.4 6660.0,7579.1 6660.0,8070.0 5641.5,8070.0 5684.8,6249.6 3660.3,6201.5 1649.3,8070.0\" /></svg>"
+          "value": "<svg><polygon points=\"1649.3,8070.0 -0.0,8070.0 0.0,-0.0 3942.0,0.0 3953.1,683.5 4754.3,710.4 4767.1,1679.6 5769.3,1671.3 5816.9,7585.4 6660.0,7579.1 6660.0,8070.0 5641.5,8070.0 5684.8,6249.6 3660.3,6201.5 1649.3,8070.0\" /></svg>"
         }
       },
       "body": {
@@ -4892,8 +4892,8 @@
           "value": "0"
         }
       ],
-      "created": "2026-08-29T19:28:19Z",
-      "modified": "2026-08-29T19:28:19Z",
+      "created": "2026-09-05T20:27:57Z",
+      "modified": "2026-09-05T20:27:57Z",
       "creator": [
         {
           "id": "https://oldinsurancemaps.net/profile/danvk",
@@ -5030,8 +5030,8 @@
           "value": "0"
         }
       ],
-      "created": "2026-08-29T19:28:19Z",
-      "modified": "2026-08-29T19:28:19Z",
+      "created": "2026-09-05T20:27:57Z",
+      "modified": "2026-09-05T20:27:57Z",
       "creator": [
         {
           "id": "https://oldinsurancemaps.net/profile/danvk",
@@ -5168,8 +5168,8 @@
           "value": "0"
         }
       ],
-      "created": "2026-08-29T19:28:19Z",
-      "modified": "2026-08-29T19:28:19Z",
+      "created": "2026-09-05T20:27:57Z",
+      "modified": "2026-09-05T20:27:57Z",
       "creator": [
         {
           "id": "https://oldinsurancemaps.net/profile/danvk",
@@ -5306,8 +5306,8 @@
           "value": "0"
         }
       ],
-      "created": "2026-08-29T19:28:19Z",
-      "modified": "2026-08-29T19:28:19Z",
+      "created": "2026-09-05T20:27:57Z",
+      "modified": "2026-09-05T20:27:57Z",
       "creator": [
         {
           "id": "https://oldinsurancemaps.net/profile/danvk",
@@ -5326,7 +5326,7 @@
         },
         "selector": {
           "type": "SvgSelector",
-          "value": "<svg><polygon points=\"302.3,633.5 284.0,0.0 6660.0,0.0 6660.0,8070.0 -0.0,8070.0 -0.0,3990.9 1423.5,3942.9 1397.7,3160.3 302.3,633.5\" /></svg>"
+          "value": "<svg><polygon points=\"279.2,658.2 261.7,0.0 6660.0,0.0 6660.0,8070.0 -0.0,8070.0 -0.0,4005.1 1397.3,3962.2 1373.3,3181.5 279.2,658.2\" /></svg>"
         }
       },
       "body": {
@@ -5355,8 +5355,8 @@
             "geometry": {
               "type": "Point",
               "coordinates": [
-                -85.69410092102348,
-                42.93083757344358
+                -85.69407319747394,
+                42.93086140207318
               ]
             }
           },
@@ -5376,8 +5376,8 @@
             "geometry": {
               "type": "Point",
               "coordinates": [
-                -85.68580874154931,
-                42.93094972834106
+                -85.6858182046268,
+                42.9309895260848
               ]
             }
           },
@@ -5397,8 +5397,8 @@
             "geometry": {
               "type": "Point",
               "coordinates": [
-                -85.68562309543886,
-                42.92359079397385
+                -85.68560761235454,
+                42.923611865912704
               ]
             }
           },
@@ -5418,8 +5418,8 @@
             "geometry": {
               "type": "Point",
               "coordinates": [
-                -85.69391527491302,
-                42.92347863907637
+                -85.69386260520169,
+                42.92348374190108
               ]
             }
           }
@@ -5444,8 +5444,8 @@
           "value": "0"
         }
       ],
-      "created": "2026-08-29T19:28:19Z",
-      "modified": "2026-08-29T19:28:19Z",
+      "created": "2026-09-05T20:27:57Z",
+      "modified": "2026-09-05T20:27:57Z",
       "creator": [
         {
           "id": "https://oldinsurancemaps.net/profile/danvk",
@@ -5464,7 +5464,7 @@
         },
         "selector": {
           "type": "SvgSelector",
-          "value": "<svg><polygon points=\"-0.0,2455.9 0.0,0.0 6660.0,0.0 6660.0,8070.0 2196.6,8070.0 712.3,5967.9 -0.0,2455.9\" /></svg>"
+          "value": "<svg><polygon points=\"-0.0,2455.9 0.0,0.0 6660.0,0.0 6660.0,8070.0 2196.6,8070.0 711.7,5942.2 -0.0,2455.9\" /></svg>"
         }
       },
       "body": {
@@ -5582,8 +5582,8 @@
           "value": "0"
         }
       ],
-      "created": "2026-08-29T19:28:19Z",
-      "modified": "2026-08-29T19:28:19Z",
+      "created": "2026-09-05T20:27:57Z",
+      "modified": "2026-09-05T20:27:57Z",
       "creator": [
         {
           "id": "https://oldinsurancemaps.net/profile/danvk",
@@ -5720,8 +5720,8 @@
           "value": "0"
         }
       ],
-      "created": "2026-08-29T19:28:19Z",
-      "modified": "2026-08-29T19:28:19Z",
+      "created": "2026-09-05T20:27:57Z",
+      "modified": "2026-09-05T20:27:57Z",
       "creator": [
         {
           "id": "https://oldinsurancemaps.net/profile/danvk",
@@ -5858,8 +5858,8 @@
           "value": "0"
         }
       ],
-      "created": "2026-08-29T19:28:19Z",
-      "modified": "2026-08-29T19:28:19Z",
+      "created": "2026-09-05T20:27:57Z",
+      "modified": "2026-09-05T20:27:57Z",
       "creator": [
         {
           "id": "https://oldinsurancemaps.net/profile/danvk",
@@ -5996,8 +5996,8 @@
           "value": "0"
         }
       ],
-      "created": "2026-08-29T19:28:19Z",
-      "modified": "2026-08-29T19:28:19Z",
+      "created": "2026-09-05T20:27:57Z",
+      "modified": "2026-09-05T20:27:57Z",
       "creator": [
         {
           "id": "https://oldinsurancemaps.net/profile/danvk",
@@ -6123,7 +6123,7 @@
         "http://iiif.io/api/extension/georef/1/context.json",
         "http://iiif.io/api/presentation/3/context.json"
       ],
-      "label": "Grand Rapids, Mich. | 1953 | Vol. 7 p819 [2]",
+      "label": "Grand Rapids, Mich. | 1953 | Vol. 7 p819",
       "metadata": [
         {
           "label": "streets",
@@ -6134,8 +6134,8 @@
           "value": "0"
         }
       ],
-      "created": "2026-08-29T19:28:19Z",
-      "modified": "2026-08-29T19:28:19Z",
+      "created": "2026-09-05T20:27:57Z",
+      "modified": "2026-09-05T20:27:57Z",
       "creator": [
         {
           "id": "https://oldinsurancemaps.net/profile/danvk",
@@ -6154,7 +6154,7 @@
         },
         "selector": {
           "type": "SvgSelector",
-          "value": "<svg><polygon points=\"6266.3,7602.8 2680.8,7519.1 2697.9,8070.0 -0.0,8070.0 -0.0,-0.0 6660.0,0.0 6660.0,2000.3 6144.1,1992.1 6266.3,7602.8\" /></svg>"
+          "value": "<svg><polygon points=\"6660.0,8070.0 -0.0,8070.0 0.0,-0.0 6660.0,0.0 6660.0,8070.0\" /></svg>"
         }
       },
       "body": {
@@ -6183,8 +6183,8 @@
             "geometry": {
               "type": "Point",
               "coordinates": [
-                -85.71025462093947,
-                42.93892188049139
+                -85.7479796692126,
+                42.92261172839538
               ]
             }
           },
@@ -6204,8 +6204,8 @@
             "geometry": {
               "type": "Point",
               "coordinates": [
-                -85.7061207164171,
-                42.938958749093736
+                -85.7397134738193,
+                42.922464186402294
               ]
             }
           },
@@ -6225,8 +6225,8 @@
             "geometry": {
               "type": "Point",
               "coordinates": [
-                -85.70606010808687,
-                42.935264734176336
+                -85.73995768541474,
+                42.91512802496251
               ]
             }
           },
@@ -6246,8 +6246,8 @@
             "geometry": {
               "type": "Point",
               "coordinates": [
-                -85.71019401260924,
-                42.935227865573985
+                -85.74822388080804,
+                42.9152755669556
               ]
             }
           }
@@ -6261,7 +6261,7 @@
         "http://iiif.io/api/extension/georef/1/context.json",
         "http://iiif.io/api/presentation/3/context.json"
       ],
-      "label": "Grand Rapids, Mich. | 1953 | Vol. 7 p820 [2]",
+      "label": "Grand Rapids, Mich. | 1953 | Vol. 7 p820",
       "metadata": [
         {
           "label": "streets",
@@ -6272,8 +6272,8 @@
           "value": "0"
         }
       ],
-      "created": "2026-08-29T19:28:19Z",
-      "modified": "2026-08-29T19:28:19Z",
+      "created": "2026-09-05T20:27:57Z",
+      "modified": "2026-09-05T20:27:57Z",
       "creator": [
         {
           "id": "https://oldinsurancemaps.net/profile/danvk",
@@ -6292,7 +6292,7 @@
         },
         "selector": {
           "type": "SvgSelector",
-          "value": "<svg><polygon points=\"2598.8,7046.6 1799.1,7015.0 1792.2,6327.7 -0.0,6317.5 -0.0,4115.3 1772.6,4216.6 1798.5,1419.5 2053.7,1431.1 2084.5,434.8 -0.0,370.8 -0.0,-0.0 6660.0,0.0 6660.0,2524.6 5362.3,2516.8 5356.2,3449.4 6056.6,3482.1 6051.7,4404.6 5350.2,4371.3 5341.2,5748.9 3602.2,5752.1 3606.3,8070.0 2606.3,8070.0 2598.8,7046.6\" /></svg>"
+          "value": "<svg><polygon points=\"2587.8,7095.9 1782.9,7062.2 1777.5,6375.3 -0.0,6360.5 -0.0,0.0 6660.0,0.0 6660.0,2587.1 5378.5,2576.0 5370.4,3508.1 6075.2,3542.7 6068.4,4464.7 5362.4,4429.5 5350.5,5806.4 3600.3,5804.8 3599.7,8070.0 2592.6,8070.0 2587.8,7095.9\" /></svg>"
         }
       },
       "body": {
@@ -6321,8 +6321,8 @@
             "geometry": {
               "type": "Point",
               "coordinates": [
-                -85.70875579377167,
-                42.93927564326093
+                -85.70874198483126,
+                42.93931858208575
               ]
             }
           },
@@ -6342,8 +6342,8 @@
             "geometry": {
               "type": "Point",
               "coordinates": [
-                -85.70041125563543,
-                42.93953782801243
+                -85.70045188415735,
+                42.93959541216725
               ]
             }
           },
@@ -6363,8 +6363,8 @@
             "geometry": {
               "type": "Point",
               "coordinates": [
-                -85.69997723010918,
-                42.93213311366403
+                -85.69999680698507,
+                42.932187396665384
               ]
             }
           },
@@ -6384,8 +6384,8 @@
             "geometry": {
               "type": "Point",
               "coordinates": [
-                -85.70832176824543,
-                42.931870928912524
+                -85.70828690765899,
+                42.93191056658388
               ]
             }
           }
@@ -6410,8 +6410,8 @@
           "value": "0"
         }
       ],
-      "created": "2026-08-29T19:28:19Z",
-      "modified": "2026-08-29T19:28:19Z",
+      "created": "2026-09-05T20:27:57Z",
+      "modified": "2026-09-05T20:27:57Z",
       "creator": [
         {
           "id": "https://oldinsurancemaps.net/profile/danvk",
@@ -6548,8 +6548,8 @@
           "value": "0"
         }
       ],
-      "created": "2026-08-29T19:28:19Z",
-      "modified": "2026-08-29T19:28:19Z",
+      "created": "2026-09-05T20:27:57Z",
+      "modified": "2026-09-05T20:27:57Z",
       "creator": [
         {
           "id": "https://oldinsurancemaps.net/profile/danvk",
@@ -6686,8 +6686,8 @@
           "value": "0"
         }
       ],
-      "created": "2026-08-29T19:28:19Z",
-      "modified": "2026-08-29T19:28:19Z",
+      "created": "2026-09-05T20:27:57Z",
+      "modified": "2026-09-05T20:27:57Z",
       "creator": [
         {
           "id": "https://oldinsurancemaps.net/profile/danvk",
@@ -6706,7 +6706,7 @@
         },
         "selector": {
           "type": "SvgSelector",
-          "value": "<svg><polygon points=\"6660.0,146.3 5649.2,115.1 5535.5,3795.4 4326.5,3757.8 4270.5,8070.0 -0.0,8070.0 0.0,-0.0 6660.0,0.0 6660.0,146.3\" /></svg>"
+          "value": "<svg><polygon points=\"4262.3,7429.5 4270.5,8070.0 -0.0,8070.0 0.0,-0.0 6660.0,0.0 6660.0,146.3 5649.2,115.1 5535.5,3795.4 4326.5,3757.8 4262.3,7429.5\" /></svg>"
         }
       },
       "body": {
@@ -6824,8 +6824,8 @@
           "value": "0"
         }
       ],
-      "created": "2026-08-29T19:28:19Z",
-      "modified": "2026-08-29T19:28:19Z",
+      "created": "2026-09-05T20:27:57Z",
+      "modified": "2026-09-05T20:27:57Z",
       "creator": [
         {
           "id": "https://oldinsurancemaps.net/profile/danvk",
@@ -6962,8 +6962,8 @@
           "value": "0"
         }
       ],
-      "created": "2026-08-29T19:28:19Z",
-      "modified": "2026-08-29T19:28:19Z",
+      "created": "2026-09-05T20:27:57Z",
+      "modified": "2026-09-05T20:27:57Z",
       "creator": [
         {
           "id": "https://oldinsurancemaps.net/profile/danvk",
@@ -7089,7 +7089,7 @@
         "http://iiif.io/api/extension/georef/1/context.json",
         "http://iiif.io/api/presentation/3/context.json"
       ],
-      "label": "Grand Rapids, Mich. | 1953 | Vol. 7 p826 [1]",
+      "label": "Grand Rapids, Mich. | 1953 | Vol. 7 p826 [2]",
       "metadata": [
         {
           "label": "streets",
@@ -7116,8 +7116,8 @@
           "value": "8070.0"
         }
       ],
-      "created": "2026-08-29T19:28:19Z",
-      "modified": "2026-08-29T19:28:19Z",
+      "created": "2026-09-05T20:27:57Z",
+      "modified": "2026-09-05T20:27:57Z",
       "creator": [
         {
           "id": "https://oldinsurancemaps.net/profile/danvk",
@@ -7254,8 +7254,8 @@
           "value": "0"
         }
       ],
-      "created": "2026-08-29T19:28:19Z",
-      "modified": "2026-08-29T19:28:19Z",
+      "created": "2026-09-05T20:27:57Z",
+      "modified": "2026-09-05T20:27:57Z",
       "creator": [
         {
           "id": "https://oldinsurancemaps.net/profile/danvk",
@@ -7392,8 +7392,8 @@
           "value": "0"
         }
       ],
-      "created": "2026-08-29T19:28:19Z",
-      "modified": "2026-08-29T19:28:19Z",
+      "created": "2026-09-05T20:27:57Z",
+      "modified": "2026-09-05T20:27:57Z",
       "creator": [
         {
           "id": "https://oldinsurancemaps.net/profile/danvk",
@@ -7530,8 +7530,8 @@
           "value": "0"
         }
       ],
-      "created": "2026-08-29T19:28:19Z",
-      "modified": "2026-08-29T19:28:19Z",
+      "created": "2026-09-05T20:27:57Z",
+      "modified": "2026-09-05T20:27:57Z",
       "creator": [
         {
           "id": "https://oldinsurancemaps.net/profile/danvk",
@@ -7668,8 +7668,8 @@
           "value": "0"
         }
       ],
-      "created": "2026-08-29T19:28:19Z",
-      "modified": "2026-08-29T19:28:19Z",
+      "created": "2026-09-05T20:27:57Z",
+      "modified": "2026-09-05T20:27:57Z",
       "creator": [
         {
           "id": "https://oldinsurancemaps.net/profile/danvk",
@@ -7806,8 +7806,8 @@
           "value": "0"
         }
       ],
-      "created": "2026-08-29T19:28:19Z",
-      "modified": "2026-08-29T19:28:19Z",
+      "created": "2026-09-05T20:27:57Z",
+      "modified": "2026-09-05T20:27:57Z",
       "creator": [
         {
           "id": "https://oldinsurancemaps.net/profile/danvk",
@@ -7944,8 +7944,8 @@
           "value": "0"
         }
       ],
-      "created": "2026-08-29T19:28:19Z",
-      "modified": "2026-08-29T19:28:19Z",
+      "created": "2026-09-05T20:27:57Z",
+      "modified": "2026-09-05T20:27:57Z",
       "creator": [
         {
           "id": "https://oldinsurancemaps.net/profile/danvk",
@@ -8071,7 +8071,7 @@
         "http://iiif.io/api/extension/georef/1/context.json",
         "http://iiif.io/api/presentation/3/context.json"
       ],
-      "label": "Grand Rapids, Mich. | 1953 | Vol. 7 p834 [3]",
+      "label": "Grand Rapids, Mich. | 1953 | Vol. 7 p834 [1]",
       "metadata": [
         {
           "label": "streets",
@@ -8098,8 +8098,8 @@
           "value": "8070.0"
         }
       ],
-      "created": "2026-08-29T19:28:19Z",
-      "modified": "2026-08-29T19:28:19Z",
+      "created": "2026-09-05T20:27:57Z",
+      "modified": "2026-09-05T20:27:57Z",
       "creator": [
         {
           "id": "https://oldinsurancemaps.net/profile/danvk",
@@ -8236,8 +8236,8 @@
           "value": "0"
         }
       ],
-      "created": "2026-08-29T19:28:19Z",
-      "modified": "2026-08-29T19:28:19Z",
+      "created": "2026-09-05T20:27:57Z",
+      "modified": "2026-09-05T20:27:57Z",
       "creator": [
         {
           "id": "https://oldinsurancemaps.net/profile/danvk",
@@ -8374,8 +8374,8 @@
           "value": "0"
         }
       ],
-      "created": "2026-08-29T19:28:19Z",
-      "modified": "2026-08-29T19:28:19Z",
+      "created": "2026-09-05T20:27:57Z",
+      "modified": "2026-09-05T20:27:57Z",
       "creator": [
         {
           "id": "https://oldinsurancemaps.net/profile/danvk",
@@ -8501,7 +8501,7 @@
         "http://iiif.io/api/extension/georef/1/context.json",
         "http://iiif.io/api/presentation/3/context.json"
       ],
-      "label": "Grand Rapids, Mich. | 1953 | Vol. 7 p837 [2]",
+      "label": "Grand Rapids, Mich. | 1953 | Vol. 7 p837 [1]",
       "metadata": [
         {
           "label": "streets",
@@ -8528,8 +8528,8 @@
           "value": "8070.0"
         }
       ],
-      "created": "2026-08-29T19:28:19Z",
-      "modified": "2026-08-29T19:28:19Z",
+      "created": "2026-09-05T20:27:57Z",
+      "modified": "2026-09-05T20:27:57Z",
       "creator": [
         {
           "id": "https://oldinsurancemaps.net/profile/danvk",
@@ -8682,8 +8682,8 @@
           "value": "3102.8"
         }
       ],
-      "created": "2026-08-29T19:28:19Z",
-      "modified": "2026-08-29T19:28:19Z",
+      "created": "2026-09-05T20:27:57Z",
+      "modified": "2026-09-05T20:27:57Z",
       "creator": [
         {
           "id": "https://oldinsurancemaps.net/profile/danvk",
@@ -8820,8 +8820,8 @@
           "value": "0"
         }
       ],
-      "created": "2026-08-29T19:28:19Z",
-      "modified": "2026-08-29T19:28:19Z",
+      "created": "2026-09-05T20:27:57Z",
+      "modified": "2026-09-05T20:27:57Z",
       "creator": [
         {
           "id": "https://oldinsurancemaps.net/profile/danvk",
@@ -8958,8 +8958,8 @@
           "value": "0"
         }
       ],
-      "created": "2026-08-29T19:28:19Z",
-      "modified": "2026-08-29T19:28:19Z",
+      "created": "2026-09-05T20:27:57Z",
+      "modified": "2026-09-05T20:27:57Z",
       "creator": [
         {
           "id": "https://oldinsurancemaps.net/profile/danvk",
@@ -9085,7 +9085,7 @@
         "http://iiif.io/api/extension/georef/1/context.json",
         "http://iiif.io/api/presentation/3/context.json"
       ],
-      "label": "Grand Rapids, Mich. | 1953 | Vol. 7 p840 [1]",
+      "label": "Grand Rapids, Mich. | 1953 | Vol. 7 p840",
       "metadata": [
         {
           "label": "streets",
@@ -9096,8 +9096,8 @@
           "value": "0"
         }
       ],
-      "created": "2026-08-29T19:28:19Z",
-      "modified": "2026-08-29T19:28:19Z",
+      "created": "2026-09-05T20:27:57Z",
+      "modified": "2026-09-05T20:27:57Z",
       "creator": [
         {
           "id": "https://oldinsurancemaps.net/profile/danvk",
@@ -9223,7 +9223,7 @@
         "http://iiif.io/api/extension/georef/1/context.json",
         "http://iiif.io/api/presentation/3/context.json"
       ],
-      "label": "Grand Rapids, Mich. | 1953 | Vol. 7 p841 [2]",
+      "label": "Grand Rapids, Mich. | 1953 | Vol. 7 p841 [1]",
       "metadata": [
         {
           "label": "streets",
@@ -9250,8 +9250,8 @@
           "value": "8070.0"
         }
       ],
-      "created": "2026-08-29T19:28:19Z",
-      "modified": "2026-08-29T19:28:19Z",
+      "created": "2026-09-05T20:27:57Z",
+      "modified": "2026-09-05T20:27:57Z",
       "creator": [
         {
           "id": "https://oldinsurancemaps.net/profile/danvk",
@@ -9388,8 +9388,8 @@
           "value": "0"
         }
       ],
-      "created": "2026-08-29T19:28:19Z",
-      "modified": "2026-08-29T19:28:19Z",
+      "created": "2026-09-05T20:27:57Z",
+      "modified": "2026-09-05T20:27:57Z",
       "creator": [
         {
           "id": "https://oldinsurancemaps.net/profile/danvk",
@@ -9526,8 +9526,8 @@
           "value": "0"
         }
       ],
-      "created": "2026-08-29T19:28:19Z",
-      "modified": "2026-08-29T19:28:19Z",
+      "created": "2026-09-05T20:27:57Z",
+      "modified": "2026-09-05T20:27:57Z",
       "creator": [
         {
           "id": "https://oldinsurancemaps.net/profile/danvk",
@@ -9647,13 +9647,13 @@
       }
     },
     {
-      "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd411m:g4114m:g4114gm:g04023195307:04023_07_1953-0845__1/georef",
+      "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd411m:g4114m:g4114gm:g04023195307:04023_07_1953-0845__2/georef",
       "type": "Annotation",
       "@context": [
         "http://iiif.io/api/extension/georef/1/context.json",
         "http://iiif.io/api/presentation/3/context.json"
       ],
-      "label": "Grand Rapids, Mich. | 1953 | Vol. 7 p845 [1]",
+      "label": "Grand Rapids, Mich. | 1953 | Vol. 7 p845 [2]",
       "metadata": [
         {
           "label": "streets",
@@ -9680,8 +9680,8 @@
           "value": "5072.7"
         }
       ],
-      "created": "2026-08-29T19:28:19Z",
-      "modified": "2026-08-29T19:28:19Z",
+      "created": "2026-09-05T20:27:57Z",
+      "modified": "2026-09-05T20:27:57Z",
       "creator": [
         {
           "id": "https://oldinsurancemaps.net/profile/danvk",
@@ -9690,7 +9690,7 @@
       ],
       "motivation": "georeferencing",
       "target": {
-        "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd411m:g4114m:g4114gm:g04023195307:04023_07_1953-0845__1/selector",
+        "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd411m:g4114m:g4114gm:g04023195307:04023_07_1953-0845__2/selector",
         "type": "SpecificResource",
         "source": {
           "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd411m:g4114m:g4114gm:g04023195307:04023_07_1953-0845",
@@ -9704,7 +9704,7 @@
         }
       },
       "body": {
-        "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd411m:g4114m:g4114gm:g04023195307:04023_07_1953-0845__1/gcps",
+        "id": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd411m:g4114m:g4114gm:g04023195307:04023_07_1953-0845__2/gcps",
         "type": "FeatureCollection",
         "transformation": {
           "type": "polynomial",

@@ -123,3 +123,20 @@ def recorded_keymap_keys(volume: Path) -> set[str]:
         return {str(key) for key in json.loads(path.read_text()).get("keys", [])}
     except (OSError, ValueError):
         return set()
+
+
+def split_parent(keymap_json: Path) -> bool:
+    """Whether the sheet behind a ``<stem>.keymap.json`` has been cut into panels.
+
+    ``split`` leaves ``<stem>.panels.json`` beside a sheet it cut, and the panels
+    supersede the parent from then on: the key-map chain re-runs on the nominated
+    panel (Schenectady's p0__1, Los Angeles's pa__2) while the parent's own
+    sidecars stay on disk. Loaded beside the panel's, they index every page a
+    second time -- the same rings twice, which doubles each page's summed region
+    area and drifts the volume-median region prior by sqrt(2). On 2026-09-03 that
+    pushed Schenectady's inset panels p60__1 and p72__2 (24 and 8 ft) into the
+    half-scale band and onto the 0.5x rung (459 and 218 ft). Every consumer that
+    globs ``raw/*.keymap.json`` skips a split parent through this check.
+    """
+    stem = keymap_json.name[: -len(".keymap.json")]
+    return keymap_json.with_name(f"{stem}.panels.json").exists()

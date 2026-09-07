@@ -27,6 +27,7 @@ from mapsnap.keymap.fit_keymap import (
     page_number,
     volume_page_keys,
 )
+from mapsnap.keymap.records import split_parent
 
 Point = tuple[float, float]
 
@@ -148,11 +149,16 @@ def usable_keymaps(directory: Path) -> list[Path]:
     Deliberately not filtered by scan resolution: osm-snap and street-solve build
     locators through here and get real value from a low-resolution sheet even when
     its page numbers are unreliable (see :data:`MIN_KEYMAP_MEGAPIXELS`).
+
+    A key-map sheet that ``split`` has since cut into panels is skipped too: its
+    panel carries the live chain and the parent's sidecars are stale (see
+    :func:`mapsnap.keymap.records.split_parent`).
     """
     return [
         keymap_json
         for keymap_json in sorted(directory.glob("*.keymap.json"))
-        if _georef_accepted(keymap_georef_path(keymap_json))
+        if not split_parent(keymap_json)
+        and _georef_accepted(keymap_georef_path(keymap_json))
     ]
 
 

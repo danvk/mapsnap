@@ -585,3 +585,14 @@ def test_planner_inputs_neutralize_masked_reads_in_place():
     # Same length as the records, so apply_repairs' indices still line up.
     assert labels == ["", "310"]
     assert centers[0] is None and centers[1] == (5.0, 5.0)
+
+
+def test_load_sheets_skips_a_split_parent(tmp_path):
+    from mapsnap.keymap.adjacency_assign import load_sheets
+
+    volume = write_volume(tmp_path, [("2", 1.0, 1.0)], [])
+    raw = volume / "raw"
+    (raw / "p0__1.keymap.json").write_text(json.dumps(keymap_doc([("2", 1.0, 1.0)])))
+    assert [stem for stem, _ in load_sheets(volume)] == ["p0", "p0__1"]
+    (raw / "p0.panels.json").write_text("{}")
+    assert [stem for stem, _ in load_sheets(volume)] == ["p0__1"]
