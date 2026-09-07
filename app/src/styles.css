@@ -162,21 +162,66 @@
   gap: 8px;
 }
 
+/* Two rows tall by design: every child is a two-item vertical stack, so the
+   bar's height is fixed and nothing wraps on a laptop-width window. */
 .iiif-controls {
   display: flex;
-  align-items: center;
-  gap: 12px;
+  align-items: flex-start;
+  gap: 18px;
   font-family: sans-serif;
   font-size: 14px;
 }
 
-.iiif-controls .opacity-control {
+.iiif-controls .control-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.iiif-controls .control-stack select {
+  width: 100%;
+}
+
+.iiif-controls label {
+  white-space: nowrap;
+}
+
+/* A slider with its caption underneath; the caption names the keyboard shortcut. */
+.iiif-controls .slider-stack {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
   width: 200px;
   flex-shrink: 0;
 }
 
+.iiif-controls .slider-stack input[type='range'] {
+  width: 100%;
+  margin: 4px 0;
+}
+
+.iiif-controls .slider-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+}
+
+.iiif-controls .slider-row input[type='range'] {
+  flex: 1;
+  min-width: 120px;
+}
+
+/* The key-map controls sit at the right edge. */
+.iiif-controls .keymap-stack {
+  margin-left: auto;
+  width: 280px;
+}
+
 .iiif-status {
   color: #555;
+  align-self: center;
 }
 
 .volume-viewer-body {
