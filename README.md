@@ -209,6 +209,9 @@ You can view the fits on Allmaps or get the IIIF files from the `gallery` direct
 
 ## How it Works
 
+For the whole pipeline, stage by stage with figures from a real run, see
+[docs/HOW-IT-WORKS.md](docs/HOW-IT-WORKS.md). What follows is the short version.
+
 Here's an [example][p19] of a Sanborn Insurance Map:
 
 ![Brooklyn 1939 Volume 2 Page 19](/images/brooklyn_ny_1939_vol_2_p19.jpg)
