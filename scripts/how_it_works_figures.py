@@ -140,7 +140,7 @@ def corners_affine(corners: list, width: int, height: int) -> np.ndarray:
 
 
 class World:
-    """A local metre frame around ``center`` (lon, lat), drawn at ``m_per_px``."""
+    """A local meter frame around ``center`` (lon, lat), drawn at ``m_per_px``."""
 
     def __init__(
         self, center: tuple[float, float], size: tuple[int, int], m_per_px: float
@@ -172,11 +172,11 @@ class World:
                 continue
             draw.line([tuple(p) for p in self.to_px(coords)], fill=color, width=width)
 
-    def scale_bar(self, draw: ImageDraw.ImageDraw, metres: float = 200.0):
-        px = metres / self.m_per_px
+    def scale_bar(self, draw: ImageDraw.ImageDraw, meters: float = 200.0):
+        px = meters / self.m_per_px
         x0, y0 = 30, self.height - 40
         draw.line([(x0, y0), (x0 + px, y0)], fill=BLACK, width=5)
-        label(draw, (x0, y0 - 34), f"{metres:.0f} m", BLACK, 24)
+        label(draw, (x0, y0 - 34), f"{meters:.0f} m", BLACK, 24)
 
 
 # --------------------------------------------------------------------------- figures
@@ -349,7 +349,7 @@ def fig_keymap() -> None:
         draw.polygon(pts, outline=(0, 0, 0, 255), width=2)
         x, y = min(p[0] for p in pts), min(p[1] for p in pts)
         label(draw, (x, y - 18), read["text"], BLACK, 16)
-    # The page's search centre, through the key map's own georef.
+    # The page's search center, through the key map's own georef.
     georef = load_json(raw / "p0.georef.json")
     page_georef = load_json(DATA / VOLUME / f"{PAGE}.georef.json")
     keymap_entry = page_georef.get("keymap") or {}
