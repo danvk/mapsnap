@@ -6,6 +6,7 @@
  * (`/iiif-api/*`) on the shared crosswalk router.
  */
 
+import { existsSync } from 'fs';
 import { readdir, readFile, stat } from 'fs/promises';
 import { createRequire } from 'module';
 import { dirname, join } from 'path';
@@ -28,6 +29,8 @@ import {
   parseMissingTruthKeys,
 } from './compareTxt.ts';
 import { findVolumes, volumePages } from './adjacencyTruth.ts';
+import { keymapAnnotation } from './keymapAnnotation.ts';
+import { keymapInfos } from './keymapInfos.ts';
 import { runArtifactDir, runArtifactStems } from './runArtifacts.ts';
 import { withTiles } from './iiifAnnotations.ts';
 import { isSafeSegment, isSafeVolume } from './volumePaths.ts';
@@ -415,29 +418,63 @@ export function registerIiifApi(
   });
 
   // A volume's key-map sheets and which visualization sidecars each has, so the viewer can link
-  // to them. Key maps are `raw/<stem>.keymap.json`; siblings <stem>.regions.panels.json and
-  // <stem>.georef.json are the region and georef views. ?volume=<dir> → { keymaps: [...] }.
+  // to them and draw the key-map underlay (see keymapInfos). ?volume=<dir> → { keymaps: [...] }.
   router.get('/iiif-api/keymaps', async (_params, request) => {
     const { volume } = request.query;
     if (!isSafeVolume(volume)) {
       throw new HTTPError(400, `invalid volume: ${volume}`);
     }
-    let files: string[];
-    try {
-      files = await readdir(join(dataDir, volume, 'raw'));
-    } catch {
-      return { keymaps: [] }; // no raw/ directory: volume has no key maps
+    const serviceBaseUrl = `${request.protocol}://${request.get('host')}/iiif/${volume}/raw`;
+    return {
+      keymaps: await keymapInfos(join(dataDir, volume, 'raw'), serviceBaseUrl),
+    };
+  });
+
+  // One key map as a georeference annotation, for the underlay: the sheet or
+  // its P(road) map, warped by a thin-plate spline through the sheet's own
+  // GCPs -- the model keymap-snap places pages in (see keymapAnnotation).
+  router.get('/iiif-api/keymap-annotation', async (_params, request) => {
+    const { volume, stem, image } = request.query;
+    if (!isSafeVolume(volume) || !isSafeSegment(stem)) {
+      throw new HTTPError(400, `invalid key map: ${volume}/${stem}`);
     }
-    const present = new Set(files);
-    const keymaps = files
-      .filter((file) => file.endsWith('.keymap.json'))
-      .map((file) => file.slice(0, -'.keymap.json'.length))
-      .sort()
-      .map((stem) => ({
-        stem,
-        hasRegions: present.has(`${stem}.regions.panels.json`),
-        hasGeoref: present.has(`${stem}.georef.json`),
-      }));
-    return { keymaps };
+    if (image !== 'sheet' && image !== 'roadprob') {
+      throw new HTTPError(400, `invalid image: ${image}`);
+    }
+    const rawDir = join(dataDir, volume, 'raw');
+    let georef: unknown;
+    try {
+      georef = JSON.parse(
+        await readFile(join(rawDir, `${stem}.georef.json`), 'utf8'),
+      );
+    } catch {
+      throw new HTTPError(404, `no georef for key map ${volume}/${stem}`);
+    }
+    // The P(road) map is rendered in the sheet's own pixel frame, so one set
+    // of GCPs places either image.
+    const candidates =
+      image === 'roadprob'
+        ? [`${stem}.roadprob.png`]
+        : [`${stem}.jpg`, `${stem}.png`];
+    const file = candidates.find((name) => existsSync(join(rawDir, name)));
+    if (!file) {
+      throw new HTTPError(
+        404,
+        `no ${image} image for key map ${volume}/${stem}`,
+      );
+    }
+    const serviceUrl = `${request.protocol}://${request.get('host')}/iiif/${volume}/raw/${file}`;
+    const page = keymapAnnotation(
+      georef,
+      serviceUrl,
+      `keymap:${volume}/${stem}/${image}`,
+    );
+    if (!page) {
+      throw new HTTPError(
+        404,
+        `key map ${volume}/${stem} has no usable georeference`,
+      );
+    }
+    return page;
   });
 }

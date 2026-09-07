@@ -1,4 +1,10 @@
 import { useEffect, useMemo, useState } from 'react';
+import {
+  keymapUnderlays,
+  underlayImageFromParam,
+  underlayImageParam,
+  type KeymapUnderlayImage,
+} from '../iiif/underlay';
 import type {
   GeorefAnnotationPage,
   SkippedItem,
@@ -96,12 +102,18 @@ export function VolumeViewer() {
   );
   // Default ON: a page outside the downloaded relation cannot be fit at all,
   // and that is invisible without the ring.
-  const [showOsmRelation, setShowOsmRelation] = useState(
-    () => initialParams.get('osm') !== '0',
-  );
   const [isolateSelected, setIsolateSelected] = useState(
     () => initialParams.get('only') === '1',
   );
+  // The key-map underlay (#211): which image, and how strongly it shows. The
+  // opacity is independent of the pages' so the two can be cross-faded.
+  const [underlayImage, setUnderlayImage] = useState<KeymapUnderlayImage>(() =>
+    underlayImageFromParam(initialParams.get('underlay')),
+  );
+  const [keymapOpacity, setKeymapOpacity] = useState(() => {
+    const value = Number(initialParams.get('keymap'));
+    return Number.isFinite(value) ? Math.min(100, Math.max(0, value)) : 0;
+  });
   const [error, setError] = useState<string | null>(null);
   // Selection is tracked by page stem (stable across annotation files, unlike the item index).
   const [selectedStem, setSelectedStem] = useState<string | null>(() =>
@@ -259,6 +271,9 @@ export function VolumeViewer() {
       .catch(() => {
         if (!cancelled) setOsmRelation(null);
       });
+    // Drop the previous volume's key maps now, or the underlay briefly asks
+    // for the new volume's key map by the old volume's stem.
+    setKeymaps([]);
     fetchKeymaps(volumeName)
       .then((list) => {
         if (!cancelled) setKeymaps(list);
@@ -318,6 +333,19 @@ export function VolumeViewer() {
       if (e.key !== 'p' || isTypingTarget(e.target)) return;
       const steps = [0, 50, 100];
       setOpacity(
+        (prev) => steps[(steps.indexOf(prev) + 1) % steps.length] ?? 0,
+      );
+    }
+    window.addEventListener('keydown', onKeydown);
+    return () => window.removeEventListener('keydown', onKeydown);
+  }, []);
+
+  // The same 0/50/100% cycle for the key-map underlay, on 'k'.
+  useEffect(() => {
+    function onKeydown(e: KeyboardEvent): void {
+      if (e.key !== 'k' || isTypingTarget(e.target)) return;
+      const steps = [0, 50, 100];
+      setKeymapOpacity(
         (prev) => steps[(steps.indexOf(prev) + 1) % steps.length] ?? 0,
       );
     }
@@ -408,6 +436,25 @@ export function VolumeViewer() {
       ),
     };
   }, [snapOpen, snapRecord, snapSelected, volumeName]);
+  // Nothing is fetched until the underlay is first turned up; after that it
+  // stays loaded and opacity is only opacity. Clearing the allmaps layer at 0
+  // and re-adding the same map at 50 left it blank until a zoom: the clear
+  // aborts the in-flight tile fetches the re-add immediately repeats.
+  // The volume the underlay is armed for: the slider was above 0 while that
+  // volume was selected. Keyed by volume, so switching volumes with the
+  // slider already up arms the new one at once, and a slider parked at 0
+  // does not.
+  const [armedVolume, setArmedVolume] = useState<string | undefined>();
+  useEffect(() => {
+    if (keymapOpacity > 0 && volumeName) setArmedVolume(volumeName);
+  }, [keymapOpacity, volumeName]);
+  const underlays = useMemo(
+    () =>
+      volumeName && armedVolume === volumeName
+        ? keymapUnderlays(volumeName, keymaps, underlayImage)
+        : [],
+    [volumeName, keymaps, underlayImage, armedVolume],
+  );
   const selectedIsMissing =
     selectedPage !== null &&
     selectedItemIndex !== null &&
@@ -432,16 +479,18 @@ export function VolumeViewer() {
       rmse: colorByRmse ? '1' : null,
       missing: showMissing ? '1' : null,
       adj: showAdjacency ? '1' : null,
-      osm: showOsmRelation ? null : '0',
       only: isolateSelected ? '1' : null,
+      underlay: underlayImageParam(underlayImage),
+      keymap: keymapOpacity > 0 ? String(keymapOpacity) : null,
     });
   }, [
     selectedStem,
     colorByRmse,
     showMissing,
     showAdjacency,
-    showOsmRelation,
     isolateSelected,
+    underlayImage,
+    keymapOpacity,
   ]);
 
   function selectVolume(name: string): void {
@@ -454,8 +503,8 @@ export function VolumeViewer() {
   if (error) {
     status = error;
   } else if (loadResult) {
-    const parts = [`${loadResult.loaded} pages shown`];
-    if (loadResult.failed > 0) parts.push(`${loadResult.failed} failed`);
+    const parts: string[] = [];
+    if (loadResult.failed > 0) parts.push(`${loadResult.failed} pages failed`);
     if (skipped.length > 0) parts.push(`${skipped.length} skipped`);
     status = parts.join(', ');
   } else if (selectedPath) {
@@ -466,107 +515,93 @@ export function VolumeViewer() {
 
   return (
     <div className="volume-viewer">
+      {/* Two rows tall by design: each stack holds two related controls, so
+          the bar never wraps on a laptop-width window (#211). */}
       <div className="iiif-controls">
-        <a href=".">← debugger</a>
-        <select
-          value={selection?.volume ?? ''}
-          onChange={(e) => selectVolume(e.target.value)}
-        >
-          <option value="" disabled>
-            Select a volume…
-          </option>
-          {(volumes ?? []).map((volume) => (
-            <option key={volume.name} value={volume.name}>
-              {volume.name} ({volume.pageCount} pages)
+        <div className="control-stack">
+          <select
+            value={selection?.volume ?? ''}
+            onChange={(e) => selectVolume(e.target.value)}
+          >
+            <option value="" disabled>
+              Select a volume…
             </option>
-          ))}
-        </select>
-        <select
-          value={selection?.file ?? ''}
-          onChange={(e) =>
-            setSelectedPath(`data/${selection?.volume}/${e.target.value}`)
-          }
-          disabled={!selectedVolume}
-        >
-          {(selectedVolume?.annotations ?? []).map((file) => (
-            <option key={file.name} value={file.name}>
-              {file.name} ({file.itemCount})
-            </option>
-          ))}
-        </select>
-        {truthStats && (
-          <label className="rmse-color-control">
-            <input
-              type="checkbox"
-              checked={colorByRmse}
-              onChange={(e) => setColorByRmse(e.target.checked)}
-            />
-            Color by RMSE
-          </label>
+            {(volumes ?? []).map((volume) => (
+              <option key={volume.name} value={volume.name}>
+                {volume.name} ({volume.pageCount} pages)
+              </option>
+            ))}
+          </select>
+          <select
+            value={selection?.file ?? ''}
+            onChange={(e) =>
+              setSelectedPath(`data/${selection?.volume}/${e.target.value}`)
+            }
+            disabled={!selectedVolume}
+          >
+            {(selectedVolume?.annotations ?? []).map((file) => (
+              <option key={file.name} value={file.name}>
+                {file.name} ({file.itemCount})
+              </option>
+            ))}
+          </select>
+        </div>
+        {(truthStats || missingPages.length > 0) && (
+          <div className="control-stack">
+            {truthStats && (
+              <label>
+                <input
+                  type="checkbox"
+                  checked={colorByRmse}
+                  onChange={(e) => setColorByRmse(e.target.checked)}
+                />
+                Color by RMSE
+              </label>
+            )}
+            {missingPages.length > 0 && (
+              <label>
+                <input
+                  type="checkbox"
+                  checked={showMissing}
+                  onChange={(e) => setShowMissing(e.target.checked)}
+                />
+                Show missing
+              </label>
+            )}
+          </div>
         )}
-        {missingPages.length > 0 && (
-          <label className="rmse-color-control">
-            <input
-              type="checkbox"
-              checked={showMissing}
-              onChange={(e) => setShowMissing(e.target.checked)}
-            />
-            Show missing pages
-          </label>
-        )}
-        <label
-          className="rmse-color-control"
-          title={
-            selectedStem
-              ? `Show only ${selectedStem}`
-              : 'Select a page to isolate it'
-          }
-        >
-          <input
-            type="checkbox"
-            checked={isolateSelected}
-            disabled={!selectedStem}
-            onChange={(e) => setIsolateSelected(e.target.checked)}
-          />
-          Isolate selected
-        </label>
-        {adjacencyData && (
-          <label className="rmse-color-control">
-            <input
-              type="checkbox"
-              checked={showAdjacency}
-              onChange={(e) => setShowAdjacency(e.target.checked)}
-            />
-            Show adjacency
-          </label>
-        )}
-        {osmRelation && (
+        <div className="control-stack">
           <label
-            className="rmse-color-control"
-            title={`Streets were downloaded from OSM ${osmRelation.id}${
-              osmRelation.name ? ` (${osmRelation.name})` : ''
-            }${
-              osmRelation.bufferM
-                ? `, buffered by ${osmRelation.bufferM} m — the ring is the area actually downloaded, not the administrative line`
-                : ' (no buffer — the ring is the administrative boundary itself)'
-            }. Pages crossing this ring cover ground whose streets are missing from the vocabulary.`}
+            title={
+              selectedStem
+                ? `Show only ${selectedStem}`
+                : 'Select a page to isolate it'
+            }
           >
             <input
               type="checkbox"
-              checked={showOsmRelation}
-              onChange={(e) => setShowOsmRelation(e.target.checked)}
+              checked={isolateSelected}
+              disabled={!selectedStem}
+              onChange={(e) => setIsolateSelected(e.target.checked)}
             />
-            {osmRelation.bufferM
-              ? `OSM boundary +${
-                  osmRelation.bufferM >= 1000
-                    ? `${osmRelation.bufferM / 1000} km`
-                    : `${osmRelation.bufferM} m`
-                }`
-              : 'OSM boundary'}
+            Isolate selected
           </label>
-        )}
-        <div className="opacity-control">
-          <label htmlFor="iiif-opacity-slider">Opacity</label>
+          {adjacencyData && (
+            <label>
+              <input
+                type="checkbox"
+                checked={showAdjacency}
+                onChange={(e) => setShowAdjacency(e.target.checked)}
+              />
+              Show adjacency
+            </label>
+          )}
+        </div>
+        {status && <span className="iiif-status">{status}</span>}
+        <div
+          className="slider-stack"
+          title="Page opacity. Press p to cycle 0/50/100%."
+        >
           <input
             type="range"
             id="iiif-opacity-slider"
@@ -575,8 +610,53 @@ export function VolumeViewer() {
             value={opacity}
             onChange={(e) => setOpacity(Number(e.target.value))}
           />
+          <label htmlFor="iiif-opacity-slider">Opacity (p)</label>
         </div>
-        <span className="iiif-status">{status}</span>
+        {keymaps.some((keymap) => keymap.hasGeoref) && (
+          <div
+            className="slider-stack keymap-stack"
+            title="Key-map underlay opacity, independent of the pages' (#211). Press k to cycle 0/50/100%."
+          >
+            <input
+              type="range"
+              id="iiif-keymap-opacity-slider"
+              min={0}
+              max={100}
+              value={keymapOpacity}
+              onChange={(e) => setKeymapOpacity(Number(e.target.value))}
+            />
+            {/* Disabled while the underlay is hidden, so the pressed side's fill
+                is not noise in the default state. */}
+            <div
+              className="segmented"
+              role="group"
+              aria-label="Key-map underlay image"
+              title="Show the key map's sheet, or its P(road) map (raw/<stem>.roadprob.png): what a key-map snap would match against."
+            >
+              <button
+                type="button"
+                aria-pressed={underlayImage === 'sheet'}
+                disabled={keymapOpacity === 0}
+                onClick={() => setUnderlayImage('sheet')}
+              >
+                Key map
+              </button>
+              <button
+                type="button"
+                aria-pressed={underlayImage === 'roadprob'}
+                disabled={
+                  keymapOpacity === 0 ||
+                  !keymaps.some(
+                    (keymap) => keymap.hasGeoref && keymap.hasRoadprob,
+                  )
+                }
+                onClick={() => setUnderlayImage('roadprob')}
+              >
+                P(road)
+              </button>
+            </div>
+          </div>
+        )}
       </div>
       <div className="volume-viewer-body">
         <PageList
@@ -595,6 +675,8 @@ export function VolumeViewer() {
         <div className="volume-map-slot" aria-hidden={debugView !== null}>
           <VolumeMap
             snapOverlay={snapOverlay}
+            keymapUnderlays={underlays}
+            keymapOpacity={keymapOpacity / 100}
             annotation={annotation}
             pages={pages}
             missingPages={missingPages}
@@ -607,9 +689,7 @@ export function VolumeViewer() {
             awaitingView={!!selectedPath && !error}
             pageColors={pageColors}
             adjacencyClaims={showAdjacency ? adjacencyClaims : []}
-            osmRelationWays={
-              showOsmRelation && osmRelation ? osmRelation.ways : null
-            }
+            osmRelationWays={osmRelation ? osmRelation.ways : null}
             selectedStem={selectedPage?.stem ?? null}
             initialViewport={initialViewport}
             fitVolumeKey={volumeName ?? null}
