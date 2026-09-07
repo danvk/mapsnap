@@ -565,7 +565,7 @@ export function VolumeViewer() {
                   checked={showMissing}
                   onChange={(e) => setShowMissing(e.target.checked)}
                 />
-                Show missing pages
+                Show missing
               </label>
             )}
           </div>

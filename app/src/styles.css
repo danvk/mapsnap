@@ -192,7 +192,7 @@
   flex-direction: column;
   align-items: flex-start;
   gap: 2px;
-  width: 200px;
+  width: 100px;
   flex-shrink: 0;
 }
 
@@ -210,13 +210,13 @@
 
 .iiif-controls .slider-row input[type='range'] {
   flex: 1;
-  min-width: 120px;
+  min-width: 80px;
 }
 
-/* The key-map controls sit at the right edge. */
+/* The key-map controls follow the page-opacity ones; the checkbox shares
+   the slider's row. */
 .iiif-controls .keymap-stack {
-  margin-left: auto;
-  width: 280px;
+  width: 180px;
 }
 
 .iiif-status {
