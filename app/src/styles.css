@@ -192,22 +192,13 @@
   flex-direction: column;
   align-items: flex-start;
   gap: 2px;
-  width: 100px;
+  width: 126px; /* the Key map / P(road) toggle's natural width; both sliders match it */
   flex-shrink: 0;
 }
 
 .iiif-controls .slider-stack input[type='range'] {
   width: 100%;
   margin: 4px 0;
-}
-
-/* The key-map stack: its slider over the sheet / P(road) toggle. */
-.iiif-controls .keymap-stack {
-  width: 130px;
-}
-
-.iiif-controls .keymap-stack input[type='range'] {
-  width: 100px;
 }
 
 /* A two-way toggle drawn as one control: the pressed side is filled. */
