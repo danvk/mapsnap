@@ -629,16 +629,27 @@ export function VolumeViewer() {
               {keymaps.some(
                 (keymap) => keymap.hasGeoref && keymap.hasRoadprob,
               ) && (
-                <label title="Show the key map's P(road) map (raw/<stem>.roadprob.png) in place of the sheet: what a key-map snap would match against.">
-                  <input
-                    type="checkbox"
-                    checked={underlayImage === 'roadprob'}
-                    onChange={(e) =>
-                      setUnderlayImage(e.target.checked ? 'roadprob' : 'sheet')
-                    }
-                  />
-                  P(road)
-                </label>
+                <div
+                  className="segmented"
+                  role="group"
+                  aria-label="Key-map underlay image"
+                  title="Show the key map's sheet, or its P(road) map (raw/<stem>.roadprob.png): what a key-map snap would match against."
+                >
+                  <button
+                    type="button"
+                    aria-pressed={underlayImage === 'sheet'}
+                    onClick={() => setUnderlayImage('sheet')}
+                  >
+                    Key map
+                  </button>
+                  <button
+                    type="button"
+                    aria-pressed={underlayImage === 'roadprob'}
+                    onClick={() => setUnderlayImage('roadprob')}
+                  >
+                    P(road)
+                  </button>
+                </div>
               )}
             </div>
             <label htmlFor="iiif-keymap-opacity-slider">Key map (k)</label>

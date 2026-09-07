@@ -216,7 +216,35 @@
 /* The key-map controls follow the page-opacity ones; the checkbox shares
    the slider's row. */
 .iiif-controls .keymap-stack {
-  width: 180px;
+  width: 240px;
+}
+
+/* A two-way toggle drawn as one control: the pressed side is filled. */
+.iiif-controls .segmented {
+  display: inline-flex;
+  border: 1px solid #888;
+  border-radius: 4px;
+  overflow: hidden;
+  flex-shrink: 0;
+}
+
+.iiif-controls .segmented button {
+  border: 0;
+  background: #fff;
+  color: #222;
+  padding: 1px 7px;
+  font: inherit;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.iiif-controls .segmented button + button {
+  border-left: 1px solid #888;
+}
+
+.iiif-controls .segmented button[aria-pressed='true'] {
+  background: #1a73e8;
+  color: #fff;
 }
 
 .iiif-status {
