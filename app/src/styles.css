@@ -201,22 +201,13 @@
   margin: 4px 0;
 }
 
-.iiif-controls .slider-row {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  width: 100%;
-}
-
-.iiif-controls .slider-row input[type='range'] {
-  flex: 1;
-  min-width: 80px;
-}
-
-/* The key-map controls follow the page-opacity ones; the checkbox shares
-   the slider's row. */
+/* The key-map stack: its slider over the sheet / P(road) toggle. */
 .iiif-controls .keymap-stack {
-  width: 240px;
+  width: 130px;
+}
+
+.iiif-controls .keymap-stack input[type='range'] {
+  width: 100px;
 }
 
 /* A two-way toggle drawn as one control: the pressed side is filled. */
@@ -245,6 +236,12 @@
 .iiif-controls .segmented button[aria-pressed='true'] {
   background: #1a73e8;
   color: #fff;
+}
+
+.iiif-controls .segmented button:disabled {
+  background: #f4f4f4;
+  color: #999;
+  cursor: default;
 }
 
 .iiif-status {

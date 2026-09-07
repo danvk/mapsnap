@@ -617,42 +617,44 @@ export function VolumeViewer() {
             className="slider-stack keymap-stack"
             title="Key-map underlay opacity, independent of the pages' (#211). Press k to cycle 0/50/100%."
           >
-            <div className="slider-row">
-              <input
-                type="range"
-                id="iiif-keymap-opacity-slider"
-                min={0}
-                max={100}
-                value={keymapOpacity}
-                onChange={(e) => setKeymapOpacity(Number(e.target.value))}
-              />
-              {keymaps.some(
-                (keymap) => keymap.hasGeoref && keymap.hasRoadprob,
-              ) && (
-                <div
-                  className="segmented"
-                  role="group"
-                  aria-label="Key-map underlay image"
-                  title="Show the key map's sheet, or its P(road) map (raw/<stem>.roadprob.png): what a key-map snap would match against."
-                >
-                  <button
-                    type="button"
-                    aria-pressed={underlayImage === 'sheet'}
-                    onClick={() => setUnderlayImage('sheet')}
-                  >
-                    Key map
-                  </button>
-                  <button
-                    type="button"
-                    aria-pressed={underlayImage === 'roadprob'}
-                    onClick={() => setUnderlayImage('roadprob')}
-                  >
-                    P(road)
-                  </button>
-                </div>
-              )}
+            <input
+              type="range"
+              id="iiif-keymap-opacity-slider"
+              min={0}
+              max={100}
+              value={keymapOpacity}
+              onChange={(e) => setKeymapOpacity(Number(e.target.value))}
+            />
+            {/* Disabled while the underlay is hidden, so the pressed side's fill
+                is not noise in the default state. */}
+            <div
+              className="segmented"
+              role="group"
+              aria-label="Key-map underlay image"
+              title="Show the key map's sheet, or its P(road) map (raw/<stem>.roadprob.png): what a key-map snap would match against."
+            >
+              <button
+                type="button"
+                aria-pressed={underlayImage === 'sheet'}
+                disabled={keymapOpacity === 0}
+                onClick={() => setUnderlayImage('sheet')}
+              >
+                Key map
+              </button>
+              <button
+                type="button"
+                aria-pressed={underlayImage === 'roadprob'}
+                disabled={
+                  keymapOpacity === 0 ||
+                  !keymaps.some(
+                    (keymap) => keymap.hasGeoref && keymap.hasRoadprob,
+                  )
+                }
+                onClick={() => setUnderlayImage('roadprob')}
+              >
+                P(road)
+              </button>
             </div>
-            <label htmlFor="iiif-keymap-opacity-slider">Key map (k)</label>
           </div>
         )}
       </div>
