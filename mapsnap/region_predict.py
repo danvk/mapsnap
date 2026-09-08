@@ -72,14 +72,20 @@ def main() -> None:
     parser.add_argument(
         "--force", action="store_true", help="Rewrite maps that already exist."
     )
+    parser.add_argument(
+        "--model",
+        type=Path,
+        default=None,
+        help="Region-model weights to use instead of models/region_unet.pt.",
+    )
     args = parser.parse_args()
 
-    from mapsnap.region_model import load_region_model
+    from mapsnap.region_model import REGION_MODEL_PATH, load_region_model
 
     images = sorted(args.volume.glob("p*.jpg"))
     if not images:
         sys.exit(f"no p*.jpg pages under {args.volume}")
-    model, device = load_region_model()
+    model, device = load_region_model(args.model or REGION_MODEL_PATH)
     written = write_region_maps(
         args.volume, images, model=model, device=device, force=args.force
     )
