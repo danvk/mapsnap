@@ -495,3 +495,101 @@ def test_normalize_name_penalty_leaves_unpenalized_pages_alone():
     )
     normalize_name_penalty(node)
     assert hypothesis.scores["name"] == pytest.approx(0.4)
+
+
+def boxed(hypothesis: Hypothesis, west_m: float, width_m: float = 500.0):
+    """Give a hypothesis a posed content region: a 500 x 400 m box at west_m."""
+    from shapely.geometry import box
+
+    hypothesis.region = box(west_m, 0.0, west_m + width_m, 400.0)
+    return hypothesis
+
+
+def test_region_edges_skip_siblings_and_skeleton_twins():
+    from mapsnap.reconcile import build_region_edges
+
+    nodes = {
+        "p1": make_node("p1", [boxed(scored("georef", affine(0), 1.8), 0.0)]),
+        "p1s": make_node("p1s", [boxed(scored("georef", affine(0), 1.8), 0.0)]),
+        "p2__1": make_node(
+            "p2__1", [boxed(scored("georef", affine(0), 1.8), 100.0)], base="p2"
+        ),
+        "p2__2": make_node(
+            "p2__2", [boxed(scored("georef", affine(0), 1.8), 100.0)], base="p2"
+        ),
+        # Far away at its published pose, but an alias hypothesis lands on p1.
+        "p3": make_node(
+            "p3",
+            [
+                boxed(scored("georef", affine(0), 1.8), 5000.0),
+                boxed(scored("snap:0", affine(0), 1.0), 200.0),
+            ],
+        ),
+        # No region at all: never an edge.
+        "p4": make_node("p4", [scored("georef", affine(0), 1.8)]),
+    }
+    for node in nodes.values():
+        node.region_px = object()
+    edges = build_region_edges(nodes)
+    pairs = {(a, b) for _, a, b in edges}
+    assert ("p1", "p1s") not in pairs
+    assert ("p2__1", "p2__2") not in pairs
+    assert ("p1", "p3") in pairs  # via p3's alias hypothesis
+    assert ("p1s", "p3") in pairs
+    assert not any("p4" in pair for pair in pairs)
+
+
+def test_region_factor_evicts_the_less_supported_overlapping_pose():
+    # p2's published pose sits on p1's ground (100% region overlap). p1 is
+    # well supported; p2 barely beats unplaced. With the factor the pair is
+    # penalized and the cheaper fix is p2 -> unplaced; without it (weight 0)
+    # both stay, which is the 2026-09-03 miami p11/p14 disaster.
+    from mapsnap.reconcile import build_region_edges
+
+    def volume():
+        p1 = boxed(scored("georef", affine(0), verification=1.9, published=True), 0.0)
+        p2_bad = boxed(scored("georef", affine(0), verification=0.6), 0.0)
+        p2_alt = boxed(scored("snap:0", affine(0), verification=0.5), 5000.0)
+        nodes = {
+            "p1": make_node("p1", [p1, scored(UNPLACED, None, 0)]),
+            "p2": make_node("p2", [p2_bad, p2_alt, scored(UNPLACED, None, 0)]),
+        }
+        for node in nodes.values():
+            node.region_px = object()
+        return nodes
+
+    nodes = volume()
+    edges = build_region_edges(nodes)
+    assert edges == [("region", "p1", "p2")]
+    with_factor = solve(nodes, edges, {}, 0.0, (-74.0, LAT0), region_weight=3.0)
+    assert nodes["p1"].hypotheses[with_factor["p1"]].source == "georef"
+    assert nodes["p2"].hypotheses[with_factor["p2"]].source != "georef"
+
+    control = volume()
+    without = solve(
+        control, build_region_edges(control), {}, 0.0, (-74.0, LAT0), region_weight=0.0
+    )
+    assert control["p2"].hypotheses[without["p2"]].source == "georef"
+
+
+def test_region_energy_is_zero_without_regions_and_free_below_soft():
+    from mapsnap.reconcile import region_energy
+
+    a = boxed(scored("georef", affine(0), 1.0), 0.0)
+    b = boxed(scored("georef", affine(0), 1.0), 480.0)  # 4% overlap
+    assert region_energy(a, b, soft=0.10) == 0.0
+    c = boxed(scored("georef", affine(0), 1.0), 0.0)  # total overlap
+    assert region_energy(a, c, soft=0.10) == pytest.approx(3.0)
+    bare = scored("georef", affine(0), 1.0)
+    assert region_energy(a, bare, soft=0.10) == 0.0
+
+
+def test_collect_ignores_the_arbiters_own_final(tmp_path):
+    # A previous publish left pN.georef-final.json behind; it is the answer,
+    # not a channel, and must not re-enter as a hypothesis.
+    write_sidecar(tmp_path, "p7", "georef", georef_doc(affine(0)))
+    write_sidecar(tmp_path, "p7", "georef-final", georef_doc(affine(3000)))
+    hypotheses, _ = collect_hypotheses(
+        tmp_path, "p7", None, None, page_size=(1000, 800)
+    )
+    assert [h.source for h in hypotheses] == ["georef", UNPLACED]
