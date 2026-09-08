@@ -579,7 +579,7 @@ def test_region_energy_is_zero_without_regions_and_free_below_soft():
     b = boxed(scored("georef", affine(0), 1.0), 480.0)  # 4% overlap
     assert region_energy(a, b, soft=0.10) == 0.0
     c = boxed(scored("georef", affine(0), 1.0), 0.0)  # total overlap
-    assert region_energy(a, c, soft=0.10) == pytest.approx(3.0)
+    assert region_energy(a, c, soft=0.10, weight=3.0) == pytest.approx(3.0)
     bare = scored("georef", affine(0), 1.0)
     assert region_energy(a, bare, soft=0.10) == 0.0
 

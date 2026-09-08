@@ -125,8 +125,20 @@ OVERLAP_HARD_DELTA = 0.35
 # published adjacent pairs, floored here, because the model's boundaries are
 # softer on some volumes (kansas_city, washington_dc: true neighbours at
 # 25-35%) than on others (detroit: good pages at a median of 3%).
-W_REGION = 3.0
-REGION_SOFT = 0.10
+#
+# Weight and floor come from a 7-setting sweep over 18 truth volumes on the
+# 2026-09-03 sidecars (report-only, real compare). At 10% / 3.0 the factor
+# removed 24 of 59 disasters but evicted 22 good pages (mean -0.06): a
+# correct page whose region overlaps a wrong neighbour's by 20-25% is often
+# the cheaper member of the pair to move, and it moves to an alias in empty
+# space (brooklyn p5, nashville p12). At 15% / 1.5 the same 24 disasters go
+# for 6 good pages (mean +0.72, 14 volumes up or flat, kansas_city -1.8),
+# and the mid-30s overlaps that separate a disaster from a soft boundary are
+# left to the unaries: detroit p85 (32%, 368 -> 12 ft) still flips because
+# its alternative is well evidenced; schenectady p9__2 (32% with a correct
+# neighbour, one pose) is the cost.
+W_REGION = 1.5
+REGION_SOFT = 0.15
 REGION_HARD_DELTA = 0.30
 # NO sibling factor. Split panels are separate maps that happen to share a
 # sheet: no geographic relationship (champaign p4's panels sit 891 m apart at
