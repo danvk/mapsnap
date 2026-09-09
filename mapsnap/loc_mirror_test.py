@@ -1,29 +1,33 @@
-"""Tests for the LoC JP2 mirror builder: planning, layout, decode, resume, broken sheets."""
+"""Tests for the LoC JP2 mirror builder: rules, layout, decode, the pipeline, resume, upload."""
 
+import json
 from pathlib import Path
 
 import pytest
 from PIL import Image, features
 
+from mapsnap import loc_mirror
 from mapsnap.loc_mirror import (
     DONE,
+    UPLOADED,
     ItemPlan,
     Settings,
     Sheet,
     broken_log_path,
     decode_jp2,
     is_candidate,
-    item_dir,
+    item_relative,
     jp2_path,
     keep_sheet,
     load_mapping,
-    process_item,
+    run_pipeline,
     s3_prefix,
     sheet_outputs,
     source_url,
 )
 
 HEADER = "item\tstate\tyear\tcity\tseq\tstem\tpage_key\tsource\tbytes\tstorage_dir\n"
+DIR = "gmd/x/g1"
 
 
 def test_keep_and_candidate_rules():
@@ -31,15 +35,15 @@ def test_keep_and_candidate_rules():
     assert (
         not keep_sheet("pcovr") and not keep_sheet("pind1") and not keep_sheet("ptitl")
     )
+    # Raw copies: the page-0 family and letter pages only; page 1 is not a candidate here.
     assert (
         is_candidate("p0")
         and is_candidate("p0b")
-        and is_candidate("p1")
+        and is_candidate("p0L")
         and is_candidate("pa")
     )
-    assert is_candidate("p1a") and is_candidate("p0L")
     assert (
-        not is_candidate("p2") and not is_candidate("p101s") and not is_candidate("p10")
+        not is_candidate("p1") and not is_candidate("p1a") and not is_candidate("p101s")
     )
 
 
@@ -47,15 +51,14 @@ def test_load_mapping_keeps_numbered_and_letter_sheets(tmp_path: Path):
     tsv = tmp_path / "map.tsv"
     tsv.write_text(
         HEADER
-        + "sanborn00081_001\talabama\t1922\tmobile\t1\t00081_1922-0000\tp0\ttorrent-jp2\t100\tgmd/x/g1\n"
-        + "sanborn00081_001\talabama\t1922\tmobile\t2\t00081_1922-covr\tpcovr\ttorrent-jp2\t50\tgmd/x/g1\n"
-        + "sanborn00081_001\talabama\t1922\tmobile\t3\t00081_1922-0001s\tp1s\ttorrent-jp2\t70\tgmd/x/g1\n"
+        + f"sanborn00081_001\talabama\t1922\tmobile\t1\t00081_1922-0000\tp0\ttorrent-jp2\t100\t{DIR}\n"
+        + f"sanborn00081_001\talabama\t1922\tmobile\t2\t00081_1922-covr\tpcovr\ttorrent-jp2\t50\t{DIR}\n"
+        + f"sanborn00081_001\talabama\t1922\tmobile\t3\t00081_1922-0001s\tp1s\ttorrent-jp2\t70\t{DIR}\n"
         + "sanborn00081_001\talabama\t1922\tmobile\t4\t\tp\tghost\t0\t\n"
     )
-    plans = load_mapping(tsv)
-    plan = plans["sanborn00081_001"]
+    plan = load_mapping(tsv)["sanborn00081_001"]
     assert [s.key for s in plan.sheets] == ["p0", "p1s"]
-    assert plan.state == "alabama" and plan.year == "1922"
+    assert (plan.state, plan.year, plan.city) == ("alabama", "1922", "mobile")
 
 
 def test_layout_matches_the_s3_prefix_shape(tmp_path: Path):
@@ -68,9 +71,7 @@ def test_layout_matches_the_s3_prefix_shape(tmp_path: Path):
         10,
         "gmd/gmd390m/g3904m/g3904mm/g000811922",
     )
-    assert (
-        item_dir(tmp_path, plan) == tmp_path / "by-state/alabama/1922/sanborn00081_001"
-    )
+    assert item_relative(plan) == Path("by-state/alabama/1922/sanborn00081_001")
     assert (
         s3_prefix("s3://mapsnap-sanborn", plan)
         == "s3://mapsnap-sanborn/by-state/alabama/1922/sanborn00081_001"
@@ -86,23 +87,26 @@ def test_layout_matches_the_s3_prefix_shape(tmp_path: Path):
         source_url("http://m", sheet)
         == "http://m/storage-services/service/gmd/gmd390m/g3904m/g3904mm/g000811922/00081_1922-0123.jp2"
     )
-    iiif = Sheet(
-        1,
-        "00081_1922-0124",
-        "p124",
-        "loc-iiif",
-        0,
-        "gmd/gmd390m/g3904m/g3904mm/g000811922",
+    tif = Sheet(
+        1, "00081_1922-0124", "p124", "torrent-master-tif", 0, sheet.storage_dir
     )
+    assert (
+        jp2_path(tmp_path, tif)
+        .as_posix()
+        .endswith(
+            "storage-services/master/" + sheet.storage_dir + "/00081_1922-0124.tif"
+        )
+    )
+    iiif = Sheet(1, "00081_1922-0125", "p125", "loc-iiif", 0, sheet.storage_dir)
     assert source_url("http://m", iiif).endswith(
-        ":00081_1922-0124/full/pct:25/0/default.jpg"
+        ":00081_1922-0125/full/pct:25/0/default.jpg"
     )
     assert source_url("http://m", iiif, full=True).endswith("/full/full/0/default.jpg")
     quarter, raw = sheet_outputs(
-        item_dir(tmp_path, plan), Sheet(1, "x-0000", "p0", "torrent-jp2", 1, "d")
+        tmp_path, Sheet(1, "x-0000", "p0", "torrent-jp2", 1, "d")
     )
     assert quarter.name == "p0.jpg" and raw is not None and raw.parent.name == "raw"
-    assert sheet_outputs(item_dir(tmp_path, plan), sheet)[1] is None
+    assert sheet_outputs(tmp_path, sheet)[1] is None
 
 
 def write_jp2(path: Path, width: int = 200, height: int = 160) -> None:
@@ -116,7 +120,12 @@ def write_jp2(path: Path, width: int = 200, height: int = 160) -> None:
     )
 
 
-@pytest.mark.skipif(not features.check("jpg_2000"), reason="Pillow lacks JPEG 2000")
+needs_jp2 = pytest.mark.skipif(
+    not features.check("jpg_2000"), reason="Pillow lacks JPEG 2000"
+)
+
+
+@needs_jp2
 def test_decode_jp2_quarter_and_full(tmp_path: Path):
     jp2 = tmp_path / "s.jp2"
     write_jp2(jp2)
@@ -125,69 +134,148 @@ def test_decode_jp2_quarter_and_full(tmp_path: Path):
     assert Image.open(tmp_path / "q.jpg").size == (50, 40)
 
 
-@pytest.mark.skipif(not features.check("jpg_2000"), reason="Pillow lacks JPEG 2000")
-def test_process_item_is_resumable_and_logs_broken_sheets(tmp_path: Path):
-    # A file:// "mirror" holding one good JP2 and one corrupt one.
+def make_volume(tmp_path: Path) -> tuple[list[ItemPlan], Settings, Path]:
+    """A file:// mirror with two items: one good sheet, one page-0 sheet, one corrupt sheet."""
     mirror = tmp_path / "mirror"
-    good = mirror / "storage-services/service/gmd/x/g1/00081_1922-0000.jp2"
-    bad = mirror / "storage-services/service/gmd/x/g1/00081_1922-0001.jp2"
-    write_jp2(good)
-    bad.write_bytes(b"not a jp2")
-    plan = ItemPlan(
-        "sanborn00081_001",
-        "alabama",
-        "1922",
-        "mobile",
-        [
-            Sheet(
-                1,
-                "00081_1922-0000",
-                "p0",
-                "torrent-jp2",
-                good.stat().st_size,
-                "gmd/x/g1",
-            ),
-            Sheet(
-                2,
-                "00081_1922-0001",
-                "p1",
-                "torrent-jp2",
-                bad.stat().st_size,
-                "gmd/x/g1",
-            ),
-        ],
+    files = {
+        "00081_1922-0000": True,
+        "00081_1922-0001": False,  # corrupt
+        "00082_1922-0005": True,
+    }
+    for stem, good in files.items():
+        path = mirror / "storage-services/service" / DIR / f"{stem}.jp2"
+        if good:
+            write_jp2(path)
+        else:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_bytes(b"not a jp2")
+    size = lambda stem: (
+        (mirror / "storage-services/service" / DIR / f"{stem}.jp2").stat().st_size
     )
+    items = [
+        ItemPlan(
+            "sanborn00081_001",
+            "alabama",
+            "1922",
+            "mobile",
+            [
+                Sheet(
+                    1,
+                    "00081_1922-0000",
+                    "p0",
+                    "torrent-jp2",
+                    size("00081_1922-0000"),
+                    DIR,
+                ),
+                Sheet(
+                    2,
+                    "00081_1922-0001",
+                    "p1",
+                    "torrent-jp2",
+                    size("00081_1922-0001"),
+                    DIR,
+                ),
+            ],
+        ),
+        ItemPlan(
+            "sanborn00082_001",
+            "alabama",
+            "1922",
+            "selma",
+            [
+                Sheet(
+                    1,
+                    "00082_1922-0005",
+                    "p5",
+                    "torrent-jp2",
+                    size("00082_1922-0005"),
+                    DIR,
+                )
+            ],
+        ),
+    ]
     settings = Settings(
         jp2_dir=tmp_path / "jp2",
-        out_dir=tmp_path / "out",
+        out_dir=tmp_path / "state",
+        staging_dir=tmp_path / "staging",
         mirror=mirror.as_uri(),
-        streams=2,
     )
-    record = process_item((plan, settings))
-    dest = item_dir(settings.out_dir, plan)
-    assert record["sheets"] == 2 and (dest / DONE).exists()
-    assert (dest / "p0.jpg").exists() and (dest / "raw" / "p0.jpg").exists()
-    assert Image.open(dest / "p0.jpg").size == (50, 40)
-    assert not (dest / "p1.jpg").exists()
-    assert (
-        settings.jp2_dir / "storage-services/service/gmd/x/g1/00081_1922-0000.jp2"
-    ).exists()
-    log = broken_log_path(settings.out_dir).read_text()
-    assert log.startswith("sanborn00081_001\t00081_1922-0001\ttorrent-jp2\t")
-    import json
+    return items, settings, mirror
 
-    meta = json.loads((dest / "metadata.json").read_text())
+
+@needs_jp2
+def test_pipeline_decodes_logs_broken_and_resumes(tmp_path: Path):
+    items, settings, _ = make_volume(tmp_path)
+    totals = run_pipeline(items, settings, streams=2, decode_workers=1, progress=False)
+    assert totals == {
+        "items": 2,
+        "sheets": 2,
+        "broken": 1,
+        "uploaded": 0,
+        "bytes": pytest.approx(totals["bytes"]),
+    }
+    staged = settings.staging_dir / item_relative(items[0])
+    assert Image.open(staged / "p0.jpg").size == (50, 40)
+    assert Image.open(staged / "raw" / "p0.jpg").size == (200, 160)
+    assert not (staged / "p1.jpg").exists()
+    state = settings.out_dir / item_relative(items[0])
+    assert (state / DONE).exists() and not (state / UPLOADED).exists()
+    meta = json.loads((state / "metadata.json").read_text())
     assert [s["key"] for s in meta["sheets"]] == ["p0"] and meta["broken"] == [
         "00081_1922-0001"
     ]
     assert meta["sheets"][0]["width"] == 50 and meta["sheets"][0]["raw"] is True
-    # Second run: nothing re-fetched or re-decoded (the mirror can even be gone).
-    (dest / "p0.jpg").write_bytes(b"sentinel")
-    settings_offline = Settings(
+    assert (staged / "metadata.json").read_text() == (
+        state / "metadata.json"
+    ).read_text()
+    assert (
+        broken_log_path(settings.out_dir)
+        .read_text()
+        .startswith("sanborn00081_001\t00081_1922-0001\ttorrent-jp2\t")
+    )
+    assert (
+        settings.jp2_dir / "storage-services/service" / DIR / "00081_1922-0000.jp2"
+    ).exists()
+    # Resume with the mirror gone: both items are complete from local markers alone.
+    offline = Settings(
         jp2_dir=settings.jp2_dir,
         out_dir=settings.out_dir,
+        staging_dir=settings.staging_dir,
         mirror="http://127.0.0.1:9",
-        streams=1,
     )
-    process_item((plan, settings_offline))
-    assert (dest / "p0.jpg").read_bytes() == b"sentinel"
+    assert (
+        run_pipeline(items, offline, streams=1, decode_workers=1, progress=False)[
+            "items"
+        ]
+        == 0
+    )
+
+
+@needs_jp2
+def test_pipeline_uploads_then_drops_staging(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    items, settings, _ = make_volume(tmp_path)
+    settings.bucket, settings.upload = "s3://bucket", True
+    synced: list[tuple[str, str]] = []
+
+    def fake_run(cmd, check):
+        synced.append((cmd[3], cmd[4]))
+
+    monkeypatch.setattr(loc_mirror.subprocess, "run", fake_run)
+    totals = run_pipeline(items, settings, streams=2, decode_workers=1, progress=False)
+    assert totals["uploaded"] == 2
+    assert sorted(dest for _, dest in synced) == [
+        "s3://bucket/by-state/alabama/1922/sanborn00081_001",
+        "s3://bucket/by-state/alabama/1922/sanborn00082_001",
+    ]
+    assert (settings.out_dir / item_relative(items[0]) / UPLOADED).exists()
+    assert not (settings.staging_dir / item_relative(items[0])).exists()
+    assert not (settings.staging_dir / "by-state").exists()  # empty parents pruned
+    # A second run finds every item uploaded and does nothing.
+    assert (
+        run_pipeline(items, settings, streams=1, decode_workers=1, progress=False)[
+            "items"
+        ]
+        == 0
+    )

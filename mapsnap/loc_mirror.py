@@ -1,43 +1,44 @@
 """Build the mapsnap Sanborn mirror from full-resolution LoC JP2s.
 
-Source of truth is the Library of Congress `storage-services` tree as served by
-the torrent's HTTP mirror: every sheet is a JP2 whose filename carries the
+Source of truth is the Library of Congress ``storage-services`` tree as served
+by the torrent's HTTP mirror: every sheet is a JP2 whose filename carries the
 sheet's own identity (``06246_1914-0051``), so no sequence-number mapping is
-involved. The plan comes from a mapping table (one row per sheet: item, state,
-year, city, sequence, stem, page key, source, bytes, storage dir) built from the
+involved. The plan is a mapping table (one row per sheet: item, state, year,
+city, sequence, stem, page key, source, bytes, storage dir) built from the
 torrent listing and the loc.gov catalog.
 
-Per item (one LoC catalog record, normally one volume):
+Three stages run concurrently, each bounded by a different resource:
 
-  * download each kept sheet's JP2 to ``--jp2-dir`` mirroring the torrent tree
-    (``storage-services/service/<dir>/<stem>.jp2``), verified against the
-    listed byte count, so the copy stays a valid torrent payload;
-  * decode it at the JPEG 2000 quarter-resolution level, which IS the pipeline's
-    25% working scale, to ``<out>/by-state/<state>/<year>/<item>/p<key>.jpg``
-    (JPEG quality 95, as ``mapsnap scale`` writes);
-  * for key-map candidates (page 0 and page 1 families, letter pages -- see
-    ``keymap.identify.candidate_keys``) also decode at full resolution to
-    ``raw/p<key>.jpg``, as the ``data/`` volumes keep them;
-  * write ``metadata.json`` (the catalog fields and the sheet table) and a
-    ``.done`` marker; optionally ``aws s3 sync`` the item directory to the
-    bucket and mark ``.uploaded``.
+  1. download (network, ``--streams`` connections): each kept sheet's JP2 goes
+     to ``--jp2-dir`` mirroring the torrent tree
+     (``storage-services/service/<dir>/<stem>.jp2``), verified against the
+     listed byte count, so the copy stays a valid torrent payload and is kept;
+  2. decode (CPU, ``--decode-workers`` processes): the JP2 is decoded at the
+     JPEG 2000 quarter-resolution level -- the pipeline's 25% working scale --
+     to ``<staging>/by-state/<state>/<year>/<item>/p<key>.jpg`` (JPEG quality
+     95, what ``mapsnap scale`` writes); page-0 sheets (``p0``, ``p0b``,
+     ``p0L``) and letter pages, the key-map candidates, are also decoded at
+     full resolution to ``raw/p<key>.jpg``;
+  3. upload (your uplink, two ``aws s3 sync`` at a time): the item directory
+     goes to ``<bucket>/by-state/<state>/<year>/<item>/`` and its staging
+     copy is deleted (``--keep-staging`` to retain it).
 
-Sheets whose page key does not start with a digit (covr, ind1, cbd, titl, note)
-are skipped: nothing in the pipeline reads them. A sheet whose download or
-decode fails after retries is appended to ``broken.log`` (tab-separated: item,
-stem, source, reason) and left out of the item; the item still completes.
+State lives only on local disk, under ``--out-dir``: per item a copy of
+``metadata.json`` (catalog fields plus the sheet table) with ``.done`` and
+``.uploaded`` markers, plus ``broken.log`` (tab-separated item, stem, source,
+reason) and ``progress.jsonl``. Resuming never lists S3: an item with its
+marker is skipped, a JP2 on disk at the listed size is not re-fetched, and an
+output already in staging is not re-decoded.
 
-Resumable and parallel: items with a ``.done`` marker are skipped, a JP2 on
-disk at the listed size is not re-fetched, an existing output is not re-decoded;
-``--workers`` items run at once, each fetching ``--streams`` sheets at a time.
-The HTTP mirror sustains about 20 MB/s in aggregate, so the run is bound by it:
-about two days for the whole collection.
+Sheets whose page key does not start with a digit (covr, ind1, cbd, titl,
+note) are skipped: nothing in the pipeline reads them. A sheet that fails to
+download or decode after retries is logged as broken and left out of its item.
 
     mapsnap loc-mirror ~/Downloads/loc-sanborn-maps.mapping.tsv \\
         --jp2-dir /Volumes/fivetera/loc-sanborn-maps/jp2 \\
         --out-dir /Volumes/fivetera/mapsnap-sanborn \\
-        --bucket s3://mapsnap-sanborn --workers 4 --streams 2
-    mapsnap loc-mirror MAPPING.tsv ... --upload-only     # sync finished items later
+        --staging-dir /Volumes/fivetera/mapsnap-sanborn/staging \\
+        --bucket s3://mapsnap-sanborn --upload
 """
 
 import argparse
@@ -51,15 +52,22 @@ import tempfile
 import time
 import urllib.error
 import urllib.request
-from concurrent.futures import ThreadPoolExecutor
+from collections import deque
+from concurrent.futures import (
+    FIRST_COMPLETED,
+    Future,
+    ProcessPoolExecutor,
+    ThreadPoolExecutor,
+    wait,
+)
 from dataclasses import asdict, dataclass, field
-from multiprocessing import Pool
 from pathlib import Path
 
 from PIL import Image
+from tqdm import tqdm
 
 from mapsnap.keymap.fit_keymap import page_number
-from mapsnap.keymap.identify import CANDIDATE_PAGE_NUMBERS, is_letter_page
+from mapsnap.keymap.identify import is_letter_page
 
 DEFAULT_MIRROR = "http://50.35.157.188:27182"
 LOC_IIIF = "https://tile.loc.gov/image-services/iiif"
@@ -94,18 +102,36 @@ class ItemPlan:
     sheets: list[Sheet] = field(default_factory=list)
 
 
+@dataclass
+class Settings:
+    """Everything the stages need; picklable for the process pool."""
+
+    jp2_dir: Path
+    out_dir: Path
+    staging_dir: Path
+    mirror: str = DEFAULT_MIRROR
+    bucket: str | None = None
+    upload: bool = False
+    keep_staging: bool = False
+
+
 def keep_sheet(key: str) -> bool:
     """Whether the pipeline can use this sheet: numbered pages and letter pages only."""
     return re.match(r"p\d", key) is not None or is_letter_page(key)
 
 
 def is_candidate(key: str) -> bool:
-    """Whether the sheet is a key-map candidate, mirroring keymap.identify.candidate_keys."""
+    """Whether a raw copy is kept: the page-0 family (p0, p0b, p0L) and letter pages.
+
+    keymap.identify also nominates the page-1 family, but page 0 is the key
+    map wherever one exists, and raw copies of every volume's sheet 1 would
+    cost 34,000 full-resolution decodes for candidates that are almost all
+    ordinary map pages.
+    """
     if is_letter_page(key):
         return True
     base = re.sub(r"[a-j]$", "", key) if re.match(r"p\d+[a-j]$", key) else key
-    number = page_number(base)
-    return number is not None and number in CANDIDATE_PAGE_NUMBERS
+    return page_number(base) == 0
 
 
 def load_mapping(path: Path) -> dict[str, ItemPlan]:
@@ -132,47 +158,53 @@ def load_mapping(path: Path) -> dict[str, ItemPlan]:
     return plans
 
 
-def item_dir(out_dir: Path, plan: ItemPlan) -> Path:
-    """``<out>/by-state/<state>/<year>/<item>``, the same shape as the S3 prefix."""
-    return out_dir / "by-state" / plan.state / plan.year / plan.item
+def item_relative(plan: ItemPlan) -> Path:
+    """``by-state/<state>/<year>/<item>``: the item's path under staging, state, and the bucket."""
+    return Path("by-state") / plan.state / plan.year / plan.item
 
 
 def s3_prefix(bucket: str, plan: ItemPlan) -> str:
-    """The item's destination prefix, e.g. ``s3://mapsnap-sanborn/by-state/alabama/1922/sanborn00081_001``."""
-    return f"{bucket.rstrip('/')}/by-state/{plan.state}/{plan.year}/{plan.item}"
+    """The item's destination, e.g. ``s3://mapsnap-sanborn/by-state/alabama/1922/sanborn00081_001``."""
+    return f"{bucket.rstrip('/')}/{item_relative(plan).as_posix()}"
 
 
 def jp2_path(jp2_dir: Path, sheet: Sheet) -> Path:
-    """Where the sheet's JP2 lives locally, mirroring the torrent tree."""
+    """Where the sheet's JP2 (or TIFF master) lives locally, mirroring the torrent tree."""
+    branch = "master" if sheet.source.startswith("torrent-master") else "service"
+    suffix = ".tif" if sheet.source == "torrent-master-tif" else ".jp2"
     return (
         jp2_dir
         / "storage-services"
-        / "service"
+        / branch
         / sheet.storage_dir
-        / f"{sheet.stem}.jp2"
+        / f"{sheet.stem}{suffix}"
     )
 
 
 def source_url(mirror: str, sheet: Sheet, full: bool = False) -> str:
     """The URL to fetch a sheet from: the mirror's JP2/TIFF, or LoC's IIIF for the rest."""
-    if sheet.source == "torrent-jp2":
-        return f"{mirror}/storage-services/service/{sheet.storage_dir}/{sheet.stem}.jp2"
-    if sheet.source == "torrent-master-tif":
-        return f"{mirror}/storage-services/master/{sheet.storage_dir}/{sheet.stem}.tif"
-    if sheet.source == "torrent-master-jp2":
-        return f"{mirror}/storage-services/master/{sheet.storage_dir}/{sheet.stem}.jp2"
+    if sheet.source.startswith("torrent"):
+        branch = "master" if sheet.source.startswith("torrent-master") else "service"
+        suffix = ".tif" if sheet.source == "torrent-master-tif" else ".jp2"
+        return f"{mirror}/storage-services/{branch}/{sheet.storage_dir}/{sheet.stem}{suffix}"
     service = "service:" + sheet.storage_dir.replace("/", ":")
-    size = "full" if full else "pct:25"
-    return f"{LOC_IIIF}/{service}:{sheet.stem}/full/{size}/0/default.jpg"
+    return f"{LOC_IIIF}/{service}:{sheet.stem}/full/{'full' if full else 'pct:25'}/0/default.jpg"
+
+
+def sheet_outputs(staging_item: Path, sheet: Sheet) -> tuple[Path, Path | None]:
+    """(25% JPEG path, raw full-resolution path or None) for a sheet."""
+    quarter = staging_item / f"{sheet.key}.jpg"
+    raw = staging_item / "raw" / f"{sheet.key}.jpg" if is_candidate(sheet.key) else None
+    return quarter, raw
 
 
 def fetch(url: str, dest: Path, expected_bytes: int = 0) -> None:
     """Download ``url`` to ``dest`` with retries; verify the byte count when known."""
     dest.parent.mkdir(parents=True, exist_ok=True)
     last: Exception | None = None
+    partial = dest.with_suffix(dest.suffix + ".part")
     for attempt in range(RETRIES):
         try:
-            partial = dest.with_suffix(dest.suffix + ".part")
             with (
                 urllib.request.urlopen(url, timeout=300) as response,
                 open(partial, "wb") as out,
@@ -186,7 +218,58 @@ def fetch(url: str, dest: Path, expected_bytes: int = 0) -> None:
         except (OSError, urllib.error.URLError) as error:
             last = error
             time.sleep(5 * (attempt + 1))
+    partial.unlink(missing_ok=True)
     raise OSError(f"{url}: {last}")
+
+
+def broken_log_path(out_dir: Path) -> Path:
+    return out_dir / "broken.log"
+
+
+def log_broken(out_dir: Path, plan: ItemPlan, sheet: Sheet, reason: str) -> None:
+    """Append one tab-separated line: item, stem, source, reason."""
+    out_dir.mkdir(parents=True, exist_ok=True)
+    with open(broken_log_path(out_dir), "a") as handle:
+        handle.write(f"{plan.item}\t{sheet.stem}\t{sheet.source}\t{reason}\n")
+
+
+# ---------------------------------------------------------------- stage 1: download
+
+
+def fetch_sheet(plan: ItemPlan, sheet: Sheet, settings: Settings) -> bool:
+    """Bring the sheet's source to disk; False (and a broken-log line) on failure.
+
+    Torrent sources land in the JP2 mirror; the few LoC-only sheets are fetched
+    already rendered, straight into staging.
+    """
+    try:
+        if sheet.source.startswith("torrent"):
+            local = jp2_path(settings.jp2_dir, sheet)
+            if local.exists() and (
+                not sheet.bytes or local.stat().st_size == sheet.bytes
+            ):
+                return True
+            fetch(source_url(settings.mirror, sheet), local, sheet.bytes)
+        else:
+            quarter, raw = sheet_outputs(
+                settings.staging_dir / item_relative(plan), sheet
+            )
+            if not quarter.exists():
+                fetch(source_url(settings.mirror, sheet), quarter)
+            if raw and not raw.exists():
+                fetch(source_url(settings.mirror, sheet, full=True), raw)
+        return True
+    except Exception as error:  # noqa: BLE001 -- any failure is a broken sheet
+        log_broken(
+            settings.out_dir,
+            plan,
+            sheet,
+            f"{error.__class__.__name__}: {str(error)[:200]}",
+        )
+        return False
+
+
+# ---------------------------------------------------------------- stage 2: decode
 
 
 def opj_available() -> bool:
@@ -195,7 +278,7 @@ def opj_available() -> bool:
 
 
 def decode_jp2(jp2: Path, out_jpg: Path, reduce: int) -> tuple[int, int]:
-    """Decode a JP2 at ``reduce`` resolution levels down and write a JPEG; returns its size.
+    """Decode a JP2 ``reduce`` resolution levels down and write a JPEG; returns its size.
 
     Uses ``opj_decompress`` (fast, multithreaded) when present, else Pillow.
     """
@@ -207,7 +290,7 @@ def decode_jp2(jp2: Path, out_jpg: Path, reduce: int) -> tuple[int, int]:
                 [
                     "opj_decompress",
                     "-threads",
-                    "4",
+                    "2",
                     "-i",
                     str(jp2),
                     "-r",
@@ -229,7 +312,7 @@ def decode_jp2(jp2: Path, out_jpg: Path, reduce: int) -> tuple[int, int]:
 
 
 def scale_to_quarter(src: Path, out_jpg: Path) -> tuple[int, int]:
-    """Write a 25% JPEG of a full-resolution TIFF or JPEG (the non-JP2 sources)."""
+    """Write a 25% JPEG of a full-resolution TIFF (the master-only sheets)."""
     out_jpg.parent.mkdir(parents=True, exist_ok=True)
     Image.MAX_IMAGE_PIXELS = None
     image = Image.open(src)
@@ -241,51 +324,13 @@ def scale_to_quarter(src: Path, out_jpg: Path) -> tuple[int, int]:
     return small.size
 
 
-@dataclass
-class Settings:
-    """Everything a worker needs; picklable for the process pool."""
-
-    jp2_dir: Path
-    out_dir: Path
-    mirror: str = DEFAULT_MIRROR
-    bucket: str | None = None
-    streams: int = 2
-    upload: bool = False
-    dry_run: bool = False
-
-
-def broken_log_path(out_dir: Path) -> Path:
-    return out_dir / "broken.log"
-
-
-def log_broken(out_dir: Path, plan: ItemPlan, sheet: Sheet, reason: str) -> None:
-    """Append one tab-separated line: item, stem, source, reason."""
-    with open(broken_log_path(out_dir), "a") as handle:
-        handle.write(f"{plan.item}\t{sheet.stem}\t{sheet.source}\t{reason}\n")
-
-
-def sheet_outputs(dest: Path, sheet: Sheet) -> tuple[Path, Path | None]:
-    """(25% JPEG path, raw full-resolution path or None) for a sheet."""
-    quarter = dest / f"{sheet.key}.jpg"
-    raw = dest / "raw" / f"{sheet.key}.jpg" if is_candidate(sheet.key) else None
-    return quarter, raw
-
-
-def process_sheet(plan: ItemPlan, sheet: Sheet, settings: Settings) -> dict | None:
-    """Fetch and decode one sheet; returns its metadata row, or None if broken."""
-    dest = item_dir(settings.out_dir, plan)
-    quarter, raw = sheet_outputs(dest, sheet)
+def decode_sheet(plan: ItemPlan, sheet: Sheet, settings: Settings) -> dict | None:
+    """Produce the sheet's outputs in staging; returns its metadata row, None if broken."""
+    quarter, raw = sheet_outputs(settings.staging_dir / item_relative(plan), sheet)
     row = asdict(sheet)
     try:
         if sheet.source.startswith("torrent"):
             local = jp2_path(settings.jp2_dir, sheet)
-            if sheet.source == "torrent-master-tif":
-                local = local.with_suffix(".tif")
-            if not (
-                local.exists()
-                and (not sheet.bytes or local.stat().st_size == sheet.bytes)
-            ):
-                fetch(source_url(settings.mirror, sheet), local, sheet.bytes)
             if not quarter.exists():
                 if local.suffix == ".jp2":
                     decode_jp2(local, quarter, QUARTER_REDUCE)
@@ -299,16 +344,11 @@ def process_sheet(plan: ItemPlan, sheet: Sheet, settings: Settings) -> dict | No
                     Image.open(local).convert("RGB").save(
                         raw, "JPEG", quality=JPEG_QUALITY
                     )
-        else:  # loc-iiif: the sheet has no file in the torrent
-            if not quarter.exists():
-                fetch(source_url(settings.mirror, sheet), quarter)
-            if raw and not raw.exists():
-                fetch(source_url(settings.mirror, sheet, full=True), raw)
         with Image.open(quarter) as image:
             row["width"], row["height"] = image.size
         row["raw"] = raw is not None
         return row
-    except Exception as error:  # noqa: BLE001 -- any failure is a broken sheet, logged and skipped
+    except Exception as error:  # noqa: BLE001 -- any failure is a broken sheet
         log_broken(
             settings.out_dir,
             plan,
@@ -321,77 +361,87 @@ def process_sheet(plan: ItemPlan, sheet: Sheet, settings: Settings) -> dict | No
         return None
 
 
-def write_metadata(
-    dest: Path, plan: ItemPlan, rows: list[dict], broken: list[str]
-) -> None:
-    """The item's metadata.json: catalog fields plus the sheet table."""
-    dest.mkdir(parents=True, exist_ok=True)
-    (dest / "metadata.json").write_text(
-        json.dumps(
-            {
-                "item": plan.item,
-                "loc_url": f"https://www.loc.gov/item/{plan.item}/",
-                "state": plan.state,
-                "year": plan.year,
-                "city": plan.city,
-                "storage_dir": plan.sheets[0].storage_dir if plan.sheets else None,
-                "jpeg_quality": JPEG_QUALITY,
-                "scale_percent": 25,
-                "sheets": rows,
-                "broken": broken,
-            },
-            indent=1,
-        )
-    )
+def metadata_document(plan: ItemPlan, rows: list[dict], broken: list[str]) -> dict:
+    """The item's metadata.json content: catalog fields plus the sheet table."""
+    return {
+        "item": plan.item,
+        "loc_url": f"https://www.loc.gov/item/{plan.item}/",
+        "state": plan.state,
+        "year": plan.year,
+        "city": plan.city,
+        "storage_dir": plan.sheets[0].storage_dir if plan.sheets else None,
+        "jpeg_quality": JPEG_QUALITY,
+        "scale_percent": 25,
+        "sheets": rows,
+        "broken": broken,
+    }
 
 
-def upload_item(dest: Path, plan: ItemPlan, bucket: str) -> None:
-    """``aws s3 sync`` the item directory to its prefix, then mark it uploaded."""
+def decode_item(
+    plan: ItemPlan, fetched: list[bool], settings: Settings
+) -> tuple[int, int]:
+    """Decode every fetched sheet, write metadata to staging and state, mark done.
+
+    Returns (sheets decoded, sheets broken). Runs in a worker process.
+    """
+    rows: list[dict] = []
+    broken: list[str] = []
+    for sheet, ok in zip(plan.sheets, fetched):
+        row = decode_sheet(plan, sheet, settings) if ok else None
+        if row is None:
+            broken.append(sheet.stem)
+        else:
+            rows.append(row)
+    document = json.dumps(metadata_document(plan, rows, broken), indent=1)
+    for root in (settings.staging_dir, settings.out_dir):
+        directory = root / item_relative(plan)
+        directory.mkdir(parents=True, exist_ok=True)
+        (directory / "metadata.json").write_text(document)
+    (settings.out_dir / item_relative(plan) / DONE).touch()
+    return len(rows), len(broken)
+
+
+# ---------------------------------------------------------------- stage 3: upload
+
+
+def upload_item(plan: ItemPlan, settings: Settings) -> None:
+    """``aws s3 sync`` the staging directory to its prefix, mark uploaded, drop the staging copy."""
+    assert settings.bucket
+    staging = settings.staging_dir / item_relative(plan)
     subprocess.run(
         [
             "aws",
             "s3",
             "sync",
-            str(dest),
-            s3_prefix(bucket, plan),
-            "--exclude",
-            ".*",
+            str(staging),
+            s3_prefix(settings.bucket, plan),
             "--only-show-errors",
         ],
         check=True,
     )
-    (dest / UPLOADED).touch()
+    (settings.out_dir / item_relative(plan) / UPLOADED).touch()
+    if not settings.keep_staging:
+        shutil.rmtree(staging, ignore_errors=True)
+        # Drop the now-empty year and state directories too, up to the staging root.
+        parent = staging.parent
+        while (
+            parent != settings.staging_dir
+            and parent.exists()
+            and not any(parent.iterdir())
+        ):
+            parent.rmdir()
+            parent = parent.parent
 
 
-def process_item(args: tuple[ItemPlan, Settings]) -> dict:
-    """Do one item end to end; returns a progress record."""
-    plan, settings = args
-    dest = item_dir(settings.out_dir, plan)
-    started = time.time()
-    if settings.dry_run:
-        return {"item": plan.item, "sheets": len(plan.sheets), "dry_run": True}
-    if not (dest / DONE).exists():
-        rows: list[dict] = []
-        broken: list[str] = []
-        with ThreadPoolExecutor(max_workers=settings.streams) as pool:
-            for sheet, row in zip(
-                plan.sheets,
-                pool.map(lambda s: process_sheet(plan, s, settings), plan.sheets),
-            ):
-                if row is None:
-                    broken.append(sheet.stem)
-                else:
-                    rows.append(row)
-        write_metadata(dest, plan, rows, broken)
-        (dest / DONE).touch()
-    if settings.upload and settings.bucket and not (dest / UPLOADED).exists():
-        upload_item(dest, plan, settings.bucket)
-    return {
-        "item": plan.item,
-        "sheets": len(plan.sheets),
-        "seconds": round(time.time() - started, 1),
-        "uploaded": (dest / UPLOADED).exists(),
-    }
+# ---------------------------------------------------------------- orchestration
+
+
+def item_complete(plan: ItemPlan, settings: Settings) -> bool:
+    """Whether resume can skip the item outright, from local markers only."""
+    state = settings.out_dir / item_relative(plan)
+    if settings.upload:
+        return (state / UPLOADED).exists()
+    return (state / DONE).exists()
 
 
 def select_items(
@@ -410,6 +460,111 @@ def select_items(
     return chosen[: args.limit] if args.limit else chosen
 
 
+def run_pipeline(
+    items: list[ItemPlan],
+    settings: Settings,
+    *,
+    streams: int = 8,
+    decode_workers: int = 4,
+    prefetch_items: int = 6,
+    upload_workers: int = 2,
+    progress: bool = True,
+) -> dict[str, int]:
+    """Drive the three stages concurrently over ``items``; returns totals.
+
+    Downloads are submitted sheet by sheet for up to ``prefetch_items`` items
+    ahead of decoding, so small items do not starve the connections; an item
+    moves to decoding when all its sheets are on disk, and to upload when its
+    metadata is written. One tqdm bar counts decoded sheets (the download
+    stage paces it), with downloaded gigabytes, uploaded items, and broken
+    sheets in the postfix.
+    """
+    todo = deque(item for item in items if not item_complete(item, settings))
+    total_sheets = sum(len(item.sheets) for item in todo)
+    totals = {"items": 0, "sheets": 0, "broken": 0, "uploaded": 0, "bytes": 0}
+    bar = tqdm(
+        total=total_sheets,
+        unit="sheet",
+        smoothing=0,
+        disable=not progress,
+        dynamic_ncols=True,
+    )
+    downloads: dict[Future, tuple[ItemPlan, int]] = {}
+    item_fetch: dict[str, list[bool | None]] = {}
+    decodes: dict[Future, ItemPlan] = {}
+    uploads: dict[Future, ItemPlan] = {}
+    in_flight: set[str] = set()
+    settings.out_dir.mkdir(parents=True, exist_ok=True)
+
+    def start_decode(plan: ItemPlan) -> None:
+        fetched = [bool(ok) for ok in item_fetch.pop(plan.item)]
+        decodes[decode_pool.submit(decode_item, plan, fetched, settings)] = plan
+
+    with (
+        open(settings.out_dir / "progress.jsonl", "a") as progress_log,
+        ThreadPoolExecutor(max_workers=streams) as fetch_pool,
+        ProcessPoolExecutor(max_workers=decode_workers) as decode_pool,
+        ThreadPoolExecutor(max_workers=upload_workers) as upload_pool,
+    ):
+        while todo or downloads or decodes or uploads:
+            while todo and len(in_flight) < prefetch_items:
+                plan = todo.popleft()
+                in_flight.add(plan.item)
+                item_fetch[plan.item] = [None] * len(plan.sheets)
+                if not plan.sheets:
+                    start_decode(plan)
+                for index, sheet in enumerate(plan.sheets):
+                    downloads[fetch_pool.submit(fetch_sheet, plan, sheet, settings)] = (
+                        plan,
+                        index,
+                    )
+            done, _ = wait(
+                list(downloads) + list(decodes) + list(uploads),
+                timeout=1.0,
+                return_when=FIRST_COMPLETED,
+            )
+            for future in done:
+                if future in downloads:
+                    plan, index = downloads.pop(future)
+                    item_fetch[plan.item][index] = future.result()
+                    if future.result():
+                        totals["bytes"] += plan.sheets[index].bytes
+                    if all(ok is not None for ok in item_fetch[plan.item]):
+                        start_decode(plan)
+                elif future in decodes:
+                    plan = decodes.pop(future)
+                    decoded, broken = future.result()
+                    totals["items"] += 1
+                    totals["sheets"] += decoded
+                    totals["broken"] += broken
+                    bar.update(len(plan.sheets))
+                    if True:
+                        progress_log.write(
+                            json.dumps(
+                                {"item": plan.item, "sheets": decoded, "broken": broken}
+                            )
+                            + "\n"
+                        )
+                        progress_log.flush()
+                    if settings.upload and settings.bucket:
+                        uploads[upload_pool.submit(upload_item, plan, settings)] = plan
+                    else:
+                        in_flight.discard(plan.item)
+                else:
+                    plan = uploads.pop(future)
+                    future.result()
+                    totals["uploaded"] += 1
+                    in_flight.discard(plan.item)
+            bar.set_postfix(
+                dl=f"{totals['bytes'] / 1e9:.1f}GB",
+                up=totals["uploaded"],
+                broken=totals["broken"],
+                refresh=False,
+            )
+    bar.close()
+    return totals
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(
         description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
@@ -423,13 +578,19 @@ def main() -> None:
         "--jp2-dir",
         type=Path,
         required=True,
-        help="Local mirror of the torrent's storage-services tree.",
+        help="Local mirror of the torrent's storage-services tree (kept).",
     )
     parser.add_argument(
         "--out-dir",
         type=Path,
         required=True,
-        help="Staging root; by-state/<state>/<year>/<item>/ goes under it.",
+        help="State root: per-item metadata.json + markers, broken.log, progress.jsonl.",
+    )
+    parser.add_argument(
+        "--staging-dir",
+        type=Path,
+        default=None,
+        help="Where decoded images wait for upload (default <out-dir>/staging).",
     )
     parser.add_argument(
         "--mirror", default=DEFAULT_MIRROR, help="HTTP root serving the torrent's tree."
@@ -442,18 +603,27 @@ def main() -> None:
     parser.add_argument(
         "--upload",
         action="store_true",
-        help="aws s3 sync each item after it completes.",
+        help="aws s3 sync each item after it is decoded, then drop its staging copy.",
     )
     parser.add_argument(
-        "--upload-only",
+        "--keep-staging",
         action="store_true",
-        help="Only sync items already marked done.",
+        help="Keep the staging copy after upload.",
     )
     parser.add_argument(
-        "--workers", type=int, default=4, help="Items processed at once."
+        "--streams",
+        type=int,
+        default=8,
+        help="Concurrent downloads (the mirror saturates near 8).",
     )
     parser.add_argument(
-        "--streams", type=int, default=2, help="Concurrent sheet downloads per item."
+        "--decode-workers", type=int, default=4, help="Decode processes."
+    )
+    parser.add_argument(
+        "--prefetch-items",
+        type=int,
+        default=6,
+        help="Items downloading ahead of decoding.",
     )
     parser.add_argument(
         "--states",
@@ -478,54 +648,43 @@ def main() -> None:
             "warning: opj_decompress not found; decoding with Pillow (several times slower)",
             file=sys.stderr,
         )
-    plans = load_mapping(args.mapping)
-    chosen = select_items(plans, args)
     settings = Settings(
         jp2_dir=args.jp2_dir,
         out_dir=args.out_dir,
+        staging_dir=args.staging_dir or args.out_dir / "staging",
         mirror=args.mirror,
         bucket=args.bucket,
-        streams=args.streams,
-        upload=args.upload or args.upload_only,
-        dry_run=args.dry_run,
+        upload=args.upload,
+        keep_staging=args.keep_staging,
     )
-    if args.upload_only:
-        chosen = [
-            plan for plan in chosen if (item_dir(args.out_dir, plan) / DONE).exists()
-        ]
-    total_sheets = sum(len(plan.sheets) for plan in chosen)
-    total_bytes = sum(sheet.bytes for plan in chosen for sheet in plan.sheets)
+    if settings.upload and not settings.bucket:
+        sys.exit("--upload needs --bucket")
+    chosen = select_items(load_mapping(args.mapping), args)
+    pending = [plan for plan in chosen if not item_complete(plan, settings)]
     print(
-        f"{len(chosen)} items, {total_sheets:,} sheets, {total_bytes / 1e9:,.1f} GB of JP2",
+        f"{len(chosen)} items selected, {len(pending)} to do: "
+        f"{sum(len(p.sheets) for p in pending):,} sheets, "
+        f"{sum(s.bytes for p in pending for s in p.sheets) / 1e9:,.1f} GB of JP2",
         file=sys.stderr,
     )
     if args.dry_run:
-        for plan in chosen[:20]:
-            print(
-                f"  {plan.item} {plan.state}/{plan.year} {len(plan.sheets)} sheets -> {item_dir(args.out_dir, plan)}"
-            )
+        for plan in pending[:20]:
+            print(f"  {plan.item} {plan.state}/{plan.year} {len(plan.sheets)} sheets")
         return
     args.out_dir.mkdir(parents=True, exist_ok=True)
-    done = 0
-    started = time.time()
-    with (
-        open(args.out_dir / "progress.jsonl", "a") as progress,
-        Pool(args.workers) as pool,
-    ):
-        for record in pool.imap_unordered(
-            process_item, [(plan, settings) for plan in chosen]
-        ):
-            progress.write(json.dumps(record) + "\n")
-            progress.flush()
-            done += 1
-            if done % 25 == 0 or done == len(chosen):
-                elapsed = time.time() - started
-                remaining = (len(chosen) - done) * elapsed / done / 3600
-                print(
-                    f"{done}/{len(chosen)} items, {elapsed / 3600:.1f} h elapsed, "
-                    f"{remaining:.1f} h remaining at this rate",
-                    file=sys.stderr,
-                )
+    settings.staging_dir.mkdir(parents=True, exist_ok=True)
+    totals = run_pipeline(
+        chosen,
+        settings,
+        streams=args.streams,
+        decode_workers=args.decode_workers,
+        prefetch_items=args.prefetch_items,
+    )
+    print(
+        f"done: {totals['items']} items, {totals['sheets']:,} sheets, {totals['broken']} broken, "
+        f"{totals['uploaded']} uploaded; broken sheets in {broken_log_path(args.out_dir)}",
+        file=sys.stderr,
+    )
 
 
 if __name__ == "__main__":
