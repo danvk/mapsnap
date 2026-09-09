@@ -22,6 +22,7 @@ from mapsnap.loc_mirror import (
     jp2_path,
     keep_sheet,
     load_mapping,
+    prune_empty_parents,
     run_pipeline,
     s3_prefix,
     select_items,
@@ -216,6 +217,7 @@ def test_pipeline_decodes_logs_broken_and_resumes(tmp_path: Path):
         "broken": 1,
         "uploaded": 0,
         "bytes": pytest.approx(totals["bytes"]),
+        "errors": 0,
     }
     staged = settings.staging_dir / item_relative(items[0])
     assert Image.open(staged / "p0.jpg").size == (50, 40)
@@ -344,3 +346,49 @@ def test_fetch_reuses_one_keep_alive_connection_per_thread(
             fetch(f"{base}/a.bin", tmp_path / "a2.bin", expected_bytes=999)
     finally:
         server.shutdown()
+
+
+def test_prune_stops_at_the_root_and_survives_races(tmp_path: Path):
+    root = tmp_path / "staging"
+    leaf = root / "by-state" / "colorado" / "1905"
+    leaf.mkdir(parents=True)
+    (root / "by-state" / "ohio").mkdir()
+    prune_empty_parents(leaf, root)
+    assert not (root / "by-state" / "colorado").exists()
+    assert (
+        root / "by-state" / "ohio"
+    ).exists() and root.exists()  # by-state kept: not empty
+    prune_empty_parents(
+        root / "by-state" / "gone" / "1900", root
+    )  # already removed elsewhere: no error
+
+
+@needs_jp2
+def test_upload_failure_is_logged_and_the_item_waits_for_resume(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    items, settings, _ = make_volume(tmp_path)
+    settings.bucket, settings.upload = "s3://bucket", True
+
+    def failing_run(cmd, check):
+        raise RuntimeError("aws exploded")
+
+    monkeypatch.setattr(loc_mirror.subprocess, "run", failing_run)
+    totals = run_pipeline(items, settings, streams=2, decode_workers=1, progress=False)
+    assert totals["items"] == 2 and totals["uploaded"] == 0 and totals["errors"] == 2
+    state = settings.out_dir / item_relative(items[0])
+    assert (state / DONE).exists() and not (state / UPLOADED).exists()
+    assert (
+        settings.staging_dir / item_relative(items[0]) / "p0.jpg"
+    ).exists()  # kept for the retry
+    assert (
+        "upload\tsanborn00081_001\tRuntimeError"
+        in (settings.out_dir / "errors.log").read_text()
+    )
+    # Resume with a working aws: only the upload runs, from the retained staging copy.
+    synced: list[str] = []
+    monkeypatch.setattr(
+        loc_mirror.subprocess, "run", lambda cmd, check: synced.append(cmd[4])
+    )
+    again = run_pipeline(items, settings, streams=1, decode_workers=1, progress=False)
+    assert again["uploaded"] == 2 and again["items"] == 0 and len(synced) == 2

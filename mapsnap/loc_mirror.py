@@ -288,6 +288,16 @@ def broken_log_path(out_dir: Path) -> Path:
     return out_dir / "broken.log"
 
 
+def log_error(out_dir: Path, stage: str, item: str, error: BaseException) -> None:
+    """Append a stage failure to errors.log; the item is left for the next resume."""
+    out_dir.mkdir(parents=True, exist_ok=True)
+    with open(out_dir / "errors.log", "a") as handle:
+        handle.write(
+            f"{time.strftime('%Y-%m-%d %H:%M:%S')}\t{stage}\t{item}\t"
+            f"{error.__class__.__name__}: {str(error)[:300]}\n"
+        )
+
+
 def log_broken(out_dir: Path, plan: ItemPlan, sheet: Sheet, reason: str) -> None:
     """Append one tab-separated line: item, stem, source, reason."""
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -461,12 +471,11 @@ def decode_item(
         directory.mkdir(parents=True, exist_ok=True)
         (directory / "metadata.json").write_text(document)
     (settings.out_dir / item_relative(plan) / DONE).touch()
-    staged = sum(
-        path.stat().st_size
-        for path in (settings.staging_dir / item_relative(plan)).rglob("*")
-        if path.is_file()
+    return (
+        len(rows),
+        len(broken),
+        staged_size(settings.staging_dir / item_relative(plan)),
     )
-    return len(rows), len(broken), staged
 
 
 # ---------------------------------------------------------------- stage 3: upload
@@ -490,18 +499,38 @@ def upload_item(plan: ItemPlan, settings: Settings) -> None:
     (settings.out_dir / item_relative(plan) / UPLOADED).touch()
     if not settings.keep_staging:
         shutil.rmtree(staging, ignore_errors=True)
-        # Drop the now-empty year and state directories too, up to the staging root.
-        parent = staging.parent
-        while (
-            parent != settings.staging_dir
-            and parent.exists()
-            and not any(parent.iterdir())
-        ):
-            parent.rmdir()
-            parent = parent.parent
+        prune_empty_parents(staging.parent, settings.staging_dir)
+
+
+def prune_empty_parents(directory: Path, root: Path) -> None:
+    """Remove ``directory`` and its parents up to ``root`` while they are empty.
+
+    Other threads prune and create siblings concurrently (two uploads finishing
+    under one state directory; a decode writing a new year directory), so a
+    directory can vanish or fill between the check and the rmdir. Either way
+    the right response is to stop.
+    """
+    while directory != root:
+        try:
+            directory.rmdir()
+        except OSError:
+            return
+        directory = directory.parent
 
 
 # ---------------------------------------------------------------- orchestration
+
+
+def staged_size(directory: Path) -> int:
+    """Bytes of files under a staging item directory (0 if absent)."""
+    return sum(path.stat().st_size for path in directory.rglob("*") if path.is_file())
+
+
+def awaiting_upload(plan: ItemPlan, settings: Settings) -> bool:
+    """Decoded on a previous run with its staging copy intact: only the upload is left."""
+    state = settings.out_dir / item_relative(plan)
+    staging = settings.staging_dir / item_relative(plan)
+    return (state / DONE).exists() and (staging / "metadata.json").exists()
 
 
 def item_complete(plan: ItemPlan, settings: Settings) -> bool:
@@ -560,20 +589,60 @@ def run_pipeline(
     metadata is written. The upload stage is decoupled: downloads and decodes
     never wait for the uplink. New items are held back only while more than
     ``max_staging_bytes`` of decoded output is waiting to upload, so a slow
-    uplink costs staging disk rather than download throughput. One tqdm bar
-    counts decoded sheets, with downloaded gigabytes, uploaded items, the
-    staging backlog, and broken sheets in the postfix.
+    uplink costs staging disk rather than download throughput. A stage failure
+    is logged to errors.log and the item is left for the next resume; it never
+    ends the run. One tqdm bar counts decoded sheets, with downloaded
+    gigabytes, uploaded items, the staging backlog, broken sheets, and stage
+    errors in the postfix.
     """
     todo = deque(item for item in items if not item_complete(item, settings))
-    total_sheets = sum(len(item.sheets) for item in todo)
-    totals = {"items": 0, "sheets": 0, "broken": 0, "uploaded": 0, "bytes": 0}
+    totals = {
+        "items": 0,
+        "sheets": 0,
+        "broken": 0,
+        "uploaded": 0,
+        "bytes": 0,
+        "errors": 0,
+    }
     bar = tqdm(
-        total=total_sheets,
+        total=sum(len(item.sheets) for item in todo),
         unit="sheet",
         smoothing=0,
         disable=not progress,
         dynamic_ncols=True,
     )
+    # Closed on every exit path: a live bar's __del__ during interpreter
+    # teardown after an exception segfaults CPython 3.13 in tqdm's formatter.
+    try:
+        run_stages(
+            todo,
+            settings,
+            totals,
+            bar,
+            streams=streams,
+            decode_workers=decode_workers,
+            prefetch_items=prefetch_items,
+            upload_workers=upload_workers,
+            max_staging_bytes=max_staging_bytes,
+        )
+    finally:
+        bar.close()
+    return totals
+
+
+def run_stages(
+    todo: deque[ItemPlan],
+    settings: Settings,
+    totals: dict[str, int],
+    bar: tqdm,
+    *,
+    streams: int,
+    decode_workers: int,
+    prefetch_items: int,
+    upload_workers: int,
+    max_staging_bytes: float,
+) -> None:
+    """The coordinator loop behind run_pipeline; mutates ``totals`` and drives ``bar``."""
     downloads: dict[Future, tuple[ItemPlan, int]] = {}
     item_fetch: dict[str, list[bool | None]] = {}
     decodes: dict[Future, ItemPlan] = {}
@@ -581,17 +650,17 @@ def run_pipeline(
     item_staged: dict[str, int] = {}
     staged_bytes = 0
     settings.out_dir.mkdir(parents=True, exist_ok=True)
-
-    def start_decode(plan: ItemPlan) -> None:
-        fetched = [bool(ok) for ok in item_fetch.pop(plan.item)]
-        decodes[decode_pool.submit(decode_item, plan, fetched, settings)] = plan
-
     with (
         open(settings.out_dir / "progress.jsonl", "a") as progress_log,
         ThreadPoolExecutor(max_workers=streams) as fetch_pool,
         ProcessPoolExecutor(max_workers=decode_workers) as decode_pool,
         ThreadPoolExecutor(max_workers=upload_workers) as upload_pool,
     ):
+
+        def start_decode(plan: ItemPlan) -> None:
+            fetched = [bool(ok) for ok in item_fetch.pop(plan.item)]
+            decodes[decode_pool.submit(decode_item, plan, fetched, settings)] = plan
+
         while todo or downloads or decodes or uploads:
             while (
                 todo
@@ -599,14 +668,22 @@ def run_pipeline(
                 and staged_bytes < max_staging_bytes
             ):
                 plan = todo.popleft()
+                if (
+                    settings.upload
+                    and settings.bucket
+                    and awaiting_upload(plan, settings)
+                ):
+                    staged = staged_size(settings.staging_dir / item_relative(plan))
+                    item_staged[plan.item] = staged
+                    staged_bytes += staged
+                    uploads[upload_pool.submit(upload_item, plan, settings)] = plan
+                    continue
                 item_fetch[plan.item] = [None] * len(plan.sheets)
                 if not plan.sheets:
                     start_decode(plan)
                 for index, sheet in enumerate(plan.sheets):
-                    downloads[fetch_pool.submit(fetch_sheet, plan, sheet, settings)] = (
-                        plan,
-                        index,
-                    )
+                    future = fetch_pool.submit(fetch_sheet, plan, sheet, settings)
+                    downloads[future] = (plan, index)
             done, _ = wait(
                 list(downloads) + list(decodes) + list(uploads),
                 timeout=1.0,
@@ -615,14 +692,28 @@ def run_pipeline(
             for future in done:
                 if future in downloads:
                     plan, index = downloads.pop(future)
-                    item_fetch[plan.item][index] = future.result()
-                    if future.result():
+                    try:
+                        fetched = bool(future.result())
+                    except Exception as error:  # noqa: BLE001 -- logged; the sheet counts as broken
+                        log_error(
+                            settings.out_dir, "download", plan.sheets[index].stem, error
+                        )
+                        totals["errors"] += 1
+                        fetched = False
+                    item_fetch[plan.item][index] = fetched
+                    if fetched:
                         totals["bytes"] += plan.sheets[index].bytes
                     if all(ok is not None for ok in item_fetch[plan.item]):
                         start_decode(plan)
                 elif future in decodes:
                     plan = decodes.pop(future)
-                    decoded, broken, staged = future.result()
+                    try:
+                        decoded, broken, staged = future.result()
+                    except Exception as error:  # noqa: BLE001 -- logged; retried on resume
+                        log_error(settings.out_dir, "decode", plan.item, error)
+                        totals["errors"] += 1
+                        bar.update(len(plan.sheets))
+                        continue
                     totals["items"] += 1
                     totals["sheets"] += decoded
                     totals["broken"] += broken
@@ -640,18 +731,22 @@ def run_pipeline(
                         uploads[upload_pool.submit(upload_item, plan, settings)] = plan
                 else:
                     plan = uploads.pop(future)
-                    future.result()
-                    totals["uploaded"] += 1
                     staged_bytes -= item_staged.pop(plan.item, 0)
+                    try:
+                        future.result()
+                    except Exception as error:  # noqa: BLE001 -- staging kept; re-synced on resume
+                        log_error(settings.out_dir, "upload", plan.item, error)
+                        totals["errors"] += 1
+                        continue
+                    totals["uploaded"] += 1
             bar.set_postfix(
                 dl=f"{totals['bytes'] / 1e9:.1f}GB",
                 up=totals["uploaded"],
                 staged=f"{staged_bytes / 1e9:.1f}GB",
                 broken=totals["broken"],
+                errors=totals["errors"],
                 refresh=False,
             )
-    bar.close()
-    return totals
 
 
 def main() -> None:
