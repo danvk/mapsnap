@@ -13,8 +13,10 @@ from mapsnap.loc_mirror import (
     ItemPlan,
     Settings,
     Sheet,
+    _connections,
     broken_log_path,
     decode_jp2,
+    fetch,
     is_candidate,
     item_relative,
     jp2_path,
@@ -301,3 +303,44 @@ def test_select_items_random_order_is_seeded_and_optional():
         "ohio"
     ] * 20
     assert [p.item for p in select_items(plans, limit=5, seed=0)] == first[:5]
+
+
+def test_fetch_reuses_one_keep_alive_connection_per_thread(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    import http.server
+    import threading
+
+    root = tmp_path / "srv"
+    root.mkdir()
+    (root / "a.bin").write_bytes(b"a" * 1000)
+    (root / "b.bin").write_bytes(b"b" * 2000)
+
+    class Handler(http.server.SimpleHTTPRequestHandler):
+        protocol_version = "HTTP/1.1"  # keep-alive, as nginx does
+
+        def __init__(self, *args, **kwargs):
+            super().__init__(*args, directory=str(root), **kwargs)
+
+        def log_message(self, *args):
+            pass
+
+    server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    base = f"http://127.0.0.1:{server.server_port}"
+    monkeypatch.setattr(loc_mirror, "RETRY_DELAY", 0.0)
+    try:
+        fetch(f"{base}/a.bin", tmp_path / "a.bin", 1000)
+        first = _connections.conn
+        fetch(f"{base}/b.bin", tmp_path / "b.bin", 2000)
+        assert _connections.conn is first  # same socket, not a new connection per file
+        assert (tmp_path / "b.bin").read_bytes() == b"b" * 2000
+        with pytest.raises(OSError):
+            fetch(f"{base}/missing.bin", tmp_path / "m.bin")
+        assert (
+            not (tmp_path / "m.bin").exists() and not (tmp_path / "m.bin.part").exists()
+        )
+        with pytest.raises(OSError):
+            fetch(f"{base}/a.bin", tmp_path / "a2.bin", expected_bytes=999)
+    finally:
+        server.shutdown()

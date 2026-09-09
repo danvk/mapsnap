@@ -45,6 +45,7 @@ download or decode after retries is logged as broken and left out of its item.
 
 import argparse
 import csv
+import http.client
 import json
 import random
 import re
@@ -52,6 +53,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import threading
 import time
 import urllib.error
 import urllib.request
@@ -65,6 +67,7 @@ from concurrent.futures import (
 )
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
+from urllib.parse import urlsplit
 
 from PIL import Image
 from tqdm import tqdm
@@ -77,6 +80,7 @@ LOC_IIIF = "https://tile.loc.gov/image-services/iiif"
 JPEG_QUALITY = 95  # what mapsnap scale writes; the pipeline is tuned on it
 QUARTER_REDUCE = 2  # JPEG 2000 resolution levels to drop: 1/4 linear = 25%
 RETRIES = 4
+RETRY_DELAY = 5.0  # seconds, times the attempt number
 DONE, UPLOADED = ".done", ".uploaded"
 
 
@@ -201,26 +205,81 @@ def sheet_outputs(staging_item: Path, sheet: Sheet) -> tuple[Path, Path | None]:
     return quarter, raw
 
 
+_connections = threading.local()
+
+
+def mirror_connection(host: str, port: int | None) -> http.client.HTTPConnection:
+    """This thread's persistent HTTP/1.1 connection to the mirror, opened on first use.
+
+    One connection per thread, reused across files: the mirror's uplink is
+    fast, but each new TCP connection pays a handshake and slow start that an
+    8 MB file never gets past, which cost two thirds of the throughput when
+    every request opened its own.
+    """
+    key = (host, port)
+    conn = getattr(_connections, "conn", None)
+    if conn is None or getattr(_connections, "key", None) != key:
+        if conn is not None:
+            conn.close()
+        conn = http.client.HTTPConnection(host, port, timeout=300)
+        _connections.conn, _connections.key = conn, key
+    return conn
+
+
+def drop_connection() -> None:
+    """Close this thread's mirror connection after an error, so the next fetch reconnects."""
+    conn = getattr(_connections, "conn", None)
+    if conn is not None:
+        conn.close()
+    _connections.conn = None
+
+
+def fetch_http(url: str, partial: Path) -> None:
+    """GET ``url`` over the thread's keep-alive connection, streaming the body to ``partial``."""
+    parts = urlsplit(url)
+    conn = mirror_connection(parts.hostname or "", parts.port)
+    path = parts.path + (f"?{parts.query}" if parts.query else "")
+    conn.request("GET", path, headers={"Connection": "keep-alive"})
+    response = conn.getresponse()
+    try:
+        if response.status != 200:
+            response.read()
+            raise OSError(f"HTTP {response.status}")
+        with open(partial, "wb") as out:
+            while chunk := response.read(1 << 20):
+                out.write(chunk)
+    finally:
+        response.close()
+
+
 def fetch(url: str, dest: Path, expected_bytes: int = 0) -> None:
-    """Download ``url`` to ``dest`` with retries; verify the byte count when known."""
+    """Download ``url`` to ``dest`` with retries; verify the byte count when known.
+
+    Plain-http URLs (the mirror) reuse a per-thread keep-alive connection;
+    anything else (LoC's IIIF over https, file:// in tests) goes through urllib.
+    """
     dest.parent.mkdir(parents=True, exist_ok=True)
     last: Exception | None = None
     partial = dest.with_suffix(dest.suffix + ".part")
     for attempt in range(RETRIES):
         try:
-            with (
-                urllib.request.urlopen(url, timeout=300) as response,
-                open(partial, "wb") as out,
-            ):
-                shutil.copyfileobj(response, out, 1 << 20)
+            if urlsplit(url).scheme == "http":
+                fetch_http(url, partial)
+            else:
+                with (
+                    urllib.request.urlopen(url, timeout=300) as response,
+                    open(partial, "wb") as out,
+                ):
+                    shutil.copyfileobj(response, out, 1 << 20)
             size = partial.stat().st_size
             if expected_bytes and size != expected_bytes:
                 raise OSError(f"size {size} != listed {expected_bytes}")
             partial.replace(dest)
             return
-        except (OSError, urllib.error.URLError) as error:
+        except (OSError, urllib.error.URLError, http.client.HTTPException) as error:
             last = error
-            time.sleep(5 * (attempt + 1))
+            drop_connection()
+            time.sleep(RETRY_DELAY * (attempt + 1))
     partial.unlink(missing_ok=True)
     raise OSError(f"{url}: {last}")
 
@@ -382,10 +441,11 @@ def metadata_document(plan: ItemPlan, rows: list[dict], broken: list[str]) -> di
 
 def decode_item(
     plan: ItemPlan, fetched: list[bool], settings: Settings
-) -> tuple[int, int]:
+) -> tuple[int, int, int]:
     """Decode every fetched sheet, write metadata to staging and state, mark done.
 
-    Returns (sheets decoded, sheets broken). Runs in a worker process.
+    Returns (sheets decoded, sheets broken, bytes now waiting in staging).
+    Runs in a worker process.
     """
     rows: list[dict] = []
     broken: list[str] = []
@@ -401,7 +461,12 @@ def decode_item(
         directory.mkdir(parents=True, exist_ok=True)
         (directory / "metadata.json").write_text(document)
     (settings.out_dir / item_relative(plan) / DONE).touch()
-    return len(rows), len(broken)
+    staged = sum(
+        path.stat().st_size
+        for path in (settings.staging_dir / item_relative(plan)).rglob("*")
+        if path.is_file()
+    )
+    return len(rows), len(broken), staged
 
 
 # ---------------------------------------------------------------- stage 3: upload
@@ -480,10 +545,11 @@ def run_pipeline(
     items: list[ItemPlan],
     settings: Settings,
     *,
-    streams: int = 8,
+    streams: int = 12,
     decode_workers: int = 4,
-    prefetch_items: int = 6,
+    prefetch_items: int = 16,
     upload_workers: int = 2,
+    max_staging_bytes: float = 250e9,
     progress: bool = True,
 ) -> dict[str, int]:
     """Drive the three stages concurrently over ``items``; returns totals.
@@ -491,9 +557,12 @@ def run_pipeline(
     Downloads are submitted sheet by sheet for up to ``prefetch_items`` items
     ahead of decoding, so small items do not starve the connections; an item
     moves to decoding when all its sheets are on disk, and to upload when its
-    metadata is written. One tqdm bar counts decoded sheets (the download
-    stage paces it), with downloaded gigabytes, uploaded items, and broken
-    sheets in the postfix.
+    metadata is written. The upload stage is decoupled: downloads and decodes
+    never wait for the uplink. New items are held back only while more than
+    ``max_staging_bytes`` of decoded output is waiting to upload, so a slow
+    uplink costs staging disk rather than download throughput. One tqdm bar
+    counts decoded sheets, with downloaded gigabytes, uploaded items, the
+    staging backlog, and broken sheets in the postfix.
     """
     todo = deque(item for item in items if not item_complete(item, settings))
     total_sheets = sum(len(item.sheets) for item in todo)
@@ -509,7 +578,8 @@ def run_pipeline(
     item_fetch: dict[str, list[bool | None]] = {}
     decodes: dict[Future, ItemPlan] = {}
     uploads: dict[Future, ItemPlan] = {}
-    in_flight: set[str] = set()
+    item_staged: dict[str, int] = {}
+    staged_bytes = 0
     settings.out_dir.mkdir(parents=True, exist_ok=True)
 
     def start_decode(plan: ItemPlan) -> None:
@@ -523,9 +593,12 @@ def run_pipeline(
         ThreadPoolExecutor(max_workers=upload_workers) as upload_pool,
     ):
         while todo or downloads or decodes or uploads:
-            while todo and len(in_flight) < prefetch_items:
+            while (
+                todo
+                and len(item_fetch) + len(decodes) < prefetch_items
+                and staged_bytes < max_staging_bytes
+            ):
                 plan = todo.popleft()
-                in_flight.add(plan.item)
                 item_fetch[plan.item] = [None] * len(plan.sheets)
                 if not plan.sheets:
                     start_decode(plan)
@@ -549,31 +622,31 @@ def run_pipeline(
                         start_decode(plan)
                 elif future in decodes:
                     plan = decodes.pop(future)
-                    decoded, broken = future.result()
+                    decoded, broken, staged = future.result()
                     totals["items"] += 1
                     totals["sheets"] += decoded
                     totals["broken"] += broken
                     bar.update(len(plan.sheets))
-                    if True:
-                        progress_log.write(
-                            json.dumps(
-                                {"item": plan.item, "sheets": decoded, "broken": broken}
-                            )
-                            + "\n"
+                    progress_log.write(
+                        json.dumps(
+                            {"item": plan.item, "sheets": decoded, "broken": broken}
                         )
-                        progress_log.flush()
+                        + "\n"
+                    )
+                    progress_log.flush()
                     if settings.upload and settings.bucket:
+                        item_staged[plan.item] = staged
+                        staged_bytes += staged
                         uploads[upload_pool.submit(upload_item, plan, settings)] = plan
-                    else:
-                        in_flight.discard(plan.item)
                 else:
                     plan = uploads.pop(future)
                     future.result()
                     totals["uploaded"] += 1
-                    in_flight.discard(plan.item)
+                    staged_bytes -= item_staged.pop(plan.item, 0)
             bar.set_postfix(
                 dl=f"{totals['bytes'] / 1e9:.1f}GB",
                 up=totals["uploaded"],
+                staged=f"{staged_bytes / 1e9:.1f}GB",
                 broken=totals["broken"],
                 refresh=False,
             )
@@ -629,8 +702,8 @@ def main() -> None:
     parser.add_argument(
         "--streams",
         type=int,
-        default=8,
-        help="Concurrent downloads (the mirror saturates near 8).",
+        default=12,
+        help="Concurrent keep-alive downloads from the mirror.",
     )
     parser.add_argument(
         "--decode-workers", type=int, default=4, help="Decode processes."
@@ -638,8 +711,14 @@ def main() -> None:
     parser.add_argument(
         "--prefetch-items",
         type=int,
-        default=6,
-        help="Items downloading ahead of decoding.",
+        default=16,
+        help="Items downloading or decoding at once (the upload queue is unbounded).",
+    )
+    parser.add_argument(
+        "--max-staging-gb",
+        type=float,
+        default=250.0,
+        help="Pause downloads while this much decoded output waits for upload.",
     )
     parser.add_argument(
         "--states",
@@ -713,6 +792,7 @@ def main() -> None:
         streams=args.streams,
         decode_workers=args.decode_workers,
         prefetch_items=args.prefetch_items,
+        max_staging_bytes=args.max_staging_gb * 1e9,
     )
     print(
         f"done: {totals['items']} items, {totals['sheets']:,} sheets, {totals['broken']} broken, "
