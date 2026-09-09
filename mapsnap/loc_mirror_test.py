@@ -322,7 +322,7 @@ def test_fetch_reuses_one_keep_alive_connection_per_thread(
         def __init__(self, *args, **kwargs):
             super().__init__(*args, directory=str(root), **kwargs)
 
-        def log_message(self, *args):
+        def log_message(self, format: str, *args) -> None:
             pass
 
     server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), Handler)
