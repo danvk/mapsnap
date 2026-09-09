@@ -30,7 +30,9 @@ reason) and ``progress.jsonl``. Resuming never lists S3: an item with its
 marker is skipped, a JP2 on disk at the listed size is not re-fetched, and an
 output already in staging is not re-decoded.
 
-Sheets whose page key does not start with a digit (covr, ind1, cbd, titl,
+Items are processed in a seeded random order, so however far the run has
+got, the finished subset is a uniform sample of the collection
+(``--sequential`` for state, year, item order). Sheets whose page key does not start with a digit (covr, ind1, cbd, titl,
 note) are skipped: nothing in the pipeline reads them. A sheet that fails to
 download or decode after retries is logged as broken and left out of its item.
 
@@ -44,6 +46,7 @@ download or decode after retries is logged as broken and left out of its item.
 import argparse
 import csv
 import json
+import random
 import re
 import shutil
 import subprocess
@@ -445,19 +448,32 @@ def item_complete(plan: ItemPlan, settings: Settings) -> bool:
 
 
 def select_items(
-    plans: dict[str, ItemPlan], args: argparse.Namespace
+    plans: dict[str, ItemPlan],
+    *,
+    states: str | None = None,
+    items: str | None = None,
+    limit: int = 0,
+    seed: int | None = 0,
 ) -> list[ItemPlan]:
-    """The items to run, filtered by --states / --items, in a stable order."""
-    states = set(args.states.split(",")) if args.states else None
-    wanted = set(args.items.split(",")) if args.items else None
+    """The items to run, filtered by state folders and ids.
+
+    The order is a random permutation seeded by ``seed`` (so a restart walks the
+    same sequence, and any prefix of the run is a uniform sample of the
+    collection, which the state-by-state order would not be); ``seed=None``
+    keeps the state, year, item order. ``limit`` truncates after ordering.
+    """
+    wanted_states = set(states.split(",")) if states else None
+    wanted_items = set(items.split(",")) if items else None
     chosen = [
         plan
         for plan in plans.values()
-        if (states is None or plan.state in states)
-        and (wanted is None or plan.item in wanted)
+        if (wanted_states is None or plan.state in wanted_states)
+        and (wanted_items is None or plan.item in wanted_items)
     ]
     chosen.sort(key=lambda plan: (plan.state, plan.year, plan.item))
-    return chosen[: args.limit] if args.limit else chosen
+    if seed is not None:
+        random.Random(seed).shuffle(chosen)
+    return chosen[:limit] if limit else chosen
 
 
 def run_pipeline(
@@ -637,6 +653,18 @@ def main() -> None:
         "--limit", type=int, default=0, help="Stop after this many items (0 = all)."
     )
     parser.add_argument(
+        "--seed",
+        type=int,
+        default=0,
+        help="Seed of the random item order (the default order), so a restart "
+        "walks the same sequence and any prefix is a uniform sample.",
+    )
+    parser.add_argument(
+        "--sequential",
+        action="store_true",
+        help="Process items in state, year, item order instead of at random.",
+    )
+    parser.add_argument(
         "--dry-run",
         action="store_true",
         help="List the items and sheet counts; touch nothing.",
@@ -659,7 +687,13 @@ def main() -> None:
     )
     if settings.upload and not settings.bucket:
         sys.exit("--upload needs --bucket")
-    chosen = select_items(load_mapping(args.mapping), args)
+    chosen = select_items(
+        load_mapping(args.mapping),
+        states=args.states,
+        items=args.items,
+        limit=args.limit,
+        seed=None if args.sequential else args.seed,
+    )
     pending = [plan for plan in chosen if not item_complete(plan, settings)]
     print(
         f"{len(chosen)} items selected, {len(pending)} to do: "

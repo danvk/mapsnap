@@ -22,6 +22,7 @@ from mapsnap.loc_mirror import (
     load_mapping,
     run_pipeline,
     s3_prefix,
+    select_items,
     sheet_outputs,
     source_url,
 )
@@ -279,3 +280,24 @@ def test_pipeline_uploads_then_drops_staging(
         ]
         == 0
     )
+
+
+def test_select_items_random_order_is_seeded_and_optional():
+    plans = {
+        f"sanborn{i:05d}_001": ItemPlan(
+            f"sanborn{i:05d}_001", "alabama" if i % 2 else "ohio", "1900", ""
+        )
+        for i in range(40)
+    }
+    first = [p.item for p in select_items(plans, seed=0)]
+    assert first == [
+        p.item for p in select_items(plans, seed=0)
+    ]  # a restart replays it
+    assert first != [p.item for p in select_items(plans, seed=1)]
+    assert sorted(first) == sorted(plans)
+    ordered = [(p.state, p.item) for p in select_items(plans, seed=None)]
+    assert ordered == sorted(ordered)
+    assert [p.state for p in select_items(plans, states="ohio", seed=0)] == [
+        "ohio"
+    ] * 20
+    assert [p.item for p in select_items(plans, limit=5, seed=0)] == first[:5]
