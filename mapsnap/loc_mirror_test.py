@@ -218,6 +218,7 @@ def test_pipeline_decodes_logs_broken_and_resumes(tmp_path: Path):
         "uploaded": 0,
         "bytes": pytest.approx(totals["bytes"]),
         "errors": 0,
+        "retries": 0,
     }
     staged = settings.staging_dir / item_relative(items[0])
     assert Image.open(staged / "p0.jpg").size == (50, 40)
@@ -364,28 +365,57 @@ def test_prune_stops_at_the_root_and_survives_races(tmp_path: Path):
 
 
 @needs_jp2
-def test_upload_failure_is_logged_and_the_item_waits_for_resume(
+def test_failed_uploads_are_retried_in_the_run(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ):
+    # aws fails twice per item (an expired session), then works: the running
+    # process retries with backoff, keeps the staging copy meanwhile, and
+    # never needs a restart. Every failure is still logged.
     items, settings, _ = make_volume(tmp_path)
     settings.bucket, settings.upload = "s3://bucket", True
+    monkeypatch.setattr(loc_mirror, "UPLOAD_RETRY_DELAY", 0.05)
+    calls: dict[str, int] = {}
 
-    def failing_run(cmd, check):
+    def flaky_run(cmd, check):
+        calls[cmd[4]] = calls.get(cmd[4], 0) + 1
+        if calls[cmd[4]] <= 2:
+            raise RuntimeError("Your session has expired")
+
+    monkeypatch.setattr(loc_mirror.subprocess, "run", flaky_run)
+    totals = run_pipeline(items, settings, streams=2, decode_workers=1, progress=False)
+    assert totals["uploaded"] == 2 and totals["errors"] == 4 and totals["retries"] == 4
+    assert all(n == 3 for n in calls.values())
+    state = settings.out_dir / item_relative(items[0])
+    assert (state / DONE).exists() and (state / UPLOADED).exists()
+    assert not (settings.staging_dir / item_relative(items[0])).exists()
+    assert (settings.out_dir / "errors.log").read_text().count("\tupload\t") == 4
+
+
+@needs_jp2
+def test_upload_failure_survives_a_restart(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    # If the run ends while uploads are still failing, the item is done but
+    # not uploaded, its staging copy is kept, and the next run goes straight
+    # to the upload stage without re-decoding.
+    items, settings, _ = make_volume(tmp_path)
+    settings.bucket, settings.upload = "s3://bucket", True
+    monkeypatch.setattr(loc_mirror, "UPLOAD_RETRY_DELAY", 0.05)
+    monkeypatch.setattr(loc_mirror, "UPLOAD_RETRY_MAX", 0.05)
+    attempts = {"n": 0}
+
+    def failing_then_stop(cmd, check):
+        attempts["n"] += 1
+        if attempts["n"] > 6:
+            raise KeyboardInterrupt  # the operator gives up on this run
         raise RuntimeError("aws exploded")
 
-    monkeypatch.setattr(loc_mirror.subprocess, "run", failing_run)
-    totals = run_pipeline(items, settings, streams=2, decode_workers=1, progress=False)
-    assert totals["items"] == 2 and totals["uploaded"] == 0 and totals["errors"] == 2
+    monkeypatch.setattr(loc_mirror.subprocess, "run", failing_then_stop)
+    with pytest.raises(KeyboardInterrupt):
+        run_pipeline(items, settings, streams=2, decode_workers=1, progress=False)
     state = settings.out_dir / item_relative(items[0])
     assert (state / DONE).exists() and not (state / UPLOADED).exists()
-    assert (
-        settings.staging_dir / item_relative(items[0]) / "p0.jpg"
-    ).exists()  # kept for the retry
-    assert (
-        "upload\tsanborn00081_001\tRuntimeError"
-        in (settings.out_dir / "errors.log").read_text()
-    )
-    # Resume with a working aws: only the upload runs, from the retained staging copy.
+    assert (settings.staging_dir / item_relative(items[0]) / "p0.jpg").exists()
     synced: list[str] = []
     monkeypatch.setattr(
         loc_mirror.subprocess, "run", lambda cmd, check: synced.append(cmd[4])

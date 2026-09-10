@@ -81,6 +81,12 @@ JPEG_QUALITY = 95  # what mapsnap scale writes; the pipeline is tuned on it
 QUARTER_REDUCE = 2  # JPEG 2000 resolution levels to drop: 1/4 linear = 25%
 RETRIES = 4
 RETRY_DELAY = 5.0  # seconds, times the attempt number
+# A failed upload is retried by the running process, first after this many
+# seconds and then with doubling delays up to UPLOAD_RETRY_MAX: an expired
+# `aws login` session (12 h) fails every sync until it is renewed, and the
+# renewal should not need a restart.
+UPLOAD_RETRY_DELAY = 60.0
+UPLOAD_RETRY_MAX = 600.0
 DONE, UPLOADED = ".done", ".uploaded"
 
 
@@ -590,8 +596,9 @@ def run_pipeline(
     never wait for the uplink. New items are held back only while more than
     ``max_staging_bytes`` of decoded output is waiting to upload, so a slow
     uplink costs staging disk rather than download throughput. A stage failure
-    is logged to errors.log and the item is left for the next resume; it never
-    ends the run. One tqdm bar counts decoded sheets, with downloaded
+    is logged to errors.log and never ends the run: a failed upload (an expired
+    AWS session, say) is retried by this process with backoff, its staging copy
+    kept; a failed decode is left for the next resume. One tqdm bar counts decoded sheets, with downloaded
     gigabytes, uploaded items, the staging backlog, broken sheets, and stage
     errors in the postfix.
     """
@@ -603,6 +610,7 @@ def run_pipeline(
         "uploaded": 0,
         "bytes": 0,
         "errors": 0,
+        "retries": 0,
     }
     bar = tqdm(
         total=sum(len(item.sheets) for item in todo),
@@ -646,9 +654,11 @@ def run_stages(
     downloads: dict[Future, tuple[ItemPlan, int]] = {}
     item_fetch: dict[str, list[bool | None]] = {}
     decodes: dict[Future, ItemPlan] = {}
-    uploads: dict[Future, ItemPlan] = {}
+    uploads: dict[Future, tuple[ItemPlan, int]] = {}
     item_staged: dict[str, int] = {}
     staged_bytes = 0
+    # Failed uploads wait here as (not-before time, attempt, item) until retried.
+    retry_queue: deque[tuple[float, int, ItemPlan]] = deque()
     settings.out_dir.mkdir(parents=True, exist_ok=True)
     with (
         open(settings.out_dir / "progress.jsonl", "a") as progress_log,
@@ -661,7 +671,18 @@ def run_stages(
             fetched = [bool(ok) for ok in item_fetch.pop(plan.item)]
             decodes[decode_pool.submit(decode_item, plan, fetched, settings)] = plan
 
-        while todo or downloads or decodes or uploads:
+        while todo or downloads or decodes or uploads or retry_queue:
+            now = time.time()
+            for _ in range(len(retry_queue)):
+                not_before, attempt, plan = retry_queue.popleft()
+                if now >= not_before:
+                    totals["retries"] += 1
+                    uploads[upload_pool.submit(upload_item, plan, settings)] = (
+                        plan,
+                        attempt,
+                    )
+                else:
+                    retry_queue.append((not_before, attempt, plan))
             while (
                 todo
                 and len(item_fetch) + len(decodes) < prefetch_items
@@ -676,7 +697,7 @@ def run_stages(
                     staged = staged_size(settings.staging_dir / item_relative(plan))
                     item_staged[plan.item] = staged
                     staged_bytes += staged
-                    uploads[upload_pool.submit(upload_item, plan, settings)] = plan
+                    uploads[upload_pool.submit(upload_item, plan, settings)] = (plan, 0)
                     continue
                 item_fetch[plan.item] = [None] * len(plan.sheets)
                 if not plan.sheets:
@@ -684,11 +705,11 @@ def run_stages(
                 for index, sheet in enumerate(plan.sheets):
                     future = fetch_pool.submit(fetch_sheet, plan, sheet, settings)
                     downloads[future] = (plan, index)
-            done, _ = wait(
-                list(downloads) + list(decodes) + list(uploads),
-                timeout=1.0,
-                return_when=FIRST_COMPLETED,
-            )
+            pending = list(downloads) + list(decodes) + list(uploads)
+            if not pending:  # only the retry queue is left: wait for its clock
+                time.sleep(min(1.0, max(0.0, retry_queue[0][0] - time.time())))
+                continue
+            done, _ = wait(pending, timeout=1.0, return_when=FIRST_COMPLETED)
             for future in done:
                 if future in downloads:
                     plan, index = downloads.pop(future)
@@ -728,23 +749,29 @@ def run_stages(
                     if settings.upload and settings.bucket:
                         item_staged[plan.item] = staged
                         staged_bytes += staged
-                        uploads[upload_pool.submit(upload_item, plan, settings)] = plan
+                        uploads[upload_pool.submit(upload_item, plan, settings)] = (
+                            plan,
+                            0,
+                        )
                 else:
-                    plan = uploads.pop(future)
-                    staged_bytes -= item_staged.pop(plan.item, 0)
+                    plan, attempt = uploads.pop(future)
                     try:
                         future.result()
-                    except Exception as error:  # noqa: BLE001 -- staging kept; re-synced on resume
+                    except Exception as error:  # noqa: BLE001 -- staging kept; retried with backoff
                         log_error(settings.out_dir, "upload", plan.item, error)
                         totals["errors"] += 1
+                        delay = min(UPLOAD_RETRY_DELAY * 2**attempt, UPLOAD_RETRY_MAX)
+                        retry_queue.append((time.time() + delay, attempt + 1, plan))
                         continue
                     totals["uploaded"] += 1
+                    staged_bytes -= item_staged.pop(plan.item, 0)
             bar.set_postfix(
                 dl=f"{totals['bytes'] / 1e9:.1f}GB",
                 up=totals["uploaded"],
                 staged=f"{staged_bytes / 1e9:.1f}GB",
                 broken=totals["broken"],
                 errors=totals["errors"],
+                retry=len(retry_queue),
                 refresh=False,
             )
 
