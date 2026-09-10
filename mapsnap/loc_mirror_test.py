@@ -1,6 +1,7 @@
 """Tests for the LoC JP2 mirror builder: rules, layout, decode, the pipeline, resume, upload."""
 
 import json
+import sys
 from pathlib import Path
 
 import pytest
@@ -347,6 +348,24 @@ def test_fetch_reuses_one_keep_alive_connection_per_thread(
             fetch(f"{base}/a.bin", tmp_path / "a2.bin", expected_bytes=999)
     finally:
         server.shutdown()
+
+
+def test_mirror_url_must_be_given(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    """--mirror has no default: the mirror is somebody's machine, not a constant."""
+    mapping = tmp_path / "map.tsv"
+    mapping.write_text(HEADER)
+    argv = [
+        "mapsnap-loc-mirror",
+        str(mapping),
+        "--jp2-dir",
+        str(tmp_path / "jp2"),
+        "--out-dir",
+        str(tmp_path / "state"),
+    ]
+    monkeypatch.setattr(sys, "argv", argv)
+    with pytest.raises(SystemExit) as excinfo:
+        loc_mirror.main()
+    assert excinfo.value.code == 2  # argparse usage error
 
 
 def test_prune_stops_at_the_root_and_survives_races(tmp_path: Path):

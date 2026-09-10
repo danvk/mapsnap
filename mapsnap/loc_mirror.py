@@ -37,6 +37,7 @@ note) are skipped: nothing in the pipeline reads them. A sheet that fails to
 download or decode after retries is logged as broken and left out of its item.
 
     mapsnap loc-mirror ~/Downloads/loc-sanborn-maps.mapping.tsv \\
+        --mirror http://<host>:<port> \\
         --jp2-dir /Volumes/fivetera/loc-sanborn-maps/jp2 \\
         --out-dir /Volumes/fivetera/mapsnap-sanborn \\
         --staging-dir /Volumes/fivetera/mapsnap-sanborn/staging \\
@@ -75,7 +76,6 @@ from tqdm import tqdm
 from mapsnap.keymap.fit_keymap import page_number
 from mapsnap.keymap.identify import is_letter_page
 
-DEFAULT_MIRROR = "http://50.35.157.188:27182"
 LOC_IIIF = "https://tile.loc.gov/image-services/iiif"
 JPEG_QUALITY = 95  # what mapsnap scale writes; the pipeline is tuned on it
 QUARTER_REDUCE = 2  # JPEG 2000 resolution levels to drop: 1/4 linear = 25%
@@ -122,7 +122,7 @@ class Settings:
     jp2_dir: Path
     out_dir: Path
     staging_dir: Path
-    mirror: str = DEFAULT_MIRROR
+    mirror: str  # HTTP root serving the torrent's storage-services tree
     bucket: str | None = None
     upload: bool = False
     keep_staging: bool = False
@@ -804,7 +804,12 @@ def main() -> None:
         help="Where decoded images wait for upload (default <out-dir>/staging).",
     )
     parser.add_argument(
-        "--mirror", default=DEFAULT_MIRROR, help="HTTP root serving the torrent's tree."
+        "--mirror",
+        required=True,
+        metavar="URL",
+        help="HTTP root serving the torrent's storage-services tree, e.g. "
+        "http://host:port (no default: the mirror is somebody's machine, not "
+        "a property of this program).",
     )
     parser.add_argument(
         "--bucket",
