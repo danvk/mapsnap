@@ -83,6 +83,10 @@ SUBCOMMANDS: dict[str, tuple[str, str]] = {
     "download-osm": ("mapsnap.download_osm", "Download street data from OSM"),
     "osm-to-geojson": ("mapsnap.osm_to_centerlines", "Convert OSM data to GeoJSON."),
     "scale": ("mapsnap.scale_images", "Shrink images by a uniform amount."),
+    "region": (
+        "mapsnap.region_predict",
+        "Predict each page's content region as a P(region) PNG.",
+    ),
     "loc-mirror": (
         "mapsnap.loc_mirror",
         "Build the Sanborn mirror (25% JPEGs + raw key-map candidates) from LoC JP2s.",

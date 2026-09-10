@@ -262,15 +262,27 @@ def cmd_train(args: argparse.Namespace) -> None:
     print(f"best val IoU {best:.3f} -> {args.output}")
 
 
-def cmd_predict(args: argparse.Namespace) -> None:
+def load_region_model(
+    path: Path = REGION_MODEL_PATH, device: torch.device | None = None
+) -> tuple[UNet, torch.device]:
+    """Load the trained content-region UNet, on the best available device by default.
+
+    The encoder width is read from the checkpoint, so weights trained with a
+    different ``--base`` load without a flag.
+    """
     from mapsnap.keymap.number_model import select_device
 
-    device = select_device()
-    state = torch.load(args.model, map_location=device)
+    device = device or select_device()
+    state = torch.load(path, map_location=device)
     base = state["enc1.block.0.weight"].shape[0]
     model = UNet(base=base, in_channels=3, norm="group").to(device)
     model.load_state_dict(state)
     model.eval()
+    return model, device
+
+
+def cmd_predict(args: argparse.Namespace) -> None:
+    model, device = load_region_model(args.model)
     args.out_dir.mkdir(parents=True, exist_ok=True)
     for path in args.images:
         image = cv2.imread(str(path))

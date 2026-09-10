@@ -14,6 +14,32 @@
 export interface LocalPageImage {
   width: number;
   height: number;
+  /**
+   * The image to serve, relative to the volume directory; the page's own
+   * `<imageKey>.jpg` when absent. An alternate raster in the sheet's pixel
+   * frame -- its P(region) or P(road) map -- is served in the sheet's place by
+   * naming it here, with its own dimensions.
+   */
+  file?: string;
+}
+
+/** Which raster to draw for each page: its sheet, its P(region) map, or its P(road) map. */
+export type PageImage = 'page' | 'region' | 'roadprob';
+
+/**
+ * The file, relative to the volume directory, holding a page's alternate image.
+ *
+ * P(region) maps are written by `mapsnap region` (#226, #352); P(road) maps
+ * by the edge-join and snap experiments. Both are rendered at the 25% page's
+ * own resolution, but callers read the PNG's real size rather than assume it.
+ */
+export function pageImageFile(
+  image: Exclude<PageImage, 'page'>,
+  imageKey: string,
+): string {
+  return image === 'region'
+    ? `artifacts/region/${imageKey}.png`
+    : `artifacts/edge_join/roadprob/${imageKey}.png`;
 }
 
 export interface GeorefSource {
@@ -88,7 +114,14 @@ export interface VolumeListResponse {
 }
 
 /** Response shape of GET /iiif-api/annotation?path=... */
-export type RewrittenAnnotationResponse = RewriteResult;
+export interface RewrittenAnnotationResponse extends RewriteResult {
+  /**
+   * Page keys drawn from their sheet because the requested alternate image
+   * (`?image=region|roadprob`) is not on disk. Absent when the sheet itself
+   * was requested.
+   */
+  imageFallbacks?: string[];
+}
 
 /**
  * Extract the page key from an OIM annotation label, or null if it has none.
@@ -288,7 +321,7 @@ export function rewriteAnnotationPage(
     const scaleX = local.width / source.width;
     const scaleY = local.height / source.height;
     target.source = {
-      id: `${serviceBaseUrl}/${imageKey}.jpg`,
+      id: `${serviceBaseUrl}/${local.file ?? `${imageKey}.jpg`}`,
       type: 'ImageService3',
       width: local.width,
       height: local.height,

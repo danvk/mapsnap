@@ -298,6 +298,21 @@ describe('rewriteAnnotationPage', () => {
     ]);
   });
 
+  it("serves a named alternate image in the sheet's place", () => {
+    const [imageKey, sheet] = [...localPages.entries()][0];
+    const alternate = new Map([
+      [imageKey, { ...sheet, file: `artifacts/region/${imageKey}.png` }],
+    ]);
+    const { annotation } = rewriteAnnotationPage(
+      fixturePage(),
+      alternate,
+      baseUrl,
+    );
+    expect(annotation.items[0]!.target?.source?.id).toBe(
+      `${baseUrl}/artifacts/region/${imageKey}.png`,
+    );
+  });
+
   it('does not mutate its input', () => {
     const input = fixturePage();
     rewriteAnnotationPage(input, localPages, baseUrl);

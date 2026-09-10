@@ -14,6 +14,7 @@
 import type { Endpoint, GetEndpoint } from 'crosswalk/dist/api-spec';
 import type {
   GeorefAnnotationPage,
+  PageImage,
   RewrittenAnnotationResponse,
   VolumeListResponse,
 } from './iiifAnnotations.ts';
@@ -56,6 +57,8 @@ export interface OsmRelationResponse {
 /** Query naming a georeference AnnotationPage, repo-root-relative. */
 export interface AnnotationQuery {
   path: string;
+  /** Draw each page's P(region) or P(road) map in place of its sheet; the sheet when absent. */
+  image?: PageImage;
 }
 
 /** Response of GET /api/images. */

@@ -192,7 +192,7 @@
   flex-direction: column;
   align-items: flex-start;
   gap: 2px;
-  width: 126px; /* the Key map / P(road) toggle's natural width; both sliders match it */
+  width: 168px; /* the Page / Region / P(road) toggle's natural width; both sliders match it */
   flex-shrink: 0;
 }
 
