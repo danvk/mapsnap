@@ -87,6 +87,10 @@ SUBCOMMANDS: dict[str, tuple[str, str]] = {
         "mapsnap.region_predict",
         "Predict each page's content region as a P(region) PNG.",
     ),
+    "loc-mirror": (
+        "mapsnap.loc_mirror",
+        "Build the Sanborn mirror (25% JPEGs + raw key-map candidates) from LoC JP2s.",
+    ),
     "download-oim": (
         "mapsnap.download_oim_iiif",
         "Fetch all images for a Sanborn volume from OldInsuranceMaps.net",

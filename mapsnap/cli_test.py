@@ -24,14 +24,42 @@ def test_every_command_module_imports(name: str) -> None:
     the cycle is imported first, which is precisely what running the command
     does.
     """
-    for module_name in [key for key in sys.modules if key.startswith("mapsnap")]:
-        del sys.modules[module_name]
+    evicted = {
+        key: sys.modules[key] for key in list(sys.modules) if key.startswith("mapsnap")
+    }
+    for key in evicted:
+        del sys.modules[key]
+    try:
+        module_name, _ = SUBCOMMANDS[name]
+        module = importlib.import_module(module_name)
+        assert callable(getattr(module, "main", None)), (
+            f"{module_name} has no main() for `mapsnap {name}`"
+        )
+    finally:
+        # Put the original module objects back. Without this the rest of the
+        # session sees FRESH mapsnap modules while already-imported test
+        # modules hold the old ones, and the two are different objects: a
+        # ProcessPoolExecutor then cannot pickle a worker function by name
+        # ("not the same object as mapsnap.loc_mirror.decode_item"), which
+        # broke loc_mirror's pipeline tests in the full suite but not alone.
+        for key in [k for k in list(sys.modules) if k.startswith("mapsnap")]:
+            del sys.modules[key]
+        sys.modules.update(evicted)
 
-    module_name, _ = SUBCOMMANDS[name]
-    module = importlib.import_module(module_name)
-    assert callable(getattr(module, "main", None)), (
-        f"{module_name} has no main() for `mapsnap {name}`"
-    )
+
+def test_command_import_check_leaves_sys_modules_alone() -> None:
+    """The import check must not swap the session's mapsnap modules for fresh ones.
+
+    It evicts them all to import each command into a clean interpreter; if it
+    does not put the originals back, every later test runs against a module
+    object its own imports do not share.
+    """
+    before = {
+        key: sys.modules[key] for key in list(sys.modules) if key.startswith("mapsnap")
+    }
+    test_every_command_module_imports(min(SUBCOMMANDS))
+    after = {key: sys.modules.get(key) for key in before}
+    assert after == before
 
 
 def test_fatal_signal_produces_a_python_traceback():
