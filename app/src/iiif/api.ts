@@ -4,6 +4,7 @@ import type { API, KeymapInfo, RunArtifactsResponse } from '../../server/api';
 import type { CompareResponse } from '../../server/compareTxt';
 import type { OsmRelationResponse } from '../../server/api';
 import type {
+  PageImage,
   RewrittenAnnotationResponse,
   VolumeListResponse,
 } from '../../server/iiifAnnotations';
@@ -20,11 +21,17 @@ export function fetchVolumes(): Promise<VolumeListResponse> {
  * Fetch an annotation file, rewritten to target the local IIIF image server.
  *
  * The path is repo-root-relative, e.g. "data/brooklyn_ny_1906_vol_6/generated.iiif.json".
+ * With an `image` other than the sheet, each page's image service points at
+ * its P(region) or P(road) map instead (falling back to the sheet per page).
  */
 export function fetchRewrittenAnnotation(
   path: string,
+  image: PageImage = 'page',
 ): Promise<RewrittenAnnotationResponse> {
-  return api.get('/iiif-api/annotation')(null, { path });
+  return api.get('/iiif-api/annotation')(
+    null,
+    image === 'page' ? { path } : { path, image },
+  );
 }
 
 /** A volume's page-image stems, and every georef sidecar each page has. */

@@ -504,6 +504,8 @@ npm run dev
 
 Then visit localhost:5173/mapsnap/.
 
+The same app also hosts the **volume viewer** (`localhost:5173/mapsnap/?view=iiif`), which draws a whole run's pages warped onto OpenStreetMap; it needs the local API server (`npm run server`) alongside `npm run dev`. Its Page / Region / P(road) toggle draws each page as its sheet, its content-region map, or its road-probability map. Region maps come from `mapsnap region data/<vol>` (written to `artifacts/region/`), P(road) maps from the snap experiments' `artifacts/edge_join/roadprob/`.
+
 To deploy the debugger:
 
 ```

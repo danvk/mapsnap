@@ -14,6 +14,9 @@ import type { Express } from 'express';
 import { HTTPError, type TypedRouter } from 'crosswalk';
 import type { API } from './api.ts';
 import {
+  pageImageFile,
+  type LocalPageImage,
+  type PageImage,
   imageStemsByLowercase,
   rewriteAnnotationPage,
   serviceUrlToPageKey,
@@ -22,6 +25,7 @@ import {
   type VolumeInfo,
 } from './iiifAnnotations.ts';
 import { jpegDimensions } from './jpegDimensions.ts';
+import { pngDimensions } from './pngDimensions.ts';
 import {
   parseCompareFooter,
   parseCompareTxt,
@@ -127,6 +131,33 @@ async function cachedJpegDimensions(
  * info.json responses are passed through {@link withTiles} first; see there
  * for why an advertised tileset is load-bearing for the map viewer.
  */
+const PAGE_IMAGES: readonly PageImage[] = ['page', 'region', 'roadprob'];
+
+// The annotation route's `image` query value, the sheet when absent; anything
+// else is a client error rather than a silent fall-through to the sheet.
+function pageImageOf(value: unknown): PageImage {
+  const image = value ?? 'page';
+  if (!PAGE_IMAGES.includes(image as PageImage)) {
+    throw new HTTPError(400, `invalid image: ${String(value)}`);
+  }
+  return image as PageImage;
+}
+
+// A page's alternate image (its P(region) or P(road) map) at the PNG's own
+// size when it is on disk, else null so the caller serves the sheet.
+function alternatePageImage(
+  volumeDir: string,
+  image: Exclude<PageImage, 'page'>,
+  imageKey: string,
+): LocalPageImage | null {
+  const file = pageImageFile(image, imageKey);
+  try {
+    return { ...pngDimensions(join(volumeDir, file)), file };
+  } catch {
+    return null;
+  }
+}
+
 export function registerIiifImages(app: Express, dataDir: string): void {
   app.use('/iiif', (request, response, next) => {
     if (!request.path.endsWith('/info.json')) return next();
@@ -202,6 +233,7 @@ export function registerIiifApi(
   // "data/" is tolerated (dataDir already points at the data directory).
   router.get('/iiif-api/annotation', async (_params, request) => {
     const rawPath = request.query.path;
+    const image = pageImageOf(request.query.image);
     const relativePath = rawPath.replace(/^data\//, '');
     const parts = relativePath.split('/');
     if (
@@ -221,7 +253,8 @@ export function registerIiifApi(
     }
     const volumeDir = dirname(annotationPath);
     const stems = await imageStemsByLowercase(volumeDir);
-    const localPages = new Map<string, { width: number; height: number }>();
+    const localPages = new Map<string, LocalPageImage>();
+    const fallbacks: string[] = [];
     for (const item of page.items) {
       // Same (url, label) pair rewriteAnnotationPage will use: the label
       // carries the split-panel variant and, for volumes that link no image
@@ -245,17 +278,30 @@ export function registerIiifApi(
       const imageKey = stems.get(parent.toLowerCase()) ?? parent;
       if (localPages.has(imageKey)) continue;
       try {
-        const dims = await cachedJpegDimensions(
+        const sheet = await cachedJpegDimensions(
           join(volumeDir, `${imageKey}.jpg`),
         );
-        localPages.set(imageKey, dims);
+        const alternate =
+          image === 'page'
+            ? null
+            : alternatePageImage(volumeDir, image, imageKey);
+        if (image !== 'page' && !alternate) fallbacks.push(imageKey);
+        localPages.set(imageKey, alternate ?? sheet);
       } catch {
         // No local image for this page; rewriteAnnotationPage reports it.
       }
     }
     const volumePath = parts.slice(0, -1).join('/');
     const serviceBaseUrl = `${request.protocol}://${request.get('host')}/iiif/${volumePath}`;
-    return rewriteAnnotationPage(page, localPages, serviceBaseUrl, stems);
+    const rewritten = rewriteAnnotationPage(
+      page,
+      localPages,
+      serviceBaseUrl,
+      stems,
+    );
+    return image === 'page'
+      ? rewritten
+      : { ...rewritten, imageFallbacks: fallbacks };
   });
 
   // Where a run's own per-page sidecars live, so the viewer can link to the files

@@ -5,6 +5,12 @@ import {
   underlayImageParam,
   type KeymapUnderlayImage,
 } from '../iiif/underlay';
+import {
+  pageImageFromParam,
+  pageImageNoun,
+  pageImageParam,
+  type PageImage,
+} from '../iiif/pageImage';
 import type {
   GeorefAnnotationPage,
   SkippedItem,
@@ -114,6 +120,13 @@ export function VolumeViewer() {
     const value = Number(initialParams.get('keymap'));
     return Number.isFinite(value) ? Math.min(100, Math.max(0, value)) : 0;
   });
+  // What the pages are drawn as (#352): their sheets, or their P(region) or
+  // P(road) maps, served through the same annotation so they warp identically.
+  const [pageImage, setPageImage] = useState<PageImage>(() =>
+    pageImageFromParam(initialParams.get('pages')),
+  );
+  // Pages drawn as their sheet because the chosen map is not on disk.
+  const [imageFallbacks, setImageFallbacks] = useState<string[]>([]);
   const [error, setError] = useState<string | null>(null);
   // Selection is tracked by page stem (stable across annotation files, unlike the item index).
   const [selectedStem, setSelectedStem] = useState<string | null>(() =>
@@ -190,11 +203,12 @@ export function VolumeViewer() {
     let cancelled = false;
     setError(null);
     setLoadResult(null);
-    fetchRewrittenAnnotation(selectedPath)
+    fetchRewrittenAnnotation(selectedPath, pageImage)
       .then((resp) => {
         if (cancelled) return;
         setAnnotation(resp.annotation);
         setSkipped(resp.skipped);
+        setImageFallbacks(resp.imageFallbacks ?? []);
       })
       .catch((err) => {
         if (!cancelled) setError(String(err));
@@ -245,7 +259,7 @@ export function VolumeViewer() {
     return () => {
       cancelled = true;
     };
-  }, [selectedPath]);
+  }, [selectedPath, pageImage]);
 
   const selection = parseAnnotationPath(selectedPath);
   const selectedVolume = volumes?.find((v) => v.name === selection?.volume);
@@ -482,6 +496,7 @@ export function VolumeViewer() {
       only: isolateSelected ? '1' : null,
       underlay: underlayImageParam(underlayImage),
       keymap: keymapOpacity > 0 ? String(keymapOpacity) : null,
+      pages: pageImageParam(pageImage),
     });
   }, [
     selectedStem,
@@ -491,6 +506,7 @@ export function VolumeViewer() {
     isolateSelected,
     underlayImage,
     keymapOpacity,
+    pageImage,
   ]);
 
   function selectVolume(name: string): void {
@@ -506,6 +522,12 @@ export function VolumeViewer() {
     const parts: string[] = [];
     if (loadResult.failed > 0) parts.push(`${loadResult.failed} pages failed`);
     if (skipped.length > 0) parts.push(`${skipped.length} skipped`);
+    if (pageImage !== 'page' && imageFallbacks.length > 0) {
+      const hint = pageImage === 'region' ? ' (mapsnap region <volume>)' : '';
+      parts.push(
+        `${imageFallbacks.length} pages have no ${pageImageNoun(pageImage)}${hint}, drawn as sheets`,
+      );
+    }
     status = parts.join(', ');
   } else if (selectedPath) {
     status = 'loading…';
@@ -611,6 +633,38 @@ export function VolumeViewer() {
             onChange={(e) => setOpacity(Number(e.target.value))}
           />
           <label htmlFor="iiif-opacity-slider">Opacity (p)</label>
+          {/* Disabled while the pages are hidden, like the key-map toggle. */}
+          <div
+            className="segmented"
+            role="group"
+            aria-label="Page image"
+            title="Draw each page as its sheet, its content-region map (mapsnap region, #352), or its P(road) map."
+          >
+            <button
+              type="button"
+              aria-pressed={pageImage === 'page'}
+              disabled={opacity === 0}
+              onClick={() => setPageImage('page')}
+            >
+              Page
+            </button>
+            <button
+              type="button"
+              aria-pressed={pageImage === 'region'}
+              disabled={opacity === 0}
+              onClick={() => setPageImage('region')}
+            >
+              Region
+            </button>
+            <button
+              type="button"
+              aria-pressed={pageImage === 'roadprob'}
+              disabled={opacity === 0}
+              onClick={() => setPageImage('roadprob')}
+            >
+              P(road)
+            </button>
+          </div>
         </div>
         {keymaps.some((keymap) => keymap.hasGeoref) && (
           <div

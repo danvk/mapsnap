@@ -83,6 +83,10 @@ SUBCOMMANDS: dict[str, tuple[str, str]] = {
     "download-osm": ("mapsnap.download_osm", "Download street data from OSM"),
     "osm-to-geojson": ("mapsnap.osm_to_centerlines", "Convert OSM data to GeoJSON."),
     "scale": ("mapsnap.scale_images", "Shrink images by a uniform amount."),
+    "region": (
+        "mapsnap.region_predict",
+        "Predict each page's content region as a P(region) PNG.",
+    ),
     "download-oim": (
         "mapsnap.download_oim_iiif",
         "Fetch all images for a Sanborn volume from OldInsuranceMaps.net",
