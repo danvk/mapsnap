@@ -116,6 +116,30 @@ STAMP_JUNK_COST = 0.15
 W_OVERLAP = 3.0
 OVERLAP_SOFT = 0.15
 OVERLAP_HARD_DELTA = 0.35
+# Content-region overlap factor (#352), opt-in via --region-overlap. Truth
+# content regions tile the ground (no pair overlaps by more than 5%), so two
+# chosen poses whose PREDICTED regions overlap cannot both be right. Unlike
+# the full-footprint overlap above, this applies to stamp-adjacent pairs too:
+# seam overlap between neighbours is margin and duplicated strip, which the
+# region model removes. The soft threshold self-calibrates from the p90 of
+# published adjacent pairs, floored here, because the model's boundaries are
+# softer on some volumes (kansas_city, washington_dc: true neighbours at
+# 25-35%) than on others (detroit: good pages at a median of 3%).
+#
+# Weight and floor come from a 7-setting sweep over 18 truth volumes on the
+# 2026-09-03 sidecars (report-only, real compare). At 10% / 3.0 the factor
+# removed 24 of 59 disasters but evicted 22 good pages (mean -0.06): a
+# correct page whose region overlaps a wrong neighbour's by 20-25% is often
+# the cheaper member of the pair to move, and it moves to an alias in empty
+# space (brooklyn p5, nashville p12). At 15% / 1.5 the same 24 disasters go
+# for 6 good pages (mean +0.72, 14 volumes up or flat, kansas_city -1.8),
+# and the mid-30s overlaps that separate a disaster from a soft boundary are
+# left to the unaries: detroit p85 (32%, 368 -> 12 ft) still flips because
+# its alternative is well evidenced; schenectady p9__2 (32% with a correct
+# neighbour, one pose) is the cost.
+W_REGION = 1.5
+REGION_SOFT = 0.15
+REGION_HARD_DELTA = 0.30
 # NO sibling factor. Split panels are separate maps that happen to share a
 # sheet: no geographic relationship (champaign p4's panels sit 891 m apart at
 # +0.2 and +48.9 degrees) and they may legitimately depict OVERLAPPING ground,
@@ -163,6 +187,9 @@ class Hypothesis:
     scores: dict = field(default_factory=dict)
     unary_terms: dict = field(default_factory=dict)
     unary: float = 0.0
+    # The page's predicted content region at this pose, in metres about the
+    # volume origin; None when the page has no usable region or is unplaced.
+    region: object | None = None
 
 
 @dataclass
@@ -174,6 +201,7 @@ class PageNode:
     base: str | None
     hypotheses: list[Hypothesis]
     published_index: int | None  # index of the published pose, None if unplaced
+    region_px: object | None = None  # predicted content region in page pixels
 
 
 def sidecar_pose(doc: dict) -> np.ndarray | None:
@@ -219,7 +247,14 @@ def collect_hypotheses(
     exists to weigh.
     """
     channel = published_channel(sidecar_dir, stem)
-    variant_paths = sorted(sidecar_dir.glob(f"{stem}.georef*.json"))
+    # The arbiter's own previous answer (pN.georef-final.json, from a prior
+    # publish) is not a channel: read back in, it would re-enter as a zombie
+    # candidate that no channel still proposes.
+    variant_paths = sorted(
+        path
+        for path in sidecar_dir.glob(f"{stem}.georef*.json")
+        if path.name != f"{stem}.georef-final.json"
+    )
     ordered: list[tuple[str, Path]] = []
     for path in variant_paths:
         name = path.name[len(stem) + 1 : -len(".json")]
@@ -595,6 +630,18 @@ def stamp_energy(
     return W_STAMP * min(STAMP_CLAMP, (distance / bar) ** 2)
 
 
+def region_energy(
+    hyp_a: Hypothesis, hyp_b: Hypothesis, soft: float, weight: float = W_REGION
+) -> float:
+    """Content-region overlap cost of two chosen poses (#352); zero without regions."""
+    if hyp_a.region is None or hyp_b.region is None:
+        return 0.0
+    from mapsnap.region_overlap import overlap_over_min
+
+    overlap = overlap_over_min(hyp_a.region, hyp_b.region)  # type: ignore[arg-type]
+    return weight * overlap_penalty(overlap, soft, soft + REGION_HARD_DELTA)
+
+
 def pairwise_energy(
     kind: str,
     adjacency: dict,
@@ -605,10 +652,14 @@ def pairwise_energy(
     median_log_scale: float,
     origin,
     overlap_soft: float = OVERLAP_SOFT,
+    region_soft: float = REGION_SOFT,
+    region_weight: float = W_REGION,
 ) -> float:
     """Energy of a pair of chosen hypotheses; zero when either is UNPLACED."""
     if hyp_a.affine is None or hyp_b.affine is None:
         return 0.0
+    if kind == "region":
+        return region_energy(hyp_a, hyp_b, region_soft, region_weight)
     if kind == "stamp":
         # Stamp edges carry the relative-pose evidence themselves; overlap
         # between mutually-claiming neighbors is legitimate sheet layout (DC's
@@ -671,6 +722,8 @@ def solve(
     median_log_scale: float,
     origin,
     overlap_soft: float = OVERLAP_SOFT,
+    region_soft: float = REGION_SOFT,
+    region_weight: float = W_REGION,
 ) -> dict[str, int]:
     """Choose one hypothesis per page minimizing joint energy (deterministic).
 
@@ -685,18 +738,29 @@ def solve(
         neighbors[a].append((kind, b))
         neighbors[b].append((kind, a))
 
+    # Pair energies are pure functions of the two hypotheses, and ICM asks for
+    # the same ones every sweep; region terms cost a polygon intersection each.
+    pair_cache: dict[tuple[str, str, int, str, int], float] = {}
+
     def pair_e(kind: str, a: str, ia: int, b: str, ib: int) -> float:
-        return pairwise_energy(
-            kind,
-            adjacency,
-            nodes[a],
-            nodes[a].hypotheses[ia],
-            nodes[b],
-            nodes[b].hypotheses[ib],
-            median_log_scale,
-            origin,
-            overlap_soft=overlap_soft,
-        )
+        key = (kind, a, ia, b, ib)
+        energy = pair_cache.get(key)
+        if energy is None:
+            energy = pairwise_energy(
+                kind,
+                adjacency,
+                nodes[a],
+                nodes[a].hypotheses[ia],
+                nodes[b],
+                nodes[b].hypotheses[ib],
+                median_log_scale,
+                origin,
+                overlap_soft=overlap_soft,
+                region_soft=region_soft,
+                region_weight=region_weight,
+            )
+            pair_cache[key] = energy
+        return energy
 
     # Union-find components.
     parent = {stem: stem for stem in nodes}
@@ -927,11 +991,152 @@ def build_edges(
     return edges
 
 
+def attach_regions(volume: Path, nodes: dict[str, PageNode], origin) -> int:
+    """Load each page's predicted content region and pose it per hypothesis.
+
+    Returns the number of pages that got a region; pages without a usable
+    map (missing, wrong size, or under REGION_MIN_FRAC of the page) take no
+    part in the region factor.
+    """
+    from mapsnap.region_overlap import posed_region_metres, region_polygon_px
+
+    attached = 0
+    for node in nodes.values():
+        node.region_px = region_polygon_px(
+            volume, node.unit.stem, (node.unit.width, node.unit.height)
+        )
+        if node.region_px is None:
+            continue
+        attached += 1
+        for hypothesis in node.hypotheses:
+            if hypothesis.affine is not None:
+                hypothesis.region = posed_region_metres(
+                    node.region_px,  # type: ignore[arg-type]
+                    hypothesis.affine,
+                    origin,
+                )
+    return attached
+
+
+def skeleton_twins(a: str, b: str) -> bool:
+    """True for a skeleton sheet and its full-colour twin (p102s / p102).
+
+    OIM's Skeleton Map layer maps the same ground as the page it shadows, so
+    their regions coincide by design; compare grades at most one of them.
+    """
+    base_a, base_b = a.split("__")[0], b.split("__")[0]
+    return base_a == base_b + "s" or base_b == base_a + "s"
+
+
+def build_region_edges(nodes: dict[str, PageNode]) -> list[tuple[str, str, str]]:
+    """("region", a, b) for every pair whose posed regions could meet.
+
+    Any hypothesis pair counts: a page's alias 300 ft away lands on a
+    neighbour it does not touch at its published pose. Sibling panels are
+    excluded (an inset legitimately details ground its large panel also
+    covers), as are skeleton twins.
+    """
+    bounds: dict[str, tuple[float, float, float, float]] = {}
+    for stem, node in nodes.items():
+        boxes = [h.region.bounds for h in node.hypotheses if h.region is not None]  # type: ignore[attr-defined]
+        if boxes:
+            bounds[stem] = (
+                min(b[0] for b in boxes),
+                min(b[1] for b in boxes),
+                max(b[2] for b in boxes),
+                max(b[3] for b in boxes),
+            )
+    stems = sorted(bounds)
+    edges: list[tuple[str, str, str]] = []
+    for i, a in enumerate(stems):
+        for b in stems[i + 1 :]:
+            if panel_base(a) is not None and panel_base(a) == panel_base(b):
+                continue
+            if skeleton_twins(a, b):
+                continue
+            ba, bb = bounds[a], bounds[b]
+            if ba[2] < bb[0] or bb[2] < ba[0] or ba[3] < bb[1] or bb[3] < ba[1]:
+                continue
+            edges.append(("region", a, b))
+    return edges
+
+
+def calibrate_region_soft(nodes: dict[str, PageNode], adjacency: dict) -> float:
+    """p90 region overlap across published adjacent pairs, floored at REGION_SOFT."""
+    from mapsnap.region_overlap import overlap_over_min
+
+    overlaps = []
+    for a, b in adjacency.get("adjacency", []) if adjacency else []:
+        na, nb = nodes.get(a), nodes.get(b)
+        if not na or not nb or na.published_index is None or nb.published_index is None:
+            continue
+        ha = na.hypotheses[na.published_index]
+        hb = nb.hypotheses[nb.published_index]
+        if ha.region is None or hb.region is None or skeleton_twins(a, b):
+            continue
+        overlaps.append(overlap_over_min(ha.region, hb.region))  # type: ignore[arg-type]
+    if not overlaps:
+        return REGION_SOFT
+    return max(REGION_SOFT, float(np.percentile(overlaps, 90)))
+
+
+def max_region_overlap(
+    nodes: dict[str, PageNode],
+    assignment: dict[str, int],
+    neighbours: list[str],
+    hypothesis: Hypothesis,
+) -> float | None:
+    """Max region overlap of one hypothesis with the chosen poses of its neighbours."""
+    from mapsnap.region_overlap import overlap_over_min
+
+    if hypothesis.region is None:
+        return None
+    best = 0.0
+    for other in neighbours:
+        theirs = nodes[other].hypotheses[assignment[other]].region
+        if theirs is not None:
+            best = max(best, overlap_over_min(hypothesis.region, theirs))  # type: ignore[arg-type]
+    return best
+
+
+def region_overlap_summary(
+    nodes: dict[str, PageNode],
+    edges: list[tuple[str, str, str]],
+    assignment: dict[str, int],
+) -> dict[str, tuple[float | None, float | None]]:
+    """Per page: max region overlap of its published and chosen poses with the chosen neighbours."""
+    neighbours: dict[str, list[str]] = {stem: [] for stem in nodes}
+    for kind, a, b in edges:
+        if kind == "region":
+            neighbours[a].append(b)
+            neighbours[b].append(a)
+    summary: dict[str, tuple[float | None, float | None]] = {}
+    for stem, node in nodes.items():
+        if node.region_px is None:
+            continue
+        published = (
+            max_region_overlap(
+                nodes,
+                assignment,
+                neighbours[stem],
+                node.hypotheses[node.published_index],
+            )
+            if node.published_index is not None
+            else None
+        )
+        chosen = max_region_overlap(
+            nodes, assignment, neighbours[stem], node.hypotheses[assignment[stem]]
+        )
+        summary[stem] = (published, chosen)
+    return summary
+
+
 def write_outputs(
     volume: Path,
     nodes: dict[str, PageNode],
     assignment: dict[str, int],
     out_dir: Path,
+    region_overlaps: dict[str, tuple[float | None, float | None]] | None = None,
 ) -> tuple[int, list[dict]]:
     """verdicts.jsonl + report.md; returns (flip count, verdict rows)."""
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -942,6 +1147,7 @@ def write_outputs(
         published = node.published_index
         chosen_h = node.hypotheses[chosen]
         published_h = node.hypotheses[published] if published is not None else None
+        region_pub, region_chosen = (region_overlaps or {}).get(stem, (None, None))
         rivals = sorted(
             (h.unary, i) for i, h in enumerate(node.hypotheses) if i != chosen
         )
@@ -962,6 +1168,8 @@ def write_outputs(
                 ),
                 "near_flip": near_flip,
                 "unverified": bool(chosen_h.scores.get("unverified")),
+                "region_overlap_published": region_pub,
+                "region_overlap_chosen": region_chosen,
                 "hypotheses": [
                     {
                         "source": h.source,
@@ -997,6 +1205,15 @@ def write_outputs(
                 else ""
             )
         )
+        if (
+            row["region_overlap_published"] is not None
+            or row["region_overlap_chosen"] is not None
+        ):
+            fmt = lambda v: "—" if v is None else f"{100 * v:.0f}%"
+            lines.append(
+                f"region overlap with chosen neighbours: "
+                f"{fmt(row['region_overlap_published'])} -> {fmt(row['region_overlap_chosen'])}"
+            )
         lines.append("")
         lines.append("| hypothesis | unary | verification | grid rmse ft |")
         lines.append("|---|---|---|---|")
@@ -1109,9 +1326,11 @@ def materialize_and_grade(
                 indent=1,
             )
         )
-    # compare resolves split-panel polygons from the generated dir.
+    # compare resolves split-panel polygons from the generated IIIF's own
+    # directory, so the panels files go beside the IIIF as well as the sidecars.
     for panels in volume.glob("p*.panels.json"):
         shutil.copy2(panels, mat_dir / panels.name)
+        shutil.copy2(panels, out_dir / panels.name)
     ref = find_ref_iiif(volume)
     iiif_path = out_dir / "reconcile.iiif.json"
     subprocess.run(
@@ -1163,6 +1382,25 @@ def main() -> None:
     parser.add_argument(
         "--pages", nargs="*", default=None, help="Restrict to these stems (debug)."
     )
+    parser.add_argument(
+        "--region-overlap",
+        action="store_true",
+        help="Add the content-region overlap factor (#352) between every pair "
+        "of pages whose predicted regions (artifacts/region/) could meet.",
+    )
+    parser.add_argument(
+        "--region-weight",
+        type=float,
+        default=W_REGION,
+        help=f"Weight of the region overlap factor (default {W_REGION}).",
+    )
+    parser.add_argument(
+        "--out-dir",
+        type=Path,
+        default=None,
+        help="Where to write verdicts/report/materialized (default "
+        "<volume>/artifacts/reconcile); experiments keep the run's own apart.",
+    )
     args = parser.parse_args()
 
     global ENTRY_PENALTY
@@ -1207,6 +1445,17 @@ def main() -> None:
     print(
         f"overlap soft threshold (p90 of published adjacent pairs): {overlap_soft:.3f}"
     )
+    region_soft = REGION_SOFT
+    if args.region_overlap:
+        attached = attach_regions(volume, nodes, origin or (0.0, 0.0))
+        region_edges = build_region_edges(nodes)
+        region_soft = calibrate_region_soft(nodes, adjacency)
+        print(
+            f"region overlap: {attached}/{len(nodes)} pages with regions, "
+            f"{len(region_edges)} pair edges, soft threshold {region_soft:.3f}, "
+            f"weight {args.region_weight}"
+        )
+        edges = [*edges, *region_edges]
     assignment = solve(
         nodes,
         edges,
@@ -1214,9 +1463,22 @@ def main() -> None:
         median_log_scale,
         origin or (0.0, 0.0),
         overlap_soft=overlap_soft,
+        region_soft=region_soft,
+        region_weight=args.region_weight,
     )
-    out_dir = volume / "artifacts" / "reconcile"
-    flips, _ = write_outputs(volume, nodes, assignment, out_dir)
+    out_dir = args.out_dir or volume / "artifacts" / "reconcile"
+    if (
+        not out_dir.is_absolute()
+        and not out_dir.exists()
+        and not str(out_dir).startswith("data")
+    ):
+        out_dir = volume / out_dir
+    region_overlaps = (
+        region_overlap_summary(nodes, edges, assignment)
+        if args.region_overlap
+        else None
+    )
+    flips, _ = write_outputs(volume, nodes, assignment, out_dir, region_overlaps)
     print(f"{flips} decisions flipped -> {out_dir / 'report.md'}")
     if args.publish:
         written, unplaced = publish(volume, nodes, assignment)
