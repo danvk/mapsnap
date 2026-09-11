@@ -16,10 +16,13 @@ from mapsnap.loc_mirror import (
     NotFound,
     Settings,
     Sheet,
+    UploadMeter,
     _connections,
     broken_log_path,
+    broken_sheets,
     decode_jp2,
     fetch,
+    format_hours,
     is_candidate,
     item_relative,
     jp2_path,
@@ -27,6 +30,7 @@ from mapsnap.loc_mirror import (
     load_mapping,
     prune_empty_parents,
     quarter_url,
+    retry_broken,
     run_pipeline,
     s3_prefix,
     select_items,
@@ -341,6 +345,44 @@ def test_prerendered_jpeg_is_copied_and_the_jp2_skipped(tmp_path: Path):
         ]
         == 0
     )
+
+
+@needs_jp2
+def test_retry_broken_reruns_only_items_with_broken_sheets(tmp_path: Path):
+    # First run: p1's JP2 is corrupt, so item 1 finishes with p1 broken.
+    items, settings, mirror = make_volume(tmp_path)
+    run_pipeline(items, settings, streams=2, decode_workers=1, progress=False)
+    state = settings.out_dir / item_relative(items[0])
+    assert broken_sheets(items[0], settings) == ["00081_1922-0001"]
+    assert broken_sheets(items[1], settings) == []
+    assert (state / DONE).exists()  # reading the list touches nothing
+    # The mirror gains a pre-rendered JPEG for p1; --retry-broken clears
+    # item 1's markers only, and the rerun recovers the sheet.
+    write_jpeg(mirror / "storage-services/service" / DIR / "00081_1922-0001.jpg")
+    assert retry_broken(items[0], settings) == ["00081_1922-0001"]
+    assert retry_broken(items[1], settings) == []
+    assert not (state / DONE).exists()
+    assert (settings.out_dir / item_relative(items[1]) / DONE).exists()
+    totals = run_pipeline(items, settings, streams=2, decode_workers=1, progress=False)
+    assert totals["items"] == 1 and totals["sheets"] == 2 and totals["broken"] == 0
+    assert broken_sheets(items[0], settings) == []
+    staged = settings.staging_dir / item_relative(items[0])
+    assert Image.open(staged / "p1.jpg").size == (50, 40)
+    assert Image.open(staged / "p0.jpg").size == (50, 40)  # kept from the first run
+
+
+def test_upload_meter_averages_over_its_window():
+    meter = UploadMeter(start=0.0, window=100.0)
+    assert meter.rate(10.0) is None  # nothing uploaded yet
+    meter.add(10.0, 1_000_000)
+    assert meter.rate(10.0) == pytest.approx(100_000)  # over the 10 s since start
+    meter.add(50.0, 3_000_000)
+    assert meter.rate(50.0) == pytest.approx(80_000)
+    # Once the window is full, only completions inside it count.
+    assert meter.rate(150.0) == pytest.approx(30_000)  # the 10 s entry aged out
+    assert meter.rate(151.0) == 0.0  # the 50 s one too: stalled, not unknown
+    assert format_hours(3725) == "1:02" and format_hours(0) == "0:00"
+    assert format_hours(49 * 3600) == "49:00"
 
 
 def test_missing_url_is_not_retried(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):

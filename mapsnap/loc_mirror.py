@@ -38,7 +38,14 @@ JP2 or TIFF is in ``--jp2-dir``), so the sheets with no local full-resolution
 copy can be listed later. Resuming never lists S3: an item with its marker is
 skipped, a JP2 on disk at the listed size is not re-fetched (and is used in
 preference to the mirror's JPEG), and an output already in staging is not
-re-decoded.
+re-decoded. ``--retry-broken`` clears the markers of finished items whose
+metadata lists broken sheets, so those run again (the sync re-uploads only
+what changed).
+
+The progress bar counts sheets through the decode stage; its postfix shows
+what actually gates the finish once the mirror's JPEGs carry most sheets:
+the uplink, as ``up_rate`` (averaged over the last ten minutes) and ``up_eta``
+(the staging backlog plus the undecoded remainder at that rate).
 
 Items are processed in a seeded random order, so however far the run has
 got, the finished subset is a uniform sample of the collection
@@ -100,6 +107,7 @@ RETRY_DELAY = 5.0  # seconds, times the attempt number
 # renewal should not need a restart.
 UPLOAD_RETRY_DELAY = 60.0
 UPLOAD_RETRY_MAX = 600.0
+UPLOAD_RATE_WINDOW = 600.0  # seconds of completed uploads the bar's rate averages over
 DONE, UPLOADED = ".done", ".uploaded"
 
 
@@ -666,6 +674,41 @@ def item_complete(plan: ItemPlan, settings: Settings) -> bool:
     return (state / DONE).exists()
 
 
+def broken_sheets(plan: ItemPlan, settings: Settings) -> list[str]:
+    """Stems the item's recorded metadata lists as broken (empty if never decoded)."""
+    metadata = settings.out_dir / item_relative(plan) / "metadata.json"
+    if not metadata.exists():
+        return []
+    return list(json.loads(metadata.read_text()).get("broken", []))
+
+
+def retry_broken(plan: ItemPlan, settings: Settings) -> list[str]:
+    """Clear a finished item's markers when it has broken sheets; returns their stems.
+
+    The item then runs again from the download stage. A broken sheet starts
+    over: whatever it left in staging is removed (a half-written file from a
+    killed run must not pass for a finished output), and so is its local JP2
+    or TIFF, since a source that failed to decode is suspect and the mirror's
+    pre-rendered JPEG may now exist for it. Items with no broken sheets are
+    untouched.
+    """
+    broken = broken_sheets(plan, settings)
+    if not broken:
+        return []
+    staging_item = settings.staging_dir / item_relative(plan)
+    for sheet in plan.sheets:
+        if sheet.stem in broken:
+            for path in sheet_outputs(staging_item, sheet):
+                if path is not None:
+                    path.unlink(missing_ok=True)
+            if sheet.source.startswith("torrent"):
+                jp2_path(settings.jp2_dir, sheet).unlink(missing_ok=True)
+    state = settings.out_dir / item_relative(plan)
+    for marker in (DONE, UPLOADED):
+        (state / marker).unlink(missing_ok=True)
+    return broken
+
+
 def select_items(
     plans: dict[str, ItemPlan],
     *,
@@ -695,6 +738,41 @@ def select_items(
     return chosen[:limit] if limit else chosen
 
 
+class UploadMeter:
+    """Rolling upload throughput from completed items, for the bar's upload ETA.
+
+    Bytes are credited when an item's sync finishes and averaged over the
+    last ``window`` seconds (or since ``start`` while the window is still
+    filling), so the rate tracks the uplink as it is now, not the run's
+    history.
+    """
+
+    def __init__(self, start: float, window: float = UPLOAD_RATE_WINDOW) -> None:
+        self.start = start
+        self.window = window
+        self.completed: deque[tuple[float, int]] = deque()
+        self.any_completed = False
+
+    def add(self, now: float, nbytes: int) -> None:
+        self.completed.append((now, nbytes))
+        self.any_completed = True
+
+    def rate(self, now: float) -> float | None:
+        """Bytes per second over the window: None before the first completed upload, 0.0 when stalled."""
+        while self.completed and self.completed[0][0] < now - self.window:
+            self.completed.popleft()
+        span = min(self.window, now - self.start)
+        if not self.any_completed or span <= 0:
+            return None
+        return sum(nbytes for _, nbytes in self.completed) / span
+
+
+def format_hours(seconds: float) -> str:
+    """A duration as ``h:mm``."""
+    minutes = int(seconds // 60)
+    return f"{minutes // 60}:{minutes % 60:02d}"
+
+
 def run_pipeline(
     items: list[ItemPlan],
     settings: Settings,
@@ -717,9 +795,11 @@ def run_pipeline(
     uplink costs staging disk rather than download throughput. A stage failure
     is logged to errors.log and never ends the run: a failed upload (an expired
     AWS session, say) is retried by this process with backoff, its staging copy
-    kept; a failed decode is left for the next resume. One tqdm bar counts decoded sheets, with downloaded
-    gigabytes, uploaded items, the staging backlog, broken sheets, and stage
-    errors in the postfix.
+    kept; a failed decode is left for the next resume. One tqdm bar counts
+    sheets through decoding, with downloaded gigabytes, uploaded items, the
+    staging backlog, broken sheets, stage errors and, when uploading, the
+    rolling upload rate and the ETA for the backlog plus the undecoded
+    remainder in the postfix.
     """
     todo = deque(item for item in items if not item_complete(item, settings))
     totals = {
@@ -779,6 +859,10 @@ def run_stages(
     staged_bytes = 0
     # Failed uploads wait here as (not-before time, attempt, item) until retried.
     retry_queue: deque[tuple[float, int, ItemPlan]] = deque()
+    meter = UploadMeter(time.time())
+    total_sheets = sum(len(plan.sheets) for plan in todo)
+    handled_sheets = 0  # through decoding (or straight to upload on a resume)
+    decoded_sheets = decoded_bytes = 0  # this run's decode output: bytes per sheet
     settings.out_dir.mkdir(parents=True, exist_ok=True)
     with (
         open(settings.out_dir / "progress.jsonl", "a") as progress_log,
@@ -819,6 +903,8 @@ def run_stages(
                     item_staged[plan.item] = staged
                     staged_bytes += staged
                     uploads[upload_pool.submit(upload_item, plan, settings)] = (plan, 0)
+                    bar.update(len(plan.sheets))
+                    handled_sheets += len(plan.sheets)
                     continue
                 item_fetch[plan.item] = [None] * len(plan.sheets)
                 item_pending[plan.item] = len(plan.sheets)
@@ -857,11 +943,15 @@ def run_stages(
                         log_error(settings.out_dir, "decode", plan.item, error)
                         totals["errors"] += 1
                         bar.update(len(plan.sheets))
+                        handled_sheets += len(plan.sheets)
                         continue
                     totals["items"] += 1
                     totals["sheets"] += decoded
                     totals["broken"] += broken
                     bar.update(len(plan.sheets))
+                    handled_sheets += len(plan.sheets)
+                    decoded_sheets += decoded
+                    decoded_bytes += staged
                     progress_log.write(
                         json.dumps(
                             {"item": plan.item, "sheets": decoded, "broken": broken}
@@ -887,16 +977,28 @@ def run_stages(
                         retry_queue.append((time.time() + delay, attempt + 1, plan))
                         continue
                     totals["uploaded"] += 1
-                    staged_bytes -= item_staged.pop(plan.item, 0)
-            bar.set_postfix(
-                dl=f"{totals['bytes'] / 1e9:.1f}GB",
-                up=totals["uploaded"],
-                staged=f"{staged_bytes / 1e9:.1f}GB",
-                broken=totals["broken"],
-                errors=totals["errors"],
-                retry=len(retry_queue),
-                refresh=False,
-            )
+                    item_bytes = item_staged.pop(plan.item, 0)
+                    staged_bytes -= item_bytes
+                    meter.add(time.time(), item_bytes)
+            postfix: dict[str, object] = {
+                "dl": f"{totals['bytes'] / 1e9:.1f}GB",
+                "up": totals["uploaded"],
+                "staged": f"{staged_bytes / 1e9:.1f}GB",
+                "broken": totals["broken"],
+                "errors": totals["errors"],
+                "retry": len(retry_queue),
+            }
+            if settings.upload:
+                rate = meter.rate(time.time())
+                per_sheet = decoded_bytes / decoded_sheets if decoded_sheets else 0.0
+                pending_bytes = (
+                    staged_bytes + (total_sheets - handled_sheets) * per_sheet
+                )
+                postfix["up_rate"] = (
+                    f"{rate / 1e6:.2f}MB/s" if rate is not None else "?"
+                )
+                postfix["up_eta"] = format_hours(pending_bytes / rate) if rate else "?"
+            bar.set_postfix(postfix, refresh=False)
 
 
 def main() -> None:
@@ -1001,6 +1103,13 @@ def main() -> None:
         help="Process items in state, year, item order instead of at random.",
     )
     parser.add_argument(
+        "--retry-broken",
+        action="store_true",
+        help="Run finished items whose metadata lists broken sheets again: their "
+        "markers are cleared, so they take the whole pipeline (the sync "
+        "re-uploads only what changed).",
+    )
+    parser.add_argument(
         "--dry-run",
         action="store_true",
         help="List the items and sheet counts; touch nothing.",
@@ -1030,6 +1139,17 @@ def main() -> None:
         limit=args.limit,
         seed=None if args.sequential else args.seed,
     )
+    if args.retry_broken:
+        lookup = broken_sheets if args.dry_run else retry_broken
+        retried = {
+            plan.item: stems for plan in chosen if (stems := lookup(plan, settings))
+        }
+        print(
+            f"--retry-broken: {sum(len(v) for v in retried.values())} broken sheets "
+            f"in {len(retried)} items {'would be' if args.dry_run else 'will be'} "
+            "retried",
+            file=sys.stderr,
+        )
     pending = [plan for plan in chosen if not item_complete(plan, settings)]
     print(
         f"{len(chosen)} items selected, {len(pending)} to do: "
