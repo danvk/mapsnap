@@ -2,6 +2,7 @@
 
 import json
 import sys
+import time
 from pathlib import Path
 
 import pytest
@@ -12,18 +13,24 @@ from mapsnap.loc_mirror import (
     DONE,
     UPLOADED,
     ItemPlan,
+    NotFound,
     Settings,
     Sheet,
+    UploadMeter,
     _connections,
     broken_log_path,
+    broken_sheets,
     decode_jp2,
     fetch,
+    format_hours,
     is_candidate,
     item_relative,
     jp2_path,
     keep_sheet,
     load_mapping,
     prune_empty_parents,
+    quarter_url,
+    retry_broken,
     run_pipeline,
     s3_prefix,
     select_items,
@@ -92,6 +99,11 @@ def test_layout_matches_the_s3_prefix_shape(tmp_path: Path):
         source_url("http://m", sheet)
         == "http://m/storage-services/service/gmd/gmd390m/g3904m/g3904mm/g000811922/00081_1922-0123.jp2"
     )
+    # The mirror's pre-rendered 25% JPEG sits beside its source with a .jpg suffix.
+    assert (
+        quarter_url("http://m", sheet)
+        == "http://m/storage-services/service/gmd/gmd390m/g3904m/g3904mm/g000811922/00081_1922-0123.jpg"
+    )
     tif = Sheet(
         1, "00081_1922-0124", "p124", "torrent-master-tif", 0, sheet.storage_dir
     )
@@ -101,6 +113,9 @@ def test_layout_matches_the_s3_prefix_shape(tmp_path: Path):
         .endswith(
             "storage-services/master/" + sheet.storage_dir + "/00081_1922-0124.tif"
         )
+    )
+    assert quarter_url("http://m", tif).endswith(
+        "storage-services/master/" + sheet.storage_dir + "/00081_1922-0124.jpg"
     )
     iiif = Sheet(1, "00081_1922-0125", "p125", "loc-iiif", 0, sheet.storage_dir)
     assert source_url("http://m", iiif).endswith(
@@ -125,6 +140,12 @@ def write_jp2(path: Path, width: int = 200, height: int = 160) -> None:
     )
 
 
+def write_jpeg(path: Path, width: int = 50, height: int = 40) -> None:
+    """A stand-in for the mirror's pre-rendered 25% JPEG: a flat tint no decode would produce."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    Image.new("RGB", (width, height), (90, 140, 200)).save(path, "JPEG", quality=95)
+
+
 needs_jp2 = pytest.mark.skipif(
     not features.check("jpg_2000"), reason="Pillow lacks JPEG 2000"
 )
@@ -139,8 +160,14 @@ def test_decode_jp2_quarter_and_full(tmp_path: Path):
     assert Image.open(tmp_path / "q.jpg").size == (50, 40)
 
 
-def make_volume(tmp_path: Path) -> tuple[list[ItemPlan], Settings, Path]:
-    """A file:// mirror with two items: one good sheet, one page-0 sheet, one corrupt sheet."""
+def make_volume(
+    tmp_path: Path, prerendered: tuple[str, ...] = ()
+) -> tuple[list[ItemPlan], Settings, Path]:
+    """A file:// mirror with two items: one good sheet, one page-0 sheet, one corrupt sheet.
+
+    ``prerendered`` names the stems the mirror also serves as ready-made 25%
+    JPEGs, beside their JP2s.
+    """
     mirror = tmp_path / "mirror"
     files = {
         "00081_1922-0000": True,
@@ -154,6 +181,8 @@ def make_volume(tmp_path: Path) -> tuple[list[ItemPlan], Settings, Path]:
         else:
             path.parent.mkdir(parents=True, exist_ok=True)
             path.write_bytes(b"not a jp2")
+    for stem in prerendered:
+        write_jpeg(mirror / "storage-services/service" / DIR / f"{stem}.jpg")
     size = lambda stem: (
         (mirror / "storage-services/service" / DIR / f"{stem}.jp2").stat().st_size
     )
@@ -232,6 +261,9 @@ def test_pipeline_decodes_logs_broken_and_resumes(tmp_path: Path):
         "00081_1922-0001"
     ]
     assert meta["sheets"][0]["width"] == 50 and meta["sheets"][0]["raw"] is True
+    # No pre-rendered JPEG on this mirror: every sheet came down as its JP2.
+    assert meta["sheets"][0]["prerendered"] is False
+    assert meta["sheets"][0]["source_on_disk"] is True
     assert (staged / "metadata.json").read_text() == (
         state / "metadata.json"
     ).read_text()
@@ -256,6 +288,113 @@ def test_pipeline_decodes_logs_broken_and_resumes(tmp_path: Path):
         ]
         == 0
     )
+
+
+@needs_jp2
+def test_prerendered_jpeg_is_copied_and_the_jp2_skipped(tmp_path: Path):
+    # The mirror has 25% JPEGs for every sheet. p5, a map sheet, is copied
+    # as is and its JP2 never comes down; p1's JPEG spares it its corrupt
+    # JP2, so nothing is broken; p0, a key-map candidate, ignores the JPEG
+    # because its raw copy needs the JP2 anyway.
+    items, settings, mirror = make_volume(
+        tmp_path,
+        prerendered=("00082_1922-0005", "00081_1922-0001", "00081_1922-0000"),
+    )
+    totals = run_pipeline(items, settings, streams=2, decode_workers=1, progress=False)
+    assert totals["items"] == 2 and totals["sheets"] == 3 and totals["broken"] == 0
+    ready = mirror / "storage-services/service" / DIR
+    map_item, map_sheet = items[1], items[1].sheets[0]
+    staged = settings.staging_dir / item_relative(map_item) / "p5.jpg"
+    assert staged.read_bytes() == (ready / "00082_1922-0005.jpg").read_bytes()
+    assert not jp2_path(settings.jp2_dir, map_sheet).exists()
+    row = json.loads(
+        (settings.out_dir / item_relative(map_item) / "metadata.json").read_text()
+    )["sheets"][0]
+    assert row["prerendered"] is True and row["source_on_disk"] is False
+    assert (row["width"], row["height"], row["raw"]) == (50, 40, False)
+    key_item, key_sheet = items[0], items[0].sheets[0]
+    key_staged = settings.staging_dir / item_relative(key_item)
+    assert (key_staged / "p0.jpg").read_bytes() != (
+        ready / "00081_1922-0000.jpg"
+    ).read_bytes()
+    assert Image.open(key_staged / "raw" / "p0.jpg").size == (200, 160)
+    assert jp2_path(settings.jp2_dir, key_sheet).exists()
+    key_rows = json.loads(
+        (settings.out_dir / item_relative(key_item) / "metadata.json").read_text()
+    )["sheets"]
+    assert [r["key"] for r in key_rows] == ["p0", "p1"]
+    assert key_rows[0]["prerendered"] is False and key_rows[0]["source_on_disk"] is True
+    assert key_rows[1]["prerendered"] is True and key_rows[1]["source_on_disk"] is False
+    assert not jp2_path(settings.jp2_dir, key_item.sheets[1]).exists()
+    # Downloaded bytes: p5's and p1's JPEGs plus p0's JP2.
+    assert totals["bytes"] == (
+        (ready / "00082_1922-0005.jpg").stat().st_size
+        + (ready / "00081_1922-0001.jpg").stat().st_size
+        + key_sheet.bytes
+    )
+    # A resume with the mirror gone skips both items on local markers alone.
+    offline = Settings(
+        jp2_dir=settings.jp2_dir,
+        out_dir=settings.out_dir,
+        staging_dir=settings.staging_dir,
+        mirror="http://127.0.0.1:9",
+    )
+    assert (
+        run_pipeline(items, offline, streams=1, decode_workers=1, progress=False)[
+            "items"
+        ]
+        == 0
+    )
+
+
+@needs_jp2
+def test_retry_broken_reruns_only_items_with_broken_sheets(tmp_path: Path):
+    # First run: p1's JP2 is corrupt, so item 1 finishes with p1 broken.
+    items, settings, mirror = make_volume(tmp_path)
+    run_pipeline(items, settings, streams=2, decode_workers=1, progress=False)
+    state = settings.out_dir / item_relative(items[0])
+    assert broken_sheets(items[0], settings) == ["00081_1922-0001"]
+    assert broken_sheets(items[1], settings) == []
+    assert (state / DONE).exists()  # reading the list touches nothing
+    # The mirror gains a pre-rendered JPEG for p1; --retry-broken clears
+    # item 1's markers only, and the rerun recovers the sheet.
+    write_jpeg(mirror / "storage-services/service" / DIR / "00081_1922-0001.jpg")
+    assert retry_broken(items[0], settings) == ["00081_1922-0001"]
+    assert retry_broken(items[1], settings) == []
+    assert not (state / DONE).exists()
+    assert (settings.out_dir / item_relative(items[1]) / DONE).exists()
+    totals = run_pipeline(items, settings, streams=2, decode_workers=1, progress=False)
+    assert totals["items"] == 1 and totals["sheets"] == 2 and totals["broken"] == 0
+    assert broken_sheets(items[0], settings) == []
+    staged = settings.staging_dir / item_relative(items[0])
+    assert Image.open(staged / "p1.jpg").size == (50, 40)
+    assert Image.open(staged / "p0.jpg").size == (50, 40)  # kept from the first run
+
+
+def test_upload_meter_averages_over_its_window():
+    meter = UploadMeter(start=0.0, window=100.0)
+    assert meter.rate(10.0) is None  # nothing uploaded yet
+    meter.add(10.0, 1_000_000)
+    assert meter.rate(10.0) == pytest.approx(100_000)  # over the 10 s since start
+    meter.add(50.0, 3_000_000)
+    assert meter.rate(50.0) == pytest.approx(80_000)
+    # Once the window is full, only completions inside it count.
+    assert meter.rate(150.0) == pytest.approx(30_000)  # the 10 s entry aged out
+    assert meter.rate(151.0) == 0.0  # the 50 s one too: stalled, not unknown
+    assert format_hours(3725) == "1:02" and format_hours(0) == "0:00"
+    assert format_hours(49 * 3600) == "49:00"
+
+
+def test_missing_url_is_not_retried(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    # A 404 (here: a file:// path that does not exist) is the mirror's answer,
+    # not a transient failure: fetch raises NotFound at once instead of
+    # sleeping through four retries.
+    monkeypatch.setattr(loc_mirror, "RETRY_DELAY", 30.0)
+    started = time.monotonic()
+    with pytest.raises(NotFound):
+        fetch((tmp_path / "nope.jpg").as_uri(), tmp_path / "out.jpg")
+    assert time.monotonic() - started < 5
+    assert not (tmp_path / "out.jpg.part").exists()
 
 
 @needs_jp2
@@ -319,6 +458,7 @@ def test_fetch_reuses_one_keep_alive_connection_per_thread(
     root.mkdir()
     (root / "a.bin").write_bytes(b"a" * 1000)
     (root / "b.bin").write_bytes(b"b" * 2000)
+    hits: dict[str, int] = {}
 
     class Handler(http.server.SimpleHTTPRequestHandler):
         protocol_version = "HTTP/1.1"  # keep-alive, as nginx does
@@ -329,23 +469,40 @@ def test_fetch_reuses_one_keep_alive_connection_per_thread(
         def log_message(self, format: str, *args) -> None:
             pass
 
+        def do_GET(self) -> None:
+            hits[self.path] = hits.get(self.path, 0) + 1
+            if self.path == "/short.bin":  # promises 2000 bytes, sends 1000, hangs up
+                self.send_response(200)
+                self.send_header("Content-Length", "2000")
+                self.end_headers()
+                self.wfile.write(b"s" * 1000)
+                self.close_connection = True
+                return
+            super().do_GET()
+
     server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), Handler)
     threading.Thread(target=server.serve_forever, daemon=True).start()
     base = f"http://127.0.0.1:{server.server_port}"
     monkeypatch.setattr(loc_mirror, "RETRY_DELAY", 0.0)
     try:
-        fetch(f"{base}/a.bin", tmp_path / "a.bin", 1000)
+        assert fetch(f"{base}/a.bin", tmp_path / "a.bin", 1000) == 1000
         first = _connections.conn
         fetch(f"{base}/b.bin", tmp_path / "b.bin", 2000)
         assert _connections.conn is first  # same socket, not a new connection per file
         assert (tmp_path / "b.bin").read_bytes() == b"b" * 2000
-        with pytest.raises(OSError):
+        with pytest.raises(NotFound):
             fetch(f"{base}/missing.bin", tmp_path / "m.bin")
+        assert hits["/missing.bin"] == 1  # a 404 is final: no retries
         assert (
             not (tmp_path / "m.bin").exists() and not (tmp_path / "m.bin.part").exists()
         )
         with pytest.raises(OSError):
             fetch(f"{base}/a.bin", tmp_path / "a2.bin", expected_bytes=999)
+        # A body cut short of its Content-Length is an error, not a small file.
+        with pytest.raises(OSError, match="short body: 1000 of 2000"):
+            fetch(f"{base}/short.bin", tmp_path / "s.bin")
+        assert hits["/short.bin"] == loc_mirror.RETRIES
+        assert not (tmp_path / "s.bin").exists()
     finally:
         server.shutdown()
 
