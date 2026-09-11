@@ -10,13 +10,14 @@ torrent listing and the loc.gov catalog.
 Three stages run concurrently, each bounded by a different resource:
 
   1. download (network, ``--streams`` connections): a map sheet whose 25%
-     JPEG the mirror has already rendered
-     (``storage-services/master/<dir>/<stem>.jpg``) is fetched as that JPEG,
-     straight into staging; otherwise its JP2 goes to ``--jp2-dir`` mirroring
-     the torrent tree (``storage-services/service/<dir>/<stem>.jp2``),
-     verified against the listed byte count, so the copy stays a valid torrent
-     payload and is kept. The key-map candidates below always take the JP2
-     route, since their raw copy needs the full resolution;
+     JPEG the mirror has already rendered (beside its source, with a ``.jpg``
+     suffix: ``storage-services/service/<dir>/<stem>.jpg``, or under
+     ``master/`` for the TIFF-only sheets) is fetched as that JPEG, straight
+     into staging; otherwise its JP2 goes to ``--jp2-dir`` mirroring the
+     torrent tree (``storage-services/service/<dir>/<stem>.jp2``), verified
+     against the listed byte count, so the copy stays a valid torrent payload
+     and is kept. The key-map candidates below always take the JP2 route,
+     since their raw copy needs the full resolution;
   2. decode (CPU, ``--decode-workers`` processes): a JP2 is decoded at the
      JPEG 2000 quarter-resolution level -- the pipeline's 25% working scale --
      to ``<staging>/by-state/<state>/<year>/<item>/p<key>.jpg`` (JPEG quality
@@ -24,9 +25,9 @@ Three stages run concurrently, each bounded by a different resource:
      the same decode); page-0 sheets (``p0``, ``p0b``, ``p0L``) and letter
      pages, the key-map candidates, are also decoded at full resolution to
      ``raw/p<key>.jpg``;
-  3. upload (your uplink, two ``aws s3 sync`` at a time): the item directory
-     goes to ``<bucket>/by-state/<state>/<year>/<item>/`` and its staging
-     copy is deleted (``--keep-staging`` to retain it).
+  3. upload (your uplink, ``--upload-workers`` ``aws s3 sync`` at a time):
+     the item directory goes to ``<bucket>/by-state/<state>/<year>/<item>/``
+     and its staging copy is deleted (``--keep-staging`` to retain it).
 
 State lives only on local disk, under ``--out-dir``: per item a copy of
 ``metadata.json`` (catalog fields plus the sheet table) with ``.done`` and
@@ -87,6 +88,8 @@ from mapsnap.keymap.fit_keymap import page_number
 from mapsnap.keymap.identify import is_letter_page
 
 LOC_IIIF = "https://tile.loc.gov/image-services/iiif"
+# tile.loc.gov answers 403 to urllib's default User-Agent; an honest one is fine.
+USER_AGENT = "mapsnap loc-mirror/1.0 (+https://github.com/danvk/mapsnap)"
 JPEG_QUALITY = 95  # what mapsnap scale writes; the pipeline is tuned on it
 QUARTER_REDUCE = 2  # JPEG 2000 resolution levels to drop: 1/4 linear = 25%
 RETRIES = 4
@@ -203,32 +206,38 @@ def s3_prefix(bucket: str, plan: ItemPlan) -> str:
     return f"{bucket.rstrip('/')}/{item_relative(plan).as_posix()}"
 
 
+def source_relative(sheet: Sheet, suffix: str | None = None) -> str:
+    """A torrent sheet's path under ``storage-services``: its branch, directory, stem, suffix.
+
+    JP2s live in the ``service`` tree, the TIFF-only sheets in ``master``;
+    ``suffix`` overrides the source's own (``.jpg`` for the pre-rendered copy).
+    """
+    branch = "master" if sheet.source.startswith("torrent-master") else "service"
+    if suffix is None:
+        suffix = ".tif" if sheet.source == "torrent-master-tif" else ".jp2"
+    return f"storage-services/{branch}/{sheet.storage_dir}/{sheet.stem}{suffix}"
+
+
 def jp2_path(jp2_dir: Path, sheet: Sheet) -> Path:
     """Where the sheet's JP2 (or TIFF master) lives locally, mirroring the torrent tree."""
-    branch = "master" if sheet.source.startswith("torrent-master") else "service"
-    suffix = ".tif" if sheet.source == "torrent-master-tif" else ".jp2"
-    return (
-        jp2_dir
-        / "storage-services"
-        / branch
-        / sheet.storage_dir
-        / f"{sheet.stem}{suffix}"
-    )
+    return jp2_dir / source_relative(sheet)
 
 
 def source_url(mirror: str, sheet: Sheet, full: bool = False) -> str:
     """The URL to fetch a sheet from: the mirror's JP2/TIFF, or LoC's IIIF for the rest."""
     if sheet.source.startswith("torrent"):
-        branch = "master" if sheet.source.startswith("torrent-master") else "service"
-        suffix = ".tif" if sheet.source == "torrent-master-tif" else ".jp2"
-        return f"{mirror}/storage-services/{branch}/{sheet.storage_dir}/{sheet.stem}{suffix}"
+        return f"{mirror}/{source_relative(sheet)}"
     service = "service:" + sheet.storage_dir.replace("/", ":")
     return f"{LOC_IIIF}/{service}:{sheet.stem}/full/{'full' if full else 'pct:25'}/0/default.jpg"
 
 
 def quarter_url(mirror: str, sheet: Sheet) -> str:
-    """The mirror's pre-rendered 25% JPEG of a torrent sheet: the master tree, ``.jpg`` suffix."""
-    return f"{mirror}/storage-services/master/{sheet.storage_dir}/{sheet.stem}.jpg"
+    """The mirror's pre-rendered 25% JPEG of a torrent sheet: beside its source, ``.jpg`` suffix.
+
+    The render job wrote each JPEG next to the file it came from, so a JP2's
+    copy is in the ``service`` tree and a TIFF master's in ``master``.
+    """
+    return f"{mirror}/{source_relative(sheet, '.jpg')}"
 
 
 def sheet_outputs(staging_item: Path, sheet: Sheet) -> tuple[Path, Path | None]:
@@ -315,8 +324,9 @@ def fetch_urllib(url: str, partial: Path) -> int:
 
     A 404, or a file:// path that does not exist, raises NotFound.
     """
+    request = urllib.request.Request(url, headers={"User-Agent": USER_AGENT})
     try:
-        with urllib.request.urlopen(url, timeout=300) as response:
+        with urllib.request.urlopen(request, timeout=300) as response:
             return stream_body(
                 response, partial, response.headers.get("Content-Length")
             )
@@ -444,12 +454,23 @@ def opj_available() -> bool:
     return shutil.which("opj_decompress") is not None
 
 
+def save_jpeg(image: Image.Image, out_jpg: Path) -> None:
+    """Write ``image`` as a quality-95 JPEG, atomically.
+
+    Written under a ``.part`` name and renamed, so a run killed mid-write
+    leaves no half file that a resume would take for a finished output.
+    """
+    out_jpg.parent.mkdir(parents=True, exist_ok=True)
+    partial = out_jpg.with_suffix(out_jpg.suffix + ".part")
+    image.convert("RGB").save(partial, "JPEG", quality=JPEG_QUALITY)
+    partial.replace(out_jpg)
+
+
 def decode_jp2(jp2: Path, out_jpg: Path, reduce: int) -> tuple[int, int]:
     """Decode a JP2 ``reduce`` resolution levels down and write a JPEG; returns its size.
 
     Uses ``opj_decompress`` (fast, multithreaded) when present, else Pillow.
     """
-    out_jpg.parent.mkdir(parents=True, exist_ok=True)
     if opj_available():
         with tempfile.TemporaryDirectory() as tmp:
             ppm = Path(tmp) / "decoded.ppm"
@@ -474,20 +495,19 @@ def decode_jp2(jp2: Path, out_jpg: Path, reduce: int) -> tuple[int, int]:
         image = Image.open(jp2)
         image.reduce = reduce  # type: ignore[attr-defined]
         image.load()
-    image.convert("RGB").save(out_jpg, "JPEG", quality=JPEG_QUALITY)
+    save_jpeg(image, out_jpg)
     return image.size
 
 
 def scale_to_quarter(src: Path, out_jpg: Path) -> tuple[int, int]:
     """Write a 25% JPEG of a full-resolution TIFF (the master-only sheets)."""
-    out_jpg.parent.mkdir(parents=True, exist_ok=True)
     Image.MAX_IMAGE_PIXELS = None
     image = Image.open(src)
     image.load()
     small = image.convert("RGB").resize(
         (max(1, image.width // 4), max(1, image.height // 4)), Image.Resampling.LANCZOS
     )
-    small.save(out_jpg, "JPEG", quality=JPEG_QUALITY)
+    save_jpeg(small, out_jpg)
     return small.size
 
 
@@ -518,9 +538,7 @@ def decode_sheet(
                     decode_jp2(local, raw, 0)
                 else:
                     Image.MAX_IMAGE_PIXELS = None
-                    Image.open(local).convert("RGB").save(
-                        raw, "JPEG", quality=JPEG_QUALITY
-                    )
+                    save_jpeg(Image.open(local), raw)
         with Image.open(quarter) as image:
             row["width"], row["height"] = image.size
         row["raw"] = raw is not None
@@ -941,6 +959,13 @@ def main() -> None:
         "--decode-workers", type=int, default=4, help="Decode processes."
     )
     parser.add_argument(
+        "--upload-workers",
+        type=int,
+        default=2,
+        help="Concurrent `aws s3 sync` processes (the uplink is the bottleneck "
+        "once the mirror's pre-rendered JPEGs carry most sheets).",
+    )
+    parser.add_argument(
         "--prefetch-items",
         type=int,
         default=16,
@@ -1025,6 +1050,7 @@ def main() -> None:
         streams=args.streams,
         decode_workers=args.decode_workers,
         prefetch_items=args.prefetch_items,
+        upload_workers=args.upload_workers,
         max_staging_bytes=args.max_staging_gb * 1e9,
     )
     print(

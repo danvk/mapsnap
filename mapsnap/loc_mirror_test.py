@@ -95,10 +95,10 @@ def test_layout_matches_the_s3_prefix_shape(tmp_path: Path):
         source_url("http://m", sheet)
         == "http://m/storage-services/service/gmd/gmd390m/g3904m/g3904mm/g000811922/00081_1922-0123.jp2"
     )
-    # The mirror's pre-rendered 25% JPEGs sit in the master tree with a .jpg suffix.
+    # The mirror's pre-rendered 25% JPEG sits beside its source with a .jpg suffix.
     assert (
         quarter_url("http://m", sheet)
-        == "http://m/storage-services/master/gmd/gmd390m/g3904m/g3904mm/g000811922/00081_1922-0123.jpg"
+        == "http://m/storage-services/service/gmd/gmd390m/g3904m/g3904mm/g000811922/00081_1922-0123.jpg"
     )
     tif = Sheet(
         1, "00081_1922-0124", "p124", "torrent-master-tif", 0, sheet.storage_dir
@@ -109,6 +109,9 @@ def test_layout_matches_the_s3_prefix_shape(tmp_path: Path):
         .endswith(
             "storage-services/master/" + sheet.storage_dir + "/00081_1922-0124.tif"
         )
+    )
+    assert quarter_url("http://m", tif).endswith(
+        "storage-services/master/" + sheet.storage_dir + "/00081_1922-0124.jpg"
     )
     iiif = Sheet(1, "00081_1922-0125", "p125", "loc-iiif", 0, sheet.storage_dir)
     assert source_url("http://m", iiif).endswith(
@@ -158,7 +161,8 @@ def make_volume(
 ) -> tuple[list[ItemPlan], Settings, Path]:
     """A file:// mirror with two items: one good sheet, one page-0 sheet, one corrupt sheet.
 
-    ``prerendered`` names the stems the mirror also serves as ready-made 25% JPEGs.
+    ``prerendered`` names the stems the mirror also serves as ready-made 25%
+    JPEGs, beside their JP2s.
     """
     mirror = tmp_path / "mirror"
     files = {
@@ -174,7 +178,7 @@ def make_volume(
             path.parent.mkdir(parents=True, exist_ok=True)
             path.write_bytes(b"not a jp2")
     for stem in prerendered:
-        write_jpeg(mirror / "storage-services/master" / DIR / f"{stem}.jpg")
+        write_jpeg(mirror / "storage-services/service" / DIR / f"{stem}.jpg")
     size = lambda stem: (
         (mirror / "storage-services/service" / DIR / f"{stem}.jp2").stat().st_size
     )
@@ -284,15 +288,17 @@ def test_pipeline_decodes_logs_broken_and_resumes(tmp_path: Path):
 
 @needs_jp2
 def test_prerendered_jpeg_is_copied_and_the_jp2_skipped(tmp_path: Path):
-    # The mirror has 25% JPEGs for both good sheets. p5, a map sheet, is
-    # copied as is and its JP2 never comes down; p0, a key-map candidate,
-    # ignores the JPEG because its raw copy needs the JP2 anyway.
+    # The mirror has 25% JPEGs for every sheet. p5, a map sheet, is copied
+    # as is and its JP2 never comes down; p1's JPEG spares it its corrupt
+    # JP2, so nothing is broken; p0, a key-map candidate, ignores the JPEG
+    # because its raw copy needs the JP2 anyway.
     items, settings, mirror = make_volume(
-        tmp_path, prerendered=("00082_1922-0005", "00081_1922-0000")
+        tmp_path,
+        prerendered=("00082_1922-0005", "00081_1922-0001", "00081_1922-0000"),
     )
     totals = run_pipeline(items, settings, streams=2, decode_workers=1, progress=False)
-    assert totals["items"] == 2 and totals["sheets"] == 2 and totals["broken"] == 1
-    ready = mirror / "storage-services/master" / DIR
+    assert totals["items"] == 2 and totals["sheets"] == 3 and totals["broken"] == 0
+    ready = mirror / "storage-services/service" / DIR
     map_item, map_sheet = items[1], items[1].sheets[0]
     staged = settings.staging_dir / item_relative(map_item) / "p5.jpg"
     assert staged.read_bytes() == (ready / "00082_1922-0005.jpg").read_bytes()
@@ -309,13 +315,18 @@ def test_prerendered_jpeg_is_copied_and_the_jp2_skipped(tmp_path: Path):
     ).read_bytes()
     assert Image.open(key_staged / "raw" / "p0.jpg").size == (200, 160)
     assert jp2_path(settings.jp2_dir, key_sheet).exists()
-    key_row = json.loads(
+    key_rows = json.loads(
         (settings.out_dir / item_relative(key_item) / "metadata.json").read_text()
-    )["sheets"][0]
-    assert key_row["prerendered"] is False and key_row["source_on_disk"] is True
-    # Downloaded bytes: p5's JPEG, p0's JP2, and the corrupt p1 JP2 (it has no JPEG).
-    assert totals["bytes"] == (ready / "00082_1922-0005.jpg").stat().st_size + sum(
-        s.bytes for s in key_item.sheets
+    )["sheets"]
+    assert [r["key"] for r in key_rows] == ["p0", "p1"]
+    assert key_rows[0]["prerendered"] is False and key_rows[0]["source_on_disk"] is True
+    assert key_rows[1]["prerendered"] is True and key_rows[1]["source_on_disk"] is False
+    assert not jp2_path(settings.jp2_dir, key_item.sheets[1]).exists()
+    # Downloaded bytes: p5's and p1's JPEGs plus p0's JP2.
+    assert totals["bytes"] == (
+        (ready / "00082_1922-0005.jpg").stat().st_size
+        + (ready / "00081_1922-0001.jpg").stat().st_size
+        + key_sheet.bytes
     )
     # A resume with the mirror gone skips both items on local markers alone.
     offline = Settings(
