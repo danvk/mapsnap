@@ -980,6 +980,11 @@ def run_stages(
                     item_bytes = item_staged.pop(plan.item, 0)
                     staged_bytes -= item_bytes
                     meter.add(time.time(), item_bytes)
+            # Redraw only when something finished: tqdm repaints on update(),
+            # and once decoding is done nothing updates the bar, so a postfix
+            # set without a refresh would freeze at the last decoded sheet
+            # while the upload backlog drains for a day.
+            finished_something = bool(done)
             postfix: dict[str, object] = {
                 "dl": f"{totals['bytes'] / 1e9:.1f}GB",
                 "up": totals["uploaded"],
@@ -998,7 +1003,7 @@ def run_stages(
                     f"{rate / 1e6:.2f}MB/s" if rate is not None else "?"
                 )
                 postfix["up_eta"] = format_hours(pending_bytes / rate) if rate else "?"
-            bar.set_postfix(postfix, refresh=False)
+            bar.set_postfix(postfix, refresh=finished_something)
 
 
 def main() -> None:
