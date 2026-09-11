@@ -9,16 +9,21 @@ torrent listing and the loc.gov catalog.
 
 Three stages run concurrently, each bounded by a different resource:
 
-  1. download (network, ``--streams`` connections): each kept sheet's JP2 goes
-     to ``--jp2-dir`` mirroring the torrent tree
-     (``storage-services/service/<dir>/<stem>.jp2``), verified against the
-     listed byte count, so the copy stays a valid torrent payload and is kept;
-  2. decode (CPU, ``--decode-workers`` processes): the JP2 is decoded at the
+  1. download (network, ``--streams`` connections): a map sheet whose 25%
+     JPEG the mirror has already rendered
+     (``storage-services/master/<dir>/<stem>.jpg``) is fetched as that JPEG,
+     straight into staging; otherwise its JP2 goes to ``--jp2-dir`` mirroring
+     the torrent tree (``storage-services/service/<dir>/<stem>.jp2``),
+     verified against the listed byte count, so the copy stays a valid torrent
+     payload and is kept. The key-map candidates below always take the JP2
+     route, since their raw copy needs the full resolution;
+  2. decode (CPU, ``--decode-workers`` processes): a JP2 is decoded at the
      JPEG 2000 quarter-resolution level -- the pipeline's 25% working scale --
      to ``<staging>/by-state/<state>/<year>/<item>/p<key>.jpg`` (JPEG quality
-     95, what ``mapsnap scale`` writes); page-0 sheets (``p0``, ``p0b``,
-     ``p0L``) and letter pages, the key-map candidates, are also decoded at
-     full resolution to ``raw/p<key>.jpg``;
+     95, what ``mapsnap scale`` writes; the mirror's pre-rendered JPEGs are
+     the same decode); page-0 sheets (``p0``, ``p0b``, ``p0L``) and letter
+     pages, the key-map candidates, are also decoded at full resolution to
+     ``raw/p<key>.jpg``;
   3. upload (your uplink, two ``aws s3 sync`` at a time): the item directory
      goes to ``<bucket>/by-state/<state>/<year>/<item>/`` and its staging
      copy is deleted (``--keep-staging`` to retain it).
@@ -26,9 +31,13 @@ Three stages run concurrently, each bounded by a different resource:
 State lives only on local disk, under ``--out-dir``: per item a copy of
 ``metadata.json`` (catalog fields plus the sheet table) with ``.done`` and
 ``.uploaded`` markers, plus ``broken.log`` (tab-separated item, stem, source,
-reason) and ``progress.jsonl``. Resuming never lists S3: an item with its
-marker is skipped, a JP2 on disk at the listed size is not re-fetched, and an
-output already in staging is not re-decoded.
+reason) and ``progress.jsonl``. Each sheet row of ``metadata.json`` records
+``prerendered`` (its 25% JPEG arrived ready-made) and ``source_on_disk`` (its
+JP2 or TIFF is in ``--jp2-dir``), so the sheets with no local full-resolution
+copy can be listed later. Resuming never lists S3: an item with its marker is
+skipped, a JP2 on disk at the listed size is not re-fetched (and is used in
+preference to the mirror's JPEG), and an output already in staging is not
+re-decoded.
 
 Items are processed in a seeded random order, so however far the run has
 got, the finished subset is a uniform sample of the collection
@@ -68,6 +77,7 @@ from concurrent.futures import (
 )
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
+from typing import Protocol
 from urllib.parse import urlsplit
 
 from PIL import Image
@@ -126,6 +136,18 @@ class Settings:
     bucket: str | None = None
     upload: bool = False
     keep_staging: bool = False
+
+
+@dataclass(frozen=True)
+class Fetched:
+    """What the download stage brought to disk for one sheet."""
+
+    prerendered: bool  # the 25% JPEG arrived ready-made (mirror JPEG or LoC IIIF)
+    bytes: int  # downloaded by this call
+
+
+class NotFound(OSError):
+    """The URL does not exist (HTTP 404, a missing file): an answer, not retried."""
 
 
 def keep_sheet(key: str) -> bool:
@@ -204,6 +226,11 @@ def source_url(mirror: str, sheet: Sheet, full: bool = False) -> str:
     return f"{LOC_IIIF}/{service}:{sheet.stem}/full/{'full' if full else 'pct:25'}/0/default.jpg"
 
 
+def quarter_url(mirror: str, sheet: Sheet) -> str:
+    """The mirror's pre-rendered 25% JPEG of a torrent sheet: the master tree, ``.jpg`` suffix."""
+    return f"{mirror}/storage-services/master/{sheet.storage_dir}/{sheet.stem}.jpg"
+
+
 def sheet_outputs(staging_item: Path, sheet: Sheet) -> tuple[Path, Path | None]:
     """(25% JPEG path, raw full-resolution path or None) for a sheet."""
     quarter = staging_item / f"{sheet.key}.jpg"
@@ -240,8 +267,33 @@ def drop_connection() -> None:
     _connections.conn = None
 
 
-def fetch_http(url: str, partial: Path) -> None:
-    """GET ``url`` over the thread's keep-alive connection, streaming the body to ``partial``."""
+class Body(Protocol):
+    """A response body read in chunks (http.client's and urllib's both are)."""
+
+    def read(self, amt: int, /) -> bytes: ...
+
+
+def stream_body(response: Body, partial: Path, content_length: str | None) -> int:
+    """Copy a response body to ``partial``; returns its size.
+
+    A body shorter than its Content-Length raises OSError: http.client ends a
+    truncated body silently, and a short file would otherwise pass as an image.
+    """
+    written = 0
+    with open(partial, "wb") as out:
+        while chunk := response.read(1 << 20):
+            out.write(chunk)
+            written += len(chunk)
+    if content_length and written != int(content_length):
+        raise OSError(f"short body: {written} of {content_length} bytes")
+    return written
+
+
+def fetch_http(url: str, partial: Path) -> int:
+    """GET ``url`` over the thread's keep-alive connection into ``partial``; returns its size.
+
+    A 404 raises NotFound, its body drained first so the connection stays reusable.
+    """
     parts = urlsplit(url)
     conn = mirror_connection(parts.hostname or "", parts.port)
     path = parts.path + (f"?{parts.query}" if parts.query else "")
@@ -250,19 +302,41 @@ def fetch_http(url: str, partial: Path) -> None:
     try:
         if response.status != 200:
             response.read()
+            if response.status == 404:
+                raise NotFound(f"HTTP 404 {url}")
             raise OSError(f"HTTP {response.status}")
-        with open(partial, "wb") as out:
-            while chunk := response.read(1 << 20):
-                out.write(chunk)
+        return stream_body(response, partial, response.getheader("Content-Length"))
     finally:
         response.close()
 
 
-def fetch(url: str, dest: Path, expected_bytes: int = 0) -> None:
-    """Download ``url`` to ``dest`` with retries; verify the byte count when known.
+def fetch_urllib(url: str, partial: Path) -> int:
+    """GET ``url`` through urllib (https, file://) into ``partial``; returns its size.
+
+    A 404, or a file:// path that does not exist, raises NotFound.
+    """
+    try:
+        with urllib.request.urlopen(url, timeout=300) as response:
+            return stream_body(
+                response, partial, response.headers.get("Content-Length")
+            )
+    except urllib.error.HTTPError as error:
+        if error.code == 404:
+            raise NotFound(f"HTTP 404 {url}") from error
+        raise
+    except urllib.error.URLError as error:
+        if isinstance(error.reason, FileNotFoundError):
+            raise NotFound(f"missing {url}") from error
+        raise
+
+
+def fetch(url: str, dest: Path, expected_bytes: int = 0) -> int:
+    """Download ``url`` to ``dest`` with retries; returns its size, checked when listed.
 
     Plain-http URLs (the mirror) reuse a per-thread keep-alive connection;
-    anything else (LoC's IIIF over https, file:// in tests) goes through urllib.
+    anything else (LoC's IIIF over https, file:// in tests) goes through
+    urllib. NotFound is raised at once, without retries: a 404 is the mirror's
+    answer (no such rendering), not a failure.
     """
     dest.parent.mkdir(parents=True, exist_ok=True)
     last: Exception | None = None
@@ -270,18 +344,16 @@ def fetch(url: str, dest: Path, expected_bytes: int = 0) -> None:
     for attempt in range(RETRIES):
         try:
             if urlsplit(url).scheme == "http":
-                fetch_http(url, partial)
+                size = fetch_http(url, partial)
             else:
-                with (
-                    urllib.request.urlopen(url, timeout=300) as response,
-                    open(partial, "wb") as out,
-                ):
-                    shutil.copyfileobj(response, out, 1 << 20)
-            size = partial.stat().st_size
+                size = fetch_urllib(url, partial)
             if expected_bytes and size != expected_bytes:
                 raise OSError(f"size {size} != listed {expected_bytes}")
             partial.replace(dest)
-            return
+            return size
+        except NotFound:
+            partial.unlink(missing_ok=True)
+            raise
         except (OSError, urllib.error.URLError, http.client.HTTPException) as error:
             last = error
             drop_connection()
@@ -314,29 +386,35 @@ def log_broken(out_dir: Path, plan: ItemPlan, sheet: Sheet, reason: str) -> None
 # ---------------------------------------------------------------- stage 1: download
 
 
-def fetch_sheet(plan: ItemPlan, sheet: Sheet, settings: Settings) -> bool:
-    """Bring the sheet's source to disk; False (and a broken-log line) on failure.
+def fetch_sheet(plan: ItemPlan, sheet: Sheet, settings: Settings) -> Fetched | None:
+    """Bring the sheet's inputs to disk; None (and a broken-log line) on failure.
 
-    Torrent sources land in the JP2 mirror; the few LoC-only sheets are fetched
-    already rendered, straight into staging.
+    A torrent sheet whose full-resolution source is already in the JP2 mirror
+    needs nothing more. Otherwise a plain map sheet tries the mirror's
+    pre-rendered 25% JPEG first, straight into staging, and only when the
+    mirror has none does its JP2 come down. Key-map candidates need the full
+    resolution for their raw copy, so they always take the JP2. The few
+    LoC-only sheets are fetched already rendered from LoC's IIIF.
     """
     try:
-        if sheet.source.startswith("torrent"):
-            local = jp2_path(settings.jp2_dir, sheet)
-            if local.exists() and (
-                not sheet.bytes or local.stat().st_size == sheet.bytes
-            ):
-                return True
-            fetch(source_url(settings.mirror, sheet), local, sheet.bytes)
-        else:
-            quarter, raw = sheet_outputs(
-                settings.staging_dir / item_relative(plan), sheet
-            )
-            if not quarter.exists():
-                fetch(source_url(settings.mirror, sheet), quarter)
-            if raw and not raw.exists():
-                fetch(source_url(settings.mirror, sheet, full=True), raw)
-        return True
+        if not sheet.source.startswith("torrent"):
+            return fetch_loc_sheet(plan, sheet, settings)
+        quarter, raw = sheet_outputs(settings.staging_dir / item_relative(plan), sheet)
+        local = jp2_path(settings.jp2_dir, sheet)
+        if local.exists() and (not sheet.bytes or local.stat().st_size == sheet.bytes):
+            return Fetched(prerendered=False, bytes=0)
+        if raw is None:
+            if quarter.exists():  # staged ready-made on an earlier run
+                return Fetched(prerendered=True, bytes=0)
+            try:
+                size = fetch(quarter_url(settings.mirror, sheet), quarter)
+                return Fetched(prerendered=True, bytes=size)
+            except NotFound:
+                pass
+        elif quarter.exists() and raw.exists():
+            return Fetched(prerendered=False, bytes=0)
+        size = fetch(source_url(settings.mirror, sheet), local, sheet.bytes)
+        return Fetched(prerendered=False, bytes=size)
     except Exception as error:  # noqa: BLE001 -- any failure is a broken sheet
         log_broken(
             settings.out_dir,
@@ -344,7 +422,18 @@ def fetch_sheet(plan: ItemPlan, sheet: Sheet, settings: Settings) -> bool:
             sheet,
             f"{error.__class__.__name__}: {str(error)[:200]}",
         )
-        return False
+        return None
+
+
+def fetch_loc_sheet(plan: ItemPlan, sheet: Sheet, settings: Settings) -> Fetched:
+    """A LoC-only sheet: its 25% rendering (and raw copy, for a candidate) straight into staging."""
+    quarter, raw = sheet_outputs(settings.staging_dir / item_relative(plan), sheet)
+    size = 0
+    if not quarter.exists():
+        size += fetch(source_url(settings.mirror, sheet), quarter)
+    if raw and not raw.exists():
+        size += fetch(source_url(settings.mirror, sheet, full=True), raw)
+    return Fetched(prerendered=True, bytes=size)
 
 
 # ---------------------------------------------------------------- stage 2: decode
@@ -402,13 +491,23 @@ def scale_to_quarter(src: Path, out_jpg: Path) -> tuple[int, int]:
     return small.size
 
 
-def decode_sheet(plan: ItemPlan, sheet: Sheet, settings: Settings) -> dict | None:
-    """Produce the sheet's outputs in staging; returns its metadata row, None if broken."""
+def decode_sheet(
+    plan: ItemPlan, sheet: Sheet, settings: Settings, fetched: Fetched
+) -> dict | None:
+    """Produce the sheet's outputs in staging; returns its metadata row, None if broken.
+
+    Whatever the download stage staged ready-made (a pre-rendered 25% JPEG) is
+    kept as is; the rest is decoded from the local JP2 or TIFF.
+    """
     quarter, raw = sheet_outputs(settings.staging_dir / item_relative(plan), sheet)
     row = asdict(sheet)
+    local = (
+        jp2_path(settings.jp2_dir, sheet)
+        if sheet.source.startswith("torrent")
+        else None
+    )
     try:
-        if sheet.source.startswith("torrent"):
-            local = jp2_path(settings.jp2_dir, sheet)
+        if local is not None:
             if not quarter.exists():
                 if local.suffix == ".jp2":
                     decode_jp2(local, quarter, QUARTER_REDUCE)
@@ -425,6 +524,8 @@ def decode_sheet(plan: ItemPlan, sheet: Sheet, settings: Settings) -> dict | Non
         with Image.open(quarter) as image:
             row["width"], row["height"] = image.size
         row["raw"] = raw is not None
+        row["prerendered"] = fetched.prerendered
+        row["source_on_disk"] = local is not None and local.exists()
         return row
     except Exception as error:  # noqa: BLE001 -- any failure is a broken sheet
         log_broken(
@@ -456,7 +557,7 @@ def metadata_document(plan: ItemPlan, rows: list[dict], broken: list[str]) -> di
 
 
 def decode_item(
-    plan: ItemPlan, fetched: list[bool], settings: Settings
+    plan: ItemPlan, fetched: list[Fetched | None], settings: Settings
 ) -> tuple[int, int, int]:
     """Decode every fetched sheet, write metadata to staging and state, mark done.
 
@@ -465,8 +566,8 @@ def decode_item(
     """
     rows: list[dict] = []
     broken: list[str] = []
-    for sheet, ok in zip(plan.sheets, fetched):
-        row = decode_sheet(plan, sheet, settings) if ok else None
+    for sheet, result in zip(plan.sheets, fetched):
+        row = decode_sheet(plan, sheet, settings, result) if result else None
         if row is None:
             broken.append(sheet.stem)
         else:
@@ -652,7 +753,8 @@ def run_stages(
 ) -> None:
     """The coordinator loop behind run_pipeline; mutates ``totals`` and drives ``bar``."""
     downloads: dict[Future, tuple[ItemPlan, int]] = {}
-    item_fetch: dict[str, list[bool | None]] = {}
+    item_fetch: dict[str, list[Fetched | None]] = {}
+    item_pending: dict[str, int] = {}  # downloads still out, per item in item_fetch
     decodes: dict[Future, ItemPlan] = {}
     uploads: dict[Future, tuple[ItemPlan, int]] = {}
     item_staged: dict[str, int] = {}
@@ -668,7 +770,8 @@ def run_stages(
     ):
 
         def start_decode(plan: ItemPlan) -> None:
-            fetched = [bool(ok) for ok in item_fetch.pop(plan.item)]
+            fetched = item_fetch.pop(plan.item)
+            item_pending.pop(plan.item, None)
             decodes[decode_pool.submit(decode_item, plan, fetched, settings)] = plan
 
         while todo or downloads or decodes or uploads or retry_queue:
@@ -700,6 +803,7 @@ def run_stages(
                     uploads[upload_pool.submit(upload_item, plan, settings)] = (plan, 0)
                     continue
                 item_fetch[plan.item] = [None] * len(plan.sheets)
+                item_pending[plan.item] = len(plan.sheets)
                 if not plan.sheets:
                     start_decode(plan)
                 for index, sheet in enumerate(plan.sheets):
@@ -714,17 +818,18 @@ def run_stages(
                 if future in downloads:
                     plan, index = downloads.pop(future)
                     try:
-                        fetched = bool(future.result())
+                        result: Fetched | None = future.result()
                     except Exception as error:  # noqa: BLE001 -- logged; the sheet counts as broken
                         log_error(
                             settings.out_dir, "download", plan.sheets[index].stem, error
                         )
                         totals["errors"] += 1
-                        fetched = False
-                    item_fetch[plan.item][index] = fetched
-                    if fetched:
-                        totals["bytes"] += plan.sheets[index].bytes
-                    if all(ok is not None for ok in item_fetch[plan.item]):
+                        result = None
+                    item_fetch[plan.item][index] = result
+                    item_pending[plan.item] -= 1
+                    if result:
+                        totals["bytes"] += result.bytes
+                    if item_pending[plan.item] == 0:
                         start_decode(plan)
                 elif future in decodes:
                     plan = decodes.pop(future)
@@ -903,8 +1008,9 @@ def main() -> None:
     pending = [plan for plan in chosen if not item_complete(plan, settings)]
     print(
         f"{len(chosen)} items selected, {len(pending)} to do: "
-        f"{sum(len(p.sheets) for p in pending):,} sheets, "
-        f"{sum(s.bytes for p in pending for s in p.sheets) / 1e9:,.1f} GB of JP2",
+        f"{sum(len(p.sheets) for p in pending):,} sheets, up to "
+        f"{sum(s.bytes for p in pending for s in p.sheets) / 1e9:,.1f} GB of JP2 "
+        "(a sheet the mirror has pre-rendered downloads its ~1 MB JPEG instead)",
         file=sys.stderr,
     )
     if args.dry_run:
