@@ -39,7 +39,7 @@ from pathlib import Path
 
 from mapsnap.craft import volume_craft_images
 from mapsnap.keymap.records import recorded_keymap_keys
-from mapsnap.utils import Step, list_pages, run_cmd
+from mapsnap.utils import Step, default_centerlines, list_pages, run_cmd
 
 
 def rerun_volume(
@@ -55,9 +55,9 @@ def rerun_volume(
             f"{volume} has no mapsnap.json — it was never set up by a pipeline run; "
             "this command re-runs existing volumes and never downloads."
         )
-    centerlines = volume / "centerlines.geojson"
-    if not centerlines.exists():
-        sys.exit(f"{volume} has no centerlines.geojson (re-run does not download OSM).")
+    centerlines = default_centerlines(volume)
+    if centerlines is None:
+        sys.exit(f"{volume} has no centerlines (re-run does not download OSM).")
 
     step = Step(volume, force=force)
 

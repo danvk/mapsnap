@@ -51,6 +51,7 @@ from mapsnap.keymap.align_page_region import (
     load_adjacency,
 )
 from mapsnap.keymap.fit_keymap import page_number, project
+from mapsnap.osm_to_centerlines import load_centerlines
 from mapsnap.score_adjacency import truth_adjacent_pairs
 from mapsnap.utils import (
     FEET_PER_METER,
@@ -2166,7 +2167,7 @@ def build_line_factors(
     centerlines_path = default_centerlines(volume)
     if centerlines_path is None:
         return []
-    features = json.loads(centerlines_path.read_text())["features"]
+    features = load_centerlines(centerlines_path)["features"]
     keymaps = discover_keymaps([str(volume / f"{stems[0]}.jpg")]) if stems else []
     locator = KeymapLocator.from_keymaps(keymaps) if keymaps else None
     filter_params = volume_filter_params(volume)

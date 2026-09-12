@@ -18,6 +18,7 @@ from tqdm import tqdm
 
 from mapsnap.ctc_vocab_decode import HINT_STRINGS, generate_vocab_strings
 from mapsnap.keymap.locate import KeymapLocator, page_key, resolve_keymaps
+from mapsnap.osm_to_centerlines import load_centerlines
 from mapsnap.streets import build_block_index, polygon_side_lengths
 from mapsnap.utils import default_centerlines, image_stem
 
@@ -1032,7 +1033,7 @@ def main() -> None:
         args.centerlines = str(centerlines)
         print(f"Using centerlines: {args.centerlines}", file=sys.stderr)
 
-    geojson = json.loads(Path(args.centerlines).read_text())
+    geojson = load_centerlines(args.centerlines)
     block_index = build_block_index(geojson)
     vocab_strings = generate_vocab_strings(set(block_index.keys()))
     print(

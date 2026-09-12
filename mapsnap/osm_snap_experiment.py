@@ -62,6 +62,7 @@ from mapsnap.osm_snap import (
     rank_pose,
     snap_page,
 )
+from mapsnap.osm_to_centerlines import load_centerlines
 from mapsnap.streets import Block, build_block_index
 from mapsnap.utils import default_centerlines, haversine_m, pose_is_upside_down
 
@@ -496,8 +497,8 @@ def load_volume_context(
     attach_missing_truth(volume, units)
     centerlines_path = default_centerlines(volume)
     if centerlines_path is None:
-        sys.exit(f"no centerlines.geojson under {volume}")
-    features = json.loads(centerlines_path.read_text())["features"]
+        sys.exit(f"no centerlines under {volume}")
+    features = load_centerlines(centerlines_path)["features"]
     keymaps = usable_keymaps(volume / "raw")
     locator = KeymapLocator.from_keymaps(keymaps) if keymaps else None
     _, region_centroids = keymap_region_adjacency(volume)
