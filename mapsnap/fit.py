@@ -9,7 +9,7 @@ import time
 from pathlib import Path
 
 from mapsnap import experiments
-from mapsnap.utils import default_centerlines, list_pages, run_cmd
+from mapsnap.utils import list_pages, require_centerlines, run_cmd
 
 
 def worker_flag(georef_extra: list[str]) -> list[str]:
@@ -27,11 +27,8 @@ def worker_flag(georef_extra: list[str]) -> list[str]:
 
 
 def find_centerlines(dir_path: Path) -> Path:
-    """Return the centerlines GeoJSON, checking dir then parent dir."""
-    centerlines = default_centerlines(dir_path)
-    if centerlines is None:
-        sys.exit(f"centerlines.geojson not found in {dir_path} or {dir_path.parent}")
-    return centerlines
+    """The volume's centerlines (GeoJSON or OSM extract), checking dir then parent."""
+    return require_centerlines(dir_path)
 
 
 def find_input_images(dir_path: Path) -> list[str]:

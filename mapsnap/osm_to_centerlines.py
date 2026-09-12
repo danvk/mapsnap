@@ -1,9 +1,21 @@
-"""Convert an OSM JSON dump to a centerlines GeoJSON compatible with georef_from_labels.py.
+"""Street centerlines from OSM data, for georef_from_labels.py and the rest of the fit.
 
 Each named drivable way becomes a GeoJSON LineString feature with a `street_name`
 property set to the OSM name (e.g. "Hooper Street"). georef_from_labels.py calls
 normalize_street on this value, which uppercases and expands abbreviations, so
 "HOOPER ST" in a detected label matches "Hooper Street" from OSM.
+
+Two sources produce the same FeatureCollection: an Overpass JSON dump
+(``download-osm``, the per-volume path) through ``osm_to_centerlines``, and an
+OSM file (a county's ``.osm.pbf`` extract, or ``.osm`` XML) through
+``centerlines_from_osm``. Every pipeline stage reads its centerlines through
+``load_centerlines``, which picks the reader by suffix, so a volume can point
+at a shared county extract instead of a converted copy (#354).
+
+The CLI (``mapsnap osm-to-geojson``) also writes ``streets.txt`` and
+``intersections.csv`` beside the GeoJSON. Nothing in the pipeline reads them --
+they are for eyeballing a volume's vocabulary -- and ``--no-debug-files``
+skips them.
 """
 
 import argparse
@@ -12,6 +24,11 @@ import json
 import math
 import sys
 from pathlib import Path
+
+import osmium
+from osmium.filter import EntityFilter, KeyFilter
+from osmium.geom import GeoJSONFactory
+from osmium.osm import WAY, Way
 
 from mapsnap.streets import normalize_street
 
@@ -98,6 +115,64 @@ def osm_to_centerlines(osm_json: str) -> dict:
     return {"type": "FeatureCollection", "features": features}
 
 
+def centerlines_from_osm(osm_path: Path) -> dict:
+    """Street centerlines straight from an OSM file (``.osm.pbf``, ``.osm``, compressed forms).
+
+    Read with pyosmium: only ways carrying a ``name`` are visited, just the
+    ``highway`` and ``service`` tags cross into Python, and each way's
+    geometry is built in C++ by the GeoJSON factory. That keeps it as fast as
+    ``osmium export`` (Los Angeles County's 214k ways: 2.6 s against 2.8 s);
+    copying every tag into a dict per way was twice as slow. A way cut at the
+    extract boundary, one of whose nodes the file has no location for, is
+    skipped, as ``osmium export`` skips it.
+    """
+    processor = (
+        osmium.FileProcessor(str(osm_path))
+        .with_locations()
+        .with_filter(EntityFilter(WAY))
+        .with_filter(KeyFilter("name"))
+    )
+    factory = GeoJSONFactory()
+    features = []
+    for way in processor:
+        if not isinstance(
+            way, Way
+        ):  # the filter guarantees it; pyright cannot see that
+            continue
+        tags = way.tags
+        kept = {
+            key: value for key in ("highway", "service") if (value := tags.get(key))
+        }
+        if should_drop(kept):
+            continue
+        try:
+            geometry = json.loads(factory.create_linestring(way))
+        except (osmium.InvalidLocationError, RuntimeError):
+            continue
+        features.append(
+            {
+                "type": "Feature",
+                "properties": {"street_name": tags["name"]},
+                "geometry": geometry,
+            }
+        )
+    return {"type": "FeatureCollection", "features": features}
+
+
+def load_centerlines(path: Path | str) -> dict:
+    """The centerlines FeatureCollection at ``path``: GeoJSON as is, an OSM file converted.
+
+    ``.geojson`` and ``.json`` are parsed directly; anything else is an OSM
+    file for centerlines_from_osm. The single entry point every stage uses,
+    so a county extract and a converted GeoJSON are interchangeable inputs.
+    """
+    path = Path(path)
+    if path.suffix in (".geojson", ".json"):
+        with open(path) as handle:
+            return json.load(handle)
+    return centerlines_from_osm(path)
+
+
 def _cluster_coords(
     coords: list[tuple[float, float]],
 ) -> list[tuple[float, float]]:
@@ -172,19 +247,31 @@ def compute_street_intersections(
 def main() -> None:
     parser = argparse.ArgumentParser(
         description=(
-            "Convert an OSM JSON dump to a centerlines GeoJSON "
-            "for use with georef_from_labels.py."
+            "Convert OSM data (an Overpass JSON dump, or an .osm.pbf / .osm file) "
+            "to a centerlines GeoJSON for use with georef_from_labels.py."
         )
     )
     parser.add_argument(
-        "osm_json", metavar="FILE", help="OSM JSON dump (Overpass API output)"
+        "osm_json",
+        metavar="FILE",
+        help="OSM JSON dump (Overpass API output), or an OSM file (.osm.pbf, .osm)",
     )
     parser.add_argument(
         "--output", metavar="FILE", help="Write GeoJSON to this file (default: stdout)"
     )
+    parser.add_argument(
+        "--no-debug-files",
+        action="store_true",
+        help="Skip streets.txt and intersections.csv beside --output; nothing in "
+        "the pipeline reads them, they are for inspecting a volume's vocabulary.",
+    )
     args = parser.parse_args()
 
-    geojson = osm_to_centerlines(args.osm_json)
+    source = Path(args.osm_json)
+    if source.suffix == ".json":
+        geojson = osm_to_centerlines(args.osm_json)
+    else:
+        geojson = centerlines_from_osm(source)
 
     out_str = json.dumps(geojson, indent=2)
     if args.output:
@@ -195,6 +282,8 @@ def main() -> None:
             file=sys.stderr,
         )
 
+        if args.no_debug_files:
+            return
         out_dir = Path(args.output).parent
         features = geojson["features"]
 

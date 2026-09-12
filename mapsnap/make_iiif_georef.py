@@ -38,6 +38,7 @@ from shapely.geometry import mapping as geom_mapping
 
 from mapsnap.clip_masks import compute_all_clip_masks, geo_polygon_to_svg
 from mapsnap.compare_iiif_georef import redundant_skeleton_keys
+from mapsnap.osm_to_centerlines import load_centerlines
 from mapsnap.split import panels_json_path, read_panels_json
 from mapsnap.utils import default_centerlines, jpeg_dimensions, label_to_page_key
 
@@ -894,8 +895,7 @@ def main() -> None:
     # assigned correctly using color and geometry from all neighboring pages.
     geo_masks: list[ShapelyPolygon | None] = [None] * len(all_valid_items)
     if args.centerlines:
-        with open(args.centerlines) as f:
-            centerlines_geojson: dict = json.load(f)
+        centerlines_geojson: dict = load_centerlines(args.centerlines)
         all_georefs = [georef for _, _, georef, _, _ in all_valid_items]
         print("Computing block-based clipping masks...", file=sys.stderr)
         debug_blocks: list[dict] | None = [] if args.debug_blocks else None

@@ -39,6 +39,7 @@ from mapsnap.keymap.locate import (
     region_scale_m_per_px,
     resolve_keymaps,
 )
+from mapsnap.osm_to_centerlines import load_centerlines
 from mapsnap.streets import (
     DIRECTION_WORDS,
     HINT_STRINGS,
@@ -3984,7 +3985,7 @@ def main() -> None:
             )
         force_intersection = (int(parts[0]), int(parts[1]))
 
-    geojson: dict = json.loads(Path(args.centerlines).read_text())
+    geojson: dict = load_centerlines(args.centerlines)
     block_index = build_block_index(geojson)
     cos_phi = compute_cos_phi(block_index)
     n_blocks = sum(len(v) for v in block_index.values())

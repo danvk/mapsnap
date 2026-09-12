@@ -57,6 +57,7 @@ from mapsnap.keymap.align_page_region import (
 from mapsnap.keymap.fit_keymap import project, unproject
 from mapsnap.keymap.locate import KeymapLocator, discover_keymaps
 from mapsnap.osm_snap import dedupe_thetas, label_osm_rotations
+from mapsnap.osm_to_centerlines import load_centerlines
 from mapsnap.road_model import page_world_affine
 from mapsnap.street_solve import (
     PriorLocation,
@@ -69,6 +70,7 @@ from mapsnap.street_solve import (
     solve_streets_pose,
 )
 from mapsnap.streets import build_block_index
+from mapsnap.utils import default_centerlines
 
 ARTIFACT_DIR = "artifacts/street_solve"
 # A stem family whose centers span more than this is not a location (LA's 1499 family
@@ -498,10 +500,10 @@ def volume_context(volume: Path):
     """(locator, centerlines, filter params, volume scale) for a volume."""
     keymaps = discover_keymaps([str(volume / "p1.jpg")])
     locator = KeymapLocator.from_keymaps(keymaps) if keymaps else None
-    centerlines_path = volume / "centerlines.geojson"
+    centerlines_path = default_centerlines(volume)
     centerlines = (
-        json.loads(centerlines_path.read_text())["features"]
-        if centerlines_path.exists()
+        load_centerlines(centerlines_path)["features"]
+        if centerlines_path is not None
         else []
     )
     return (
