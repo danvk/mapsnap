@@ -18,6 +18,7 @@ from mapsnap.detect_text import (
     page_lab,
     page_vocabs,
     region_color,
+    threads_per_worker,
 )
 from mapsnap.keymap.locate import KeymapLocator
 from mapsnap.streets import (
@@ -563,3 +564,10 @@ def test_resume_skips_only_reads_from_the_same_recognizer(tmp_path):
     assert not reads_are_current(tuned, None)
     # A page with no read at all is always due.
     assert not reads_are_current(tmp_path / "missing.streets.json", None)
+
+
+def test_threads_per_worker_shares_the_cores_without_oversubscribing() -> None:
+    assert threads_per_worker(8, 1) == 8
+    assert threads_per_worker(8, 8) == 1
+    assert threads_per_worker(8, 3) == 2
+    assert threads_per_worker(4, 16) == 1

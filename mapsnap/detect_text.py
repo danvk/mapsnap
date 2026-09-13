@@ -4,6 +4,7 @@ import argparse
 import json
 import math
 import multiprocessing
+import os
 import sys
 from collections.abc import Iterator
 from datetime import UTC, datetime
@@ -765,6 +766,16 @@ def detect_text(
 _worker_state: dict[str, Any] = {}
 
 
+def threads_per_worker(cpu_count: int, workers: int) -> int:
+    """Torch intra-op threads each of ``workers`` processes may use on ``cpu_count`` cores.
+
+    Torch defaults every process to all cores, so N workers run N×cores threads and
+    thrash: 8 CPU workers on 8 cores measured no faster than 1. Splitting the cores
+    lets the workers actually run side by side.
+    """
+    return max(1, cpu_count // max(1, workers))
+
+
 def _worker_init(
     vocab_strings: list[str],
     min_size: int,
@@ -776,8 +787,12 @@ def _worker_init(
     tile_size: int,
     gpu: bool,
     recognizer_weights: str | None,
+    threads: int,
 ) -> None:
     """Initialize per-worker state once per process: create the EasyOCR reader."""
+    import torch
+
+    torch.set_num_threads(threads)
     _worker_state["reader"] = easyocr.Reader(["en"], gpu=gpu, verbose=False)
     if recognizer_weights:
         load_recognizer_weights(_worker_state["reader"], recognizer_weights)
@@ -1127,6 +1142,7 @@ def main() -> None:
             args.tile_size,
             gpu,
             args.recognizer_weights,
+            threads_per_worker(os.cpu_count() or 1, args.num_workers),
         )
         with multiprocessing.Pool(
             args.num_workers,

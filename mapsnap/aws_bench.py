@@ -486,8 +486,10 @@ def main() -> None:
     parser.add_argument(
         "--workers",
         type=int,
-        default=os.cpu_count() or 1,
-        help="ocr workers for the shared-GPU row.",
+        default=1,
+        help="ocr workers for the shared-GPU row; 1 (default) skips it. The EC2 "
+        "bootstrap passes the vCPU count. Keep 1 on a laptop: each worker loads its own "
+        "recognizer and the machine runs out of memory.",
     )
     parser.add_argument(
         "--slow", action="store_true", help="Also CRAFT the raw sheet on the CPU."

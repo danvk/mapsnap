@@ -74,7 +74,7 @@ mv "$WORK/data/model" "$HOME/.EasyOCR/model"
 VOLUME=$(find "$WORK/data" -mindepth 1 -maxdepth 1 -type d | head -1)
 
 # shellcheck disable=SC2086  # BENCH_ARGS is a flag string by design
-uv run mapsnap bench --volume "$VOLUME" --out "$WORK/results.json" $BENCH_ARGS
+uv run mapsnap bench --volume "$VOLUME" --out "$WORK/results.json" --workers "$(nproc)" $BENCH_ARGS
 
 aws s3 cp "$WORK/results.json" "s3://$BUCKET/$RESULT_KEY"
 aws s3 cp /var/log/mapsnap-bench.log "s3://$BUCKET/$LOG_KEY"

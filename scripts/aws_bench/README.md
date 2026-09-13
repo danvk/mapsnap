@@ -91,7 +91,9 @@ uv run mapsnap bench --volume data/hudson_co_nj_1950_vol_9 --out results/laptop.
 ```
 
 (Locally the accelerator is MPS; the bench copies nothing and only writes sidecars
-into a scratch copy of the volume it makes under the output directory.)
+into a scratch copy of the volume it makes under the output directory. Leave
+`--workers` at its default of 1 on a laptop: every ocr worker loads its own recognizer
+and the machine runs out of memory. The EC2 bootstrap passes the instance's vCPU count.)
 
 ## If something goes wrong
 

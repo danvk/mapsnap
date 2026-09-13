@@ -221,3 +221,6 @@ data
 backup-data
 .claude/settings.local.json
 models/*.pth
+
+# mapsnap bench output (scripts/aws_bench/README.md)
+results/
