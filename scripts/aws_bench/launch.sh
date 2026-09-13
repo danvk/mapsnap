@@ -74,17 +74,36 @@ if [ "$MARKET" = spot ]; then
     "MarketType=spot,SpotOptions={SpotInstanceType=one-time,InstanceInterruptionBehavior=terminate}")
 fi
 
-INSTANCE_ID=$(aws ec2 run-instances \
-  --image-id "$AMI" \
-  --instance-type "$INSTANCE_TYPE" \
-  --iam-instance-profile "Name=$ROLE" \
-  ${MARKET_ARGS[@]+"${MARKET_ARGS[@]}"} \
-  --instance-initiated-shutdown-behavior terminate \
-  --metadata-options "HttpTokens=required,HttpEndpoint=enabled" \
-  --block-device-mappings "DeviceName=/dev/sda1,Ebs={VolumeSize=100,VolumeType=gp3,DeleteOnTermination=true}" \
-  --user-data "file://$USER_DATA" \
-  --tag-specifications "ResourceType=instance,Tags=[{Key=Name,Value=mapsnap-bench-$INSTANCE_TYPE},{Key=project,Value=mapsnap-bench}]" \
-  --query 'Instances[0].InstanceId' --output text)
+# Capacity is per availability zone, and without a subnet EC2 keeps picking the same
+# one, so try each zone's default subnet until one has room.
+SUBNETS=$(aws ec2 describe-subnets --filters Name=default-for-az,Values=true \
+  --query 'sort_by(Subnets,&AvailabilityZone)[].[AvailabilityZone,SubnetId]' --output text)
+INSTANCE_ID=""
+while read -r zone subnet; do
+  if OUTPUT=$(aws ec2 run-instances \
+      --image-id "$AMI" \
+      --instance-type "$INSTANCE_TYPE" \
+      --subnet-id "$subnet" \
+      --iam-instance-profile "Name=$ROLE" \
+      ${MARKET_ARGS[@]+"${MARKET_ARGS[@]}"} \
+      --instance-initiated-shutdown-behavior terminate \
+      --metadata-options "HttpTokens=required,HttpEndpoint=enabled" \
+      --block-device-mappings "DeviceName=/dev/sda1,Ebs={VolumeSize=100,VolumeType=gp3,DeleteOnTermination=true}" \
+      --user-data "file://$USER_DATA" \
+      --tag-specifications "ResourceType=instance,Tags=[{Key=Name,Value=mapsnap-bench-$INSTANCE_TYPE},{Key=project,Value=mapsnap-bench}]" \
+      --query 'Instances[0].InstanceId' --output text 2>&1); then
+    INSTANCE_ID=$OUTPUT
+    echo "launched $INSTANCE_TYPE ($MARKET) in $zone as $INSTANCE_ID at ref ${GIT_REF:0:10}; bench args: '${BENCH_ARGS}'"
+    break
+  fi
+  case "$OUTPUT" in
+    *InsufficientInstanceCapacity*|*Unsupported*) echo "$zone: no $MARKET capacity for $INSTANCE_TYPE, trying the next zone" ;;
+    *) echo "$OUTPUT" >&2; rm -f "$USER_DATA"; exit 1 ;;
+  esac
+done <<< "$SUBNETS"
 rm -f "$USER_DATA"
-echo "launched $INSTANCE_TYPE ($MARKET) as $INSTANCE_ID at ref ${GIT_REF:0:10}; bench args: '${BENCH_ARGS}'"
+if [ -z "$INSTANCE_ID" ]; then
+  echo "no $MARKET capacity for $INSTANCE_TYPE in any zone; retry later or use --on-demand" >&2
+  exit 1
+fi
 echo "result will land at s3://$BUCKET/$PREFIX/results/$INSTANCE_TYPE-$INSTANCE_ID.json"

@@ -113,7 +113,9 @@ For a live shell (no SSH keys involved) install the Session Manager plugin once 
 AWS_PROFILE=mapsnap aws ssm start-session --region us-west-2 --target <id>
 ```
 
-`launch.sh --on-demand` sidesteps a spot capacity shortage at roughly twice the price.
+`launch.sh` tries every availability zone before giving up on capacity;
+`launch.sh --on-demand` sidesteps a spot shortage at roughly twice the price, within
+the separate on-demand vCPU quota.
 
 ## What the numbers decide
 
