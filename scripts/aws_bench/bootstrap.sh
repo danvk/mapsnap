@@ -48,7 +48,13 @@ fi
 
 # From here on the log reaches S3 whatever happens: every two minutes in the
 # background, and once more at exit before the instance powers itself off.
-upload_log() { aws s3 cp "$LOG" "s3://$BUCKET/$LOG_KEY" > /dev/null 2>&1 || true; }
+upload_log() {
+  aws s3 cp "$LOG" "s3://$BUCKET/$LOG_KEY" > /dev/null 2>&1 || true
+  # The bench's own stage log (every pipeline command's output) rides along.
+  if [ -f "$WORK/results.log" ]; then
+    aws s3 cp "$WORK/results.log" "s3://$BUCKET/${LOG_KEY%.log}.stages.log" > /dev/null 2>&1 || true
+  fi
+}
 ( while sleep 120; do upload_log; done ) &
 finish() {
   local status=$?

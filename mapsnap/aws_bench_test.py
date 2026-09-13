@@ -3,6 +3,7 @@
 from pathlib import Path
 
 from mapsnap.aws_bench import (
+    Bench,
     clear_sidecars,
     format_report,
     machine_label,
@@ -86,6 +87,7 @@ def test_report_lines_up_machines_and_fills_gaps() -> None:
             {"stage": "craft", "device": "cuda", "workers": 1, "per_page": 1.5},
             {"stage": "craft", "device": "cpu", "workers": 1, "per_page": 40.0},
             {"stage": "ocr", "device": "cuda", "workers": 4, "per_page": 0.9},
+            {"stage": "ocr", "device": "cpu", "workers": 1, "per_page": None},
         ],
     }
     assert machine_label(laptop["machine"]) == "mbp (mps)"
@@ -105,4 +107,18 @@ def test_report_lines_up_machines_and_fills_gaps() -> None:
     assert lines[1].split() == ["craft", "cpu", "1", "25.00", "40.00"]
     assert lines[2].split() == ["craft", "cuda", "1", "-", "1.50"]
     assert lines[3].split() == ["craft", "mps", "1", "4.50", "-"]
-    assert lines[4].split() == ["ocr", "cuda", "4", "-", "0.90"]
+    assert lines[4].split() == ["ocr", "cpu", "1", "-", "fail"]
+    assert lines[5].split() == ["ocr", "cuda", "4", "-", "0.90"]
+
+
+def test_a_failing_stage_is_recorded_and_the_bench_continues(tmp_path: Path) -> None:
+    page = tmp_path / "p1.jpg"
+    page.write_bytes(b"jpg")
+    bench = Bench(tmp_path, tmp_path / "bench.log", workers=1)
+    bench.cli_stage("craft", "cpu", [page], lambda pages: ["false"], ())
+    bench.single_run("ocr", "cpu", [page], ["true"], ())
+    assert [(r.stage, r.per_page is None) for r in bench.results] == [
+        ("craft", True),
+        ("ocr", False),
+    ]
+    assert bench.results[0].note.startswith("CalledProcessError")

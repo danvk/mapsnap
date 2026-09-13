@@ -43,7 +43,7 @@ class StageResult:
     pages: int
     workers: int
     seconds: float
-    per_page: float
+    per_page: float | None  # None when the stage failed; see ``note``
     startup: float | None = None
     note: str = ""
 
@@ -205,11 +205,33 @@ class Bench:
         startup = (
             f" startup {result.startup:.1f}s" if result.startup is not None else ""
         )
+        per_page = (
+            f"{result.per_page:6.2f} s/page"
+            if result.per_page is not None
+            else "FAILED"
+        )
         print(
             f"  {result.stage:22s} {result.device:5s} x{result.workers:<2d} "
-            f"{result.pages:3d} pages {result.seconds:7.1f}s = {result.per_page:6.2f} s/page"
+            f"{result.pages:3d} pages {result.seconds:7.1f}s = {per_page}"
             f"{startup} {result.note}",
             flush=True,
+        )
+
+    def record_failure(
+        self, stage: str, device: str, workers: int, error: Exception
+    ) -> None:
+        """Keep going after a broken stage: the other rows are still worth having."""
+        detail = str(error).splitlines()[0][:160] if str(error) else ""
+        self.record(
+            StageResult(
+                stage,
+                device,
+                0,
+                workers,
+                0.0,
+                None,
+                note=f"{type(error).__name__}: {detail}",
+            )
         )
 
     def cli_stage(
@@ -221,10 +243,14 @@ class Bench:
         sidecars: tuple[str, ...],
     ) -> None:
         """Time ``command`` on one page then on all ``pages``; report the marginal cost."""
-        clear_sidecars(pages, sidecars)
-        seconds_one = timed_cli(command(pages[:1]), self.log)
-        clear_sidecars(pages, sidecars)
-        seconds_all = timed_cli(command(pages), self.log)
+        try:
+            clear_sidecars(pages, sidecars)
+            seconds_one = timed_cli(command(pages[:1]), self.log)
+            clear_sidecars(pages, sidecars)
+            seconds_all = timed_cli(command(pages), self.log)
+        except (subprocess.CalledProcessError, OSError) as error:
+            self.record_failure(stage, device, 1, error)
+            return
         per_page = per_page_seconds(seconds_one, seconds_all, len(pages))
         self.record(
             StageResult(
@@ -249,8 +275,12 @@ class Bench:
         note: str = "",
     ) -> None:
         """Time one run of ``cmd``; per-page includes startup (a throughput figure)."""
-        clear_sidecars(pages, sidecars)
-        seconds = timed_cli(cmd, self.log)
+        try:
+            clear_sidecars(pages, sidecars)
+            seconds = timed_cli(cmd, self.log)
+        except (subprocess.CalledProcessError, OSError) as error:
+            self.record_failure(stage, device, workers, error)
+            return
         self.record(
             StageResult(
                 stage,
@@ -293,14 +323,18 @@ class Bench:
         predict: Callable[[object, Path, str], None],
     ) -> None:
         """Time an in-process UNet: model load once, then one prediction per page."""
-        started = time.perf_counter()
-        model = loader(device)
-        predict(model, pages[0], device)  # warm-up (kernel compilation, allocator)
-        startup = time.perf_counter() - started
-        started = time.perf_counter()
-        for page in pages:
-            predict(model, page, device)
-        seconds = time.perf_counter() - started
+        try:
+            started = time.perf_counter()
+            model = loader(device)
+            predict(model, pages[0], device)  # warm-up (kernel compilation, allocator)
+            startup = time.perf_counter() - started
+            started = time.perf_counter()
+            for page in pages:
+                predict(model, page, device)
+            seconds = time.perf_counter() - started
+        except (RuntimeError, OSError, ValueError) as error:
+            self.record_failure(stage, device, 1, error)
+            return
         self.record(
             StageResult(
                 stage,
@@ -463,7 +497,9 @@ def format_report(records: list[dict[str, object]]) -> str:
     ]
     for (stage, device, workers), cells in sorted(rows.items()):
         values = "  ".join(
-            f"{cells[label]:{width}.2f}" if label in cells else f"{'-':>{width}s}"
+            f"{cells[label]:{width}.2f}"
+            if cells.get(label) is not None
+            else f"{'fail' if label in cells else '-':>{width}s}"
             for label in labels
         )
         lines.append(f"{stage:22s} {device:6s} {workers:3d}  {values}")

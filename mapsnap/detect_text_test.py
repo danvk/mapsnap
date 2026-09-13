@@ -12,6 +12,7 @@ from mapsnap.detect_text import (
     _merge_vocab_passes,
     _nms_bboxes,
     annotate_backgrounds,
+    build_reader,
     filter_args,
     has_split_panels,
     lab_to_hex,
@@ -571,3 +572,23 @@ def test_threads_per_worker_shares_the_cores_without_oversubscribing() -> None:
     assert threads_per_worker(8, 8) == 1
     assert threads_per_worker(8, 3) == 2
     assert threads_per_worker(4, 16) == 1
+
+
+def test_build_reader_keeps_the_recognizer_float(monkeypatch) -> None:
+    import easyocr
+
+    captured: dict[str, object] = {}
+
+    def fake_reader(langs: list[str], **kwargs: object) -> str:
+        captured["langs"] = langs
+        captured.update(kwargs)
+        return "reader"
+
+    monkeypatch.setattr(easyocr, "Reader", fake_reader)
+    assert build_reader(gpu=False) == "reader"
+    assert captured == {
+        "langs": ["en"],
+        "gpu": False,
+        "verbose": False,
+        "quantize": False,
+    }
