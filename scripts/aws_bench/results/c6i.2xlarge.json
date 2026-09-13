@@ -1,0 +1,84 @@
+{
+  "machine": {
+    "hostname": "ip-172-31-40-97",
+    "platform": "Linux-6.17.0-1020-aws-x86_64-with-glibc2.39",
+    "cpu": "Intel(R) Xeon(R) Platinum 8375C CPU @ 2.90GHz",
+    "cpu_count": 8,
+    "python": "3.12.3",
+    "torch": "2.12.0+cu130",
+    "accelerator": null,
+    "instance_type": "c6i.2xlarge",
+    "instance_id": "i-0a2580fa58d8afd8e"
+  },
+  "started": "2026-09-13T22:24:56.360135+00:00",
+  "finished": "2026-09-13T22:43:50.797626+00:00",
+  "args": {
+    "volume": "/opt/bench/data/hudson_co_nj_1950_vol_9",
+    "out": "/opt/bench/results.json",
+    "cpu_pages": "16",
+    "workers": "8",
+    "slow": "True"
+  },
+  "stages": [
+    {
+      "stage": "craft",
+      "device": "cpu",
+      "pages": 16,
+      "workers": 1,
+      "seconds": 317.33053659899997,
+      "per_page": 19.227972175799998,
+      "startup": 9.682981786199996,
+      "note": ""
+    },
+    {
+      "stage": "craft raw sheet",
+      "device": "cpu",
+      "pages": 1,
+      "workers": 1,
+      "seconds": 524.52674725,
+      "per_page": 524.52674725,
+      "startup": null,
+      "note": "tiled at native resolution"
+    },
+    {
+      "stage": "ocr",
+      "device": "cpu",
+      "pages": 16,
+      "workers": 1,
+      "seconds": 72.82753957600005,
+      "per_page": 3.9121023277333355,
+      "startup": 10.23390233226668,
+      "note": ""
+    },
+    {
+      "stage": "ocr",
+      "device": "cpu",
+      "pages": 16,
+      "workers": 8,
+      "seconds": 41.233774753999796,
+      "per_page": 2.5771109221249873,
+      "startup": null,
+      "note": "wall time incl. startup"
+    },
+    {
+      "stage": "road unet",
+      "device": "cpu",
+      "pages": 16,
+      "workers": 1,
+      "seconds": 118.92073321400017,
+      "per_page": 7.43254582587501,
+      "startup": 7.441315313999894,
+      "note": ""
+    },
+    {
+      "stage": "region unet",
+      "device": "cpu",
+      "pages": 16,
+      "workers": 1,
+      "seconds": 4.64796956400005,
+      "per_page": 0.2904980977500031,
+      "startup": 1.256965584999989,
+      "note": ""
+    }
+  ]
+}

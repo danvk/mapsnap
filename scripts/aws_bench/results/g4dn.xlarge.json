@@ -1,0 +1,157 @@
+{
+  "machine": {
+    "hostname": "ip-172-31-32-32",
+    "platform": "Linux-6.17.0-1020-aws-x86_64-with-glibc2.39",
+    "cpu": "Intel(R) Xeon(R) Platinum 8259CL CPU @ 2.50GHz",
+    "cpu_count": 4,
+    "python": "3.12.3",
+    "torch": "2.12.0+cu130",
+    "accelerator": "cuda",
+    "instance_type": "g4dn.xlarge",
+    "instance_id": "i-057f56b89d0197e4f",
+    "gpu": "Tesla T4",
+    "cuda": "13.0",
+    "gpu_memory_gb": 14.6
+  },
+  "started": "2026-09-13T22:25:04.002441+00:00",
+  "finished": "2026-09-13T22:52:01.381946+00:00",
+  "args": {
+    "volume": "/opt/bench/data/hudson_co_nj_1950_vol_9",
+    "out": "/opt/bench/results.json",
+    "cpu_pages": "8",
+    "workers": "4",
+    "slow": "False"
+  },
+  "stages": [
+    {
+      "stage": "craft",
+      "device": "cpu",
+      "pages": 8,
+      "workers": 1,
+      "seconds": 374.770057295,
+      "per_page": 45.209792914714285,
+      "startup": 13.091713977285707,
+      "note": ""
+    },
+    {
+      "stage": "craft",
+      "device": "cuda",
+      "pages": 93,
+      "workers": 1,
+      "seconds": 273.694526203,
+      "per_page": 2.848014574163044,
+      "startup": 8.829170805836926,
+      "note": ""
+    },
+    {
+      "stage": "craft raw sheet",
+      "device": "cuda",
+      "pages": 1,
+      "workers": 1,
+      "seconds": 97.925633361,
+      "per_page": 97.925633361,
+      "startup": null,
+      "note": "tiled at native resolution"
+    },
+    {
+      "stage": "ocr",
+      "device": "cuda",
+      "pages": 93,
+      "workers": 1,
+      "seconds": 232.20161740000003,
+      "per_page": 2.4002779077826086,
+      "startup": 8.975771976217445,
+      "note": ""
+    },
+    {
+      "stage": "ocr",
+      "device": "cuda",
+      "pages": 93,
+      "workers": 4,
+      "seconds": 123.124724109,
+      "per_page": 1.3239217646129031,
+      "startup": null,
+      "note": "wall time incl. startup"
+    },
+    {
+      "stage": "ocr",
+      "device": "cpu",
+      "pages": 8,
+      "workers": 1,
+      "seconds": 87.83072937099996,
+      "per_page": 8.855614140857142,
+      "startup": 16.985816244142825,
+      "note": ""
+    },
+    {
+      "stage": "ocr",
+      "device": "cpu",
+      "pages": 8,
+      "workers": 4,
+      "seconds": 56.7094980710001,
+      "per_page": 7.088687258875012,
+      "startup": null,
+      "note": "wall time incl. startup"
+    },
+    {
+      "stage": "ocr raw sheet",
+      "device": "cuda",
+      "pages": 1,
+      "workers": 1,
+      "seconds": 27.422946994000085,
+      "per_page": 27.422946994000085,
+      "startup": null,
+      "note": ""
+    },
+    {
+      "stage": "road unet",
+      "device": "cuda",
+      "pages": 93,
+      "workers": 1,
+      "seconds": 49.60825941999997,
+      "per_page": 0.5334221443010749,
+      "startup": 1.005220417999908,
+      "note": ""
+    },
+    {
+      "stage": "region unet",
+      "device": "cuda",
+      "pages": 93,
+      "workers": 1,
+      "seconds": 4.661736891000146,
+      "per_page": 0.050126203129033826,
+      "startup": 1.3822783720002008,
+      "note": ""
+    },
+    {
+      "stage": "road unet",
+      "device": "cpu",
+      "pages": 8,
+      "workers": 1,
+      "seconds": 144.56813526299993,
+      "per_page": 18.07101690787499,
+      "startup": 17.543818257999874,
+      "note": ""
+    },
+    {
+      "stage": "region unet",
+      "device": "cpu",
+      "pages": 8,
+      "workers": 1,
+      "seconds": 5.207792431999906,
+      "per_page": 0.6509740539999882,
+      "startup": 0.6720448339999621,
+      "note": ""
+    },
+    {
+      "stage": "keymap numbers",
+      "device": "cuda",
+      "pages": 1,
+      "workers": 1,
+      "seconds": 10.392118900000014,
+      "per_page": 10.392118900000014,
+      "startup": null,
+      "note": ""
+    }
+  ]
+}

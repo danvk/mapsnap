@@ -1,0 +1,154 @@
+{
+  "machine": {
+    "hostname": "danvk-air.lan",
+    "platform": "macOS-14.6.1-arm64-arm-64bit-Mach-O",
+    "cpu": "Apple M2",
+    "cpu_count": 8,
+    "python": "3.13.2",
+    "torch": "2.12.0",
+    "accelerator": "mps",
+    "instance_type": null,
+    "instance_id": null
+  },
+  "started": "2026-09-13T20:51:16.831682+00:00",
+  "finished": "2026-09-13T21:19:08.152272+00:00",
+  "args": {
+    "volume": "data/hudson_co_nj_1950_vol_9",
+    "out": "results/laptop.json",
+    "cpu_pages": "8",
+    "workers": "8",
+    "slow": "False"
+  },
+  "stages": [
+    {
+      "stage": "craft",
+      "device": "cpu",
+      "pages": 8,
+      "workers": 1,
+      "seconds": 194.95859345793724,
+      "per_page": 23.303863577411644,
+      "startup": 8.527684838644095,
+      "note": ""
+    },
+    {
+      "stage": "craft",
+      "device": "mps",
+      "pages": 93,
+      "workers": 1,
+      "seconds": 440.7438215839211,
+      "per_page": 4.685811404445026,
+      "startup": 4.9633609705336355,
+      "note": ""
+    },
+    {
+      "stage": "craft raw sheet",
+      "device": "mps",
+      "pages": 1,
+      "workers": 1,
+      "seconds": 156.68252420797944,
+      "per_page": 156.68252420797944,
+      "startup": null,
+      "note": "tiled at native resolution"
+    },
+    {
+      "stage": "ocr",
+      "device": "mps",
+      "pages": 93,
+      "workers": 1,
+      "seconds": 208.85142383293714,
+      "per_page": 2.1702723840540075,
+      "startup": 7.01609211591447,
+      "note": ""
+    },
+    {
+      "stage": "ocr",
+      "device": "mps",
+      "pages": 93,
+      "workers": 8,
+      "seconds": 202.6977318749996,
+      "per_page": 2.1795455040322538,
+      "startup": null,
+      "note": "wall time incl. startup"
+    },
+    {
+      "stage": "ocr",
+      "device": "cpu",
+      "pages": 8,
+      "workers": 1,
+      "seconds": 38.89964262500871,
+      "per_page": 3.3351191368585984,
+      "startup": 12.218689530139923,
+      "note": ""
+    },
+    {
+      "stage": "ocr",
+      "device": "cpu",
+      "pages": 8,
+      "workers": 8,
+      "seconds": 26.582238291040994,
+      "per_page": 3.3227797863801243,
+      "startup": null,
+      "note": "wall time incl. startup"
+    },
+    {
+      "stage": "ocr raw sheet",
+      "device": "mps",
+      "pages": 1,
+      "workers": 1,
+      "seconds": 18.41972874989733,
+      "per_page": 18.41972874989733,
+      "startup": null,
+      "note": ""
+    },
+    {
+      "stage": "road unet",
+      "device": "mps",
+      "pages": 93,
+      "workers": 1,
+      "seconds": 157.20016645803116,
+      "per_page": 1.6903243705164641,
+      "startup": 1.6479225419461727,
+      "note": ""
+    },
+    {
+      "stage": "region unet",
+      "device": "mps",
+      "pages": 93,
+      "workers": 1,
+      "seconds": 13.72346504102461,
+      "per_page": 0.1475641402260711,
+      "startup": 0.6601493749767542,
+      "note": ""
+    },
+    {
+      "stage": "road unet",
+      "device": "cpu",
+      "pages": 8,
+      "workers": 1,
+      "seconds": 112.52673387492541,
+      "per_page": 14.065841734365677,
+      "startup": 14.4163541670423,
+      "note": ""
+    },
+    {
+      "stage": "region unet",
+      "device": "cpu",
+      "pages": 8,
+      "workers": 1,
+      "seconds": 4.131925167050213,
+      "per_page": 0.5164906458812766,
+      "startup": 0.5638380000600591,
+      "note": ""
+    },
+    {
+      "stage": "keymap numbers",
+      "device": "mps",
+      "pages": 1,
+      "workers": 1,
+      "seconds": 7.485257333959453,
+      "per_page": 7.485257333959453,
+      "startup": null,
+      "note": ""
+    }
+  ]
+}
