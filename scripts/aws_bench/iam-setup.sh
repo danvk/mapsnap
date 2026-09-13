@@ -60,6 +60,9 @@ LAUNCH_POLICY=$(cat <<EOF
    "Resource": "arn:aws:ssm:*::parameter/aws/service/deeplearning/*"},
   {"Effect": "Allow", "Action": ["ssm:StartSession", "ssm:TerminateSession", "ssm:DescribeInstanceInformation"],
    "Resource": "*"},
+  {"Effect": "Allow", "Action": ["servicequotas:GetServiceQuota", "servicequotas:ListServiceQuotas",
+                                 "servicequotas:ListRequestedServiceQuotaChangeHistoryByQuota"],
+   "Resource": "*"},
   {"Effect": "Allow", "Action": ["s3:ListBucket"], "Resource": "arn:aws:s3:::$BUCKET"},
   {"Effect": "Allow", "Action": ["s3:GetObject", "s3:PutObject", "s3:DeleteObject"],
    "Resource": "arn:aws:s3:::$BUCKET/$PREFIX/*"}

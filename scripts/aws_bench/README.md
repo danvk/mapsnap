@@ -18,8 +18,29 @@ scripts/aws_bench/iam-setup.sh              # role mapsnap-bench + launch rights
 ```
 
 `iam-setup.sh` creates the `mapsnap-bench` instance role (read the bucket, write
-`_bench/*`, SSM Session Manager) and adds an inline launch policy to the existing
-`mapsnap-mirror` IAM user, so every later step runs with `AWS_PROFILE=mapsnap`.
+`_bench/*`, SSM Session Manager), EC2's service-linked role for Spot, and adds an
+inline launch policy to the existing `mapsnap-mirror` IAM user, so every later step
+runs with `AWS_PROFILE=mapsnap`.
+
+A fresh account's EC2 vCPU quotas for GPU instances are zero, and the Standard
+family's are a handful, so `run-instances` fails with `MaxSpotInstanceCountExceeded`
+(or `VcpuLimitExceeded` on-demand) until they are raised. Still in the admin session:
+
+```sh
+REGION=us-west-2
+for code in L-3819A6DF L-DB2E81BA L-34B43A08 L-1216C47A; do   # G+VT spot, G+VT on-demand, Standard spot, Standard on-demand
+  aws service-quotas get-service-quota --region $REGION --service-code ec2 --quota-code $code \
+    --query '[Quota.QuotaName,Quota.Value]' --output text
+done
+aws service-quotas request-service-quota-increase --region $REGION --service-code ec2 --quota-code L-3819A6DF --desired-value 32
+aws service-quotas request-service-quota-increase --region $REGION --service-code ec2 --quota-code L-DB2E81BA --desired-value 16
+aws service-quotas request-service-quota-increase --region $REGION --service-code ec2 --quota-code L-34B43A08 --desired-value 32
+```
+
+Quotas are vCPUs: the three GPU launches below need 16 Spot vCPUs at once, the
+c6i.2xlarge control needs 8 Standard. Modest increases are usually granted
+automatically within the hour; larger ones (the corpus run will want hundreds) open
+a support case, so request those early.
 
 ## Run
 
