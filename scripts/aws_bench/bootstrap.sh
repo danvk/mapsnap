@@ -8,9 +8,10 @@
 # JSON result and the full log, and powers the instance off (the launch sets
 # InstanceInitiatedShutdownBehavior=terminate, so that also terminates it).
 #
-# Anything that fails leaves the instance running with the log at
-# /var/log/mapsnap-bench.log; read it with `aws ec2 get-console-output` or an SSM
-# session (see README.md), then terminate the instance by hand.
+# The log (/var/log/mapsnap-bench.log) is uploaded to _bench/logs/ every two minutes
+# and again on exit, success or failure, and the instance powers off either way so a
+# failed bootstrap never sits idle. `aws ec2 get-console-output` shows the same
+# trace while the instance is up.
 set -euxo pipefail
 exec > >(tee -a /var/log/mapsnap-bench.log) 2>&1
 
@@ -19,6 +20,7 @@ PREFIX="__PREFIX__"
 GIT_REF="__GIT_REF__"
 BENCH_ARGS="__BENCH_ARGS__"
 TORCH_CUDA_FALLBACK="cu126"  # wheel variant for drivers too old for the locked CUDA 13 build
+LOG=/var/log/mapsnap-bench.log
 
 export DEBIAN_FRONTEND=noninteractive
 export HOME=/root
@@ -43,6 +45,19 @@ if ! command -v aws > /dev/null; then
   unzip -q /tmp/awscli.zip -d /tmp
   /tmp/aws/install
 fi
+
+# From here on the log reaches S3 whatever happens: every two minutes in the
+# background, and once more at exit before the instance powers itself off.
+upload_log() { aws s3 cp "$LOG" "s3://$BUCKET/$LOG_KEY" > /dev/null 2>&1 || true; }
+( while sleep 120; do upload_log; done ) &
+finish() {
+  local status=$?
+  echo "bootstrap exit status $status"
+  upload_log
+  shutdown -h now
+}
+trap finish EXIT
+
 curl -LsSf https://astral.sh/uv/install.sh | sh
 
 cd "$WORK"
@@ -54,7 +69,10 @@ uv sync --frozen --no-dev
 
 # The lockfile's Linux torch is the CUDA 13 build, which needs driver >= 580. Older
 # DLAMI drivers get the cu126 wheel instead so torch.cuda.is_available() stays true.
-if command -v nvidia-smi > /dev/null; then
+# The DLAMI ships nvidia-smi even on GPU-less instances, where it exits non-zero
+# ("couldn't communicate with the NVIDIA driver"), so test that it works, not that
+# it exists.
+if nvidia-smi > /dev/null 2>&1; then
   nvidia-smi
   DRIVER=$(nvidia-smi --query-gpu=driver_version --format=csv,noheader | head -1)
   if [ "${DRIVER%%.*}" -lt 580 ]; then
@@ -77,6 +95,5 @@ VOLUME=$(find "$WORK/data" -mindepth 1 -maxdepth 1 -type d | head -1)
 uv run mapsnap bench --volume "$VOLUME" --out "$WORK/results.json" --workers "$(nproc)" $BENCH_ARGS
 
 aws s3 cp "$WORK/results.json" "s3://$BUCKET/$RESULT_KEY"
-aws s3 cp /var/log/mapsnap-bench.log "s3://$BUCKET/$LOG_KEY"
 echo "benchmark done: s3://$BUCKET/$RESULT_KEY"
-shutdown -h now
+# The EXIT trap uploads the log and powers off.
