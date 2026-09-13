@@ -91,6 +91,10 @@ SUBCOMMANDS: dict[str, tuple[str, str]] = {
         "mapsnap.loc_mirror",
         "Build the Sanborn mirror (25% JPEGs + raw key-map candidates) from LoC JP2s.",
     ),
+    "bench": (
+        "mapsnap.aws_bench",
+        "Time craft/ocr/UNet stages on this machine, accelerator vs CPU (#354 sizing)",
+    ),
     "download-oim": (
         "mapsnap.download_oim_iiif",
         "Fetch all images for a Sanborn volume from OldInsuranceMaps.net",
