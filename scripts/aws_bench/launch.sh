@@ -78,7 +78,7 @@ INSTANCE_ID=$(aws ec2 run-instances \
   --image-id "$AMI" \
   --instance-type "$INSTANCE_TYPE" \
   --iam-instance-profile "Name=$ROLE" \
-  "${MARKET_ARGS[@]}" \
+  ${MARKET_ARGS[@]+"${MARKET_ARGS[@]}"} \
   --instance-initiated-shutdown-behavior terminate \
   --metadata-options "HttpTokens=required,HttpEndpoint=enabled" \
   --block-device-mappings "DeviceName=/dev/sda1,Ebs={VolumeSize=100,VolumeType=gp3,DeleteOnTermination=true}" \
