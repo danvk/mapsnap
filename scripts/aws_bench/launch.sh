@@ -33,7 +33,8 @@ while [ $# -gt 0 ]; do
 done
 export AWS_PROFILE=${AWS_PROFILE:-mapsnap}
 export AWS_REGION=$REGION
-HERE=$(cd "$(dirname "$0")" && pwd)
+# `cd` echoes the directory when CDPATH is set, so silence it.
+HERE=$(cd -- "$(dirname -- "$0")" > /dev/null && pwd -P)
 
 # The ref must be on GitHub for the instance to check it out.
 if ! git branch -r --contains "$GIT_REF" 2>/dev/null | grep -q origin; then
