@@ -22,6 +22,14 @@ ROLE=mapsnap-bench
 ACCOUNT=$(aws sts get-caller-identity --query Account --output text)
 echo "account $ACCOUNT, bucket $BUCKET, user $USER_NAME"
 
+# A spot request needs EC2's service-linked role for Spot, which an account gets
+# the first time an admin creates it. Without it the launcher's first spot request
+# fails with AuthFailure.ServiceLinkedRoleCreationNotPermitted.
+if ! aws iam get-role --role-name AWSServiceRoleForEC2Spot > /dev/null 2>&1; then
+  aws iam create-service-linked-role --aws-service-name spot.amazonaws.com > /dev/null
+  echo "created service-linked role AWSServiceRoleForEC2Spot"
+fi
+
 TRUST=$(cat <<EOF
 {"Version": "2012-10-17", "Statement": [{"Effect": "Allow",
   "Principal": {"Service": "ec2.amazonaws.com"}, "Action": "sts:AssumeRole"}]}
