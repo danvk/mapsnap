@@ -68,12 +68,25 @@ benchmark hold on real volumes rather than Hudson.
 ## Full run
 
 ```sh
-scripts/loc_craft/launch.sh --shards 4 --on-demand-from 2
+scripts/loc_craft/launch.sh --shards 4 --on-demand-from 2 --workers 2
 ```
 
 Four shards, the first two on spot and the last two on demand, which is the
-whole G-family quota. Each instance terminates itself when its shard is done.
-With more quota, raise `--shards` to match.
+whole G-family quota at 8 vCPUs each. Each instance terminates itself when its
+shard is done. With more quota, raise `--shards` to match.
+
+Spot launches try the cheapest availability zone that has capacity, not the
+alphabetically first: the spread is real money over a multi-day run (g6.xlarge
+was $0.556 in us-west-2d against $0.720 in us-west-2a on 2026-09-14, and
+alphabetical order always picked the dearest). The chosen order is printed at
+launch.
+
+Re-partitioning later is safe, because an item is skipped on the strength of its
+sidecars in S3 rather than on which shard claimed it. To grow the fleet mid-run,
+terminate the running instances and relaunch with the larger `--shards`: only
+the items actually in flight are repeated. Running two partitions at once is the
+thing to avoid, since their shards overlap and both would compute the same
+items.
 
 Watch:
 
