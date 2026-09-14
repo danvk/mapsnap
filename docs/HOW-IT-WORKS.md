@@ -31,7 +31,7 @@ through per-page sidecar files (`p220.streets.json`, `p220.georef.json`,
 | 6 | `adjacency` | [Sheets that name their neighbors](#6-adjacency-sheets-that-name-their-neighbors) |
 | 7 | `georef` | [Label axes, intersections and RANSAC](#7-georef-label-axes-intersections-and-ransac) |
 | 8 | `adjacency-gate` | [Printed claims against fitted poses](#8-adjacency-gate-printed-claims-against-fitted-poses) |
-| 9 | road model | [P(road), a picture of the streets](#9-road-model-proad-a-picture-of-the-streets) |
+| 9 | `roadprob` | [P(road), a picture of the streets](#9-road-model-proad-a-picture-of-the-streets) |
 | 10 | `snap` | [Matching geometry, not names](#10-snap-matching-geometry-not-names) |
 | 11 | `street-solve` | [Labels as constraints](#11-street-solve-labels-as-constraints) |
 | 12 | `reconcile` | [One arbiter for every pose](#12-reconcile-one-arbiter-for-every-pose) |
@@ -74,7 +74,9 @@ Many sheets carry two to four separate map panels divided by heavy black rules,
 often L-shaped or stepped. `mapsnap split` vectorizes the rules, cuts the sheet
 into panels and writes each as its own page (`p209__1`, `p209__2`) with the
 out-of-panel area masked white ([#70](https://github.com/danvk/mapsnap/pull/70); the OIM-truth harness and shape guard of
-[#272](https://github.com/danvk/mapsnap/pull/272)). Two-panel sheets number the panel holding the bottom-left corner first,
+[#272](https://github.com/danvk/mapsnap/pull/272)). A panel inherits what the two whole-sheet
+model passes already produced for its parent: CRAFT's boxes, remapped into the
+panel's frame, and a crop of the parent's P(road) map ([#354](https://github.com/danvk/mapsnap/issues/354)). Two-panel sheets number the panel holding the bottom-left corner first,
 matching OldInsuranceMaps ([#382](https://github.com/danvk/mapsnap/pull/382)), so truth and output name the same panel.
 
 Key-map sheets get a second, stricter look: a split must cut away a box flush
@@ -282,7 +284,10 @@ Everything so far ran on names. The next stage runs on ink. A small UNet turns
 a page into a **road-probability map**: it was trained on free labels, OSM
 centerlines drawn through pages the name channel had already fitted ([#125](https://github.com/danvk/mapsnap/pull/125)),
 resampled uniformly so wide streets and alleys both count ([#348](https://github.com/danvk/mapsnap/pull/348)), and
-recalibrated in its fourth version ([#350](https://github.com/danvk/mapsnap/pull/350)). A color variant does the same for
+recalibrated in its fourth version ([#350](https://github.com/danvk/mapsnap/pull/350)). `mapsnap roadprob` caches one
+per page as `<stem>.roadprob.jpg`; like CRAFT it depends only on the image, so
+it runs once over the parent sheets, before `split` cuts the panels' maps out of
+their parent's, and `snap` infers on demand only for a page that has none. A color variant does the same for
 key maps, whose streets are paper-colored gaps between painted blocks ([#211](https://github.com/danvk/mapsnap/issues/211),
 [#225](https://github.com/danvk/mapsnap/pull/225); that matcher is an experiment, not part of the production fit).
 

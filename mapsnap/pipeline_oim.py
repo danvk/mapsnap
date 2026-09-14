@@ -8,6 +8,7 @@ from pathlib import Path
 from mapsnap.craft import volume_craft_images
 from mapsnap.download_osm import BUFFER_M
 from mapsnap.keymap.records import recorded_keymap_keys
+from mapsnap.roadprob import volume_roadprob_images
 from mapsnap.utils import (
     Step,
     image_stem,
@@ -198,6 +199,12 @@ def main() -> None:
                 *volume_craft_images(dir_path, keymap_keys),
             ]
         )
+
+    # P(road) for every parent sheet, the road-UNet counterpart of craft: a
+    # GPU pass whose output depends only on the image, so `split` cuts panels
+    # out of it rather than inferring their own (#354).
+    with step("roadprob"):
+        run_cmd(["mapsnap", "roadprob", "--resume", *volume_roadprob_images(dir_path)])
 
     # Printed adjacent-sheet graph. Runs BEFORE the key-map step so its mutual
     # edges can repair key-map page-number assignments (#213); key-map sheets

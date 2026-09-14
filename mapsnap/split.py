@@ -30,6 +30,7 @@ from skimage.morphology import medial_axis
 
 from mapsnap.corner_boxes import BOX_MIN_THICK_PX, corner_boxes, panels_with_boxes
 from mapsnap.keymap.log import append_keymap_log
+from mapsnap.roadprob import derive_panel_roadprob
 from mapsnap.utils import image_stem, jpeg_dimensions
 
 
@@ -1132,6 +1133,7 @@ PANEL_SIDECAR_SUFFIXES = (
     "streets.json",
     "txt",
     "contradiction.json",
+    "roadprob.jpg",
 )
 
 
@@ -1228,6 +1230,12 @@ def write_panels(image_path: Path, panels: list, base: str) -> list[Path]:
         Image.fromarray(masked[y0:y1, x0:x1]).save(out_path, quality=92)
         out_paths.append(out_path)
     write_panels_json(image_path, ordered, w, h)
+    # A P(road) map cached for the parent (by `mapsnap roadprob`, which runs on a
+    # GPU before this) is cut the same way, so panels need no inference of their
+    # own. Silently does nothing when the parent has no map.
+    derive_panel_roadprob(
+        image_path, [list(panel.exterior.coords) for panel in ordered], base
+    )
     return out_paths
 
 

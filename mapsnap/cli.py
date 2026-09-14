@@ -31,6 +31,10 @@ SUBCOMMANDS: dict[str, tuple[str, str]] = {
         "mapsnap.craft",
         "Run CRAFT text detection and cache <stem>.boxes.json (prerequisite for ocr/adjacency)",
     ),
+    "roadprob": (
+        "mapsnap.roadprob",
+        "Predict each page's P(road) map and cache <stem>.roadprob.jpg (before split)",
+    ),
     "ocr": ("mapsnap.detect_text", "Detect text regions in map images"),
     "georef": (
         "mapsnap.georef_from_labels",
@@ -87,9 +91,25 @@ SUBCOMMANDS: dict[str, tuple[str, str]] = {
         "mapsnap.region_predict",
         "Predict each page's content region as a P(region) PNG.",
     ),
+    "loc-craft": (
+        "mapsnap.loc_craft",
+        "Cache CRAFT boxes and P(road) maps for one shard of the LoC mirror (#354)",
+    ),
+    "loc-raw": (
+        "mapsnap.loc_raw",
+        "Fetch the full-resolution key-map sheets the mirror skipped (#354)",
+    ),
+    "loc-keymaps": (
+        "mapsnap.loc_keymaps",
+        "Identify each volume's key map(s) over one shard of the LoC mirror (#354)",
+    ),
     "loc-mirror": (
         "mapsnap.loc_mirror",
         "Build the Sanborn mirror (25% JPEGs + raw key-map candidates) from LoC JP2s.",
+    ),
+    "loc-counties": (
+        "mapsnap.loc_counties",
+        "Map LoC Sanborn items to Natural Earth counties, the OSM extraction units.",
     ),
     "download-oim": (
         "mapsnap.download_oim_iiif",

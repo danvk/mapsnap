@@ -18,8 +18,10 @@ sidecars for three kinds of placements:
     of the time).
 
 Everything here is truth-free; main.iiif.json, when present, only annotates
-diagnostics. Road-UNet P(road) maps are inferred on demand (cached under
-artifacts/edge_join/roadprob/). Build the volume IIIF with the osm-first
+diagnostics. Road-UNet P(road) maps are read from the `<stem>.roadprob.jpg`
+sidecars `mapsnap roadprob` writes, and inferred on demand for any page that
+has none (pre-#354 caches under artifacts/edge_join/roadprob/ are still read).
+Build the volume IIIF with the osm-first
 hybrid glob so the sidecars win where they exist:
 
     mapsnap iiif <ref> '<dir>/*.georef-snap.json,<dir>/*.georef.json' ...

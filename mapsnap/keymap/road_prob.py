@@ -29,9 +29,11 @@ This module supplies everything around that idea except the training loop
     stratified by background so "found the roads over paper but not the roads
     over fills" is visible as a number, not just to the eye.
 
-Output PNGs live next to the sheet in raw/ (uint8, probability * 255). They
-must NOT go in artifacts/edge_join/roadprob/: champaign's key map is stem p1,
-which would collide with page p1's probability map there.
+Output PNGs live next to the sheet in raw/ (uint8, probability * 255), which is
+also what keeps them distinct from the pages' own maps: champaign's key map is
+stem p1, so a shared directory would collide with page p1's map. These are the
+colour model's and stay PNG; the grayscale per-page maps beside the 25% pages
+are ``mapsnap roadprob``'s (see mapsnap/roadprob.py).
 """
 
 import argparse

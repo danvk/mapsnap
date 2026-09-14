@@ -266,10 +266,10 @@ def read_valid_pages(
 
 
 def load_models(
-    cnn_weights: Path, crnn_weights: Path
-) -> tuple[torch.nn.Module, torch.nn.Module, object]:
-    """Load the CNN localizer and CRNN recognizer onto the selected device."""
-    device = select_device()
+    cnn_weights: Path, crnn_weights: Path, device: torch.device | None = None
+) -> tuple[torch.nn.Module, torch.nn.Module, torch.device]:
+    """Load the CNN localizer and CRNN recognizer onto ``device``, or the best one."""
+    device = device or select_device()
     cnn = build_model(pretrained=False)
     cnn.load_state_dict(torch.load(cnn_weights, map_location=device))
     cnn.to(device)

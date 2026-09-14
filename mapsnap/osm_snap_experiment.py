@@ -1141,17 +1141,16 @@ def ensure_probs(volume: Path, stems: list[str]) -> None:
 
     from mapsnap.keymap.number_model import select_device
     from mapsnap.road_model import ROAD_MODEL_PATH, load_model, predict_page
+    from mapsnap.roadprob import roadprob_path, save_roadprob
 
-    out_dir = volume / "artifacts" / "edge_join" / "roadprob"
-    out_dir.mkdir(parents=True, exist_ok=True)
     device = select_device()
     model = load_model(ROAD_MODEL_PATH, device)
     for stem in missing:
-        gray = cv2.imread(str(volume / f"{stem}.jpg"), cv2.IMREAD_GRAYSCALE)
+        image_path = volume / f"{stem}.jpg"
+        gray = cv2.imread(str(image_path), cv2.IMREAD_GRAYSCALE)
         if gray is None:
             continue
-        prob = predict_page(model, gray, device)
-        cv2.imwrite(str(out_dir / f"{stem}.png"), (prob * 255).round().astype(np.uint8))
+        save_roadprob(roadprob_path(image_path), predict_page(model, gray, device))
     print(f"  inferred {len(missing)} P(road) maps")
 
 

@@ -10,8 +10,8 @@ Subcommands:
             truth-free), adjacency pair enumeration (detected + truth-derived),
             inter-page rotation distribution, overlap-strip geometry, and the
             coverage ceiling for the missing pages.
-    infer   cache P(road) maps for every base page jpg under
-            artifacts/edge_join/roadprob/.
+    infer   cache a P(road) map beside every base page jpg, as
+            <stem>.roadprob.jpg (see mapsnap.roadprob).
     sanity  per-adjacent-pair seam contact sheets and strip statistics at
             truth poses (the ceiling any matcher could exploit).
     posegraph  measure every mutual-adjacency edge (multi-hypothesis) and
@@ -701,41 +701,40 @@ def cmd_stats(volume: Path) -> None:
 
 
 def cmd_infer(volume: Path) -> None:
-    """Phase 2: cache P(road) maps for every base page as uint8 PNGs."""
+    """Phase 2: cache a P(road) map beside every base page (see mapsnap.roadprob)."""
     import torch  # noqa: F401  (import check before loading model)
 
     from mapsnap.keymap.number_model import select_device
     from mapsnap.road_model import ROAD_MODEL_PATH, load_model, predict_page
+    from mapsnap.roadprob import roadprob_path, save_roadprob
 
-    out_dir = volume / "artifacts" / "edge_join" / "roadprob"
-    out_dir.mkdir(parents=True, exist_ok=True)
     device = select_device()
     model = load_model(ROAD_MODEL_PATH, device)
     jpgs = [p for p in sorted(volume.glob("p*.jpg")) if "__" not in p.stem]
     done = 0
     for jpg in jpgs:
-        out = out_dir / f"{jpg.stem}.png"
-        if out.exists():
+        if load_prob(volume, jpg.stem) is not None:
             continue
         gray = cv2.imread(str(jpg), cv2.IMREAD_GRAYSCALE)
         if gray is None:
             print(f"  skipping unreadable {jpg}", file=sys.stderr)
             continue
-        prob = predict_page(model, gray, device)
-        cv2.imwrite(str(out), (prob * 255).round().astype(np.uint8))
+        save_roadprob(roadprob_path(jpg), predict_page(model, gray, device))
         done += 1
         if done % 20 == 0:
             print(f"  {done} pages inferred…", file=sys.stderr)
-    print(f"inferred {done} new pages; cache at {out_dir} ({len(jpgs)} total)")
+    print(f"inferred {done} new pages beside the images ({len(jpgs)} total)")
 
 
 def load_prob(volume: Path, stem: str) -> np.ndarray | None:
-    """A cached P(road) map in [0,1], or None."""
-    path = volume / "artifacts" / "edge_join" / "roadprob" / f"{stem}.png"
-    if not path.exists():
-        return None
-    raw = cv2.imread(str(path), cv2.IMREAD_GRAYSCALE)
-    return None if raw is None else raw.astype(np.float32) / 255.0
+    """A cached P(road) map in [0,1], or None.
+
+    Thin wrapper over :func:`mapsnap.roadprob.load_roadprob` keyed the way this
+    module's callers hold a page (volume plus stem) rather than by image path.
+    """
+    from mapsnap.roadprob import load_roadprob
+
+    return load_roadprob(volume / f"{stem}.jpg")
 
 
 def render_to_frame(
