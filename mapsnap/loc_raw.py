@@ -41,6 +41,7 @@ from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
+from urllib.parse import urlsplit
 
 from mapsnap.loc_craft import (
     Item,
@@ -159,23 +160,40 @@ def build_list(bucket: str, items: list[Item], workers: int) -> list[Wanted]:
 
 
 def fetch_one(want: Wanted, plan, bucket: str, mirror: str, work_dir: Path) -> int:
-    """Download one sheet's JP2, decode it at full resolution, upload the JPEG.
+    """Download one sheet at full resolution, convert it to JPEG, upload it.
 
-    Returns the JPEG's size in bytes. The JP2 is deleted either way: at roughly
-    8 MB a sheet, keeping them would be 80 GB of scratch for nothing.
+    Returns the JPEG's size in bytes. The source is deleted either way: at
+    roughly 8 MB a sheet, keeping them would be 80 GB of scratch for nothing.
+
+    Three kinds of source, as ``loc_mirror`` has: a JP2 (9,077 of the key-map
+    fetch list) goes through the JPEG-2000 decoder, a TIFF master (29) through
+    Pillow -- feeding one to ``opj_decompress`` killed every shard of the first
+    attempt -- and the handful with no torrent copy come from LoC's IIIF, which
+    must be asked for ``full`` rather than the 25% rendering.
     """
-    from mapsnap.loc_mirror import decode_jp2, fetch, source_url
+    from PIL import Image
+
+    from mapsnap.loc_mirror import decode_jp2, fetch, save_jpeg, source_url
 
     sheet = next((s for s in plan.sheets if s.key == want.key), None)
     if sheet is None:
         raise OSError(f"{want.item}: no sheet {want.key} in the mapping")
     item = Item(item=plan.item, state=plan.state, year=plan.year)
+    torrent = sheet.source.startswith("torrent")
+    url = source_url(mirror, sheet, full=True)
+    suffix = Path(urlsplit(url).path).suffix or ".jpg"
     with tempfile.TemporaryDirectory(dir=work_dir) as tmp:
         scratch = Path(tmp)
-        source = scratch / f"{want.key}{Path(source_url(mirror, sheet)).suffix}"
-        fetch(source_url(mirror, sheet), source, sheet.bytes)
+        source = scratch / f"{want.key}{suffix}"
+        fetch(url, source, sheet.bytes if torrent else 0)
         out_jpg = scratch / f"{want.key}.jpg"
-        decode_jp2(source, out_jpg, 0)
+        if suffix == ".jp2":
+            decode_jp2(source, out_jpg, 0)
+        elif suffix == ".jpg":
+            source.replace(out_jpg)  # IIIF already served a full-resolution JPEG
+        else:
+            Image.MAX_IMAGE_PIXELS = None
+            save_jpeg(Image.open(source), out_jpg)
         run_aws(
             [
                 "aws",
@@ -278,7 +296,10 @@ def main() -> None:
                 skipped += 1
                 continue
             written += fetch_one(want, plan, args.bucket, args.mirror, args.work_dir)
-        except OSError as error:
+        # Anything a single sheet can raise -- a decoder exiting non-zero is a
+        # CalledProcessError, which is NOT an OSError and took out all four
+        # shards of the first attempt after 443 of 9,107 sheets.
+        except Exception as error:  # noqa: BLE001
             print(
                 f"{want.item} {want.key}: FAILED: {error}", file=sys.stderr, flush=True
             )

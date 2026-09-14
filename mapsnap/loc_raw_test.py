@@ -81,3 +81,69 @@ def test_resolve_list_takes_a_local_path_or_downloads_from_s3(
     calls.clear()
     resolve_list("s3://bucket/_craft/list.tsv", tmp_path / "work")
     assert calls == []  # already downloaded
+
+
+def test_fetch_one_picks_the_decoder_from_the_source_kind(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """A TIFF master fed to the JPEG-2000 decoder killed all four shards once."""
+    from dataclasses import dataclass
+
+    from mapsnap import loc_raw
+
+    @dataclass
+    class FakeSheet:
+        key: str
+        stem: str
+        source: str
+        bytes: int
+        storage_dir: str
+
+    @dataclass
+    class FakePlan:
+        item: str
+        state: str
+        year: str
+        sheets: list
+
+    calls: list[str] = []
+    monkeypatch.setattr(loc_raw, "run_aws", lambda command, **kw: None)
+
+    def fake_fetch(url, dest, expected=0):
+        calls.append(f"fetch {Path(url).suffix}")
+        dest.write_bytes(b"x")
+        return 1
+
+    def make(kind):
+        sheet = FakeSheet("p1", "00001_1900-0001", kind, 10, "gmd/x")
+        return FakePlan("sanborn1", "alabama", "1900", [sheet])
+
+    import mapsnap.loc_mirror as mirror
+
+    monkeypatch.setattr(mirror, "fetch", fake_fetch)
+    monkeypatch.setattr(
+        mirror,
+        "decode_jp2",
+        lambda src, out, r: (calls.append("jp2"), out.write_bytes(b"j"))[1],
+    )
+    monkeypatch.setattr(
+        mirror,
+        "save_jpeg",
+        lambda image, out: (calls.append("pillow"), out.write_bytes(b"p"))[1],
+    )
+    monkeypatch.setattr("PIL.Image.open", lambda path: object())
+
+    loc_raw.fetch_one(
+        Wanted("sanborn1", "p1"), make("torrent-jp2"), "s3://b", "http://m", tmp_path
+    )
+    assert calls == ["fetch .jp2", "jp2"]
+
+    calls.clear()
+    loc_raw.fetch_one(
+        Wanted("sanborn1", "p1"),
+        make("torrent-master-tif"),
+        "s3://b",
+        "http://m",
+        tmp_path,
+    )
+    assert calls == ["fetch .tif", "pillow"]
