@@ -75,11 +75,14 @@ echo "AMI $AMI, $JOB on $INSTANCE_TYPE x${WORKERS} worker(s), ref ${GIT_REF:0:10
 SUBNETS=$(aws ec2 describe-subnets --filters Name=default-for-az,Values=true \
   --query 'sort_by(Subnets,&AvailabilityZone)[].[AvailabilityZone,SubnetId]' --output text)
 
-# Spot prices differ by zone enough to matter over a multi-day run: g6.xlarge was
-# $0.556 in us-west-2d against $0.720 in us-west-2a on 2026-09-14, and trying the
-# zones alphabetically always landed in the dearest one. Order by current price,
-# cheapest first, so the first zone with capacity is also the cheapest with
-# capacity. On-demand pricing does not vary by zone, so that order is left alone.
+# Zones are ordered by current spot price, but each shard STARTS at a different
+# one, rotating through the list. Ordering by price alone put all 30 key-map
+# instances in us-west-2d on 2026-09-14, and a single pool reclamation at
+# 19:04:44 took 29 of them five minutes after launch, before any had done work.
+# Concentrating a fleet in the cheapest pool trades a few dollars for a
+# correlated total loss; rotating keeps the price preference per shard while
+# spreading the fleet across pools, and every shard still falls through the
+# other zones when one has no capacity.
 spot_prices() {
   aws ec2 describe-spot-price-history \
     --instance-types "$INSTANCE_TYPE" \
@@ -104,14 +107,25 @@ zones_by_price() {
 }
 
 SPOT_SUBNETS=$(zones_by_price)
-echo "spot zone order: $(echo "$SPOT_SUBNETS" | awk '{printf "%s ", $1}')"
+echo "spot zones, cheapest first (each shard starts at a different one): $(echo "$SPOT_SUBNETS" | awk '{printf "%s ", $1}')"
 
 launch_shard() {
   local shard=$1 market=$2 user_data=$3 instance_id="" output=""
   local market_args=()
   # Spot tries the cheapest zone with capacity; on-demand costs the same everywhere.
   local subnets=$SUBNETS
-  [ "$market" = spot ] && subnets=$SPOT_SUBNETS
+  if [ "$market" = spot ]; then
+    # Rotate the price-ordered list by the shard number so consecutive shards
+    # start in different pools.
+    local count offset
+    count=$(echo "$SPOT_SUBNETS" | grep -c .)
+    offset=$((shard % count))
+    if [ "$offset" -eq 0 ]; then
+      subnets=$SPOT_SUBNETS   # BSD head rejects -n 0
+    else
+      subnets=$(echo "$SPOT_SUBNETS" | tail -n +$((offset + 1)); echo "$SPOT_SUBNETS" | head -n "$offset")
+    fi
+  fi
   if [ "$market" = spot ]; then
     market_args=(--instance-market-options \
       "MarketType=spot,SpotOptions={SpotInstanceType=one-time,InstanceInterruptionBehavior=terminate}")
