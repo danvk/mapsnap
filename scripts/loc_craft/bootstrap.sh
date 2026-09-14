@@ -116,4 +116,8 @@ for pid in "${pids[@]}"; do
 done
 
 echo "shard $SHARD/$SHARDS finished ($WORKERS worker(s), status $status)"
+# Exit with the workers' status so the trap reports it: the echo above would
+# otherwise make every run look like a clean 0, which it did when all four
+# loc-raw shards died on their first TIFF.
+exit "$status"
 # The EXIT trap uploads the log and powers off.
