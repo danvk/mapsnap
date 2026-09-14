@@ -118,6 +118,10 @@ instance-hours for the corpus with one worker process per instance:
 | 4 x g6.xlarge (8 spot + 8 on-demand vCPUs) | ~2.9 days |
 | 8 x g6.xlarge (32 vCPUs) | ~1.5 days |
 
+The driver downloads the next item while the current one computes, so the S3
+round trip does not idle the GPU; the first pilot showed untiled items running
+at 2.4-3.7 s/page against 1.54 s of compute, about a third of the time waiting.
+
 `--workers N` runs N driver processes per instance, each on a sub-shard, so
 CRAFT's CPU post-processing on one item overlaps another's GPU work. `ocr`
 gained 2x that way on the same hardware, but it is unmeasured for this pass.

@@ -36,7 +36,9 @@ import shutil
 import subprocess
 import sys
 import time
-from dataclasses import dataclass
+from collections.abc import Iterator
+from concurrent.futures import ThreadPoolExecutor
+from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -282,24 +284,81 @@ class Worker:
         return written
 
 
-def run_item(
-    work: ItemWork, bucket: str, work_dir: Path, worker: Worker
-) -> tuple[int, int]:
-    """Sync one item down, run both passes, sync the sidecars up; return what was written."""
+def item_prefix(bucket: str, item: Item) -> str:
+    """The item's directory URL in the bucket."""
+    return f"{bucket.rstrip('/')}/{item.prefix}"
+
+
+def fetch_item(work: ItemWork, bucket: str, work_dir: Path) -> Path:
+    """Sync one item's images into its own directory under ``work_dir``."""
     local = work_dir / work.item.item
     shutil.rmtree(local, ignore_errors=True)
     local.mkdir(parents=True)
-    prefix = f"{bucket.rstrip('/')}/{work.item.prefix}"
+    sync(item_prefix(bucket, work.item), str(local))
+    return local
+
+
+def process_item(
+    work: ItemWork, local: Path, bucket: str, worker: Worker
+) -> tuple[int, int]:
+    """Run both passes over an already-downloaded item and sync the sidecars up."""
     try:
-        sync(prefix, str(local))
         pages = [str(local / name) for name in work.pages]
         raw_sheets = [str(local / name) for name in work.raw_sheets]
         detected = worker.craft(pages + raw_sheets)
         predicted = worker.roadprob(pages)
-        sync(str(local), prefix)
+        sync(str(local), item_prefix(bucket, work.item))
         return detected, predicted
     finally:
         shutil.rmtree(local, ignore_errors=True)
+
+
+@dataclass
+class Prepared:
+    """The next item to compute, plus everything passed over while finding it.
+
+    ``work`` is None when the shard is exhausted; ``skipped`` and ``failures``
+    still describe what the scan saw on the way, so the caller counts them once.
+    """
+
+    work: ItemWork | None
+    local: Path | None
+    index: int
+    skipped: int = 0
+    failures: list[tuple[str, str]] = field(default_factory=list)
+
+
+def prepare_next(
+    items: Iterator[tuple[int, Item]],
+    bucket: str,
+    work_dir: Path,
+    *,
+    fetch: bool = True,
+) -> Prepared:
+    """List forward until an item needs work, download it, and return it.
+
+    Runs on a background thread so one item's S3 round trip overlaps the
+    previous one's inference: about a third of a single worker's time was the
+    download, with the GPU idle. Items already complete, and items whose listing
+    or download fails, are reported in the result rather than raised, so the
+    caller keeps the counting and the logging in one place.
+    """
+    skipped = 0
+    failures: list[tuple[str, str]] = []
+    for index, item in items:
+        try:
+            work = plan_item(item, list_prefix(bucket, item.prefix))
+            if work.complete:
+                skipped += 1
+                continue
+            local = (
+                fetch_item(work, bucket, work_dir) if fetch else work_dir / item.item
+            )
+        except OSError as error:
+            failures.append((item.item, str(error)))
+            continue
+        return Prepared(work, local, index, skipped, failures)
+    return Prepared(None, None, 0, skipped, failures)
 
 
 def format_duration(seconds: float) -> str:
@@ -375,47 +434,73 @@ def main() -> None:
     started = time.perf_counter()
     done = skipped = failed = pages_detected = pages_predicted = 0
     broken = args.work_dir / f"broken-{args.shard}.log"
-    for index, item in enumerate(items, start=1):
-        if args.limit and done >= args.limit:
-            break
-        try:
-            work = plan_item(item, list_prefix(args.bucket, item.prefix))
-        except OSError as error:
-            print(f"{item.item}: listing failed: {error}", file=sys.stderr, flush=True)
-            failed += 1
-            continue
-        if work.complete:
-            skipped += 1
-            continue
-        if args.dry_run:
-            print(
-                f"{item.item}: {len(work.pages)} pages, {len(work.raw_sheets)} raw, "
-                f"{len(work.missing)} sidecars missing"
-            )
-            done += 1
-            continue
-        if worker is None:
-            worker = Worker(gpu=args.gpu)
-        try:
-            detected, predicted = run_item(work, args.bucket, args.work_dir, worker)
-        except OSError as error:
-            print(f"{item.item}: FAILED: {error}", file=sys.stderr, flush=True)
+
+    def record(prepared: Prepared) -> None:
+        """Count what the scan passed over on its way to this item."""
+        nonlocal skipped, failed
+        skipped += prepared.skipped
+        for name, error in prepared.failures:
+            print(f"{name}: listing/fetch failed: {error}", file=sys.stderr, flush=True)
             with broken.open("a") as handle:
-                handle.write(f"{item.item}\t{error}\n")
+                handle.write(f"{name}\t{error}\n")
             failed += 1
-            continue
-        done += 1
-        pages_detected += detected
-        pages_predicted += predicted
-        elapsed = time.perf_counter() - started
-        rate = done / elapsed if elapsed else 0.0
-        remaining = (len(items) - index) / rate if rate else 0.0
-        print(
-            f"{datetime.now(UTC):%H:%M:%S} s{args.shard} [{index}/{len(items)}] "
-            f"{item.item}: {detected} craft, {predicted} P(road)"
-            f" | {rate * 3600:.0f} items/h, eta {format_duration(remaining)}",
-            flush=True,
+
+    # One thread runs a step ahead, so the next item is on local disk by the
+    # time this one finishes computing.
+    pending = iter(list(enumerate(items, start=1)))
+    with ThreadPoolExecutor(1) as fetcher:
+        future = fetcher.submit(
+            prepare_next, pending, args.bucket, args.work_dir, fetch=not args.dry_run
         )
+        while True:
+            prepared = future.result()
+            record(prepared)
+            if prepared.work is None or (args.limit and done >= args.limit):
+                # --limit stops one item after the prefetcher ran ahead; drop
+                # what it downloaded rather than leaving it in the scratch dir.
+                if prepared.local is not None and prepared.work is not None:
+                    shutil.rmtree(prepared.local, ignore_errors=True)
+                break
+            work, local, index = prepared.work, prepared.local, prepared.index
+            assert local is not None
+            # Start the next download before computing this one.
+            future = fetcher.submit(
+                prepare_next,
+                pending,
+                args.bucket,
+                args.work_dir,
+                fetch=not args.dry_run,
+            )
+            if args.dry_run:
+                print(
+                    f"{work.item.item}: {len(work.pages)} pages, "
+                    f"{len(work.raw_sheets)} raw, {len(work.missing)} sidecars missing"
+                )
+                done += 1
+                continue
+            if worker is None:
+                worker = Worker(gpu=args.gpu)
+            try:
+                detected, predicted = process_item(work, local, args.bucket, worker)
+            except OSError as error:
+                print(f"{work.item.item}: FAILED: {error}", file=sys.stderr, flush=True)
+                with broken.open("a") as handle:
+                    handle.write(f"{work.item.item}\t{error}\n")
+                failed += 1
+                continue
+            done += 1
+            pages_detected += detected
+            pages_predicted += predicted
+            elapsed = time.perf_counter() - started
+            rate = done / elapsed if elapsed else 0.0
+            remaining = (len(items) - index) / rate if rate else 0.0
+            print(
+                f"{datetime.now(UTC):%H:%M:%S} s{args.shard} [{index}/{len(items)}] "
+                f"{work.item.item}: {detected} craft, {predicted} P(road)"
+                f" | {rate * 3600:.0f} items/h, eta {format_duration(remaining)}",
+                flush=True,
+            )
+
     elapsed = time.perf_counter() - started
     print(
         f"shard {args.shard}: {done} items processed, {skipped} already complete, "
