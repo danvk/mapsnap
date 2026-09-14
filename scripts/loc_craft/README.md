@@ -108,6 +108,31 @@ If a spot instance is reclaimed, launch its shard again:
 scripts/loc_craft/launch.sh --shards 4 --only 1
 ```
 
+## Identifying the key maps
+
+`mapsnap loc-keymaps` is the same shape on the Standard (CPU) quota, and answers
+the question the raw mirror cannot: which sheet of each volume is its key map.
+The mirror kept full-resolution copies of the page-0 family and lettered sheets
+only, so a volume whose key map is in the page-1 family has no raw sheet yet.
+
+```sh
+scripts/loc_craft/launch.sh --job loc-keymaps --instance-type c6i.2xlarge --shards 32
+```
+
+Most items never load a model: an item with fewer pages than the coverage floor
+cannot have a detectable key map, and one with an unsplit page 0 is a key map by
+convention, recorded from file names with nothing downloaded. Only the rest, about
+11,185 of 35,158, download their one to four candidate pages and run the CNN
+localizer and CRNN reader, at about 65 s each on a c6i.2xlarge.
+
+It writes `keymaps.json` into each item's prefix, which is what `mapsnap keymap`
+reads, so detection never repeats. Re-run with `--force` after retraining the
+number models, or with a lower `--min-distinct` if the floor of
+[#405](https://github.com/danvk/mapsnap/issues/405) changes.
+
+The closing summary counts the key maps found that are **not** in the mirror's raw
+set: those are the sheets a later pass has to fetch as JP2s and convert.
+
 ## Checking the result
 
 `mapsnap loc-craft --dry-run` lists what each item still needs without computing

@@ -19,6 +19,7 @@ GIT_REF="__GIT_REF__"
 SHARD="__SHARD__"
 SHARDS="__SHARDS__"
 WORKERS="__WORKERS__"
+JOB="__JOB__"
 EXTRA_ARGS="__EXTRA_ARGS__"
 TORCH_CUDA_FALLBACK="cu126"  # wheel variant for drivers too old for the locked CUDA 13 build
 LOG=/var/log/mapsnap-craft.log
@@ -34,7 +35,7 @@ TOKEN=$(curl -sX PUT "http://169.254.169.254/latest/api/token" \
 meta() { curl -s -H "X-aws-ec2-metadata-token: $TOKEN" "http://169.254.169.254/latest/meta-data/$1"; }
 INSTANCE_TYPE=$(meta instance-type)
 INSTANCE_ID=$(meta instance-id)
-LOG_KEY="_craft/logs/shard-${SHARD}-of-${SHARDS}-${INSTANCE_TYPE}-${INSTANCE_ID}.log"
+LOG_KEY="_craft/logs/${JOB}-shard-${SHARD}-of-${SHARDS}-${INSTANCE_TYPE}-${INSTANCE_ID}.log"
 
 # opencv-python (not the headless build) links libGL; git/curl/unzip for the rest.
 apt-get update -q
@@ -93,7 +94,7 @@ uv run python -c "import easyocr; easyocr.Reader(['en'], gpu=False, verbose=Fals
 pids=()
 for worker in $(seq 0 $((WORKERS - 1))); do
   # shellcheck disable=SC2086  # GPU_FLAG and EXTRA_ARGS are flag strings by design
-  uv run mapsnap loc-craft \
+  uv run mapsnap "$JOB" \
     --bucket "$BUCKET" \
     --shard "$((SHARD * WORKERS + worker))" \
     --shards "$((SHARDS * WORKERS))" \
