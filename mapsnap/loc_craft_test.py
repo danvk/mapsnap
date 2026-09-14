@@ -12,6 +12,7 @@ from mapsnap.loc_craft import (
     key_prefix,
     list_prefix,
     plan_item,
+    prepare_next,
     read_manifest,
     resolve_manifest,
     run_aws,
@@ -280,3 +281,62 @@ def test_shard_order_is_shuffled_but_reproducible() -> None:
     assert order != [item.item for item in items]  # and not id order
     assert sorted(order) == sorted(item.item for item in items)  # nothing lost
     assert order != [item.item for item in select_shard(items, 0, 1, seed=7)]
+
+
+def test_prepare_next_walks_past_finished_items_and_records_failures(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """The scan returns the first item needing work, and what it passed to reach it."""
+    from mapsnap import loc_craft
+
+    items = [
+        Item(item=name, state="x", year="1900")
+        for name in ("done1", "broken", "done2", "needs-work", "later")
+    ]
+    complete = ["p1.jpg", "p1.boxes.json", "p1.roadprob.jpg"]
+
+    def fake_list(bucket, prefix):
+        name = prefix.split("/")[-1]
+        if name == "broken":
+            raise OSError("aws s3 ls failed after 4 attempts")
+        return complete if name.startswith("done") else ["p1.jpg"]
+
+    fetched = []
+    monkeypatch.setattr(loc_craft, "list_prefix", fake_list)
+    monkeypatch.setattr(
+        loc_craft,
+        "fetch_item",
+        lambda work, bucket, dir: fetched.append(work.item.item) or dir,
+    )
+    pending = iter(list(enumerate(items, start=1)))
+    first = prepare_next(pending, "s3://b", tmp_path)
+    assert first.work is not None and first.work.item.item == "needs-work"
+    assert first.index == 4
+    assert first.skipped == 2
+    assert [name for name, _ in first.failures] == ["broken"]
+    assert fetched == ["needs-work"]
+
+    # The iterator is shared, so the next call continues where this one stopped.
+    second = prepare_next(pending, "s3://b", tmp_path)
+    assert second.work is not None and second.work.item.item == "later"
+
+    # Exhausted: no work, and nothing left to report.
+    third = prepare_next(pending, "s3://b", tmp_path)
+    assert third.work is None and third.skipped == 0 and third.failures == []
+
+
+def test_prepare_next_can_skip_the_download(tmp_path: Path, monkeypatch) -> None:
+    """--dry-run plans items without pulling a byte."""
+    from mapsnap import loc_craft
+
+    monkeypatch.setattr(loc_craft, "list_prefix", lambda bucket, prefix: ["p1.jpg"])
+    monkeypatch.setattr(
+        loc_craft, "fetch_item", lambda *a: pytest.fail("should not download")
+    )
+    prepared = prepare_next(
+        iter([(1, Item(item="x", state="s", year="1900"))]),
+        "s3://b",
+        tmp_path,
+        fetch=False,
+    )
+    assert prepared.work is not None
