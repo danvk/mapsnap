@@ -75,11 +75,18 @@ Four shards, the first two on spot and the last two on demand, which is the
 whole G-family quota at 8 vCPUs each. Each instance terminates itself when its
 shard is done. With more quota, raise `--shards` to match.
 
-Spot launches try the cheapest availability zone that has capacity, not the
-alphabetically first: the spread is real money over a multi-day run (g6.xlarge
-was $0.556 in us-west-2d against $0.720 in us-west-2a on 2026-09-14, and
-alphabetical order always picked the dearest). The chosen order is printed at
-launch.
+Spot launches order zones by current price but **rotate the starting zone per
+shard**, so the fleet spreads across pools instead of piling into the cheapest
+one. Ordering by price alone put all 30 key-map instances in us-west-2d on
+2026-09-14, and one pool reclamation at 19:04:44 took 29 of them five minutes
+after launch, before any had recorded a single item. The few dollars a cheap
+zone saves are not worth a correlated total loss. Each shard still falls through
+the other zones when its first has no capacity; the order is printed at launch.
+
+Spot reclamation is the normal failure of this fleet, not an exception. Treat an
+instance terminating as no evidence at all about whether its work finished:
+check the outputs in the bucket. `StateTransitionReason` distinguishes them --
+"Service initiated" is a reclamation, "User initiated" is a clean self-shutdown.
 
 Re-partitioning later is safe, because an item is skipped on the strength of its
 sidecars in S3 rather than on which shard claimed it. To grow the fleet mid-run,
