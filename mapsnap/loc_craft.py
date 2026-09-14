@@ -119,6 +119,45 @@ def select_shard(items: list[Item], shard: int, shards: int) -> list[Item]:
     return [item for item in items if shard_of(item.item, shards) == shard]
 
 
+# A transient S3 failure must not cost an item: the first call a freshly booted
+# instance makes can beat its instance-profile credentials out of the metadata
+# service (the first pilot lost one item that way, non-zero exit and empty
+# stderr, seconds into the run), and a multi-day pass also meets throttling.
+AWS_ATTEMPTS = 4
+AWS_BACKOFF_SECONDS = 3.0
+
+
+def run_aws(
+    command: list[str], *, capture: bool = False
+) -> subprocess.CompletedProcess:
+    """Run an aws CLI command, retrying transient failures with a growing delay.
+
+    Raises OSError with whatever the CLI said (and its exit status, since a
+    credential race reports nothing at all) once the attempts are spent.
+    """
+    last = ""
+    status = 0
+    for attempt in range(AWS_ATTEMPTS):
+        result = subprocess.run(command, capture_output=True, text=True, check=False)
+        if result.returncode == 0:
+            return result
+        status = result.returncode
+        last = (result.stderr or result.stdout or "").strip()
+        if attempt + 1 < AWS_ATTEMPTS:
+            delay = AWS_BACKOFF_SECONDS * 2**attempt
+            print(
+                f"  aws {command[1]} {command[2]} failed (exit {status}), "
+                f"retrying in {delay:.0f}s: {last[:120]}",
+                file=sys.stderr,
+                flush=True,
+            )
+            time.sleep(delay)
+    raise OSError(
+        f"{' '.join(command[:4])} failed after {AWS_ATTEMPTS} attempts "
+        f"(exit {status}): {last or 'no output'}"
+    )
+
+
 def key_prefix(bucket: str, prefix: str) -> str:
     """The full S3 key prefix of an item, honouring any path in the bucket URL.
 
@@ -135,14 +174,10 @@ def key_prefix(bucket: str, prefix: str) -> str:
 def list_prefix(bucket: str, prefix: str) -> list[str]:
     """Keys under an item's prefix, relative to it, via one recursive listing."""
     full = key_prefix(bucket, prefix)
-    result = subprocess.run(
+    result = run_aws(
         ["aws", "s3", "ls", f"{bucket.rstrip('/')}/{prefix}/", "--recursive"],
-        capture_output=True,
-        text=True,
-        check=False,
+        capture=True,
     )
-    if result.returncode != 0:
-        raise OSError(result.stderr.strip() or "aws s3 ls failed")
     keys = []
     for line in result.stdout.splitlines():
         fields = line.split(maxsplit=3)
@@ -183,9 +218,7 @@ def sync(source: str, destination: str) -> None:
     copies only what is new, because the CLI gives a downloaded file its object's
     last-modified time and so does not consider it changed.
     """
-    subprocess.run(
-        ["aws", "s3", "sync", source, destination, "--only-show-errors"], check=True
-    )
+    run_aws(["aws", "s3", "sync", source, destination, "--only-show-errors"])
 
 
 class Worker:
@@ -268,9 +301,7 @@ def resolve_manifest(manifest: str | None, bucket: str, work_dir: Path) -> Path:
     local = work_dir / MANIFEST_NAME
     if not local.exists():
         work_dir.mkdir(parents=True, exist_ok=True)
-        subprocess.run(
-            ["aws", "s3", "cp", source, str(local), "--only-show-errors"], check=True
-        )
+        run_aws(["aws", "s3", "cp", source, str(local), "--only-show-errors"])
     return local
 
 
@@ -346,7 +377,7 @@ def main() -> None:
             worker = Worker(gpu=args.gpu)
         try:
             detected, predicted = run_item(work, args.bucket, args.work_dir, worker)
-        except (subprocess.CalledProcessError, OSError) as error:
+        except OSError as error:
             print(f"{item.item}: FAILED: {error}", file=sys.stderr, flush=True)
             with broken.open("a") as handle:
                 handle.write(f"{item.item}\t{error}\n")

@@ -14,9 +14,19 @@ from mapsnap.loc_craft import (
     plan_item,
     read_manifest,
     resolve_manifest,
+    run_aws,
     select_shard,
     shard_of,
 )
+
+
+@pytest.fixture(autouse=True)
+def no_retry_backoff(monkeypatch) -> None:
+    """Skip the retry sleeps; without this the failure tests cost 21 s each."""
+    from mapsnap import loc_craft
+
+    monkeypatch.setattr(loc_craft.time, "sleep", lambda seconds: None)
+
 
 MANIFEST = """item\tstate\tyear\tcity\tseq\tstem\tpage_key\tsource\tbytes\tstorage_dir
 sanborn00001_003\talabama\t1924\tabbeville\t1\t00001_1924-0001\tp1\tjp2\t9\tgmd/x
@@ -229,3 +239,31 @@ def test_limit_counts_work_done_not_items_skipped(
     out = capsys.readouterr()
     assert "sanborn00009_004" in out.out
     assert "1 items processed, 2 already complete" in out.err
+
+
+def test_run_aws_retries_a_transient_failure_then_succeeds(monkeypatch) -> None:
+    """The first S3 call of a fresh instance can beat its instance credentials."""
+    attempts = []
+
+    def fake_run(command, **kwargs):
+        attempts.append(command)
+        code = 0 if len(attempts) == 3 else 1
+        return subprocess.CompletedProcess(command, code, stdout="ok", stderr="")
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+    assert run_aws(["aws", "s3", "ls", "s3://b/x"]).stdout == "ok"
+    assert len(attempts) == 3
+
+
+def test_run_aws_gives_up_with_the_exit_status_when_there_is_no_message(
+    monkeypatch,
+) -> None:
+    monkeypatch.setattr(
+        subprocess,
+        "run",
+        lambda command, **kwargs: subprocess.CompletedProcess(
+            command, 2, stdout="", stderr=""
+        ),
+    )
+    with pytest.raises(OSError, match="exit 2.*no output"):
+        run_aws(["aws", "s3", "ls", "s3://b/x"])
