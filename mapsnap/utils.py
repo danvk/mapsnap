@@ -260,20 +260,35 @@ def image_stem(image_path: str) -> str:
     return Path(image_path).name.split(".")[0]
 
 
+# The centerlines file a stage looks for beside its inputs, in order of preference:
+# a converted GeoJSON, else a county's OSM extract read directly (#354).
+CENTERLINES_NAMES = ("centerlines.geojson", "centerlines.osm.pbf")
+
+
 def default_centerlines(dir_path: Path) -> Path | None:
-    """Return the ``centerlines.geojson`` next to the inputs, or None if absent.
+    """Return the centerlines file next to the inputs, or None if absent.
 
     Checks ``dir_path`` then its parent (so it is found whether commands are run on a
-    volume directory or on split panels in a subdirectory). Returns None rather than
-    exiting so callers can decide whether the file is required.
+    volume directory or on split panels in a subdirectory -- and so volumes laid out
+    under a shared county directory find the county's extract). Returns None rather
+    than exiting so callers can decide whether the file is required.
     """
-    for candidate in (
-        dir_path / "centerlines.geojson",
-        dir_path.parent / "centerlines.geojson",
-    ):
-        if candidate.exists():
-            return candidate
+    for directory in (dir_path, dir_path.parent):
+        for name in CENTERLINES_NAMES:
+            candidate = directory / name
+            if candidate.exists():
+                return candidate
     return None
+
+
+def require_centerlines(dir_path: Path) -> Path:
+    """default_centerlines, or exit naming what was looked for."""
+    centerlines = default_centerlines(dir_path)
+    if centerlines is None:
+        sys.exit(
+            f"no {' or '.join(CENTERLINES_NAMES)} in {dir_path} or {dir_path.parent}"
+        )
+    return centerlines
 
 
 def list_pages(dir_path: Path) -> list[Path]:

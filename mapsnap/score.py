@@ -64,6 +64,7 @@ from mapsnap.compare_iiif_georef import (
     load_split_polygons,
     truth_polygon_world,
 )
+from mapsnap.osm_to_centerlines import load_centerlines
 from mapsnap.utils import default_centerlines, source_id_to_page_key
 
 GOOD_FT = 25.0
@@ -166,7 +167,7 @@ def truth_footprint_ring(item: dict) -> list[list[float]] | None:
 def street_tree(centerlines_path: Path, frame: LocalFrame) -> STRtree:
     """STRtree of the volume's street centerlines in local metres."""
     lines = []
-    for feature in json.loads(centerlines_path.read_text())["features"]:
+    for feature in load_centerlines(centerlines_path)["features"]:
         geometry = feature.get("geometry", {})
         kind = geometry.get("type")
         parts = (

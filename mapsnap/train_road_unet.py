@@ -23,6 +23,7 @@ import torch
 from torch import nn
 
 from mapsnap.keymap.number_model import select_device
+from mapsnap.osm_to_centerlines import load_centerlines
 from mapsnap.road_model import (
     PATCH,
     UNet,
@@ -30,7 +31,7 @@ from mapsnap.road_model import (
     normalize_patch,
     rasterize_road_mask,
 )
-from mapsnap.utils import image_stem
+from mapsnap.utils import image_stem, require_centerlines
 
 # Random patches sampled from each page per epoch.
 PATCHES_PER_PAGE = 6
@@ -220,7 +221,7 @@ def main() -> None:
 
     train_set: list[tuple[Path, dict, list[dict]]] = []
     for volume in args.volumes:
-        features = json.loads((volume / "centerlines.geojson").read_text())["features"]
+        features = load_centerlines(require_centerlines(volume))["features"]
         pages = volume_pages(volume, args.min_effective_gcps)
         if args.limit_pages:
             pages = pages[: args.limit_pages]
@@ -228,9 +229,7 @@ def main() -> None:
         print(f"  {volume.name}: {len(pages)} pages", file=sys.stderr)
     print(f"training pages: {len(train_set)}", file=sys.stderr)
 
-    val_features = json.loads((args.val / "centerlines.geojson").read_text())[
-        "features"
-    ]
+    val_features = load_centerlines(require_centerlines(args.val))["features"]
     all_val_pages = volume_pages(args.val, args.min_effective_gcps)
     val_pages_meta = all_val_pages[:: max(1, len(all_val_pages) // args.val_pages)]
     val_pages = []
