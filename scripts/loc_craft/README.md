@@ -21,17 +21,31 @@ scripts/loc_craft/iam-setup.sh
 
 Creates the `mapsnap-craft` instance role (read the bucket, write `by-state/*`
 and `_craft/*`), EC2's Spot service-linked role, and launch rights for the
-`mapsnap-mirror` user. Quotas are counted in vCPUs and G-family spot and
-on-demand are separate pools; check what you have with:
+`mapsnap-mirror` user, which afterwards can read *and raise* quotas without an
+admin session. Quotas are counted in vCPUs and G-family spot and on-demand are
+separate pools:
 
 ```sh
 for code in L-3819A6DF L-DB2E81BA; do   # G+VT spot, G+VT on-demand
-  aws service-quotas get-service-quota --region us-west-2 --service-code ec2 \
-    --quota-code $code --query '[Quota.QuotaName,Quota.Value]' --output text
+  AWS_PROFILE=mapsnap aws service-quotas get-service-quota --region us-west-2 \
+    --service-code ec2 --quota-code $code --query '[Quota.QuotaName,Quota.Value]' --output text
+  AWS_PROFILE=mapsnap aws service-quotas list-requested-service-quota-change-history-by-quota \
+    --region us-west-2 --service-code ec2 --quota-code $code \
+    --query 'RequestedQuotas[].[Created,DesiredValue,Status,CaseId]' --output text
 done
 ```
 
-At 8 spot + 8 on-demand vCPUs, four `g6.xlarge` run at once (two per pool).
+At 8 spot + 8 on-demand vCPUs, four `g6.xlarge` run at once (two per pool). A
+request whose history still says `CASE_OPENED` is being worked by a human, and a
+second request for the same quota is refused while it is open; a partial grant
+(0 -> 8 when 32 was asked) does not close the case. Either reply on that case in
+Support Center with the usage history, or ask for a smaller step, which is more
+often granted automatically:
+
+```sh
+AWS_PROFILE=mapsnap aws service-quotas request-service-quota-increase --region us-west-2 \
+  --service-code ec2 --quota-code L-3819A6DF --desired-value 16
+```
 
 ## Pilot first
 

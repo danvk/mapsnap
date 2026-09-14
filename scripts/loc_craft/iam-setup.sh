@@ -11,7 +11,9 @@
 #   * EC2's service-linked role for Spot, if the account has never used spot.
 #   * inline policy `mapsnap-craft-launch` on the long-lived `mapsnap-mirror`
 #     user: launch/describe/terminate instances, pass the role above, read the
-#     Deep Learning AMI parameters, and read quotas.
+#     Deep Learning AMI parameters, and read *and raise* EC2 quotas (a G-family
+#     vCPU increase is the recurring blocker, and needing the admin session for
+#     each attempt is the only reason it waits).
 #
 # The instance role can write only under by-state/ and _craft/, so a runaway
 # worker cannot touch the manifest or the README at the bucket root.
@@ -60,7 +62,8 @@ LAUNCH_POLICY=$(cat <<EOF
   {"Effect": "Allow", "Action": ["ssm:StartSession", "ssm:TerminateSession", "ssm:DescribeInstanceInformation"],
    "Resource": "*"},
   {"Effect": "Allow", "Action": ["servicequotas:GetServiceQuota", "servicequotas:ListServiceQuotas",
-                                 "servicequotas:ListRequestedServiceQuotaChangeHistoryByQuota"],
+                                 "servicequotas:ListRequestedServiceQuotaChangeHistoryByQuota",
+                                 "servicequotas:RequestServiceQuotaIncrease"],
    "Resource": "*"}
 ]}
 EOF
