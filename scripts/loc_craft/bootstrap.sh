@@ -37,9 +37,10 @@ INSTANCE_TYPE=$(meta instance-type)
 INSTANCE_ID=$(meta instance-id)
 LOG_KEY="_craft/logs/${JOB}-shard-${SHARD}-of-${SHARDS}-${INSTANCE_TYPE}-${INSTANCE_ID}.log"
 
-# opencv-python (not the headless build) links libGL; git/curl/unzip for the rest.
+# opencv-python (not the headless build) links libGL; git/curl/unzip for the rest;
+# libopenjp2-tools is opj_decompress, which loc-raw decodes JP2s with.
 apt-get update -q
-apt-get install -y -q libgl1 libglib2.0-0 git curl unzip
+apt-get install -y -q libgl1 libglib2.0-0 git curl unzip libopenjp2-tools
 if ! command -v aws > /dev/null; then
   curl -s https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip -o /tmp/awscli.zip
   unzip -q /tmp/awscli.zip -d /tmp

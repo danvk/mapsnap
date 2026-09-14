@@ -133,6 +133,27 @@ number models, or with a lower `--min-distinct` if the floor of
 The closing summary counts the key maps found that are **not** in the mirror's raw
 set: those are the sheets a later pass has to fetch as JP2s and convert.
 
+## Fetching the key-map sheets the mirror skipped
+
+`mapsnap loc-keymaps` names each volume's key map; the ones outside the page-0
+family and the lettered sheets have no full-resolution copy, because the mirror
+kept raw sheets only for those. `mapsnap loc-raw` fetches them: JP2 from the
+source mirror, decoded at full resolution, uploaded to the item's `raw/` prefix.
+
+```sh
+uv run mapsnap loc-raw --build-list keymaps.tsv          # sweep the records
+scripts/loc_craft/launch.sh --job loc-raw --instance-type c6i.2xlarge --shards 4 \
+  --extra-args "--list keymaps.tsv --mirror http://host:port"
+```
+
+Run it on an instance rather than a laptop: the original mirror took two days
+because a home uplink caps near 2.5 MB/s, and in-region the upload is free.
+
+**Use few shards.** The source mirror is somebody's machine, measured near
+20 MB/s in total, which at about 7 MB a sheet is already close to 10,000 sheets
+an hour. More shards crowd each other and the person hosting it. Tell them before
+a run of this size.
+
 ## Checking the result
 
 `mapsnap loc-craft --dry-run` lists what each item still needs without computing
