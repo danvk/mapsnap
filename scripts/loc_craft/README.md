@@ -149,7 +149,7 @@ source mirror, decoded at full resolution, uploaded to the item's `raw/` prefix.
 
 ```sh
 uv run mapsnap loc-raw --build-list keymaps.tsv          # sweep the records
-scripts/loc_craft/launch.sh --job loc-raw --instance-type c6i.2xlarge --shards 4 \
+scripts/loc_craft/launch.sh --job loc-raw --shards 4 \
   --extra-args "--list keymaps.tsv --mirror http://host:port"
 ```
 
