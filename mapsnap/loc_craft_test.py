@@ -8,6 +8,7 @@ import pytest
 
 from mapsnap.loc_craft import (
     Item,
+    bucket_name,
     format_duration,
     key_prefix,
     list_prefix,
@@ -122,10 +123,8 @@ def test_plan_item_wants_no_road_map_for_a_raw_key_map_sheet() -> None:
 
 def test_list_prefix_returns_keys_relative_to_the_prefix(monkeypatch) -> None:
     prefix = "by-state/alabama/1924/sanborn00001_003"
-    listing = (
-        f"2026-09-11 11:26:18       1155 {prefix}/metadata.json\n"
-        f"2026-09-11 11:26:19    1061353 {prefix}/p1.jpg\n"
-        f"2026-09-11 11:26:19     920685 {prefix}/raw/p1.jpg\n"
+    listing = "\t".join(
+        f"{prefix}/{name}" for name in ("metadata.json", "p1.jpg", "raw/p1.jpg")
     )
     captured: dict[str, list[str]] = {}
 
@@ -139,13 +138,29 @@ def test_list_prefix_returns_keys_relative_to_the_prefix(monkeypatch) -> None:
         "p1.jpg",
         "raw/p1.jpg",
     ]
-    assert captured["command"][:4] == ["aws", "s3", "ls", f"s3://bucket/{prefix}/"]
+    assert captured["command"][:3] == ["aws", "s3api", "list-objects-v2"]
+    assert "bucket" in captured["command"]
+    assert f"{prefix}/" in captured["command"]
+
+
+def test_list_prefix_reads_an_unmirrored_item_as_empty_not_as_a_failure(
+    monkeypatch,
+) -> None:
+    """`aws s3 ls` could not tell these apart; s3api says exit 0 and "None"."""
+    monkeypatch.setattr(
+        subprocess,
+        "run",
+        lambda command, **kwargs: subprocess.CompletedProcess(
+            command, 0, stdout="None\n", stderr=""
+        ),
+    )
+    assert list_prefix("s3://bucket", "by-state/x/1900/never-mirrored") == []
 
 
 def test_list_prefix_strips_a_path_in_the_bucket_url(monkeypatch) -> None:
     """A bucket URL with a path once made every item look complete (no work done)."""
     prefix = "by-state/alabama/1924/sanborn00001_003"
-    listing = f"2026-09-11 11:26:19    1061353 _craft/selftest/{prefix}/p1.jpg\n"
+    listing = f"_craft/selftest/{prefix}/p1.jpg"
     monkeypatch.setattr(
         subprocess,
         "run",
@@ -158,6 +173,8 @@ def test_list_prefix_strips_a_path_in_the_bucket_url(monkeypatch) -> None:
     )
     assert key_prefix("s3://bucket", prefix) == prefix
     assert list_prefix("s3://bucket/_craft/selftest", prefix) == ["p1.jpg"]
+    assert bucket_name("s3://bucket/_craft/selftest") == "bucket"
+    assert bucket_name("s3://bucket") == "bucket"
 
 
 def test_list_prefix_raises_when_the_cli_fails(monkeypatch) -> None:
@@ -340,3 +357,23 @@ def test_prepare_next_can_skip_the_download(tmp_path: Path, monkeypatch) -> None
         fetch=False,
     )
     assert prepared.work is not None
+
+
+def test_an_unmirrored_item_is_counted_apart_from_a_finished_one(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """45 manifest items were never mirrored; they are absent, not complete."""
+    from mapsnap import loc_craft
+
+    items = [Item(item=name, state="x", year="1900") for name in ("gone", "needs")]
+    monkeypatch.setattr(
+        loc_craft,
+        "list_prefix",
+        lambda bucket, prefix: [] if prefix.endswith("gone") else ["p1.jpg"],
+    )
+    monkeypatch.setattr(loc_craft, "fetch_item", lambda work, bucket, dir: dir)
+    prepared = prepare_next(iter(list(enumerate(items, start=1))), "s3://b", tmp_path)
+    assert prepared.work is not None and prepared.work.item.item == "needs"
+    assert prepared.absent == 1
+    assert prepared.skipped == 0
+    assert prepared.failures == []
