@@ -72,9 +72,43 @@ echo "AMI $AMI, $INSTANCE_TYPE x${WORKERS} worker(s), ref ${GIT_REF:0:10}, bucke
 SUBNETS=$(aws ec2 describe-subnets --filters Name=default-for-az,Values=true \
   --query 'sort_by(Subnets,&AvailabilityZone)[].[AvailabilityZone,SubnetId]' --output text)
 
+# Spot prices differ by zone enough to matter over a multi-day run: g6.xlarge was
+# $0.556 in us-west-2d against $0.720 in us-west-2a on 2026-09-14, and trying the
+# zones alphabetically always landed in the dearest one. Order by current price,
+# cheapest first, so the first zone with capacity is also the cheapest with
+# capacity. On-demand pricing does not vary by zone, so that order is left alone.
+spot_prices() {
+  aws ec2 describe-spot-price-history \
+    --instance-types "$INSTANCE_TYPE" \
+    --product-descriptions "Linux/UNIX" \
+    --start-time "$(date -u +%Y-%m-%dT%H:%M:%S)" \
+    --query 'SpotPriceHistory[].[AvailabilityZone,SpotPrice]' --output text 2>/dev/null | sort -u
+}
+
+zones_by_price() {
+  local prices
+  prices=$(spot_prices)
+  if [ -z "$prices" ]; then
+    echo "$SUBNETS"   # no price data: keep the alphabetical order
+    return
+  fi
+  while read -r zone subnet; do
+    [ -z "$zone" ] && continue
+    # A zone the history does not mention sorts last rather than being dropped.
+    price=$(echo "$prices" | awk -v z="$zone" '$1 == z {print $2; exit}')
+    echo "${price:-9.999999} $zone $subnet"
+  done <<< "$SUBNETS" | sort -n | awk '{print $2, $3}'
+}
+
+SPOT_SUBNETS=$(zones_by_price)
+echo "spot zone order: $(echo "$SPOT_SUBNETS" | awk '{printf "%s ", $1}')"
+
 launch_shard() {
   local shard=$1 market=$2 user_data=$3 instance_id="" output=""
   local market_args=()
+  # Spot tries the cheapest zone with capacity; on-demand costs the same everywhere.
+  local subnets=$SUBNETS
+  [ "$market" = spot ] && subnets=$SPOT_SUBNETS
   if [ "$market" = spot ]; then
     market_args=(--instance-market-options \
       "MarketType=spot,SpotOptions={SpotInstanceType=one-time,InstanceInterruptionBehavior=terminate}")
@@ -100,7 +134,7 @@ launch_shard() {
       *InsufficientInstanceCapacity*|*Unsupported*) ;;
       *) echo "shard $shard: $output" >&2; return 1 ;;
     esac
-  done <<< "$SUBNETS"
+  done <<< "$subnets"
   echo "shard $shard: no $market capacity for $INSTANCE_TYPE in any zone" >&2
   return 1
 }
