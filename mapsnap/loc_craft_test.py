@@ -191,3 +191,41 @@ def test_format_duration_reads_as_hours_and_minutes() -> None:
     assert format_duration(3600) == "1:00"
     assert format_duration(3660) == "1:01"
     assert format_duration(258000) == "71:40"
+
+
+def test_limit_counts_work_done_not_items_skipped(
+    tmp_path: Path, monkeypatch, capsys
+) -> None:
+    """A pilot re-run must process --limit fresh items, not stop after N skips."""
+    from mapsnap import loc_craft
+
+    manifest = write_manifest(
+        tmp_path,
+        MANIFEST + "sanborn00009_004\talabama\t1930\tdothan\t1\ts\tp1\tjp2\t9\tgmd/z\n",
+    )
+    # The first two items are finished; the third still needs both sidecars.
+    listings = {
+        "sanborn00001_003": ["p1.jpg", "p1.boxes.json", "p1.roadprob.jpg"],
+        "sanborn05791_007": ["p1.jpg", "p1.boxes.json", "p1.roadprob.jpg"],
+        "sanborn00009_004": ["p1.jpg"],
+    }
+    monkeypatch.setattr(
+        loc_craft, "list_prefix", lambda bucket, prefix: listings[prefix.split("/")[-1]]
+    )
+    monkeypatch.setattr(
+        "sys.argv",
+        [
+            "mapsnap loc-craft",
+            "--manifest",
+            str(manifest),
+            "--work-dir",
+            str(tmp_path / "work"),
+            "--dry-run",
+            "--limit",
+            "1",
+        ],
+    )
+    loc_craft.main()
+    out = capsys.readouterr()
+    assert "sanborn00009_004" in out.out
+    assert "1 items processed, 2 already complete" in out.err
