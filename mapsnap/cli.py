@@ -31,6 +31,10 @@ SUBCOMMANDS: dict[str, tuple[str, str]] = {
         "mapsnap.craft",
         "Run CRAFT text detection and cache <stem>.boxes.json (prerequisite for ocr/adjacency)",
     ),
+    "roadprob": (
+        "mapsnap.roadprob",
+        "Predict each page's P(road) map and cache <stem>.roadprob.jpg (before split)",
+    ),
     "ocr": ("mapsnap.detect_text", "Detect text regions in map images"),
     "georef": (
         "mapsnap.georef_from_labels",

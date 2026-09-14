@@ -29,9 +29,11 @@ export type PageImage = 'page' | 'region' | 'roadprob';
 /**
  * The file, relative to the volume directory, holding a page's alternate image.
  *
- * P(region) maps are written by `mapsnap region` (#226, #352); P(road) maps
- * by the edge-join and snap experiments. Both are rendered at the 25% page's
- * own resolution, but callers read the PNG's real size rather than assume it.
+ * P(region) maps are written by `mapsnap region` (#226, #352) into the volume's
+ * artifacts/; P(road) maps by `mapsnap roadprob` (#354) as a JPEG sidecar beside
+ * the page, which `mapsnap split` cuts into the panels' when a sheet splits.
+ * Both are rendered at the 25% page's own resolution, but callers read the file's
+ * real size rather than assume it.
  */
 export function pageImageFile(
   image: Exclude<PageImage, 'page'>,
@@ -39,7 +41,18 @@ export function pageImageFile(
 ): string {
   return image === 'region'
     ? `artifacts/region/${imageKey}.png`
-    : `artifacts/edge_join/roadprob/${imageKey}.png`;
+    : `${imageKey}.roadprob.jpg`;
+}
+
+/**
+ * The pre-#354 location of a page's P(road) map, read when the sidecar is absent.
+ *
+ * `mapsnap roadprob` now writes `<stem>.roadprob.jpg` beside the page, and
+ * `mapsnap split` cuts a parent's map into its panels'. Volumes fitted before
+ * that still have PNGs under the volume's artifacts/, so both are tried.
+ */
+export function legacyPageImageFile(imageKey: string): string {
+  return `artifacts/edge_join/roadprob/${imageKey}.png`;
 }
 
 export interface GeorefSource {

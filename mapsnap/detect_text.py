@@ -4,6 +4,7 @@ import argparse
 import json
 import math
 import multiprocessing
+import os
 import sys
 from collections.abc import Iterator
 from datetime import UTC, datetime
@@ -493,6 +494,19 @@ def reads_are_current(streets_path: Path, weights: str | None) -> bool:
     return cached_recognizer(streets_path) == (Path(weights).name if weights else None)
 
 
+def build_reader(gpu: bool) -> easyocr.Reader:
+    """An EasyOCR reader whose recognizer can take the fine-tuned float weights.
+
+    EasyOCR dynamically quantizes the recognizer to int8 when it runs on the CPU.
+    That silently does nothing on Apple Silicon (torch's quantized engine is
+    "none" there) but succeeds on x86 Linux, where the LSTM and Linear layers
+    become quantized modules and ``load_recognizer_weights`` then fails on a
+    state-dict mismatch: every ``--no-gpu`` run on EC2 died this way. Keeping the
+    model float also makes CPU and GPU workers recognize identically.
+    """
+    return easyocr.Reader(["en"], gpu=gpu, verbose=False, quantize=False)
+
+
 def load_recognizer_weights(reader: easyocr.Reader, weights_path: str) -> None:
     """Swap fine-tuned recognizer weights (#265) into an EasyOCR reader.
 
@@ -702,7 +716,7 @@ def detect_text(
     {color, hue, chroma} form, which is the reference the ``background`` property is relative to.
     """
     if reader is None:
-        reader = easyocr.Reader(["en"], gpu=True, verbose=False)
+        reader = build_reader(gpu=True)
 
     img = Image.open(image_path).convert("RGB")
     orig_width, orig_height = img.size
@@ -764,6 +778,16 @@ def detect_text(
 _worker_state: dict[str, Any] = {}
 
 
+def threads_per_worker(cpu_count: int, workers: int) -> int:
+    """Torch intra-op threads each of ``workers`` processes may use on ``cpu_count`` cores.
+
+    Torch defaults every process to all cores, so N workers run N*cores threads and
+    thrash: 8 CPU workers on 8 cores measured no faster than 1. Splitting the cores
+    lets the workers actually run side by side.
+    """
+    return max(1, cpu_count // max(1, workers))
+
+
 def _worker_init(
     vocab_strings: list[str],
     min_size: int,
@@ -775,9 +799,13 @@ def _worker_init(
     tile_size: int,
     gpu: bool,
     recognizer_weights: str | None,
+    threads: int,
 ) -> None:
     """Initialize per-worker state once per process: create the EasyOCR reader."""
-    _worker_state["reader"] = easyocr.Reader(["en"], gpu=gpu, verbose=False)
+    import torch
+
+    torch.set_num_threads(threads)
+    _worker_state["reader"] = build_reader(gpu)
     if recognizer_weights:
         load_recognizer_weights(_worker_state["reader"], recognizer_weights)
     _worker_state["vocab_strings"] = vocab_strings
@@ -1126,6 +1154,7 @@ def main() -> None:
             args.tile_size,
             gpu,
             args.recognizer_weights,
+            threads_per_worker(os.cpu_count() or 1, args.num_workers),
         )
         with multiprocessing.Pool(
             args.num_workers,
@@ -1139,7 +1168,7 @@ def main() -> None:
             ):
                 pass
     else:
-        reader = easyocr.Reader(["en"], gpu=gpu, verbose=False)
+        reader = build_reader(gpu)
         if args.recognizer_weights:
             load_recognizer_weights(reader, args.recognizer_weights)
         for image_path in tqdm(images, smoothing=0):

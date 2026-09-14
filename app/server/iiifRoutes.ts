@@ -15,6 +15,7 @@ import { HTTPError, type TypedRouter } from 'crosswalk';
 import type { API } from './api.ts';
 import {
   pageImageFile,
+  legacyPageImageFile,
   type LocalPageImage,
   type PageImage,
   imageStemsByLowercase,
@@ -143,19 +144,31 @@ function pageImageOf(value: unknown): PageImage {
   return image as PageImage;
 }
 
-// A page's alternate image (its P(region) or P(road) map) at the PNG's own
-// size when it is on disk, else null so the caller serves the sheet.
+// A page's alternate image (its P(region) or P(road) map) at the file's own
+// size when it is on disk, else null so the caller serves the sheet. P(road)
+// maps are JPEG sidecars beside the page since #354, with the PNGs older runs
+// left under artifacts/ as a fallback.
 function alternatePageImage(
   volumeDir: string,
   image: Exclude<PageImage, 'page'>,
   imageKey: string,
 ): LocalPageImage | null {
-  const file = pageImageFile(image, imageKey);
-  try {
-    return { ...pngDimensions(join(volumeDir, file)), file };
-  } catch {
-    return null;
+  const candidates =
+    image === 'roadprob'
+      ? [pageImageFile(image, imageKey), legacyPageImageFile(imageKey)]
+      : [pageImageFile(image, imageKey)];
+  for (const file of candidates) {
+    const path = join(volumeDir, file);
+    try {
+      const size = file.endsWith('.jpg')
+        ? jpegDimensions(path)
+        : pngDimensions(path);
+      return { ...size, file };
+    } catch {
+      continue;
+    }
   }
+  return null;
 }
 
 export function registerIiifImages(app: Express, dataDir: string): void {
