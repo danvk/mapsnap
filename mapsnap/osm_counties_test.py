@@ -133,3 +133,15 @@ def test_natural_earth_geojson_rejects_a_directory_with_no_shapefile(
 ) -> None:
     with pytest.raises(SystemExit, match="no .shp"):
         natural_earth_geojson(tmp_path)
+
+
+def test_a_zero_byte_extract_does_not_count_as_done(tmp_path: Path) -> None:
+    """A killed osmium pass leaves stubs; treating them as done would skip them forever."""
+    from mapsnap.osm_counties import is_cut
+
+    counties = [County("US1", "IL", "A", 1), County("US2", "IL", "B", 2)]
+    (tmp_path / "US1.osm.pbf").write_bytes(b"")  # created, never filled
+    (tmp_path / "US2.osm.pbf").write_bytes(b"pbf")
+    assert not is_cut(tmp_path / "US1.osm.pbf")
+    assert is_cut(tmp_path / "US2.osm.pbf")
+    assert [c.fips for c in pending(counties, tmp_path)] == ["US1"]

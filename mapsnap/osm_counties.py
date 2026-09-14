@@ -140,9 +140,22 @@ def extract_entry(county: County, rings: list[list[list[list[float]]]]) -> dict:
     return entry
 
 
+def is_cut(path: Path) -> bool:
+    """Whether an extract on disk is real output rather than a killed pass's stub.
+
+    osmium creates every output file when a pass starts and fills it as blocks
+    flush, so a batch interrupted part-way leaves zero-byte files behind. Testing
+    existence alone would count those as done and skip them forever, which is the
+    same silent-truncation trap the un-renumbered dump set. Every county here has
+    a Sanborn volume, so it has a town, so it has named streets: an empty extract
+    means the pass did not finish, not that the county is empty.
+    """
+    return path.exists() and path.stat().st_size > 0
+
+
 def pending(counties: list[County], out_dir: Path) -> list[County]:
-    """Counties with no extract on disk yet, so a killed run resumes."""
-    return [c for c in counties if not (out_dir / c.filename).exists()]
+    """Counties with no usable extract yet, so a killed run resumes."""
+    return [c for c in counties if not is_cut(out_dir / c.filename)]
 
 
 def run_batch(
@@ -256,7 +269,7 @@ def main() -> None:
                 )
                 return
             result = run_batch(entries, args.pbf, args.out_dir, work_dir)
-            written = sum(1 for c in batch if (args.out_dir / c.filename).exists())
+            written = sum(1 for c in batch if is_cut(args.out_dir / c.filename))
             cut += written
             if result.returncode != 0 or written < len(batch):
                 failed += len(batch) - written
@@ -279,7 +292,7 @@ def main() -> None:
     size = sum(
         (args.out_dir / c.filename).stat().st_size
         for c in counties
-        if (args.out_dir / c.filename).exists()
+        if is_cut(args.out_dir / c.filename)
     )
     print(
         f"cut {cut} counties ({failed} failed) in {format_duration(elapsed)}; "
