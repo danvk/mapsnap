@@ -6,7 +6,7 @@
 #   scripts/loc_craft/launch.sh --shards 4 --on-demand-from 2   # shards 2,3 on demand
 #   scripts/loc_craft/launch.sh --shards 1 --extra-args "--limit 50"   # a pilot
 #   scripts/loc_craft/launch.sh --shards 4 --workers 2                # 2 processes per instance
-#   scripts/loc_craft/launch.sh --job loc-keymaps --instance-type c6i.2xlarge --shards 32
+#   scripts/loc_craft/launch.sh --job loc-keymaps --shards 32       # CPU type chosen from the job
 #
 # Each instance runs one shard and terminates itself when the shard is done.
 # Shards are static, so re-launching a shard after a spot interruption resumes
@@ -17,7 +17,11 @@
 set -euo pipefail
 
 SHARDS=4
-INSTANCE_TYPE=g6.xlarge
+# Chosen from the job below unless --instance-type says otherwise: only loc-craft
+# uses a GPU, and defaulting the others to one sends them at the 8-vCPU G-family
+# quota, where they fail with MaxSpotInstanceCountExceeded while 256 vCPUs of
+# Standard spot sit idle.
+INSTANCE_TYPE=""
 ONLY=""
 ON_DEMAND_FROM=""
 EXTRA_ARGS=""
@@ -41,6 +45,12 @@ while [ $# -gt 0 ]; do
     *) echo "unknown flag: $1" >&2; exit 2 ;;
   esac
 done
+if [ -z "$INSTANCE_TYPE" ]; then
+  case "$JOB" in
+    loc-craft) INSTANCE_TYPE=g6.xlarge ;;   # CRAFT and the road UNet want the GPU
+    *) INSTANCE_TYPE=c6i.2xlarge ;;         # everything else is CPU work
+  esac
+fi
 export AWS_PROFILE=${AWS_PROFILE:-mapsnap}
 export AWS_REGION=$REGION
 # `cd` echoes the directory when CDPATH is set, so silence it.

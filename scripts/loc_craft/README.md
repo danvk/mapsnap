@@ -123,7 +123,7 @@ The mirror kept full-resolution copies of the page-0 family and lettered sheets
 only, so a volume whose key map is in the page-1 family has no raw sheet yet.
 
 ```sh
-scripts/loc_craft/launch.sh --job loc-keymaps --instance-type c6i.2xlarge --shards 32
+scripts/loc_craft/launch.sh --job loc-keymaps --shards 32
 ```
 
 Most items never load a model: an item with fewer pages than the coverage floor
@@ -171,6 +171,11 @@ single second on 2026-09-14, and a `loc-raw` shard went at 20:44 the same day.
 scripts/loc_craft/supervise.sh --job loc-craft --shards 4 --workers 2 --on-demand-from 2
 scripts/loc_craft/supervise.sh --job loc-craft --shards 4 --watch          # loop every 15 min
 ```
+
+The instance type follows the job unless `--instance-type` overrides it: only
+`loc-craft` takes a GPU, and the rest go to `c6i.2xlarge`. Defaulting a CPU job
+to a GPU type sends it at the 8-vCPU G-family quota, where it fails with
+`MaxSpotInstanceCountExceeded` while 256 vCPUs of Standard spot sit idle.
 
 It relaunches any shard that is neither finished nor running. A shard counts as
 finished when it has written `_craft/done/<job>-of-<shards>-shard-<n>`, which
