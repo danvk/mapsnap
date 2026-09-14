@@ -20,9 +20,11 @@ scripts/loc_craft/iam-setup.sh
 ```
 
 Creates the `mapsnap-craft` instance role (read the bucket, write `by-state/*`
-and `_craft/*`), EC2's Spot service-linked role, and launch rights for the
-`mapsnap-mirror` user, which afterwards can read *and raise* quotas without an
-admin session. Quotas are counted in vCPUs and G-family spot and on-demand are
+and `_craft/*`), EC2's Spot service-linked role, and a managed policy granting
+the `mapsnap-mirror` user launch rights, after which it can read *and raise*
+quotas without an admin session. The grant is a managed policy rather than an
+inline one because IAM caps a user's *aggregate* inline policy size at 2048
+bytes, which this plus the sizing benchmark's grant exceeds. Quotas are counted in vCPUs and G-family spot and on-demand are
 separate pools:
 
 ```sh

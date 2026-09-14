@@ -81,6 +81,31 @@ if ! aws iam get-instance-profile --instance-profile-name "$ROLE" > /dev/null 2>
   aws iam add-role-to-instance-profile --instance-profile-name "$ROLE" --role-name "$ROLE"
   echo "created instance profile $ROLE (allow ~10 s before the first launch)"
 fi
-aws iam put-user-policy --user-name "$USER_NAME" --policy-name "$ROLE-launch" \
-  --policy-document "$LAUNCH_POLICY"
-echo "granted $USER_NAME launch rights (policy $ROLE-launch)"
+# A customer-managed policy, not an inline one: IAM caps the *aggregate* size of
+# a user's inline policies at 2048 bytes, and this one plus the sizing
+# benchmark's `mapsnap-bench-launch` exceeds that. Managed policies have their
+# own 6144-byte budget and can be detached in one call.
+POLICY_ARN="arn:aws:iam::$ACCOUNT:policy/$ROLE-launch"
+if aws iam get-policy --policy-arn "$POLICY_ARN" > /dev/null 2>&1; then
+  # Five versions per policy is the hard limit, so clear the old ones first.
+  for version in $(aws iam list-policy-versions --policy-arn "$POLICY_ARN" \
+      --query 'Versions[?!IsDefaultVersion].VersionId' --output text); do
+    aws iam delete-policy-version --policy-arn "$POLICY_ARN" --version-id "$version"
+  done
+  aws iam create-policy-version --policy-arn "$POLICY_ARN" \
+    --policy-document "$LAUNCH_POLICY" --set-as-default > /dev/null
+  echo "updated managed policy $ROLE-launch"
+else
+  aws iam create-policy --policy-name "$ROLE-launch" \
+    --policy-document "$LAUNCH_POLICY" > /dev/null
+  echo "created managed policy $ROLE-launch"
+fi
+aws iam attach-user-policy --user-name "$USER_NAME" --policy-arn "$POLICY_ARN"
+# An inline copy from an earlier version of this script would eat the user's
+# 2048-byte inline budget for nothing.
+aws iam delete-user-policy --user-name "$USER_NAME" --policy-name "$ROLE-launch" 2> /dev/null || true
+echo "granted $USER_NAME launch rights (managed policy $ROLE-launch)"
+echo
+echo "If PutUserPolicy ever fails with LimitExceeded, an inline policy is using"
+echo "the user's 2048-byte budget; the sizing benchmark left one:"
+echo "  aws iam delete-user-policy --user-name $USER_NAME --policy-name mapsnap-bench-launch"
