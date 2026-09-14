@@ -31,6 +31,7 @@ items of different sizes.
 
 import argparse
 import hashlib
+import random
 import shutil
 import subprocess
 import sys
@@ -43,6 +44,8 @@ from pathlib import Path
 MANIFEST_NAME = "loc-sanborn-maps.mapping.tsv"
 ITEM_COLUMNS = ("item", "state", "year")
 # What this pass writes for one page, and for one raw key-map sheet.
+# Fixed so a resumed shard, and a --limit sample, are reproducible.
+SHUFFLE_SEED = 0
 PAGE_OUTPUTS = ("boxes.json", "roadprob.jpg")
 RAW_OUTPUTS = ("boxes.json",)
 
@@ -114,9 +117,21 @@ def shard_of(item: str, shards: int) -> int:
     return int.from_bytes(digest[:8], "big") % max(1, shards)
 
 
-def select_shard(items: list[Item], shard: int, shards: int) -> list[Item]:
-    """The items this worker owns."""
-    return [item for item in items if shard_of(item.item, shards) == shard]
+def select_shard(
+    items: list[Item], shard: int, shards: int, seed: int = SHUFFLE_SEED
+) -> list[Item]:
+    """The items this worker owns, in a deterministic shuffled order.
+
+    Manifest order is item-id order, and id correlates with era and format: the
+    corpus's first item is an 1867 Boston atlas of unsplit two-page spreads at an
+    unusual aspect ratio, which tiles into four and takes twelve minutes. A
+    ``--limit`` sample has to see a representative mix rather than the oldest
+    volumes, so the shard is shuffled -- with a fixed seed, so every worker and
+    every restart walks the same order.
+    """
+    chosen = [item for item in items if shard_of(item.item, shards) == shard]
+    random.Random(seed).shuffle(chosen)
+    return chosen
 
 
 # A transient S3 failure must not cost an item: the first call a freshly booted
@@ -331,6 +346,12 @@ def main() -> None:
     parser.add_argument(
         "--limit", type=int, help="Stop after this many items (a pilot)."
     )
+    parser.add_argument(
+        "--seed",
+        type=int,
+        default=SHUFFLE_SEED,
+        help="Seed for the shard's item order (default: %(default)s).",
+    )
     parser.add_argument("--gpu", action="store_true", help="Run the models on the GPU.")
     parser.add_argument(
         "--dry-run",
@@ -343,7 +364,7 @@ def main() -> None:
         sys.exit(f"--shard must be in [0, {args.shards})")
 
     manifest = resolve_manifest(args.manifest, args.bucket, args.work_dir)
-    items = select_shard(read_manifest(manifest), args.shard, args.shards)
+    items = select_shard(read_manifest(manifest), args.shard, args.shards, args.seed)
     print(
         f"shard {args.shard}/{args.shards}: {len(items)} items",
         file=sys.stderr,

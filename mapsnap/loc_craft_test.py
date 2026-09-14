@@ -213,12 +213,12 @@ def test_limit_counts_work_done_not_items_skipped(
         tmp_path,
         MANIFEST + "sanborn00009_004\talabama\t1930\tdothan\t1\ts\tp1\tjp2\t9\tgmd/z\n",
     )
-    # The first two items are finished; the third still needs both sidecars.
-    listings = {
-        "sanborn00001_003": ["p1.jpg", "p1.boxes.json", "p1.roadprob.jpg"],
-        "sanborn05791_007": ["p1.jpg", "p1.boxes.json", "p1.roadprob.jpg"],
-        "sanborn00009_004": ["p1.jpg"],
-    }
+    # Everything the worker reaches before the last item is already finished, so
+    # the skips come first whatever order the shuffle picks.
+    order = [item.item for item in select_shard(read_manifest(manifest), 0, 1)]
+    done, pending = order[:-1], order[-1]
+    listings = {name: ["p1.jpg", "p1.boxes.json", "p1.roadprob.jpg"] for name in done}
+    listings[pending] = ["p1.jpg"]
     monkeypatch.setattr(
         loc_craft, "list_prefix", lambda bucket, prefix: listings[prefix.split("/")[-1]]
     )
@@ -237,8 +237,8 @@ def test_limit_counts_work_done_not_items_skipped(
     )
     loc_craft.main()
     out = capsys.readouterr()
-    assert "sanborn00009_004" in out.out
-    assert "1 items processed, 2 already complete" in out.err
+    assert pending in out.out
+    assert f"1 items processed, {len(done)} already complete" in out.err
 
 
 def test_run_aws_retries_a_transient_failure_then_succeeds(monkeypatch) -> None:
@@ -267,3 +267,16 @@ def test_run_aws_gives_up_with_the_exit_status_when_there_is_no_message(
     )
     with pytest.raises(OSError, match="exit 2.*no output"):
         run_aws(["aws", "s3", "ls", "s3://b/x"])
+
+
+def test_shard_order_is_shuffled_but_reproducible() -> None:
+    """--limit must sample a representative mix, not the oldest item ids."""
+    items = [
+        Item(item=f"sanborn{index:05d}_001", state="x", year="1900")
+        for index in range(200)
+    ]
+    order = [item.item for item in select_shard(items, 0, 1)]
+    assert order == [item.item for item in select_shard(items, 0, 1)]  # reproducible
+    assert order != [item.item for item in items]  # and not id order
+    assert sorted(order) == sorted(item.item for item in items)  # nothing lost
+    assert order != [item.item for item in select_shard(items, 0, 1, seed=7)]
