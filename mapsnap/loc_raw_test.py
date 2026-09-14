@@ -4,7 +4,14 @@ from pathlib import Path
 
 import pytest
 
-from mapsnap.loc_raw import Wanted, keymap_keys, missing_raw, read_list, write_list
+from mapsnap.loc_raw import (
+    Wanted,
+    keymap_keys,
+    missing_raw,
+    read_list,
+    resolve_list,
+    write_list,
+)
 
 
 def test_missing_raw_wants_only_the_sheets_with_no_copy() -> None:
@@ -47,3 +54,30 @@ def test_read_list_rejects_a_file_without_the_columns(tmp_path: Path) -> None:
     path.write_text("item\tstate\nx\ty\n")
     with pytest.raises(SystemExit, match="'key'"):
         read_list(path)
+
+
+def test_resolve_list_takes_a_local_path_or_downloads_from_s3(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """The fleet reads the list from the bucket; a single machine can use a file."""
+    import subprocess
+
+    local = tmp_path / "wanted.tsv"
+    local.write_text("item\tkey\n")
+    assert resolve_list(str(local), tmp_path) == local
+
+    calls: list[list[str]] = []
+
+    def fake_run(command, **kwargs):
+        calls.append(command)
+        (tmp_path / "work" / "fetch-list.tsv").write_text("item\tkey\n")
+        return subprocess.CompletedProcess(command, 0, stdout="", stderr="")
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+    got = resolve_list("s3://bucket/_craft/list.tsv", tmp_path / "work")
+    assert got == tmp_path / "work" / "fetch-list.tsv"
+    assert calls[0][:4] == ["aws", "s3", "cp", "s3://bucket/_craft/list.tsv"]
+
+    calls.clear()
+    resolve_list("s3://bucket/_craft/list.tsv", tmp_path / "work")
+    assert calls == []  # already downloaded

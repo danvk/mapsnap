@@ -28,7 +28,7 @@ already near 10,000 sheets an hour -- more shards would only crowd each other an
 the person hosting it.
 
     mapsnap loc-raw --build-list keymaps.tsv
-    mapsnap loc-raw --list keymaps.tsv --mirror http://host:port --shard 0 --shards 4
+    mapsnap loc-raw --list s3://bucket/_craft/fetch-list.tsv --mirror http://host:port
 """
 
 import argparse
@@ -62,6 +62,21 @@ class Wanted:
 
     item: str
     key: str
+
+
+def resolve_list(source: str, work_dir: Path) -> Path:
+    """The work list as a local file, downloading it when given an ``s3://`` URL.
+
+    The fleet needs the list on every instance, and the bucket is the only thing
+    they all already have; a local path still works for a single-machine run.
+    """
+    if not source.startswith("s3://"):
+        return Path(source)
+    local = work_dir / "fetch-list.tsv"
+    if not local.exists():
+        work_dir.mkdir(parents=True, exist_ok=True)
+        run_aws(["aws", "s3", "cp", source, str(local), "--only-show-errors"])
+    return local
 
 
 def read_list(path: Path) -> list[Wanted]:
@@ -183,7 +198,9 @@ def main() -> None:
         "--mirror",
         help="HTTP root serving the torrent's storage-services tree, e.g. http://host:port.",
     )
-    parser.add_argument("--list", type=Path, help="Work list TSV (item, key).")
+    parser.add_argument(
+        "--list", help="Work list TSV (item, key); a local path or an s3:// URL."
+    )
     parser.add_argument(
         "--build-list",
         type=Path,
@@ -235,7 +252,7 @@ def main() -> None:
     plans = load_mapping(manifest)
     wanted = [
         want
-        for want in read_list(args.list)
+        for want in read_list(resolve_list(args.list, args.work_dir))
         if shard_of(want.item, args.shards) == args.shard
     ]
     print(
