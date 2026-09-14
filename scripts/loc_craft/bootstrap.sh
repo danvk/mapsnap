@@ -50,9 +50,16 @@ fi
 # From here on the log reaches S3 whatever happens.
 upload_log() { aws s3 cp "$LOG" "$BUCKET/$LOG_KEY" > /dev/null 2>&1 || true; }
 ( while sleep 120; do upload_log; done ) &
+UPLOADER=$!
 finish() {
   local status=$?
   echo "bootstrap exit status $status"
+  # Stop the periodic uploader FIRST. It reads the log when it wakes, so one
+  # that woke before the job's closing summary was written can land its PUT
+  # after this one and overwrite the finished log with a stale copy -- which is
+  # how 41 of 96 shard summaries went missing from the key-map run.
+  kill "$UPLOADER" 2> /dev/null || true
+  wait "$UPLOADER" 2> /dev/null || true
   upload_log
   shutdown -h now
 }
