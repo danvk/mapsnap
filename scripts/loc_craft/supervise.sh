@@ -6,6 +6,13 @@
 #
 #   scripts/loc_craft/supervise.sh --job loc-craft --shards 4 --workers 2 --on-demand-from 2
 #   scripts/loc_craft/supervise.sh --job loc-craft --shards 4 --watch      # loop every 15 min
+#   scripts/loc_craft/supervise.sh --job loc-craft --shards 4 --dry-run   # report, launch nothing
+#   scripts/loc_craft/supervise.sh --job loc-craft --shards 6 --own 4-5 --region us-east-2
+#
+# --own names the shards this supervisor is responsible for, which is what a
+# fleet split across regions needs: each region runs its own supervisor, and
+# without it every one of them would relaunch the other regions' shards into
+# its own region, duplicating the work the partition was meant to divide.
 #
 # Relaunches clone origin/main unless --git-ref names something else.
 #
@@ -34,14 +41,18 @@ BUCKET=${BUCKET:-s3://mapsnap-sanborn}
 REGION=${AWS_REGION:-us-west-2}
 PASSTHROUGH=()
 GIT_REF=""
+OWN=""
+DRY_RUN=0
 while [ $# -gt 0 ]; do
   case "$1" in
     --job) JOB="$2"; shift 2 ;;
     --shards) SHARDS="$2"; shift 2 ;;
     --watch) WATCH=1; shift ;;
+    --dry-run) DRY_RUN=1; shift ;;   # report what a sweep would launch
     --interval) INTERVAL="$2"; shift 2 ;;
     # Anything launch.sh understands is handed straight through.
     --workers) WORKERS="$2"; PASSTHROUGH+=(--workers "$2"); shift 2 ;;
+    --own) OWN="$2"; shift 2 ;;
     --git-ref) GIT_REF="$2"; shift 2 ;;
     --on-demand-from|--instance-type|--extra-args|--region)
       PASSTHROUGH+=("$1" "$2"); shift 2 ;;
@@ -51,6 +62,9 @@ done
 export AWS_PROFILE=${AWS_PROFILE:-mapsnap}
 export AWS_REGION=$REGION
 HERE=$(cd -- "$(dirname -- "$0")" > /dev/null && pwd -P)
+source "$HERE/shards.sh"
+MINE=$(expand_shards "${OWN:-0-$((SHARDS - 1))}" "$SHARDS")
+MINE_COUNT=$(echo "$MINE" | wc -l | tr -d " ")
 
 # launch.sh clones at the working tree's HEAD, so an unattended sweep would send
 # the fleet whatever branch happened to be checked out. Pin relaunches to
@@ -104,13 +118,18 @@ sweep() {
     echo "$(date -u +%H:%M) cannot list instances; skipping this sweep" >&2
     return 1
   fi
-  for shard in $(seq 0 $((SHARDS - 1))); do
+  for shard in $MINE; do
     if echo "$finished" | grep -qx "$shard"; then
       done_count=$((done_count + 1))
       continue
     fi
     if echo "$running" | grep -qx "$shard"; then
       alive=$((alive + 1))
+      continue
+    fi
+    if [ "$DRY_RUN" -eq 1 ]; then
+      echo "$(date -u +%H:%M) shard $shard: would relaunch (--dry-run)"
+      relaunched=$((relaunched + 1))
       continue
     fi
     echo "$(date -u +%H:%M) shard $shard: neither finished nor running, relaunching"
@@ -121,18 +140,18 @@ sweep() {
       echo "$(date -u +%H:%M) shard $shard: relaunch failed (quota or capacity); will retry" >&2
     fi
   done
-  echo "$(date -u +%H:%M) $JOB: $done_count/$SHARDS finished, $alive running, $relaunched relaunched"
-  [ "$done_count" -eq "$SHARDS" ]
+  echo "$(date -u +%H:%M) $JOB in $REGION: $done_count/$MINE_COUNT finished, $alive running, $relaunched relaunched"
+  [ "$done_count" -eq "$MINE_COUNT" ]
 }
 
 if [ "$WATCH" -eq 0 ]; then
-  sweep && echo "all $SHARDS shards finished"
+  sweep && echo "all $MINE_COUNT owned shards finished"
   exit 0
 fi
 
 while true; do
   if sweep; then
-    echo "all $SHARDS shards finished"
+    echo "all $MINE_COUNT owned shards finished"
     exit 0
   fi
   sleep "$INTERVAL"

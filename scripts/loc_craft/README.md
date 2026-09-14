@@ -194,6 +194,47 @@ relaunch each of its shards once more after they finish. That run re-lists the
 shard, finds everything done, exits cleanly and writes the marker, which stops
 the cycle -- half an hour and a dollar or two per shard, once.
 
+`--dry-run` reports what a sweep would launch without launching it.
+
+## Spreading a fleet across regions
+
+GPU quota is granted per region, and 8 vCPUs is only two `g6.xlarge`. A second
+region roughly doubles the fleet, and cross-region S3 is both cheap and
+transparent: the corpus reads about 324 GB and writes about 100 GB of sidecars,
+which at $0.02/GB is under $10 for a full pass, and the CLI follows the bucket's
+region on its own, so nothing needs configuring on the instance.
+
+The one thing that must line up is the partition. A worker owns shard
+`SHARD * WORKERS + w` of `SHARDS * WORKERS`, so two fleets are disjoint only if
+they launch with the same `--shards` and `--workers` and take different
+`--only`. Running a second fleet on the *same* partition does not merely
+duplicate a little work: every worker walks its shard in the same seeded
+shuffle, so the newcomer skips the finished prefix, catches up to the running
+fleet and then starts each item at the same moment it does. Nothing claims an
+item that is in flight; only finished ones are skipped.
+
+Six shards split four/two, GPU quota being 8 spot vCPUs in each region:
+
+```sh
+# us-west-2: shards 0-3, the last two on demand (spot quota is 2 instances)
+scripts/loc_craft/launch.sh --shards 6 --only 0-3 --workers 2 --on-demand-from 2
+
+# us-east-2: shards 4-5, both spot
+scripts/loc_craft/launch.sh --shards 6 --only 4-5 --workers 2 --region us-east-2
+```
+
+Each region then supervises its own shards. Without `--own`, every supervisor
+would relaunch the other region's shards into its own region:
+
+```
+*/15 * * * * cd ~/github/mapsnap && scripts/loc_craft/supervise.sh --job loc-craft --shards 6 --own 0-3 --workers 2 --on-demand-from 2 >> /tmp/supervise-west.log 2>&1
+*/17 * * * * cd ~/github/mapsnap && scripts/loc_craft/supervise.sh --job loc-craft --shards 6 --own 4-5 --workers 2 --region us-east-2 >> /tmp/supervise-east.log 2>&1
+```
+
+Re-partitioning a running job is safe: completion lives in the S3 sidecars, not
+in shard bookkeeping, so a new partition skips what is already done and loses
+only the items in flight when the old instances are terminated.
+
 ## Checking the result
 
 `mapsnap loc-craft --dry-run` lists what each item still needs without computing
