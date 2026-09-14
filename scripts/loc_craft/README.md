@@ -161,6 +161,34 @@ because a home uplink caps near 2.5 MB/s, and in-region the upload is free.
 an hour. More shards crowd each other and the person hosting it. Tell them before
 a run of this size.
 
+## Keeping a fleet alive overnight
+
+Launches use one-time spot requests, so a reclaimed instance stays dead until
+something relaunches it. That is not rare: 29 of 30 key-map instances went in a
+single second on 2026-09-14, and a `loc-raw` shard went at 20:44 the same day.
+
+```sh
+scripts/loc_craft/supervise.sh --job loc-craft --shards 4 --workers 2 --on-demand-from 2
+scripts/loc_craft/supervise.sh --job loc-craft --shards 4 --watch          # loop every 15 min
+```
+
+It relaunches any shard that is neither finished nor running. A shard counts as
+finished when it has written `_craft/done/<job>-of-<shards>-shard-<n>`, which
+`bootstrap.sh` does only on a clean exit -- from EC2 alone, a finished shard and
+a reclaimed one look the same, because the instance is simply gone.
+
+One-shot by default so it can live in cron and survive a laptop restart, which a
+`--watch` loop in a terminal does not:
+
+```
+*/15 * * * * cd ~/github/mapsnap && scripts/loc_craft/supervise.sh --job loc-craft --shards 4 --workers 2 >> /tmp/supervise.log 2>&1
+```
+
+A fleet launched before the marker existed writes none, so the supervisor will
+relaunch each of its shards once more after they finish. That run re-lists the
+shard, finds everything done, exits cleanly and writes the marker, which stops
+the cycle -- half an hour and a dollar or two per shard, once.
+
 ## Checking the result
 
 `mapsnap loc-craft --dry-run` lists what each item still needs without computing
