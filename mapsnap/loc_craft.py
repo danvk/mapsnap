@@ -175,6 +175,11 @@ def run_aws(
     )
 
 
+def bucket_name(bucket: str) -> str:
+    """The bucket itself, from an ``s3://bucket[/path]`` URL."""
+    return bucket.rstrip("/").removeprefix("s3://").partition("/")[0]
+
+
 def key_prefix(bucket: str, prefix: str) -> str:
     """The full S3 key prefix of an item, honouring any path in the bucket URL.
 
@@ -189,18 +194,36 @@ def key_prefix(bucket: str, prefix: str) -> str:
 
 
 def list_prefix(bucket: str, prefix: str) -> list[str]:
-    """Keys under an item's prefix, relative to it, via one recursive listing."""
+    """Keys under an item's prefix, relative to it.
+
+    Uses ``s3api list-objects-v2`` rather than ``s3 ls``, which cannot tell an
+    empty prefix from a failure: both exit 1 with nothing on either stream. An
+    item the mirror never produced (45 of the manifest's 35,159) therefore looked
+    like a transient error, spent four retries on it and was counted a failure.
+    s3api answers the empty case with exit 0 and "None", and a real failure with
+    a non-zero status and a message, so the two stop being the same event.
+    """
     full = key_prefix(bucket, prefix)
     result = run_aws(
-        ["aws", "s3", "ls", f"{bucket.rstrip('/')}/{prefix}/", "--recursive"],
+        [
+            "aws",
+            "s3api",
+            "list-objects-v2",
+            "--bucket",
+            bucket_name(bucket),
+            "--prefix",
+            f"{full}/",
+            "--query",
+            "Contents[].Key",
+            "--output",
+            "text",
+        ],
         capture=True,
     )
-    keys = []
-    for line in result.stdout.splitlines():
-        fields = line.split(maxsplit=3)
-        if len(fields) == 4 and fields[3].startswith(f"{full}/"):
-            keys.append(fields[3][len(full) + 1 :])
-    return keys
+    text = result.stdout.strip()
+    if not text or text == "None":
+        return []
+    return [key[len(full) + 1 :] for key in text.split() if key.startswith(f"{full}/")]
 
 
 def plan_item(item: Item, present: list[str]) -> ItemWork:
@@ -317,14 +340,16 @@ def process_item(
 class Prepared:
     """The next item to compute, plus everything passed over while finding it.
 
-    ``work`` is None when the shard is exhausted; ``skipped`` and ``failures``
-    still describe what the scan saw on the way, so the caller counts them once.
+    ``work`` is None when the shard is exhausted; ``skipped`` (already finished),
+    ``absent`` (in the manifest but never mirrored) and ``failures`` still
+    describe what the scan saw on the way, so the caller counts them once.
     """
 
     work: ItemWork | None
     local: Path | None
     index: int
     skipped: int = 0
+    absent: int = 0
     failures: list[tuple[str, str]] = field(default_factory=list)
 
 
@@ -343,11 +368,16 @@ def prepare_next(
     or download fails, are reported in the result rather than raised, so the
     caller keeps the counting and the logging in one place.
     """
-    skipped = 0
+    skipped = absent = 0
     failures: list[tuple[str, str]] = []
     for index, item in items:
         try:
-            work = plan_item(item, list_prefix(bucket, item.prefix))
+            present = list_prefix(bucket, item.prefix)
+            if not present:
+                # In the manifest but not in the mirror: 45 of 35,159 items.
+                absent += 1
+                continue
+            work = plan_item(item, present)
             if work.complete:
                 skipped += 1
                 continue
@@ -357,8 +387,8 @@ def prepare_next(
         except OSError as error:
             failures.append((item.item, str(error)))
             continue
-        return Prepared(work, local, index, skipped, failures)
-    return Prepared(None, None, 0, skipped, failures)
+        return Prepared(work, local, index, skipped, absent, failures)
+    return Prepared(None, None, 0, skipped, absent, failures)
 
 
 def format_duration(seconds: float) -> str:
@@ -432,13 +462,14 @@ def main() -> None:
 
     worker = None
     started = time.perf_counter()
-    done = skipped = failed = pages_detected = pages_predicted = 0
+    done = skipped = absent = failed = pages_detected = pages_predicted = 0
     broken = args.work_dir / f"broken-{args.shard}.log"
 
     def record(prepared: Prepared) -> None:
         """Count what the scan passed over on its way to this item."""
-        nonlocal skipped, failed
+        nonlocal skipped, absent, failed
         skipped += prepared.skipped
+        absent += prepared.absent
         for name, error in prepared.failures:
             print(f"{name}: listing/fetch failed: {error}", file=sys.stderr, flush=True)
             with broken.open("a") as handle:
@@ -504,7 +535,7 @@ def main() -> None:
     elapsed = time.perf_counter() - started
     print(
         f"shard {args.shard}: {done} items processed, {skipped} already complete, "
-        f"{failed} failed; {pages_detected} pages crafted, {pages_predicted} P(road) maps"
+        f"{absent} not in the mirror, {failed} failed; {pages_detected} pages crafted, {pages_predicted} P(road) maps"
         f" in {format_duration(elapsed)} ({elapsed:.0f}s, "
         f"{pages_detected / elapsed * 3600 if elapsed else 0:.0f} pages/h)",
         file=sys.stderr,
