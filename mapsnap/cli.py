@@ -91,6 +91,10 @@ SUBCOMMANDS: dict[str, tuple[str, str]] = {
         "mapsnap.region_predict",
         "Predict each page's content region as a P(region) PNG.",
     ),
+    "loc-craft": (
+        "mapsnap.loc_craft",
+        "Cache CRAFT boxes and P(road) maps for one shard of the LoC mirror (#354)",
+    ),
     "loc-mirror": (
         "mapsnap.loc_mirror",
         "Build the Sanborn mirror (25% JPEGs + raw key-map candidates) from LoC JP2s.",
