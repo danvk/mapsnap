@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import {
   imageStemsByLowercase,
+  legacyPageImageFile,
+  pageImageFile,
   rescaleSvgSelector,
   rewriteAnnotationPage,
   labelToPageKey,
@@ -455,5 +457,19 @@ describe('withTiles', () => {
   it('passes through a body with no usable dimensions', () => {
     const noDims = { type: 'ImageService3' };
     expect(withTiles(noDims)).toBe(noDims);
+  });
+});
+
+describe('pageImageFile', () => {
+  it('names the P(road) sidecar beside the page and P(region) under artifacts', () => {
+    expect(pageImageFile('roadprob', 'p220')).toBe('p220.roadprob.jpg');
+    expect(pageImageFile('roadprob', 'p209__2')).toBe('p209__2.roadprob.jpg');
+    expect(pageImageFile('region', 'p220')).toBe('artifacts/region/p220.png');
+  });
+
+  it('keeps the pre-#354 P(road) location as a fallback', () => {
+    expect(legacyPageImageFile('p220')).toBe(
+      'artifacts/edge_join/roadprob/p220.png',
+    );
   });
 });

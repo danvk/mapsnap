@@ -39,6 +39,7 @@ from pathlib import Path
 
 from mapsnap.craft import volume_craft_images
 from mapsnap.keymap.records import recorded_keymap_keys
+from mapsnap.roadprob import volume_roadprob_images
 from mapsnap.utils import Step, list_pages, run_cmd
 
 
@@ -90,6 +91,11 @@ def rerun_volume(
         run_cmd(
             ["mapsnap", "craft", "--resume", *volume_craft_images(volume, keymap_keys)]
         )
+
+    # P(road) for every parent sheet (#354). --resume keeps the cached maps;
+    # panels are cut from their parent's rather than inferred.
+    with step(f"rerun-{tag}-roadprob"):
+        run_cmd(["mapsnap", "roadprob", "--resume", *volume_roadprob_images(volume)])
 
     # Adjacency before the key-map build so its mutual edges can repair
     # key-map page-number assignments (#213).
