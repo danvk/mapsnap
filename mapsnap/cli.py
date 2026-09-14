@@ -95,6 +95,10 @@ SUBCOMMANDS: dict[str, tuple[str, str]] = {
         "mapsnap.loc_craft",
         "Cache CRAFT boxes and P(road) maps for one shard of the LoC mirror (#354)",
     ),
+    "loc-raw": (
+        "mapsnap.loc_raw",
+        "Fetch the full-resolution key-map sheets the mirror skipped (#354)",
+    ),
     "loc-keymaps": (
         "mapsnap.loc_keymaps",
         "Identify each volume's key map(s) over one shard of the LoC mirror (#354)",
