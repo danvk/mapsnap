@@ -57,7 +57,11 @@ scripts/loc_craft/launch.sh --shards 64 --only 0 --extra-args "--limit 50"
 ```
 
 One instance, 50 items, about 20 minutes. Read its log (below) for the
-items-per-hour line, then divide: 35,114 items at that rate is the whole corpus.
+pages-per-hour line, then divide: 35,114 items at that rate is the whole corpus.
+Each shard is walked in a fixed shuffled order (`--seed`), so a `--limit` sample
+is a representative mix of eras and formats rather than the lowest item ids --
+the corpus's first item is an 1867 Boston atlas of unsplit two-page spreads that
+tiles into four and takes twelve minutes on its own.
 The pilot is also what says whether the per-page numbers from the sizing
 benchmark hold on real volumes rather than Hudson.
 

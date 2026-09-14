@@ -31,6 +31,7 @@ items of different sizes.
 
 import argparse
 import hashlib
+import random
 import shutil
 import subprocess
 import sys
@@ -43,6 +44,8 @@ from pathlib import Path
 MANIFEST_NAME = "loc-sanborn-maps.mapping.tsv"
 ITEM_COLUMNS = ("item", "state", "year")
 # What this pass writes for one page, and for one raw key-map sheet.
+# Fixed so a resumed shard, and a --limit sample, are reproducible.
+SHUFFLE_SEED = 0
 PAGE_OUTPUTS = ("boxes.json", "roadprob.jpg")
 RAW_OUTPUTS = ("boxes.json",)
 
@@ -114,9 +117,60 @@ def shard_of(item: str, shards: int) -> int:
     return int.from_bytes(digest[:8], "big") % max(1, shards)
 
 
-def select_shard(items: list[Item], shard: int, shards: int) -> list[Item]:
-    """The items this worker owns."""
-    return [item for item in items if shard_of(item.item, shards) == shard]
+def select_shard(
+    items: list[Item], shard: int, shards: int, seed: int = SHUFFLE_SEED
+) -> list[Item]:
+    """The items this worker owns, in a deterministic shuffled order.
+
+    Manifest order is item-id order, and id correlates with era and format: the
+    corpus's first item is an 1867 Boston atlas of unsplit two-page spreads at an
+    unusual aspect ratio, which tiles into four and takes twelve minutes. A
+    ``--limit`` sample has to see a representative mix rather than the oldest
+    volumes, so the shard is shuffled -- with a fixed seed, so every worker and
+    every restart walks the same order.
+    """
+    chosen = [item for item in items if shard_of(item.item, shards) == shard]
+    random.Random(seed).shuffle(chosen)
+    return chosen
+
+
+# A transient S3 failure must not cost an item: the first call a freshly booted
+# instance makes can beat its instance-profile credentials out of the metadata
+# service (the first pilot lost one item that way, non-zero exit and empty
+# stderr, seconds into the run), and a multi-day pass also meets throttling.
+AWS_ATTEMPTS = 4
+AWS_BACKOFF_SECONDS = 3.0
+
+
+def run_aws(
+    command: list[str], *, capture: bool = False
+) -> subprocess.CompletedProcess:
+    """Run an aws CLI command, retrying transient failures with a growing delay.
+
+    Raises OSError with whatever the CLI said (and its exit status, since a
+    credential race reports nothing at all) once the attempts are spent.
+    """
+    last = ""
+    status = 0
+    for attempt in range(AWS_ATTEMPTS):
+        result = subprocess.run(command, capture_output=True, text=True, check=False)
+        if result.returncode == 0:
+            return result
+        status = result.returncode
+        last = (result.stderr or result.stdout or "").strip()
+        if attempt + 1 < AWS_ATTEMPTS:
+            delay = AWS_BACKOFF_SECONDS * 2**attempt
+            print(
+                f"  aws {command[1]} {command[2]} failed (exit {status}), "
+                f"retrying in {delay:.0f}s: {last[:120]}",
+                file=sys.stderr,
+                flush=True,
+            )
+            time.sleep(delay)
+    raise OSError(
+        f"{' '.join(command[:4])} failed after {AWS_ATTEMPTS} attempts "
+        f"(exit {status}): {last or 'no output'}"
+    )
 
 
 def key_prefix(bucket: str, prefix: str) -> str:
@@ -135,14 +189,10 @@ def key_prefix(bucket: str, prefix: str) -> str:
 def list_prefix(bucket: str, prefix: str) -> list[str]:
     """Keys under an item's prefix, relative to it, via one recursive listing."""
     full = key_prefix(bucket, prefix)
-    result = subprocess.run(
+    result = run_aws(
         ["aws", "s3", "ls", f"{bucket.rstrip('/')}/{prefix}/", "--recursive"],
-        capture_output=True,
-        text=True,
-        check=False,
+        capture=True,
     )
-    if result.returncode != 0:
-        raise OSError(result.stderr.strip() or "aws s3 ls failed")
     keys = []
     for line in result.stdout.splitlines():
         fields = line.split(maxsplit=3)
@@ -183,9 +233,7 @@ def sync(source: str, destination: str) -> None:
     copies only what is new, because the CLI gives a downloaded file its object's
     last-modified time and so does not consider it changed.
     """
-    subprocess.run(
-        ["aws", "s3", "sync", source, destination, "--only-show-errors"], check=True
-    )
+    run_aws(["aws", "s3", "sync", source, destination, "--only-show-errors"])
 
 
 class Worker:
@@ -268,9 +316,7 @@ def resolve_manifest(manifest: str | None, bucket: str, work_dir: Path) -> Path:
     local = work_dir / MANIFEST_NAME
     if not local.exists():
         work_dir.mkdir(parents=True, exist_ok=True)
-        subprocess.run(
-            ["aws", "s3", "cp", source, str(local), "--only-show-errors"], check=True
-        )
+        run_aws(["aws", "s3", "cp", source, str(local), "--only-show-errors"])
     return local
 
 
@@ -300,6 +346,12 @@ def main() -> None:
     parser.add_argument(
         "--limit", type=int, help="Stop after this many items (a pilot)."
     )
+    parser.add_argument(
+        "--seed",
+        type=int,
+        default=SHUFFLE_SEED,
+        help="Seed for the shard's item order (default: %(default)s).",
+    )
     parser.add_argument("--gpu", action="store_true", help="Run the models on the GPU.")
     parser.add_argument(
         "--dry-run",
@@ -312,7 +364,7 @@ def main() -> None:
         sys.exit(f"--shard must be in [0, {args.shards})")
 
     manifest = resolve_manifest(args.manifest, args.bucket, args.work_dir)
-    items = select_shard(read_manifest(manifest), args.shard, args.shards)
+    items = select_shard(read_manifest(manifest), args.shard, args.shards, args.seed)
     print(
         f"shard {args.shard}/{args.shards}: {len(items)} items",
         file=sys.stderr,
@@ -346,7 +398,7 @@ def main() -> None:
             worker = Worker(gpu=args.gpu)
         try:
             detected, predicted = run_item(work, args.bucket, args.work_dir, worker)
-        except (subprocess.CalledProcessError, OSError) as error:
+        except OSError as error:
             print(f"{item.item}: FAILED: {error}", file=sys.stderr, flush=True)
             with broken.open("a") as handle:
                 handle.write(f"{item.item}\t{error}\n")
