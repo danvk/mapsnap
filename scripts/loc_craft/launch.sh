@@ -6,6 +6,7 @@
 #   scripts/loc_craft/launch.sh --shards 4 --on-demand-from 2   # shards 2,3 on demand
 #   scripts/loc_craft/launch.sh --shards 1 --extra-args "--limit 50"   # a pilot
 #   scripts/loc_craft/launch.sh --shards 4 --workers 2                # 2 processes per instance
+#   scripts/loc_craft/launch.sh --job loc-keymaps --instance-type c6i.2xlarge --shards 32
 #
 # Each instance runs one shard and terminates itself when the shard is done.
 # Shards are static, so re-launching a shard after a spot interruption resumes
@@ -21,6 +22,7 @@ ONLY=""
 ON_DEMAND_FROM=""
 EXTRA_ARGS=""
 WORKERS=1
+JOB=loc-craft
 GIT_REF=$(git rev-parse HEAD)
 REGION=${AWS_REGION:-us-west-2}
 BUCKET=${BUCKET:-s3://mapsnap-sanborn}
@@ -33,6 +35,7 @@ while [ $# -gt 0 ]; do
     --instance-type) INSTANCE_TYPE="$2"; shift 2 ;;
     --extra-args) EXTRA_ARGS="$2"; shift 2 ;;
     --workers) WORKERS="$2"; shift 2 ;;
+    --job) JOB="$2"; shift 2 ;;
     --git-ref) GIT_REF="$2"; shift 2 ;;
     --region) REGION="$2"; shift 2 ;;
     *) echo "unknown flag: $1" >&2; exit 2 ;;
@@ -66,7 +69,7 @@ if [ -z "$AMI" ] || [ "$AMI" = "None" ]; then
   echo "could not resolve a Deep Learning Base AMI in $REGION" >&2
   exit 1
 fi
-echo "AMI $AMI, $INSTANCE_TYPE x${WORKERS} worker(s), ref ${GIT_REF:0:10}, bucket $BUCKET"
+echo "AMI $AMI, $JOB on $INSTANCE_TYPE x${WORKERS} worker(s), ref ${GIT_REF:0:10}, bucket $BUCKET"
 
 # Capacity is per availability zone, so try each zone's default subnet.
 SUBNETS=$(aws ec2 describe-subnets --filters Name=default-for-az,Values=true \
@@ -124,7 +127,7 @@ launch_shard() {
         --metadata-options "HttpTokens=required,HttpEndpoint=enabled" \
         --block-device-mappings "DeviceName=/dev/sda1,Ebs={VolumeSize=200,VolumeType=gp3,DeleteOnTermination=true}" \
         --user-data "file://$user_data" \
-        --tag-specifications "ResourceType=instance,Tags=[{Key=Name,Value=mapsnap-craft-$shard},{Key=project,Value=mapsnap-craft},{Key=shard,Value=$shard}]" \
+        --tag-specifications "ResourceType=instance,Tags=[{Key=Name,Value=$JOB-$shard},{Key=project,Value=mapsnap-craft},{Key=job,Value=$JOB},{Key=shard,Value=$shard}]" \
         --query 'Instances[0].InstanceId' --output text 2>&1); then
       instance_id=$output
       echo "shard $shard/$SHARDS ($market, $zone): $instance_id"
@@ -148,6 +151,7 @@ for shard in $(seq 0 $((SHARDS - 1))); do
   sed -e "s|__BUCKET__|$BUCKET|" -e "s|__GIT_REF__|$GIT_REF|" \
       -e "s|__SHARD__|$shard|" -e "s|__SHARDS__|$SHARDS|" \
       -e "s|__EXTRA_ARGS__|$EXTRA_ARGS|" -e "s|__WORKERS__|$WORKERS|" \
+      -e "s|__JOB__|$JOB|" \
       "$HERE/bootstrap.sh" > "$user_data"
   launch_shard "$shard" "$market" "$user_data" || failed=$((failed + 1))
   rm -f "$user_data"
