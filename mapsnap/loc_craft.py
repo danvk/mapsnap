@@ -22,6 +22,10 @@ gains ``p1.boxes.json``, ``p1.roadprob.jpg`` and ``raw/p1.boxes.json``. Raw
 key-map sheets get CRAFT only: their P(road) comes from the colour model in
 ``mapsnap.keymap.road_prob``, which needs a georeference this pass does not have.
 
+Each item logs a timestamped, shard-tagged line, and the closing summary
+reports pages per hour -- the figure to compare when two configurations process
+items of different sizes.
+
     mapsnap loc-craft --bucket s3://mapsnap-sanborn --shard 0 --shards 8
 """
 
@@ -32,6 +36,7 @@ import subprocess
 import sys
 import time
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from pathlib import Path
 
 # Columns of the mirror's manifest (loc-sanborn-maps.mapping.tsv at the bucket root).
@@ -319,7 +324,7 @@ def main() -> None:
     done = skipped = failed = pages_detected = pages_predicted = 0
     broken = args.work_dir / f"broken-{args.shard}.log"
     for index, item in enumerate(items, start=1):
-        if args.limit and done + skipped >= args.limit:
+        if args.limit and done >= args.limit:
             break
         try:
             work = plan_item(item, list_prefix(args.bucket, item.prefix))
@@ -354,14 +359,17 @@ def main() -> None:
         rate = done / elapsed if elapsed else 0.0
         remaining = (len(items) - index) / rate if rate else 0.0
         print(
-            f"[{index}/{len(items)}] {item.item}: {detected} craft, {predicted} P(road)"
+            f"{datetime.now(UTC):%H:%M:%S} s{args.shard} [{index}/{len(items)}] "
+            f"{item.item}: {detected} craft, {predicted} P(road)"
             f" | {rate * 3600:.0f} items/h, eta {format_duration(remaining)}",
             flush=True,
         )
+    elapsed = time.perf_counter() - started
     print(
         f"shard {args.shard}: {done} items processed, {skipped} already complete, "
         f"{failed} failed; {pages_detected} pages crafted, {pages_predicted} P(road) maps"
-        f" in {format_duration(time.perf_counter() - started)}",
+        f" in {format_duration(elapsed)} ({elapsed:.0f}s, "
+        f"{pages_detected / elapsed * 3600 if elapsed else 0:.0f} pages/h)",
         file=sys.stderr,
         flush=True,
     )

@@ -116,7 +116,16 @@ instance-hours for the corpus with one worker process per instance:
 
 `--workers N` runs N driver processes per instance, each on a sub-shard, so
 CRAFT's CPU post-processing on one item overlaps another's GPU work. `ocr`
-gained 2x that way on the same hardware, but it is unmeasured for this pass:
-run the pilot once at `--workers 1` and once at `--workers 2` and compare the
-items-per-hour line before committing the full fleet.
+gained 2x that way on the same hardware, but it is unmeasured for this pass.
+Measure it with two pilot instances on disjoint shards:
+
+```sh
+scripts/loc_craft/launch.sh --shards 4 --only 0 --workers 1 --extra-args "--limit 25"
+scripts/loc_craft/launch.sh --shards 4 --only 1 --workers 2 --extra-args "--limit 25"
+```
+
+`--limit` is per driver process, so the second instance does about twice the
+items; compare **pages per hour** from each run's closing summary, not items or
+wall time, since items vary from 1 to 100+ pages. With `--workers 2` the log
+holds two interleaved processes, so add their two figures together.
 Transfer is free (same region) and small: ~412 GB down, ~83 GB of sidecars up.
