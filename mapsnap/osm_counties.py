@@ -37,10 +37,19 @@ import time
 from dataclasses import dataclass
 from pathlib import Path
 
+import osmium
+from osmium.geom import GeoJSONFactory
+from osmium.osm import Area
+
 # osmium holds a node-id bitmap per extract, so memory grows with the batch.
 # 100 polygons measured at 3.7 GB against the renumbered dump.
 DEFAULT_BATCH = 200
-DEFAULT_BUFFER_KM = 3.0
+# Zero, because the surveyed OSM boundary needs no slack: measured on Manhattan,
+# cutting to it reaches every one of the 11,535 in-county ways that a 3 km buffer
+# around Natural Earth's line took 11,963 foreign ways to reach. Buffering is for
+# boundaries a volume genuinely overhangs, which is an independent-city problem
+# (#311 measured Richmond at 618 m past its line), not a county one.
+DEFAULT_BUFFER_KM = 0.0
 # Metres per degree, near enough for a buffer whose purpose is slack.
 METRES_PER_DEGREE_LAT = 110_570.0
 METRES_PER_DEGREE_LON_EQUATOR = 111_320.0
@@ -101,6 +110,36 @@ def load_boundaries(geojson: Path) -> dict[str, dict]:
         for feature in features
         if feature.get("properties", {}).get("FIPS")
     }
+
+
+def load_osm_boundaries(pbf: Path) -> dict[str, dict]:
+    """Surveyed county polygons from an OSM dump, keyed by FIPS (``US06037``).
+
+    Preferred over Natural Earth, whose generalization clips real territory:
+    its New York County polygon omits 1,919 ways along Manhattan's waterfront
+    and leaves out Randalls, Wards and Roosevelt Islands entirely.
+
+    OSM writes the code without a leading zero -- Los Angeles is ``6037`` -- so
+    it is padded back to the five digits the rest of the pipeline joins on.
+    """
+    factory = GeoJSONFactory()
+    boundaries: dict[str, dict] = {}
+    for area in osmium.FileProcessor(str(pbf)).with_areas():
+        if not isinstance(area, Area) or area.from_way():
+            continue
+        tags = dict(area.tags)
+        if tags.get("boundary") != "administrative" or tags.get("admin_level") != "6":
+            continue
+        fips = tags.get("nist:fips_code", "")
+        if not fips:
+            continue
+        try:
+            boundaries[f"US{fips.zfill(5)}"] = json.loads(
+                factory.create_multipolygon(area)
+            )
+        except (RuntimeError, ValueError):
+            continue  # an unclosed ring: fall back to Natural Earth for this one
+    return boundaries
 
 
 def buffered_rings(geometry: dict, buffer_km: float) -> list[list[list[list[float]]]]:
@@ -195,8 +234,13 @@ def main() -> None:
     parser.add_argument(
         "--natural-earth",
         type=Path,
-        required=True,
-        help="Natural Earth admin-2 counties: a .geojson, a .shp, or its directory.",
+        help="Natural Earth admin-2 counties, used where OSM has no relation: "
+        "a .geojson, a .shp, or its directory.",
+    )
+    parser.add_argument(
+        "--osm-boundaries",
+        type=Path,
+        help="OSM dump of admin_level=6 relations, preferred over Natural Earth.",
     )
     parser.add_argument(
         "--pbf", type=Path, required=True, help="The national dump, RENUMBERED."
@@ -223,11 +267,29 @@ def main() -> None:
     args = parser.parse_args()
 
     counties = read_counties(args.counties)
-    boundaries = load_boundaries(natural_earth_geojson(args.natural_earth))
+    if not args.osm_boundaries and not args.natural_earth:
+        parser.error("give --osm-boundaries, --natural-earth, or both")
+    boundaries: dict[str, dict] = {}
+    if args.natural_earth:
+        boundaries = load_boundaries(natural_earth_geojson(args.natural_earth))
+    fallback = len(boundaries)
+    if args.osm_boundaries:
+        surveyed = load_osm_boundaries(args.osm_boundaries)
+        wanted = {c.fips for c in counties}
+        used = {k: v for k, v in surveyed.items() if k in wanted}
+        boundaries.update(used)
+        from_ne = sum(
+            1 for c in counties if c.fips not in used and c.fips in boundaries
+        )
+        print(
+            f"boundaries: {len(used)} surveyed from OSM, {from_ne} from Natural Earth"
+        )
+    elif fallback:
+        print(f"boundaries: {fallback} from Natural Earth")
     unknown = [c for c in counties if c.fips not in boundaries]
     if unknown:
         print(
-            f"{len(unknown)} counties are not in Natural Earth, skipping: "
+            f"{len(unknown)} counties have no boundary at all, skipping: "
             f"{', '.join(c.fips for c in unknown[:5])}",
             file=sys.stderr,
         )
