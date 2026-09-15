@@ -9,7 +9,8 @@
 #
 # The log is uploaded to <bucket>/_craft/logs/ every two minutes and again on
 # exit, success or failure, and the instance powers off either way so a failed
-# boot never sits idle. Work is idempotent: an interrupted shard is finished by
+# boot never sits idle -- the exit trap is installed before the first command
+# that can fail, so that holds for the whole script. Work is idempotent: an interrupted shard is finished by
 # launching the same shard number again, which skips every item already done.
 set -euxo pipefail
 exec > >(tee -a /var/log/mapsnap-craft.log) 2>&1
@@ -37,20 +38,14 @@ INSTANCE_TYPE=$(meta instance-type)
 INSTANCE_ID=$(meta instance-id)
 LOG_KEY="_craft/logs/${JOB}-shard-${SHARD}-of-${SHARDS}-${INSTANCE_TYPE}-${INSTANCE_ID}.log"
 
-# opencv-python (not the headless build) links libGL; git/curl/unzip for the rest;
-# libopenjp2-tools is opj_decompress, which loc-raw decodes JP2s with.
-apt-get update -q
-apt-get install -y -q libgl1 libglib2.0-0 git curl unzip libopenjp2-tools
-if ! command -v aws > /dev/null; then
-  curl -s https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip -o /tmp/awscli.zip
-  unzip -q /tmp/awscli.zip -d /tmp
-  /tmp/aws/install
-fi
-
-# From here on the log reaches S3 whatever happens.
-upload_log() { aws s3 cp "$LOG" "$BUCKET/$LOG_KEY" > /dev/null 2>&1 || true; }
-( while sleep 120; do upload_log; done ) &
-UPLOADER=$!
+# Installed before anything that can fail. When this trap lived below the apt
+# install instead, a failure above it exited with no upload and no shutdown:
+# four instances on 2026-09-15 sat idle and billing for half an hour, with no
+# log in S3 and nothing on the console, indistinguishable from healthy work.
+upload_log() {
+  command -v aws > /dev/null 2>&1 || return 0   # before the CLI is installed
+  aws s3 cp "$LOG" "$BUCKET/$LOG_KEY" > /dev/null 2>&1 || true
+}
 finish() {
   local status=$?
   echo "bootstrap exit status $status"
@@ -58,13 +53,15 @@ finish() {
   # that woke before the job's closing summary was written can land its PUT
   # after this one and overwrite the finished log with a stale copy -- which is
   # how 41 of 96 shard summaries went missing from the key-map run.
-  kill "$UPLOADER" 2> /dev/null || true
-  wait "$UPLOADER" 2> /dev/null || true
+  if [ -n "${UPLOADER:-}" ]; then
+    kill "$UPLOADER" 2> /dev/null || true
+    wait "$UPLOADER" 2> /dev/null || true
+  fi
   upload_log
   # A marker, written only on success, is what tells a supervisor that this
   # shard is finished rather than reclaimed. Both look identical from EC2: the
   # instance is simply gone.
-  if [ "$status" -eq 0 ]; then
+  if [ "$status" -eq 0 ] && command -v aws > /dev/null 2>&1; then
     : | aws s3 cp - "$BUCKET/_craft/done/${JOB}-of-${SHARDS}-shard-${SHARD}" \
       > /dev/null 2>&1 || true
   fi
@@ -72,6 +69,30 @@ finish() {
 }
 trap finish EXIT
 
+# apt mirrors fail transiently, and a bare failure here used to strand the
+# instance. Retry, then give up through the trap so it uploads and powers off.
+apt_retry() {
+  local attempt
+  for attempt in 1 2 3; do
+    if "$@"; then return 0; fi
+    echo "apt attempt $attempt failed: $*"
+    sleep $((attempt * 15))
+  done
+  return 1
+}
+
+# opencv-python (not the headless build) links libGL; git/curl/unzip for the rest;
+# libopenjp2-tools is opj_decompress, which loc-raw decodes JP2s with.
+apt_retry apt-get update -q
+apt_retry apt-get install -y -q libgl1 libglib2.0-0 git curl unzip libopenjp2-tools
+if ! command -v aws > /dev/null; then
+  curl -s https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip -o /tmp/awscli.zip
+  unzip -q /tmp/awscli.zip -d /tmp
+  /tmp/aws/install
+fi
+
+( while sleep 120; do upload_log; done ) &
+UPLOADER=$!
 curl -LsSf https://astral.sh/uv/install.sh | sh
 
 cd "$WORK"
