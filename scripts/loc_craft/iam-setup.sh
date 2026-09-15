@@ -41,7 +41,11 @@ INSTANCE_POLICY=$(cat <<EOF
    "Resource": "arn:aws:s3:::$BUCKET_NAME"},
   {"Effect": "Allow", "Action": "s3:GetObject", "Resource": "arn:aws:s3:::$BUCKET_NAME/*"},
   {"Effect": "Allow", "Action": ["s3:PutObject", "s3:DeleteObject"],
-   "Resource": ["arn:aws:s3:::$BUCKET_NAME/by-state/*", "arn:aws:s3:::$BUCKET_NAME/_craft/*"]}
+   "Resource": ["arn:aws:s3:::$BUCKET_NAME/by-state/*", "arn:aws:s3:::$BUCKET_NAME/_craft/*"]},
+  {"Effect": "Allow", "Action": [
+     "sqs:ReceiveMessage", "sqs:DeleteMessage", "sqs:ChangeMessageVisibility",
+     "sqs:GetQueueAttributes", "sqs:GetQueueUrl"],
+   "Resource": "arn:aws:sqs:*:$ACCOUNT:mapsnap-*"}
 ]}
 EOF
 )
@@ -64,6 +68,11 @@ LAUNCH_POLICY=$(cat <<EOF
   {"Effect": "Allow", "Action": ["servicequotas:GetServiceQuota", "servicequotas:ListServiceQuotas",
                                  "servicequotas:ListRequestedServiceQuotaChangeHistoryByQuota",
                                  "servicequotas:RequestServiceQuotaIncrease"],
+   "Resource": "*"},
+  {"Effect": "Allow", "Action": [
+     "sqs:CreateQueue", "sqs:SendMessage", "sqs:GetQueueAttributes", "sqs:SetQueueAttributes",
+     "sqs:GetQueueUrl", "sqs:ListQueues", "sqs:ReceiveMessage", "sqs:DeleteMessage",
+     "sqs:PurgeQueue", "sqs:DeleteQueue"],
    "Resource": "*"}
 ]}
 EOF

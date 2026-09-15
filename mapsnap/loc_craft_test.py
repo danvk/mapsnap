@@ -377,3 +377,106 @@ def test_an_unmirrored_item_is_counted_apart_from_a_finished_one(
     assert prepared.absent == 1
     assert prepared.skipped == 0
     assert prepared.failures == []
+
+
+# The queue as an item source (#354)
+
+ALPHA = Item("sanborn1", "alabama", "1900")
+BETA = Item("sanborn2", "alabama", "1901")
+
+
+def _queue_source(monkeypatch, bodies: list[str], items: dict[str, Item]):
+    """A QueueSource backed by a scripted queue, plus the deletes it performs."""
+    from mapsnap import work_queue
+    from mapsnap.loc_craft import QueueSource
+
+    pending = [work_queue.Message(body, f"handle-{body}") for body in bodies]
+    deleted: list[str] = []
+    monkeypatch.setattr(
+        work_queue, "receive", lambda url, **kw: [pending.pop(0)] if pending else []
+    )
+    monkeypatch.setattr(
+        work_queue, "delete", lambda url, handle: deleted.append(handle)
+    )
+    return QueueSource("https://q", items), deleted
+
+
+def test_queue_source_yields_manifest_items_until_drained(monkeypatch) -> None:
+    source, deleted = _queue_source(
+        monkeypatch, ["sanborn1", "sanborn2"], {"sanborn1": ALPHA, "sanborn2": BETA}
+    )
+    assert [(i, it.item) for i, it in source] == [(1, "sanborn1"), (2, "sanborn2")]
+    assert deleted == []  # nothing is retired merely by being taken
+
+
+def test_queue_source_drops_a_name_the_manifest_does_not_have(monkeypatch) -> None:
+    """Otherwise it is redelivered forever and the queue never drains."""
+    source, deleted = _queue_source(
+        monkeypatch, ["ghost", "sanborn1"], {"sanborn1": ALPHA}
+    )
+    assert [it.item for _, it in source] == ["sanborn1"]
+    assert deleted == ["handle-ghost"]
+
+
+def test_queue_source_retire_deletes_and_release_does_not(monkeypatch) -> None:
+    source, deleted = _queue_source(
+        monkeypatch, ["sanborn1", "sanborn2"], {"sanborn1": ALPHA, "sanborn2": BETA}
+    )
+    taken = [it for _, it in source]
+    source.retire(taken[0])
+    assert deleted == ["handle-sanborn1"]
+    # A failure leaves the lease to lapse so another worker retries it.
+    source.release(taken[1])
+    assert deleted == ["handle-sanborn1"]
+    source.retire(taken[1])  # already released: nothing left to delete
+    assert deleted == ["handle-sanborn1"]
+
+
+def test_prepare_next_retires_what_it_settles_itself(monkeypatch) -> None:
+    """Skipped and absent items must leave the queue; failures must not."""
+    from mapsnap import loc_craft
+
+    complete = Item("done", "alabama", "1900")
+    absent = Item("gone", "alabama", "1901")
+    retired: list[str] = []
+
+    monkeypatch.setattr(
+        loc_craft,
+        "list_prefix",
+        lambda bucket, prefix: [] if prefix.endswith("gone") else ["p1.jpg"],
+    )
+    monkeypatch.setattr(
+        loc_craft,
+        "plan_item",
+        lambda item, present: loc_craft.ItemWork(item, [], [], []),
+    )
+    prepared = loc_craft.prepare_next(
+        iter([(1, complete), (2, absent)]),
+        "s3://b",
+        Path("/tmp"),
+        fetch=False,
+        retire=lambda item: retired.append(item.item),
+    )
+    assert prepared.work is None
+    assert (prepared.skipped, prepared.absent) == (1, 1)
+    assert retired == ["done", "gone"]
+
+
+def test_prepare_next_leaves_a_failed_item_for_another_worker(monkeypatch) -> None:
+    """A listing failure is transient; retiring it would lose the item."""
+    from mapsnap import loc_craft
+
+    def boom(bucket, prefix):
+        raise OSError("listing failed")
+
+    retired: list[str] = []
+    monkeypatch.setattr(loc_craft, "list_prefix", boom)
+    prepared = loc_craft.prepare_next(
+        iter([(1, Item("flaky", "alabama", "1900"))]),
+        "s3://b",
+        Path("/tmp"),
+        fetch=False,
+        retire=lambda item: retired.append(item.item),
+    )
+    assert [name for name, _ in prepared.failures] == ["flaky"]
+    assert retired == []

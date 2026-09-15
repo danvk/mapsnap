@@ -33,20 +33,24 @@ import argparse
 import hashlib
 import random
 import shutil
-import subprocess
 import sys
 import time
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
+
+from mapsnap import work_queue
+from mapsnap.aws_cli import run_aws
 
 # Columns of the mirror's manifest (loc-sanborn-maps.mapping.tsv at the bucket root).
 MANIFEST_NAME = "loc-sanborn-maps.mapping.tsv"
 ITEM_COLUMNS = ("item", "state", "year")
 # What this pass writes for one page, and for one raw key-map sheet.
 # Fixed so a resumed shard, and a --limit sample, are reproducible.
+# A queue has no fixed denominator, so its depth is re-read now and then.
+QUEUE_DEPTH_EVERY = 25
 SHUFFLE_SEED = 0
 PAGE_OUTPUTS = ("boxes.json", "roadprob.jpg")
 RAW_OUTPUTS = ("boxes.json",)
@@ -140,39 +144,6 @@ def select_shard(
 # instance makes can beat its instance-profile credentials out of the metadata
 # service (the first pilot lost one item that way, non-zero exit and empty
 # stderr, seconds into the run), and a multi-day pass also meets throttling.
-AWS_ATTEMPTS = 4
-AWS_BACKOFF_SECONDS = 3.0
-
-
-def run_aws(
-    command: list[str], *, capture: bool = False
-) -> subprocess.CompletedProcess:
-    """Run an aws CLI command, retrying transient failures with a growing delay.
-
-    Raises OSError with whatever the CLI said (and its exit status, since a
-    credential race reports nothing at all) once the attempts are spent.
-    """
-    last = ""
-    status = 0
-    for attempt in range(AWS_ATTEMPTS):
-        result = subprocess.run(command, capture_output=True, text=True, check=False)
-        if result.returncode == 0:
-            return result
-        status = result.returncode
-        last = (result.stderr or result.stdout or "").strip()
-        if attempt + 1 < AWS_ATTEMPTS:
-            delay = AWS_BACKOFF_SECONDS * 2**attempt
-            print(
-                f"  aws {command[1]} {command[2]} failed (exit {status}), "
-                f"retrying in {delay:.0f}s: {last[:120]}",
-                file=sys.stderr,
-                flush=True,
-            )
-            time.sleep(delay)
-    raise OSError(
-        f"{' '.join(command[:4])} failed after {AWS_ATTEMPTS} attempts "
-        f"(exit {status}): {last or 'no output'}"
-    )
 
 
 def bucket_name(bucket: str) -> str:
@@ -336,6 +307,48 @@ def process_item(
         shutil.rmtree(local, ignore_errors=True)
 
 
+class QueueSource:
+    """Items taken from an SQS queue, with the handles that retire them.
+
+    Stands in for a shard's item list, so the fleet no longer has to agree on a
+    partition: every worker just takes the next item. Two items are in flight at
+    once because the prefetcher runs a step ahead, which is why the handles are
+    kept in a dict rather than a single slot.
+    """
+
+    def __init__(self, url: str, by_name: dict[str, Item]) -> None:
+        self.url = url
+        self.by_name = by_name
+        self.handles: dict[str, str] = {}
+        self.taken = 0
+
+    def __iter__(self) -> Iterator[tuple[int, Item]]:
+        while True:
+            messages = work_queue.receive(self.url, count=1)
+            if not messages:
+                return  # drained
+            for message in messages:
+                item = self.by_name.get(message.body)
+                if item is None:
+                    # Named in the queue but not in the manifest: nothing to do,
+                    # and leaving it would keep the queue from ever draining.
+                    work_queue.delete(self.url, message.handle)
+                    continue
+                self.handles[item.item] = message.handle
+                self.taken += 1
+                yield self.taken, item
+
+    def retire(self, item: Item) -> None:
+        """Delete the item's message: it is finished and must not come back."""
+        handle = self.handles.pop(item.item, None)
+        if handle is not None:
+            work_queue.delete(self.url, handle)
+
+    def release(self, item: Item) -> None:
+        """Forget the handle without deleting, so the lease lapses and it retries."""
+        self.handles.pop(item.item, None)
+
+
 @dataclass
 class Prepared:
     """The next item to compute, plus everything passed over while finding it.
@@ -359,6 +372,7 @@ def prepare_next(
     work_dir: Path,
     *,
     fetch: bool = True,
+    retire: Callable[[Item], None] | None = None,
 ) -> Prepared:
     """List forward until an item needs work, download it, and return it.
 
@@ -367,6 +381,10 @@ def prepare_next(
     download, with the GPU idle. Items already complete, and items whose listing
     or download fails, are reported in the result rather than raised, so the
     caller keeps the counting and the logging in one place.
+
+    ``retire`` is called for items this pass settles on its own -- already
+    complete, or never mirrored -- so a queue can drop them. Items whose listing
+    or download fails are deliberately left alone: those should come back.
     """
     skipped = absent = 0
     failures: list[tuple[str, str]] = []
@@ -376,10 +394,14 @@ def prepare_next(
             if not present:
                 # In the manifest but not in the mirror: 45 of 35,159 items.
                 absent += 1
+                if retire is not None:
+                    retire(item)
                 continue
             work = plan_item(item, present)
             if work.complete:
                 skipped += 1
+                if retire is not None:
+                    retire(item)
                 continue
             local = (
                 fetch_item(work, bucket, work_dir) if fetch else work_dir / item.item
@@ -441,6 +463,11 @@ def main() -> None:
         default=SHUFFLE_SEED,
         help="Seed for the shard's item order (default: %(default)s).",
     )
+    parser.add_argument(
+        "--queue",
+        help="SQS queue URL to take items from, instead of --shard/--shards. "
+        "Workers sharing a queue need not agree on anything.",
+    )
     parser.add_argument("--gpu", action="store_true", help="Run the models on the GPU.")
     parser.add_argument(
         "--dry-run",
@@ -453,12 +480,25 @@ def main() -> None:
         sys.exit(f"--shard must be in [0, {args.shards})")
 
     manifest = resolve_manifest(args.manifest, args.bucket, args.work_dir)
-    items = select_shard(read_manifest(manifest), args.shard, args.shards, args.seed)
-    print(
-        f"shard {args.shard}/{args.shards}: {len(items)} items",
-        file=sys.stderr,
-        flush=True,
-    )
+    all_items = read_manifest(manifest)
+    source: QueueSource | None = None
+    if args.queue:
+        source = QueueSource(args.queue, {item.item: item for item in all_items})
+        total = work_queue.depth(args.queue).total
+        label = "queue"
+        print(f"queue: {total:,} items waiting", file=sys.stderr, flush=True)
+        pending: Iterator[tuple[int, Item]] = iter(source)
+    else:
+        items = select_shard(all_items, args.shard, args.shards, args.seed)
+        total = len(items)
+        label = f"s{args.shard}"
+        print(
+            f"shard {args.shard}/{args.shards}: {len(items)} items",
+            file=sys.stderr,
+            flush=True,
+        )
+        pending = iter(list(enumerate(items, start=1)))
+    retire = source.retire if source is not None else None
 
     worker = None
     started = time.perf_counter()
@@ -478,10 +518,14 @@ def main() -> None:
 
     # One thread runs a step ahead, so the next item is on local disk by the
     # time this one finishes computing.
-    pending = iter(list(enumerate(items, start=1)))
     with ThreadPoolExecutor(1) as fetcher:
         future = fetcher.submit(
-            prepare_next, pending, args.bucket, args.work_dir, fetch=not args.dry_run
+            prepare_next,
+            pending,
+            args.bucket,
+            args.work_dir,
+            fetch=not args.dry_run,
+            retire=retire,
         )
         while True:
             prepared = future.result()
@@ -501,6 +545,7 @@ def main() -> None:
                 args.bucket,
                 args.work_dir,
                 fetch=not args.dry_run,
+                retire=retire,
             )
             if args.dry_run:
                 print(
@@ -518,15 +563,24 @@ def main() -> None:
                 with broken.open("a") as handle:
                     handle.write(f"{work.item.item}\t{error}\n")
                 failed += 1
+                # Leave the lease to lapse: another worker retries, and an item
+                # that keeps failing lands in the dead-letter queue.
+                if source is not None:
+                    source.release(work.item)
                 continue
+            if retire is not None:
+                retire(work.item)
             done += 1
             pages_detected += detected
             pages_predicted += predicted
             elapsed = time.perf_counter() - started
             rate = done / elapsed if elapsed else 0.0
-            remaining = (len(items) - index) / rate if rate else 0.0
+            if source is not None and done % QUEUE_DEPTH_EVERY == 0:
+                total = work_queue.depth(args.queue).total
+            left = total - index if source is None else total
+            remaining = left / rate if rate else 0.0
             print(
-                f"{datetime.now(UTC):%H:%M:%S} s{args.shard} [{index}/{len(items)}] "
+                f"{datetime.now(UTC):%H:%M:%S} {label} [{index}/{total}] "
                 f"{work.item.item}: {detected} craft, {predicted} P(road)"
                 f" | {rate * 3600:.0f} items/h, eta {format_duration(remaining)}",
                 flush=True,
@@ -534,7 +588,7 @@ def main() -> None:
 
     elapsed = time.perf_counter() - started
     print(
-        f"shard {args.shard}: {done} items processed, {skipped} already complete, "
+        f"{label}: {done} items processed, {skipped} already complete, "
         f"{absent} not in the mirror, {failed} failed; {pages_detected} pages crafted, {pages_predicted} P(road) maps"
         f" in {format_duration(elapsed)} ({elapsed:.0f}s, "
         f"{pages_detected / elapsed * 3600 if elapsed else 0:.0f} pages/h)",
