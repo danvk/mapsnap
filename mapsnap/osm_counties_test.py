@@ -145,3 +145,47 @@ def test_a_zero_byte_extract_does_not_count_as_done(tmp_path: Path) -> None:
     assert not is_cut(tmp_path / "US1.osm.pbf")
     assert is_cut(tmp_path / "US2.osm.pbf")
     assert [c.fips for c in pending(counties, tmp_path)] == ["US1"]
+
+
+def test_load_osm_boundaries_keys_on_padded_fips(tmp_path: Path) -> None:
+    """OSM writes Los Angeles as 6037; the pipeline joins on US06037."""
+    from mapsnap.osm_counties import load_osm_boundaries
+
+    path = tmp_path / "county.osm"
+    path.write_text(
+        "<?xml version='1.0' encoding='UTF-8'?>\n"
+        '<osm version="0.6" generator="test">\n'
+        '  <node id="1" version="1" lat="34.0" lon="-118.0"/>\n'
+        '  <node id="2" version="1" lat="34.0" lon="-117.0"/>\n'
+        '  <node id="3" version="1" lat="35.0" lon="-117.0"/>\n'
+        '  <node id="4" version="1" lat="35.0" lon="-118.0"/>\n'
+        '  <way id="1" version="1">\n'
+        '    <nd ref="1"/><nd ref="2"/><nd ref="3"/><nd ref="4"/><nd ref="1"/>\n'
+        "  </way>\n"
+        '  <relation id="10" version="1">\n'
+        '    <member type="way" ref="1" role="outer"/>\n'
+        '    <tag k="type" v="boundary"/>\n'
+        '    <tag k="boundary" v="administrative"/>\n'
+        '    <tag k="admin_level" v="6"/>\n'
+        '    <tag k="name" v="Los Angeles County"/>\n'
+        '    <tag k="nist:fips_code" v="6037"/>\n'
+        "  </relation>\n"
+        '  <relation id="11" version="1">\n'
+        '    <member type="way" ref="1" role="outer"/>\n'
+        '    <tag k="type" v="boundary"/>\n'
+        '    <tag k="boundary" v="administrative"/>\n'
+        '    <tag k="admin_level" v="8"/>\n'
+        '    <tag k="name" v="Some Town"/>\n'
+        "  </relation>\n"
+        "</osm>\n"
+    )
+    boundaries = load_osm_boundaries(path)
+    assert list(boundaries) == ["US06037"]
+    assert boundaries["US06037"]["type"] in ("Polygon", "MultiPolygon")
+
+
+def test_default_buffer_is_zero() -> None:
+    """The buffer compensated for Natural Earth's generalization, not for overhang."""
+    from mapsnap.osm_counties import DEFAULT_BUFFER_KM
+
+    assert DEFAULT_BUFFER_KM == 0.0
