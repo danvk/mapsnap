@@ -33,6 +33,7 @@ queue instead, where it can be looked at rather than retried blindly.
 
 import argparse
 import json
+import re
 import sys
 from dataclasses import dataclass
 from pathlib import Path
@@ -65,6 +66,29 @@ class Depth:
         return self.visible + self.in_flight
 
 
+def queue_region(url: str) -> str | None:
+    """The region baked into an SQS queue URL, or None if it is not one.
+
+    Every call has to name this region explicitly. The CLI otherwise signs
+    against whatever region the caller defaults to -- on an instance, the one
+    IMDS reports -- and SQS then looks for the queue in the wrong region and
+    answers ``NonExistentQueue``. That is exactly what killed both us-east-2
+    workers on 2026-09-15 while the us-west-2 four, whose default happened to
+    match, ran fine.
+    """
+    match = re.search(r"sqs\.([a-z0-9-]+)\.amazonaws\.com", url)
+    return match.group(1) if match else None
+
+
+def sqs_command(url: str, operation: str, *args: str) -> list[str]:
+    """An ``aws sqs`` command pinned to the queue's own region."""
+    command = ["aws", "sqs", operation]
+    region = queue_region(url)
+    if region:
+        command += ["--region", region]
+    return [*command, *args]
+
+
 def create_queue(
     name: str,
     *,
@@ -91,9 +115,8 @@ def create_queue(
         capture=True,
     ).stdout.strip()
     arn = run_aws(
-        [
-            "aws",
-            "sqs",
+        sqs_command(
+            dead,
             "get-queue-attributes",
             "--queue-url",
             dead,
@@ -103,7 +126,7 @@ def create_queue(
             "text",
             "--query",
             "Attributes.QueueArn",
-        ],
+        ),
         capture=True,
     ).stdout.strip()
     policy = json.dumps({"deadLetterTargetArn": arn, "maxReceiveCount": max_receives})
@@ -149,15 +172,9 @@ def fill_queue(url: str, names: list[str]) -> int:
             ]
         )
         run_aws(
-            [
-                "aws",
-                "sqs",
-                "send-message-batch",
-                "--queue-url",
-                url,
-                "--entries",
-                entries,
-            ],
+            sqs_command(
+                url, "send-message-batch", "--queue-url", url, "--entries", entries
+            ),
             capture=True,
         )
         sent += len(batch)
@@ -172,9 +189,8 @@ def receive(url: str, *, count: int = 1, wait: int = 20) -> list[Message]:
     come back if those workers die.
     """
     result = run_aws(
-        [
-            "aws",
-            "sqs",
+        sqs_command(
+            url,
             "receive-message",
             "--queue-url",
             url,
@@ -184,7 +200,7 @@ def receive(url: str, *, count: int = 1, wait: int = 20) -> list[Message]:
             str(wait),
             "--output",
             "json",
-        ],
+        ),
         capture=True,
     ).stdout.strip()
     if not result:
@@ -199,15 +215,9 @@ def receive(url: str, *, count: int = 1, wait: int = 20) -> list[Message]:
 def delete(url: str, handle: str) -> None:
     """Retire an item so no other worker sees it."""
     run_aws(
-        [
-            "aws",
-            "sqs",
-            "delete-message",
-            "--queue-url",
-            url,
-            "--receipt-handle",
-            handle,
-        ],
+        sqs_command(
+            url, "delete-message", "--queue-url", url, "--receipt-handle", handle
+        ),
         capture=True,
     )
 
@@ -215,9 +225,8 @@ def delete(url: str, handle: str) -> None:
 def extend(url: str, handle: str, seconds: int) -> None:
     """Push this item's lease out, for work that outruns the visibility timeout."""
     run_aws(
-        [
-            "aws",
-            "sqs",
+        sqs_command(
+            url,
             "change-message-visibility",
             "--queue-url",
             url,
@@ -225,7 +234,7 @@ def extend(url: str, handle: str, seconds: int) -> None:
             handle,
             "--visibility-timeout",
             str(seconds),
-        ],
+        ),
         capture=True,
     )
 
@@ -233,9 +242,8 @@ def extend(url: str, handle: str, seconds: int) -> None:
 def depth(url: str) -> Depth:
     """How many items are waiting, and how many are leased out right now."""
     result = run_aws(
-        [
-            "aws",
-            "sqs",
+        sqs_command(
+            url,
             "get-queue-attributes",
             "--queue-url",
             url,
@@ -244,7 +252,7 @@ def depth(url: str) -> Depth:
             "ApproximateNumberOfMessagesNotVisible",
             "--output",
             "json",
-        ],
+        ),
         capture=True,
     ).stdout.strip()
     attributes = json.loads(result).get("Attributes", {}) if result else {}
