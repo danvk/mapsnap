@@ -15,7 +15,9 @@ from mapsnap.work_queue import (
     depth,
     extend,
     fill_queue,
+    queue_region,
     receive,
+    sqs_command,
 )
 
 
@@ -141,3 +143,40 @@ def test_visibility_is_a_lease_not_an_interval(monkeypatch, seconds: int) -> Non
     create_queue("craft", visibility=seconds)
     attributes = json.loads(fake.flag(2, "--attributes"))
     assert attributes["VisibilityTimeout"] == str(seconds)
+
+
+# Cross-region: the queue's region must come from its URL, not the caller's.
+
+WEST = "https://sqs.us-west-2.amazonaws.com/213478311378/mapsnap-craft"
+
+
+def test_queue_region_reads_the_url() -> None:
+    assert queue_region(WEST) == "us-west-2"
+    assert queue_region("https://sqs.eu-central-1.amazonaws.com/1/q") == "eu-central-1"
+    assert queue_region("https://example.test/not-a-queue") is None
+
+
+def test_sqs_command_pins_the_region() -> None:
+    """A us-east-2 instance signing against its own region got NonExistentQueue."""
+    command = sqs_command(WEST, "receive-message", "--queue-url", WEST)
+    assert command[:5] == ["aws", "sqs", "receive-message", "--region", "us-west-2"]
+
+
+def test_sqs_command_omits_the_region_when_the_url_has_none() -> None:
+    command = sqs_command("https://example.test/q", "delete-message")
+    assert command == ["aws", "sqs", "delete-message"]
+
+
+def test_every_queue_call_names_the_region(monkeypatch) -> None:
+    """One unpinned call is enough to kill a worker in another region."""
+    fake = FakeAws(["", "{}", "", "", "{}"])
+    monkeypatch.setattr(work_queue, "run_aws", fake)
+    fill_queue(WEST, ["sanborn1"])
+    receive(WEST)
+    delete(WEST, "h")
+    extend(WEST, "h", 900)
+    depth(WEST)
+    assert len(fake.calls) == 5
+    for command in fake.calls:
+        assert "--region" in command, command
+        assert command[command.index("--region") + 1] == "us-west-2"
