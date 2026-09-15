@@ -123,7 +123,7 @@ The mirror kept full-resolution copies of the page-0 family and lettered sheets
 only, so a volume whose key map is in the page-1 family has no raw sheet yet.
 
 ```sh
-scripts/loc_craft/launch.sh --job loc-keymaps --instance-type c6i.2xlarge --shards 32
+scripts/loc_craft/launch.sh --job loc-keymaps --shards 32
 ```
 
 Most items never load a model: an item with fewer pages than the coverage floor
@@ -149,7 +149,7 @@ source mirror, decoded at full resolution, uploaded to the item's `raw/` prefix.
 
 ```sh
 uv run mapsnap loc-raw --build-list keymaps.tsv          # sweep the records
-scripts/loc_craft/launch.sh --job loc-raw --instance-type c6i.2xlarge --shards 4 \
+scripts/loc_craft/launch.sh --job loc-raw --shards 4 \
   --extra-args "--list keymaps.tsv --mirror http://host:port"
 ```
 
@@ -160,6 +160,80 @@ because a home uplink caps near 2.5 MB/s, and in-region the upload is free.
 20 MB/s in total, which at about 7 MB a sheet is already close to 10,000 sheets
 an hour. More shards crowd each other and the person hosting it. Tell them before
 a run of this size.
+
+## Keeping a fleet alive overnight
+
+Launches use one-time spot requests, so a reclaimed instance stays dead until
+something relaunches it. That is not rare: 29 of 30 key-map instances went in a
+single second on 2026-09-14, and a `loc-raw` shard went at 20:44 the same day.
+
+```sh
+scripts/loc_craft/supervise.sh --job loc-craft --shards 4 --workers 2 --on-demand-from 2
+scripts/loc_craft/supervise.sh --job loc-craft --shards 4 --watch          # loop every 15 min
+```
+
+The instance type follows the job unless `--instance-type` overrides it: only
+`loc-craft` takes a GPU, and the rest go to `c6i.2xlarge`. Defaulting a CPU job
+to a GPU type sends it at the 8-vCPU G-family quota, where it fails with
+`MaxSpotInstanceCountExceeded` while 256 vCPUs of Standard spot sit idle.
+
+It relaunches any shard that is neither finished nor running. A shard counts as
+finished when it has written `_craft/done/<job>-of-<shards>-shard-<n>`, which
+`bootstrap.sh` does only on a clean exit -- from EC2 alone, a finished shard and
+a reclaimed one look the same, because the instance is simply gone.
+
+One-shot by default so it can live in cron and survive a laptop restart, which a
+`--watch` loop in a terminal does not:
+
+```
+*/15 * * * * cd ~/github/mapsnap && scripts/loc_craft/supervise.sh --job loc-craft --shards 4 --workers 2 >> /tmp/supervise.log 2>&1
+```
+
+A fleet launched before the marker existed writes none, so the supervisor will
+relaunch each of its shards once more after they finish. That run re-lists the
+shard, finds everything done, exits cleanly and writes the marker, which stops
+the cycle -- half an hour and a dollar or two per shard, once.
+
+`--dry-run` reports what a sweep would launch without launching it.
+
+## Spreading a fleet across regions
+
+GPU quota is granted per region, and 8 vCPUs is only two `g6.xlarge`. A second
+region roughly doubles the fleet, and cross-region S3 is both cheap and
+transparent: the corpus reads about 324 GB and writes about 100 GB of sidecars,
+which at $0.02/GB is under $10 for a full pass, and the CLI follows the bucket's
+region on its own, so nothing needs configuring on the instance.
+
+The one thing that must line up is the partition. A worker owns shard
+`SHARD * WORKERS + w` of `SHARDS * WORKERS`, so two fleets are disjoint only if
+they launch with the same `--shards` and `--workers` and take different
+`--only`. Running a second fleet on the *same* partition does not merely
+duplicate a little work: every worker walks its shard in the same seeded
+shuffle, so the newcomer skips the finished prefix, catches up to the running
+fleet and then starts each item at the same moment it does. Nothing claims an
+item that is in flight; only finished ones are skipped.
+
+Six shards split four/two, GPU quota being 8 spot vCPUs in each region:
+
+```sh
+# us-west-2: shards 0-3, the last two on demand (spot quota is 2 instances)
+scripts/loc_craft/launch.sh --shards 6 --only 0-3 --workers 2 --on-demand-from 2
+
+# us-east-2: shards 4-5, both spot
+scripts/loc_craft/launch.sh --shards 6 --only 4-5 --workers 2 --region us-east-2
+```
+
+Each region then supervises its own shards. Without `--own`, every supervisor
+would relaunch the other region's shards into its own region:
+
+```
+*/15 * * * * cd ~/github/mapsnap && scripts/loc_craft/supervise.sh --job loc-craft --shards 6 --own 0-3 --workers 2 --on-demand-from 2 >> /tmp/supervise-west.log 2>&1
+*/17 * * * * cd ~/github/mapsnap && scripts/loc_craft/supervise.sh --job loc-craft --shards 6 --own 4-5 --workers 2 --region us-east-2 >> /tmp/supervise-east.log 2>&1
+```
+
+Re-partitioning a running job is safe: completion lives in the S3 sidecars, not
+in shard bookkeeping, so a new partition skips what is already done and loses
+only the items in flight when the old instances are terminated.
 
 ## Checking the result
 

@@ -61,6 +61,13 @@ finish() {
   kill "$UPLOADER" 2> /dev/null || true
   wait "$UPLOADER" 2> /dev/null || true
   upload_log
+  # A marker, written only on success, is what tells a supervisor that this
+  # shard is finished rather than reclaimed. Both look identical from EC2: the
+  # instance is simply gone.
+  if [ "$status" -eq 0 ]; then
+    : | aws s3 cp - "$BUCKET/_craft/done/${JOB}-of-${SHARDS}-shard-${SHARD}" \
+      > /dev/null 2>&1 || true
+  fi
   shutdown -h now
 }
 trap finish EXIT

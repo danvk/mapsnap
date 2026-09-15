@@ -3,21 +3,29 @@
 #
 #   scripts/loc_craft/launch.sh --shards 4                      # 4 g6.xlarge spot
 #   scripts/loc_craft/launch.sh --shards 4 --only 2             # just shard 2 (a replacement)
+#   scripts/loc_craft/launch.sh --shards 6 --only 4-5 --region us-east-2  # this region's slice
 #   scripts/loc_craft/launch.sh --shards 4 --on-demand-from 2   # shards 2,3 on demand
 #   scripts/loc_craft/launch.sh --shards 1 --extra-args "--limit 50"   # a pilot
 #   scripts/loc_craft/launch.sh --shards 4 --workers 2                # 2 processes per instance
-#   scripts/loc_craft/launch.sh --job loc-keymaps --instance-type c6i.2xlarge --shards 32
+#   scripts/loc_craft/launch.sh --job loc-keymaps --shards 32       # CPU type chosen from the job
 #
 # Each instance runs one shard and terminates itself when the shard is done.
 # Shards are static, so re-launching a shard after a spot interruption resumes
 # it: finished items are skipped by their S3 sidecars.
 #
 # Quotas are counted in vCPUs, and G-family spot and on-demand have separate
-# pools, so --on-demand-from puts the later shards in the other pool.
+# pools, so --on-demand-from puts the later shards in the other pool. Quotas are
+# also per region, so a fleet can span regions: launch every region with the
+# same --shards and give each a disjoint --only, since the partition is
+# (shard, worker) over --shards * --workers and only lines up if both agree.
 set -euo pipefail
 
 SHARDS=4
-INSTANCE_TYPE=g6.xlarge
+# Chosen from the job below unless --instance-type says otherwise: only loc-craft
+# uses a GPU, and defaulting the others to one sends them at the 8-vCPU G-family
+# quota, where they fail with MaxSpotInstanceCountExceeded while 256 vCPUs of
+# Standard spot sit idle.
+INSTANCE_TYPE=""
 ONLY=""
 ON_DEMAND_FROM=""
 EXTRA_ARGS=""
@@ -30,7 +38,7 @@ ROLE=mapsnap-craft
 while [ $# -gt 0 ]; do
   case "$1" in
     --shards) SHARDS="$2"; shift 2 ;;
-    --only) ONLY="$2"; shift 2 ;;
+    --only) ONLY="$2"; shift 2 ;;   # one shard, a list, or a range: 2 / 0,3 / 4-5
     --on-demand-from) ON_DEMAND_FROM="$2"; shift 2 ;;
     --instance-type) INSTANCE_TYPE="$2"; shift 2 ;;
     --extra-args) EXTRA_ARGS="$2"; shift 2 ;;
@@ -41,10 +49,17 @@ while [ $# -gt 0 ]; do
     *) echo "unknown flag: $1" >&2; exit 2 ;;
   esac
 done
+if [ -z "$INSTANCE_TYPE" ]; then
+  case "$JOB" in
+    loc-craft) INSTANCE_TYPE=g6.xlarge ;;   # CRAFT and the road UNet want the GPU
+    *) INSTANCE_TYPE=c6i.2xlarge ;;         # everything else is CPU work
+  esac
+fi
 export AWS_PROFILE=${AWS_PROFILE:-mapsnap}
 export AWS_REGION=$REGION
 # `cd` echoes the directory when CDPATH is set, so silence it.
 HERE=$(cd -- "$(dirname -- "$0")" > /dev/null && pwd -P)
+source "$HERE/shards.sh"
 
 if ! git branch -r --contains "$GIT_REF" 2>/dev/null | grep -q origin; then
   echo "git ref $GIT_REF is not on origin; push it first (instances clone from GitHub)" >&2
@@ -156,9 +171,10 @@ launch_shard() {
   return 1
 }
 
+WANTED=$(expand_shards "${ONLY:-0-$((SHARDS - 1))}" "$SHARDS")
+
 failed=0
-for shard in $(seq 0 $((SHARDS - 1))); do
-  if [ -n "$ONLY" ] && [ "$shard" != "$ONLY" ]; then continue; fi
+for shard in $WANTED; do
   market=spot
   if [ -n "$ON_DEMAND_FROM" ] && [ "$shard" -ge "$ON_DEMAND_FROM" ]; then market=on-demand; fi
   user_data=$(mktemp)
@@ -171,6 +187,6 @@ for shard in $(seq 0 $((SHARDS - 1))); do
   rm -f "$user_data"
 done
 if [ "$failed" -gt 0 ]; then
-  echo "$failed shard(s) did not launch; re-run with --only <shard> once capacity or quota allows" >&2
+  echo "$failed shard(s) did not launch; re-run with --only <shards> once capacity or quota allows" >&2
   exit 1
 fi
