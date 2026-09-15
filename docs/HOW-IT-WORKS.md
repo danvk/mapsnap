@@ -15,29 +15,85 @@ lists every gate a page can fail and the message it leaves behind, and
 the pull requests that built it; they carry the experiments and pictures
 behind the design.
 
-Each step below is one pipeline command. The first six run once per volume
-and cache their sidecars beside the page images; `mapsnap fit` runs steps 7
-through 14 in a fixed order ([#270](https://github.com/danvk/mapsnap/issues/270) phase 3), each communicating with the next
-through per-page sidecar files (`p220.streets.json`, `p220.georef.json`,
-`p220.georef-final.json`, …).
+Each step below is one pipeline command, and each says three things about
+itself: **what it reads, what it writes, and whether it wants a GPU.** Every
+step communicates with the next entirely through sidecar files beside the
+page images (`p220.boxes.json`, `p220.roadprob.jpg`, `p220.streets.json`,
+`p220.georef.json`, `p220.georef-final.json`, …), which is what lets a stage be
+moved to a different machine, or a different fleet, without the others noticing.
+That is not a hypothetical: the corpus run ([#354](https://github.com/danvk/mapsnap/issues/354)) runs steps 2 and 3 on GPU
+instances and everything after them on CPU instances, and the only coordination
+between the two is the sidecars in S3.
 
-| step | command | |
-| --- | --- | --- |
-| 1 | `download` | [A sheet, and the key map that indexes it](#1-download-a-sheet-and-the-key-map-that-indexes-it) |
-| 2 | `split` | [One scan, several pages](#2-split-one-scan-several-pages) |
-| 3 | `craft` | [Where the text is](#3-craft-where-the-text-is) |
-| 4 | `ocr` | [Reading only what could be a street](#4-ocr-reading-only-what-could-be-a-street) |
-| 5 | `keymap` | [The key map](#5-keymap-the-key-map) |
-| 6 | `adjacency` | [Sheets that name their neighbors](#6-adjacency-sheets-that-name-their-neighbors) |
-| 7 | `georef` | [Label axes, intersections and RANSAC](#7-georef-label-axes-intersections-and-ransac) |
-| 8 | `adjacency-gate` | [Printed claims against fitted poses](#8-adjacency-gate-printed-claims-against-fitted-poses) |
-| 9 | `roadprob` | [P(road), a picture of the streets](#9-road-model-proad-a-picture-of-the-streets) |
-| 10 | `snap` | [Matching geometry, not names](#10-snap-matching-geometry-not-names) |
-| 11 | `street-solve` | [Labels as constraints](#11-street-solve-labels-as-constraints) |
-| 12 | `reconcile` | [One arbiter for every pose](#12-reconcile-one-arbiter-for-every-pose) |
-| 13 | `iiif` | [The annotation page and its masks](#13-iiif-the-annotation-page-and-its-masks) |
-| 14 | `compare`, `score` | [Grading against hand-placed truth](#14-compare-and-score-grading-against-hand-placed-truth) |
-| 15 | | [What is left on the table](#15-what-is-left-on-the-table) |
+The first seven steps run once per volume in `mapsnap run-loc`; `mapsnap fit`
+runs steps 8 through 14 in a fixed order ([#270](https://github.com/danvk/mapsnap/issues/270) phase 3).
+
+| step | command | runs on | reads | writes |
+| --- | --- | --- | --- | --- |
+| 1 | [`download`](#1-download-a-sheet-and-the-key-map-that-indexes-it) | network | LoC IIIF, OSM | `p*.jpg`, `raw/<key>.jpg`, `centerlines.geojson`, `mapsnap.json` |
+| 2 | [`craft`](#2-craft-where-the-text-is) | **GPU** | `p*.jpg`, `raw/*.jpg` | `p*.boxes.json` |
+| 3 | [`roadprob`](#3-roadprob-proad-a-picture-of-the-streets) | **GPU** | `p*.jpg` (parents) | `p*.roadprob.jpg` |
+| 4 | [`split`](#4-split-one-scan-several-pages) | CPU | `p*.jpg`, `p*.boxes.json`, `p*.roadprob.jpg` | `p*__N.jpg`, `p*.panels.json`, `p*__N.boxes.json`, `p*__N.roadprob.jpg` |
+| 5 | [`adjacency`](#5-adjacency-sheets-that-name-their-neighbors) | CPU | parent `p*.jpg`, `p*.boxes.json`, `keymaps.json` | `adjacency.json` |
+| 6 | [`keymap`](#6-keymap-the-key-map) | CPU (GPU optional) | `raw/<key>.jpg`, its `.boxes.json`, `adjacency.json`, `centerlines.geojson` | `keymaps.json`, `raw/<key>.keymap.json`, `.keymap.txt`, `.regions.panels.json`, `.inset.panels.json`, `.georef.json` |
+| 7 | [`ocr`](#7-ocr-reading-only-what-could-be-a-street) | CPU-bound, GPU-assisted | `p*.jpg`, `p*.boxes.json`, `centerlines.geojson`, `raw/*.keymap.json` | `p*.streets.json` |
+| 8 | [`georef`](#8-georef-label-axes-intersections-and-ransac) | CPU | `p*.streets.json`, `centerlines.geojson`, `raw/*.keymap.json` | `p*.georef.json` and its declined variants |
+| 9 | [`adjacency-gate`](#9-adjacency-gate-printed-claims-against-fitted-poses) | CPU | `p*.georef.json`, `adjacency.json` | `p*.contradiction.json`, `p*.georef-contradicted.json` |
+| 10 | [`snap`](#10-snap-matching-geometry-not-names) | CPU | `p*.roadprob.jpg`, `centerlines.geojson`, `p*.georef.json`, `raw/*.keymap.json`, `adjacency.json`, `p*.contradiction.json` | `p*.georef-snap.json`, `artifacts/osm_snap/candidates.jsonl` |
+| 11 | [`street-solve`](#11-street-solve-labels-as-constraints) | CPU | `p*.streets.json`, `centerlines.geojson`, `p*.roadprob.jpg` | `p*.georef-street.json`, `artifacts/street_solve/candidates.jsonl` |
+| 12 | [`reconcile`](#12-reconcile-one-arbiter-for-every-pose) | CPU | every `p*.georef*.json`, both `candidates.jsonl`, `adjacency.json`, key-map regions | `p*.georef-final.json` |
+| 13 | [`iiif`](#13-iiif-the-annotation-page-and-its-masks) | CPU | `*.georef-final.json`, `main.iiif.json`, `p*.panels.json`, `centerlines.geojson` | `<tag>.iiif.json` |
+| 14 | [`compare`, `score`](#14-compare-and-score-grading-against-hand-placed-truth) | CPU | `<tag>.iiif.json`, `main.iiif.json`, OIM `p*.panels.json` | `<tag>.txt` |
+| 15 | | | [What is left on the table](#15-what-is-left-on-the-table) | |
+
+## Which steps want a GPU
+
+Two steps, and they are the two that look at every pixel of every sheet with a
+convolutional model: `craft` and `roadprob`. Everything else is either CPU-bound
+outright or gains too little from a GPU to be worth the scarcer quota. The
+numbers come from `mapsnap bench` on Hudson County 1950 vol. 9 (93 pages and one
+raw key-map sheet) run across four instance types on 2026-09-13 ([#411](https://github.com/danvk/mapsnap/pull/411); full
+table in `gpu-vs-cpu-2026-09-13.md`), and from the corpus run that followed.
+
+| step | L4 (g6.xlarge) | T4 (g4dn) | best CPU (c6i.2xlarge, 8 vCPU) | GPU gain |
+| --- | ---: | ---: | ---: | ---: |
+| craft, per page | 1.54 s | 2.9 s | 19.2 s | 12× |
+| craft, raw key-map sheet | 57 s | 98 s | 525 s | 9× |
+| roadprob (road UNet), per page | 0.24 s | 0.53 s | 7.4 s | **31×** |
+| region UNet, per page | 0.03 s | 0.05 s | 0.29 s | 10× |
+| ocr, one worker | 1.87 s | 2.4 s | 3.9 s | 2× |
+| ocr, every vCPU busy (wall) | 0.93 s | 0.66 s (8 vCPU) | 2.58 s | 3–4× |
+| key-map numbers, per sheet | 8 s | 10 s | | |
+
+Three facts decide the split:
+
+**Per vCPU, the L4 beats the T4 by 1.8 to 2.2× on every GPU stage** at the same
+4-vCPU footprint. Under a quota counted in vCPUs that is the number that
+matters, so `g6.xlarge` is the instance.
+
+**CRAFT is the dominant cost and a quarter of it is CPU.** Its post-processing
+is single-threaded, which is why a T4 only gains 1.6× over an M2 laptop and why
+two workers on one L4 measured **1.81×** rather than 2× in the corpus pilot
+([#413](https://github.com/danvk/mapsnap/pull/413)). End to end, with S3 download and upload overlapped by a prefetching
+thread, the corpus fleet sustains about **3.3 s per page per worker** on an L4.
+
+**ocr is CPU-bound and the quota says CPU.** A GPU takes the recognizer's
+forward pass, so ocr costs about 4.5 vCPU-seconds per page with one and 15
+without, but the account's G-family quota is 16 vCPUs against 256 for Standard
+spot. Sixteen GPU vCPUs at 4.5 s/page and 256 CPU vCPUs at 15 s/page are 3.6
+and 17 pages per second respectively: the CPU fleet wins by five to one on
+throughput, and costs less. So ocr runs on the GPU only when the GPU is idle
+anyway, and the same arithmetic puts `keymap` on the CPU fleet, where the
+corpus's 4,080 key-map sheets ran across 32 `c6i.2xlarge` instances in an
+afternoon ([#419](https://github.com/danvk/mapsnap/pull/419)).
+
+What the two GPU steps cost at corpus scale: 432,293 pages at 1.54 + 0.24 s and
+4,080 raw sheets at 57 s is about 360 L4-hours, or four instances for just under
+four days ([#354](https://github.com/danvk/mapsnap/issues/354)). The 2026-09-15 fleet measured 6,400 pages per hour on 8
+workers before the raw sheets entered the stream and 4,500 after — those 57-second
+sheets are a fifth of the GPU time for one percent of the pages. The CPU-side
+work, ocr at ~4.7 vCPU-s, fit at ~5 and split at 0.35, is about 1,300 vCPU-hours:
+five hours on the Standard spot quota.
 
 ---
 
@@ -58,15 +114,91 @@ Pages arrive as scans from the Library of Congress IIIF service ([#33](https://g
 from OldInsuranceMaps.net ([#310](https://github.com/danvk/mapsnap/pull/310), which also fetches the hand-placed truth).
 Everything downstream works on a 25% copy (here 1629 × 1949 px); only the key
 map keeps its full-resolution scan under `raw/`, because its page numbers are
-small.
+small. The same step fetches the volume's street network: an OSM extract for
+the county ([#308](https://github.com/danvk/mapsnap/pull/308)), converted to `centerlines.geojson`, which every later step
+that touches the ground reads. At corpus scale the extracts are cut once from
+a national dump, one per county, against surveyed OSM boundaries with no
+buffer ([#426](https://github.com/danvk/mapsnap/pull/426), [#433](https://github.com/danvk/mapsnap/pull/433)); the independent cities that belong to no county get
+their own ([#430](https://github.com/danvk/mapsnap/pull/430)).
 
 |  |  |
 | --- | --- |
+| Runs on | the network; nothing here computes |
+| Reads | LoC IIIF (or OIM), an OSM extract |
+| Writes | `p*.jpg` at 25%, `raw/<key>.jpg` for key maps, `streets.osm.json` → `centerlines.geojson`, `mapsnap.json` (the run's parameters) |
 | Volume | Columbus, Ohio, 1951, vol. 3 |
 | Pages | 106 (99 placed by this run; 105 have truth) |
 | Working copy | 1629 × 1949 px, one quarter of the scan |
 
-### 2. split: one scan, several pages
+---
+
+## II. Two passes over every pixel
+
+These two steps are the whole-sheet model passes. Both depend only on the
+image, so both run on the parent sheet before anything cuts it into panels,
+and both are the reason the corpus needs GPUs at all.
+
+### 2. craft: where the text is
+
+![CRAFT boxes on p220](../images/how-it-works/03-craft.jpg)
+
+The only model that looks at the whole drawing for text is a _detector_:
+EasyOCR's CRAFT, run three times on each page, on the image as scanned and
+rotated by 90° and 270°, because street names run in every direction. Detection
+is tiled so small type on a large sheet is not lost ([#101](https://github.com/danvk/mapsnap/pull/101)) and runs as its own
+cached step ([#216](https://github.com/danvk/mapsnap/pull/216)); the raw key-map sheet is tiled at native resolution, which is
+why it costs forty pages' worth of GPU time.
+
+CRAFT runs once per parent sheet and never on a panel: a split panel's boxes
+are **derived** from its parent's, remapped into the panel's frame ([#361](https://github.com/danvk/mapsnap/pull/361), [#362](https://github.com/danvk/mapsnap/pull/362),
+[#394](https://github.com/danvk/mapsnap/pull/394)). The command detects parents first and derives panels second, in that
+order, because deriving from a parent whose boxes do not exist yet silently
+fell back to detecting the panel — which is what made Richmond p370's panels
+cost a full CRAFT pass each until [#362](https://github.com/danvk/mapsnap/pull/362) found it.
+
+|  |  |
+| --- | --- |
+| Runs on | **GPU.** 1.54 s per page on an L4 against 19.2 s on the best CPU (12×); the raw sheet 57 s against 525 s. About a quarter of the time is CPU post-processing, so a second worker per GPU gains 1.81×, not 2× |
+| Reads | `p*.jpg` (parents), `raw/<key>.jpg` |
+| Writes | `p*.boxes.json` (and `p*__N.boxes.json`, derived, once panels exist) |
+| Boxes on p220 | 133 at 0°, 89 at 90°, 126 at 270° |
+
+### 3. roadprob: P(road), a picture of the streets
+
+![P(road) on p220 and on the key map](../images/how-it-works/08-unet.jpg)
+
+The second pass runs on ink rather than lettering. A small UNet turns a page
+into a **road-probability map**: it was trained on free labels, OSM centerlines
+drawn through pages the name channel had already fitted ([#125](https://github.com/danvk/mapsnap/pull/125)), resampled
+uniformly so wide streets and alleys both count ([#348](https://github.com/danvk/mapsnap/pull/348)), and recalibrated in
+its fourth version ([#350](https://github.com/danvk/mapsnap/pull/350)). Nothing consumes it until step 10, but it is computed
+here because, like CRAFT, its output depends only on the image.
+
+It used to be inferred on demand inside `snap`, which tied the one step that
+needs a GPU to the fleet that runs the fit. `mapsnap roadprob` made it a cached
+sidecar of its own ([#412](https://github.com/danvk/mapsnap/pull/412)): it runs once per parent sheet, `split` cuts each panel's
+map out of its parent's, and `snap` infers only for a page that somehow has
+none. Cutting a parent's map is not an approximation worth worrying about —
+measured over 30 panels, the crop and a fresh prediction on the panel differ
+by a mean absolute 0.013 with a road-mask IoU of 0.93, and only within ~64 px
+of a cut, where the parent-based map sees the neighbouring panel's ink. A
+color variant does the same for key maps, whose streets are paper-colored gaps
+between painted blocks ([#211](https://github.com/danvk/mapsnap/issues/211), [#225](https://github.com/danvk/mapsnap/pull/225); that matcher is an experiment, not part of
+the production fit). The companion region UNet, which predicts a page's content
+outline for the reconcile experiments of [#401](https://github.com/danvk/mapsnap/pull/401), has the same character at a tenth
+of the cost.
+
+|  |  |
+| --- | --- |
+| Runs on | **GPU, no debate.** 0.24 s per page on an L4, 0.53 on a T4, 7.4 s on the best CPU: 31×, the widest gap in the pipeline |
+| Reads | `p*.jpg` (parents only) |
+| Writes | `p*.roadprob.jpg` (JPEG at quality 90; the pre-[#354](https://github.com/danvk/mapsnap/issues/354) PNGs under `artifacts/edge_join/roadprob/` are still read as a fallback) |
+
+---
+
+## III. Cutting and indexing the volume
+
+### 4. split: one scan, several pages
 
 ![p209 split into two panels](../images/how-it-works/02-split.jpg)
 
@@ -74,10 +206,11 @@ Many sheets carry two to four separate map panels divided by heavy black rules,
 often L-shaped or stepped. `mapsnap split` vectorizes the rules, cuts the sheet
 into panels and writes each as its own page (`p209__1`, `p209__2`) with the
 out-of-panel area masked white ([#70](https://github.com/danvk/mapsnap/pull/70); the OIM-truth harness and shape guard of
-[#272](https://github.com/danvk/mapsnap/pull/272)). A panel inherits what the two whole-sheet
-model passes already produced for its parent: CRAFT's boxes, remapped into the
-panel's frame, and a crop of the parent's P(road) map ([#354](https://github.com/danvk/mapsnap/issues/354)). Two-panel sheets number the panel holding the bottom-left corner first,
-matching OldInsuranceMaps ([#382](https://github.com/danvk/mapsnap/pull/382)), so truth and output name the same panel.
+[#272](https://github.com/danvk/mapsnap/pull/272)). Each panel then inherits what the two model passes already produced
+for its parent: CRAFT's boxes, remapped into the panel's frame, and a crop of
+the parent's P(road) map ([#354](https://github.com/danvk/mapsnap/issues/354)). Two-panel sheets number the panel holding the
+bottom-left corner first, matching OldInsuranceMaps ([#382](https://github.com/danvk/mapsnap/pull/382)), so truth and output
+name the same panel.
 
 Key-map sheets get a second, stricter look: a split must cut away a box flush
 with two sheet edges, or the parent stands whole ([#383](https://github.com/danvk/mapsnap/pull/383)), and a corner-box
@@ -107,56 +240,44 @@ and we do not, so no single pose can satisfy both halves.
 
 |  |  |
 | --- | --- |
+| Runs on | CPU; about 0.35 vCPU-seconds per page, the cheapest step in the pipeline |
+| Reads | `p*.jpg`, `p*.boxes.json`, `p*.roadprob.jpg` (the last two if present) |
+| Writes | `p*__N.jpg`, `p*.panels.json` (the panel polygons), `p*__N.boxes.json`, `p*__N.roadprob.jpg`; mirrored under `raw/` for a key-map sheet |
 | Split sheets in this volume | 8 (p201, p202, p206, p209, p221, p241, p243, p248); OIM splits 9 |
 | Panels | 16 |
 
----
+### 5. adjacency: sheets that name their neighbors
 
-## II. Reading the sheet
+![p220's margin claims and the volume's adjacency graph](../images/how-it-works/07-adjacency.jpg)
 
-### 3. craft: where the text is
+Sanborn sheets print the adjoining sheet's number across the shared boundary.
+mapsnap reads those margin numerals ([#110](https://github.com/danvk/mapsnap/pull/110)) inside CRAFT's boxes and admits one
+as a **claim** only when it resolves to a valid page key, sits in the edge band,
+is printed at least as tall as the volume's own calibrated floor and is
+axis-aligned ([#206](https://github.com/danvk/mapsnap/pull/206), [#209](https://github.com/danvk/mapsnap/pull/209)); a mutual pair of claims is an edge that is ~100%
+precise. One-sided claims form a lower-trust tier ([#207](https://github.com/danvk/mapsnap/pull/207)), and a mutual-edge
+triangle or a reciprocating multi-digit read can promote one ([#356](https://github.com/danvk/mapsnap/pull/356), [#357](https://github.com/danvk/mapsnap/pull/357)).
+The graph was labeled and checked in the debugger ([#150](https://github.com/danvk/mapsnap/pull/150), [#170](https://github.com/danvk/mapsnap/pull/170), [#178](https://github.com/danvk/mapsnap/pull/178)). It reads the
+_parent_ sheets, never the panels, because the printed margin references live
+on the parent even where panels supersede it downstream, and it runs before
+the key-map step so its edges are available to that step's page-number repair.
 
-![CRAFT boxes on p220](../images/how-it-works/03-craft.jpg)
-
-The only model that looks at the whole drawing is a text *detector*: EasyOCR's
-CRAFT, run three times on each page, on the image as scanned and rotated by 90°
-and 270°, because street names run in every direction. Detection is tiled so
-small type on a large sheet is not lost ([#101](https://github.com/danvk/mapsnap/pull/101)), runs as its own cached step
-([#216](https://github.com/danvk/mapsnap/pull/216)), and a split panel inherits its parent sheet's boxes, remapped into the
-panel's frame, instead of being detected twice ([#362](https://github.com/danvk/mapsnap/pull/362), [#394](https://github.com/danvk/mapsnap/pull/394)).
-
-|  |  |
-| --- | --- |
-| Boxes on p220 | 133 at 0°, 89 at 90°, 126 at 270° |
-
-### 4. ocr: reading only what could be a street
-
-![Vocabulary-constrained reads on p220](../images/how-it-works/04-ocr.jpg)
-
-Each box is read by a CRNN recognizer fine-tuned on Sanborn lettering ([#279](https://github.com/danvk/mapsnap/pull/279),
-[#313](https://github.com/danvk/mapsnap/pull/313)). The trick is in the decoder: instead of free text, the CTC decoder walks
-a **prefix trie of street names** taken from OpenStreetMap, so every read is by
-construction a name that exists near the page ([#18](https://github.com/danvk/mapsnap/pull/18); lettered avenues and
-type hints like `ST` / `AV` in [#46](https://github.com/danvk/mapsnap/pull/46); spelling variants that keep the stem, so
-`CLAIREPOINTE` finds `CLAIREPOINT`). The vocabulary is pulled from the
-county's OSM extract ([#308](https://github.com/danvk/mapsnap/pull/308), [#311](https://github.com/danvk/mapsnap/pull/311)) and, once the key map has said roughly where
-the page is, narrowed to the streets within a few hundred meters of it ([#102](https://github.com/danvk/mapsnap/pull/102),
-[#171](https://github.com/danvk/mapsnap/pull/171), [#235](https://github.com/danvk/mapsnap/pull/235)). The same decoder reads the printed scale note, "Scale 50 Ft. to
-One Inch" ([#196](https://github.com/danvk/mapsnap/pull/196)), which step 7 uses.
-
-There is no language model anywhere in this pipeline; every read is a
-detector box, a recognizer and a dictionary.
+Adjacency feeds three consumers in production: it supplies a rotation prior to
+snap (a neighbor's fitted angle), it seeds rescues with the neighbor's
+**stamp**, the point where its printed claim lands through its own fit ([#336](https://github.com/danvk/mapsnap/pull/336)),
+and it is the contradiction gate of step 9. (Its fourth use, repairing key-map
+page numbers, is the opt-in of step 6.)
 
 |  |  |
 | --- | --- |
-| Reads on p220 | 248, of which 20 at confidence ≥ 0.5 |
-| Vocabulary for p220 | streets within 514 m of the key map's location for sheet 220 |
+| Runs on | CPU. It recognizes inside boxes already found; there is no detection here |
+| Reads | parent `p*.jpg`, `p*.boxes.json`, `keymaps.json` (to skip the key-map sheets) |
+| Writes | `adjacency.json` |
+| Mutual edges | 155 |
+| One-sided claims | 123 (41 promoted) |
+| p220's claims | 214 (top), 259 (top right), 219 (left), 230 (bottom) |
 
----
-
-## III. What the volume knows
-
-### 5. keymap: the key map
+### 6. keymap: the key map
 
 ![The key map with reads, regions, inset mask and p220's search circle](../images/how-it-works/06-keymap.jpg)
 
@@ -170,12 +291,12 @@ georeferenced like any other page, from its own street labels, with a full
 six-parameter affine because key maps are drawn with real anisotropy ([#94](https://github.com/danvk/mapsnap/pull/94),
 [#113](https://github.com/danvk/mapsnap/pull/113)). That gives every page number a place on the ground.
 
-Three things on a key-map sheet are *not* pages and had to be taught: the
+Three things on a key-map sheet are _not_ pages and had to be taught: the
 "graphic map of volumes" inset, whose numerals are volume numbers ([#386](https://github.com/danvk/mapsnap/pull/386)–[#388](https://github.com/danvk/mapsnap/pull/388);
 Richmond's p311 was published 14,713 ft away because the inset's "1" became a
 search center), the KEY legend and any second key map cut away as corner boxes
 ([#389](https://github.com/danvk/mapsnap/pull/389)), and the sheet's own cartouche words ([#384](https://github.com/danvk/mapsnap/pull/384)). The printed adjacency
-graph of step 6 can propose repairs to page numbers the CRNN misread ([#217](https://github.com/danvk/mapsnap/pull/217)),
+graph of step 5 can propose repairs to page numbers the CRNN misread ([#217](https://github.com/danvk/mapsnap/pull/217)),
 but the chain only reports them: applying them was a net negative across the
 corpus and has been opt-in since [#249](https://github.com/danvk/mapsnap/pull/249) (issue [#239](https://github.com/danvk/mapsnap/issues/239)). Every decision is logged to
 `raw/<stem>.keymap.txt` ([#385](https://github.com/danvk/mapsnap/pull/385)).
@@ -196,48 +317,60 @@ reach 0.5 (DC 115 of 133, Detroit 83 of 104), which is why the region is only
 a prior and never a placement.
 
 From here on each page carries, in its sidecar, a **search center and radius**
-(the region's centroid; the vocabulary of step 4 is restricted to it), and a
+(the region's centroid; the vocabulary of step 7 is restricted to it), and a
 **region scale prior**: a page whose key-map footprint is about twice the
 volume's typical area was drawn at half the scale, which is how the half-scale
 sheets of a volume are caught ([#114](https://github.com/danvk/mapsnap/pull/114), [#140](https://github.com/danvk/mapsnap/pull/140)).
 
 |  |  |
 | --- | --- |
+| Runs on | CPU, with a GPU optional. The CNN localizer and CRNN take 8 s per sheet on an L4, and a volume has one or two sheets: 4,080 across the corpus, which 32 CPU instances finished in an afternoon ([#419](https://github.com/danvk/mapsnap/pull/419)). Identifying _which_ page is the key map reads names, not pixels, and needs no image at all |
+| Reads | `raw/<key>.jpg`, `raw/<key>.boxes.json`, `adjacency.json`, `centerlines.geojson`; the raw sheet's own street labels are read inside this step |
+| Writes | `keymaps.json` (which pages are key maps), `raw/<key>.keymap.json` (page-number reads with locations), `.keymap-raw.json`, `.regions.panels.json` (page regions), `.inset.panels.json`, `.cartouche.json`, `.georef.json` (the key map's own affine), `.keymap.txt` (the decision log) |
 | Page-number reads | 104 (8 more inside the inset, ignored) |
 | Located numbers vs hand labels | 96 of 97 found, 86% precision, 3 misread |
 | Page regions segmented | 101 |
 | Key-map georef | 922 street labels, 1060 intersections |
 
-### 6. adjacency: sheets that name their neighbors
+---
 
-![p220's margin claims and the volume's adjacency graph](../images/how-it-works/07-adjacency.jpg)
+## IV. Reading the sheet
 
-Sanborn sheets print the adjoining sheet's number across the shared boundary.
-mapsnap reads those margin numerals ([#110](https://github.com/danvk/mapsnap/pull/110)) and admits one as a **claim** only
-when it resolves to a valid page key, sits in the edge band, is printed at
-least as tall as the volume's own calibrated floor and is axis-aligned ([#206](https://github.com/danvk/mapsnap/pull/206),
-[#209](https://github.com/danvk/mapsnap/pull/209)); a mutual pair of claims is an edge that is ~100% precise. One-sided
-claims form a lower-trust tier ([#207](https://github.com/danvk/mapsnap/pull/207)), and a mutual-edge triangle or a
-reciprocating multi-digit read can promote one ([#356](https://github.com/danvk/mapsnap/pull/356), [#357](https://github.com/danvk/mapsnap/pull/357)). The graph
-was labeled and checked in the debugger ([#150](https://github.com/danvk/mapsnap/pull/150), [#170](https://github.com/danvk/mapsnap/pull/170), [#178](https://github.com/danvk/mapsnap/pull/178)).
+### 7. ocr: reading only what could be a street
 
-Adjacency feeds three consumers in production: it supplies a rotation prior to
-snap (a neighbor's fitted angle), it seeds rescues with the neighbor's
-**stamp**, the point where its printed claim lands through its own fit ([#336](https://github.com/danvk/mapsnap/pull/336)),
-and it is the contradiction gate of step 8. (Its fourth use, repairing key-map
-page numbers, is the opt-in of step 5.)
+![Vocabulary-constrained reads on p220](../images/how-it-works/04-ocr.jpg)
+
+Each CRAFT box is read by a CRNN recognizer fine-tuned on Sanborn lettering
+([#279](https://github.com/danvk/mapsnap/pull/279), [#313](https://github.com/danvk/mapsnap/pull/313)). The trick is in the decoder: instead of free text, the CTC decoder
+walks a **prefix trie of street names** taken from OpenStreetMap, so every read
+is by construction a name that exists near the page ([#18](https://github.com/danvk/mapsnap/pull/18); lettered avenues and
+type hints like `ST` / `AV` in [#46](https://github.com/danvk/mapsnap/pull/46); spelling variants that keep the stem, so
+`CLAIREPOINTE` finds `CLAIREPOINT`). The vocabulary is pulled from the
+county's OSM extract ([#308](https://github.com/danvk/mapsnap/pull/308), [#311](https://github.com/danvk/mapsnap/pull/311)) and, once the key map has said roughly where
+the page is, narrowed to the streets within a few hundred meters of it ([#102](https://github.com/danvk/mapsnap/pull/102),
+[#171](https://github.com/danvk/mapsnap/pull/171), [#235](https://github.com/danvk/mapsnap/pull/235)). The same decoder reads the printed scale note, "Scale 50 Ft. to
+One Inch" ([#196](https://github.com/danvk/mapsnap/pull/196)), which step 8 uses.
+
+There is no language model anywhere in this pipeline; every read is a
+detector box, a recognizer and a dictionary.
 
 |  |  |
 | --- | --- |
-| Mutual edges | 155 |
-| One-sided claims | 123 (41 promoted) |
-| p220's claims | 214 (top), 259 (top right), 219 (left), 230 (bottom) |
+| Runs on | CPU-bound, GPU-assisted. A GPU takes the recognizer's forward pass (1.87 s per page on an L4 against 3.9 on the best CPU, single worker) but the trie decode stays on the CPU: about 4.5 vCPU-seconds per page with a GPU, 15 without. Under this account's quotas, 256 Standard vCPUs at 15 s beat 16 GPU vCPUs at 4.5 s by five to one, so the corpus runs it on the CPU fleet. On an x86 CPU the readers must be built unquantized, or the fine-tuned weights silently fail to load ([#412](https://github.com/danvk/mapsnap/pull/412)) |
+| Reads | `p*.jpg`, `p*.boxes.json`, `centerlines.geojson`, `raw/*.keymap.json` (to restrict the vocabulary) |
+| Writes | `p*.streets.json` (reads, confidences, the scale note, the page's paper color) |
+| Reads on p220 | 248, of which 20 at confidence ≥ 0.5 |
+| Vocabulary for p220 | streets within 514 m of the key map's location for sheet 220 |
 
 ---
 
-## IV. Fitting a page
+## V. Fitting a page
 
-### 7. georef: label axes, intersections and RANSAC
+Everything from here on is `mapsnap fit`: CPU work, about 5 vCPU-seconds per
+page across the seven stages, reading the sidecars above and never an image
+except in one fallback.
+
+### 8. georef: label axes, intersections and RANSAC
 
 ![RANSAC on p220](../images/how-it-works/05-georef.jpg)
 
@@ -263,10 +396,13 @@ volume's is snapped to the nearest **rung** (50, 100, 200 ft per inch; [#114](ht
 
 |  |  |
 | --- | --- |
+| Runs on | CPU. RANSAC over all 106 Columbus pages took 28 s |
+| Reads | `p*.streets.json`, `centerlines.geojson`, `raw/*.keymap.json` (search center, scale prior) |
+| Writes | `p*.georef.json` for a fitted page; a declined page gets a variant that records why — `-nofit`, `-outlier`, `-misscale`, `-keymap-outlier`, `-neighbor` — so the next stages can still see the pose it declined |
 | p220 | 8 candidate intersections, 8 inliers; 6 of 7 labels agree |
-| Volume | RANSAC over all 106 pages in 28 s; 99 carry a published pose at the end |
+| Volume | 99 carry a published pose at the end |
 
-### 8. adjacency-gate: printed claims against fitted poses
+### 9. adjacency-gate: printed claims against fitted poses
 
 Both sides of every mutual edge are mapped through their own fits. If the two
 stamps land more than 100 m apart (widened for coarser sheets, [#262](https://github.com/danvk/mapsnap/pull/262)) the edge
@@ -276,34 +412,25 @@ points ([#208](https://github.com/danvk/mapsnap/pull/208)). A named page is demo
 rotation far from the volume's median, and its partners' stamps are handed to
 the next stage as extra search centers. On Columbus no page was demoted.
 
-### 9. road model: P(road), a picture of the streets
-
-![P(road) on p220 and on the key map](../images/how-it-works/08-unet.jpg)
-
-Everything so far ran on names. The next stage runs on ink. A small UNet turns
-a page into a **road-probability map**: it was trained on free labels, OSM
-centerlines drawn through pages the name channel had already fitted ([#125](https://github.com/danvk/mapsnap/pull/125)),
-resampled uniformly so wide streets and alleys both count ([#348](https://github.com/danvk/mapsnap/pull/348)), and
-recalibrated in its fourth version ([#350](https://github.com/danvk/mapsnap/pull/350)). `mapsnap roadprob` caches one
-per page as `<stem>.roadprob.jpg`; like CRAFT it depends only on the image, so
-it runs once over the parent sheets, before `split` cuts the panels' maps out of
-their parent's, and `snap` infers on demand only for a page that has none. A color variant does the same for
-key maps, whose streets are paper-colored gaps between painted blocks ([#211](https://github.com/danvk/mapsnap/issues/211),
-[#225](https://github.com/danvk/mapsnap/pull/225); that matcher is an experiment, not part of the production fit).
+|  |  |
+| --- | --- |
+| Runs on | CPU, seconds per volume |
+| Reads | `p*.georef.json`, `adjacency.json` |
+| Writes | `p*.contradiction.json` (the partners' stamps, as hints for snap); a demoted fit becomes `p*.georef-contradicted.json` |
 
 ### 10. snap: matching geometry, not names
 
 ![snap on Richmond p311](../images/how-it-works/09-snap.jpg)
 
-`snap` places a page by correlating its P(road) map against OSM centerlines
-rasterized at the same scale ([#152](https://github.com/danvk/mapsnap/pull/152)). It searches a **rotation ladder** built
-from the page's own evidence: the angles of label pairs that matched exactly,
-labels against their OSM street modulo 180°, the neighbor's fitted angle, the
-volume's median, plus a sweep at 90° steps; and the volume's **scale rungs**,
-including the page's own fitted rung ([#371](https://github.com/danvk/mapsnap/pull/371)) and the printed note's ([#201](https://github.com/danvk/mapsnap/pull/201)). Each
-rung is one masked normalized-cross-correlation pass; the top peaks are refined
-by chamfer matching of the road skeleton, sliding at most 30 m; and each
-candidate is scored:
+`snap` places a page by correlating its P(road) map from step 3 against OSM
+centerlines rasterized at the same scale ([#152](https://github.com/danvk/mapsnap/pull/152)). It searches a **rotation
+ladder** built from the page's own evidence: the angles of label pairs that
+matched exactly, labels against their OSM street modulo 180°, the neighbor's
+fitted angle, the volume's median, plus a sweep at 90° steps; and the volume's
+**scale rungs**, including the page's own fitted rung ([#371](https://github.com/danvk/mapsnap/pull/371)) and the printed
+note's ([#201](https://github.com/danvk/mapsnap/pull/201)). Each rung is one masked normalized-cross-correlation pass; the
+top peaks are refined by chamfer matching of the road skeleton, sliding at
+most 30 m; and each candidate is scored:
 
 ```
 verification = inlier_frac + ncc_fine − chamfer_mean_m / 30
@@ -319,7 +446,7 @@ count against it ([#376](https://github.com/danvk/mapsnap/pull/376)). What happe
   in at 0.7 ([#336](https://github.com/danvk/mapsnap/pull/336)).
 - **Challenge** (the page has a fit the candidate disagrees with by ≥ 100 ft):
   the candidate needs `select ≥ 1.6`, the margin, better verification and name
-  parity, *and* an incumbent that is geometrically indefensible
+  parity, _and_ an incumbent that is geometrically indefensible
   (verification < 0.1).
 - **Refine** (they agree within 100 ft): the chamfer-locked pose replaces the
   incumbent when its verification is better by 0.05 and the incumbent had at
@@ -352,12 +479,15 @@ region-graded metric before they were fixed ([#161](https://github.com/danvk/map
 
 |  |  |
 | --- | --- |
-| Columbus | 247 s; 53 incumbents kept, 35 refinements, 1 challenge, 7 abstains |
+| Runs on | CPU. The correlation and chamfer passes are numpy on a cached map; 247 s for Columbus. The one exception is a page with no `roadprob.jpg`, for which snap runs the UNet itself — on a CPU, 7 s per page — which is the case step 3 exists to prevent |
+| Reads | `p*.roadprob.jpg`, `centerlines.geojson`, `p*.georef.json` (the incumbent), `raw/*.keymap.json` (search center, regions), `adjacency.json` (rotation prior, stamps), `p*.contradiction.json` |
+| Writes | `p*.georef-snap.json`, `artifacts/osm_snap/candidates.jsonl` (every candidate, cached across runs) and `selection_*.jsonl` |
+| Columbus | 53 incumbents kept, 35 refinements, 1 challenge, 7 abstains |
 | Richmond p311 | 14,713 ft (2026-08-28) → 210 ft RANSAC → 19 ft snap |
 
 ### 11. street-solve: labels as constraints
 
-RANSAC needs two readable streets to *cross*. Many pages never give it one:
+RANSAC needs two readable streets to _cross_. Many pages never give it one:
 their labels run parallel, or the crossing is off the sheet. But a label alone
 says two things, where its street is and which way it runs, and two distinct
 parallel streets fix rotation and, from their spacing, scale. `street-solve`
@@ -366,6 +496,12 @@ intersection ([#175](https://github.com/danvk/mapsnap/pull/175), [#189](https://
 channel is a coin flip, so its pose is adopted only where an independent
 referee, snap's `evaluate_pose` on the road skeleton, prefers it over the
 published pose by a clear margin.
+
+|  |  |
+| --- | --- |
+| Runs on | CPU |
+| Reads | `p*.streets.json`, `centerlines.geojson`, `p*.roadprob.jpg` (the referee), the published pose |
+| Writes | `p*.georef-street.json`, `artifacts/street_solve/candidates.jsonl` |
 
 ### 12. reconcile: one arbiter for every pose
 
@@ -383,9 +519,15 @@ assignment is written to `p*.georef-final.json` for **every** page; a page the
 arbiter declines gets one with `corners: null`, so not placing a page is a
 recorded decision rather than a missing file.
 
+|  |  |
+| --- | --- |
+| Runs on | CPU |
+| Reads | every `p*.georef*.json` a stage wrote, declined variants included; both `candidates.jsonl`; `adjacency.json`; the key map's regions |
+| Writes | `p*.georef-final.json`, one per page, always |
+
 ---
 
-## V. Publishing and grading
+## VI. Publishing and grading
 
 ### 13. iiif: the annotation page and its masks
 
@@ -401,6 +543,12 @@ disappear and the mosaic tiles without seams ([#31](https://github.com/danvk/map
 [#364](https://github.com/danvk/mapsnap/pull/364); labels and split markers in [#381](https://github.com/danvk/mapsnap/pull/381)). The result opens directly in Allmaps
 and in the repo's own viewer ([#123](https://github.com/danvk/mapsnap/pull/123), [#137](https://github.com/danvk/mapsnap/pull/137), [#158](https://github.com/danvk/mapsnap/pull/158)). A multi-volume run stitches
 annotation pages together ([#39](https://github.com/danvk/mapsnap/pull/39)).
+
+|  |  |
+| --- | --- |
+| Runs on | CPU |
+| Reads | `*.georef-final.json`, `main.iiif.json` (the reference page, for image services), `p*.panels.json`, `centerlines.geojson` (for the block masks) |
+| Writes | `<tag>.iiif.json` |
 
 ### 14. compare and score: grading against hand-placed truth
 
@@ -424,6 +572,9 @@ number is the mean over the 20 truth volumes; runs are compared with
 
 |  |  |
 | --- | --- |
+| Runs on | CPU |
+| Reads | `<tag>.iiif.json`, `main.iiif.json` (truth), the truth's `p*.panels.json` |
+| Writes | `<tag>.txt` beside the annotation page — every generated `.iiif.json` needs one, because the debugger renders the RMSE table from it |
 | Columbus 2026-09-03 | **88.8** (≤25 ft 89.1%, 25–50 ft 7.6%, 50–200 ft 0.5%, ≥200 ft 0.4%, 100/105 placed) |
 | Corpus, 20 volumes | mean **80.4** |
 
@@ -448,7 +599,7 @@ So the score has three places to grow: 9.7 points of weight in the two middle
 bands, 5.9 in unplaced sheets, and 2.0 in disasters, which count twice (once
 missing from the top band, once as the penalty).
 
-The archived candidates say how much of that better *selection* alone could
+The archived candidates say how much of that better _selection_ alone could
 reach. Of the 1,742 snap pages with truth, 79% hold a ≤25 ft pose in their top
 eight candidates, almost always at rank 1. An oracle choosing the best of the
 incumbent and those eight would score 83.8 against 80.4: 72 pages (4%) are
@@ -468,13 +619,16 @@ everything works on
 rotation and the key map
 **key map** — the sheet or sheets that index the volume; read for page
 numbers and georeferenced themselves
+**sidecar** — a file beside a page image that one step writes and later steps
+read; the only channel between steps
 **claim** — a margin numeral admitted as naming an adjoining sheet
 **stamp** — where a claim lands on the ground through its page's fit
 **GCP** — a control point: a street crossing found on both the page and OSM
 **1-GCP fit / deferred** — a page placed from one crossing at the volume's
 reference scale, once the volume has established it
 **rung** — one of the volume's printed scales, 50/100/200 ft to the inch
-**P(road)** — the UNet's road-probability map of a page
+**P(road)** — the UNet's road-probability map of a page, cached as
+`<stem>.roadprob.jpg`
 **rescue / challenge / refine** — snap's three outcomes: place an unplaced
 page, replace a disagreeing fit, tighten an agreeing one
 **arbiter** — `reconcile`, which weighs every pose jointly and publishes
