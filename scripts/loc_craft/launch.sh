@@ -127,8 +127,17 @@ echo "spot zones, cheapest first (each shard starts at a different one): $(echo 
 launch_shard() {
   local shard=$1 market=$2 user_data=$3 instance_id="" output="" last_error=""
   local market_args=()
-  # Spot tries the cheapest zone with capacity; on-demand costs the same everywhere.
+  # Spot tries the cheapest zone with capacity; on-demand costs the same
+  # everywhere, so it asks EC2 to place the instance before naming any zone.
+  # Pinning a subnet is what made 3 of 6 shards fail on 2026-09-15: EC2 said so
+  # itself -- "You can currently get g6.xlarge capacity by not specifying an
+  # Availability Zone" -- while we were asking zone by zone and being refused.
+  # Spot still pins, because pool diversity is what keeps one reclamation from
+  # taking the whole fleet.
   local subnets=$SUBNETS
+  if [ "$market" != spot ]; then
+    subnets=$(printf 'any -\n'; echo "$SUBNETS")
+  fi
   if [ "$market" = spot ]; then
     # Rotate the price-ordered list by the shard number so consecutive shards
     # start in different pools.
@@ -146,10 +155,13 @@ launch_shard() {
       "MarketType=spot,SpotOptions={SpotInstanceType=one-time,InstanceInterruptionBehavior=terminate}")
   fi
   while read -r zone subnet; do
+    # "-" is the unpinned attempt: no subnet, so EC2 picks a zone with capacity.
+    local placement=(--subnet-id "$subnet")
+    if [ "$subnet" = "-" ]; then placement=(); fi
     if output=$(aws ec2 run-instances \
         --image-id "$AMI" \
         --instance-type "$INSTANCE_TYPE" \
-        --subnet-id "$subnet" \
+        ${placement[@]+"${placement[@]}"} \
         --iam-instance-profile "Name=$ROLE" \
         ${market_args[@]+"${market_args[@]}"} \
         --instance-initiated-shutdown-behavior terminate \
