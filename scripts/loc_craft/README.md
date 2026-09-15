@@ -21,9 +21,9 @@ scripts/loc_craft/iam-setup.sh
 
 Creates the `mapsnap-craft` instance role (read the bucket, write `by-state/*`
 and `_craft/*`), EC2's Spot service-linked role, and a managed policy granting
-the `mapsnap-mirror` user launch rights, after which it can read *and raise*
+the `mapsnap-mirror` user launch rights, after which it can read _and raise_
 quotas without an admin session. The grant is a managed policy rather than an
-inline one because IAM caps a user's *aggregate* inline policy size at 2048
+inline one because IAM caps a user's _aggregate_ inline policy size at 2048
 bytes, which this plus the sizing benchmark's grant exceeds. Quotas are counted in vCPUs and G-family spot and on-demand are
 separate pools:
 
@@ -207,7 +207,7 @@ region on its own, so nothing needs configuring on the instance.
 The one thing that must line up is the partition. A worker owns shard
 `SHARD * WORKERS + w` of `SHARDS * WORKERS`, so two fleets are disjoint only if
 they launch with the same `--shards` and `--workers` and take different
-`--only`. Running a second fleet on the *same* partition does not merely
+`--only`. Running a second fleet on the _same_ partition does not merely
 duplicate a little work: every worker walks its shard in the same seeded
 shuffle, so the newcomer skips the finished prefix, catches up to the running
 fleet and then starts each item at the same moment it does. Nothing claims an
@@ -235,6 +235,61 @@ Re-partitioning a running job is safe: completion lives in the S3 sidecars, not
 in shard bookkeeping, so a new partition skips what is already done and loses
 only the items in flight when the old instances are terminated.
 
+## Running from a queue instead of shards
+
+Static sharding makes each instance's share a launch-time decision. Resizing the
+fleet means tearing it down and re-partitioning, and a shard whose instance
+never launched is a hole nobody fills -- on 2026-09-15 three of six shards could
+not launch for lack of g6 capacity, leaving half the corpus unworked while four
+instances ran.
+
+With a queue the workers are identical: start one or twenty, in any region, at
+any moment, and each takes the next item. Nothing has to agree on anything.
+
+```sh
+uv run mapsnap work-queue create --name mapsnap-craft     # queue + dead-letter
+uv run mapsnap work-queue fill --url "$QUEUE" --limit 200 # a pilot
+uv run mapsnap work-queue status --url "$QUEUE"
+```
+
+Then launch instances with the URL instead of a shard:
+
+```sh
+scripts/loc_craft/launch.sh --shards 1 --workers 2 \
+  --extra-args "--queue $QUEUE"
+```
+
+`--shards 1` is vestigial here: the worker ignores its shard number once
+`--queue` is given. Launch as many instances as capacity allows, whenever it
+allows, and add more later without touching the ones already running.
+
+### What the visibility timeout does
+
+Receiving an item hides it from other consumers for `--visibility` seconds and
+deleting it retires it. That is a **lease, not a delivery interval**: throughput
+is unrelated to it, and a worker takes its next item the moment it asks. The
+only thing the timeout governs is how long a dead worker's item waits before
+another worker may take it, so it has to exceed the longest an item can take --
+the corpus's worst are 90-page volumes carrying a key-map sheet tiled at native
+resolution, about 57 s per page, hence the 30-minute default.
+
+An item that keeps killing its worker is not retried forever: after
+`--max-receives` attempts it moves to `mapsnap-craft-dead`, where it can be
+looked at. One bad TIFF stalled four `loc-raw` shards before this existed.
+
+### Rollout
+
+The queue needs IAM permissions that predate it, so re-run the setup first:
+
+```sh
+aws login                                   # admin session, expires every 12 h
+scripts/loc_craft/iam-setup.sh
+```
+
+Prove it on a small slice before cutting a fleet over: fill with `--limit 200`,
+run a single instance, and check `status` reaches zero. Nothing is at risk if it
+misbehaves -- the work is idempotent either way, and the shard path still works.
+
 ## Checking the result
 
 `mapsnap loc-craft --dry-run` lists what each item still needs without computing
@@ -253,10 +308,10 @@ From the 2026-09-13 benchmark, per page on an L4 (`g6.xlarge`): CRAFT 1.54 s,
 P(road) 0.24 s; a raw key-map sheet's tiled CRAFT is 56.8 s. That is roughly 278
 instance-hours for the corpus with one worker process per instance:
 
-| fleet | wall time |
-| --- | --- |
+| fleet                                      | wall time |
+| ------------------------------------------ | --------- |
 | 4 x g6.xlarge (8 spot + 8 on-demand vCPUs) | ~2.9 days |
-| 8 x g6.xlarge (32 vCPUs) | ~1.5 days |
+| 8 x g6.xlarge (32 vCPUs)                   | ~1.5 days |
 
 The driver downloads the next item while the current one computes, so the S3
 round trip does not idle the GPU; the first pilot showed untiled items running
