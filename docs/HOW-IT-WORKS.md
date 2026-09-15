@@ -26,74 +26,27 @@ instances and everything after them on CPU instances, and the only coordination
 between the two is the sidecars in S3.
 
 The first seven steps run once per volume in `mapsnap run-loc`; `mapsnap fit`
-runs steps 8 through 14 in a fixed order ([#270](https://github.com/danvk/mapsnap/issues/270) phase 3).
+runs steps 8 through 14 in a fixed order ([#270](https://github.com/danvk/mapsnap/issues/270) phase 3). The **runs on** column says which fleet each step belongs on; the
+measurements behind it are collected in an [appendix](#appendix-which-steps-want-a-gpu),
+being a fact about hardware rather than about how a sheet gets placed.
 
 | step | command | runs on | reads | writes |
 | --- | --- | --- | --- | --- |
-| 1 | [`download`](#1-download-a-sheet-and-the-key-map-that-indexes-it) | network | LoC IIIF, OSM | `p*.jpg`, `raw/<key>.jpg`, `centerlines.geojson`, `mapsnap.json` |
-| 2 | [`craft`](#2-craft-where-the-text-is) | **GPU** | `p*.jpg`, `raw/*.jpg` | `p*.boxes.json` |
+| 1 | [`download`](#1-download-a-sheet-and-the-key-map-that-indexes-it) | network | <ul><li>LoC IIIF</li><li>OSM</li></ul> | <ul><li>`p*.jpg`</li><li>`raw/<key>.jpg`</li><li>`centerlines.geojson`</li><li>`mapsnap.json`</li></ul> |
+| 2 | [`craft`](#2-craft-where-the-text-is) | **GPU** | <ul><li>`p*.jpg`</li><li>`raw/*.jpg`</li></ul> | `p*.boxes.json` |
 | 3 | [`roadprob`](#3-roadprob-proad-a-picture-of-the-streets) | **GPU** | `p*.jpg` (parents) | `p*.roadprob.jpg` |
-| 4 | [`split`](#4-split-one-scan-several-pages) | CPU | `p*.jpg`, `p*.boxes.json`, `p*.roadprob.jpg` | `p*__N.jpg`, `p*.panels.json`, `p*__N.boxes.json`, `p*__N.roadprob.jpg` |
-| 5 | [`adjacency`](#5-adjacency-sheets-that-name-their-neighbors) | CPU | parent `p*.jpg`, `p*.boxes.json`, `keymaps.json` | `adjacency.json` |
-| 6 | [`keymap`](#6-keymap-the-key-map) | CPU (GPU optional) | `raw/<key>.jpg`, its `.boxes.json`, `adjacency.json`, `centerlines.geojson` | `keymaps.json`, `raw/<key>.keymap.json`, `.keymap.txt`, `.regions.panels.json`, `.inset.panels.json`, `.georef.json` |
-| 7 | [`ocr`](#7-ocr-reading-only-what-could-be-a-street) | CPU-bound, GPU-assisted | `p*.jpg`, `p*.boxes.json`, `centerlines.geojson`, `raw/*.keymap.json` | `p*.streets.json` |
-| 8 | [`georef`](#8-georef-label-axes-intersections-and-ransac) | CPU | `p*.streets.json`, `centerlines.geojson`, `raw/*.keymap.json` | `p*.georef.json` and its declined variants |
-| 9 | [`adjacency-gate`](#9-adjacency-gate-printed-claims-against-fitted-poses) | CPU | `p*.georef.json`, `adjacency.json` | `p*.contradiction.json`, `p*.georef-contradicted.json` |
-| 10 | [`snap`](#10-snap-matching-geometry-not-names) | CPU | `p*.roadprob.jpg`, `centerlines.geojson`, `p*.georef.json`, `raw/*.keymap.json`, `adjacency.json`, `p*.contradiction.json` | `p*.georef-snap.json`, `artifacts/osm_snap/candidates.jsonl` |
-| 11 | [`street-solve`](#11-street-solve-labels-as-constraints) | CPU | `p*.streets.json`, `centerlines.geojson`, `p*.roadprob.jpg` | `p*.georef-street.json`, `artifacts/street_solve/candidates.jsonl` |
-| 12 | [`reconcile`](#12-reconcile-one-arbiter-for-every-pose) | CPU | every `p*.georef*.json`, both `candidates.jsonl`, `adjacency.json`, key-map regions | `p*.georef-final.json` |
-| 13 | [`iiif`](#13-iiif-the-annotation-page-and-its-masks) | CPU | `*.georef-final.json`, `main.iiif.json`, `p*.panels.json`, `centerlines.geojson` | `<tag>.iiif.json` |
-| 14 | [`compare`, `score`](#14-compare-and-score-grading-against-hand-placed-truth) | CPU | `<tag>.iiif.json`, `main.iiif.json`, OIM `p*.panels.json` | `<tag>.txt` |
+| 4 | [`split`](#4-split-one-scan-several-pages) | CPU | <ul><li>`p*.jpg`</li><li>`p*.boxes.json`</li><li>`p*.roadprob.jpg`</li></ul> | <ul><li>`p*__N.jpg`</li><li>`p*.panels.json`</li><li>`p*__N.boxes.json`</li><li>`p*__N.roadprob.jpg`</li></ul> |
+| 5 | [`adjacency`](#5-adjacency-sheets-that-name-their-neighbors) | CPU | <ul><li>parent `p*.jpg`</li><li>`p*.boxes.json`</li><li>`keymaps.json`</li></ul> | `adjacency.json` |
+| 6 | [`keymap`](#6-keymap-the-key-map) | CPU (GPU optional) | <ul><li>`raw/<key>.jpg`</li><li>its `.boxes.json`</li><li>`adjacency.json`</li><li>`centerlines.geojson`</li></ul> | <ul><li>`keymaps.json`</li><li>`raw/<key>.keymap.json`</li><li>`.keymap.txt`</li><li>`.regions.panels.json`</li><li>`.inset.panels.json`</li><li>`.georef.json`</li></ul> |
+| 7 | [`ocr`](#7-ocr-reading-only-what-could-be-a-street) | CPU-bound, GPU-assisted | <ul><li>`p*.jpg`</li><li>`p*.boxes.json`</li><li>`centerlines.geojson`</li><li>`raw/*.keymap.json`</li></ul> | `p*.streets.json` |
+| 8 | [`georef`](#8-georef-label-axes-intersections-and-ransac) | CPU | <ul><li>`p*.streets.json`</li><li>`centerlines.geojson`</li><li>`raw/*.keymap.json`</li></ul> | `p*.georef.json` and its declined variants |
+| 9 | [`adjacency-gate`](#9-adjacency-gate-printed-claims-against-fitted-poses) | CPU | <ul><li>`p*.georef.json`</li><li>`adjacency.json`</li></ul> | <ul><li>`p*.contradiction.json`</li><li>`p*.georef-contradicted.json`</li></ul> |
+| 10 | [`snap`](#10-snap-matching-geometry-not-names) | CPU | <ul><li>`p*.roadprob.jpg`</li><li>`centerlines.geojson`</li><li>`p*.georef.json`</li><li>`raw/*.keymap.json`</li><li>`adjacency.json`</li><li>`p*.contradiction.json`</li></ul> | <ul><li>`p*.georef-snap.json`</li><li>`artifacts/osm_snap/candidates.jsonl`</li></ul> |
+| 11 | [`street-solve`](#11-street-solve-labels-as-constraints) | CPU | <ul><li>`p*.streets.json`</li><li>`centerlines.geojson`</li><li>`p*.roadprob.jpg`</li></ul> | <ul><li>`p*.georef-street.json`</li><li>`artifacts/street_solve/candidates.jsonl`</li></ul> |
+| 12 | [`reconcile`](#12-reconcile-one-arbiter-for-every-pose) | CPU | <ul><li>every `p*.georef*.json`</li><li>both `candidates.jsonl`</li><li>`adjacency.json`</li><li>key-map regions</li></ul> | `p*.georef-final.json` |
+| 13 | [`iiif`](#13-iiif-the-annotation-page-and-its-masks) | CPU | <ul><li>`*.georef-final.json`</li><li>`main.iiif.json`</li><li>`p*.panels.json`</li><li>`centerlines.geojson`</li></ul> | `<tag>.iiif.json` |
+| 14 | [`compare`, `score`](#14-compare-and-score-grading-against-hand-placed-truth) | CPU | <ul><li>`<tag>.iiif.json`</li><li>`main.iiif.json`</li><li>OIM `p*.panels.json`</li></ul> | `<tag>.txt` |
 | 15 | | | [What is left on the table](#15-what-is-left-on-the-table) | |
-
-## Which steps want a GPU
-
-Two steps, and they are the two that look at every pixel of every sheet with a
-convolutional model: `craft` and `roadprob`. Everything else is either CPU-bound
-outright or gains too little from a GPU to be worth the scarcer quota. The
-numbers come from `mapsnap bench` on Hudson County 1950 vol. 9 (93 pages and one
-raw key-map sheet) run across four instance types on 2026-09-13 ([#411](https://github.com/danvk/mapsnap/pull/411); full
-table in `gpu-vs-cpu-2026-09-13.md`), and from the corpus run that followed.
-
-| step | L4 (g6.xlarge) | T4 (g4dn) | best CPU (c6i.2xlarge, 8 vCPU) | GPU gain |
-| --- | ---: | ---: | ---: | ---: |
-| craft, per page | 1.54 s | 2.9 s | 19.2 s | 12× |
-| craft, raw key-map sheet | 57 s | 98 s | 525 s | 9× |
-| roadprob (road UNet), per page | 0.24 s | 0.53 s | 7.4 s | **31×** |
-| region UNet, per page | 0.03 s | 0.05 s | 0.29 s | 10× |
-| ocr, one worker | 1.87 s | 2.4 s | 3.9 s | 2× |
-| ocr, every vCPU busy (wall) | 0.93 s | 0.66 s (8 vCPU) | 2.58 s | 3–4× |
-| key-map numbers, per sheet | 8 s | 10 s | | |
-
-Three facts decide the split:
-
-**Per vCPU, the L4 beats the T4 by 1.8 to 2.2× on every GPU stage** at the same
-4-vCPU footprint. Under a quota counted in vCPUs that is the number that
-matters, so `g6.xlarge` is the instance.
-
-**CRAFT is the dominant cost and a quarter of it is CPU.** Its post-processing
-is single-threaded, which is why a T4 only gains 1.6× over an M2 laptop and why
-two workers on one L4 measured **1.81×** rather than 2× in the corpus pilot
-([#413](https://github.com/danvk/mapsnap/pull/413)). End to end, with S3 download and upload overlapped by a prefetching
-thread, the corpus fleet sustains about **3.3 s per page per worker** on an L4.
-
-**ocr is CPU-bound and the quota says CPU.** A GPU takes the recognizer's
-forward pass, so ocr costs about 4.5 vCPU-seconds per page with one and 15
-without, but the account's G-family quota is 16 vCPUs against 256 for Standard
-spot. Sixteen GPU vCPUs at 4.5 s/page and 256 CPU vCPUs at 15 s/page are 3.6
-and 17 pages per second respectively: the CPU fleet wins by five to one on
-throughput, and costs less. So ocr runs on the GPU only when the GPU is idle
-anyway, and the same arithmetic puts `keymap` on the CPU fleet, where the
-corpus's 4,080 key-map sheets ran across 32 `c6i.2xlarge` instances in an
-afternoon ([#419](https://github.com/danvk/mapsnap/pull/419)).
-
-What the two GPU steps cost at corpus scale: 432,293 pages at 1.54 + 0.24 s and
-4,080 raw sheets at 57 s is about 360 L4-hours, or four instances for just under
-four days ([#354](https://github.com/danvk/mapsnap/issues/354)). The 2026-09-15 fleet measured 6,400 pages per hour on 8
-workers before the raw sheets entered the stream and 4,500 after — those 57-second
-sheets are a fifth of the GPU time for one percent of the pages. The CPU-side
-work, ocr at ~4.7 vCPU-s, fit at ~5 and split at 0.35, is about 1,300 vCPU-hours:
-five hours on the Standard spot quota.
 
 ---
 
@@ -124,8 +77,8 @@ their own ([#430](https://github.com/danvk/mapsnap/pull/430)).
 |  |  |
 | --- | --- |
 | Runs on | the network; nothing here computes |
-| Reads | LoC IIIF (or OIM), an OSM extract |
-| Writes | `p*.jpg` at 25%, `raw/<key>.jpg` for key maps, `streets.osm.json` → `centerlines.geojson`, `mapsnap.json` (the run's parameters) |
+| Reads | <ul><li>LoC IIIF (or OIM)</li><li>an OSM extract</li></ul> |
+| Writes | <ul><li>`p*.jpg` at 25%</li><li>`raw/<key>.jpg` for key maps</li><li>`streets.osm.json` → `centerlines.geojson`</li><li>`mapsnap.json` (the run's parameters)</li></ul> |
 | Volume | Columbus, Ohio, 1951, vol. 3 |
 | Pages | 106 (99 placed by this run; 105 have truth) |
 | Working copy | 1629 × 1949 px, one quarter of the scan |
@@ -159,8 +112,8 @@ cost a full CRAFT pass each until [#362](https://github.com/danvk/mapsnap/pull/3
 |  |  |
 | --- | --- |
 | Runs on | **GPU.** 1.54 s per page on an L4 against 19.2 s on the best CPU (12×); the raw sheet 57 s against 525 s. About a quarter of the time is CPU post-processing, so a second worker per GPU gains 1.81×, not 2× |
-| Reads | `p*.jpg` (parents), `raw/<key>.jpg` |
-| Writes | `p*.boxes.json` (and `p*__N.boxes.json`, derived, once panels exist) |
+| Reads | <ul><li>`p*.jpg` (parents)</li><li>`raw/<key>.jpg`</li></ul> |
+| Writes | <ul><li>`p*.boxes.json`</li><li>`p*__N.boxes.json`, derived, once panels exist</li></ul> |
 | Boxes on p220 | 133 at 0°, 89 at 90°, 126 at 270° |
 
 ### 3. roadprob: P(road), a picture of the streets
@@ -241,8 +194,8 @@ and we do not, so no single pose can satisfy both halves.
 |  |  |
 | --- | --- |
 | Runs on | CPU; about 0.35 vCPU-seconds per page, the cheapest step in the pipeline |
-| Reads | `p*.jpg`, `p*.boxes.json`, `p*.roadprob.jpg` (the last two if present) |
-| Writes | `p*__N.jpg`, `p*.panels.json` (the panel polygons), `p*__N.boxes.json`, `p*__N.roadprob.jpg`; mirrored under `raw/` for a key-map sheet |
+| Reads | <ul><li>`p*.jpg`</li><li>`p*.boxes.json` (if present)</li><li>`p*.roadprob.jpg` (if present)</li></ul> |
+| Writes | <ul><li>`p*__N.jpg`</li><li>`p*.panels.json` (the panel polygons)</li><li>`p*__N.boxes.json`</li><li>`p*__N.roadprob.jpg`</li><li>the same, mirrored under `raw/`, for a key-map sheet</li></ul> |
 | Split sheets in this volume | 8 (p201, p202, p206, p209, p221, p241, p243, p248); OIM splits 9 |
 | Panels | 16 |
 
@@ -271,7 +224,7 @@ page numbers, is the opt-in of step 6.)
 |  |  |
 | --- | --- |
 | Runs on | CPU. It recognizes inside boxes already found; there is no detection here |
-| Reads | parent `p*.jpg`, `p*.boxes.json`, `keymaps.json` (to skip the key-map sheets) |
+| Reads | <ul><li>parent `p*.jpg`</li><li>`p*.boxes.json`</li><li>`keymaps.json` (to skip the key-map sheets)</li></ul> |
 | Writes | `adjacency.json` |
 | Mutual edges | 155 |
 | One-sided claims | 123 (41 promoted) |
@@ -325,8 +278,8 @@ sheets of a volume are caught ([#114](https://github.com/danvk/mapsnap/pull/114)
 |  |  |
 | --- | --- |
 | Runs on | CPU, with a GPU optional. The CNN localizer and CRNN take 8 s per sheet on an L4, and a volume has one or two sheets: 4,080 across the corpus, which 32 CPU instances finished in an afternoon ([#419](https://github.com/danvk/mapsnap/pull/419)). Identifying _which_ page is the key map reads names, not pixels, and needs no image at all |
-| Reads | `raw/<key>.jpg`, `raw/<key>.boxes.json`, `adjacency.json`, `centerlines.geojson`; the raw sheet's own street labels are read inside this step |
-| Writes | `keymaps.json` (which pages are key maps), `raw/<key>.keymap.json` (page-number reads with locations), `.keymap-raw.json`, `.regions.panels.json` (page regions), `.inset.panels.json`, `.cartouche.json`, `.georef.json` (the key map's own affine), `.keymap.txt` (the decision log) |
+| Reads | <ul><li>`raw/<key>.jpg`</li><li>`raw/<key>.boxes.json`</li><li>`adjacency.json`</li><li>`centerlines.geojson`</li><li>the raw sheet's own street labels, read inside this step</li></ul> |
+| Writes | <ul><li>`keymaps.json` (which pages are key maps)</li><li>`raw/<key>.keymap.json` (page-number reads with locations)</li><li>`raw/<key>.keymap-raw.json`</li><li>`raw/<key>.regions.panels.json` (page regions)</li><li>`raw/<key>.inset.panels.json`</li><li>`raw/<key>.cartouche.json`</li><li>`raw/<key>.georef.json` (the key map's own affine)</li><li>`raw/<key>.keymap.txt` (the decision log)</li></ul> |
 | Page-number reads | 104 (8 more inside the inset, ignored) |
 | Located numbers vs hand labels | 96 of 97 found, 86% precision, 3 misread |
 | Page regions segmented | 101 |
@@ -357,7 +310,7 @@ detector box, a recognizer and a dictionary.
 |  |  |
 | --- | --- |
 | Runs on | CPU-bound, GPU-assisted. A GPU takes the recognizer's forward pass (1.87 s per page on an L4 against 3.9 on the best CPU, single worker) but the trie decode stays on the CPU: about 4.5 vCPU-seconds per page with a GPU, 15 without. Under this account's quotas, 256 Standard vCPUs at 15 s beat 16 GPU vCPUs at 4.5 s by five to one, so the corpus runs it on the CPU fleet. On an x86 CPU the readers must be built unquantized, or the fine-tuned weights silently fail to load ([#412](https://github.com/danvk/mapsnap/pull/412)) |
-| Reads | `p*.jpg`, `p*.boxes.json`, `centerlines.geojson`, `raw/*.keymap.json` (to restrict the vocabulary) |
+| Reads | <ul><li>`p*.jpg`</li><li>`p*.boxes.json`</li><li>`centerlines.geojson`</li><li>`raw/*.keymap.json` (to restrict the vocabulary)</li></ul> |
 | Writes | `p*.streets.json` (reads, confidences, the scale note, the page's paper color) |
 | Reads on p220 | 248, of which 20 at confidence ≥ 0.5 |
 | Vocabulary for p220 | streets within 514 m of the key map's location for sheet 220 |
@@ -397,7 +350,7 @@ volume's is snapped to the nearest **rung** (50, 100, 200 ft per inch; [#114](ht
 |  |  |
 | --- | --- |
 | Runs on | CPU. RANSAC over all 106 Columbus pages took 28 s |
-| Reads | `p*.streets.json`, `centerlines.geojson`, `raw/*.keymap.json` (search center, scale prior) |
+| Reads | <ul><li>`p*.streets.json`</li><li>`centerlines.geojson`</li><li>`raw/*.keymap.json` (search center, scale prior)</li></ul> |
 | Writes | `p*.georef.json` for a fitted page; a declined page gets a variant that records why — `-nofit`, `-outlier`, `-misscale`, `-keymap-outlier`, `-neighbor` — so the next stages can still see the pose it declined |
 | p220 | 8 candidate intersections, 8 inliers; 6 of 7 labels agree |
 | Volume | 99 carry a published pose at the end |
@@ -415,8 +368,8 @@ the next stage as extra search centers. On Columbus no page was demoted.
 |  |  |
 | --- | --- |
 | Runs on | CPU, seconds per volume |
-| Reads | `p*.georef.json`, `adjacency.json` |
-| Writes | `p*.contradiction.json` (the partners' stamps, as hints for snap); a demoted fit becomes `p*.georef-contradicted.json` |
+| Reads | <ul><li>`p*.georef.json`</li><li>`adjacency.json`</li></ul> |
+| Writes | <ul><li>`p*.contradiction.json` (the partners' stamps, as hints for snap)</li><li>`p*.georef-contradicted.json`, which a demoted fit becomes</li></ul> |
 
 ### 10. snap: matching geometry, not names
 
@@ -480,8 +433,8 @@ region-graded metric before they were fixed ([#161](https://github.com/danvk/map
 |  |  |
 | --- | --- |
 | Runs on | CPU. The correlation and chamfer passes are numpy on a cached map; 247 s for Columbus. The one exception is a page with no `roadprob.jpg`, for which snap runs the UNet itself — on a CPU, 7 s per page — which is the case step 3 exists to prevent |
-| Reads | `p*.roadprob.jpg`, `centerlines.geojson`, `p*.georef.json` (the incumbent), `raw/*.keymap.json` (search center, regions), `adjacency.json` (rotation prior, stamps), `p*.contradiction.json` |
-| Writes | `p*.georef-snap.json`, `artifacts/osm_snap/candidates.jsonl` (every candidate, cached across runs) and `selection_*.jsonl` |
+| Reads | <ul><li>`p*.roadprob.jpg`</li><li>`centerlines.geojson`</li><li>`p*.georef.json` (the incumbent)</li><li>`raw/*.keymap.json` (search center, regions)</li><li>`adjacency.json` (rotation prior, stamps)</li><li>`p*.contradiction.json`</li></ul> |
+| Writes | <ul><li>`p*.georef-snap.json`</li><li>`artifacts/osm_snap/candidates.jsonl` (every candidate, cached across runs)</li><li>`artifacts/osm_snap/selection_*.jsonl`</li></ul> |
 | Columbus | 53 incumbents kept, 35 refinements, 1 challenge, 7 abstains |
 | Richmond p311 | 14,713 ft (2026-08-28) → 210 ft RANSAC → 19 ft snap |
 
@@ -500,8 +453,8 @@ published pose by a clear margin.
 |  |  |
 | --- | --- |
 | Runs on | CPU |
-| Reads | `p*.streets.json`, `centerlines.geojson`, `p*.roadprob.jpg` (the referee), the published pose |
-| Writes | `p*.georef-street.json`, `artifacts/street_solve/candidates.jsonl` |
+| Reads | <ul><li>`p*.streets.json`</li><li>`centerlines.geojson`</li><li>`p*.roadprob.jpg` (the referee)</li><li>the published pose</li></ul> |
+| Writes | <ul><li>`p*.georef-street.json`</li><li>`artifacts/street_solve/candidates.jsonl`</li></ul> |
 
 ### 12. reconcile: one arbiter for every pose
 
@@ -522,7 +475,7 @@ recorded decision rather than a missing file.
 |  |  |
 | --- | --- |
 | Runs on | CPU |
-| Reads | every `p*.georef*.json` a stage wrote, declined variants included; both `candidates.jsonl`; `adjacency.json`; the key map's regions |
+| Reads | <ul><li>every `p*.georef*.json` a stage wrote, declined variants included</li><li>both `candidates.jsonl`</li><li>`adjacency.json`</li><li>the key map's regions</li></ul> |
 | Writes | `p*.georef-final.json`, one per page, always |
 
 ---
@@ -547,7 +500,7 @@ annotation pages together ([#39](https://github.com/danvk/mapsnap/pull/39)).
 |  |  |
 | --- | --- |
 | Runs on | CPU |
-| Reads | `*.georef-final.json`, `main.iiif.json` (the reference page, for image services), `p*.panels.json`, `centerlines.geojson` (for the block masks) |
+| Reads | <ul><li>`*.georef-final.json`</li><li>`main.iiif.json` (the reference page, for image services)</li><li>`p*.panels.json`</li><li>`centerlines.geojson` (for the block masks)</li></ul> |
 | Writes | `<tag>.iiif.json` |
 
 ### 14. compare and score: grading against hand-placed truth
@@ -573,7 +526,7 @@ number is the mean over the 20 truth volumes; runs are compared with
 |  |  |
 | --- | --- |
 | Runs on | CPU |
-| Reads | `<tag>.iiif.json`, `main.iiif.json` (truth), the truth's `p*.panels.json` |
+| Reads | <ul><li>`<tag>.iiif.json`</li><li>`main.iiif.json` (truth)</li><li>the truth's `p*.panels.json`</li></ul> |
 | Writes | `<tag>.txt` beside the annotation page — every generated `.iiif.json` needs one, because the debugger renders the RMSE table from it |
 | Columbus 2026-09-03 | **88.8** (≤25 ft 89.1%, 25–50 ft 7.6%, 50–200 ft 0.5%, ≥200 ft 0.4%, 100/105 placed) |
 | Corpus, 20 volumes | mean **80.4** |
@@ -633,6 +586,55 @@ reference scale, once the volume has established it
 page, replace a disagreeing fit, tighten an agreeing one
 **arbiter** — `reconcile`, which weighs every pose jointly and publishes
 **score** — %≤25 ft − %≥200 ft, per volume, averaged over the corpus
+
+## Appendix: which steps want a GPU
+
+Two steps, and they are the two that look at every pixel of every sheet with a
+convolutional model: `craft` and `roadprob`. Everything else is either CPU-bound
+outright or gains too little from a GPU to be worth the scarcer quota. The
+numbers come from `mapsnap bench` on Hudson County 1950 vol. 9 (93 pages and one
+raw key-map sheet) run across four instance types on 2026-09-13 ([#411](https://github.com/danvk/mapsnap/pull/411); full
+table in `gpu-vs-cpu-2026-09-13.md`), and from the corpus run that followed.
+
+| step | L4 (g6.xlarge) | T4 (g4dn) | best CPU (c6i.2xlarge, 8 vCPU) | GPU gain |
+| --- | ---: | ---: | ---: | ---: |
+| craft, per page | 1.54 s | 2.9 s | 19.2 s | 12× |
+| craft, raw key-map sheet | 57 s | 98 s | 525 s | 9× |
+| roadprob (road UNet), per page | 0.24 s | 0.53 s | 7.4 s | **31×** |
+| region UNet, per page | 0.03 s | 0.05 s | 0.29 s | 10× |
+| ocr, one worker | 1.87 s | 2.4 s | 3.9 s | 2× |
+| ocr, every vCPU busy (wall) | 0.93 s | 0.66 s (8 vCPU) | 2.58 s | 3–4× |
+| key-map numbers, per sheet | 8 s | 10 s | | |
+
+Three facts decide the split:
+
+**Per vCPU, the L4 beats the T4 by 1.8 to 2.2× on every GPU stage** at the same
+4-vCPU footprint. Under a quota counted in vCPUs that is the number that
+matters, so `g6.xlarge` is the instance.
+
+**CRAFT is the dominant cost and a quarter of it is CPU.** Its post-processing
+is single-threaded, which is why a T4 only gains 1.6× over an M2 laptop and why
+two workers on one L4 measured **1.81×** rather than 2× in the corpus pilot
+([#413](https://github.com/danvk/mapsnap/pull/413)). End to end, with S3 download and upload overlapped by a prefetching
+thread, the corpus fleet sustains about **3.3 s per page per worker** on an L4.
+
+**ocr is CPU-bound and the quota says CPU.** A GPU takes the recognizer's
+forward pass, so ocr costs about 4.5 vCPU-seconds per page with one and 15
+without, but the account's G-family quota is 16 vCPUs against 256 for Standard
+spot. Sixteen GPU vCPUs at 4.5 s/page and 256 CPU vCPUs at 15 s/page are 3.6
+and 17 pages per second respectively: the CPU fleet wins by five to one on
+throughput, and costs less. So ocr runs on the GPU only when the GPU is idle
+anyway, and the same arithmetic puts `keymap` on the CPU fleet, where the
+corpus's 4,080 key-map sheets ran across 32 `c6i.2xlarge` instances in an
+afternoon ([#419](https://github.com/danvk/mapsnap/pull/419)).
+
+What the two GPU steps cost at corpus scale: 432,293 pages at 1.54 + 0.24 s and
+4,080 raw sheets at 57 s is about 360 L4-hours, or four instances for just under
+four days ([#354](https://github.com/danvk/mapsnap/issues/354)). The 2026-09-15 fleet measured 6,400 pages per hour on 8
+workers before the raw sheets entered the stream and 4,500 after — those 57-second
+sheets are a fifth of the GPU time for one percent of the pages. The CPU-side
+work, ocr at ~4.7 vCPU-s, fit at ~5 and split at 0.35, is about 1,300 vCPU-hours:
+five hours on the Standard spot quota.
 
 ## Regenerating the figures
 
