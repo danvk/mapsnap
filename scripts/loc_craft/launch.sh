@@ -125,7 +125,7 @@ SPOT_SUBNETS=$(zones_by_price)
 echo "spot zones, cheapest first (each shard starts at a different one): $(echo "$SPOT_SUBNETS" | awk '{printf "%s ", $1}')"
 
 launch_shard() {
-  local shard=$1 market=$2 user_data=$3 instance_id="" output=""
+  local shard=$1 market=$2 user_data=$3 instance_id="" output="" last_error=""
   local market_args=()
   # Spot tries the cheapest zone with capacity; on-demand costs the same everywhere.
   local subnets=$SUBNETS
@@ -163,11 +163,16 @@ launch_shard() {
       return 0
     fi
     case "$output" in
-      *InsufficientInstanceCapacity*|*Unsupported*) ;;
+      *InsufficientInstanceCapacity*|*Unsupported*) last_error=$output ;;
       *) echo "shard $shard: $output" >&2; return 1 ;;
     esac
   done <<< "$subnets"
+  # Report why the last zone refused. Swallowing it made two separate failures
+  # on 2026-09-15 -- g6.xlarge spot in both regions, and three of four zones for
+  # c6i.2xlarge -- indistinguishable from a quota problem, which is a different
+  # fix entirely: capacity means wait or change zone, quota means ask AWS.
   echo "shard $shard: no $market capacity for $INSTANCE_TYPE in any zone" >&2
+  echo "shard $shard: last zone said: ${last_error:-(no error recorded)}" >&2
   return 1
 }
 
