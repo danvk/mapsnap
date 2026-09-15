@@ -24,6 +24,7 @@ today (see ``SUCCESSORS``). A redirect is recorded as ``successor`` in the
 
 import argparse
 import csv
+import json
 import subprocess
 import sys
 import tempfile
@@ -32,7 +33,8 @@ from pathlib import Path
 
 import osmium
 from osmium.filter import EntityFilter
-from osmium.osm import RELATION
+from osmium.geom import GeoJSONFactory
+from osmium.osm import RELATION, Area
 
 # Cities whose Sanborn volumes predate a boundary change, mapped to the FIPS of
 # whatever covers that ground now. Without these, 22 items and 134 sheets have
@@ -231,6 +233,66 @@ def write_items_tsv(path: Path, matches: list[Match]) -> None:
             )
 
 
+def boundary_features(pbf: Path, wanted: set[str]) -> list[dict]:
+    """Assemble the wanted boundaries into GeoJSON features keyed on ``FIPS``.
+
+    `osm-counties` reads Natural Earth features keyed on a ``FIPS`` property, so
+    emitting that same shape sends the cities through the existing extractor
+    instead of a second one. Areas built from closed ways are dropped: a few
+    member ways close on their own and would otherwise appear as untagged
+    duplicates of the relation they belong to.
+    """
+    factory = GeoJSONFactory()
+    features: list[dict] = []
+    for area in osmium.FileProcessor(str(pbf)).with_areas():
+        if not isinstance(area, Area) or area.from_way():
+            continue
+        tags = dict(area.tags)
+        fips = tags.get("nist:fips_code", "")
+        if not fips or f"US{fips}" not in wanted:
+            continue
+        features.append(
+            {
+                "type": "Feature",
+                "properties": {"FIPS": f"US{fips}", "name": tags.get("name", "")},
+                "geometry": json.loads(factory.create_multipolygon(area)),
+            }
+        )
+    return features
+
+
+def write_boundaries_geojson(path: Path, features: list[dict]) -> None:
+    """Write the features as a FeatureCollection `osm-counties` can read."""
+    path.write_text(
+        json.dumps({"type": "FeatureCollection", "features": features}, indent=1)
+    )
+
+
+def write_counties_tsv(path: Path, matches: list[Match]) -> None:
+    """Write one row per boundary, shaped like `loc-counties`' counties.tsv.
+
+    That is the file `osm-counties` takes as its work list, so the cities can be
+    cut by the same command that cut the counties.
+    """
+    totals: dict[str, list[int]] = {}
+    boundaries: dict[str, Boundary] = {}
+    states: dict[str, str] = {}
+    for match in matches:
+        fips = match.boundary.county_fips
+        counts = totals.setdefault(fips, [0, 0])
+        counts[0] += 1
+        counts[1] += match.item.sheets
+        boundaries[fips] = match.boundary
+        states.setdefault(fips, match.item.state)
+    with path.open("w", newline="") as handle:
+        writer = csv.writer(handle, delimiter="\t", lineterminator="\n")
+        writer.writerow(["fips", "state", "ne_name", "ne_type", "items", "sheets"])
+        for fips in sorted(totals, key=lambda f: -totals[f][1]):
+            boundary = boundaries[fips]
+            kind = "City" if "city" in boundary.border_type else "County"
+            writer.writerow([fips, states[fips], boundary.name, kind, *totals[fips]])
+
+
 def write_boundary_extract(pbf: Path, relation_ids: list[int], out_path: Path) -> None:
     """Cut the matched relations, with their member ways and nodes, into one file.
 
@@ -275,6 +337,16 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "--out-pbf", type=Path, help="write the matched boundaries to this extract"
     )
+    parser.add_argument(
+        "--out-geojson",
+        type=Path,
+        help="write the boundary polygons for `osm-counties --natural-earth`",
+    )
+    parser.add_argument(
+        "--out-counties",
+        type=Path,
+        help="write the work list for `osm-counties --counties`",
+    )
     args = parser.parse_args(argv)
 
     items = read_independent_city_items(args.skipped)
@@ -300,10 +372,24 @@ def main(argv: list[str] | None = None) -> int:
     write_items_tsv(args.out_tsv, matched)
     print(f"wrote {args.out_tsv}")
 
-    if args.out_pbf:
+    if args.out_counties:
+        write_counties_tsv(args.out_counties, matched)
+        print(f"wrote {args.out_counties}")
+
+    if args.out_pbf or args.out_geojson:
         relation_ids = sorted({match.boundary.relation_id for match in matched})
-        write_boundary_extract(args.pbf, relation_ids, args.out_pbf)
-        print(f"wrote {args.out_pbf} with {len(relation_ids)} relations")
+        extract = args.out_pbf
+        with tempfile.TemporaryDirectory() as scratch:
+            if extract is None:
+                extract = Path(scratch) / "boundaries.osm.pbf"
+            write_boundary_extract(args.pbf, relation_ids, extract)
+            if args.out_pbf:
+                print(f"wrote {args.out_pbf} with {len(relation_ids)} relations")
+            if args.out_geojson:
+                wanted = {match.boundary.county_fips for match in matched}
+                features = boundary_features(extract, wanted)
+                write_boundaries_geojson(args.out_geojson, features)
+                print(f"wrote {args.out_geojson} with {len(features)} polygons")
     return 1 if unmatched else 0
 
 
