@@ -1,5 +1,6 @@
 """Tests for the independent-city mapping (mapsnap.loc_cities)."""
 
+import json
 from pathlib import Path
 
 from mapsnap.loc_cities import (
@@ -12,6 +13,8 @@ from mapsnap.loc_cities import (
     read_boundaries,
     read_independent_city_items,
     state_by_fips_prefix,
+    write_boundaries_geojson,
+    write_counties_tsv,
     write_items_tsv,
 )
 
@@ -208,3 +211,59 @@ def test_read_boundaries_reads_a_real_osm_file(tmp_path: Path) -> None:
         "</osm>\n"
     )
     assert read_boundaries(path) == [Boundary(133345, "Baltimore", "24510", "city")]
+
+
+def test_write_counties_tsv_aggregates_items_per_boundary(tmp_path: Path) -> None:
+    """Several volumes share a city, and osm-counties wants one row per boundary."""
+    path = tmp_path / "counties.tsv"
+    items = [
+        Item("a", "virginia", "independent cities", "Richmond", 27),
+        Item("b", "virginia", "independent cities", "Richmond", 13),
+        Item("c", "missouri", "independent cities", "Saint Louis", 5),
+    ]
+    matched, _ = match_items(
+        items,
+        {
+            ("virginia", "richmond"): RICHMOND,
+            ("missouri", "saint louis"): SAINT_LOUIS,
+        },
+        {},
+    )
+    write_counties_tsv(path, matched)
+    lines = [line.split("\t") for line in path.read_text().splitlines()]
+    assert lines[0] == ["fips", "state", "ne_name", "ne_type", "items", "sheets"]
+    # Ordered by sheets, so the biggest job is visible first in a long run.
+    assert lines[1] == ["US51760", "virginia", "Richmond", "City", "2", "40"]
+    assert lines[2] == ["US29510", "missouri", "Saint Louis", "City", "1", "5"]
+
+
+def test_write_counties_tsv_labels_a_successor_county(tmp_path: Path) -> None:
+    path = tmp_path / "counties.tsv"
+    bedford = Boundary(2532615, "Bedford County", "51019", "county")
+    items = [Item("a", "virginia", "independent cities", "Bedford", 3)]
+    matched, _ = match_items(items, {}, {"51019": bedford})
+    write_counties_tsv(path, matched)
+    assert path.read_text().splitlines()[1].split("\t")[3] == "County"
+
+
+def test_write_boundaries_geojson_is_a_feature_collection(tmp_path: Path) -> None:
+    path = tmp_path / "b.geojson"
+    features = [
+        {
+            "type": "Feature",
+            "properties": {"FIPS": "US51760", "name": "Richmond"},
+            "geometry": {"type": "MultiPolygon", "coordinates": []},
+        }
+    ]
+    write_boundaries_geojson(path, features)
+    loaded = json.loads(path.read_text())
+    assert loaded["type"] == "FeatureCollection"
+    assert loaded["features"][0]["properties"]["FIPS"] == "US51760"
+
+
+def test_boundary_county_fips_pads_a_low_numbered_state() -> None:
+    """OSM tags Los Angeles 6037, not 06037; unpadded it joins to nothing."""
+    los_angeles = Boundary(396479, "Los Angeles County", "6037", "county")
+    assert los_angeles.county_fips == "US06037"
+    anchorage = Boundary(2605259, "Anchorage", "02020", "borough;city")
+    assert anchorage.county_fips == "US02020"
