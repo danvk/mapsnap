@@ -82,8 +82,12 @@ class Boundary:
 
     @property
     def county_fips(self) -> str:
-        """The identifier `loc-counties` uses, so both mappings share a key."""
-        return f"US{self.fips}"
+        """The identifier `loc-counties` uses, so both mappings share a key.
+
+        OSM omits a leading zero: Los Angeles is tagged ``6037``, not ``06037``,
+        so anything in a state numbered below 10 fails to join without padding.
+        """
+        return f"US{self.fips.zfill(5)}"
 
 
 def normalize_place(name: str) -> str:

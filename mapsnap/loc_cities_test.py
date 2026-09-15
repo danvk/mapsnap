@@ -259,3 +259,11 @@ def test_write_boundaries_geojson_is_a_feature_collection(tmp_path: Path) -> Non
     loaded = json.loads(path.read_text())
     assert loaded["type"] == "FeatureCollection"
     assert loaded["features"][0]["properties"]["FIPS"] == "US51760"
+
+
+def test_boundary_county_fips_pads_a_low_numbered_state() -> None:
+    """OSM tags Los Angeles 6037, not 06037; unpadded it joins to nothing."""
+    los_angeles = Boundary(396479, "Los Angeles County", "6037", "county")
+    assert los_angeles.county_fips == "US06037"
+    anchorage = Boundary(2605259, "Anchorage", "02020", "borough;city")
+    assert anchorage.county_fips == "US02020"
