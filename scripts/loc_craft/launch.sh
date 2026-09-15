@@ -49,6 +49,26 @@ while [ $# -gt 0 ]; do
     *) echo "unknown flag: $1" >&2; exit 2 ;;
   esac
 done
+# A flag with no value costs a whole fleet: on 2026-09-15 an unset $QUEUE made
+# --extra-args "--queue $QUEUE" arrive as a bare --queue, and both instances
+# booted, installed, then died on argparse and powered off. The shell will not
+# catch it, so catch it here, before anything is launched.
+case "$EXTRA_ARGS" in
+  *--*)
+    for word in $EXTRA_ARGS; do
+      case "$word" in
+        --*) dangling=$word ;;
+        *) dangling="" ;;
+      esac
+    done
+    if [ -n "${dangling:-}" ]; then
+      echo "--extra-args ends with $dangling and no value for it." >&2
+      echo "  Usually an unset shell variable: --extra-args \"--queue \$QUEUE\"" >&2
+      exit 2
+    fi
+    ;;
+esac
+
 if [ -z "$INSTANCE_TYPE" ]; then
   case "$JOB" in
     loc-craft) INSTANCE_TYPE=g6.xlarge ;;   # CRAFT and the road UNet want the GPU
