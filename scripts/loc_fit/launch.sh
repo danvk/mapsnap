@@ -30,6 +30,11 @@ MANIFEST=""
 # Fine once craft is done, too fast while it is still running, hence the flag.
 MAX_RECEIVES=3
 FILL=0
+BUCKET=${BUCKET:-s3://mapsnap-sanborn}
+# `loc-fit` REQUIRES --counties: without a county extract an item cannot read a
+# street name, so there is no useful default inside the command and it refuses
+# to start. The bucket's staged copies are that default here.
+COUNTIES=""
 DRY_RUN=0
 # The lease the worker renews while an item runs (work_queue.lease). Shorter
 # than the longest item on purpose: the heartbeat covers the long ones, and a
@@ -49,6 +54,7 @@ while [ $# -gt 0 ]; do
     --limit) LIMIT="$2"; shift 2 ;;
     --manifest) MANIFEST="$2"; shift 2 ;;
     --max-receives) MAX_RECEIVES="$2"; shift 2 ;;
+    --counties) COUNTIES="$2"; shift 2 ;;   # space-separated paths or s3:// URLs
     --visibility) VISIBILITY="$2"; shift 2 ;;
     --region) REGION="$2"; shift 2 ;;
     --fill) FILL=1; shift ;;
@@ -132,8 +138,28 @@ if [ "$FILL" = 1 ]; then
   run uv run --directory "$REPO" mapsnap work-queue fill "${fill_args[@]}"
 fi
 
+if [ -z "$COUNTIES" ]; then
+  COUNTIES="$BUCKET/_craft/items.tsv $BUCKET/_craft/city-items.tsv"
+fi
 WORKER_ARGS="--queue $QUEUE_URL --run-tag $RUN_TAG"
 [ -n "$OCR_FROM" ] && WORKER_ARGS="$WORKER_ARGS --ocr-from $OCR_FROM"
+# Last, because --counties takes one or more values and would otherwise swallow
+# the flag that followed it.
+WORKER_ARGS="$WORKER_ARGS --counties $COUNTIES"
+
+# The worker's arguments are only checked when a worker runs them, which is on
+# an instance, after boot -- so a missing required flag costs three instances
+# and a silent queue. Parse them here instead, where it costs nothing.
+if ! uv run --directory "$REPO" mapsnap loc-fit --help > /dev/null 2>&1; then
+  echo "cannot run 'mapsnap loc-fit' locally to validate worker arguments" >&2
+  exit 1
+fi
+# shellcheck disable=SC2086  # WORKER_ARGS is a flag string by design
+if ! validation=$(uv run --directory "$REPO" mapsnap loc-fit --check-args $WORKER_ARGS 2>&1); then
+  echo "the worker command these flags build is not valid:" >&2
+  echo "$validation" >&2
+  exit 2
+fi
 
 run "$HERE/../loc_craft/launch.sh" \
   --job loc-fit \
