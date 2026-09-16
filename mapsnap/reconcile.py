@@ -1059,6 +1059,7 @@ def approximate_location(
     assignment: dict[str, int],
     adjacency: dict | None,
     region_centroids: dict | None,
+    locator=None,
 ) -> dict:
     """Where the page probably is, and how much that claim is worth.
 
@@ -1119,12 +1120,21 @@ def approximate_location(
                 "radius_m": round(max(APPROX_RADIUS_FLOOR_M, spread), 1),
             }
 
-    if unit.keymap_centers:
-        (lon, lat), spread = centroid_and_spread(list(unit.keymap_centers))
+    # The page's own centers first; otherwise the volume's locator, which is
+    # where page_keymap_data finds them for a panel -- without this, a volume
+    # with a perfectly good key map reported its abstained panels at the
+    # volume extent (the first corpus smoke run, all four of them).
+    centers = [(float(c[0]), float(c[1])) for c in unit.keymap_centers]
+    if not centers and locator is not None:
+        entry = locator.page_keymap(unit.number)
+        if entry:
+            centers = [(float(c[0]), float(c[1])) for c in entry.get("centers", [])]
+    if centers:
+        (lon, lat), spread = centroid_and_spread(centers)
         radius = max(APPROX_RADIUS_FLOOR_M, spread, float(unit.keymap_radius_m or 0.0))
         return {
             "tier": 3,
-            "basis": f"key map, {len(unit.keymap_centers)} center(s)",
+            "basis": f"key map, {len(centers)} center(s)",
             "lonlat": [lon, lat],
             "radius_m": round(radius, 1),
         }
@@ -1162,6 +1172,7 @@ def provenance_record(
     adjacency: dict | None,
     edges: list[tuple[str, str, str]],
     region_centroids: dict | None,
+    locator=None,
 ) -> dict:
     """How this page got its answer: every pose weighed, the evidence, a location.
 
@@ -1224,7 +1235,7 @@ def provenance_record(
             None
             if superseded
             else approximate_location(
-                stem, nodes, assignment, adjacency, region_centroids
+                stem, nodes, assignment, adjacency, region_centroids, locator
             )
         ),
     }
@@ -1238,6 +1249,7 @@ def publish(
     adjacency: dict | None = None,
     edges: list[tuple[str, str, str]] | None = None,
     region_centroids: dict | None = None,
+    locator=None,
 ) -> tuple[int, int]:
     """Write the arbitrated answer as ``pN.georef-final.json``, one per page.
 
@@ -1300,7 +1312,13 @@ def publish(
         (volume / f"{stem}.provenance.json").write_text(
             json.dumps(
                 provenance_record(
-                    stem, nodes, assignment, adjacency, edges or [], region_centroids
+                    stem,
+                    nodes,
+                    assignment,
+                    adjacency,
+                    edges or [],
+                    region_centroids,
+                    locator,
                 ),
                 indent=1,
             )
@@ -1466,6 +1484,7 @@ def main() -> None:
             adjacency=adjacency,
             edges=edges,
             region_centroids=vctx.region_centroids,
+            locator=vctx.locator,
         )
         print(f"published {written} reconcile sidecars, {unplaced} unplaced markers")
     if args.grade:

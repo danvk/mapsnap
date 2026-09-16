@@ -644,3 +644,24 @@ def test_build_nodes_keeps_a_page_no_channel_ever_posed(tmp_path):
     assert list(nodes) == ["p9"]
     assert [h.source for h in nodes["p9"].hypotheses] == [UNPLACED]
     assert nodes["p9"].published_index is None
+
+
+def test_tier_3_consults_the_volume_locator_when_the_unit_has_no_centers():
+    """The corpus smoke run had a key map yet every abstained panel fell to tier 4."""
+    from types import SimpleNamespace
+
+    from mapsnap.reconcile import approximate_location
+
+    node = make_node("p2", [unplaced_hypothesis()], published=None)
+    assert node.unit.keymap_centers == []
+    locator = SimpleNamespace(
+        page_keymap=lambda number: {"centers": [[-74.0, 40.7], [-74.002, 40.7]]}
+    )
+    got = approximate_location("p2", {"p2": node}, {"p2": 0}, None, None, locator)
+    assert got["tier"] == 3
+    assert "2 center(s)" in got["basis"]
+    assert abs(got["lonlat"][0] - -74.001) < 1e-9
+
+    silent = SimpleNamespace(page_keymap=lambda number: None)
+    got = approximate_location("p2", {"p2": node}, {"p2": 0}, None, None, silent)
+    assert got["tier"] == 5
