@@ -483,3 +483,54 @@ def test_one_item_touches_s3_in_the_right_order(monkeypatch, tmp_path):
         f"PUT /{RUNS_DIRNAME}/{TAG}",
         f"CP /{RUNS_DIRNAME}/{TAG}/{DONE_MARKER}",
     ]
+
+
+def test_check_args_validates_without_touching_anything(capsys, monkeypatch) -> None:
+    """A worker's flags must be checkable before a fleet boots on them.
+
+    The first test-200 launch died because `--counties` is required and the
+    launcher did not pass it: three instances booted, argparse refused, and the
+    queue was never touched. Nothing here may reach AWS.
+    """
+    import sys
+
+    from mapsnap import loc_fit
+
+    def explode(*args, **kwargs):
+        raise AssertionError("--check-args must not touch the network")
+
+    monkeypatch.setattr(loc_fit, "run_aws", explode)
+    monkeypatch.setattr(loc_fit, "resolve_manifest", explode)
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "mapsnap loc-fit",
+            "--check-args",
+            "--queue",
+            "https://sqs.example/q",
+            "--run-tag",
+            "v1.3",
+            "--counties",
+            "s3://b/_craft/items.tsv",
+            "s3://b/_craft/city-items.tsv",
+        ],
+    )
+    loc_fit.main()
+    assert "arguments OK" in capsys.readouterr().out
+
+
+def test_check_args_still_requires_the_counties(monkeypatch) -> None:
+    """The flag whose absence killed the first launch is the one to catch."""
+    import sys
+
+    import pytest
+
+    from mapsnap import loc_fit
+
+    monkeypatch.setattr(
+        sys, "argv", ["mapsnap loc-fit", "--check-args", "--queue", "https://q"]
+    )
+    with pytest.raises(SystemExit) as caught:
+        loc_fit.main()
+    assert caught.value.code != 0

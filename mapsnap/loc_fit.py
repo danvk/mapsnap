@@ -632,11 +632,26 @@ def build_parser() -> argparse.ArgumentParser:
         ),
     )
     parser.add_argument("--dry-run", action="store_true")
+    parser.add_argument(
+        "--check-args",
+        action="store_true",
+        help=(
+            "Parse the arguments and exit 0. A worker's flags are otherwise "
+            "first checked on the instance, after boot: a missing required one "
+            "then costs a whole fleet and leaves the queue untouched, which is "
+            "how the first test-200 launch died. Let a launcher check here."
+        ),
+    )
     return parser
 
 
 def main() -> None:
     args = build_parser().parse_args()
+    if args.check_args:
+        # Nothing is fetched and no queue is touched: reaching here is the
+        # whole answer, because argparse has already rejected what is invalid.
+        print("loc-fit arguments OK")
+        return
 
     manifest = resolve_manifest(args.manifest, args.bucket, args.work_dir)
     all_items = read_manifest(manifest)
