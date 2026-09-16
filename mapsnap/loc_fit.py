@@ -59,7 +59,7 @@ from mapsnap.loc_craft import (
     select_shard,
     sync,
 )
-from mapsnap.utils import list_pages
+from mapsnap.utils import list_pages, source_images
 
 # The county extracts, one per FIPS, cut by `mapsnap osm-counties`.
 COUNTY_PREFIX = "osm-by-county"
@@ -229,7 +229,7 @@ def stage(command: list[str], local: Path) -> None:
 
 def raw_images(local: Path) -> list[str]:
     """Every full-resolution scan under raw/: key-map sheets and their panels."""
-    return [str(path) for path in sorted((local / "raw").glob("p*.jpg"))]
+    return [str(path) for path in source_images(local / "raw")]
 
 
 def keymap_sheets(local: Path) -> list[str]:

@@ -58,6 +58,7 @@ from mapsnap.utils import (
     haversine_m,
     jpeg_dimensions,
     source_id_to_page_key,
+    source_images,
 )
 
 GEOREF_VARIANTS = [
@@ -262,7 +263,7 @@ def load_page_units(volume: Path) -> list[PageUnit]:
 
     truth_by_key, split_truth_parents = load_truth_units(volume)
     units: list[PageUnit] = []
-    for jpg in sorted(volume.glob("p*.jpg")):
+    for jpg in source_images(volume):
         stem = jpg.stem
         if "__" in stem:
             continue
@@ -710,7 +711,7 @@ def cmd_infer(volume: Path) -> None:
 
     device = select_device()
     model = load_model(ROAD_MODEL_PATH, device)
-    jpgs = [p for p in sorted(volume.glob("p*.jpg")) if "__" not in p.stem]
+    jpgs = [p for p in source_images(volume) if "__" not in p.stem]
     done = 0
     for jpg in jpgs:
         if load_prob(volume, jpg.stem) is not None:

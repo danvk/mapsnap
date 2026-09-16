@@ -32,6 +32,7 @@ import numpy as np
 
 from mapsnap.keymap.records import live_detections
 from mapsnap.keymap.score_keymap_labels import point_in_polygon
+from mapsnap.utils import source_images
 
 # Metres per degree of latitude (and of longitude after the cos(lat) correction).
 METERS_PER_DEGREE = 111_320.0
@@ -149,7 +150,7 @@ def polygon_centroid(polygon: list[list[float]]) -> Point:
 
 def superseded_stems(volume: Path) -> set[str]:
     """Page stems made obsolete by the splitter: if ``p239__1.jpg`` exists, ``p239`` is dead."""
-    stems = {f.name[: -len(".jpg")] for f in volume.glob("p*.jpg")}
+    stems = {f.name[: -len(".jpg")] for f in source_images(volume)}
     return {s.split("__")[0] for s in stems if "__" in s}
 
 

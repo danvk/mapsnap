@@ -81,7 +81,7 @@ from mapsnap.keymap.locate import (
 )
 from mapsnap.keymap.page_regions import clean_cluster_mask
 from mapsnap.streets import Block, build_block_index, street_name_family
-from mapsnap.utils import FEET_PER_METER, haversine_m
+from mapsnap.utils import FEET_PER_METER, haversine_m, source_images
 
 Point = tuple[float, float]
 Model = tuple[
@@ -1336,7 +1336,7 @@ def discover_pages(volume: Path, only_unfit: bool) -> list[str]:
     is keyed by number. With ``only_unfit`` these are the pages this method is *for* (GCP-RANSAC
     georef failed, no ``<stem>.georef.json``); without it, every page the key map outlines.
     """
-    image_paths = sorted(volume.glob("p*.jpg"))
+    image_paths = source_images(volume)
     if not image_paths:
         return []
     keymap_stems = {

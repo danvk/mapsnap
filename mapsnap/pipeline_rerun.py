@@ -40,7 +40,7 @@ from pathlib import Path
 from mapsnap.craft import volume_craft_images
 from mapsnap.keymap.records import recorded_keymap_keys
 from mapsnap.roadprob import volume_roadprob_images
-from mapsnap.utils import Step, default_centerlines, list_pages, run_cmd
+from mapsnap.utils import Step, default_centerlines, list_pages, run_cmd, source_images
 
 
 def rerun_volume(
@@ -63,7 +63,7 @@ def rerun_volume(
     step = Step(volume, force=force)
 
     with step(f"rerun-{tag}-split"):
-        pages = [str(p) for p in sorted(volume.glob("p*.jpg")) if "__" not in p.stem]
+        pages = [str(p) for p in source_images(volume) if "__" not in p.stem]
         run_cmd(["mapsnap", "split", *pages])
 
     with step(f"rerun-{tag}-keymap-detect"):

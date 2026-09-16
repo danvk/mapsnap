@@ -239,3 +239,64 @@ def test_pose_is_upside_down():
     for theta in (113, 150, 180, 210, 246):
         assert pose_is_upside_down(pose(theta)), theta
     assert abs(pose_text_theta_deg(pose(180)) - 180.0) < 1.0
+
+
+# --- page images vs the sidecars beside them (#412 / #354) --------------------
+
+
+def test_is_page_image_admits_pages_and_panels_only() -> None:
+    from mapsnap.utils import is_page_image
+
+    assert is_page_image("p1.jpg")
+    assert is_page_image("p12b.jpg")
+    assert is_page_image("p2__3.jpg")
+    assert not is_page_image("p1.roadprob.jpg")
+    assert not is_page_image("p2__1.roadprob.jpg")
+    assert not is_page_image("p50n.2048px.jpg")  # a scaled copy shares the stem too
+    assert not is_page_image("p1.boxes.json")
+    assert not is_page_image("main.iiif.json")
+
+
+def test_source_images_never_returns_a_sidecar(tmp_path) -> None:
+    from mapsnap.utils import source_images
+
+    for name in (
+        "p1.jpg",
+        "p1.roadprob.jpg",
+        "p2.jpg",
+        "p2.roadprob.jpg",
+        "p2__1.jpg",
+        "p2__1.roadprob.jpg",
+    ):
+        (tmp_path / name).write_bytes(b"")
+    assert [p.name for p in source_images(tmp_path)] == [
+        "p1.jpg",
+        "p2.jpg",
+        "p2__1.jpg",
+    ]
+
+
+def test_list_pages_with_proad_sidecars_present(tmp_path) -> None:
+    """The corpus failure: sidecars counted as pages, and a split parent's sidecar
+    surviving where the parent itself was correctly superseded."""
+    from mapsnap.utils import list_pages
+
+    for name in (
+        "p1.jpg",
+        "p1.roadprob.jpg",
+        "p2.jpg",
+        "p2.roadprob.jpg",
+        "p2__1.jpg",
+        "p2__1.roadprob.jpg",
+    ):
+        (tmp_path / name).write_bytes(b"")
+    assert [p.name for p in list_pages(tmp_path)] == ["p1.jpg", "p2__1.jpg"]
+
+
+def test_drop_sidecar_images_keeps_pages_and_reports(capsys) -> None:
+    from mapsnap.utils import drop_sidecar_images
+
+    kept = drop_sidecar_images(["a/p1.jpg", "a/p1.roadprob.jpg", "a/p2__1.jpg"])
+    assert kept == ["a/p1.jpg", "a/p2__1.jpg"]
+    assert "Ignoring 1 sidecar" in capsys.readouterr().err
+    assert drop_sidecar_images(["a/p1.jpg"]) == ["a/p1.jpg"]

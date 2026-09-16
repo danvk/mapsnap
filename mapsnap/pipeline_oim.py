@@ -14,6 +14,7 @@ from mapsnap.utils import (
     image_stem,
     list_pages,
     run_cmd,
+    source_images,
     write_run_record,
 )
 
@@ -139,7 +140,7 @@ def main() -> None:
         run_cmd(["mapsnap", "scale", *raw_images, "--output-dir", str(dir_path)])
 
     # Detect and write split panels (pN__i.jpg + pN.panels.json) for pages that split.
-    page_images = sorted(glob.glob(str(dir_path / "p*.jpg")))
+    page_images = [str(path) for path in source_images(dir_path)]
     with step("split"):
         run_cmd(["mapsnap", "split", *page_images])
 
