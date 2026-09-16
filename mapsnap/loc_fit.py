@@ -81,6 +81,7 @@ UPLOAD_GLOBS = (
     "p*.streets.json",
     "p*.georef*.json",
     "p*.contradiction.json",
+    "p*.provenance.json",
     "adjacency.json",
     "keymaps.json",
     f"{RUN_TAG}.iiif.json",
@@ -103,7 +104,6 @@ UPLOAD_EXCLUDES = (
     "artifacts/*",
 )
 QUEUE_DEPTH_EVERY = 25
-PROGRESS_EVERY = 1
 
 
 @dataclass(frozen=True)
@@ -115,6 +115,26 @@ class County:
     @property
     def key(self) -> str:
         return f"{COUNTY_PREFIX}/{self.fips}.osm.pbf"
+
+
+def resolve_counties(sources: list[str], work_dir: Path) -> list[Path]:
+    """The county mappings as local files, downloading any given as ``s3://`` URLs.
+
+    The fleet needs them on every instance, and the bucket is what every
+    instance already has. Each lands under ``work_dir`` by its own basename, so
+    items.tsv and city-items.tsv do not collide the way a fixed name would.
+    """
+    paths: list[Path] = []
+    for source in sources:
+        if not source.startswith("s3://"):
+            paths.append(Path(source))
+            continue
+        local = work_dir / source.rsplit("/", 1)[-1]
+        if not local.exists():
+            work_dir.mkdir(parents=True, exist_ok=True)
+            run_aws(["aws", "s3", "cp", source, str(local), "--only-show-errors"])
+        paths.append(local)
+    return paths
 
 
 def read_counties(paths: list[Path]) -> dict[str, County]:
@@ -361,7 +381,8 @@ def prepare_next(
     return Prepared(None, None, 0, skipped, waiting, failures)
 
 
-def main() -> None:
+def build_parser() -> argparse.ArgumentParser:
+    """The command line, separately so the fleet's flags can be checked in-process."""
     parser = argparse.ArgumentParser(
         description="Run split, adjacency, keymap, ocr and fit over the mirror."
     )
@@ -374,10 +395,15 @@ def main() -> None:
     parser.add_argument("--manifest")
     parser.add_argument(
         "--counties",
-        type=Path,
         nargs="+",
         required=True,
-        help="items.tsv and city-items.tsv: the item -> county FIPS mapping.",
+        help="items.tsv and city-items.tsv, local paths or s3:// URLs: "
+        "the item -> county FIPS mapping.",
+    )
+    parser.add_argument(
+        "--gpu",
+        action="store_true",
+        help="Accepted so the fleet bootstrap can pass it; the chain is CPU work.",
     )
     parser.add_argument(
         "--image-host",
@@ -387,11 +413,15 @@ def main() -> None:
     parser.add_argument("--work-dir", type=Path, default=Path("/tmp/loc-fit"))
     parser.add_argument("--limit", type=int)
     parser.add_argument("--dry-run", action="store_true")
-    args = parser.parse_args()
+    return parser
+
+
+def main() -> None:
+    args = build_parser().parse_args()
 
     manifest = resolve_manifest(args.manifest, args.bucket, args.work_dir)
     all_items = read_manifest(manifest)
-    counties = read_counties(args.counties)
+    counties = read_counties(resolve_counties(args.counties, args.work_dir))
     print(f"{len(counties):,} items mapped to a county extract", file=sys.stderr)
 
     source: QueueSource | None = None

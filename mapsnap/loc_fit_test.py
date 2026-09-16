@@ -189,3 +189,39 @@ def test_run_chain_derives_panel_boxes_and_reads_effective_pages(
         "p2.jpg",
     }  # not the split parent
     assert "--image-base-url" in commands[5]
+
+
+def test_resolve_counties_downloads_s3_urls_by_basename(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """Two mapping files must not collide on a fixed download name."""
+    from mapsnap import loc_fit
+    from mapsnap.loc_fit import resolve_counties
+
+    calls: list[list[str]] = []
+
+    def fake_aws(command, **kwargs):
+        calls.append(command)
+        Path(command[4]).write_text("item\tfips\n")
+
+    monkeypatch.setattr(loc_fit, "run_aws", fake_aws)
+    work = tmp_path / "work"
+    paths = resolve_counties(
+        ["s3://b/_craft/items.tsv", "s3://b/_craft/city-items.tsv", "/local/x.tsv"],
+        work,
+    )
+    assert paths == [work / "items.tsv", work / "city-items.tsv", Path("/local/x.tsv")]
+    assert len(calls) == 2
+    resolve_counties(["s3://b/_craft/items.tsv"], work)
+    assert len(calls) == 2  # already downloaded
+
+
+def test_parser_accepts_gpu_as_a_no_op() -> None:
+    """bootstrap.sh passes --gpu to every job on a GPU box; the chain must not choke."""
+    from mapsnap.loc_fit import build_parser
+
+    args = build_parser().parse_args(
+        ["--counties", "a.tsv", "b.tsv", "--gpu", "--queue", "https://q"]
+    )
+    assert args.gpu is True
+    assert args.counties == ["a.tsv", "b.tsv"]

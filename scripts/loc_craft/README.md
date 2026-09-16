@@ -161,6 +161,54 @@ because a home uplink caps near 2.5 MB/s, and in-region the upload is free.
 an hour. More shards crowd each other and the person hosting it. Tell them before
 a run of this size.
 
+## Fitting: the CPU chain
+
+Once `loc-craft` has left a volume with its CRAFT boxes and P(road) maps, the
+rest of the pipeline is CPU work: `split`, `adjacency`, `keymap`, `ocr` and
+`fit`. All of it is scoped to the volume -- the key map is confirmed against the
+volume's page set, adjacency needs every sheet, georef needs the volume's
+reference scale, reconcile is one joint decision per volume -- and an LoC item
+is a volume, so `mapsnap loc-fit` runs the whole chain per item.
+
+```sh
+# The item -> county mapping the workers read, once
+aws s3 cp ~/Documents/mapsnap/loc-counties/items.tsv      s3://mapsnap-sanborn/_craft/
+aws s3 cp ~/Documents/mapsnap/loc-counties/city-items.tsv s3://mapsnap-sanborn/_craft/
+
+# Its own queue, with a lease long enough for the biggest volume: the corpus
+# tops out at 167 sheets, about 28 minutes of chain on one worker, so 30 min
+# would hand a still-running item to a second worker. Three hours is safe.
+uv run mapsnap work-queue create --name mapsnap-fit --visibility 10800
+FIT_QUEUE=<the url it prints>
+uv run mapsnap work-queue fill --url "$FIT_QUEUE"
+
+scripts/loc_craft/launch.sh --job loc-fit --shards 8 --workers 4 \
+  --extra-args "--queue $FIT_QUEUE --counties s3://mapsnap-sanborn/_craft/items.tsv s3://mapsnap-sanborn/_craft/city-items.tsv"
+```
+
+`--job loc-fit` picks `c6i.2xlarge`; the county extracts are read straight
+from `osm-by-county/` (`load_centerlines` takes the `.pbf` directly). Start
+with `--workers 4` on an 8-vCPU box and watch memory before going higher: each
+worker is a full ocr plus fit process.
+
+Three things about what it uploads and what it skips:
+
+- **Panel images stay on the worker.** `make_iiif_georef` builds every page's
+  image URL from its parent and split pages share the parent's canvas, so
+  nothing reads `p209__1.jpg`; it reads the parent plus `p209.panels.json`. The
+  panel image, its boxes and its P(road) crop are deterministic in the parent
+  and the rings and cost 0.35 vCPU-s a page to re-cut, so the chain re-runs
+  `split` locally every time rather than storing ~50 GB every later pass would
+  re-download.
+- **Not ready is not failed.** An item whose boxes are not all present is
+  waiting on the GPU pass; it is released back to the queue, not retired, so
+  filling the fit queue before craft finishes is safe.
+- **Canvases point at the mirror.** A mirrored volume has scans and metadata
+  but no reference annotation page, so `fit --image-base-url` builds the
+  canvases from the page images at the bucket's own URLs. Pointing at LoC's
+  IIIF services instead needs a generated reference page per item;
+  `metadata.json` carries the `storage_dir` and per-sheet `stem` to build one.
+
 ## Keeping a fleet alive overnight
 
 Launches use one-time spot requests, so a reclaimed instance stays dead until

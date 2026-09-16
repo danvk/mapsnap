@@ -495,3 +495,115 @@ def test_normalize_name_penalty_leaves_unpenalized_pages_alone():
     )
     normalize_name_penalty(node)
     assert hypothesis.scores["name"] == pytest.approx(0.4)
+
+
+# --- provenance and approximate location (#354) -------------------------------
+
+
+def unplaced_hypothesis():
+    return scored(UNPLACED, None, 0.0, gcps=0, page_placed=False)
+
+
+def test_publish_writes_a_provenance_record_for_every_page(tmp_path):
+    """Placed pages and abstentions alike get a record, and the chosen pose is marked."""
+    import json
+
+    placed = make_node("p1", [scored("georef", affine(0), 0.9)])
+    abstained = make_node(
+        "p2",
+        [
+            scored("snap:0", affine(PAGE_EAST_M), 0.1, page_placed=False),
+            unplaced_hypothesis(),
+        ],
+        published=None,
+    )
+    publish(tmp_path, {"p1": placed, "p2": abstained}, {"p1": 0, "p2": 1})
+    first = json.loads((tmp_path / "p1.provenance.json").read_text())
+    second = json.loads((tmp_path / "p2.provenance.json").read_text())
+    assert first["decision"] == "placed"
+    assert first["approximate"]["tier"] == 0
+    assert first["hypotheses"][0]["chosen"] is True
+    assert second["decision"] == "abstained"
+    assert second["source"] == UNPLACED
+    assert [h["chosen"] for h in second["hypotheses"]] == [False, True]
+    assert second["evidence"]["fit_state"] == "fitted"
+
+
+def test_publish_survives_numpy_scores(tmp_path):
+    """Scores arrive as numpy scalars, which json.dumps refuses without casting."""
+    node = make_node("p1", [scored("georef", affine(0), np.float64(0.9))])
+    node.hypotheses[0].scores["keymap_dist_m"] = np.float32(12.5)
+    publish(tmp_path, {"p1": node}, {"p1": 0})
+    assert (tmp_path / "p1.provenance.json").exists()
+
+
+def test_tier_1_admits_a_declined_pose_only_when_the_roads_half_agreed():
+    from mapsnap.reconcile import approximate_location, pose_center
+
+    believable = make_node(
+        "p2",
+        [
+            scored("snap:0", affine(PAGE_EAST_M), 0.6, page_placed=False),
+            unplaced_hypothesis(),
+        ],
+        published=None,
+    )
+    got = approximate_location("p2", {"p2": believable}, {"p2": 1}, None, None)
+    assert got["tier"] == 1
+    assert got["lonlat"] == list(pose_center(affine(PAGE_EAST_M), 1000, 800))
+    assert got["radius_m"] >= 100.0
+
+    alias = make_node(
+        "p2",
+        [
+            scored("snap:0", affine(PAGE_EAST_M), 0.1, page_placed=False),
+            unplaced_hypothesis(),
+        ],
+        published=None,
+    )
+    got = approximate_location("p2", {"p2": alias}, {"p2": 1}, None, None)
+    assert got["tier"] == 5  # nothing else to fall back on here
+
+
+def test_tier_2_lands_where_a_placed_neighbour_claims_the_page():
+    """p1 is placed and prints p2's number at its right edge; p2 is abstained."""
+    from mapsnap.reconcile import approximate_location, world_point
+
+    nodes = {
+        "p1": make_node("p1", [scored("georef", affine(0), 0.9)]),
+        "p2": make_node("p2", [unplaced_hypothesis()], published=None),
+    }
+    got = approximate_location("p2", nodes, {"p1": 0, "p2": 0}, chain_adjacency(), None)
+    assert got["tier"] == 2
+    lon, lat = world_point(affine(0), 1000, 400)  # x_frac 1.0, y_frac 0.5 of p1
+    assert abs(got["lonlat"][0] - lon) < 1e-9 and abs(got["lonlat"][1] - lat) < 1e-9
+    assert "1 printed claim" in got["basis"]
+
+
+def test_tier_3_uses_the_key_map_when_nothing_placed_claims_the_page():
+    from mapsnap.reconcile import approximate_location
+
+    node = make_node("p2", [unplaced_hypothesis()], published=None)
+    node.unit.keymap_centers = [(-74.0, 40.7), (-74.001, 40.7)]
+    got = approximate_location("p2", {"p2": node}, {"p2": 0}, None, None)
+    assert got["tier"] == 3
+    assert got["radius_m"] >= 600.0  # the unit's key-map radius is the floor here
+    assert abs(got["lonlat"][0] - -74.0005) < 1e-9
+
+
+def test_tier_4_falls_back_to_the_volume_then_the_key_map_regions():
+    from mapsnap.reconcile import approximate_location
+
+    nodes = {
+        "p1": make_node("p1", [scored("georef", affine(0), 0.9)]),
+        "p2": make_node("p2", [unplaced_hypothesis()], published=None),
+    }
+    got = approximate_location("p2", nodes, {"p1": 0, "p2": 0}, None, None)
+    assert got["tier"] == 4 and "volume extent" in got["basis"]
+
+    alone = {"p2": make_node("p2", [unplaced_hypothesis()], published=None)}
+    got = approximate_location("p2", alone, {"p2": 0}, None, {1: (-74.0, 40.7)})
+    assert got["tier"] == 4 and "key-map regions" in got["basis"]
+
+    got = approximate_location("p2", alone, {"p2": 0}, None, None)
+    assert got["tier"] == 5 and got["lonlat"] is None
