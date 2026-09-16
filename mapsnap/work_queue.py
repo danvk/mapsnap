@@ -35,6 +35,9 @@ import argparse
 import json
 import re
 import sys
+import threading
+from collections.abc import Iterator
+from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -152,22 +155,40 @@ def create_queue(
     return url, dead
 
 
+# A message names the item and, optionally, the run it belongs to. Tab, because
+# an LoC item id never contains one and a bare id stays a valid body -- loc-craft
+# fills untagged queues and must keep reading them.
+BODY_SEPARATOR = "\t"
+
+
+def format_body(name: str, run_tag: str | None = None) -> str:
+    """The message body for one item, carrying its run tag when it has one."""
+    return f"{name}{BODY_SEPARATOR}{run_tag}" if run_tag else name
+
+
+def parse_body(body: str) -> tuple[str, str | None]:
+    """Split a message body into ``(item name, run tag or None)``."""
+    name, separator, tag = body.partition(BODY_SEPARATOR)
+    return name, (tag or None) if separator else None
+
+
 def batches(names: list[str], size: int = SEND_BATCH) -> list[list[str]]:
     """Split the fill into batches SQS will accept."""
     return [names[i : i + size] for i in range(0, len(names), size)]
 
 
-def fill_queue(url: str, names: list[str]) -> int:
+def fill_queue(url: str, names: list[str], run_tag: str | None = None) -> int:
     """Send one message per item; return how many were sent.
 
     Ids are the item's position in the batch, which only has to be unique
-    within the request.
+    within the request. ``run_tag`` rides along in every body so a worker takes
+    the run from the work rather than from its own launch flags.
     """
     sent = 0
     for batch in batches(names):
         entries = json.dumps(
             [
-                {"Id": str(index), "MessageBody": name}
+                {"Id": str(index), "MessageBody": format_body(name, run_tag)}
                 for index, name in enumerate(batch)
             ]
         )
@@ -220,6 +241,43 @@ def delete(url: str, handle: str) -> None:
         ),
         capture=True,
     )
+
+
+@contextmanager
+def lease(
+    url: str, handle: str | None, *, seconds: int = DEFAULT_VISIBILITY_SECONDS
+) -> Iterator[None]:
+    """Hold a message's lease open for as long as the body runs.
+
+    The visibility timeout is a lease, not a delivery interval, so work that
+    outlasts it is handed to a SECOND worker while the first is still going --
+    both then write the same outputs. Measured against the mirror: at the
+    ~15 s/page the pilot showed, the 202 items over 120 sheets (0.57% of the
+    corpus, up to 174) outrun the 30-minute default.
+
+    A daemon thread pushes the lease out every third of the window, so a worker
+    that dies stops renewing and the item comes back on its own.
+    """
+    if handle is None:
+        yield
+        return
+    stop = threading.Event()
+
+    def renew() -> None:
+        while not stop.wait(seconds / 3):
+            try:
+                extend(url, handle, seconds)
+            except Exception as exc:  # noqa: BLE001 - a lost renewal is not fatal
+                print(f"lease renewal failed: {exc}", file=sys.stderr)
+                return
+
+    thread = threading.Thread(target=renew, daemon=True)
+    thread.start()
+    try:
+        yield
+    finally:
+        stop.set()
+        thread.join(timeout=5)
 
 
 def extend(url: str, handle: str, seconds: int) -> None:
@@ -296,6 +354,16 @@ def main(argv: list[str] | None = None) -> int:
         help="Scratch directory.",
     )
     filled.add_argument("--limit", type=int, help="Send only this many (a pilot).")
+    filled.add_argument(
+        "--run-tag",
+        metavar="TAG",
+        help=(
+            "Stamp every message with the run it belongs to, so a worker takes "
+            "the run from the work. Use one queue per run: a worker cannot "
+            "decline a message it has received, and passing one over counts "
+            "against maxReceiveCount until it dead-letters."
+        ),
+    )
 
     status = sub.add_parser("status", help="Report what is left.")
     status.add_argument("--url", required=True)
@@ -319,7 +387,7 @@ def main(argv: list[str] | None = None) -> int:
         names = [item.item for item in read_manifest(manifest)]
         if args.limit:
             names = names[: args.limit]
-        sent = fill_queue(args.url, names)
+        sent = fill_queue(args.url, names, args.run_tag)
         print(f"sent {sent:,} items")
         return 0
 

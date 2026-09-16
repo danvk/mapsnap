@@ -11,6 +11,24 @@ only re-download the same item three times.
 
     mapsnap loc-fit --queue "$QUEUE" --counties items.tsv
 
+Where the outputs go
+--------------------
+
+The item's stable half -- its images, CRAFT boxes and P(road) maps -- is written
+once at the item root and shared by every run. Everything this chain produces
+goes under ``<item>/runs/<tag>/`` instead, because ocr and fit outputs change
+from run to run while craft's do not. At 133 KB a page, a corpus pass of run
+outputs is about 55 GB, so keeping runs apart costs roughly a dollar a month and
+buys a great deal: a pilot cannot collide with the full pass, two runs at the
+same commit can be compared to see how deterministic the chain is, and a bad run
+is one ``aws s3 rm --recursive`` rather than an unpickable mixture.
+
+The tag comes from the queue message, not from this worker's flags, so the
+prefix the outputs land in and the run recorded inside them are the same string.
+Use one queue per run: SQS has no selective receive, so a worker cannot decline
+a message meant for another run, and merely passing one over counts against
+``maxReceiveCount`` until it dead-letters.
+
 What is uploaded, and what is not
 ---------------------------------
 
@@ -35,6 +53,7 @@ again once the GPU pass has been through it.
 
 import argparse
 import csv
+import json
 import shutil
 import subprocess
 import sys
@@ -45,7 +64,7 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
 
-from mapsnap import work_queue
+from mapsnap import experiments, work_queue
 from mapsnap.aws_cli import run_aws
 from mapsnap.keymap.records import recorded_keymap_keys
 from mapsnap.loc_craft import (
@@ -66,9 +85,24 @@ COUNTY_PREFIX = "osm-by-county"
 # What `default_centerlines` looks for beside the pages; load_centerlines reads
 # the .pbf directly, so the county extract needs no conversion (#408).
 CENTERLINES_NAME = "centerlines.osm.pbf"
-RUN_TAG = "mapsnap"
-# Written last, so its presence means the whole chain ran for this item.
-DONE_MARKER = f"{RUN_TAG}.iiif.json"
+# `fit`'s own archive name and the annotation filename. NOT the run tag: that
+# names a whole corpus pass and comes from the queue message.
+ARCHIVE_TAG = "mapsnap"
+# Every run's outputs live under this directory inside the item, one tag deep,
+# so the stable half (images, CRAFT boxes, P(road)) is written once and shared,
+# while ocr and fit outputs -- 133 KB a page, about 55 GB a corpus pass -- stay
+# separate per run. A single `--exclude "runs/*"` keeps a download from pulling
+# every previous run, which a bare tag directory beside `raw/` could not.
+RUNS_DIRNAME = "runs"
+# Uploaded on its own AFTER everything else, so its presence means the whole
+# chain ran for this item. It used to ride in the same sync as the sidecars,
+# where it sorts before `p*.streets.json` and so landed first: an interrupted
+# upload left a done marker over a partial item, which is then skipped forever.
+DONE_MARKER = f"{ARCHIVE_TAG}.iiif.json"
+# The reads `--ocr-from` brings forward from an earlier run. `ocr --resume`
+# decides what to keep: it re-reads any page whose recognizer weights differ,
+# and any page the previous run never had (a new panel, say).
+OCR_REUSE_GLOBS = ("p*.streets.json", "p*.txt")
 # What the upload is expected to carry, for the tests to assert against: the
 # sync itself works by exclusion, so this list documents the intent and the
 # excludes below enforce it.
@@ -80,10 +114,10 @@ UPLOAD_GLOBS = (
     "p*.provenance.json",
     "artifacts/osm_snap/candidates.jsonl",
     "artifacts/street_solve/candidates.jsonl",
-    f"artifacts/{RUN_TAG}/manifest.json",
+    f"artifacts/{ARCHIVE_TAG}/manifest.json",
     "adjacency.json",
     "keymaps.json",
-    f"{RUN_TAG}.iiif.json",
+    f"{ARCHIVE_TAG}.iiif.json",
     "raw/*.keymap.json",
     "raw/*.keymap-raw.json",
     "raw/*.keymap.txt",
@@ -104,19 +138,54 @@ UPLOAD_GLOBS = (
 # hypothesis, and the reason why was in a candidates file that had not been
 # kept. Measured at 10.6 KB a page, about 4.4 GB over the corpus.
 UPLOAD_EXCLUDES = (
-    "*__[0-9]*.jpg",
-    "*__[0-9]*.boxes.json",
+    # Every image and every CRAFT box file: loc-craft already wrote these once
+    # at the item root, where all runs share them. Re-uploading them per run
+    # would multiply 64-232 MB a volume by the number of runs, against the
+    # 12-30 MB of output a run actually produces. This also covers the panel
+    # images and their derived boxes, which are re-cut locally in 0.35
+    # vCPU-seconds a page and never uploaded at all.
+    "*.jpg",
+    "*.boxes.json",
+    "metadata.json",
     "artifacts/reconcile/*",
     # `fit` archives the whole run, which is a second copy of every sidecar in
     # the item. Its manifest is the part worth keeping -- the git SHA, the
     # model hashes, the stage timings and the fit-state counts -- so that is
     # re-included below.
-    f"artifacts/{RUN_TAG}/*",
+    f"artifacts/{ARCHIVE_TAG}/*",
 )
 # Applied after the excludes, so it wins: aws s3 sync takes the last matching
 # filter.
-UPLOAD_INCLUDES = (f"artifacts/{RUN_TAG}/manifest.json",)
+UPLOAD_INCLUDES = (f"artifacts/{ARCHIVE_TAG}/manifest.json",)
 QUEUE_DEPTH_EVERY = 25
+
+
+def run_prefix(bucket: str, item: Item, run_tag: str) -> str:
+    """Where one run's outputs live for one item."""
+    return f"{item_prefix(bucket, item)}/{RUNS_DIRNAME}/{run_tag}"
+
+
+def resolve_run_tag(message_tag: str | None, flag_tag: str | None) -> str:
+    """The run this item belongs to, from exactly one source.
+
+    The message is the authority: it travels with the work, so the S3 prefix and
+    the provenance recorded inside the outputs cannot name different runs. A
+    ``--run-tag`` on the worker is an assertion against it, not an override --
+    a mismatch means the fleet was pointed at the wrong queue, which is worth
+    stopping for rather than quietly writing into another run's directory.
+    """
+    if message_tag and flag_tag and message_tag != flag_tag:
+        raise ValueError(
+            f"queue says run {message_tag!r}, this worker was launched for "
+            f"{flag_tag!r}. Point it at the right queue, or drop --run-tag."
+        )
+    tag = message_tag or flag_tag
+    if not tag:
+        raise ValueError(
+            "no run tag: fill the queue with `work-queue fill --run-tag TAG`, "
+            "or pass --run-tag to this worker."
+        )
+    return tag
 
 
 @dataclass(frozen=True)
@@ -177,9 +246,12 @@ class FitWork:
     ready: bool
     done: bool
     reason: str = ""
+    run_tag: str = ""
 
 
-def plan_fit(item: Item, present: list[str], county: County | None) -> FitWork:
+def plan_fit(
+    item: Item, present: list[str], county: County | None, run_tag: str
+) -> FitWork:
     """Decide whether this item can run the CPU chain, and whether it already has.
 
     Not ready is not failure: an item whose CRAFT boxes are missing is waiting on
@@ -189,28 +261,48 @@ def plan_fit(item: Item, present: list[str], county: County | None) -> FitWork:
     keys = set(present)
     images = sorted(key for key in keys if key.endswith(".jpg") and key.count(".") == 1)
     pages = [key for key in images if "/" not in key and "__" not in key]
-    if DONE_MARKER in keys:
-        return FitWork(item, pages, county, ready=True, done=True)
+    # Done means done FOR THIS RUN: another tag's marker says nothing about this
+    # one, which is the point of keeping runs apart.
+    if f"{RUNS_DIRNAME}/{run_tag}/{DONE_MARKER}" in keys:
+        return FitWork(item, pages, county, True, True, run_tag=run_tag)
     if not pages:
-        return FitWork(item, pages, county, False, False, "no pages in the mirror")
+        return FitWork(
+            item, pages, county, False, False, "no pages in the mirror", run_tag
+        )
     unboxed = [
         page for page in pages if f"{page[: -len('.jpg')]}.boxes.json" not in keys
     ]
     if unboxed:
         return FitWork(
-            item, pages, county, False, False, f"{len(unboxed)} page(s) await craft"
+            item,
+            pages,
+            county,
+            False,
+            False,
+            f"{len(unboxed)} page(s) await craft",
+            run_tag,
         )
     if county is None:
-        return FitWork(item, pages, county, False, False, "no county extract known")
-    return FitWork(item, pages, county, ready=True, done=False)
+        return FitWork(
+            item, pages, county, False, False, "no county extract known", run_tag
+        )
+    return FitWork(item, pages, county, True, False, run_tag=run_tag)
 
 
-def fetch_item(work: FitWork, bucket: str, work_dir: Path) -> Path:
-    """Sync the item down and put its county extract beside the pages."""
+def fetch_item(
+    work: FitWork, bucket: str, work_dir: Path, ocr_from: str | None = None
+) -> Path:
+    """Sync the item down and put its county extract beside the pages.
+
+    Three layers, in the order they must land: the stable half every run shares,
+    then the reads an earlier run is lending (``--ocr-from``), then this run's
+    own outputs, which win over both so an interrupted item resumes rather than
+    restarting.
+    """
     local = work_dir / work.item.item
     shutil.rmtree(local, ignore_errors=True)
     local.mkdir(parents=True)
-    sync(item_prefix(bucket, work.item), str(local))
+    sync(item_prefix(bucket, work.item), str(local), "--exclude", f"{RUNS_DIRNAME}/*")
     assert work.county is not None
     run_aws(
         [
@@ -222,7 +314,66 @@ def fetch_item(work: FitWork, bucket: str, work_dir: Path) -> Path:
             "--only-show-errors",
         ]
     )
+    if ocr_from:
+        borrow_reads(local, bucket, work.item, ocr_from)
+    sync(run_prefix(bucket, work.item, work.run_tag), str(local))
     return local
+
+
+def manifest_key(bucket: str, item: Item, run_tag: str) -> str:
+    """Where one run archived its manifest for one item."""
+    return f"{run_prefix(bucket, item, run_tag)}/artifacts/{ARCHIVE_TAG}/manifest.json"
+
+
+def reused_reads_are_valid(local: Path, bucket: str, item: Item, source: str) -> bool:
+    """Whether an earlier run's reads were made against the streets we now have.
+
+    A read is a match between a page's text and a county extract, so it is only
+    reusable if the extract has not changed underneath it -- and it has, for
+    every county: the 0-buffer re-cut removed 187,439 foreign ways. The source
+    run's manifest records the sha it used, which is the cheapest honest check.
+    `ocr --resume` covers the other half by re-reading any page whose recognizer
+    weights differ.
+    """
+    try:
+        manifest = run_aws(
+            [
+                "aws",
+                "s3",
+                "cp",
+                manifest_key(bucket, item, source),
+                "-",
+            ],
+            capture=True,
+        ).stdout
+    except OSError:
+        manifest = ""
+    if not manifest.strip():
+        print(
+            f"{item.item}: run {source} has no manifest; not reusing its reads.",
+            file=sys.stderr,
+        )
+        return False
+    recorded = (json.loads(manifest).get("inputs") or {}).get("centerlines_sha")
+    current = experiments.file_sha256(local / CENTERLINES_NAME)
+    if recorded != current:
+        print(
+            f"{item.item}: run {source} read against {recorded}, this run has "
+            f"{current}; not reusing its reads.",
+            file=sys.stderr,
+        )
+        return False
+    return True
+
+
+def borrow_reads(local: Path, bucket: str, item: Item, source: str) -> None:
+    """Bring an earlier run's OCR output forward, when its inputs still match."""
+    if not reused_reads_are_valid(local, bucket, item, source):
+        return
+    filters = ["--exclude", "*"]
+    for glob in OCR_REUSE_GLOBS:
+        filters += ["--include", glob]
+    sync(run_prefix(bucket, item, source), str(local), *filters)
 
 
 def stage(command: list[str], local: Path) -> None:
@@ -295,7 +446,7 @@ def run_chain(local: Path, work: FitWork, run_tag: str | None = None) -> None:
     # until this removed it. Dropping it is right here -- its manifest is
     # re-written by the run about to happen, and the rest of it duplicates
     # sidecars this chain regenerates anyway.
-    shutil.rmtree(local / "artifacts" / RUN_TAG, ignore_errors=True)
+    shutil.rmtree(local / "artifacts" / ARCHIVE_TAG, ignore_errors=True)
     # No --image-base-url: fit finds the item's metadata.json and builds the
     # canvases against LoC's own image servers, so the annotation is usable
     # without anything being hosted (#354).
@@ -305,42 +456,61 @@ def run_chain(local: Path, work: FitWork, run_tag: str | None = None) -> None:
             "fit",
             str(local),
             "--tag",
-            RUN_TAG,
+            ARCHIVE_TAG,
             *(["--run-tag", run_tag] if run_tag else []),
         ],
         local,
     )
 
 
-def upload(local: Path, bucket: str, item: Item) -> None:
-    """Sync the durable sidecars up, leaving the panel images on the worker."""
+def upload(local: Path, bucket: str, item: Item, run_tag: str) -> None:
+    """Sync this run's sidecars up, then the done marker, in that order.
+
+    Two calls, not one: the marker is what `plan_fit` reads to decide an item is
+    finished, so it must not exist until everything it vouches for does. In a
+    single sync it sorts before `p*.streets.json` and landed first, and a spot
+    interruption in between retired a half-uploaded item for good.
+    """
     excludes: list[str] = []
     for pattern in UPLOAD_EXCLUDES:
         excludes += ["--exclude", pattern]
     for pattern in UPLOAD_INCLUDES:
         excludes += ["--include", pattern]
+    destination = run_prefix(bucket, item, run_tag)
     run_aws(
         [
             "aws",
             "s3",
             "sync",
             str(local),
-            item_prefix(bucket, item),
+            destination,
             "--exclude",
             CENTERLINES_NAME,
+            "--exclude",
+            DONE_MARKER,
             *excludes,
             "--only-show-errors",
         ]
     )
+    marker = local / DONE_MARKER
+    if marker.exists():
+        run_aws(
+            [
+                "aws",
+                "s3",
+                "cp",
+                str(marker),
+                f"{destination}/{DONE_MARKER}",
+                "--only-show-errors",
+            ]
+        )
 
 
-def process_item(
-    work: FitWork, local: Path, bucket: str, *, run_tag: str | None = None
-) -> int:
+def process_item(work: FitWork, local: Path, bucket: str) -> int:
     """Run the chain over a downloaded item and sync its sidecars up."""
     try:
-        run_chain(local, work, run_tag)
-        upload(local, bucket, work.item)
+        run_chain(local, work, work.run_tag)
+        upload(local, bucket, work.item, work.run_tag)
         return len(work.pages)
     finally:
         shutil.rmtree(local, ignore_errors=True)
@@ -364,7 +534,9 @@ def prepare_next(
     work_dir: Path,
     *,
     counties: dict[str, County],
+    tag_for: Callable[[Item], str],
     fetch: bool = True,
+    ocr_from: str | None = None,
     retire: Callable[[Item], None] | None = None,
     release: Callable[[Item], None] | None = None,
 ) -> Prepared:
@@ -380,7 +552,7 @@ def prepare_next(
     for index, item in items:
         try:
             present = list_prefix(bucket, item.prefix)
-            work = plan_fit(item, present, counties.get(item.item))
+            work = plan_fit(item, present, counties.get(item.item), tag_for(item))
             if work.done:
                 skipped += 1
                 if retire is not None:
@@ -397,7 +569,9 @@ def prepare_next(
                     release(item)
                 continue
             local = (
-                fetch_item(work, bucket, work_dir) if fetch else work_dir / item.item
+                fetch_item(work, bucket, work_dir, ocr_from)
+                if fetch
+                else work_dir / item.item
             )
         except OSError as error:
             failures.append((item.item, str(error)))
@@ -436,10 +610,25 @@ def build_parser() -> argparse.ArgumentParser:
         "--run-tag",
         metavar="TAG",
         help=(
-            "Name for this corpus pass -- a cut release, say -- recorded in "
-            "every item's manifest and published annotation page. Defaults to "
-            "the worker checkout's nearest git tag, so a fleet launched at a "
-            "release names itself."
+            "Name for this corpus pass -- a cut release, say. Outputs go to "
+            "<item>/runs/TAG/ and the tag is recorded in every manifest and "
+            "published annotation page. On a queue whose messages carry a tag "
+            "this is an ASSERTION against them, not an override: a mismatch "
+            "means this worker was pointed at the wrong queue and it stops. "
+            "Use one queue per run -- a worker cannot decline a message it has "
+            "received, and passing one over counts toward maxReceiveCount "
+            f"(default {work_queue.DEFAULT_MAX_RECEIVES}) until it dead-letters."
+        ),
+    )
+    parser.add_argument(
+        "--ocr-from",
+        metavar="TAG",
+        help=(
+            "Reuse an earlier run's reads instead of re-running OCR, which is "
+            "two thirds of both the output bytes and the CPU. Refused when that "
+            "run read against a different county extract; `ocr --resume` then "
+            "re-reads any page whose recognizer weights differ, and any page "
+            "the earlier run did not have."
         ),
     )
     parser.add_argument("--dry-run", action="store_true")
@@ -469,6 +658,10 @@ def main() -> None:
     retire = source.retire if source is not None else None
     release = source.release if source is not None else None
 
+    def tag_for(item: Item) -> str:
+        message_tag = source.tag_for(item) if source is not None else None
+        return resolve_run_tag(message_tag, args.run_tag)
+
     started = time.perf_counter()
     done = skipped = waiting = failed = pages = 0
     broken = args.work_dir / f"broken-{args.shard}.log"
@@ -490,7 +683,9 @@ def main() -> None:
             args.bucket,
             args.work_dir,
             counties=counties,
+            tag_for=tag_for,
             fetch=not args.dry_run,
+            ocr_from=args.ocr_from,
             retire=retire,
             release=release,
         )
@@ -509,7 +704,9 @@ def main() -> None:
                 args.bucket,
                 args.work_dir,
                 counties=counties,
+                tag_for=tag_for,
                 fetch=not args.dry_run,
+                ocr_from=args.ocr_from,
                 retire=retire,
                 release=release,
             )
@@ -520,7 +717,10 @@ def main() -> None:
                 done += 1
                 continue
             try:
-                pages += process_item(work, local, args.bucket, run_tag=args.run_tag)
+                with work_queue.lease(
+                    args.queue, source.handle_for(work.item) if source else None
+                ):
+                    pages += process_item(work, local, args.bucket)
             except OSError as error:
                 print(f"{work.item.item}: FAILED: {error}", file=sys.stderr, flush=True)
                 with broken.open("a") as handle:
