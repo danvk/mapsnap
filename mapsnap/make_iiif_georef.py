@@ -93,6 +93,20 @@ def has_pose(path: str) -> bool:
     return bool(doc.get("corners"))
 
 
+def glob_matched_anything(pattern: str) -> bool:
+    """Whether the pattern matched any file at all, posed or not.
+
+    ``expand_georef_globs`` drops poseless sidecars, so an empty result means
+    either a wrong path or a volume where every page abstained. Only the first
+    is an error: Gardiner NY 1913 is one split sheet, neither panel placed, and
+    exiting there left `fit` with a non-zero status and no annotation -- which
+    at corpus scale is an item that never records its own outcome.
+    """
+    return any(
+        sorted(glob.glob(sub.strip())) for sub in pattern.split(",") if sub.strip()
+    )
+
+
 def expand_georef_globs(pattern: str) -> list[str]:
     """Paths for a comma-separated list of globs, first glob wins per page.
 
@@ -617,7 +631,7 @@ def _load_s3_items(
     The image URL for each page is: {image_base_url}/{parent_key}.jpg
     """
     georef_paths = expand_georef_globs(georef_glob_pattern)
-    if not georef_paths:
+    if not georef_paths and not glob_matched_anything(georef_glob_pattern):
         print(f"Error: no files matched '{georef_glob_pattern}'.", file=sys.stderr)
         sys.exit(1)
 
@@ -741,7 +755,7 @@ def volume_label(source_data: dict) -> str:
     return label if isinstance(label, str) else ""
 
 
-def volume_report(georef_paths: list[Path], generated: str) -> list[dict]:
+def volume_report(directory: Path | None, generated: str) -> list[dict]:
     """A per-volume report card for the annotation page's top-level metadata.
 
     Read from the provenance records beside the georef files, so it costs a
@@ -752,8 +766,11 @@ def volume_report(georef_paths: list[Path], generated: str) -> list[dict]:
 
     Entries use the flat ``{"label", "value"}`` shape the per-page metadata in
     this file already uses.
+
+    Takes the volume's directory rather than the annotations' paths: a volume
+    that placed nothing has no annotations, and that is exactly when the report
+    matters most.
     """
-    directory = georef_paths[0].parent if georef_paths else None
     if directory is None:
         return []
     records = []
@@ -829,7 +846,7 @@ def _load_volume_items(
     source_data: dict = json.loads(Path(iiif_path).read_text())
 
     georef_paths = expand_georef_globs(georef_glob_pattern)
-    if not georef_paths:
+    if not georef_paths and not glob_matched_anything(georef_glob_pattern):
         print(f"Error: no files matched '{georef_glob_pattern}'.", file=sys.stderr)
         sys.exit(1)
 
@@ -1144,7 +1161,7 @@ def main() -> None:
         part for part in (label, f"mapsnap generated fit ({generated})") if part
     )
     report = (
-        volume_report(annotation_georef_paths, generated)
+        volume_report(Path(georef_globs[0]).parent, generated)
         if len(georef_globs) == 1
         else [{"label": "generated", "value": generated}]
     )

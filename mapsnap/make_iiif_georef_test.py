@@ -780,10 +780,7 @@ def test_volume_report_counts_and_names_the_abstentions(tmp_path) -> None:
     ]
     for r in records:
         (tmp_path / f"{r['stem']}.provenance.json").write_text(json.dumps(r))
-    report = {
-        m["label"]: m["value"]
-        for m in volume_report([tmp_path / "x.json"], "2026-09-16")
-    }
+    report = {m["label"]: m["value"] for m in volume_report(tmp_path, "2026-09-16")}
     assert report["generated"] == "2026-09-16"
     assert report["pages"] == "5"  # the superseded parent is not a page to place
     assert report["placed"] == "3"
@@ -798,7 +795,45 @@ def test_volume_report_counts_and_names_the_abstentions(tmp_path) -> None:
 def test_volume_report_without_records_still_dates_the_run(tmp_path) -> None:
     from mapsnap.make_iiif_georef import volume_report
 
-    assert volume_report([tmp_path / "x.json"], "2026-09-16") == [
+    assert volume_report(tmp_path, "2026-09-16") == [
         {"label": "generated", "value": "2026-09-16"}
     ]
-    assert volume_report([], "2026-09-16") == []
+    assert volume_report(None, "2026-09-16") == []
+
+
+def test_glob_matched_anything_separates_a_wrong_path_from_an_empty_volume(
+    tmp_path,
+) -> None:
+    """Gardiner NY 1913 placed nothing; that is a result, not a bad glob."""
+    from mapsnap.make_iiif_georef import expand_georef_globs, glob_matched_anything
+
+    poseless = tmp_path / "p1.georef-final.json"
+    poseless.write_text(json.dumps({"width": 10, "height": 10, "corners": None}))
+    pattern = str(tmp_path / "*.georef-final.json")
+    assert expand_georef_globs(pattern) == []  # nothing publishable
+    assert glob_matched_anything(pattern) is True  # but the sidecar is there
+    assert glob_matched_anything(str(tmp_path / "nope-*.json")) is False
+
+
+def test_glob_matched_anything_handles_a_comma_list(tmp_path) -> None:
+    from mapsnap.make_iiif_georef import glob_matched_anything
+
+    (tmp_path / "p1.georef.json").write_text("{}")
+    both = f"{tmp_path}/nope-*.json,{tmp_path}/*.georef.json"
+    assert glob_matched_anything(both) is True
+    assert glob_matched_anything(f"{tmp_path}/a-*.json,{tmp_path}/b-*.json") is False
+
+
+def test_volume_report_survives_a_volume_that_placed_nothing(tmp_path) -> None:
+    """Gardiner has no annotations at all, which is when the card matters most."""
+    from mapsnap.make_iiif_georef import volume_report
+
+    for stem in ("p0__1", "p0__2"):
+        (tmp_path / f"{stem}.provenance.json").write_text(
+            json.dumps(_provenance(stem, "abstained", "unplaced", tier=5))
+        )
+    report = {m["label"]: m["value"] for m in volume_report(tmp_path, "2026-09-16")}
+    assert report["placed"] == "0"
+    assert report["unplaced"] == "2"
+    assert report["fit sources"] == "none"
+    assert "p0__1 (tier 5," in report["unplaced pages"]
