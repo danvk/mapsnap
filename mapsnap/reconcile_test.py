@@ -685,3 +685,36 @@ def test_keymap_state_distinguishes_read_from_georeferenced(tmp_path):
     )
     record = json.loads((tmp_path / "p1.provenance.json").read_text())
     assert record["evidence"]["keymap"] == "georeferenced"
+
+
+def test_publish_carries_the_source_pose_control_points(tmp_path):
+    """Empty intersections made every annotation fall back to corner points."""
+    import json
+
+    from mapsnap.reconcile import publish
+
+    doc = georef_doc(affine(0))
+    doc["streets"] = [{"street": "MAIN ST", "inlier": True}]
+    doc["intersections"] = [
+        {"x": 1, "y": 2, "lon": -74.0, "lat": 40.7, "inlier": True, "initial": True},
+        {"x": 9, "y": 8, "lon": -74.1, "lat": 40.8, "inlier": True, "initial": True},
+    ]
+    write_sidecar(tmp_path, "p1", "georef", doc)
+    node = make_node("p1", [scored("georef", affine(0), 0.9)])
+    publish(tmp_path, {"p1": node}, {"p1": 0})
+    final = json.loads((tmp_path / "p1.georef-final.json").read_text())
+    assert len(final["streets"]) == 1
+    assert len(final["intersections"]) == 2
+    assert final["intersections"][0]["initial"] is True
+
+
+def test_publish_leaves_a_geometry_only_pose_without_street_evidence(tmp_path):
+    """snap poses by road shape, so carrying nothing is correct, not a loss."""
+    import json
+
+    from mapsnap.reconcile import publish
+
+    node = make_node("p1", [scored("snap:0", affine(0), 0.9)])
+    publish(tmp_path, {"p1": node}, {"p1": 0})
+    final = json.loads((tmp_path / "p1.georef-final.json").read_text())
+    assert final["streets"] == [] and final["intersections"] == []

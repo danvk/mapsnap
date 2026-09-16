@@ -1259,6 +1259,34 @@ def provenance_record(
     }
 
 
+def source_control_points(
+    sidecar_dir: Path, stem: str, source: str
+) -> tuple[list, list]:
+    """The streets and intersections behind a chosen pose, from its own sidecar.
+
+    The arbiter used to write empty lists here, which cost more than the counts:
+    ``make_iiif_georef`` builds the annotation's control points from the
+    intersections, so every published page fell back to four synthetic corner
+    points and a polynomial transformation instead of its real GCPs and a
+    Helmert. Placement was unaffected -- the corners of an affine rectangle
+    reproduce the affine -- but the evidence was gone from the annotation, and
+    the metadata read ``streets 0, intersections 0`` for a page fitted on five.
+
+    Only the georef-family channels have street evidence; snap and street-solve
+    pose by geometry, so their poses legitimately carry none.
+    """
+    if not source.startswith("georef"):
+        return [], []
+    path = sidecar_dir / f"{stem}.{source}.json"
+    if not path.exists():
+        return [], []
+    try:
+        doc = json.loads(path.read_text())
+    except (OSError, json.JSONDecodeError):
+        return [], []
+    return doc.get("streets") or [], doc.get("intersections") or []
+
+
 def publish(
     volume: Path,
     nodes: dict[str, PageNode],
@@ -1268,6 +1296,7 @@ def publish(
     edges: list[tuple[str, str, str]] | None = None,
     region_centroids: dict | None = None,
     locator=None,
+    sidecar_dir: Path | None = None,
 ) -> tuple[int, int]:
     """Write the arbitrated answer as ``pN.georef-final.json``, one per page.
 
@@ -1288,6 +1317,7 @@ def publish(
     """
     written = unplaced = 0
     keymap = keymap_state(volume)
+    sidecar_dir = sidecar_dir or volume
     for stale in list(volume.glob("p*.georef-final.json")) + list(
         volume.glob("p*.provenance.json")
     ):
@@ -1295,6 +1325,9 @@ def publish(
     for stem in sorted(nodes):
         node = nodes[stem]
         hypothesis = node.hypotheses[assignment[stem]]
+        streets, intersections = source_control_points(
+            sidecar_dir, stem, hypothesis.source
+        )
         w, h = node.unit.width, node.unit.height
         a = hypothesis.affine
         corners = (
@@ -1314,8 +1347,8 @@ def publish(
                     "width": w,
                     "height": h,
                     "corners": corners,
-                    "streets": [],
-                    "intersections": [],
+                    "streets": streets,
+                    "intersections": intersections,
                     "reconcile": {
                         "source": hypothesis.source,
                         "merged": hypothesis.merged_sources,
@@ -1505,6 +1538,7 @@ def main() -> None:
             edges=edges,
             region_centroids=vctx.region_centroids,
             locator=vctx.locator,
+            sidecar_dir=sidecar_dir,
         )
         print(f"published {written} reconcile sidecars, {unplaced} unplaced markers")
     if args.grade:

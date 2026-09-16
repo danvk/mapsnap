@@ -734,3 +734,71 @@ def test_metadata_index_falls_back_to_the_item_storage_dir() -> None:
         "g019711893:01971_1893-0001"
         in _load_metadata_index(data)["p1"]["target"]["source"]["id"]
     )
+
+
+# --- the page's own label and report card (#354) ------------------------------
+
+
+def test_volume_label_from_each_reference_shape() -> None:
+    from mapsnap.make_iiif_georef import volume_label
+
+    assert volume_label(_metadata(city="madison", state="indiana", year="1904")) == (
+        "Madison, Indiana | 1904"
+    )
+    assert volume_label({"label": "Sanborn ... Columbus, Ohio."}).startswith("Sanborn")
+    assert volume_label({}) == ""
+
+
+def _provenance(stem, decision, source, *, panels=None, tier=0, keymap="georeferenced"):
+    return {
+        "stem": stem,
+        "decision": decision,
+        "source": source,
+        "panels": panels,
+        "hypotheses": [],
+        "evidence": {"keymap": keymap},
+        "approximate": None
+        if decision == "superseded"
+        else {"tier": tier, "basis": "b", "lonlat": [-85.4, 38.7], "radius_m": 100.0},
+    }
+
+
+def test_volume_report_counts_and_names_the_abstentions(tmp_path) -> None:
+    """An unplaced page cannot be an item -- a georeference annotation's body is
+    its control points -- so the page-level metadata is where it is recorded."""
+    import json
+
+    from mapsnap.make_iiif_georef import volume_report
+
+    records = [
+        _provenance("p1", "placed", "georef"),
+        _provenance("p2", "placed", "georef-snap"),
+        _provenance("p3", "abstained", "unplaced", tier=2),
+        _provenance("p4", "superseded", "unplaced", panels=["p4__1", "p4__2"]),
+        _provenance("p4__1", "placed", "georef"),
+        _provenance("p4__2", "abstained", "unplaced", tier=1),
+    ]
+    for r in records:
+        (tmp_path / f"{r['stem']}.provenance.json").write_text(json.dumps(r))
+    report = {
+        m["label"]: m["value"]
+        for m in volume_report([tmp_path / "x.json"], "2026-09-16")
+    }
+    assert report["generated"] == "2026-09-16"
+    assert report["pages"] == "5"  # the superseded parent is not a page to place
+    assert report["placed"] == "3"
+    assert report["unplaced"] == "2"
+    assert report["fit sources"] == "georef 2, georef-snap 1"
+    assert report["key map"] == "georeferenced"
+    assert report["split sheets"] == "1 sheet(s) cut into 2 panels"
+    assert "p3 (tier 2," in report["unplaced pages"]
+    assert "p4__2 (tier 1," in report["unplaced pages"]
+
+
+def test_volume_report_without_records_still_dates_the_run(tmp_path) -> None:
+    from mapsnap.make_iiif_georef import volume_report
+
+    assert volume_report([tmp_path / "x.json"], "2026-09-16") == [
+        {"label": "generated", "value": "2026-09-16"}
+    ]
+    assert volume_report([], "2026-09-16") == []

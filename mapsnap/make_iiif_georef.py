@@ -29,6 +29,7 @@ import glob
 import json
 import re
 import sys
+from collections import Counter
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -725,6 +726,92 @@ def _load_metadata_index(data: dict) -> dict[str, dict]:
     return index
 
 
+def volume_label(source_data: dict) -> str:
+    """A human label for the volume, from whichever reference shape was given."""
+    if "sheets" in source_data and "item" in source_data:
+        place = ", ".join(
+            part.title()
+            for part in (source_data.get("city"), source_data.get("state"))
+            if part
+        )
+        return " | ".join(
+            part for part in (place, str(source_data.get("year") or "")) if part
+        )
+    label = source_data.get("label") or ""
+    return label if isinstance(label, str) else ""
+
+
+def volume_report(georef_paths: list[Path], generated: str) -> list[dict]:
+    """A per-volume report card for the annotation page's top-level metadata.
+
+    Read from the provenance records beside the georef files, so it costs a
+    directory read rather than any recomputation. Abstentions are named here
+    because the annotation page is what people consume, and a page the arbiter
+    declined cannot appear in ``items``: a georeference annotation's body is its
+    control points, and a page with no pose has none.
+
+    Entries use the flat ``{"label", "value"}`` shape the per-page metadata in
+    this file already uses.
+    """
+    directory = georef_paths[0].parent if georef_paths else None
+    if directory is None:
+        return []
+    records = []
+    for path in sorted(directory.glob("p*.provenance.json")):
+        try:
+            records.append(json.loads(path.read_text()))
+        except (OSError, json.JSONDecodeError):
+            continue
+    if not records:
+        return [{"label": "generated", "value": generated}]
+
+    placed = [r for r in records if r["decision"] == "placed"]
+    abstained = [r for r in records if r["decision"] == "abstained"]
+    superseded = [r for r in records if r["decision"] == "superseded"]
+    sources = Counter(r["source"] for r in placed)
+    keymap = next(
+        (r["evidence"].get("keymap") for r in records if r.get("evidence")), "unknown"
+    )
+    panels = sum(len(r.get("panels") or []) for r in superseded)
+
+    def where(record: dict) -> str:
+        approx = record.get("approximate") or {}
+        if not approx.get("lonlat"):
+            return f"{record['stem']} (no location)"
+        lon, lat = approx["lonlat"]
+        return (
+            f"{record['stem']} (tier {approx['tier']}, "
+            f"{lat:.5f},{lon:.5f} +/-{approx['radius_m']:.0f}m)"
+        )
+
+    report = [
+        {"label": "generated", "value": generated},
+        {"label": "pages", "value": str(len(placed) + len(abstained))},
+        {"label": "placed", "value": str(len(placed))},
+        {"label": "unplaced", "value": str(len(abstained))},
+        {
+            "label": "fit sources",
+            "value": ", ".join(f"{k} {n}" for k, n in sources.most_common()) or "none",
+        },
+        {"label": "key map", "value": str(keymap)},
+    ]
+    if superseded:
+        report.append(
+            {
+                "label": "split sheets",
+                "value": f"{len(superseded)} sheet(s) cut into {panels} panels",
+            }
+        )
+    if abstained:
+        report.append(
+            {
+                "label": "unplaced pages",
+                "value": "; ".join(where(r) for r in abstained),
+            }
+        )
+    return report
+
+
 def _load_volume_items(
     iiif_path: str,
     georef_glob_pattern: str,
@@ -770,7 +857,7 @@ def _load_volume_items(
         )
         sys.exit(1)
 
-    label: str = source_data.get("label", "")
+    label: str = volume_label(source_data)
 
     valid_items: list[tuple[str, dict, dict, Path, Path]] = []
     for path in georef_paths:
@@ -1048,11 +1135,25 @@ def main() -> None:
             file=sys.stderr,
         )
 
+    # The annotation page is what people consume, so it says whose volume it is,
+    # when it was generated, and what the run decided -- including the pages it
+    # declined, which cannot appear in `items` because a georeference
+    # annotation's body is its control points and an unplaced page has none.
+    generated = datetime.now(UTC).strftime("%Y-%m-%d")
+    page_label = " | ".join(
+        part for part in (label, f"mapsnap generated fit ({generated})") if part
+    )
+    report = (
+        volume_report(annotation_georef_paths, generated)
+        if len(georef_globs) == 1
+        else [{"label": "generated", "value": generated}]
+    )
     result = {
         "id": result_id,
         "type": "AnnotationPage",
         "@context": ["http://www.w3.org/ns/anno.jsonld"],
-        "label": label,
+        "label": page_label,
+        "metadata": report,
         "items": annotations,
     }
 
