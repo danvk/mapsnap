@@ -142,10 +142,14 @@ uv run python -c "import easyocr; easyocr.Reader(['en'], gpu=False, verbose=Fals
 # measured no faster than 1"), but loc-fit's workers are separate processes and
 # take the serial path, which caps nothing. Measured on a c6i.2xlarge: four
 # uncapped workers finished ~1 item in 25 minutes.
-THREADS=$(( $(nproc) / WORKERS ))
+# Read once, BEFORE the export: nproc returns the minimum of the real core
+# count and OMP_NUM_THREADS, so asking it again afterwards reports the cap back
+# and the line reads "4 threads each (of 4 cores)" on an 8-core box.
+CORES=$(nproc)
+THREADS=$(( CORES / WORKERS ))
 [ "$THREADS" -lt 1 ] && THREADS=1
 export OMP_NUM_THREADS=$THREADS
-echo "workers: $WORKERS, torch threads each: $THREADS (of $(nproc) cores)"
+echo "workers: $WORKERS, torch threads each: $THREADS (of $CORES cores)"
 
 pids=()
 for worker in $(seq 0 $((WORKERS - 1))); do
