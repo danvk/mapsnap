@@ -839,8 +839,12 @@ def build_nodes(volume: Path, sidecar_dir: Path, vctx) -> dict[str, PageNode]:
             street_records.get(unit.stem),
             page_size=(unit.width, unit.height),
         )
-        if len(hypotheses) <= 1 and published is None:
-            continue  # nothing to arbitrate: no pose exists anywhere
+        # A page no channel ever posed has nothing to arbitrate, but it is still
+        # a page: it gets a node offering only the unplaced state, so it is
+        # written like every other (corners: null) and its provenance can say
+        # where it probably is from the neighbours, the key map or the volume.
+        # Skipping these -- the previous shape -- left the abstentions with the
+        # least evidence as the only pages with no record at all (#354).
         nodes[unit.stem] = PageNode(
             unit=unit,
             is_panel=base is not None,
@@ -1169,6 +1173,9 @@ def provenance_record(
     chosen_index = assignment[stem]
     chosen = node.hypotheses[chosen_index]
     w, h = unit.width, unit.height
+    # A split parent is not abstained, it is answered by its panels; its own
+    # final sidecar exists only to claim the page key.
+    superseded = any(other.startswith(f"{stem}__") for other in nodes)
     hypotheses = []
     for index, hyp in enumerate(node.hypotheses):
         hypotheses.append(
@@ -1190,9 +1197,18 @@ def provenance_record(
                 ),
             }
         )
+    if superseded:
+        decision = "superseded"
+    elif chosen.affine is not None:
+        decision = "placed"
+    else:
+        decision = "abstained"
     return {
         "stem": stem,
-        "decision": "placed" if chosen.affine is not None else "abstained",
+        "decision": decision,
+        "panels": sorted(other for other in nodes if other.startswith(f"{stem}__"))
+        if superseded
+        else None,
         "source": chosen.source,
         "merged": list(chosen.merged_sources),
         "hypotheses": hypotheses,
@@ -1204,8 +1220,12 @@ def provenance_record(
             "keymap_radius_m": number(unit.keymap_radius_m),
             "mutual_edges": sum(1 for _, a, b in edges if stem in (a, b)),
         },
-        "approximate": approximate_location(
-            stem, nodes, assignment, adjacency, region_centroids
+        "approximate": (
+            None
+            if superseded
+            else approximate_location(
+                stem, nodes, assignment, adjacency, region_centroids
+            )
         ),
     }
 

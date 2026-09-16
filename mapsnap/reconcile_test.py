@@ -611,3 +611,36 @@ def test_tier_4_falls_back_to_the_volume_then_the_key_map_regions():
 
     got = approximate_location("p2", alone, {"p2": 0}, None, None)
     assert got["tier"] == 5 and got["lonlat"] is None
+
+
+def test_a_split_parent_is_superseded_not_abstained(tmp_path):
+    import json
+
+    from mapsnap.reconcile import publish
+
+    nodes = {
+        "p1": make_node("p1", [unplaced_hypothesis()], published=None),
+        "p1__1": make_node("p1__1", [scored("georef", affine(0), 0.9)], base="p1"),
+        "p1__2": make_node("p1__2", [unplaced_hypothesis()], published=None, base="p1"),
+    }
+    publish(tmp_path, nodes, {"p1": 0, "p1__1": 0, "p1__2": 0})
+    parent = json.loads((tmp_path / "p1.provenance.json").read_text())
+    assert parent["decision"] == "superseded"
+    assert parent["panels"] == ["p1__1", "p1__2"]
+    assert parent["approximate"] is None
+    panel = json.loads((tmp_path / "p1__2.provenance.json").read_text())
+    assert panel["decision"] == "abstained"
+    assert panel["approximate"]["tier"] == 4  # the volume: its sibling is placed
+
+
+def test_build_nodes_keeps_a_page_no_channel_ever_posed(tmp_path):
+    """Such a page has nothing to arbitrate but is still owed a record."""
+    from types import SimpleNamespace
+
+    from mapsnap.reconcile import build_nodes
+
+    vctx = SimpleNamespace(units=[make_unit("p9")], panel_units=[])
+    nodes = build_nodes(tmp_path, tmp_path, vctx)
+    assert list(nodes) == ["p9"]
+    assert [h.source for h in nodes["p9"].hypotheses] == [UNPLACED]
+    assert nodes["p9"].published_index is None
