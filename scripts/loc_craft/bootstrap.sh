@@ -127,6 +127,18 @@ uv run python -c "import easyocr; easyocr.Reader(['en'], gpu=False, verbose=Fals
 # CRAFT's CPU post-processing on one item overlaps the GPU work of another. The
 # nesting keeps every sub-shard static and resumable: worker w of this instance
 # always owns shard (SHARD * WORKERS + w) of (SHARDS * WORKERS).
+# Torch gives EVERY process all the cores, and nothing inside a worker knows
+# how many siblings it has -- only this loop does. Without this, N workers run
+# N*cores intra-op threads and thrash: mapsnap.detect_text.threads_per_worker
+# was written for exactly this inside ocr's own pool ("8 CPU workers on 8 cores
+# measured no faster than 1"), but loc-fit's workers are separate processes and
+# take the serial path, which caps nothing. Measured on a c6i.2xlarge: four
+# uncapped workers finished ~1 item in 25 minutes.
+THREADS=$(( $(nproc) / WORKERS ))
+[ "$THREADS" -lt 1 ] && THREADS=1
+export OMP_NUM_THREADS=$THREADS
+echo "workers: $WORKERS, torch threads each: $THREADS (of $(nproc) cores)"
+
 pids=()
 for worker in $(seq 0 $((WORKERS - 1))); do
   # shellcheck disable=SC2086  # GPU_FLAG and EXTRA_ARGS are flag strings by design
