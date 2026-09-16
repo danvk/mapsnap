@@ -103,6 +103,12 @@ KEYMAP_CLAMP = 3.0
 # printed note contradicted by the pose pays W_NOTE_MISMATCH.
 W_RUNG_OFF = 0.15
 W_NOTE_MISMATCH = 0.30
+# How close (in log2) a pose must sit to a rung, or to its printed note, to
+# claim it. Mirrors osm_snap_experiment.RUNG_NOTE_BAND, which cannot be
+# imported at module level (the two modules import each other lazily);
+# reconcile_test asserts the two stay equal.
+RUNG_NOTE_BAND = (0.80, 1.25)
+RUNG_TOLERANCE = 0.25
 # Robust stamp factor between chosen neighbor poses, clamped so one junk edge
 # cannot dominate (the fargo p64 lesson).
 W_STAMP = 0.30
@@ -458,6 +464,67 @@ def normalize_name_penalty(node: "PageNode") -> None:
             hypothesis.scores["name"] = (hypothesis.scores["name"] or 0.0) + floor
 
 
+def rung_verdict(offset: float, note_ratio: float | None) -> dict:
+    """Which scale rung a pose sits on, what decided it, and what that costs.
+
+    ``offset`` is the pose's log2 metres-per-pixel relative to the volume family
+    median, so an integer offset is a clean power-of-two rung -- a half- or
+    double-scale sheet -- and costs nothing; second families are legitimate.
+    Only a scale BETWEEN rungs pays. A printed note that disagrees with the pose
+    it was measured against outranks the family in both directions.
+
+    Returned as a record rather than a bare penalty so the provenance file can
+    state the conclusion (which rung, and who decided) next to the evidence
+    (the offset, the note ratio, and the distance to each).
+    """
+    rung = round(offset)
+    distance = abs(offset - rung)
+    note_decides = note_ratio is not None and not (
+        RUNG_NOTE_BAND[0] <= note_ratio <= RUNG_NOTE_BAND[1]
+    )
+    if note_decides and note_ratio is not None:
+        note_offset = offset - math.log2(note_ratio)
+        agrees = abs(note_offset) < RUNG_TOLERANCE
+        return {
+            "verdict": "matches printed note" if agrees else "contradicts printed note",
+            "decided_by": "printed note",
+            "rung": rung,
+            "scale_ratio": round(2.0**offset, 4),
+            "offset_log2": round(offset, 4),
+            "rung_distance": round(distance, 4),
+            "note_ratio": round(note_ratio, 4),
+            "note_offset_log2": round(note_offset, 4),
+            "penalty": 0.0 if agrees else W_NOTE_MISMATCH,
+        }
+    on_rung = distance < RUNG_TOLERANCE
+    return {
+        "verdict": "on rung" if on_rung else "between rungs",
+        "decided_by": "volume family",
+        "rung": rung,
+        "scale_ratio": round(2.0**offset, 4),
+        "offset_log2": round(offset, 4),
+        "rung_distance": round(distance, 4),
+        "note_ratio": round(note_ratio, 4) if note_ratio is not None else None,
+        "note_offset_log2": None,
+        "penalty": 0.0 if on_rung else W_RUNG_OFF,
+    }
+
+
+# Recorded when the volume has too few fitted pages to have a scale family at
+# all, so the provenance file explains the absence instead of omitting the key.
+NO_FAMILY_RUNG = {
+    "verdict": "no volume family",
+    "decided_by": None,
+    "rung": None,
+    "scale_ratio": None,
+    "offset_log2": None,
+    "rung_distance": None,
+    "note_ratio": None,
+    "note_offset_log2": None,
+    "penalty": 0.0,
+}
+
+
 def unary_energy(
     hypothesis: Hypothesis,
     is_published: bool,
@@ -503,16 +570,13 @@ def unary_energy(
             KEYMAP_CLAMP, (keymap_dist / keymap_radius_m) ** 2
         )
     if family_log2 is not None:
-        # Distance to the nearest integer rung of the volume family. Being on
-        # ANY rung is free (second families are legitimate); between rungs
-        # pays; a printed note overrides in both directions.
-        offset = pose_scale_log2(hypothesis.affine) - family_log2
-        rung_distance = abs(offset - round(offset))
-        if note_ratio is not None and not (0.8 <= note_ratio <= 1.25):
-            note_offset = offset - math.log2(note_ratio)
-            terms["rung"] = 0.0 if abs(note_offset) < 0.25 else W_NOTE_MISMATCH
-        else:
-            terms["rung"] = 0.0 if rung_distance < 0.25 else W_RUNG_OFF
+        verdict = rung_verdict(
+            pose_scale_log2(hypothesis.affine) - family_log2, note_ratio
+        )
+        terms["rung"] = verdict["penalty"]
+    else:
+        verdict = NO_FAMILY_RUNG
+    hypothesis.scores["rung"] = verdict
     if hypothesis.scores.get("ambiguous"):
         terms["ambiguity"] = W_AMBIG
     if hypothesis.status == sidecar.CONTRADICTED:
@@ -839,8 +903,12 @@ def build_nodes(volume: Path, sidecar_dir: Path, vctx) -> dict[str, PageNode]:
             street_records.get(unit.stem),
             page_size=(unit.width, unit.height),
         )
-        if len(hypotheses) <= 1 and published is None:
-            continue  # nothing to arbitrate: no pose exists anywhere
+        # A page no channel ever posed has nothing to arbitrate, but it is still
+        # a page: it gets a node offering only the unplaced state, so it is
+        # written like every other (corners: null) and its provenance can say
+        # where it probably is from the neighbours, the key map or the volume.
+        # Skipping these -- the previous shape -- left the abstentions with the
+        # least evidence as the only pages with no record at all (#354).
         nodes[unit.stem] = PageNode(
             unit=unit,
             is_panel=base is not None,
@@ -1010,8 +1078,339 @@ def write_outputs(
     return len(flips), rows
 
 
+# --- Provenance and approximate location (#354) -------------------------------
+#
+# A corpus run happens rarely, so each page records how it got its answer, and
+# an abstention still says where the page probably is. The location comes in
+# tiers of decreasing trust, and the tier is written next to the point so a
+# map can colour by it rather than treat a guess as a fit.
+
+# Tier 1 admits a pose the arbiter declined only if the roads half-agreed with
+# it: below this a rejected pose is as likely to be a block-grid alias as the
+# right block, and pointing at an alias is worse than pointing at the key map.
+APPROX_VERIFICATION_FLOOR = 0.3
+# No tier claims to be tighter than this; a printed-claim stamp or a key-map
+# read is not a survey.
+APPROX_RADIUS_FLOOR_M = 100.0
+
+
+def world_point(affine: np.ndarray, x: float, y: float) -> tuple[float, float]:
+    """(lon, lat) of a page pixel under a pose."""
+    return (
+        affine[0, 0] * x + affine[0, 1] * y + affine[0, 2],
+        affine[1, 0] * x + affine[1, 1] * y + affine[1, 2],
+    )
+
+
+def centroid_and_spread(
+    points: list[tuple[float, float]],
+) -> tuple[tuple[float, float], float]:
+    """Mean of (lon, lat) points and the farthest point's distance from it, m."""
+    lon = sum(p[0] for p in points) / len(points)
+    lat = sum(p[1] for p in points) / len(points)
+    spread = max(haversine_m(lat, lon, b, a) for a, b in points)
+    return (lon, lat), spread
+
+
+def number(value) -> float | None:
+    """A JSON-safe float, or None; scores arrive as numpy scalars."""
+    return None if value is None else float(value)
+
+
+def approximate_location(
+    stem: str,
+    nodes: dict[str, PageNode],
+    assignment: dict[str, int],
+    adjacency: dict | None,
+    region_centroids: dict | None,
+    locator=None,
+) -> dict:
+    """Where the page probably is, and how much that claim is worth.
+
+    Tier 0 is a placed page: its pose center, no radius. Below that:
+
+      1. the best pose the arbiter declined, if the roads half-agreed with it
+      2. where placed neighbours' printed claims of this page land
+      3. the key map's centers for this page number
+      4. the volume's extent: its placed pages, else its key-map regions
+      5. nothing
+
+    The radius is the tier's own spread, floored, never a promise of accuracy.
+    """
+    node = nodes[stem]
+    unit = node.unit
+    chosen = node.hypotheses[assignment[stem]]
+    w, h = unit.width, unit.height
+    if chosen.affine is not None:
+        lon, lat = pose_center(chosen.affine, w, h)
+        return {"tier": 0, "basis": "placed", "lonlat": [lon, lat], "radius_m": 0.0}
+
+    declined = [
+        hyp
+        for hyp in node.hypotheses
+        if hyp.affine is not None
+        and (number(hyp.scores.get("verification")) or 0.0) >= APPROX_VERIFICATION_FLOOR
+    ]
+    if declined:
+        best = min(declined, key=lambda hyp: hyp.unary)
+        assert best.affine is not None
+        lon, lat = pose_center(best.affine, w, h)
+        x0, y0 = world_point(best.affine, 0.0, 0.0)
+        half_diagonal = haversine_m(lat, lon, y0, x0)
+        verification = number(best.scores.get("verification")) or 0.0
+        return {
+            "tier": 1,
+            "basis": f"declined pose {best.source} (verification {verification:.2f})",
+            "lonlat": [lon, lat],
+            "radius_m": round(max(APPROX_RADIUS_FLOOR_M, half_diagonal), 1),
+        }
+
+    if adjacency:
+        stamps: list[tuple[float, float]] = []
+        for other, other_node in nodes.items():
+            if other == stem:
+                continue
+            other_hyp = other_node.hypotheses[assignment[other]]
+            if other_hyp.affine is None:
+                continue
+            page = fitted_page_for(other_hyp, other_node.unit)
+            stamps += stamp_worlds(adjacency, page, stem)
+        if stamps:
+            (lon, lat), spread = centroid_and_spread(stamps)
+            return {
+                "tier": 2,
+                "basis": f"{len(stamps)} printed claim(s) by placed neighbours",
+                "lonlat": [lon, lat],
+                "radius_m": round(max(APPROX_RADIUS_FLOOR_M, spread), 1),
+            }
+
+    # The page's own centers first; otherwise the volume's locator, which is
+    # where page_keymap_data finds them for a panel -- without this, a volume
+    # with a perfectly good key map reported its abstained panels at the
+    # volume extent (the first corpus smoke run, all four of them).
+    centers = [(float(c[0]), float(c[1])) for c in unit.keymap_centers]
+    if not centers and locator is not None:
+        entry = locator.page_keymap(unit.number)
+        if entry:
+            centers = [(float(c[0]), float(c[1])) for c in entry.get("centers", [])]
+    if centers:
+        (lon, lat), spread = centroid_and_spread(centers)
+        radius = max(APPROX_RADIUS_FLOOR_M, spread, float(unit.keymap_radius_m or 0.0))
+        return {
+            "tier": 3,
+            "basis": f"key map, {len(centers)} center(s)",
+            "lonlat": [lon, lat],
+            "radius_m": round(radius, 1),
+        }
+
+    placed = [
+        pose_center(hyp.affine, other.unit.width, other.unit.height)
+        for name, other in nodes.items()
+        if (hyp := other.hypotheses[assignment[name]]).affine is not None
+    ]
+    if placed:
+        (lon, lat), spread = centroid_and_spread(placed)
+        return {
+            "tier": 4,
+            "basis": f"volume extent, {len(placed)} placed page(s)",
+            "lonlat": [lon, lat],
+            "radius_m": round(max(APPROX_RADIUS_FLOOR_M, spread), 1),
+        }
+    if region_centroids:
+        (lon, lat), spread = centroid_and_spread(
+            [tuple(c) for c in region_centroids.values()]
+        )
+        return {
+            "tier": 4,
+            "basis": f"key-map regions, {len(region_centroids)} page(s)",
+            "lonlat": [lon, lat],
+            "radius_m": round(max(APPROX_RADIUS_FLOOR_M, spread), 1),
+        }
+    return {"tier": 5, "basis": "no evidence", "lonlat": None, "radius_m": None}
+
+
+def keymap_state(volume: Path) -> str:
+    """Whether the volume has a key map, and whether it was ever georeferenced.
+
+    A key map that was read but not georeferenced still narrows nothing: the
+    locator holds page numbers in pixel space and no coordinates, so tier 3 is
+    unavailable and an abstention falls to the volume extent. The record says
+    which case it was, since "tier 4" alone reads like a missing key map.
+    """
+    raw = volume / "raw"
+    if not any(raw.glob("*.keymap.json")):
+        return "none"
+    if any(raw.glob("*.georef.json")):
+        return "georeferenced"
+    return "read, not georeferenced"
+
+
+def stamp_agreement(
+    stem: str,
+    nodes: dict[str, PageNode],
+    assignment: dict[str, int],
+    adjacency: dict | None,
+) -> dict | None:
+    """How far this page's printed claims land from its placed neighbours'.
+
+    The strongest truth-free check the pipeline has: two sheets that print each
+    other's number agree on where the seam is, or one of them is wrong. Recorded
+    per page because it needs every neighbour's final pose, which no later pass
+    over the sidecars can reconstruct cheaply.
+    """
+    node = nodes[stem]
+    hypothesis = node.hypotheses[assignment[stem]]
+    if adjacency is None or hypothesis.affine is None:
+        return None
+    page = fitted_page_for(hypothesis, node.unit)
+    distances: list[float] = []
+    for other, other_node in nodes.items():
+        if other == stem:
+            continue
+        other_hyp = other_node.hypotheses[assignment[other]]
+        if other_hyp.affine is None:
+            continue
+        other_page = fitted_page_for(other_hyp, other_node.unit)
+        mine = stamp_worlds(adjacency, page, other)
+        theirs = stamp_worlds(adjacency, other_page, stem)
+        if not mine or not theirs:
+            continue
+        distances.append(
+            min(haversine_m(la, lo, lb, ob) for lo, la in mine for ob, lb in theirs)
+        )
+    if not distances:
+        return None
+    return {
+        "neighbours": len(distances),
+        "median_m": round(float(np.median(distances)), 1),
+        "max_m": round(max(distances), 1),
+        "agree_100m": sum(1 for d in distances if d <= 100.0),
+    }
+
+
+def provenance_record(
+    stem: str,
+    nodes: dict[str, PageNode],
+    assignment: dict[str, int],
+    adjacency: dict | None,
+    edges: list[tuple[str, str, str]],
+    region_centroids: dict | None,
+    locator=None,
+    keymap: str = "unknown",
+    snap_records: dict | None = None,
+) -> dict:
+    """How this page got its answer: every pose weighed, the evidence, a location.
+
+    Written for every page, abstentions included, so "why is this page not
+    placed" and "where is it anyway" can be answered without re-running.
+    """
+    node = nodes[stem]
+    unit = node.unit
+    chosen_index = assignment[stem]
+    chosen = node.hypotheses[chosen_index]
+    w, h = unit.width, unit.height
+    # A split parent is not abstained, it is answered by its panels; its own
+    # final sidecar exists only to claim the page key.
+    superseded = any(other.startswith(f"{stem}__") for other in nodes)
+    hypotheses = []
+    for index, hyp in enumerate(node.hypotheses):
+        hypotheses.append(
+            {
+                "source": hyp.source,
+                "status": hyp.status,
+                "chosen": index == chosen_index,
+                "unary": round(float(hyp.unary), 4),
+                "terms": {k: round(float(v), 4) for k, v in hyp.unary_terms.items()},
+                "effective_gcps": int(hyp.effective_gcps),
+                "verification": number(hyp.scores.get("verification")),
+                "name": number(hyp.scores.get("name")),
+                "containment": number(hyp.scores.get("containment")),
+                "keymap_dist_m": number(hyp.scores.get("keymap_dist_m")),
+                "rung": hyp.scores.get("rung"),
+                "center": (
+                    list(pose_center(hyp.affine, w, h))
+                    if hyp.affine is not None
+                    else None
+                ),
+            }
+        )
+    if superseded:
+        decision = "superseded"
+    elif chosen.affine is not None:
+        decision = "placed"
+    else:
+        decision = "abstained"
+    snap = (snap_records or {}).get(stem) or {}
+    verdict = (snap.get("decision") or {}).get("page_verdict")
+    return {
+        "stem": stem,
+        "decision": decision,
+        "snap_verdict": verdict,
+        "panels": sorted(other for other in nodes if other.startswith(f"{stem}__"))
+        if superseded
+        else None,
+        "source": chosen.source,
+        "merged": list(chosen.merged_sources),
+        "hypotheses": hypotheses,
+        "evidence": {
+            "fit_state": unit.fit_state,
+            "inlier_intersections": int(unit.inlier_intersections),
+            "inlier_streets": int(unit.inlier_streets),
+            "keymap": keymap,
+            "keymap_centers": len(unit.keymap_centers),
+            "keymap_radius_m": number(unit.keymap_radius_m),
+            "mutual_edges": sum(1 for _, a, b in edges if stem in (a, b)),
+            "stamp_agreement": stamp_agreement(stem, nodes, assignment, adjacency),
+        },
+        "approximate": (
+            None
+            if superseded
+            else approximate_location(
+                stem, nodes, assignment, adjacency, region_centroids, locator
+            )
+        ),
+    }
+
+
+def source_control_points(
+    sidecar_dir: Path, stem: str, source: str
+) -> tuple[list, list]:
+    """The streets and intersections behind a chosen pose, from its own sidecar.
+
+    The arbiter used to write empty lists here, which cost more than the counts:
+    ``make_iiif_georef`` builds the annotation's control points from the
+    intersections, so every published page fell back to four synthetic corner
+    points and a polynomial transformation instead of its real GCPs and a
+    Helmert. Placement was unaffected -- the corners of an affine rectangle
+    reproduce the affine -- but the evidence was gone from the annotation, and
+    the metadata read ``streets 0, intersections 0`` for a page fitted on five.
+
+    Only the georef-family channels have street evidence; snap and street-solve
+    pose by geometry, so their poses legitimately carry none.
+    """
+    if not source.startswith("georef"):
+        return [], []
+    path = sidecar_dir / f"{stem}.{source}.json"
+    if not path.exists():
+        return [], []
+    try:
+        doc = json.loads(path.read_text())
+    except (OSError, json.JSONDecodeError):
+        return [], []
+    return doc.get("streets") or [], doc.get("intersections") or []
+
+
 def publish(
-    volume: Path, nodes: dict[str, PageNode], assignment: dict[str, int]
+    volume: Path,
+    nodes: dict[str, PageNode],
+    assignment: dict[str, int],
+    *,
+    adjacency: dict | None = None,
+    edges: list[tuple[str, str, str]] | None = None,
+    region_centroids: dict | None = None,
+    locator=None,
+    sidecar_dir: Path | None = None,
+    snap_records: dict | None = None,
 ) -> tuple[int, int]:
     """Write the arbitrated answer as ``pN.georef-final.json``, one per page.
 
@@ -1025,13 +1424,24 @@ def publish(
     could only express "unplaced" as the absence of a file, so suppressing a
     pose meant hiding it. Here the decision is a written record, and the
     channels' own sidecars stay exactly where they are.
+
+    Beside each answer goes ``pN.provenance.json``: every hypothesis weighed
+    with its terms, the page's evidence, and a tiered approximate location, so
+    an abstention still says where the page probably is (#354).
     """
     written = unplaced = 0
-    for stale in volume.glob("p*.georef-final.json"):
+    keymap = keymap_state(volume)
+    sidecar_dir = sidecar_dir or volume
+    for stale in list(volume.glob("p*.georef-final.json")) + list(
+        volume.glob("p*.provenance.json")
+    ):
         stale.unlink()
     for stem in sorted(nodes):
         node = nodes[stem]
         hypothesis = node.hypotheses[assignment[stem]]
+        streets, intersections = source_control_points(
+            sidecar_dir, stem, hypothesis.source
+        )
         w, h = node.unit.width, node.unit.height
         a = hypothesis.affine
         corners = (
@@ -1051,8 +1461,8 @@ def publish(
                     "width": w,
                     "height": h,
                     "corners": corners,
-                    "streets": [],
-                    "intersections": [],
+                    "streets": streets,
+                    "intersections": intersections,
                     "reconcile": {
                         "source": hypothesis.source,
                         "merged": hypothesis.merged_sources,
@@ -1062,6 +1472,22 @@ def publish(
                         },
                     },
                 },
+                indent=1,
+            )
+        )
+        (volume / f"{stem}.provenance.json").write_text(
+            json.dumps(
+                provenance_record(
+                    stem,
+                    nodes,
+                    assignment,
+                    adjacency,
+                    edges or [],
+                    region_centroids,
+                    locator,
+                    keymap,
+                    snap_records,
+                ),
                 indent=1,
             )
         )
@@ -1219,7 +1645,17 @@ def main() -> None:
     flips, _ = write_outputs(volume, nodes, assignment, out_dir)
     print(f"{flips} decisions flipped -> {out_dir / 'report.md'}")
     if args.publish:
-        written, unplaced = publish(volume, nodes, assignment)
+        written, unplaced = publish(
+            volume,
+            nodes,
+            assignment,
+            adjacency=adjacency,
+            edges=edges,
+            region_centroids=vctx.region_centroids,
+            locator=vctx.locator,
+            sidecar_dir=sidecar_dir,
+            snap_records=snap_records,
+        )
         print(f"published {written} reconcile sidecars, {unplaced} unplaced markers")
     if args.grade:
         materialize_and_grade(volume, nodes, assignment, out_dir)

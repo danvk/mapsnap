@@ -47,7 +47,7 @@ from tqdm import tqdm
 from mapsnap.detect_text import craft_hint
 from mapsnap.keymap.locate import page_key, page_number
 from mapsnap.keymap.records import recorded_keymap_keys
-from mapsnap.utils import image_stem
+from mapsnap.utils import image_stem, source_images
 
 # A detection only counts as an adjacency claim when it sits in the outer EDGE_BAND of the
 # page, is at least MIN_HEIGHT px tall (the printed sheet references are large numerals; this
@@ -110,7 +110,7 @@ def volume_page_images(volume: Path) -> list[Path]:
     """
     recorded = recorded_keymap_keys(volume)
     images = []
-    for image in sorted(volume.glob("p*.jpg")):
+    for image in source_images(volume):
         stem = image_stem(str(image))
         if "__" in stem:
             continue

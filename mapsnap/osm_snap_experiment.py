@@ -494,6 +494,7 @@ def load_volume_context(
     volume: Path, units: list[PageUnit] | None = None
 ) -> VolumeContext:
     units = units if units is not None else load_page_units(volume)
+    panel_units = load_panel_units(volume)
     attach_missing_truth(volume, units)
     centerlines_path = default_centerlines(volume)
     if centerlines_path is None:
@@ -508,11 +509,11 @@ def load_volume_context(
     return VolumeContext(
         volume=volume,
         units=units,
-        panel_units=load_panel_units(volume),
+        panel_units=panel_units,
         features=features,
         feature_index=FeatureIndex(features),
         locator=locator,
-        volume_m_per_px=volume_median_scale(units),
+        volume_m_per_px=volume_median_scale(units, panel_units),
         adjacency=load_adjacency(volume),
         region_centroids=region_centroids,
         filter_params=volume_filter_params(volume),

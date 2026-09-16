@@ -24,6 +24,7 @@ import numpy as np
 import torch
 
 from mapsnap.region_model import predict_region
+from mapsnap.utils import source_images
 
 REGION_DIR = Path("artifacts") / "region"
 
@@ -76,7 +77,7 @@ def main() -> None:
 
     from mapsnap.region_model import load_region_model
 
-    images = sorted(args.volume.glob("p*.jpg"))
+    images = source_images(args.volume)
     if not images:
         sys.exit(f"no p*.jpg pages under {args.volume}")
     model, device = load_region_model()

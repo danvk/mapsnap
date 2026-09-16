@@ -646,3 +646,221 @@ def test_fill_missing_source_ids_skips_sb_format():
     }
     fill_missing_source_ids(index)
     assert index["p126"]["target"]["source"]["id"] is None
+
+
+# --- the mirror's metadata.json as a reference (#354) --------------------------
+
+
+def _metadata(**overrides) -> dict:
+    data = {
+        "item": "sanborn01971_002",
+        "loc_url": "https://www.loc.gov/item/sanborn01971_002/",
+        "state": "illinois",
+        "year": "1893",
+        "city": "lewistown",
+        "storage_dir": "gmd/gmd410m/g4104m/g4104lm/g019711893",
+        "sheets": [
+            {
+                "seq": 1,
+                "stem": "01971_1893-0001",
+                "key": "p1",
+                "storage_dir": "gmd/gmd410m/g4104m/g4104lm/g019711893",
+                "width": 1613,
+                "height": 1913,
+            }
+        ],
+    }
+    data.update(overrides)
+    return data
+
+
+def test_loc_service_id_matches_the_manifest_form() -> None:
+    from mapsnap.make_iiif_georef import loc_service_id
+
+    assert loc_service_id(
+        "gmd/gmd410m/g4104m/g4104lm/g019711893", "01971_1893-0001"
+    ) == (
+        "https://tile.loc.gov/image-services/iiif/service"
+        ":gmd:gmd410m:g4104m:g4104lm:g019711893:01971_1893-0001"
+    )
+    # A stray leading or trailing slash must not produce an empty segment.
+    assert loc_service_id("/gmd/x/", "stem").endswith(":gmd:x:stem")
+
+
+def test_metadata_index_points_at_loc_with_a_full_res_canvas() -> None:
+    from mapsnap.make_iiif_georef import _load_metadata_index
+
+    index = _load_metadata_index(_metadata())
+    assert list(index) == ["p1"]
+    source = index["p1"]["target"]["source"]
+    assert source["id"].startswith("https://tile.loc.gov/image-services/iiif/service:")
+    assert source["id"].endswith("01971_1893-0001/info.json")
+    assert source["type"] == "ImageService2"
+    assert (source["width"], source["height"]) == (1613 * 4, 1913 * 4)
+    assert "Lewistown" in index["p1"]["label"]
+
+
+def test_metadata_index_keeps_an_uppercase_page_suffix() -> None:
+    """10,882 corpus sheets are keyed p5S; parsing the URL back would lowercase it,
+    and the georef sidecars are named in the mirror's case."""
+    from mapsnap.make_iiif_georef import _load_metadata_index, _service_url_to_page_key
+
+    data = _metadata()
+    data["sheets"][0]["key"] = "p5S"
+    data["sheets"][0]["stem"] = "00015_01_1951-0005S"
+    index = _load_metadata_index(data)
+    assert list(index) == ["p5S"]
+    # The URL parser is where the case would have been lost.
+    assert _service_url_to_page_key(index["p5S"]["target"]["source"]["id"]) == "p5s"
+
+
+def test_metadata_index_skips_a_sheet_missing_any_field() -> None:
+    from mapsnap.make_iiif_georef import _load_metadata_index
+
+    data = _metadata()
+    data["sheets"] += [
+        {"seq": 2, "stem": "x", "key": "p2", "width": 10},  # no height
+        {"seq": 3, "key": "p3", "width": 10, "height": 10},  # no stem
+    ]
+    assert list(_load_metadata_index(data)) == ["p1"]
+
+
+def test_metadata_index_falls_back_to_the_item_storage_dir() -> None:
+    from mapsnap.make_iiif_georef import _load_metadata_index
+
+    data = _metadata()
+    del data["sheets"][0]["storage_dir"]
+    assert (
+        "g019711893:01971_1893-0001"
+        in _load_metadata_index(data)["p1"]["target"]["source"]["id"]
+    )
+
+
+# --- the page's own label and report card (#354) ------------------------------
+
+
+def test_volume_label_from_each_reference_shape() -> None:
+    from mapsnap.make_iiif_georef import volume_label
+
+    assert volume_label(_metadata(city="madison", state="indiana", year="1904")) == (
+        "Madison, Indiana | 1904"
+    )
+    assert volume_label({"label": "Sanborn ... Columbus, Ohio."}).startswith("Sanborn")
+    assert volume_label({}) == ""
+
+
+def _provenance(stem, decision, source, *, panels=None, tier=0, keymap="georeferenced"):
+    return {
+        "stem": stem,
+        "decision": decision,
+        "source": source,
+        "panels": panels,
+        "hypotheses": [],
+        "evidence": {"keymap": keymap},
+        "approximate": None
+        if decision == "superseded"
+        else {"tier": tier, "basis": "b", "lonlat": [-85.4, 38.7], "radius_m": 100.0},
+    }
+
+
+def test_volume_report_counts_and_names_the_abstentions(tmp_path) -> None:
+    """An unplaced page cannot be an item -- a georeference annotation's body is
+    its control points -- so the page-level metadata is where it is recorded."""
+    import json
+
+    from mapsnap.make_iiif_georef import volume_report
+
+    records = [
+        _provenance("p1", "placed", "georef"),
+        _provenance("p2", "placed", "georef-snap"),
+        _provenance("p3", "abstained", "unplaced", tier=2),
+        _provenance("p4", "superseded", "unplaced", panels=["p4__1", "p4__2"]),
+        _provenance("p4__1", "placed", "georef"),
+        _provenance("p4__2", "abstained", "unplaced", tier=1),
+    ]
+    for r in records:
+        (tmp_path / f"{r['stem']}.provenance.json").write_text(json.dumps(r))
+    report = {m["label"]: m["value"] for m in volume_report(tmp_path, "2026-09-16")}
+    assert report["generated"] == "2026-09-16"
+    assert report["pages"] == "5"  # the superseded parent is not a page to place
+    assert report["placed"] == "3"
+    assert report["unplaced"] == "2"
+    assert report["fit sources"] == "georef 2, georef-snap 1"
+    assert report["key map"] == "georeferenced"
+    assert report["split sheets"] == "1 sheet(s) cut into 2 panels"
+    assert "p3 (tier 2," in report["unplaced pages"]
+    assert "p4__2 (tier 1," in report["unplaced pages"]
+
+
+def test_volume_report_without_records_still_dates_the_run(tmp_path) -> None:
+    from mapsnap.make_iiif_georef import volume_report
+
+    assert volume_report(tmp_path, "2026-09-16") == [
+        {"label": "generated", "value": "2026-09-16"}
+    ]
+    assert volume_report(None, "2026-09-16") == []
+
+
+def test_glob_matched_anything_separates_a_wrong_path_from_an_empty_volume(
+    tmp_path,
+) -> None:
+    """Gardiner NY 1913 placed nothing; that is a result, not a bad glob."""
+    from mapsnap.make_iiif_georef import expand_georef_globs, glob_matched_anything
+
+    poseless = tmp_path / "p1.georef-final.json"
+    poseless.write_text(json.dumps({"width": 10, "height": 10, "corners": None}))
+    pattern = str(tmp_path / "*.georef-final.json")
+    assert expand_georef_globs(pattern) == []  # nothing publishable
+    assert glob_matched_anything(pattern) is True  # but the sidecar is there
+    assert glob_matched_anything(str(tmp_path / "nope-*.json")) is False
+
+
+def test_glob_matched_anything_handles_a_comma_list(tmp_path) -> None:
+    from mapsnap.make_iiif_georef import glob_matched_anything
+
+    (tmp_path / "p1.georef.json").write_text("{}")
+    both = f"{tmp_path}/nope-*.json,{tmp_path}/*.georef.json"
+    assert glob_matched_anything(both) is True
+    assert glob_matched_anything(f"{tmp_path}/a-*.json,{tmp_path}/b-*.json") is False
+
+
+def test_volume_report_survives_a_volume_that_placed_nothing(tmp_path) -> None:
+    """Gardiner has no annotations at all, which is when the card matters most."""
+    from mapsnap.make_iiif_georef import volume_report
+
+    for stem in ("p0__1", "p0__2"):
+        (tmp_path / f"{stem}.provenance.json").write_text(
+            json.dumps(_provenance(stem, "abstained", "unplaced", tier=5))
+        )
+    report = {m["label"]: m["value"] for m in volume_report(tmp_path, "2026-09-16")}
+    assert report["placed"] == "0"
+    assert report["unplaced"] == "2"
+    assert report["fit sources"] == "none"
+    assert "p0__1 (tier 5," in report["unplaced pages"]
+
+
+def test_report_card_names_the_run_when_tagged(tmp_path) -> None:
+    """A published fit must be traceable to the corpus pass that produced it."""
+    from mapsnap.make_iiif_georef import volume_report
+
+    (tmp_path / "p1.provenance.json").write_text(
+        json.dumps(_provenance("p1", "placed", "georef"))
+    )
+    card = {
+        m["label"]: m["value"] for m in volume_report(tmp_path, "2026-09-16", "v1.3")
+    }
+    assert card["run"] == "v1.3"
+    assert card["generated"] == "2026-09-16"
+    # Untagged runs say nothing rather than saying "None".
+    untagged = {m["label"]: m["value"] for m in volume_report(tmp_path, "2026-09-16")}
+    assert "run" not in untagged
+
+
+def test_report_card_names_the_run_with_no_provenance(tmp_path) -> None:
+    """The tag survives the early return taken when a volume has no records."""
+    from mapsnap.make_iiif_georef import volume_report
+
+    card = {
+        m["label"]: m["value"] for m in volume_report(tmp_path, "2026-09-16", "v1.3")
+    }
+    assert card["run"] == "v1.3"

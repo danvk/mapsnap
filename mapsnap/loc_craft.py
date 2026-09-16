@@ -221,7 +221,7 @@ def plan_item(item: Item, present: list[str]) -> ItemWork:
     return ItemWork(item=item, pages=pages, raw_sheets=raw_sheets, missing=missing)
 
 
-def sync(source: str, destination: str) -> None:
+def sync(source: str, destination: str, *filters: str) -> None:
     """``aws s3 sync`` one direction, quietly, failing loudly.
 
     Downward it brings the images plus any sidecars an interrupted run already
@@ -229,7 +229,7 @@ def sync(source: str, destination: str) -> None:
     copies only what is new, because the CLI gives a downloaded file its object's
     last-modified time and so does not consider it changed.
     """
-    run_aws(["aws", "s3", "sync", source, destination, "--only-show-errors"])
+    run_aws(["aws", "s3", "sync", source, destination, *filters, "--only-show-errors"])
 
 
 class Worker:
@@ -320,6 +320,10 @@ class QueueSource:
         self.url = url
         self.by_name = by_name
         self.handles: dict[str, str] = {}
+        # The run each item belongs to, taken from its message rather than from
+        # this worker's flags, so the S3 prefix and the recorded provenance
+        # cannot disagree. None for an untagged queue (loc-craft fills those).
+        self.tags: dict[str, str | None] = {}
         self.taken = 0
 
     def __iter__(self) -> Iterator[tuple[int, Item]]:
@@ -328,13 +332,15 @@ class QueueSource:
             if not messages:
                 return  # drained
             for message in messages:
-                item = self.by_name.get(message.body)
+                name, run_tag = work_queue.parse_body(message.body)
+                item = self.by_name.get(name)
                 if item is None:
                     # Named in the queue but not in the manifest: nothing to do,
                     # and leaving it would keep the queue from ever draining.
                     work_queue.delete(self.url, message.handle)
                     continue
                 self.handles[item.item] = message.handle
+                self.tags[item.item] = run_tag
                 self.taken += 1
                 yield self.taken, item
 
@@ -347,6 +353,14 @@ class QueueSource:
     def release(self, item: Item) -> None:
         """Forget the handle without deleting, so the lease lapses and it retries."""
         self.handles.pop(item.item, None)
+
+    def handle_for(self, item: Item) -> str | None:
+        """The item's receipt handle, for holding its lease open while it runs."""
+        return self.handles.get(item.item)
+
+    def tag_for(self, item: Item) -> str | None:
+        """The run this item's message named, or None on an untagged queue."""
+        return self.tags.get(item.item)
 
 
 @dataclass

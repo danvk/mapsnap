@@ -21,7 +21,7 @@ from mapsnap.ctc_vocab_decode import HINT_STRINGS, generate_vocab_strings
 from mapsnap.keymap.locate import KeymapLocator, page_key, resolve_keymaps
 from mapsnap.osm_to_centerlines import load_centerlines
 from mapsnap.streets import build_block_index, polygon_side_lengths
-from mapsnap.utils import default_centerlines, image_stem
+from mapsnap.utils import default_centerlines, drop_sidecar_images, image_stem
 
 # Non-street text that appears on Sanborn maps and should be recognized but
 # excluded from georeferencing.
@@ -1100,7 +1100,7 @@ def main() -> None:
     # Never OCR a page that has been split into panels; OCR its panels instead. This
     # mirrors mapsnap.utils.list_pages so the rule holds however ocr is invoked (pipeline
     # or a raw shell glob that happens to include the parent).
-    images = args.images
+    images = drop_sidecar_images(args.images)
     superseded = [p for p in images if has_split_panels(p)]
     if superseded:
         images = [p for p in images if p not in superseded]

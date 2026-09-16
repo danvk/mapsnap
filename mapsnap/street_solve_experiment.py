@@ -597,6 +597,23 @@ def incumbent_pose(volume: Path, unit: PageUnit) -> tuple[np.ndarray | None, str
     return unit.gen_affine, "ransac"
 
 
+def load_posed_candidates(path: Path) -> dict[str, dict]:
+    """The posed records of a candidates file, keyed by stem.
+
+    A missing file is an error -- `candidates` has not been run -- but a file
+    with no posed record in it is a legitimate empty result: the channel ran
+    and could pose nothing.
+    """
+    if not path.exists():
+        sys.exit(f"no candidates file at {path}; run `candidates` first")
+    posed: dict[str, dict] = {}
+    for line in path.read_text().splitlines():
+        record = json.loads(line)
+        if record.get("status") == "posed" and record.get("corners"):
+            posed[record["stem"]] = record
+    return posed
+
+
 def cmd_select(args: argparse.Namespace) -> None:
     """Adopt the streets pose where an independent referee prefers it.
 
@@ -613,22 +630,21 @@ def cmd_select(args: argparse.Namespace) -> None:
     from mapsnap.osm_snap_experiment import build_page_context, load_volume_context
 
     volume = Path(args.volume)
+    posed = load_posed_candidates(volume / ARTIFACT_DIR / "candidates.jsonl")
+    for stale in volume.glob(f"p*.georef-{STREET_SUFFIX}.json"):
+        stale.unlink()  # this command owns them; never leave a previous run's pick
+    if not posed:
+        # Nothing the street channel could pose, so nothing to adopt. Not a
+        # failure: a two-sheet volume where RANSAC placed nothing arrives here
+        # routinely at corpus scale, and exiting non-zero here killed the whole
+        # fit for such volumes on 2026-09-16.
+        print("street-solve: no posed candidates, nothing to adopt", file=sys.stderr)
+        return
+
     locator, centerlines, filter_params, scale = volume_context(volume)
     gates = StreetGates(**parse_gate_overrides(args.gates))
     units = load_page_units(volume)
     attach_case_folded_truth(volume, units)
-    posed = {}
-    path = volume / ARTIFACT_DIR / "candidates.jsonl"
-    if path.exists():
-        for line in path.read_text().splitlines():
-            record = json.loads(line)
-            if record.get("status") == "posed" and record.get("corners"):
-                posed[record["stem"]] = record
-    if not posed:
-        sys.exit(f"no posed candidates in {path}; run `candidates` first")
-
-    for stale in volume.glob(f"p*.georef-{STREET_SUFFIX}.json"):
-        stale.unlink()  # this command owns them; never leave a previous run's pick
 
     vctx = load_volume_context(volume, units)
     adopted = 0

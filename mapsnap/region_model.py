@@ -34,6 +34,7 @@ from mapsnap.compare_iiif_georef import (
 from mapsnap.fix_truth_splits import gcp_containment
 from mapsnap.road_model import UNet
 from mapsnap.train_road_unet import dice_loss
+from mapsnap.utils import source_images
 
 INPUT_SIZE = 512
 REGION_MODEL_PATH = Path(__file__).resolve().parent.parent / "models" / "region_unet.pt"
@@ -107,7 +108,7 @@ def volume_examples(volume: Path) -> list[tuple[Path, np.ndarray]]:
     truth = volume / "main.iiif.json"
     if not truth.exists():
         return []
-    stems = {p.stem.lower(): p for p in volume.glob("p*.jpg") if "__" not in p.stem}
+    stems = {p.stem.lower(): p for p in source_images(volume) if "__" not in p.stem}
     examples = []
     for key, items in annotations_by_source(truth).items():
         jpg = stems.get(key.lower())

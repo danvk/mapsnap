@@ -1,7 +1,6 @@
 """Full pipeline for georeferencing a Library of Congress Sanborn volume."""
 
 import argparse
-import glob
 import sys
 from pathlib import Path
 
@@ -9,7 +8,7 @@ from mapsnap.craft import volume_craft_images
 from mapsnap.download_osm import BUFFER_M
 from mapsnap.keymap.records import recorded_keymap_keys
 from mapsnap.roadprob import volume_roadprob_images
-from mapsnap.utils import Step, list_pages, run_cmd, write_run_record
+from mapsnap.utils import Step, list_pages, run_cmd, source_images, write_run_record
 
 
 def main() -> None:
@@ -70,7 +69,7 @@ def main() -> None:
         run_cmd(["mapsnap", "download-loc", "--scale", "pct:25", str(manifest)])
 
     # Detect and write split panels (pN__i.jpg + pN.panels.json) for pages that split.
-    page_images = sorted(glob.glob(str(dir_path / "p*.jpg")))
+    page_images = [str(path) for path in source_images(dir_path)]
     with step("split"):
         run_cmd(["mapsnap", "split", *page_images])
 

@@ -58,6 +58,7 @@ from mapsnap.utils import (
     haversine_m,
     jpeg_dimensions,
     source_id_to_page_key,
+    source_images,
 )
 
 GEOREF_VARIANTS = [
@@ -262,7 +263,7 @@ def load_page_units(volume: Path) -> list[PageUnit]:
 
     truth_by_key, split_truth_parents = load_truth_units(volume)
     units: list[PageUnit] = []
-    for jpg in sorted(volume.glob("p*.jpg")):
+    for jpg in source_images(volume):
         stem = jpg.stem
         if "__" in stem:
             continue
@@ -710,7 +711,7 @@ def cmd_infer(volume: Path) -> None:
 
     device = select_device()
     model = load_model(ROAD_MODEL_PATH, device)
-    jpgs = [p for p in sorted(volume.glob("p*.jpg")) if "__" not in p.stem]
+    jpgs = [p for p in source_images(volume) if "__" not in p.stem]
     done = 0
     for jpg in jpgs:
         if load_prob(volume, jpg.stem) is not None:
@@ -1288,18 +1289,50 @@ def run_join(
     return record
 
 
-def volume_median_scale(units: list[PageUnit]) -> float:
+# Median metres per pixel over the 2,540 fitted pages of the truth volumes
+# (p10 0.174, p90 0.312) -- the 50 ft-to-the-inch rung at a typical 25% scan.
+# Used only when a volume offers no fitted page at all, so that such a volume
+# still runs to completion and records its abstentions instead of crashing.
+FALLBACK_M_PER_PX = 0.203
+
+
+def fitted_scales(units: list[PageUnit]) -> list[float]:
+    """Metres per pixel for each unit the pipeline actually fitted."""
+    return [
+        affine_scale_m_per_px(u.gen_affine)
+        for u in units
+        if u.fit_state == "fitted" and u.gen_affine is not None
+    ]
+
+
+def volume_median_scale(
+    units: list[PageUnit], panels: list[PageUnit] | None = None
+) -> float:
     """Median RANSAC-fit scale (metres per page pixel).
 
     Deliberately truth-free: the volume scale must come from the pipeline's
     own fits so the matcher and pose graph run identically on volumes without
     ground truth.
+
+    Base pages first, panels only if no base page was fitted. A panel is a crop
+    of its parent at the same pixel scale, so the two are directly comparable --
+    measured across the truth volumes they agree to the third decimal on all but
+    the volumes with genuine half-scale sheets. Preferring base pages therefore
+    leaves every volume that has one unchanged, while a volume whose only sheet
+    is split still has a scale: Gardiner NY 1913 is one sheet cut into two
+    panels, so every base page is ``split``, none is ``fitted``, and the median
+    was taken over an empty list.
     """
-    scales = [
-        affine_scale_m_per_px(u.gen_affine)
-        for u in units
-        if u.fit_state == "fitted" and u.gen_affine is not None
-    ]
+    scales = fitted_scales(units)
+    if not scales and panels:
+        scales = fitted_scales(panels)
+    if not scales:
+        print(
+            "No fitted page in this volume; assuming the corpus-median scale "
+            f"{FALLBACK_M_PER_PX} m/px.",
+            file=sys.stderr,
+        )
+        return FALLBACK_M_PER_PX
     return statistics.median(scales)
 
 

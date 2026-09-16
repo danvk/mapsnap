@@ -25,6 +25,7 @@ from tqdm import tqdm
 
 from mapsnap.detect_text import boxes_path, write_craft_boxes
 from mapsnap.panel_boxes import derive_boxes_for_panel_image
+from mapsnap.utils import drop_sidecar_images
 
 
 def expand_images(patterns: list[str]) -> list[str]:
@@ -128,7 +129,7 @@ def main() -> None:
     )
     args = parser.parse_args()
 
-    images = expand_images(args.images)
+    images = drop_sidecar_images(expand_images(args.images))
     if not images:
         sys.exit(f"No images matched: {' '.join(args.images)}")
     missing = [image for image in images if not Path(image).exists()]

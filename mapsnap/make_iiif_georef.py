@@ -29,6 +29,7 @@ import glob
 import json
 import re
 import sys
+from collections import Counter
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -90,6 +91,20 @@ def has_pose(path: str) -> bool:
     except (OSError, json.JSONDecodeError):
         return False
     return bool(doc.get("corners"))
+
+
+def glob_matched_anything(pattern: str) -> bool:
+    """Whether the pattern matched any file at all, posed or not.
+
+    ``expand_georef_globs`` drops poseless sidecars, so an empty result means
+    either a wrong path or a volume where every page abstained. Only the first
+    is an error: Gardiner NY 1913 is one split sheet, neither panel placed, and
+    exiting there left `fit` with a non-zero status and no annotation -- which
+    at corpus scale is an item that never records its own outcome.
+    """
+    return any(
+        sorted(glob.glob(sub.strip())) for sub in pattern.split(",") if sub.strip()
+    )
 
 
 def expand_georef_globs(pattern: str) -> list[str]:
@@ -616,7 +631,7 @@ def _load_s3_items(
     The image URL for each page is: {image_base_url}/{parent_key}.jpg
     """
     georef_paths = expand_georef_globs(georef_glob_pattern)
-    if not georef_paths:
+    if not georef_paths and not glob_matched_anything(georef_glob_pattern):
         print(f"Error: no files matched '{georef_glob_pattern}'.", file=sys.stderr)
         sys.exit(1)
 
@@ -661,6 +676,169 @@ def _load_s3_items(
     return valid_items, base_url, ""
 
 
+# LoC serves every mirrored scan from one Image API 2 endpoint, addressed by the
+# item's storage directory and the sheet's stem.
+LOC_IIIF_SERVICE = "https://tile.loc.gov/image-services/iiif/service"
+
+
+def loc_service_id(storage_dir: str, stem: str) -> str:
+    """The LoC IIIF service URL for one mirrored sheet.
+
+    ``gmd/gmd410m/.../g019711893`` + ``01971_1893-0001`` becomes
+    ``…/service:gmd:gmd410m:…:g019711893:01971_1893-0001``, which is exactly the
+    id the item's own LoC manifest carries for that canvas.
+    """
+    return f"{LOC_IIIF_SERVICE}:{storage_dir.strip('/').replace('/', ':')}:{stem}"
+
+
+def _load_metadata_index(data: dict) -> dict[str, dict]:
+    """Build page_key -> item dict from the mirror's ``metadata.json``.
+
+    A mirrored volume has no IIIF manifest of its own, but it does not need one:
+    every field a canvas requires is already recorded per sheet, so the
+    annotation can point at LoC's own image servers rather than at wherever the
+    mirror happens to live (#354).
+
+    Two details that matter:
+
+    * The page key is taken from the sheet's ``key``, not parsed back out of the
+      service URL. The URL parser lowercases a letter suffix, and 10,882 of the
+      corpus's sheets have an uppercase one (``p5S``), whose georef sidecars are
+      named in the mirror's case -- parsing would drop them from the annotation
+      silently.
+    * ``width``/``height`` are the 25% copy's, so the full-resolution canvas is
+      4x, the same convention ``_load_loc_index`` reaches by scaling the
+      manifest's ``pct:25`` resource. LoC rounds that percentage up, so both
+      routes can overstate the true canvas by a pixel or two; control points
+      scale by exactly 4 either way.
+    """
+    item = data.get("item", "")
+    place = ", ".join(part for part in (data.get("city"), data.get("state")) if part)
+    volume_label = " | ".join(
+        part for part in (place.title(), data.get("year"), item) if part
+    )
+    index: dict[str, dict] = {}
+    for sheet in data.get("sheets", []):
+        key = sheet.get("key")
+        storage_dir = sheet.get("storage_dir") or data.get("storage_dir")
+        stem = sheet.get("stem")
+        width, height = sheet.get("width"), sheet.get("height")
+        if not (key and storage_dir and stem and width and height):
+            continue
+        service_id = loc_service_id(storage_dir, stem)
+        index[key] = {
+            "label": f"{volume_label} {key}",
+            "target": {
+                "source": {
+                    "id": f"{service_id}/info.json",
+                    "type": "ImageService2",
+                    "width": width * FULL_RES_FACTOR,
+                    "height": height * FULL_RES_FACTOR,
+                }
+            },
+        }
+    return index
+
+
+def volume_label(source_data: dict) -> str:
+    """A human label for the volume, from whichever reference shape was given."""
+    if "sheets" in source_data and "item" in source_data:
+        place = ", ".join(
+            part.title()
+            for part in (source_data.get("city"), source_data.get("state"))
+            if part
+        )
+        return " | ".join(
+            part for part in (place, str(source_data.get("year") or "")) if part
+        )
+    label = source_data.get("label") or ""
+    return label if isinstance(label, str) else ""
+
+
+def run_entries(generated: str, run_tag: str | None) -> list[dict]:
+    """The report card's identity lines: when the fit ran, and as part of what."""
+    entries = [{"label": "generated", "value": generated}]
+    if run_tag:
+        entries.append({"label": "run", "value": run_tag})
+    return entries
+
+
+def volume_report(
+    directory: Path | None, generated: str, run_tag: str | None = None
+) -> list[dict]:
+    """A per-volume report card for the annotation page's top-level metadata.
+
+    Read from the provenance records beside the georef files, so it costs a
+    directory read rather than any recomputation. Abstentions are named here
+    because the annotation page is what people consume, and a page the arbiter
+    declined cannot appear in ``items``: a georeference annotation's body is its
+    control points, and a page with no pose has none.
+
+    Entries use the flat ``{"label", "value"}`` shape the per-page metadata in
+    this file already uses.
+
+    Takes the volume's directory rather than the annotations' paths: a volume
+    that placed nothing has no annotations, and that is exactly when the report
+    matters most.
+    """
+    if directory is None:
+        return []
+    records = []
+    for path in sorted(directory.glob("p*.provenance.json")):
+        try:
+            records.append(json.loads(path.read_text()))
+        except (OSError, json.JSONDecodeError):
+            continue
+    if not records:
+        return run_entries(generated, run_tag)
+
+    placed = [r for r in records if r["decision"] == "placed"]
+    abstained = [r for r in records if r["decision"] == "abstained"]
+    superseded = [r for r in records if r["decision"] == "superseded"]
+    sources = Counter(r["source"] for r in placed)
+    keymap = next(
+        (r["evidence"].get("keymap") for r in records if r.get("evidence")), "unknown"
+    )
+    panels = sum(len(r.get("panels") or []) for r in superseded)
+
+    def where(record: dict) -> str:
+        approx = record.get("approximate") or {}
+        if not approx.get("lonlat"):
+            return f"{record['stem']} (no location)"
+        lon, lat = approx["lonlat"]
+        return (
+            f"{record['stem']} (tier {approx['tier']}, "
+            f"{lat:.5f},{lon:.5f} +/-{approx['radius_m']:.0f}m)"
+        )
+
+    report = [
+        *run_entries(generated, run_tag),
+        {"label": "pages", "value": str(len(placed) + len(abstained))},
+        {"label": "placed", "value": str(len(placed))},
+        {"label": "unplaced", "value": str(len(abstained))},
+        {
+            "label": "fit sources",
+            "value": ", ".join(f"{k} {n}" for k, n in sources.most_common()) or "none",
+        },
+        {"label": "key map", "value": str(keymap)},
+    ]
+    if superseded:
+        report.append(
+            {
+                "label": "split sheets",
+                "value": f"{len(superseded)} sheet(s) cut into {panels} panels",
+            }
+        )
+    if abstained:
+        report.append(
+            {
+                "label": "unplaced pages",
+                "value": "; ".join(where(r) for r in abstained),
+            }
+        )
+    return report
+
+
 def _load_volume_items(
     iiif_path: str,
     georef_glob_pattern: str,
@@ -678,11 +856,19 @@ def _load_volume_items(
     source_data: dict = json.loads(Path(iiif_path).read_text())
 
     georef_paths = expand_georef_globs(georef_glob_pattern)
-    if not georef_paths:
+    if not georef_paths and not glob_matched_anything(georef_glob_pattern):
         print(f"Error: no files matched '{georef_glob_pattern}'.", file=sys.stderr)
         sys.exit(1)
 
-    if source_data.get("type") == "AnnotationPage":
+    if "sheets" in source_data and "item" in source_data:
+        items_by_key = _load_metadata_index(source_data)
+        result_id = f"{source_data.get('loc_url', '').rstrip('/')}/generated"
+        print(
+            f"Loaded {len(items_by_key)} sheets from the mirror's metadata; "
+            "canvases point at LoC.",
+            file=sys.stderr,
+        )
+    elif source_data.get("type") == "AnnotationPage":
         items_by_key = _load_oim_index(source_data)
         result_id = source_data.get("id", "") + "/generated"
         print(f"Loaded {len(items_by_key)} OIM annotations.", file=sys.stderr)
@@ -692,13 +878,13 @@ def _load_volume_items(
         print(f"Loaded {len(items_by_key)} LOC canvases.", file=sys.stderr)
     else:
         print(
-            "Error: expected an OIM IIIF AnnotationPage (type: AnnotationPage) "
-            "or a LOC manifest (@type: sc:Manifest).",
+            "Error: expected an OIM IIIF AnnotationPage (type: AnnotationPage), "
+            "a LOC manifest (@type: sc:Manifest), or the mirror's metadata.json.",
             file=sys.stderr,
         )
         sys.exit(1)
 
-    label: str = source_data.get("label", "")
+    label: str = volume_label(source_data)
 
     valid_items: list[tuple[str, dict, dict, Path, Path]] = []
     for path in georef_paths:
@@ -794,6 +980,15 @@ def main() -> None:
         "--centerlines",
         metavar="FILE",
         help="GeoJSON centerlines file for block-based clipping masks",
+    )
+    parser.add_argument(
+        "--run-tag",
+        metavar="TAG",
+        help=(
+            "Name of the run this annotation page belongs to (a cut release, "
+            "say). Recorded in the page's top-level metadata so a published "
+            "fit can be traced back to the corpus pass that produced it."
+        ),
     )
     parser.add_argument(
         "--debug-blocks",
@@ -976,11 +1171,25 @@ def main() -> None:
             file=sys.stderr,
         )
 
+    # The annotation page is what people consume, so it says whose volume it is,
+    # when it was generated, and what the run decided -- including the pages it
+    # declined, which cannot appear in `items` because a georeference
+    # annotation's body is its control points and an unplaced page has none.
+    generated = datetime.now(UTC).strftime("%Y-%m-%d")
+    page_label = " | ".join(
+        part for part in (label, f"mapsnap generated fit ({generated})") if part
+    )
+    report = (
+        volume_report(Path(georef_globs[0]).parent, generated, args.run_tag)
+        if len(georef_globs) == 1
+        else run_entries(generated, args.run_tag)
+    )
     result = {
         "id": result_id,
         "type": "AnnotationPage",
         "@context": ["http://www.w3.org/ns/anno.jsonld"],
-        "label": label,
+        "label": page_label,
+        "metadata": report,
         "items": annotations,
     }
 

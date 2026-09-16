@@ -1,0 +1,485 @@
+"""Tests for the CPU chain driver (mapsnap.loc_fit)."""
+
+from pathlib import Path
+
+from mapsnap.loc_craft import Item
+from mapsnap.loc_fit import (
+    ARCHIVE_TAG,
+    CENTERLINES_NAME,
+    DONE_MARKER,
+    RUNS_DIRNAME,
+    UPLOAD_EXCLUDES,
+    UPLOAD_GLOBS,
+    UPLOAD_INCLUDES,
+    County,
+    plan_fit,
+    read_counties,
+    upload,
+)
+
+ALPHA = Item("sanborn1", "alabama", "1900")
+TAG = "v1.3"
+
+
+def present(pages: int, *, boxes: bool = True, done: bool = False) -> list[str]:
+    """An item's S3 keys with `pages` sheets, optionally crafted or finished."""
+    keys = [f"p{n}.jpg" for n in range(1, pages + 1)]
+    if boxes:
+        keys += [f"p{n}.boxes.json" for n in range(1, pages + 1)]
+    if done:
+        keys.append(f"{RUNS_DIRNAME}/{TAG}/{DONE_MARKER}")
+    return keys
+
+
+def test_plan_fit_runs_an_item_whose_pages_are_all_crafted() -> None:
+    work = plan_fit(ALPHA, present(3), County("US01001"), TAG)
+    assert work.ready and not work.done
+    assert work.pages == ["p1.jpg", "p2.jpg", "p3.jpg"]
+
+
+def test_plan_fit_skips_an_item_that_already_finished() -> None:
+    """The annotation page is written last, so it means the whole chain ran."""
+    work = plan_fit(ALPHA, present(3, done=True), County("US01001"), TAG)
+    assert work.done
+
+
+def test_plan_fit_waits_for_craft_rather_than_failing() -> None:
+    """Boxes missing means the GPU pass has not been through yet, not an error."""
+    keys = present(3)
+    keys.remove("p2.boxes.json")
+    work = plan_fit(ALPHA, keys, County("US01001"), TAG)
+    assert not work.ready and not work.done
+    assert "await craft" in work.reason
+
+
+def test_plan_fit_waits_when_no_county_extract_is_known() -> None:
+    work = plan_fit(ALPHA, present(2), None, TAG)
+    assert not work.ready
+    assert "county" in work.reason
+
+
+def test_plan_fit_reports_an_item_the_mirror_never_produced() -> None:
+    work = plan_fit(ALPHA, ["metadata.json"], County("US01001"), TAG)
+    assert not work.ready
+    assert "no pages" in work.reason
+
+
+def test_plan_fit_ignores_panels_when_listing_parent_pages() -> None:
+    """Panels are cut locally each run; the parents are what gets planned."""
+    keys = present(2) + ["p1__1.jpg", "p1__2.jpg", "p1.panels.json"]
+    work = plan_fit(ALPHA, keys, County("US01001"), TAG)
+    assert work.pages == ["p1.jpg", "p2.jpg"]
+
+
+def test_county_key_points_at_the_extract() -> None:
+    assert County("US06037").key == "osm-by-county/US06037.osm.pbf"
+
+
+def test_read_counties_merges_both_mappings(tmp_path: Path) -> None:
+    """Counties come from items.tsv, independent cities from city-items.tsv."""
+    items = tmp_path / "items.tsv"
+    items.write_text(
+        "item\tstate\tcounty\tcity\tsheets\tmatch\tfips\tne_name\n"
+        "sanborn1\talabama\tlimestone county\tathens\t1\texact\tUS01083\tLimestone\n"
+    )
+    cities = tmp_path / "city-items.tsv"
+    cities.write_text(
+        "item\tstate\tcounty\tcity\tsheets\tmatch\tfips\tosm_relation\tosm_name\n"
+        "sanborn2\tvirginia\tindependent cities\trichmond\t27\texact\tUS51760\t3864712\tRichmond\n"
+    )
+    counties = read_counties([items, cities])
+    assert counties == {"sanborn1": County("US01083"), "sanborn2": County("US51760")}
+
+
+def test_read_counties_skips_a_row_with_no_fips(tmp_path: Path) -> None:
+    path = tmp_path / "items.tsv"
+    path.write_text("item\tfips\nsanborn1\t\nsanborn2\tUS01083\n")
+    assert read_counties([path]) == {"sanborn2": County("US01083")}
+
+
+def test_upload_excludes_the_panel_files_and_the_extract(monkeypatch) -> None:
+    """Panel images are regenerable; the extract is 20 MB of someone else's data."""
+    from mapsnap import loc_fit
+
+    calls: list[list[str]] = []
+    monkeypatch.setattr(loc_fit, "run_aws", lambda command, **kw: calls.append(command))
+    upload(Path("/tmp/x"), "s3://bucket", ALPHA, TAG)
+    command = calls[0]
+    assert command[:3] == ["aws", "s3", "sync"]
+    excluded = {command[i + 1] for i, word in enumerate(command) if word == "--exclude"}
+    assert CENTERLINES_NAME in excluded
+    for pattern in UPLOAD_EXCLUDES:
+        assert pattern in excluded
+
+
+def test_upload_patterns_do_not_catch_what_must_be_kept() -> None:
+    """A too-greedy exclude would silently drop the reads or the cut."""
+    import fnmatch
+
+    keepers = [
+        "p209.panels.json",
+        "p209__1.streets.json",
+        "p209__1.georef-final.json",
+        "p220.streets.json",
+        "adjacency.json",
+        "raw/p0.keymap.json",
+        DONE_MARKER,
+    ]
+    for name in keepers:
+        for pattern in UPLOAD_EXCLUDES:
+            assert not fnmatch.fnmatch(name, pattern), f"{pattern} would drop {name}"
+
+
+def test_upload_patterns_do_catch_the_regenerable_files() -> None:
+    import fnmatch
+
+    for name in ["p209__1.jpg", "p209__12.jpg", "p209__1.boxes.json"]:
+        assert any(fnmatch.fnmatch(name, pattern) for pattern in UPLOAD_EXCLUDES), name
+
+
+def test_upload_keeps_the_candidate_files() -> None:
+    """They record what snap and street-solve rejected; re-running the search to
+    recover that is the expensive part, and Madison p20__3 needed it."""
+    import fnmatch
+
+    for name in (
+        "artifacts/osm_snap/candidates.jsonl",
+        "artifacts/street_solve/candidates.jsonl",
+    ):
+        assert name in UPLOAD_GLOBS
+        for pattern in UPLOAD_EXCLUDES:
+            assert not fnmatch.fnmatch(name, pattern), f"{pattern} would drop {name}"
+
+
+def test_upload_still_drops_the_reconcile_report() -> None:
+    """verdicts.jsonl and report.md restate what the provenance records carry."""
+    import fnmatch
+
+    for name in ("artifacts/reconcile/verdicts.jsonl", "artifacts/reconcile/report.md"):
+        assert any(fnmatch.fnmatch(name, pattern) for pattern in UPLOAD_EXCLUDES), name
+
+
+def test_upload_globs_and_excludes_do_not_contradict() -> None:
+    """The globs document intent; the filters enforce it. They must agree.
+
+    An exclude may still cover a glob as long as an include wins it back --
+    that is how the run manifest survives the exclusion of the archive it
+    sits in.
+    """
+    import fnmatch
+
+    for glob in UPLOAD_GLOBS:
+        excluded = any(fnmatch.fnmatch(glob, p) for p in UPLOAD_EXCLUDES)
+        rescued = any(fnmatch.fnmatch(glob, p) for p in UPLOAD_INCLUDES)
+        assert not excluded or rescued, f"{glob} is excluded and never included"
+
+
+def test_run_chain_derives_panel_boxes_and_reads_effective_pages(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """split, then a derive-only craft, then adjacency, keymap, ocr, fit.
+
+    The smoke run of 2026-09-16 failed ocr with "No CRAFT boxes for p10__1.jpg":
+    split cuts a panel's image and P(road) crop but not its boxes.
+    """
+    from mapsnap import loc_fit
+    from mapsnap.keymap.records import write_keymaps_record
+
+    for name in ("p1.jpg", "p1__1.jpg", "p1__2.jpg", "p2.jpg"):
+        (tmp_path / name).write_bytes(b"")
+    (tmp_path / "raw").mkdir()
+    for name in ("p0.jpg", "p0__1.jpg"):
+        (tmp_path / "raw" / name).write_bytes(b"")
+    write_keymaps_record(tmp_path, ["p0__1"])
+
+    commands: list[list[str]] = []
+    monkeypatch.setattr(
+        loc_fit, "stage", lambda command, local: commands.append(command)
+    )
+    work = plan_fit(
+        ALPHA,
+        ["p1.jpg", "p2.jpg", "p1.boxes.json", "p2.boxes.json"],
+        County("US01001"),
+        TAG,
+    )
+    loc_fit.run_chain(tmp_path, work, work.run_tag)
+
+    assert [c[1] for c in commands] == [
+        "split",
+        "craft",
+        "adjacency",
+        "keymap",
+        "ocr",
+        "fit",
+    ]
+    names = lambda c: {Path(a).name for a in c if a.endswith(".jpg")}
+    assert names(commands[0]) == {"p1.jpg", "p2.jpg"}  # split runs on the parents
+    craft = commands[1]
+    assert "--resume" in craft
+    assert names(craft) == {"p1__1.jpg", "p1__2.jpg", "p2.jpg", "p0.jpg", "p0__1.jpg"}
+    assert commands[3][2:] == [str(tmp_path / "raw" / "p0__1.jpg")]  # the recorded key
+    assert names(commands[4]) == {
+        "p1__1.jpg",
+        "p1__2.jpg",
+        "p2.jpg",
+    }  # not the split parent
+    assert commands[5][:5] == ["mapsnap", "fit", str(tmp_path), "--tag", "mapsnap"]
+
+
+def test_resolve_counties_downloads_s3_urls_by_basename(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """Two mapping files must not collide on a fixed download name."""
+    from mapsnap import loc_fit
+    from mapsnap.loc_fit import resolve_counties
+
+    calls: list[list[str]] = []
+
+    def fake_aws(command, **kwargs):
+        calls.append(command)
+        Path(command[4]).write_text("item\tfips\n")
+
+    monkeypatch.setattr(loc_fit, "run_aws", fake_aws)
+    work = tmp_path / "work"
+    paths = resolve_counties(
+        ["s3://b/_craft/items.tsv", "s3://b/_craft/city-items.tsv", "/local/x.tsv"],
+        work,
+    )
+    assert paths == [work / "items.tsv", work / "city-items.tsv", Path("/local/x.tsv")]
+    assert len(calls) == 2
+    resolve_counties(["s3://b/_craft/items.tsv"], work)
+    assert len(calls) == 2  # already downloaded
+
+
+def test_parser_accepts_gpu_as_a_no_op() -> None:
+    """bootstrap.sh passes --gpu to every job on a GPU box; the chain must not choke."""
+    from mapsnap.loc_fit import build_parser
+
+    args = build_parser().parse_args(
+        ["--counties", "a.tsv", "b.tsv", "--gpu", "--queue", "https://q"]
+    )
+    assert args.gpu is True
+    assert args.counties == ["a.tsv", "b.tsv"]
+
+
+def test_upload_keeps_the_run_manifest_but_not_the_rest_of_the_archive() -> None:
+    """fit archives a second copy of every sidecar; only its manifest is worth it."""
+    import fnmatch
+
+    manifest = "artifacts/mapsnap/manifest.json"
+    duplicate = "artifacts/mapsnap/p1.streets.json"
+    assert any(fnmatch.fnmatch(manifest, p) for p in UPLOAD_EXCLUDES)
+    assert manifest in UPLOAD_INCLUDES  # the include is applied last and wins
+    assert any(fnmatch.fnmatch(duplicate, p) for p in UPLOAD_EXCLUDES)
+    assert not any(fnmatch.fnmatch(duplicate, p) for p in UPLOAD_INCLUDES)
+
+
+def test_upload_orders_includes_after_excludes(monkeypatch) -> None:
+    """aws s3 sync takes the last matching filter, so order is the behaviour."""
+    from mapsnap import loc_fit
+
+    calls: list[list[str]] = []
+    monkeypatch.setattr(loc_fit, "run_aws", lambda command, **kw: calls.append(command))
+    upload(Path("/tmp/x"), "s3://bucket", ALPHA, TAG)
+    command = calls[0]
+    last_exclude = max(i for i, w in enumerate(command) if w == "--exclude")
+    first_include = min(i for i, w in enumerate(command) if w == "--include")
+    assert first_include > last_exclude
+
+
+def test_run_chain_clears_the_previous_archive(tmp_path, monkeypatch) -> None:
+    """fit refuses to overwrite an archive, and the sync brings the old one down."""
+    from mapsnap import loc_fit
+
+    (tmp_path / "p1.jpg").write_bytes(b"")
+    stale = tmp_path / "artifacts" / "mapsnap"
+    stale.mkdir(parents=True)
+    (stale / "manifest.json").write_text("{}")
+    monkeypatch.setattr(loc_fit, "stage", lambda command, local: None)
+    work = plan_fit(ALPHA, ["p1.jpg", "p1.boxes.json"], County("US01001"), TAG)
+    loc_fit.run_chain(tmp_path, work)
+    assert not stale.exists()
+
+
+def test_plan_fit_is_done_only_for_its_own_run() -> None:
+    """Another run's marker says nothing about this one -- the point of tags."""
+    keys = present(3, done=True)
+    assert plan_fit(ALPHA, keys, County("US01001"), TAG).done
+    assert not plan_fit(ALPHA, keys, County("US01001"), "other").done
+
+
+def test_plan_fit_ignores_a_bare_marker_at_the_item_root() -> None:
+    """Pre-tag layout: a top-level marker must not retire a tagged run."""
+    keys = present(3) + [DONE_MARKER]
+    assert not plan_fit(ALPHA, keys, County("US01001"), TAG).done
+
+
+def test_upload_writes_the_done_marker_after_everything_else(monkeypatch, tmp_path):
+    """The marker is what retires an item, so it must not precede what it vouches for.
+
+    In one sync it sorts before `p*.streets.json` and landed first: an upload
+    interrupted in between left a done marker over a partial item.
+    """
+    from mapsnap import loc_fit
+
+    (tmp_path / DONE_MARKER).write_text("{}")
+    calls: list[list[str]] = []
+    monkeypatch.setattr(loc_fit, "run_aws", lambda command, **kw: calls.append(command))
+    loc_fit.upload(tmp_path, "s3://bucket", ALPHA, TAG)
+
+    assert [c[2] for c in calls] == ["sync", "cp"]
+    assert "--exclude" in calls[0] and DONE_MARKER in calls[0]
+    assert calls[1][-2].endswith(f"{RUNS_DIRNAME}/{TAG}/{DONE_MARKER}")
+
+
+def test_upload_targets_the_run_directory_and_skips_the_stable_half(
+    monkeypatch, tmp_path
+):
+    """Images and CRAFT boxes are written once at the item root and shared."""
+    from mapsnap import loc_fit
+
+    calls: list[list[str]] = []
+    monkeypatch.setattr(loc_fit, "run_aws", lambda command, **kw: calls.append(command))
+    loc_fit.upload(tmp_path, "s3://bucket", ALPHA, TAG)
+
+    assert calls[0][4].endswith(f"/{RUNS_DIRNAME}/{TAG}")
+    for pattern in ("*.jpg", "*.boxes.json", "metadata.json"):
+        assert pattern in calls[0], pattern
+    # The fit archive's manifest is re-included, and must stay last to win.
+    assert calls[0].index("--include") > calls[0].index(f"artifacts/{ARCHIVE_TAG}/*")
+
+
+def test_resolve_run_tag_takes_the_message_as_the_authority() -> None:
+    """One value, so the S3 prefix and the recorded provenance cannot disagree."""
+    from mapsnap.loc_fit import resolve_run_tag
+
+    assert resolve_run_tag("v1.3", None) == "v1.3"
+    assert resolve_run_tag("v1.3", "v1.3") == "v1.3"
+    assert resolve_run_tag(None, "v1.3") == "v1.3"
+
+
+def test_resolve_run_tag_stops_a_worker_pointed_at_the_wrong_queue() -> None:
+    """A mismatch is a launch error, not something to paper over."""
+    import pytest
+
+    from mapsnap.loc_fit import resolve_run_tag
+
+    with pytest.raises(ValueError, match="wrong queue|queue says"):
+        resolve_run_tag("v1.3", "v1.2")
+    with pytest.raises(ValueError, match="no run tag"):
+        resolve_run_tag(None, None)
+
+
+def test_fetch_item_does_not_pull_other_runs(monkeypatch, tmp_path):
+    """A recursive sync of the item prefix would drag every run down with it."""
+    from mapsnap import loc_fit
+
+    syncs: list[tuple] = []
+    monkeypatch.setattr(loc_fit, "sync", lambda *a: syncs.append(a))
+    monkeypatch.setattr(loc_fit, "run_aws", lambda command, **kw: None)
+    work = plan_fit(ALPHA, present(2), County("US01001"), TAG)
+    loc_fit.fetch_item(work, "s3://bucket", tmp_path)
+
+    stable = syncs[0]
+    assert stable[2:] == ("--exclude", f"{RUNS_DIRNAME}/*")
+    # This run's own outputs land last, so an interrupted item resumes.
+    assert syncs[-1][0].endswith(f"{RUNS_DIRNAME}/{TAG}")
+
+
+def test_borrow_reads_refuses_a_run_that_read_different_streets(monkeypatch, tmp_path):
+    """The county re-cut changed every extract; reads made against the old one
+    match streets that are no longer in the file."""
+    import json as _json
+
+    from mapsnap import loc_fit
+
+    (tmp_path / CENTERLINES_NAME).write_bytes(b"new extract")
+    monkeypatch.setattr(
+        loc_fit,
+        "run_aws",
+        lambda command, **kw: type(
+            "R",
+            (),
+            {"stdout": _json.dumps({"inputs": {"centerlines_sha": "sha256:old"}})},
+        )(),
+    )
+    syncs: list[tuple] = []
+    monkeypatch.setattr(loc_fit, "sync", lambda *a: syncs.append(a))
+    loc_fit.borrow_reads(tmp_path, "s3://bucket", ALPHA, "v1.2")
+    assert syncs == []
+
+
+def test_borrow_reads_takes_only_the_reads(monkeypatch, tmp_path):
+    """Poses and provenance are this run's to make, even when the reads are lent."""
+    import json as _json
+
+    from mapsnap import experiments, loc_fit
+
+    (tmp_path / CENTERLINES_NAME).write_bytes(b"same extract")
+    sha = experiments.file_sha256(tmp_path / CENTERLINES_NAME)
+    monkeypatch.setattr(
+        loc_fit,
+        "run_aws",
+        lambda command, **kw: type(
+            "R", (), {"stdout": _json.dumps({"inputs": {"centerlines_sha": sha}})}
+        )(),
+    )
+    syncs: list[tuple] = []
+    monkeypatch.setattr(loc_fit, "sync", lambda *a: syncs.append(a))
+    loc_fit.borrow_reads(tmp_path, "s3://bucket", ALPHA, "v1.2")
+
+    assert len(syncs) == 1
+    filters = syncs[0][2:]
+    assert filters[:2] == ("--exclude", "*")
+    assert "p*.streets.json" in filters and "p*.georef.json" not in filters
+
+
+def test_one_item_touches_s3_in_the_right_order(monkeypatch, tmp_path):
+    """The whole lifecycle, as S3 sees it: read the stable half, borrow reads,
+    resume this run, then write the outputs and only then the done marker."""
+    import json as _json
+
+    from mapsnap import experiments, loc_fit
+
+    local = tmp_path / ALPHA.item
+    events: list[str] = []
+    extract_sha = experiments.file_sha256
+
+    def tail(url: str) -> str:
+        return url.split(ALPHA.item)[-1] or "/"
+
+    def fake_sync(source, destination, *filters):
+        joined = " ".join(filters)
+        events.append(f"GET {tail(source)} {joined}".rstrip())
+
+    def fake_run_aws(command, **kw):
+        if command[2] == "cp" and command[3].endswith("manifest.json"):
+            sha = extract_sha(local / CENTERLINES_NAME)
+            return type(
+                "R", (), {"stdout": _json.dumps({"inputs": {"centerlines_sha": sha}})}
+            )()
+        if command[2] == "cp" and command[4].endswith(CENTERLINES_NAME):
+            Path(command[4]).write_bytes(b"extract")  # the county extract landing
+        elif command[2] == "cp":
+            events.append(f"CP {tail(command[4])}")
+        elif command[2] == "sync":
+            events.append(f"PUT {tail(command[4])}")
+        return type("R", (), {"stdout": ""})()
+
+    monkeypatch.setattr(loc_fit, "sync", fake_sync)
+    monkeypatch.setattr(loc_fit, "run_aws", fake_run_aws)
+    monkeypatch.setattr(loc_fit, "run_chain", lambda *a: None)
+
+    work = plan_fit(ALPHA, present(2), County("US01001"), TAG)
+    loc_fit.fetch_item(work, "s3://bucket", tmp_path, ocr_from="v1.2")
+    (local / DONE_MARKER).write_text("{}")
+    loc_fit.process_item(work, local, "s3://bucket")
+
+    reads = "--exclude * --include p*.streets.json --include p*.txt"
+    assert events == [
+        f"GET / --exclude {RUNS_DIRNAME}/*",
+        f"GET /{RUNS_DIRNAME}/v1.2 {reads}",
+        f"GET /{RUNS_DIRNAME}/{TAG}",
+        f"PUT /{RUNS_DIRNAME}/{TAG}",
+        f"CP /{RUNS_DIRNAME}/{TAG}/{DONE_MARKER}",
+    ]

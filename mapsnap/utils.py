@@ -291,14 +291,55 @@ def require_centerlines(dir_path: Path) -> Path:
     return centerlines
 
 
+def is_page_image(path: Path | str) -> bool:
+    """A source page image (``p1.jpg``, ``p1__2.jpg``), not a sidecar beside it.
+
+    Sidecars share the page's stem plus a dotted suffix -- ``p1.roadprob.jpg``,
+    ``p1.2048px.jpg`` -- and ``image_stem`` strips both to the same ``p1``, so
+    a sidecar admitted as a page writes its outputs over the page's own. #412
+    put P(road) beside the pages as a .jpg and every ``p*.jpg`` glob matched it:
+    ocr read a probability map as a sheet, its ``p1.streets.json`` shadowed the
+    real one, and the first corpus fit run lost a page in every volume.
+    """
+    path = Path(path)
+    return path.suffix == ".jpg" and path.name.startswith("p") and "." not in path.stem
+
+
+def source_images(dir_path: Path) -> list[Path]:
+    """Every page image at the top level of ``dir_path``, parents and panels, sorted.
+
+    The only way a volume's page images should ever be globbed: a bare
+    ``p*.jpg`` also matches the sidecars (see ``is_page_image``).
+    """
+    return sorted(path for path in dir_path.glob("p*.jpg") if is_page_image(path))
+
+
+def drop_sidecar_images(paths: list[str]) -> list[str]:
+    """A caller-supplied image list without its sidecars, saying what was dropped.
+
+    For commands given a shell glob directly, where ``p*.jpg`` from a prompt
+    carries the same sidecars the listers now exclude.
+    """
+    kept = [path for path in paths if is_page_image(path)]
+    dropped = len(paths) - len(kept)
+    if dropped:
+        print(
+            f"Ignoring {dropped} sidecar image(s) given as input "
+            "(e.g. *.roadprob.jpg); pages only.",
+            file=sys.stderr,
+        )
+    return kept
+
+
 def list_pages(dir_path: Path) -> list[Path]:
     """Return the effective page images in dir_path, splits superseding their parent.
 
-    Globs top-level ``p*.jpg`` (ignoring the ``raw/`` and ``oim/`` subdirectories). A
+    Lists the page images (never the sidecars beside them, see ``source_images``)
+    at the top level, ignoring the ``raw/`` and ``oim/`` subdirectories. A
     whole-page ``pN.jpg`` is dropped when any of its panels ``pN__*.jpg`` is present, so
     callers operate on the split panels instead. Returns paths sorted by name.
     """
-    images = sorted(dir_path.glob("p*.jpg"))
+    images = source_images(dir_path)
     split_parents = {p.stem.split("__")[0] for p in images if "__" in p.stem}
     return [
         p

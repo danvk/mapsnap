@@ -48,7 +48,12 @@ def find_ref_iiif(dir_path: Path) -> Path | None:
     manifests = sorted(glob.glob(str(dir_path / "*manifest.json")))
     if len(manifests) > 1:
         sys.exit(f"Found multiple manifest.json files in {dir_path}")
-    return Path(manifests[0]) if manifests else None
+    if manifests:
+        return Path(manifests[0])
+    # A mirrored corpus volume has no manifest of its own, but its metadata.json
+    # carries every field a canvas needs and points at LoC's image servers (#354).
+    metadata = dir_path / "metadata.json"
+    return metadata if metadata.exists() else None
 
 
 def resolve_run_id(
@@ -154,6 +159,17 @@ def main() -> None:
         help="Human-readable name recorded alongside the run id in the manifest.",
     )
     parser.add_argument(
+        "--run-tag",
+        default=None,
+        metavar="TAG",
+        help=(
+            "Name for the run this fit belongs to -- a cut release, say -- "
+            "recorded in the manifest and in the published annotation page so "
+            "an output can be traced back to the corpus pass that made it. "
+            "Defaults to the repo's nearest git tag."
+        ),
+    )
+    parser.add_argument(
         "--no-snap",
         action="store_true",
         help=(
@@ -162,17 +178,37 @@ def main() -> None:
             "machinery — so the arbiter weighs RANSAC's poses alone."
         ),
     )
+    parser.add_argument(
+        "--image-base-url",
+        help=(
+            "Publish canvases from the page images rather than a reference "
+            "manifest; each page's URL is {URL}/{parent_key}.jpg. Needed for a "
+            "mirrored volume, which has no annotation page to borrow from."
+        ),
+    )
+    parser.add_argument(
+        "--image-source-type",
+        default="Image",
+        help="IIIF source type for --image-base-url (default: %(default)s).",
+    )
     args, georef_extra = parser.parse_known_args()
 
     dir_path = Path(args.dir)
     centerlines = find_centerlines(dir_path)
     images = find_input_images(dir_path)
     ref_iiif = find_ref_iiif(dir_path)
-    if ref_iiif is None:
+    if ref_iiif is None and not args.image_base_url:
         sys.exit(f"No reference IIIF found in {dir_path}")
     truth = dir_path / "main.iiif.json"
 
-    git = experiments.git_head_info(dir_path)
+    # The repo, not the volume: a corpus worker fits a scratch directory that is
+    # not inside a git checkout, and asking there recorded "sha": null on every
+    # item -- the one field that says which code produced the run.
+    git = experiments.git_head_info(Path(__file__).resolve().parent)
+    models = experiments.model_hashes()
+    # An explicit tag wins; otherwise the checkout names itself, so a fleet
+    # launched at a release records that release without being told.
+    run_tag = args.run_tag or git.get("describe")
     inputs = experiments.gather_inputs(
         dir_path, centerlines, truth if truth.exists() else None
     )
@@ -265,17 +301,31 @@ def main() -> None:
     # The arbiter answers for every page instead, so there is nothing to
     # prioritize between (#270 phase 3).
     georef_glob = str(dir_path / "*.georef-final.json")
+    # Without a reference manifest the canvases are built from the images on
+    # disk, which is how a mirrored corpus volume is published: it has its scans
+    # and its metadata, but no annotation page to borrow image services from
+    # (#354).
+    if args.image_base_url:
+        source = [
+            georef_glob,
+            "--image-base-url",
+            args.image_base_url,
+            "--image-source-type",
+            args.image_source_type,
+        ]
+    else:
+        source = [str(ref_iiif), georef_glob]
     timed(
         "iiif",
         [
             "mapsnap",
             "iiif",
-            str(ref_iiif),
-            georef_glob,
+            *source,
             "--centerlines",
             str(centerlines),
             "--output",
             str(output_iiif),
+            *(["--run-tag", run_tag] if run_tag else []),
         ],
     )
 
@@ -299,7 +349,7 @@ def main() -> None:
         run_id,
         georef_extra,
         inputs,
-        git,
+        git | {"models": models, "run_tag": run_tag},
         command,
         truth if truth.exists() else None,
         output_iiif,

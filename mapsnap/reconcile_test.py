@@ -10,6 +10,8 @@ import pytest
 from mapsnap.reconcile import (
     KEEP_PRIOR,
     UNPLACED,
+    W_NOTE_MISMATCH,
+    W_RUNG_OFF,
     Hypothesis,
     PageNode,
     build_edges,
@@ -164,7 +166,7 @@ def test_pose_scale_log2_tracks_scale():
     )
 
 
-def make_node(stem: str, hypotheses, published=0, base=None):
+def make_node(stem: str, hypotheses, published: int | None = 0, base=None):
     return PageNode(
         unit=make_unit(stem),
         is_panel=base is not None,
@@ -495,3 +497,343 @@ def test_normalize_name_penalty_leaves_unpenalized_pages_alone():
     )
     normalize_name_penalty(node)
     assert hypothesis.scores["name"] == pytest.approx(0.4)
+
+
+# --- provenance and approximate location (#354) -------------------------------
+
+
+def unplaced_hypothesis():
+    return scored(UNPLACED, None, 0.0, gcps=0, page_placed=False)
+
+
+def test_publish_writes_a_provenance_record_for_every_page(tmp_path):
+    """Placed pages and abstentions alike get a record, and the chosen pose is marked."""
+    import json
+
+    from mapsnap.reconcile import publish
+
+    placed = make_node("p1", [scored("georef", affine(0), 0.9)])
+    abstained = make_node(
+        "p2",
+        [
+            scored("snap:0", affine(PAGE_EAST_M), 0.1, page_placed=False),
+            unplaced_hypothesis(),
+        ],
+        published=None,
+    )
+    publish(tmp_path, {"p1": placed, "p2": abstained}, {"p1": 0, "p2": 1})
+    first = json.loads((tmp_path / "p1.provenance.json").read_text())
+    second = json.loads((tmp_path / "p2.provenance.json").read_text())
+    assert first["decision"] == "placed"
+    assert first["approximate"]["tier"] == 0
+    assert first["hypotheses"][0]["chosen"] is True
+    assert second["decision"] == "abstained"
+    assert second["source"] == UNPLACED
+    assert [h["chosen"] for h in second["hypotheses"]] == [False, True]
+    assert second["evidence"]["fit_state"] == "fitted"
+
+
+def test_publish_survives_numpy_scores(tmp_path):
+    """Scores arrive as numpy scalars, which json.dumps refuses without casting."""
+    from mapsnap.reconcile import publish
+
+    node = make_node("p1", [scored("georef", affine(0), np.float64(0.9))])
+    node.hypotheses[0].scores["keymap_dist_m"] = np.float32(12.5)
+    publish(tmp_path, {"p1": node}, {"p1": 0})
+    assert (tmp_path / "p1.provenance.json").exists()
+
+
+def test_tier_1_admits_a_declined_pose_only_when_the_roads_half_agreed():
+    from mapsnap.reconcile import approximate_location, pose_center
+
+    believable = make_node(
+        "p2",
+        [
+            scored("snap:0", affine(PAGE_EAST_M), 0.6, page_placed=False),
+            unplaced_hypothesis(),
+        ],
+        published=None,
+    )
+    got = approximate_location("p2", {"p2": believable}, {"p2": 1}, None, None)
+    assert got["tier"] == 1
+    assert got["lonlat"] == list(pose_center(affine(PAGE_EAST_M), 1000, 800))
+    assert got["radius_m"] >= 100.0
+
+    alias = make_node(
+        "p2",
+        [
+            scored("snap:0", affine(PAGE_EAST_M), 0.1, page_placed=False),
+            unplaced_hypothesis(),
+        ],
+        published=None,
+    )
+    got = approximate_location("p2", {"p2": alias}, {"p2": 1}, None, None)
+    assert got["tier"] == 5  # nothing else to fall back on here
+
+
+def test_tier_2_lands_where_a_placed_neighbour_claims_the_page():
+    """p1 is placed and prints p2's number at its right edge; p2 is abstained."""
+    from mapsnap.reconcile import approximate_location, world_point
+
+    nodes = {
+        "p1": make_node("p1", [scored("georef", affine(0), 0.9)]),
+        "p2": make_node("p2", [unplaced_hypothesis()], published=None),
+    }
+    got = approximate_location("p2", nodes, {"p1": 0, "p2": 0}, chain_adjacency(), None)
+    assert got["tier"] == 2
+    lon, lat = world_point(affine(0), 1000, 400)  # x_frac 1.0, y_frac 0.5 of p1
+    assert abs(got["lonlat"][0] - lon) < 1e-9 and abs(got["lonlat"][1] - lat) < 1e-9
+    assert "1 printed claim" in got["basis"]
+
+
+def test_tier_3_uses_the_key_map_when_nothing_placed_claims_the_page():
+    from mapsnap.reconcile import approximate_location
+
+    node = make_node("p2", [unplaced_hypothesis()], published=None)
+    node.unit.keymap_centers = [(-74.0, 40.7), (-74.001, 40.7)]
+    got = approximate_location("p2", {"p2": node}, {"p2": 0}, None, None)
+    assert got["tier"] == 3
+    assert got["radius_m"] >= 600.0  # the unit's key-map radius is the floor here
+    assert abs(got["lonlat"][0] - -74.0005) < 1e-9
+
+
+def test_tier_4_falls_back_to_the_volume_then_the_key_map_regions():
+    from mapsnap.reconcile import approximate_location
+
+    nodes = {
+        "p1": make_node("p1", [scored("georef", affine(0), 0.9)]),
+        "p2": make_node("p2", [unplaced_hypothesis()], published=None),
+    }
+    got = approximate_location("p2", nodes, {"p1": 0, "p2": 0}, None, None)
+    assert got["tier"] == 4 and "volume extent" in got["basis"]
+
+    alone = {"p2": make_node("p2", [unplaced_hypothesis()], published=None)}
+    got = approximate_location("p2", alone, {"p2": 0}, None, {1: (-74.0, 40.7)})
+    assert got["tier"] == 4 and "key-map regions" in got["basis"]
+
+    got = approximate_location("p2", alone, {"p2": 0}, None, None)
+    assert got["tier"] == 5 and got["lonlat"] is None
+
+
+def test_a_split_parent_is_superseded_not_abstained(tmp_path):
+    import json
+
+    from mapsnap.reconcile import publish
+
+    nodes = {
+        "p1": make_node("p1", [unplaced_hypothesis()], published=None),
+        "p1__1": make_node("p1__1", [scored("georef", affine(0), 0.9)], base="p1"),
+        "p1__2": make_node("p1__2", [unplaced_hypothesis()], published=None, base="p1"),
+    }
+    publish(tmp_path, nodes, {"p1": 0, "p1__1": 0, "p1__2": 0})
+    parent = json.loads((tmp_path / "p1.provenance.json").read_text())
+    assert parent["decision"] == "superseded"
+    assert parent["panels"] == ["p1__1", "p1__2"]
+    assert parent["approximate"] is None
+    panel = json.loads((tmp_path / "p1__2.provenance.json").read_text())
+    assert panel["decision"] == "abstained"
+    assert panel["approximate"]["tier"] == 4  # the volume: its sibling is placed
+
+
+def test_build_nodes_keeps_a_page_no_channel_ever_posed(tmp_path):
+    """Such a page has nothing to arbitrate but is still owed a record."""
+    from types import SimpleNamespace
+
+    from mapsnap.reconcile import build_nodes
+
+    vctx = SimpleNamespace(units=[make_unit("p9")], panel_units=[])
+    nodes = build_nodes(tmp_path, tmp_path, vctx)
+    assert list(nodes) == ["p9"]
+    assert [h.source for h in nodes["p9"].hypotheses] == [UNPLACED]
+    assert nodes["p9"].published_index is None
+
+
+def test_tier_3_consults_the_volume_locator_when_the_unit_has_no_centers():
+    """The corpus smoke run had a key map yet every abstained panel fell to tier 4."""
+    from types import SimpleNamespace
+
+    from mapsnap.reconcile import approximate_location
+
+    node = make_node("p2", [unplaced_hypothesis()], published=None)
+    assert node.unit.keymap_centers == []
+    locator = SimpleNamespace(
+        page_keymap=lambda number: {"centers": [[-74.0, 40.7], [-74.002, 40.7]]}
+    )
+    got = approximate_location("p2", {"p2": node}, {"p2": 0}, None, None, locator)
+    assert got["tier"] == 3
+    assert "2 center(s)" in got["basis"]
+    assert abs(got["lonlat"][0] - -74.001) < 1e-9
+
+    silent = SimpleNamespace(page_keymap=lambda number: None)
+    got = approximate_location("p2", {"p2": node}, {"p2": 0}, None, None, silent)
+    assert got["tier"] == 5
+
+
+def test_keymap_state_distinguishes_read_from_georeferenced(tmp_path):
+    """The smoke volume had a key map that was read but never georeferenced."""
+    import json
+
+    from mapsnap.reconcile import keymap_state, publish
+
+    assert keymap_state(tmp_path) == "none"
+    (tmp_path / "raw").mkdir()
+    (tmp_path / "raw" / "p0.keymap.json").write_text("{}")
+    assert keymap_state(tmp_path) == "read, not georeferenced"
+    (tmp_path / "raw" / "p0.georef.json").write_text("{}")
+    assert keymap_state(tmp_path) == "georeferenced"
+
+    publish(
+        tmp_path, {"p1": make_node("p1", [scored("georef", affine(0), 0.9)])}, {"p1": 0}
+    )
+    record = json.loads((tmp_path / "p1.provenance.json").read_text())
+    assert record["evidence"]["keymap"] == "georeferenced"
+
+
+def test_publish_carries_the_source_pose_control_points(tmp_path):
+    """Empty intersections made every annotation fall back to corner points."""
+    import json
+
+    from mapsnap.reconcile import publish
+
+    doc = georef_doc(affine(0))
+    doc["streets"] = [{"street": "MAIN ST", "inlier": True}]
+    doc["intersections"] = [
+        {"x": 1, "y": 2, "lon": -74.0, "lat": 40.7, "inlier": True, "initial": True},
+        {"x": 9, "y": 8, "lon": -74.1, "lat": 40.8, "inlier": True, "initial": True},
+    ]
+    write_sidecar(tmp_path, "p1", "georef", doc)
+    node = make_node("p1", [scored("georef", affine(0), 0.9)])
+    publish(tmp_path, {"p1": node}, {"p1": 0})
+    final = json.loads((tmp_path / "p1.georef-final.json").read_text())
+    assert len(final["streets"]) == 1
+    assert len(final["intersections"]) == 2
+    assert final["intersections"][0]["initial"] is True
+
+
+def test_publish_leaves_a_geometry_only_pose_without_street_evidence(tmp_path):
+    """snap poses by road shape, so carrying nothing is correct, not a loss."""
+    import json
+
+    from mapsnap.reconcile import publish
+
+    node = make_node("p1", [scored("snap:0", affine(0), 0.9)])
+    publish(tmp_path, {"p1": node}, {"p1": 0})
+    final = json.loads((tmp_path / "p1.georef-final.json").read_text())
+    assert final["streets"] == [] and final["intersections"] == []
+
+
+def test_stamp_agreement_measures_the_printed_seam(tmp_path):
+    """Two sheets that print each other's number agree on the seam, or one is wrong."""
+    from mapsnap.reconcile import stamp_agreement
+
+    nodes = {
+        "p1": make_node("p1", [scored("georef", affine(0), 0.9)]),
+        "p2": make_node("p2", [scored("georef", affine(PAGE_EAST_M), 0.9)]),
+    }
+    assignment = {"p1": 0, "p2": 0}
+    got = stamp_agreement("p1", nodes, assignment, chain_adjacency())
+    assert got is not None
+    assert got["neighbours"] == 1
+    assert got["agree_100m"] == 1  # placed edge to edge, so the stamps coincide
+    assert got["median_m"] < 100.0
+
+    # A neighbour dragged a kilometre away no longer agrees.
+    nodes["p2"] = make_node("p2", [scored("georef", affine(PAGE_EAST_M + 1000), 0.9)])
+    far = stamp_agreement("p1", nodes, assignment, chain_adjacency())
+    assert far is not None and far["agree_100m"] == 0 and far["median_m"] > 100.0
+
+
+def test_stamp_agreement_is_none_without_evidence(tmp_path):
+    from mapsnap.reconcile import stamp_agreement
+
+    nodes = {"p1": make_node("p1", [scored("georef", affine(0), 0.9)])}
+    assert stamp_agreement("p1", nodes, {"p1": 0}, None) is None
+    assert stamp_agreement("p1", nodes, {"p1": 0}, chain_adjacency()) is None
+    unplaced = {"p1": make_node("p1", [unplaced_hypothesis()], published=None)}
+    assert stamp_agreement("p1", unplaced, {"p1": 0}, chain_adjacency()) is None
+
+
+def test_provenance_records_the_snap_verdict(tmp_path):
+    """rescue / challenge / refine lives only in candidates.jsonl otherwise."""
+    import json
+
+    from mapsnap.reconcile import publish
+
+    node = make_node("p1", [scored("georef-snap", affine(0), 0.9)])
+    publish(
+        tmp_path,
+        {"p1": node},
+        {"p1": 0},
+        snap_records={"p1": {"decision": {"page_verdict": "refine"}}},
+    )
+    record = json.loads((tmp_path / "p1.provenance.json").read_text())
+    assert record["snap_verdict"] == "refine"
+
+    publish(tmp_path, {"p1": node}, {"p1": 0})
+    assert (
+        json.loads((tmp_path / "p1.provenance.json").read_text())["snap_verdict"]
+        is None
+    )
+
+
+def test_rung_note_band_matches_the_snap_constant():
+    """The two modules import each other lazily, so the band is mirrored by hand."""
+    from mapsnap.osm_snap_experiment import RUNG_NOTE_BAND as snap_band
+    from mapsnap.reconcile import RUNG_NOTE_BAND
+
+    assert RUNG_NOTE_BAND == snap_band
+
+
+@pytest.mark.parametrize(
+    "offset,note_ratio,verdict,decided_by,rung,penalty",
+    [
+        # Sitting on the family's own rung is free.
+        (0.02, None, "on rung", "volume family", 0, 0.0),
+        # A half-scale sheet is a legitimate second family, also free.
+        (-1.01, None, "on rung", "volume family", -1, 0.0),
+        # Between rungs is the only family case that pays.
+        (0.5, None, "between rungs", "volume family", 0, W_RUNG_OFF),
+        # A note that agrees with the pose it was measured against stays out of it.
+        (0.5, 1.0, "between rungs", "volume family", 0, W_RUNG_OFF),
+        # A note that disagrees takes over, and endorses a pose that matches it.
+        (-1.0, 0.5, "matches printed note", "printed note", -1, 0.0),
+        # ... and charges one that does not.
+        (0.0, 0.5, "contradicts printed note", "printed note", 0, W_NOTE_MISMATCH),
+    ],
+)
+def test_rung_verdict(offset, note_ratio, verdict, decided_by, rung, penalty):
+    """The conclusion, who reached it, and what it cost."""
+    from mapsnap.reconcile import rung_verdict
+
+    got = rung_verdict(offset, note_ratio)
+    assert got["verdict"] == verdict
+    assert got["decided_by"] == decided_by
+    assert got["rung"] == rung
+    assert got["penalty"] == pytest.approx(penalty)
+    assert got["scale_ratio"] == pytest.approx(2.0**offset, abs=1e-3)
+
+
+def test_rung_verdict_records_its_evidence():
+    """A reader must be able to check the conclusion, not just take it."""
+    from mapsnap.reconcile import rung_verdict
+
+    got = rung_verdict(-0.6, 0.5)
+    assert got["offset_log2"] == pytest.approx(-0.6)
+    assert got["rung_distance"] == pytest.approx(0.4)
+    assert got["note_ratio"] == pytest.approx(0.5)
+    assert got["note_offset_log2"] == pytest.approx(0.4)
+
+
+def test_provenance_records_the_rung_verdict(tmp_path):
+    """Scale is a decision the run makes; the file must say which rung and why."""
+    from mapsnap.reconcile import publish
+
+    node = make_node("p1", [scored("georef", affine(0), 0.9)])
+    publish(tmp_path, {"p1": node}, {"p1": 0})
+    rung = json.loads((tmp_path / "p1.provenance.json").read_text())["hypotheses"][0][
+        "rung"
+    ]
+    # scored() passes family_log2=None: a volume with no scale family at all
+    # still explains itself rather than dropping the key.
+    assert rung["verdict"] == "no volume family"
+    assert rung["penalty"] == 0.0

@@ -180,3 +180,51 @@ def test_every_queue_call_names_the_region(monkeypatch) -> None:
     for command in fake.calls:
         assert "--region" in command, command
         assert command[command.index("--region") + 1] == "us-west-2"
+
+
+def test_message_body_carries_the_run_tag() -> None:
+    """One value travels with the work, so prefix and provenance cannot differ."""
+    from mapsnap.work_queue import format_body, parse_body
+
+    assert format_body("sanborn1", "v1.3") == "sanborn1\tv1.3"
+    assert parse_body("sanborn1\tv1.3") == ("sanborn1", "v1.3")
+
+
+def test_untagged_bodies_stay_readable() -> None:
+    """loc-craft fills untagged queues; those messages must keep working."""
+    from mapsnap.work_queue import format_body, parse_body
+
+    assert format_body("sanborn1") == "sanborn1"
+    assert format_body("sanborn1", None) == "sanborn1"
+    assert parse_body("sanborn1") == ("sanborn1", None)
+
+
+def test_lease_renews_until_the_body_finishes(monkeypatch) -> None:
+    """Work that outruns the visibility timeout is handed to a SECOND worker."""
+    import threading
+
+    from mapsnap import work_queue
+
+    renewals = threading.Event()
+    calls: list[int] = []
+
+    def fake_extend(url, handle, seconds):
+        calls.append(seconds)
+        renewals.set()
+
+    monkeypatch.setattr(work_queue, "extend", fake_extend)
+    with work_queue.lease("u", "h", seconds=1):
+        renewals.wait(timeout=5)
+    assert calls and calls[0] == 1
+
+
+def test_lease_without_a_handle_is_a_no_op(monkeypatch) -> None:
+    """Shard mode has no message to renew."""
+    from mapsnap import work_queue
+
+    def boom(*a, **k):
+        raise AssertionError("must not renew without a handle")
+
+    monkeypatch.setattr(work_queue, "extend", boom)
+    with work_queue.lease("u", None, seconds=1):
+        pass

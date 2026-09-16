@@ -161,6 +161,68 @@ because a home uplink caps near 2.5 MB/s, and in-region the upload is free.
 an hour. More shards crowd each other and the person hosting it. Tell them before
 a run of this size.
 
+## Fitting: the CPU chain
+
+Once `loc-craft` has left a volume with its CRAFT boxes and P(road) maps, the
+rest of the pipeline is CPU work: `split`, `adjacency`, `keymap`, `ocr` and
+`fit`. All of it is scoped to the volume -- the key map is confirmed against the
+volume's page set, adjacency needs every sheet, georef needs the volume's
+reference scale, reconcile is one joint decision per volume -- and an LoC item
+is a volume, so `mapsnap loc-fit` runs the whole chain per item.
+
+```sh
+# The item -> county mapping the workers read, once
+aws s3 cp ~/Documents/mapsnap/loc-counties/items.tsv      s3://mapsnap-sanborn/_craft/
+aws s3 cp ~/Documents/mapsnap/loc-counties/city-items.tsv s3://mapsnap-sanborn/_craft/
+
+# Its own queue, with a lease long enough for the biggest volume: the corpus
+# tops out at 167 sheets, about 28 minutes of chain on one worker, so 30 min
+# would hand a still-running item to a second worker. Three hours is safe.
+uv run mapsnap work-queue create --name mapsnap-fit --visibility 10800
+FIT_QUEUE=<the url it prints>
+uv run mapsnap work-queue fill --url "$FIT_QUEUE"
+
+scripts/loc_craft/launch.sh --job loc-fit --shards 8 --workers 4 \
+  --extra-args "--queue $FIT_QUEUE --counties s3://mapsnap-sanborn/_craft/items.tsv s3://mapsnap-sanborn/_craft/city-items.tsv"
+```
+
+`--job loc-fit` picks `c6i.2xlarge`; the county extracts are read straight
+from `osm-by-county/` (`load_centerlines` takes the `.pbf` directly). Start
+with `--workers 4` on an 8-vCPU box and watch memory before going higher: each
+worker is a full ocr plus fit process.
+
+Three things about what it uploads and what it skips:
+
+- **The candidate files are kept.** `artifacts/*/candidates.jsonl` is
+  nominally a cache, but it is the only record of what snap and street-solve
+  considered and rejected, and regenerating it means re-running the search.
+  Madison p20__3 made the case: its provenance said snap offered no hypothesis
+  and the reason was in a file that had not been kept. Measured at 10.7 KB a
+  page over the truth volumes, so about 4.4 GB across the corpus, roughly
+  \$0.10 a month. `artifacts/reconcile/` is still dropped, since its verdicts
+  restate what the per-page provenance records already carry.
+- **Panel images stay on the worker.** `make_iiif_georef` builds every page's
+  image URL from its parent and split pages share the parent's canvas, so
+  nothing reads `p209__1.jpg`; it reads the parent plus `p209.panels.json`. The
+  panel image, its boxes and its P(road) crop are deterministic in the parent
+  and the rings and cost 0.35 vCPU-s a page to re-cut, so the chain re-runs
+  `split` locally every time rather than storing ~50 GB every later pass would
+  re-download.
+- **Not ready is not failed.** An item whose boxes are not all present is
+  waiting on the GPU pass; it is released back to the queue, not retired, so
+  filling the fit queue before craft finishes is safe.
+- **Canvases point at LoC.** A mirrored volume has no reference annotation
+  page, but its `metadata.json` carries everything a canvas needs, so `fit`
+  reads that and addresses LoC's own image servers -- nothing has to be hosted
+  and viewers get full-resolution tiles. The service id is the item's
+  `storage_dir` with `/` as `:` plus the sheet's `stem`; checked against
+  Columbus 1951 vol 3's real LoC manifest, all 102 derived ids match exactly.
+  Page keys come from the sheet's `key` rather than being parsed back out of
+  the URL, which would lowercase the suffix of the 10,882 corpus sheets keyed
+  `p5S` and drop them from the annotation. Scoring is unaffected: the
+  LoC-pointing file and the manifest-based one both score Columbus at 88.8,
+  matching the archived run.
+
 ## Keeping a fleet alive overnight
 
 Launches use one-time spot requests, so a reclaimed instance stays dead until
