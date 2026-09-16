@@ -864,3 +864,21 @@ def test_report_card_names_the_run_with_no_provenance(tmp_path) -> None:
         m["label"]: m["value"] for m in volume_report(tmp_path, "2026-09-16", "v1.3")
     }
     assert card["run"] == "v1.3"
+
+
+def test_label_note_distinguishes_a_volume_second_annotation_page(tmp_path) -> None:
+    """A volume publishes its sheets AND its key map; the labels must differ."""
+    from mapsnap.make_iiif_georef import volume_label
+
+    source = {"label": "Madison, Indiana | 1904"}
+    label = volume_label(source)
+    for note in ("key map", None):
+        page_label = " | ".join(
+            part for part in (label, note, "mapsnap generated fit (2026-09-16)") if part
+        )
+        if note:
+            assert page_label == (
+                "Madison, Indiana | 1904 | key map | mapsnap generated fit (2026-09-16)"
+            )
+        else:
+            assert "key map" not in page_label

@@ -118,6 +118,9 @@ UPLOAD_GLOBS = (
     "adjacency.json",
     "keymaps.json",
     f"{ARCHIVE_TAG}.iiif.json",
+    # The key map's own annotation page: it is georeferenced like any other
+    # sheet and is the one sheet that shows how the volume is laid out.
+    f"{ARCHIVE_TAG}.keymap.iiif.json",
     "raw/*.keymap.json",
     "raw/*.keymap-raw.json",
     "raw/*.keymap.txt",
