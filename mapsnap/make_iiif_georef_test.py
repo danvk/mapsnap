@@ -646,3 +646,91 @@ def test_fill_missing_source_ids_skips_sb_format():
     }
     fill_missing_source_ids(index)
     assert index["p126"]["target"]["source"]["id"] is None
+
+
+# --- the mirror's metadata.json as a reference (#354) --------------------------
+
+
+def _metadata(**overrides) -> dict:
+    data = {
+        "item": "sanborn01971_002",
+        "loc_url": "https://www.loc.gov/item/sanborn01971_002/",
+        "state": "illinois",
+        "year": "1893",
+        "city": "lewistown",
+        "storage_dir": "gmd/gmd410m/g4104m/g4104lm/g019711893",
+        "sheets": [
+            {
+                "seq": 1,
+                "stem": "01971_1893-0001",
+                "key": "p1",
+                "storage_dir": "gmd/gmd410m/g4104m/g4104lm/g019711893",
+                "width": 1613,
+                "height": 1913,
+            }
+        ],
+    }
+    data.update(overrides)
+    return data
+
+
+def test_loc_service_id_matches_the_manifest_form() -> None:
+    from mapsnap.make_iiif_georef import loc_service_id
+
+    assert loc_service_id(
+        "gmd/gmd410m/g4104m/g4104lm/g019711893", "01971_1893-0001"
+    ) == (
+        "https://tile.loc.gov/image-services/iiif/service"
+        ":gmd:gmd410m:g4104m:g4104lm:g019711893:01971_1893-0001"
+    )
+    # A stray leading or trailing slash must not produce an empty segment.
+    assert loc_service_id("/gmd/x/", "stem").endswith(":gmd:x:stem")
+
+
+def test_metadata_index_points_at_loc_with_a_full_res_canvas() -> None:
+    from mapsnap.make_iiif_georef import _load_metadata_index
+
+    index = _load_metadata_index(_metadata())
+    assert list(index) == ["p1"]
+    source = index["p1"]["target"]["source"]
+    assert source["id"].startswith("https://tile.loc.gov/image-services/iiif/service:")
+    assert source["id"].endswith("01971_1893-0001/info.json")
+    assert source["type"] == "ImageService2"
+    assert (source["width"], source["height"]) == (1613 * 4, 1913 * 4)
+    assert "Lewistown" in index["p1"]["label"]
+
+
+def test_metadata_index_keeps_an_uppercase_page_suffix() -> None:
+    """10,882 corpus sheets are keyed p5S; parsing the URL back would lowercase it,
+    and the georef sidecars are named in the mirror's case."""
+    from mapsnap.make_iiif_georef import _load_metadata_index, _service_url_to_page_key
+
+    data = _metadata()
+    data["sheets"][0]["key"] = "p5S"
+    data["sheets"][0]["stem"] = "00015_01_1951-0005S"
+    index = _load_metadata_index(data)
+    assert list(index) == ["p5S"]
+    # The URL parser is where the case would have been lost.
+    assert _service_url_to_page_key(index["p5S"]["target"]["source"]["id"]) == "p5s"
+
+
+def test_metadata_index_skips_a_sheet_missing_any_field() -> None:
+    from mapsnap.make_iiif_georef import _load_metadata_index
+
+    data = _metadata()
+    data["sheets"] += [
+        {"seq": 2, "stem": "x", "key": "p2", "width": 10},  # no height
+        {"seq": 3, "key": "p3", "width": 10, "height": 10},  # no stem
+    ]
+    assert list(_load_metadata_index(data)) == ["p1"]
+
+
+def test_metadata_index_falls_back_to_the_item_storage_dir() -> None:
+    from mapsnap.make_iiif_georef import _load_metadata_index
+
+    data = _metadata()
+    del data["sheets"][0]["storage_dir"]
+    assert (
+        "g019711893:01971_1893-0001"
+        in _load_metadata_index(data)["p1"]["target"]["source"]["id"]
+    )

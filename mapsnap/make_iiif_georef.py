@@ -661,6 +661,70 @@ def _load_s3_items(
     return valid_items, base_url, ""
 
 
+# LoC serves every mirrored scan from one Image API 2 endpoint, addressed by the
+# item's storage directory and the sheet's stem.
+LOC_IIIF_SERVICE = "https://tile.loc.gov/image-services/iiif/service"
+
+
+def loc_service_id(storage_dir: str, stem: str) -> str:
+    """The LoC IIIF service URL for one mirrored sheet.
+
+    ``gmd/gmd410m/.../g019711893`` + ``01971_1893-0001`` becomes
+    ``…/service:gmd:gmd410m:…:g019711893:01971_1893-0001``, which is exactly the
+    id the item's own LoC manifest carries for that canvas.
+    """
+    return f"{LOC_IIIF_SERVICE}:{storage_dir.strip('/').replace('/', ':')}:{stem}"
+
+
+def _load_metadata_index(data: dict) -> dict[str, dict]:
+    """Build page_key -> item dict from the mirror's ``metadata.json``.
+
+    A mirrored volume has no IIIF manifest of its own, but it does not need one:
+    every field a canvas requires is already recorded per sheet, so the
+    annotation can point at LoC's own image servers rather than at wherever the
+    mirror happens to live (#354).
+
+    Two details that matter:
+
+    * The page key is taken from the sheet's ``key``, not parsed back out of the
+      service URL. The URL parser lowercases a letter suffix, and 10,882 of the
+      corpus's sheets have an uppercase one (``p5S``), whose georef sidecars are
+      named in the mirror's case -- parsing would drop them from the annotation
+      silently.
+    * ``width``/``height`` are the 25% copy's, so the full-resolution canvas is
+      4x, the same convention ``_load_loc_index`` reaches by scaling the
+      manifest's ``pct:25`` resource. LoC rounds that percentage up, so both
+      routes can overstate the true canvas by a pixel or two; control points
+      scale by exactly 4 either way.
+    """
+    item = data.get("item", "")
+    place = ", ".join(part for part in (data.get("city"), data.get("state")) if part)
+    volume_label = " | ".join(
+        part for part in (place.title(), data.get("year"), item) if part
+    )
+    index: dict[str, dict] = {}
+    for sheet in data.get("sheets", []):
+        key = sheet.get("key")
+        storage_dir = sheet.get("storage_dir") or data.get("storage_dir")
+        stem = sheet.get("stem")
+        width, height = sheet.get("width"), sheet.get("height")
+        if not (key and storage_dir and stem and width and height):
+            continue
+        service_id = loc_service_id(storage_dir, stem)
+        index[key] = {
+            "label": f"{volume_label} {key}",
+            "target": {
+                "source": {
+                    "id": f"{service_id}/info.json",
+                    "type": "ImageService2",
+                    "width": width * FULL_RES_FACTOR,
+                    "height": height * FULL_RES_FACTOR,
+                }
+            },
+        }
+    return index
+
+
 def _load_volume_items(
     iiif_path: str,
     georef_glob_pattern: str,
@@ -682,7 +746,15 @@ def _load_volume_items(
         print(f"Error: no files matched '{georef_glob_pattern}'.", file=sys.stderr)
         sys.exit(1)
 
-    if source_data.get("type") == "AnnotationPage":
+    if "sheets" in source_data and "item" in source_data:
+        items_by_key = _load_metadata_index(source_data)
+        result_id = f"{source_data.get('loc_url', '').rstrip('/')}/generated"
+        print(
+            f"Loaded {len(items_by_key)} sheets from the mirror's metadata; "
+            "canvases point at LoC.",
+            file=sys.stderr,
+        )
+    elif source_data.get("type") == "AnnotationPage":
         items_by_key = _load_oim_index(source_data)
         result_id = source_data.get("id", "") + "/generated"
         print(f"Loaded {len(items_by_key)} OIM annotations.", file=sys.stderr)
@@ -692,8 +764,8 @@ def _load_volume_items(
         print(f"Loaded {len(items_by_key)} LOC canvases.", file=sys.stderr)
     else:
         print(
-            "Error: expected an OIM IIIF AnnotationPage (type: AnnotationPage) "
-            "or a LOC manifest (@type: sc:Manifest).",
+            "Error: expected an OIM IIIF AnnotationPage (type: AnnotationPage), "
+            "a LOC manifest (@type: sc:Manifest), or the mirror's metadata.json.",
             file=sys.stderr,
         )
         sys.exit(1)

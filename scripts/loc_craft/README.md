@@ -203,11 +203,17 @@ Three things about what it uploads and what it skips:
 - **Not ready is not failed.** An item whose boxes are not all present is
   waiting on the GPU pass; it is released back to the queue, not retired, so
   filling the fit queue before craft finishes is safe.
-- **Canvases point at the mirror.** A mirrored volume has scans and metadata
-  but no reference annotation page, so `fit --image-base-url` builds the
-  canvases from the page images at the bucket's own URLs. Pointing at LoC's
-  IIIF services instead needs a generated reference page per item;
-  `metadata.json` carries the `storage_dir` and per-sheet `stem` to build one.
+- **Canvases point at LoC.** A mirrored volume has no reference annotation
+  page, but its `metadata.json` carries everything a canvas needs, so `fit`
+  reads that and addresses LoC's own image servers -- nothing has to be hosted
+  and viewers get full-resolution tiles. The service id is the item's
+  `storage_dir` with `/` as `:` plus the sheet's `stem`; checked against
+  Columbus 1951 vol 3's real LoC manifest, all 102 derived ids match exactly.
+  Page keys come from the sheet's `key` rather than being parsed back out of
+  the URL, which would lowercase the suffix of the 10,882 corpus sheets keyed
+  `p5S` and drop them from the annotation. Scoring is unaffected: the
+  LoC-pointing file and the manifest-based one both score Columbus at 88.8,
+  matching the archived run.
 
 ## Keeping a fleet alive overnight
 

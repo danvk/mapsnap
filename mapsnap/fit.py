@@ -48,7 +48,12 @@ def find_ref_iiif(dir_path: Path) -> Path | None:
     manifests = sorted(glob.glob(str(dir_path / "*manifest.json")))
     if len(manifests) > 1:
         sys.exit(f"Found multiple manifest.json files in {dir_path}")
-    return Path(manifests[0]) if manifests else None
+    if manifests:
+        return Path(manifests[0])
+    # A mirrored corpus volume has no manifest of its own, but its metadata.json
+    # carries every field a canvas needs and points at LoC's image servers (#354).
+    metadata = dir_path / "metadata.json"
+    return metadata if metadata.exists() else None
 
 
 def resolve_run_id(

@@ -167,7 +167,7 @@ def test_run_chain_derives_panel_boxes_and_reads_effective_pages(
     work = plan_fit(
         ALPHA, ["p1.jpg", "p2.jpg", "p1.boxes.json", "p2.boxes.json"], County("US01001")
     )
-    loc_fit.run_chain(tmp_path, work, "https://images.test/x")
+    loc_fit.run_chain(tmp_path, work)
 
     assert [c[1] for c in commands] == [
         "split",
@@ -188,7 +188,7 @@ def test_run_chain_derives_panel_boxes_and_reads_effective_pages(
         "p1__2.jpg",
         "p2.jpg",
     }  # not the split parent
-    assert "--image-base-url" in commands[5]
+    assert commands[5][:5] == ["mapsnap", "fit", str(tmp_path), "--tag", "mapsnap"]
 
 
 def test_resolve_counties_downloads_s3_urls_by_basename(

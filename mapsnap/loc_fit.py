@@ -67,10 +67,6 @@ COUNTY_PREFIX = "osm-by-county"
 # the .pbf directly, so the county extract needs no conversion (#408).
 CENTERLINES_NAME = "centerlines.osm.pbf"
 RUN_TAG = "mapsnap"
-# A mirrored volume has scans and metadata but no annotation page, so the
-# canvases are built from the mirror's own object URLs instead (see fit's
-# --image-base-url). Plain JPEGs, hence the Image source type.
-IMAGE_HOST = "https://{bucket}.s3.{region}.amazonaws.com"
 # Written last, so its presence means the whole chain ran for this item.
 DONE_MARKER = f"{RUN_TAG}.iiif.json"
 # What the upload is expected to carry, for the tests to assert against: the
@@ -244,7 +240,7 @@ def keymap_sheets(local: Path) -> list[str]:
     ]
 
 
-def run_chain(local: Path, work: FitWork, image_base_url: str) -> None:
+def run_chain(local: Path, work: FitWork) -> None:
     """split, adjacency, keymap, ocr, fit -- the order `run-loc` uses.
 
     adjacency runs before keymap so its mutual edges can repair the key map's
@@ -277,18 +273,10 @@ def run_chain(local: Path, work: FitWork, image_base_url: str) -> None:
         ],
         local,
     )
-    stage(
-        [
-            "mapsnap",
-            "fit",
-            str(local),
-            "--tag",
-            RUN_TAG,
-            "--image-base-url",
-            image_base_url,
-        ],
-        local,
-    )
+    # No --image-base-url: fit finds the item's metadata.json and builds the
+    # canvases against LoC's own image servers, so the annotation is usable
+    # without anything being hosted (#354).
+    stage(["mapsnap", "fit", str(local), "--tag", RUN_TAG], local)
 
 
 def upload(local: Path, bucket: str, item: Item) -> None:
@@ -311,10 +299,10 @@ def upload(local: Path, bucket: str, item: Item) -> None:
     )
 
 
-def process_item(work: FitWork, local: Path, bucket: str, image_base_url: str) -> int:
+def process_item(work: FitWork, local: Path, bucket: str) -> int:
     """Run the chain over a downloaded item and sync its sidecars up."""
     try:
-        run_chain(local, work, image_base_url)
+        run_chain(local, work)
         upload(local, bucket, work.item)
         return len(work.pages)
     finally:
@@ -405,11 +393,6 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Accepted so the fleet bootstrap can pass it; the chain is CPU work.",
     )
-    parser.add_argument(
-        "--image-host",
-        default=IMAGE_HOST.format(bucket="mapsnap-sanborn", region="us-west-2"),
-        help="Base URL the published canvases point at (default: %(default)s).",
-    )
     parser.add_argument("--work-dir", type=Path, default=Path("/tmp/loc-fit"))
     parser.add_argument("--limit", type=int)
     parser.add_argument("--dry-run", action="store_true")
@@ -490,9 +473,7 @@ def main() -> None:
                 done += 1
                 continue
             try:
-                pages += process_item(
-                    work, local, args.bucket, f"{args.image_host}/{work.item.prefix}"
-                )
+                pages += process_item(work, local, args.bucket)
             except OSError as error:
                 print(f"{work.item.item}: FAILED: {error}", file=sys.stderr, flush=True)
                 with broken.open("a") as handle:
