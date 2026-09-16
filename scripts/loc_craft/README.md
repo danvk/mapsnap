@@ -193,6 +193,14 @@ worker is a full ocr plus fit process.
 
 Three things about what it uploads and what it skips:
 
+- **The candidate files are kept.** `artifacts/*/candidates.jsonl` is
+  nominally a cache, but it is the only record of what snap and street-solve
+  considered and rejected, and regenerating it means re-running the search.
+  Madison p20__3 made the case: its provenance said snap offered no hypothesis
+  and the reason was in a file that had not been kept. Measured at 10.7 KB a
+  page over the truth volumes, so about 4.4 GB across the corpus, roughly
+  \$0.10 a month. `artifacts/reconcile/` is still dropped, since its verdicts
+  restate what the per-page provenance records already carry.
 - **Panel images stay on the worker.** `make_iiif_georef` builds every page's
   image URL from its parent and split pages share the parent's canvas, so
   nothing reads `p209__1.jpg`; it reads the parent plus `p209.panels.json`. The

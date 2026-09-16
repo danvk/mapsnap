@@ -127,10 +127,32 @@ def test_upload_patterns_do_not_catch_what_must_be_kept() -> None:
 
 
 def test_upload_patterns_do_catch_the_regenerable_files() -> None:
+    import fnmatch
+
     for name in ["p209__1.jpg", "p209__12.jpg", "p209__1.boxes.json"]:
-        assert any(
-            __import__("fnmatch").fnmatch(name, pattern) for pattern in UPLOAD_EXCLUDES
-        ), name
+        assert any(fnmatch.fnmatch(name, pattern) for pattern in UPLOAD_EXCLUDES), name
+
+
+def test_upload_keeps_the_candidate_files() -> None:
+    """They record what snap and street-solve rejected; re-running the search to
+    recover that is the expensive part, and Madison p20__3 needed it."""
+    import fnmatch
+
+    for name in (
+        "artifacts/osm_snap/candidates.jsonl",
+        "artifacts/street_solve/candidates.jsonl",
+    ):
+        assert name in UPLOAD_GLOBS
+        for pattern in UPLOAD_EXCLUDES:
+            assert not fnmatch.fnmatch(name, pattern), f"{pattern} would drop {name}"
+
+
+def test_upload_still_drops_the_reconcile_report() -> None:
+    """verdicts.jsonl and report.md restate what the provenance records carry."""
+    import fnmatch
+
+    for name in ("artifacts/reconcile/verdicts.jsonl", "artifacts/reconcile/report.md"):
+        assert any(fnmatch.fnmatch(name, pattern) for pattern in UPLOAD_EXCLUDES), name
 
 
 def test_upload_globs_and_excludes_do_not_contradict() -> None:
