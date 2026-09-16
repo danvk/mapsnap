@@ -24,6 +24,11 @@ OCR_FROM=""
 SHARDS=1
 WORKERS=1
 LIMIT=""
+MANIFEST=""
+# An item waiting on loc-craft is RELEASED, not retired, and a release counts as
+# a receive: at the default 3 a not-ready item dead-letters after three passes.
+# Fine once craft is done, too fast while it is still running, hence the flag.
+MAX_RECEIVES=3
 FILL=0
 DRY_RUN=0
 # The lease the worker renews while an item runs (work_queue.lease). Shorter
@@ -42,6 +47,8 @@ while [ $# -gt 0 ]; do
     --shards) SHARDS="$2"; shift 2 ;;
     --workers) WORKERS="$2"; shift 2 ;;
     --limit) LIMIT="$2"; shift 2 ;;
+    --manifest) MANIFEST="$2"; shift 2 ;;
+    --max-receives) MAX_RECEIVES="$2"; shift 2 ;;
     --visibility) VISIBILITY="$2"; shift 2 ;;
     --region) REGION="$2"; shift 2 ;;
     --fill) FILL=1; shift ;;
@@ -100,11 +107,12 @@ echo "queue     $QUEUE_NAME"
 # adding workers to a running pass is the same command without --fill.
 if [ "$DRY_RUN" = 1 ]; then
   run uv run --directory "$REPO" mapsnap work-queue create \
-    --name "$QUEUE_NAME" --visibility "$VISIBILITY"
+    --name "$QUEUE_NAME" --visibility "$VISIBILITY" --max-receives "$MAX_RECEIVES"
   QUEUE_URL="https://sqs.example/DRY-RUN/$QUEUE_NAME"
 else
   QUEUE_URL=$(uv run --directory "$REPO" mapsnap work-queue create \
     --name "$QUEUE_NAME" --visibility "$VISIBILITY" \
+    --max-receives "$MAX_RECEIVES" \
     | awk '$1 == "queue" {print $2}')
   if [ -z "$QUEUE_URL" ]; then
     echo "could not create or find queue $QUEUE_NAME" >&2
@@ -118,6 +126,9 @@ echo "queue url $QUEUE_URL"
 if [ "$FILL" = 1 ]; then
   fill_args=(--url "$QUEUE_URL" --run-tag "$RUN_TAG")
   [ -n "$LIMIT" ] && fill_args+=(--limit "$LIMIT")
+  # A sample run fills from its own manifest; the workers keep the full one,
+  # since the queue names the items and the manifest only resolves them.
+  [ -n "$MANIFEST" ] && fill_args+=(--manifest "$MANIFEST")
   run uv run --directory "$REPO" mapsnap work-queue fill "${fill_args[@]}"
 fi
 

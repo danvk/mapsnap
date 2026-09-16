@@ -47,6 +47,22 @@ A pilot — a few hundred items, its own directory, colliding with nothing:
 scripts/loc_fit/launch.sh --run-tag v1.3-pilot --fill --limit 200 --shards 2
 ```
 
+`--limit` takes the manifest's first N, which is one state's worth. To choose
+the items instead, fill from a manifest of your own — any subset of the mirror
+manifest's rows is a valid one, and the workers keep the full manifest, since
+the queue names the items and the manifest only resolves them:
+
+```bash
+scripts/loc_fit/launch.sh --run-tag v1.3-pilot --fill \
+  --manifest ~/Documents/mapsnap/loc-fit-sample-200.tsv \
+  --max-receives 10 --shards 3
+```
+
+`--max-receives` is worth raising while `loc-craft` is still running. An item
+whose boxes are not all there yet is *released*, not retired, and a release
+counts as a receive: at the default 3, an item waiting on the GPU pass
+dead-letters after three passes rather than waiting for it.
+
 The full pass:
 
 ```bash
