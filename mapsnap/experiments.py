@@ -120,6 +120,23 @@ def normalize_flags_for_hash(flag_tokens: list[str]) -> list[str]:
     return result
 
 
+def model_hashes(repo: Path | None = None) -> dict[str, str]:
+    """sha256 of every model weight file, so a run says which models produced it.
+
+    The git SHA pins the code but not the weights: they are large binaries that
+    change without a commit touching them, and a corpus run is the one thing
+    nobody will re-do to find out which version was used.
+    """
+    root = (repo or Path(__file__).resolve().parent.parent) / "models"
+    if not root.is_dir():
+        return {}
+    return {
+        path.name: file_sha256(path)
+        for path in sorted(root.glob("*.pt"))
+        if path.is_file()
+    }
+
+
 def gather_inputs(dir_path: Path, centerlines: Path, truth: Path | None) -> dict:
     """Hash every input that affects a georef run: streets.json, centerlines, truth, boxes.
 

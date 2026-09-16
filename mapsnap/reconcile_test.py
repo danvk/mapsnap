@@ -718,3 +718,57 @@ def test_publish_leaves_a_geometry_only_pose_without_street_evidence(tmp_path):
     publish(tmp_path, {"p1": node}, {"p1": 0})
     final = json.loads((tmp_path / "p1.georef-final.json").read_text())
     assert final["streets"] == [] and final["intersections"] == []
+
+
+def test_stamp_agreement_measures_the_printed_seam(tmp_path):
+    """Two sheets that print each other's number agree on the seam, or one is wrong."""
+    from mapsnap.reconcile import stamp_agreement
+
+    nodes = {
+        "p1": make_node("p1", [scored("georef", affine(0), 0.9)]),
+        "p2": make_node("p2", [scored("georef", affine(PAGE_EAST_M), 0.9)]),
+    }
+    assignment = {"p1": 0, "p2": 0}
+    got = stamp_agreement("p1", nodes, assignment, chain_adjacency())
+    assert got is not None
+    assert got["neighbours"] == 1
+    assert got["agree_100m"] == 1  # placed edge to edge, so the stamps coincide
+    assert got["median_m"] < 100.0
+
+    # A neighbour dragged a kilometre away no longer agrees.
+    nodes["p2"] = make_node("p2", [scored("georef", affine(PAGE_EAST_M + 1000), 0.9)])
+    far = stamp_agreement("p1", nodes, assignment, chain_adjacency())
+    assert far is not None and far["agree_100m"] == 0 and far["median_m"] > 100.0
+
+
+def test_stamp_agreement_is_none_without_evidence(tmp_path):
+    from mapsnap.reconcile import stamp_agreement
+
+    nodes = {"p1": make_node("p1", [scored("georef", affine(0), 0.9)])}
+    assert stamp_agreement("p1", nodes, {"p1": 0}, None) is None
+    assert stamp_agreement("p1", nodes, {"p1": 0}, chain_adjacency()) is None
+    unplaced = {"p1": make_node("p1", [unplaced_hypothesis()], published=None)}
+    assert stamp_agreement("p1", unplaced, {"p1": 0}, chain_adjacency()) is None
+
+
+def test_provenance_records_the_snap_verdict(tmp_path):
+    """rescue / challenge / refine lives only in candidates.jsonl otherwise."""
+    import json
+
+    from mapsnap.reconcile import publish
+
+    node = make_node("p1", [scored("georef-snap", affine(0), 0.9)])
+    publish(
+        tmp_path,
+        {"p1": node},
+        {"p1": 0},
+        snap_records={"p1": {"decision": {"page_verdict": "refine"}}},
+    )
+    record = json.loads((tmp_path / "p1.provenance.json").read_text())
+    assert record["snap_verdict"] == "refine"
+
+    publish(tmp_path, {"p1": node}, {"p1": 0})
+    assert (
+        json.loads((tmp_path / "p1.provenance.json").read_text())["snap_verdict"]
+        is None
+    )

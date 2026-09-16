@@ -1181,6 +1181,49 @@ def keymap_state(volume: Path) -> str:
     return "read, not georeferenced"
 
 
+def stamp_agreement(
+    stem: str,
+    nodes: dict[str, PageNode],
+    assignment: dict[str, int],
+    adjacency: dict | None,
+) -> dict | None:
+    """How far this page's printed claims land from its placed neighbours'.
+
+    The strongest truth-free check the pipeline has: two sheets that print each
+    other's number agree on where the seam is, or one of them is wrong. Recorded
+    per page because it needs every neighbour's final pose, which no later pass
+    over the sidecars can reconstruct cheaply.
+    """
+    node = nodes[stem]
+    hypothesis = node.hypotheses[assignment[stem]]
+    if adjacency is None or hypothesis.affine is None:
+        return None
+    page = fitted_page_for(hypothesis, node.unit)
+    distances: list[float] = []
+    for other, other_node in nodes.items():
+        if other == stem:
+            continue
+        other_hyp = other_node.hypotheses[assignment[other]]
+        if other_hyp.affine is None:
+            continue
+        other_page = fitted_page_for(other_hyp, other_node.unit)
+        mine = stamp_worlds(adjacency, page, other)
+        theirs = stamp_worlds(adjacency, other_page, stem)
+        if not mine or not theirs:
+            continue
+        distances.append(
+            min(haversine_m(la, lo, lb, ob) for lo, la in mine for ob, lb in theirs)
+        )
+    if not distances:
+        return None
+    return {
+        "neighbours": len(distances),
+        "median_m": round(float(np.median(distances)), 1),
+        "max_m": round(max(distances), 1),
+        "agree_100m": sum(1 for d in distances if d <= 100.0),
+    }
+
+
 def provenance_record(
     stem: str,
     nodes: dict[str, PageNode],
@@ -1190,6 +1233,7 @@ def provenance_record(
     region_centroids: dict | None,
     locator=None,
     keymap: str = "unknown",
+    snap_records: dict | None = None,
 ) -> dict:
     """How this page got its answer: every pose weighed, the evidence, a location.
 
@@ -1231,9 +1275,12 @@ def provenance_record(
         decision = "placed"
     else:
         decision = "abstained"
+    snap = (snap_records or {}).get(stem) or {}
+    verdict = (snap.get("decision") or {}).get("page_verdict")
     return {
         "stem": stem,
         "decision": decision,
+        "snap_verdict": verdict,
         "panels": sorted(other for other in nodes if other.startswith(f"{stem}__"))
         if superseded
         else None,
@@ -1248,6 +1295,7 @@ def provenance_record(
             "keymap_centers": len(unit.keymap_centers),
             "keymap_radius_m": number(unit.keymap_radius_m),
             "mutual_edges": sum(1 for _, a, b in edges if stem in (a, b)),
+            "stamp_agreement": stamp_agreement(stem, nodes, assignment, adjacency),
         },
         "approximate": (
             None
@@ -1297,6 +1345,7 @@ def publish(
     region_centroids: dict | None = None,
     locator=None,
     sidecar_dir: Path | None = None,
+    snap_records: dict | None = None,
 ) -> tuple[int, int]:
     """Write the arbitrated answer as ``pN.georef-final.json``, one per page.
 
@@ -1372,6 +1421,7 @@ def publish(
                     region_centroids,
                     locator,
                     keymap,
+                    snap_records,
                 ),
                 indent=1,
             )
@@ -1539,6 +1589,7 @@ def main() -> None:
             region_centroids=vctx.region_centroids,
             locator=vctx.locator,
             sidecar_dir=sidecar_dir,
+            snap_records=snap_records,
         )
         print(f"published {written} reconcile sidecars, {unplaced} unplaced markers")
     if args.grade:

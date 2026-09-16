@@ -190,7 +190,11 @@ def main() -> None:
         sys.exit(f"No reference IIIF found in {dir_path}")
     truth = dir_path / "main.iiif.json"
 
-    git = experiments.git_head_info(dir_path)
+    # The repo, not the volume: a corpus worker fits a scratch directory that is
+    # not inside a git checkout, and asking there recorded "sha": null on every
+    # item -- the one field that says which code produced the run.
+    git = experiments.git_head_info(Path(__file__).resolve().parent)
+    models = experiments.model_hashes()
     inputs = experiments.gather_inputs(
         dir_path, centerlines, truth if truth.exists() else None
     )
@@ -330,7 +334,7 @@ def main() -> None:
         run_id,
         georef_extra,
         inputs,
-        git,
+        git | {"models": models},
         command,
         truth if truth.exists() else None,
         output_iiif,
