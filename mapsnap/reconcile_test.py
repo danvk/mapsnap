@@ -164,7 +164,7 @@ def test_pose_scale_log2_tracks_scale():
     )
 
 
-def make_node(stem: str, hypotheses, published=0, base=None):
+def make_node(stem: str, hypotheses, published: int | None = 0, base=None):
     return PageNode(
         unit=make_unit(stem),
         is_panel=base is not None,
@@ -508,6 +508,8 @@ def test_publish_writes_a_provenance_record_for_every_page(tmp_path):
     """Placed pages and abstentions alike get a record, and the chosen pose is marked."""
     import json
 
+    from mapsnap.reconcile import publish
+
     placed = make_node("p1", [scored("georef", affine(0), 0.9)])
     abstained = make_node(
         "p2",
@@ -531,6 +533,8 @@ def test_publish_writes_a_provenance_record_for_every_page(tmp_path):
 
 def test_publish_survives_numpy_scores(tmp_path):
     """Scores arrive as numpy scalars, which json.dumps refuses without casting."""
+    from mapsnap.reconcile import publish
+
     node = make_node("p1", [scored("georef", affine(0), np.float64(0.9))])
     node.hypotheses[0].scores["keymap_dist_m"] = np.float32(12.5)
     publish(tmp_path, {"p1": node}, {"p1": 0})
