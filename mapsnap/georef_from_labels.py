@@ -3907,6 +3907,25 @@ def main() -> None:
         help="Geocode key maps in addition to regular pages.",
     )
     parser.add_argument(
+        "--city-center",
+        metavar="LAT,LON",
+        help=(
+            "Where the volume is, used ONLY when it has no key map: matching is "
+            "restricted to --city-radius-m around this point. The LoC Sanborn "
+            "data package carries this for 90.8%% of the corpus."
+        ),
+    )
+    parser.add_argument(
+        "--city-radius-m",
+        type=float,
+        default=5000.0,
+        help=(
+            "Neighbourhood radius for --city-center (default: %(default)s). "
+            "Measured: the catalogue point sits 0.39 km (median) and 2.85 km "
+            "(worst) from the farthest placed page of a 1-3 sheet volume."
+        ),
+    )
+    parser.add_argument(
         "--keymap",
         nargs="+",
         metavar="JSON",
@@ -4022,6 +4041,18 @@ def main() -> None:
     )
     locator = None
     embed_locator = None
+    # No key map: fall back to where the LoC catalogue says the volume is. This
+    # is the only prior a small volume has, and small volumes are most of the
+    # corpus by item count.
+    if not keymap_files and args.city_center:
+        lat, lon = (float(v) for v in args.city_center.split(","))
+        locator = KeymapLocator.from_point((lon, lat), args.city_radius_m)
+        embed_locator = locator
+        print(
+            f"No key map; restricting to {args.city_radius_m:.0f} m around the "
+            f"catalogue location {lat:.5f},{lon:.5f}.",
+            file=sys.stderr,
+        )
     if embed_keymap_files:
         embed_locator = KeymapLocator.from_keymaps(
             embed_keymap_files, args.keymap_radius

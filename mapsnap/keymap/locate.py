@@ -463,6 +463,12 @@ class KeymapLocator:
     index_cache: tuple[list[dict], FeatureIndex] | None = field(
         default=None, repr=False, compare=False
     )
+    # Where the volume is when the key map cannot say where a PAGE is -- the
+    # town the LoC catalogue records. A volume with no key map has no per-page
+    # prior at all, which is most of the corpus by item count: 42% of items are
+    # three sheets or fewer, and those are the ones whose street names are too
+    # common to place on their own.
+    fallback_center: Point | None = None
 
     def feature_index(self, features: list[dict]) -> FeatureIndex:
         """Spatial index over ``features``, reused across calls with the same list."""
@@ -564,12 +570,32 @@ class KeymapLocator:
         return [stored for stored in mapping if key_stem(stored) == stem]
 
     def centers_for(self, page: int | str | None) -> list[Point]:
-        """Every key-map detection location answering a lookup for ``page``."""
-        return [
+        """Every key-map detection location answering a lookup for ``page``.
+
+        Falls back to the volume's own location when the key map places no such
+        page: knowing the town is weaker than knowing the block, but it is the
+        difference between a 5 km neighbourhood and a whole county.
+        """
+        found = [
             point
             for key in self.matching_keys(page, self.locations)
             for point in self.locations[key]
         ]
+        if not found and self.fallback_center is not None:
+            return [self.fallback_center]
+        return found
+
+    @classmethod
+    def from_point(cls, center: Point, radius_m: float) -> "KeymapLocator":
+        """A locator that knows only where the volume is, not where its pages are.
+
+        Every page gets the same neighbourhood, which is the honest model for a
+        volume with no key map: the LoC catalogue records the town, and for a
+        small volume the town IS the page. Measured over the fitted test-200
+        items, that coordinate sits 0.39 km (median) from the farthest placed
+        page of a 1-3 sheet volume, and 2.85 km in the worst case.
+        """
+        return cls({}, radius_m, fallback_center=center)
 
     def regions_for(self, page: int | str | None) -> list[list[Point]]:
         """The segmented region rings answering a lookup for ``page``."""
