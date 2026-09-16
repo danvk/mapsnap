@@ -80,6 +80,7 @@ UPLOAD_GLOBS = (
     "p*.provenance.json",
     "artifacts/osm_snap/candidates.jsonl",
     "artifacts/street_solve/candidates.jsonl",
+    f"artifacts/{RUN_TAG}/manifest.json",
     "adjacency.json",
     "keymaps.json",
     f"{RUN_TAG}.iiif.json",
@@ -106,7 +107,15 @@ UPLOAD_EXCLUDES = (
     "*__[0-9]*.jpg",
     "*__[0-9]*.boxes.json",
     "artifacts/reconcile/*",
+    # `fit` archives the whole run, which is a second copy of every sidecar in
+    # the item. Its manifest is the part worth keeping -- the git SHA, the
+    # model hashes, the stage timings and the fit-state counts -- so that is
+    # re-included below.
+    f"artifacts/{RUN_TAG}/*",
 )
+# Applied after the excludes, so it wins: aws s3 sync takes the last matching
+# filter.
+UPLOAD_INCLUDES = (f"artifacts/{RUN_TAG}/manifest.json",)
 QUEUE_DEPTH_EVERY = 25
 
 
@@ -281,6 +290,12 @@ def run_chain(local: Path, work: FitWork) -> None:
         ],
         local,
     )
+    # The previous run's archive comes down with the sync, and `fit` refuses to
+    # overwrite one: re-fitting an item after a code change failed outright
+    # until this removed it. Dropping it is right here -- its manifest is
+    # re-written by the run about to happen, and the rest of it duplicates
+    # sidecars this chain regenerates anyway.
+    shutil.rmtree(local / "artifacts" / RUN_TAG, ignore_errors=True)
     # No --image-base-url: fit finds the item's metadata.json and builds the
     # canvases against LoC's own image servers, so the annotation is usable
     # without anything being hosted (#354).
@@ -292,6 +307,8 @@ def upload(local: Path, bucket: str, item: Item) -> None:
     excludes: list[str] = []
     for pattern in UPLOAD_EXCLUDES:
         excludes += ["--exclude", pattern]
+    for pattern in UPLOAD_INCLUDES:
+        excludes += ["--include", pattern]
     run_aws(
         [
             "aws",

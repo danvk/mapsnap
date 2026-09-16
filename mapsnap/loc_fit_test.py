@@ -8,6 +8,7 @@ from mapsnap.loc_fit import (
     DONE_MARKER,
     UPLOAD_EXCLUDES,
     UPLOAD_GLOBS,
+    UPLOAD_INCLUDES,
     County,
     plan_fit,
     read_counties,
@@ -156,12 +157,18 @@ def test_upload_still_drops_the_reconcile_report() -> None:
 
 
 def test_upload_globs_and_excludes_do_not_contradict() -> None:
-    """The globs document intent; the excludes enforce it. They must agree."""
+    """The globs document intent; the filters enforce it. They must agree.
+
+    An exclude may still cover a glob as long as an include wins it back --
+    that is how the run manifest survives the exclusion of the archive it
+    sits in.
+    """
     import fnmatch
 
     for glob in UPLOAD_GLOBS:
-        for pattern in UPLOAD_EXCLUDES:
-            assert not fnmatch.fnmatch(glob, pattern), f"{pattern} excludes {glob}"
+        excluded = any(fnmatch.fnmatch(glob, p) for p in UPLOAD_EXCLUDES)
+        rescued = any(fnmatch.fnmatch(glob, p) for p in UPLOAD_INCLUDES)
+        assert not excluded or rescued, f"{glob} is excluded and never included"
 
 
 def test_run_chain_derives_panel_boxes_and_reads_effective_pages(
@@ -247,3 +254,42 @@ def test_parser_accepts_gpu_as_a_no_op() -> None:
     )
     assert args.gpu is True
     assert args.counties == ["a.tsv", "b.tsv"]
+
+
+def test_upload_keeps_the_run_manifest_but_not_the_rest_of_the_archive() -> None:
+    """fit archives a second copy of every sidecar; only its manifest is worth it."""
+    import fnmatch
+
+    manifest = "artifacts/mapsnap/manifest.json"
+    duplicate = "artifacts/mapsnap/p1.streets.json"
+    assert any(fnmatch.fnmatch(manifest, p) for p in UPLOAD_EXCLUDES)
+    assert manifest in UPLOAD_INCLUDES  # the include is applied last and wins
+    assert any(fnmatch.fnmatch(duplicate, p) for p in UPLOAD_EXCLUDES)
+    assert not any(fnmatch.fnmatch(duplicate, p) for p in UPLOAD_INCLUDES)
+
+
+def test_upload_orders_includes_after_excludes(monkeypatch) -> None:
+    """aws s3 sync takes the last matching filter, so order is the behaviour."""
+    from mapsnap import loc_fit
+
+    calls: list[list[str]] = []
+    monkeypatch.setattr(loc_fit, "run_aws", lambda command, **kw: calls.append(command))
+    upload(Path("/tmp/x"), "s3://bucket", ALPHA)
+    command = calls[0]
+    last_exclude = max(i for i, w in enumerate(command) if w == "--exclude")
+    first_include = min(i for i, w in enumerate(command) if w == "--include")
+    assert first_include > last_exclude
+
+
+def test_run_chain_clears_the_previous_archive(tmp_path, monkeypatch) -> None:
+    """fit refuses to overwrite an archive, and the sync brings the old one down."""
+    from mapsnap import loc_fit
+
+    (tmp_path / "p1.jpg").write_bytes(b"")
+    stale = tmp_path / "artifacts" / "mapsnap"
+    stale.mkdir(parents=True)
+    (stale / "manifest.json").write_text("{}")
+    monkeypatch.setattr(loc_fit, "stage", lambda command, local: None)
+    work = plan_fit(ALPHA, ["p1.jpg", "p1.boxes.json"], County("US01001"))
+    loc_fit.run_chain(tmp_path, work)
+    assert not stale.exists()
