@@ -162,13 +162,26 @@ def main() -> None:
             "machinery — so the arbiter weighs RANSAC's poses alone."
         ),
     )
+    parser.add_argument(
+        "--image-base-url",
+        help=(
+            "Publish canvases from the page images rather than a reference "
+            "manifest; each page's URL is {URL}/{parent_key}.jpg. Needed for a "
+            "mirrored volume, which has no annotation page to borrow from."
+        ),
+    )
+    parser.add_argument(
+        "--image-source-type",
+        default="Image",
+        help="IIIF source type for --image-base-url (default: %(default)s).",
+    )
     args, georef_extra = parser.parse_known_args()
 
     dir_path = Path(args.dir)
     centerlines = find_centerlines(dir_path)
     images = find_input_images(dir_path)
     ref_iiif = find_ref_iiif(dir_path)
-    if ref_iiif is None:
+    if ref_iiif is None and not args.image_base_url:
         sys.exit(f"No reference IIIF found in {dir_path}")
     truth = dir_path / "main.iiif.json"
 
@@ -265,13 +278,26 @@ def main() -> None:
     # The arbiter answers for every page instead, so there is nothing to
     # prioritize between (#270 phase 3).
     georef_glob = str(dir_path / "*.georef-final.json")
+    # Without a reference manifest the canvases are built from the images on
+    # disk, which is how a mirrored corpus volume is published: it has its scans
+    # and its metadata, but no annotation page to borrow image services from
+    # (#354).
+    if args.image_base_url:
+        source = [
+            georef_glob,
+            "--image-base-url",
+            args.image_base_url,
+            "--image-source-type",
+            args.image_source_type,
+        ]
+    else:
+        source = [str(ref_iiif), georef_glob]
     timed(
         "iiif",
         [
             "mapsnap",
             "iiif",
-            str(ref_iiif),
-            georef_glob,
+            *source,
             "--centerlines",
             str(centerlines),
             "--output",
