@@ -1165,6 +1165,22 @@ def approximate_location(
     return {"tier": 5, "basis": "no evidence", "lonlat": None, "radius_m": None}
 
 
+def keymap_state(volume: Path) -> str:
+    """Whether the volume has a key map, and whether it was ever georeferenced.
+
+    A key map that was read but not georeferenced still narrows nothing: the
+    locator holds page numbers in pixel space and no coordinates, so tier 3 is
+    unavailable and an abstention falls to the volume extent. The record says
+    which case it was, since "tier 4" alone reads like a missing key map.
+    """
+    raw = volume / "raw"
+    if not any(raw.glob("*.keymap.json")):
+        return "none"
+    if any(raw.glob("*.georef.json")):
+        return "georeferenced"
+    return "read, not georeferenced"
+
+
 def provenance_record(
     stem: str,
     nodes: dict[str, PageNode],
@@ -1173,6 +1189,7 @@ def provenance_record(
     edges: list[tuple[str, str, str]],
     region_centroids: dict | None,
     locator=None,
+    keymap: str = "unknown",
 ) -> dict:
     """How this page got its answer: every pose weighed, the evidence, a location.
 
@@ -1227,6 +1244,7 @@ def provenance_record(
             "fit_state": unit.fit_state,
             "inlier_intersections": int(unit.inlier_intersections),
             "inlier_streets": int(unit.inlier_streets),
+            "keymap": keymap,
             "keymap_centers": len(unit.keymap_centers),
             "keymap_radius_m": number(unit.keymap_radius_m),
             "mutual_edges": sum(1 for _, a, b in edges if stem in (a, b)),
@@ -1269,6 +1287,7 @@ def publish(
     an abstention still says where the page probably is (#354).
     """
     written = unplaced = 0
+    keymap = keymap_state(volume)
     for stale in list(volume.glob("p*.georef-final.json")) + list(
         volume.glob("p*.provenance.json")
     ):
@@ -1319,6 +1338,7 @@ def publish(
                     edges or [],
                     region_centroids,
                     locator,
+                    keymap,
                 ),
                 indent=1,
             )

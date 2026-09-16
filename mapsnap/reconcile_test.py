@@ -665,3 +665,23 @@ def test_tier_3_consults_the_volume_locator_when_the_unit_has_no_centers():
     silent = SimpleNamespace(page_keymap=lambda number: None)
     got = approximate_location("p2", {"p2": node}, {"p2": 0}, None, None, silent)
     assert got["tier"] == 5
+
+
+def test_keymap_state_distinguishes_read_from_georeferenced(tmp_path):
+    """The smoke volume had a key map that was read but never georeferenced."""
+    import json
+
+    from mapsnap.reconcile import keymap_state, publish
+
+    assert keymap_state(tmp_path) == "none"
+    (tmp_path / "raw").mkdir()
+    (tmp_path / "raw" / "p0.keymap.json").write_text("{}")
+    assert keymap_state(tmp_path) == "read, not georeferenced"
+    (tmp_path / "raw" / "p0.georef.json").write_text("{}")
+    assert keymap_state(tmp_path) == "georeferenced"
+
+    publish(
+        tmp_path, {"p1": make_node("p1", [scored("georef", affine(0), 0.9)])}, {"p1": 0}
+    )
+    record = json.loads((tmp_path / "p1.provenance.json").read_text())
+    assert record["evidence"]["keymap"] == "georeferenced"
