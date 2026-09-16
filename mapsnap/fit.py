@@ -329,6 +329,57 @@ def main() -> None:
         ],
     )
 
+    # The key map is georeferenced too -- by street GCPs, like any other sheet --
+    # and until now that pose was written to raw/<stem>.georef.json and never
+    # published. It is a map in its own right, and the one sheet that shows how
+    # the volume is laid out. No --centerlines: the block-based clip masks are
+    # built for street sheets, and a key map's own footprint lives in its
+    # regions.panels.json instead, which is uploaded too -- so a mask can be
+    # added later by regenerating this file, without re-running the chain.
+    keymap_georefs = sorted((dir_path / "raw").glob("*.georef.json"))
+    if keymap_georefs:
+        keymap_iiif = dir_path / f"{run_id}.keymap.iiif.json"
+        timed(
+            "keymap-iiif",
+            [
+                "mapsnap",
+                "iiif",
+                *(
+                    [str(ref_iiif)]
+                    if ref_iiif is not None and not args.image_base_url
+                    else []
+                ),
+                str(dir_path / "raw" / "*.georef.json"),
+                *(
+                    [
+                        "--image-base-url",
+                        args.image_base_url,
+                        "--image-source-type",
+                        args.image_source_type,
+                    ]
+                    if args.image_base_url
+                    else []
+                ),
+                "--label-note",
+                "key map",
+                "--output",
+                str(keymap_iiif),
+                *(["--run-tag", run_tag] if run_tag else []),
+            ],
+        )
+        # A reference annotation page carries canvases only for the sheets it
+        # georeferenced, and the key map is not one of them -- so a truth volume
+        # produces an empty page here while a mirrored volume, whose canvases
+        # come from metadata.json listing every page, produces a real one.
+        # Publishing the empty file would claim a key map was published.
+        if not json.loads(keymap_iiif.read_text())["items"]:
+            keymap_iiif.unlink()
+            print(
+                f"No key-map annotation written: nothing in {ref_iiif.name if ref_iiif else 'the source'} "
+                "provides a canvas for the key-map sheet.",
+                file=sys.stderr,
+            )
+
     # Compare against OIM, if truth data is available.
     compare_txt: Path | None = None
     if truth.exists():

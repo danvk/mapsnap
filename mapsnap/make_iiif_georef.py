@@ -982,6 +982,15 @@ def main() -> None:
         help="GeoJSON centerlines file for block-based clipping masks",
     )
     parser.add_argument(
+        "--label-note",
+        metavar="TEXT",
+        help=(
+            "Extra phrase for the annotation page's label, between the volume "
+            "and the generated date. A volume publishes more than one page -- "
+            "its sheets and its key map -- and they are otherwise identical."
+        ),
+    )
+    parser.add_argument(
         "--run-tag",
         metavar="TAG",
         help=(
@@ -1177,7 +1186,9 @@ def main() -> None:
     # annotation's body is its control points and an unplaced page has none.
     generated = datetime.now(UTC).strftime("%Y-%m-%d")
     page_label = " | ".join(
-        part for part in (label, f"mapsnap generated fit ({generated})") if part
+        part
+        for part in (label, args.label_note, f"mapsnap generated fit ({generated})")
+        if part
     )
     report = (
         volume_report(Path(georef_globs[0]).parent, generated, args.run_tag)

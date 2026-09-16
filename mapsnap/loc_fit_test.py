@@ -534,3 +534,19 @@ def test_check_args_still_requires_the_counties(monkeypatch) -> None:
     with pytest.raises(SystemExit) as caught:
         loc_fit.main()
     assert caught.value.code != 0
+
+
+def test_upload_keeps_the_keymap_annotation_page() -> None:
+    """The key map is georeferenced like any other sheet and is worth publishing."""
+    import fnmatch
+
+    name = f"{ARCHIVE_TAG}.keymap.iiif.json"
+    assert name in UPLOAD_GLOBS
+    for pattern in UPLOAD_EXCLUDES:
+        assert not fnmatch.fnmatch(name, pattern), f"{pattern} would drop {name}"
+
+
+def test_the_done_marker_is_not_the_keymap_page() -> None:
+    """Both end in .iiif.json; retiring an item on the wrong one would be silent."""
+    assert DONE_MARKER == f"{ARCHIVE_TAG}.iiif.json"
+    assert DONE_MARKER != f"{ARCHIVE_TAG}.keymap.iiif.json"
