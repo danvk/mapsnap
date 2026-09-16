@@ -450,3 +450,44 @@ def test_gather_inputs_falls_back_when_there_are_no_page_images(tmp_path):
     _write(tmp_path / "p1.streets.json", "s1")
     centerlines = _write(tmp_path / "centerlines.geojson", "lines")
     assert gather_inputs(tmp_path, centerlines, None)["streets"]["count"] == 1
+
+
+def test_git_head_info_describes_a_tagged_checkout(tmp_path) -> None:
+    """A fleet launched at a cut release names itself without being told.
+
+    Built in a throwaway repo rather than asserted against this one: the moment
+    a release is tagged here, describe becomes the bare tag, and a test tied to
+    the `-g<sha>` form would fail on exactly the commit that matters.
+    """
+    import subprocess
+
+    from mapsnap import experiments
+
+    def git(*args: str) -> None:
+        subprocess.run(
+            ["git", "-c", "user.email=t@t", "-c", "user.name=t", *args],
+            cwd=tmp_path,
+            check=True,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+
+    git("init", "-q")
+    (tmp_path / "f.txt").write_text("x")
+    git("add", "f.txt")
+    git("commit", "-qm", "first")
+    git("tag", "v9.9")
+    assert experiments.git_head_info(tmp_path)["describe"] == "v9.9"
+
+    # One commit past the release still points back at it.
+    (tmp_path / "f.txt").write_text("y")
+    git("commit", "-qam", "second")
+    assert experiments.git_head_info(tmp_path)["describe"].startswith("v9.9-1-g")
+
+
+def test_git_head_info_outside_a_repo_has_every_key(tmp_path) -> None:
+    """Callers read `describe` unconditionally; it must never be missing."""
+    from mapsnap import experiments
+
+    info = experiments.git_head_info(tmp_path)
+    assert set(info) == {"sha", "branch", "subject", "clean", "describe"}

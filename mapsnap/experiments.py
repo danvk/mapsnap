@@ -69,7 +69,7 @@ def combined_sha256(paths: list[Path]) -> str:
 
 
 def git_head_info(cwd: Path) -> dict:
-    """Return ``{sha, branch, subject, clean}`` for the git HEAD containing ``cwd``.
+    """Return ``{sha, branch, subject, clean, describe}`` for the git HEAD containing ``cwd``.
 
     ``clean`` reflects whether the working tree has uncommitted changes to tracked files
     (``data/`` is gitignored, so generated outputs never count). Returns ``clean=None`` and
@@ -92,13 +92,23 @@ def git_head_info(cwd: Path) -> dict:
 
     sha = git("rev-parse", "HEAD")
     if sha is None:
-        return {"sha": None, "branch": None, "subject": None, "clean": None}
+        return {
+            "sha": None,
+            "branch": None,
+            "subject": None,
+            "clean": None,
+            "describe": None,
+        }
     status = git("status", "--porcelain")
     return {
         "sha": sha,
         "branch": git("rev-parse", "--abbrev-ref", "HEAD"),
         "subject": git("log", "-1", "--format=%s"),
         "clean": status == "",
+        # The nearest tag, so a run launched at a cut release names itself
+        # without anyone passing a flag: exactly "v1.3" on the tagged commit,
+        # "v1.3-5-gabc1234" five commits past it, the short sha if untagged.
+        "describe": git("describe", "--tags", "--always"),
     }
 
 

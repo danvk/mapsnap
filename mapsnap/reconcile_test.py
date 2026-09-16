@@ -10,6 +10,8 @@ import pytest
 from mapsnap.reconcile import (
     KEEP_PRIOR,
     UNPLACED,
+    W_NOTE_MISMATCH,
+    W_RUNG_OFF,
     Hypothesis,
     PageNode,
     build_edges,
@@ -772,3 +774,66 @@ def test_provenance_records_the_snap_verdict(tmp_path):
         json.loads((tmp_path / "p1.provenance.json").read_text())["snap_verdict"]
         is None
     )
+
+
+def test_rung_note_band_matches_the_snap_constant():
+    """The two modules import each other lazily, so the band is mirrored by hand."""
+    from mapsnap.osm_snap_experiment import RUNG_NOTE_BAND as snap_band
+    from mapsnap.reconcile import RUNG_NOTE_BAND
+
+    assert RUNG_NOTE_BAND == snap_band
+
+
+@pytest.mark.parametrize(
+    "offset,note_ratio,verdict,decided_by,rung,penalty",
+    [
+        # Sitting on the family's own rung is free.
+        (0.02, None, "on rung", "volume family", 0, 0.0),
+        # A half-scale sheet is a legitimate second family, also free.
+        (-1.01, None, "on rung", "volume family", -1, 0.0),
+        # Between rungs is the only family case that pays.
+        (0.5, None, "between rungs", "volume family", 0, W_RUNG_OFF),
+        # A note that agrees with the pose it was measured against stays out of it.
+        (0.5, 1.0, "between rungs", "volume family", 0, W_RUNG_OFF),
+        # A note that disagrees takes over, and endorses a pose that matches it.
+        (-1.0, 0.5, "matches printed note", "printed note", -1, 0.0),
+        # ... and charges one that does not.
+        (0.0, 0.5, "contradicts printed note", "printed note", 0, W_NOTE_MISMATCH),
+    ],
+)
+def test_rung_verdict(offset, note_ratio, verdict, decided_by, rung, penalty):
+    """The conclusion, who reached it, and what it cost."""
+    from mapsnap.reconcile import rung_verdict
+
+    got = rung_verdict(offset, note_ratio)
+    assert got["verdict"] == verdict
+    assert got["decided_by"] == decided_by
+    assert got["rung"] == rung
+    assert got["penalty"] == pytest.approx(penalty)
+    assert got["scale_ratio"] == pytest.approx(2.0**offset, abs=1e-3)
+
+
+def test_rung_verdict_records_its_evidence():
+    """A reader must be able to check the conclusion, not just take it."""
+    from mapsnap.reconcile import rung_verdict
+
+    got = rung_verdict(-0.6, 0.5)
+    assert got["offset_log2"] == pytest.approx(-0.6)
+    assert got["rung_distance"] == pytest.approx(0.4)
+    assert got["note_ratio"] == pytest.approx(0.5)
+    assert got["note_offset_log2"] == pytest.approx(0.4)
+
+
+def test_provenance_records_the_rung_verdict(tmp_path):
+    """Scale is a decision the run makes; the file must say which rung and why."""
+    from mapsnap.reconcile import publish
+
+    node = make_node("p1", [scored("georef", affine(0), 0.9)])
+    publish(tmp_path, {"p1": node}, {"p1": 0})
+    rung = json.loads((tmp_path / "p1.provenance.json").read_text())["hypotheses"][0][
+        "rung"
+    ]
+    # scored() passes family_log2=None: a volume with no scale family at all
+    # still explains itself rather than dropping the key.
+    assert rung["verdict"] == "no volume family"
+    assert rung["penalty"] == 0.0

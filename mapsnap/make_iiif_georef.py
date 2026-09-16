@@ -755,7 +755,17 @@ def volume_label(source_data: dict) -> str:
     return label if isinstance(label, str) else ""
 
 
-def volume_report(directory: Path | None, generated: str) -> list[dict]:
+def run_entries(generated: str, run_tag: str | None) -> list[dict]:
+    """The report card's identity lines: when the fit ran, and as part of what."""
+    entries = [{"label": "generated", "value": generated}]
+    if run_tag:
+        entries.append({"label": "run", "value": run_tag})
+    return entries
+
+
+def volume_report(
+    directory: Path | None, generated: str, run_tag: str | None = None
+) -> list[dict]:
     """A per-volume report card for the annotation page's top-level metadata.
 
     Read from the provenance records beside the georef files, so it costs a
@@ -780,7 +790,7 @@ def volume_report(directory: Path | None, generated: str) -> list[dict]:
         except (OSError, json.JSONDecodeError):
             continue
     if not records:
-        return [{"label": "generated", "value": generated}]
+        return run_entries(generated, run_tag)
 
     placed = [r for r in records if r["decision"] == "placed"]
     abstained = [r for r in records if r["decision"] == "abstained"]
@@ -802,7 +812,7 @@ def volume_report(directory: Path | None, generated: str) -> list[dict]:
         )
 
     report = [
-        {"label": "generated", "value": generated},
+        *run_entries(generated, run_tag),
         {"label": "pages", "value": str(len(placed) + len(abstained))},
         {"label": "placed", "value": str(len(placed))},
         {"label": "unplaced", "value": str(len(abstained))},
@@ -970,6 +980,15 @@ def main() -> None:
         "--centerlines",
         metavar="FILE",
         help="GeoJSON centerlines file for block-based clipping masks",
+    )
+    parser.add_argument(
+        "--run-tag",
+        metavar="TAG",
+        help=(
+            "Name of the run this annotation page belongs to (a cut release, "
+            "say). Recorded in the page's top-level metadata so a published "
+            "fit can be traced back to the corpus pass that produced it."
+        ),
     )
     parser.add_argument(
         "--debug-blocks",
@@ -1161,9 +1180,9 @@ def main() -> None:
         part for part in (label, f"mapsnap generated fit ({generated})") if part
     )
     report = (
-        volume_report(Path(georef_globs[0]).parent, generated)
+        volume_report(Path(georef_globs[0]).parent, generated, args.run_tag)
         if len(georef_globs) == 1
-        else [{"label": "generated", "value": generated}]
+        else run_entries(generated, args.run_tag)
     )
     result = {
         "id": result_id,

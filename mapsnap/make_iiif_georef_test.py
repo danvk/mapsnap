@@ -837,3 +837,30 @@ def test_volume_report_survives_a_volume_that_placed_nothing(tmp_path) -> None:
     assert report["unplaced"] == "2"
     assert report["fit sources"] == "none"
     assert "p0__1 (tier 5," in report["unplaced pages"]
+
+
+def test_report_card_names_the_run_when_tagged(tmp_path) -> None:
+    """A published fit must be traceable to the corpus pass that produced it."""
+    from mapsnap.make_iiif_georef import volume_report
+
+    (tmp_path / "p1.provenance.json").write_text(
+        json.dumps(_provenance("p1", "placed", "georef"))
+    )
+    card = {
+        m["label"]: m["value"] for m in volume_report(tmp_path, "2026-09-16", "v1.3")
+    }
+    assert card["run"] == "v1.3"
+    assert card["generated"] == "2026-09-16"
+    # Untagged runs say nothing rather than saying "None".
+    untagged = {m["label"]: m["value"] for m in volume_report(tmp_path, "2026-09-16")}
+    assert "run" not in untagged
+
+
+def test_report_card_names_the_run_with_no_provenance(tmp_path) -> None:
+    """The tag survives the early return taken when a volume has no records."""
+    from mapsnap.make_iiif_georef import volume_report
+
+    card = {
+        m["label"]: m["value"] for m in volume_report(tmp_path, "2026-09-16", "v1.3")
+    }
+    assert card["run"] == "v1.3"

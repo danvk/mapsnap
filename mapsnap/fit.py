@@ -159,6 +159,17 @@ def main() -> None:
         help="Human-readable name recorded alongside the run id in the manifest.",
     )
     parser.add_argument(
+        "--run-tag",
+        default=None,
+        metavar="TAG",
+        help=(
+            "Name for the run this fit belongs to -- a cut release, say -- "
+            "recorded in the manifest and in the published annotation page so "
+            "an output can be traced back to the corpus pass that made it. "
+            "Defaults to the repo's nearest git tag."
+        ),
+    )
+    parser.add_argument(
         "--no-snap",
         action="store_true",
         help=(
@@ -195,6 +206,9 @@ def main() -> None:
     # item -- the one field that says which code produced the run.
     git = experiments.git_head_info(Path(__file__).resolve().parent)
     models = experiments.model_hashes()
+    # An explicit tag wins; otherwise the checkout names itself, so a fleet
+    # launched at a release records that release without being told.
+    run_tag = args.run_tag or git.get("describe")
     inputs = experiments.gather_inputs(
         dir_path, centerlines, truth if truth.exists() else None
     )
@@ -311,6 +325,7 @@ def main() -> None:
             str(centerlines),
             "--output",
             str(output_iiif),
+            *(["--run-tag", run_tag] if run_tag else []),
         ],
     )
 
@@ -334,7 +349,7 @@ def main() -> None:
         run_id,
         georef_extra,
         inputs,
-        git | {"models": models},
+        git | {"models": models, "run_tag": run_tag},
         command,
         truth if truth.exists() else None,
         output_iiif,

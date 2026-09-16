@@ -257,7 +257,7 @@ def keymap_sheets(local: Path) -> list[str]:
     ]
 
 
-def run_chain(local: Path, work: FitWork) -> None:
+def run_chain(local: Path, work: FitWork, run_tag: str | None = None) -> None:
     """split, adjacency, keymap, ocr, fit -- the order `run-loc` uses.
 
     adjacency runs before keymap so its mutual edges can repair the key map's
@@ -299,7 +299,17 @@ def run_chain(local: Path, work: FitWork) -> None:
     # No --image-base-url: fit finds the item's metadata.json and builds the
     # canvases against LoC's own image servers, so the annotation is usable
     # without anything being hosted (#354).
-    stage(["mapsnap", "fit", str(local), "--tag", RUN_TAG], local)
+    stage(
+        [
+            "mapsnap",
+            "fit",
+            str(local),
+            "--tag",
+            RUN_TAG,
+            *(["--run-tag", run_tag] if run_tag else []),
+        ],
+        local,
+    )
 
 
 def upload(local: Path, bucket: str, item: Item) -> None:
@@ -324,10 +334,12 @@ def upload(local: Path, bucket: str, item: Item) -> None:
     )
 
 
-def process_item(work: FitWork, local: Path, bucket: str) -> int:
+def process_item(
+    work: FitWork, local: Path, bucket: str, *, run_tag: str | None = None
+) -> int:
     """Run the chain over a downloaded item and sync its sidecars up."""
     try:
-        run_chain(local, work)
+        run_chain(local, work, run_tag)
         upload(local, bucket, work.item)
         return len(work.pages)
     finally:
@@ -420,6 +432,16 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("--work-dir", type=Path, default=Path("/tmp/loc-fit"))
     parser.add_argument("--limit", type=int)
+    parser.add_argument(
+        "--run-tag",
+        metavar="TAG",
+        help=(
+            "Name for this corpus pass -- a cut release, say -- recorded in "
+            "every item's manifest and published annotation page. Defaults to "
+            "the worker checkout's nearest git tag, so a fleet launched at a "
+            "release names itself."
+        ),
+    )
     parser.add_argument("--dry-run", action="store_true")
     return parser
 
@@ -498,7 +520,7 @@ def main() -> None:
                 done += 1
                 continue
             try:
-                pages += process_item(work, local, args.bucket)
+                pages += process_item(work, local, args.bucket, run_tag=args.run_tag)
             except OSError as error:
                 print(f"{work.item.item}: FAILED: {error}", file=sys.stderr, flush=True)
                 with broken.open("a") as handle:

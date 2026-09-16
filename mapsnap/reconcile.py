@@ -103,6 +103,12 @@ KEYMAP_CLAMP = 3.0
 # printed note contradicted by the pose pays W_NOTE_MISMATCH.
 W_RUNG_OFF = 0.15
 W_NOTE_MISMATCH = 0.30
+# How close (in log2) a pose must sit to a rung, or to its printed note, to
+# claim it. Mirrors osm_snap_experiment.RUNG_NOTE_BAND, which cannot be
+# imported at module level (the two modules import each other lazily);
+# reconcile_test asserts the two stay equal.
+RUNG_NOTE_BAND = (0.80, 1.25)
+RUNG_TOLERANCE = 0.25
 # Robust stamp factor between chosen neighbor poses, clamped so one junk edge
 # cannot dominate (the fargo p64 lesson).
 W_STAMP = 0.30
@@ -458,6 +464,67 @@ def normalize_name_penalty(node: "PageNode") -> None:
             hypothesis.scores["name"] = (hypothesis.scores["name"] or 0.0) + floor
 
 
+def rung_verdict(offset: float, note_ratio: float | None) -> dict:
+    """Which scale rung a pose sits on, what decided it, and what that costs.
+
+    ``offset`` is the pose's log2 metres-per-pixel relative to the volume family
+    median, so an integer offset is a clean power-of-two rung -- a half- or
+    double-scale sheet -- and costs nothing; second families are legitimate.
+    Only a scale BETWEEN rungs pays. A printed note that disagrees with the pose
+    it was measured against outranks the family in both directions.
+
+    Returned as a record rather than a bare penalty so the provenance file can
+    state the conclusion (which rung, and who decided) next to the evidence
+    (the offset, the note ratio, and the distance to each).
+    """
+    rung = round(offset)
+    distance = abs(offset - rung)
+    note_decides = note_ratio is not None and not (
+        RUNG_NOTE_BAND[0] <= note_ratio <= RUNG_NOTE_BAND[1]
+    )
+    if note_decides and note_ratio is not None:
+        note_offset = offset - math.log2(note_ratio)
+        agrees = abs(note_offset) < RUNG_TOLERANCE
+        return {
+            "verdict": "matches printed note" if agrees else "contradicts printed note",
+            "decided_by": "printed note",
+            "rung": rung,
+            "scale_ratio": round(2.0**offset, 4),
+            "offset_log2": round(offset, 4),
+            "rung_distance": round(distance, 4),
+            "note_ratio": round(note_ratio, 4),
+            "note_offset_log2": round(note_offset, 4),
+            "penalty": 0.0 if agrees else W_NOTE_MISMATCH,
+        }
+    on_rung = distance < RUNG_TOLERANCE
+    return {
+        "verdict": "on rung" if on_rung else "between rungs",
+        "decided_by": "volume family",
+        "rung": rung,
+        "scale_ratio": round(2.0**offset, 4),
+        "offset_log2": round(offset, 4),
+        "rung_distance": round(distance, 4),
+        "note_ratio": round(note_ratio, 4) if note_ratio is not None else None,
+        "note_offset_log2": None,
+        "penalty": 0.0 if on_rung else W_RUNG_OFF,
+    }
+
+
+# Recorded when the volume has too few fitted pages to have a scale family at
+# all, so the provenance file explains the absence instead of omitting the key.
+NO_FAMILY_RUNG = {
+    "verdict": "no volume family",
+    "decided_by": None,
+    "rung": None,
+    "scale_ratio": None,
+    "offset_log2": None,
+    "rung_distance": None,
+    "note_ratio": None,
+    "note_offset_log2": None,
+    "penalty": 0.0,
+}
+
+
 def unary_energy(
     hypothesis: Hypothesis,
     is_published: bool,
@@ -503,16 +570,13 @@ def unary_energy(
             KEYMAP_CLAMP, (keymap_dist / keymap_radius_m) ** 2
         )
     if family_log2 is not None:
-        # Distance to the nearest integer rung of the volume family. Being on
-        # ANY rung is free (second families are legitimate); between rungs
-        # pays; a printed note overrides in both directions.
-        offset = pose_scale_log2(hypothesis.affine) - family_log2
-        rung_distance = abs(offset - round(offset))
-        if note_ratio is not None and not (0.8 <= note_ratio <= 1.25):
-            note_offset = offset - math.log2(note_ratio)
-            terms["rung"] = 0.0 if abs(note_offset) < 0.25 else W_NOTE_MISMATCH
-        else:
-            terms["rung"] = 0.0 if rung_distance < 0.25 else W_RUNG_OFF
+        verdict = rung_verdict(
+            pose_scale_log2(hypothesis.affine) - family_log2, note_ratio
+        )
+        terms["rung"] = verdict["penalty"]
+    else:
+        verdict = NO_FAMILY_RUNG
+    hypothesis.scores["rung"] = verdict
     if hypothesis.scores.get("ambiguous"):
         terms["ambiguity"] = W_AMBIG
     if hypothesis.status == sidecar.CONTRADICTED:
@@ -1262,6 +1326,7 @@ def provenance_record(
                 "name": number(hyp.scores.get("name")),
                 "containment": number(hyp.scores.get("containment")),
                 "keymap_dist_m": number(hyp.scores.get("keymap_dist_m")),
+                "rung": hyp.scores.get("rung"),
                 "center": (
                     list(pose_center(hyp.affine, w, h))
                     if hyp.affine is not None
