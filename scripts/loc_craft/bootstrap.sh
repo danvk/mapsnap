@@ -71,10 +71,18 @@ trap finish EXIT
 
 # apt mirrors fail transiently, and a bare failure here used to strand the
 # instance. Retry, then give up through the trap so it uploads and powers off.
+#
+# DPkg::Lock::Timeout makes apt WAIT for the dpkg lock instead of failing on it.
+# Ubuntu runs unattended-upgrades at boot, which holds that lock for minutes,
+# and retrying on a 15/30/45s ladder simply loses the race: a loc-fit instance
+# died that way having done no work, because all three attempts landed inside
+# one unattended-upgrades run. Waiting is the right response to a lock held by
+# a process that will finish; the retries stay for the mirror failures they
+# were written for.
 apt_retry() {
   local attempt
   for attempt in 1 2 3; do
-    if "$@"; then return 0; fi
+    if "$@" -o DPkg::Lock::Timeout=600; then return 0; fi
     echo "apt attempt $attempt failed: $*"
     sleep $((attempt * 15))
   done
