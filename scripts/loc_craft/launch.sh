@@ -59,6 +59,12 @@ case "$EXTRA_ARGS" in
   *--*)
     for word in $EXTRA_ARGS; do
       case "$word" in
+        # Flags that take no value are legitimately last. Without this, a
+        # perfectly good --extra-args "--manifest s3://... --gpu" is rejected
+        # as a dangling flag, which is the opposite of the mistake the guard
+        # was written to catch (an unset "$QUEUE" leaving --queue bare).
+        --gpu|--dry-run|--force|--check-args|--resume|--no-snap|--omit-missing)
+          dangling="" ;;
         --*) dangling=$word ;;
         *) dangling="" ;;
       esac
