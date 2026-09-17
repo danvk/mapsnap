@@ -44,6 +44,7 @@ affine. Detecting the page numbers after georeferencing would leave a first run 
 """
 
 import argparse
+import json
 import sys
 from collections.abc import Iterable
 from pathlib import Path
@@ -52,7 +53,7 @@ from mapsnap.keymap.adjacency_assign import repair_volume
 from mapsnap.keymap.fit_keymap import collapse_skeleton_keys, volume_page_keys
 from mapsnap.keymap.log import append_keymap_log
 from mapsnap.keymap.records import keymap_path, page_key_sort
-from mapsnap.utils import default_centerlines, run_cmd
+from mapsnap.utils import default_centerlines, image_stem, run_cmd
 
 
 def format_page_spec(keys: Iterable[int | str]) -> str:
@@ -172,6 +173,70 @@ def build_parser() -> argparse.ArgumentParser:
         ),
     )
     return parser
+
+
+# Below this many confident reads, the auto floor is not a measurement of the
+# sheet's text. LA 1949 vol 14 derived a 105px floor from three title-block
+# words and discarded 85% of its real street labels.
+MIN_CONFIDENT_READS = 20
+
+
+def georef_log_lines(image_path: str | Path) -> list[str]:
+    """Whether the key map got a pose, and the numbers that decided it.
+
+    georef writes nothing and exits 0 when it cannot fit a sheet, so a key map
+    that failed looked exactly like one that was never tried. Los Angeles 1949
+    vol 14 lost its p0a that way and it cost the volume 25 points; the log had
+    recorded every ingredient of the failure (three cartouche reads, all
+    title-block words) and never said the fit then failed, so there was no
+    reason to read it.
+
+    The floor is the same statistic georef derives -- the p25 of confident
+    reads' short sides -- because a floor set from a handful of unrepresentative
+    detections is how the reads get discarded.
+    """
+    from mapsnap.georef_from_labels import compute_auto_min_short_side
+
+    image_path = Path(image_path)
+    stem = image_stem(str(image_path))
+    reads = image_path.parent / f"{stem}.streets.json"
+    lines: list[str] = []
+    if not reads.exists():
+        lines.append("no reads file: ocr wrote nothing for this sheet")
+    else:
+        document = json.loads(reads.read_text())
+        detections = document.get("streets") or []
+        confident = [d for d in detections if (d.get("confidence") or 0) >= 0.5]
+        lines.append(
+            f"reads: {len(detections)} detection(s), {len(confident)} at "
+            "confidence >= 0.5"
+        )
+        floor = compute_auto_min_short_side([str(image_path)], 0.5, 25.0)
+        if floor is not None:
+            lines.append(f"auto min-short-side: {floor:.1f}px")
+        if len(confident) < MIN_CONFIDENT_READS:
+            lines.append(
+                f"  only {len(confident)} confident read(s): a floor derived "
+                "from so few is not a measurement of this sheet's text"
+            )
+    pose = image_path.parent / f"{stem}.georef.json"
+    if not pose.exists():
+        lines.append("NO POSE WRITTEN: this key map places no page")
+        return lines
+    document = json.loads(pose.read_text())
+    corners = document.get("corners")
+    if not corners:
+        lines.append("NO POSE WRITTEN: georef.json has no corners")
+        return lines
+    lat = sum(point[1] for point in corners) / len(corners)
+    lon = sum(point[0] for point in corners) / len(corners)
+    inlier_x = sum(1 for x in document.get("intersections", []) if x.get("inlier"))
+    inlier_s = sum(1 for x in document.get("streets", []) if x.get("inlier"))
+    lines.append(
+        f"pose: {lat:.5f},{lon:.5f} from {inlier_x} inlier intersection(s) "
+        f"and {inlier_s} inlier street(s)"
+    )
+    return lines
 
 
 def main() -> None:
@@ -299,6 +364,8 @@ def main() -> None:
             *image_args,
         ]
     )
+    for image in images:
+        append_keymap_log(image, "georef", georef_log_lines(image))
 
     # 4. Segment the colored block around each page number (one key map at a time).
     for image in images:
