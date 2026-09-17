@@ -698,11 +698,22 @@ def awaiting_upload(plan: ItemPlan, settings: Settings) -> bool:
 
 
 def item_complete(plan: ItemPlan, settings: Settings) -> bool:
-    """Whether resume can skip the item outright, from local markers only."""
+    """Whether resume can skip the item outright, from local markers only.
+
+    A finished marker predates ``--raw-keys``: these items were mirrored when
+    their page-1 key map was not a sheet worth keeping raw, so the marker says
+    "done" about a different question. An item missing a raw copy the caller
+    has now named is not done, whatever the marker says -- otherwise a mop-up
+    run reports "0 to do" and fetches nothing, which is exactly what it did.
+    """
     state = settings.out_dir / item_relative(plan)
-    if settings.upload:
-        return (state / UPLOADED).exists()
-    return (state / DONE).exists()
+    marker = UPLOADED if settings.upload else DONE
+    if not (state / marker).exists():
+        return False
+    return all(
+        (state / "raw" / f"{key}.jpg").exists()
+        for key in settings.raw_keys.get(plan.item, frozenset())
+    )
 
 
 def broken_sheets(plan: ItemPlan, settings: Settings) -> list[str]:

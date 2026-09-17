@@ -649,3 +649,70 @@ def test_named_keys_do_not_leak_between_items(tmp_path) -> None:
     )
     _, raw = sheet_outputs(tmp_path, sheet, frozenset({"p1"}))
     assert raw is None
+
+
+def _plan(tmp_path, item="sanborn00003_001"):
+    from mapsnap.loc_mirror import ItemPlan, Sheet
+
+    return ItemPlan(
+        item=item,
+        state="alabama",
+        year="1885",
+        city="x",
+        sheets=[
+            Sheet(
+                seq=2,
+                stem="s2",
+                key="p1",
+                source="torrent-jp2",
+                bytes=1,
+                storage_dir="gmd/x",
+            )
+        ],
+    )
+
+
+def test_a_finished_item_is_unfinished_when_a_named_raw_copy_is_missing(tmp_path):
+    """The finished marker predates --raw-keys and answers a different question.
+
+    Without this the mop-up run reported "846 items selected, 0 to do".
+    """
+    from mapsnap.loc_mirror import Settings, item_complete, item_relative
+
+    plan = _plan(tmp_path)
+    settings = Settings(
+        jp2_dir=tmp_path,
+        out_dir=tmp_path,
+        staging_dir=tmp_path,
+        mirror="http://x",
+        bucket="s3://b",
+        upload=True,
+        raw_keys={plan.item: frozenset({"p1"})},
+    )
+    state = tmp_path / item_relative(plan)
+    (state).mkdir(parents=True, exist_ok=True)
+    (state / ".uploaded").touch()
+    assert not item_complete(plan, settings), "the named raw sheet is missing"
+
+    (state / "raw").mkdir()
+    (state / "raw" / "p1.jpg").touch()
+    assert item_complete(plan, settings), "now it really is done"
+
+
+def test_items_without_named_keys_are_unaffected(tmp_path):
+    """The marker still settles it for every other item."""
+    from mapsnap.loc_mirror import Settings, item_complete, item_relative
+
+    plan = _plan(tmp_path)
+    settings = Settings(
+        jp2_dir=tmp_path,
+        out_dir=tmp_path,
+        staging_dir=tmp_path,
+        mirror="http://x",
+        bucket="s3://b",
+        upload=True,
+    )
+    state = tmp_path / item_relative(plan)
+    state.mkdir(parents=True, exist_ok=True)
+    (state / ".uploaded").touch()
+    assert item_complete(plan, settings)
