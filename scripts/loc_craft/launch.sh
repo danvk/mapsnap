@@ -164,7 +164,20 @@ launch_shard() {
   # reclaimed on 2026-09-16. AWS scores a single-type request 1-3 out of 10 for
   # capacity and a diversified list 9, so every type is tried in every zone
   # before a shard is called a failure (#448).
-  local types=${INSTANCE_TYPE//,/ }
+  # Rotate the type list by shard number, exactly as the zone list is rotated
+  # below. Trying the list in order means the first type wins wherever it has
+  # capacity, so a 32-instance fleet lands entirely on one type and shares one
+  # pool -- fallback diversity, not spread. Rotating spreads the fleet across
+  # every type up front, which is what makes a pool-wide reclamation cost a
+  # quarter of the fleet instead of all of it (#448 proposes Spot Fleet, whose
+  # capacity-optimized strategy does this properly).
+  local all_types=(${INSTANCE_TYPE//,/ })
+  local types=""
+  local n=${#all_types[@]}
+  local i
+  for ((i = 0; i < n; i++)); do
+    types+="${all_types[$(((shard + i) % n))]} "
+  done
   if [ "$market" = spot ]; then
     # Rotate the price-ordered list by the shard number so consecutive shards
     # start in different pools.
