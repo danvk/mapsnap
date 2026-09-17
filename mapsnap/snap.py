@@ -31,7 +31,7 @@ NCC matching (roughly 10-30 minutes per volume); candidates are cached in
 artifacts/osm_snap/candidates.jsonl and reruns are seconds.
 
 Usage:
-    mapsnap snap DIR [--rescue-only] [--recompute]
+    mapsnap snap DIR [--rescue-only] [--recompute] [--other-edition FILE.iiif.json]
 """
 
 import argparse
@@ -73,6 +73,17 @@ def main() -> None:
             "so expect about a gigabyte of memory apiece on a large volume."
         ),
     )
+    parser.add_argument(
+        "--other-edition",
+        type=Path,
+        default=None,
+        metavar="FILE",
+        help=(
+            "A IIIF annotation placing another edition of this atlas. A rescue "
+            "search starts from its same-numbered sheet where the key map "
+            "cannot place the page or disagrees with it."
+        ),
+    )
     args = parser.parse_args()
 
     # The production gates are frozen alongside the selection code (see the
@@ -96,6 +107,7 @@ def main() -> None:
         recompute=args.recompute,
         vis=False,
         num_workers=args.num_workers,
+        other_edition=args.other_edition,
     )
     cmd_select(
         args.dir,

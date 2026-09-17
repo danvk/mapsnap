@@ -714,3 +714,101 @@ def test_with_incumbent_scale_adds_a_missing_rung_and_dedupes_an_existing_one():
         [ScalePrior(0.55, 0.05, "volume-median")], np.array(affine())
     )
     assert [p.source for p in same] == ["volume-median"]
+
+
+def other_edition_context(tmp_path) -> VolumeContext:
+    """A volume context carrying an other-edition prior that places sheet P1."""
+    from mapsnap.other_edition_prior import OtherEditionPrior
+
+    prior = OtherEditionPrior(
+        source="other-edition.iiif.json",
+        centers={"P1": (-87.6, 41.9)},
+        signature="sig",
+    )
+    return VolumeContext(
+        volume=tmp_path,
+        units=[],
+        panel_units=[],
+        features=[],
+        feature_index=FeatureIndex([]),
+        locator=None,
+        volume_m_per_px=0.6,
+        adjacency={},
+        region_centroids={},
+        filter_params={},
+        radius_m=250.0,
+        radius_source="calibrated",
+        median_theta_deg=None,
+        other_edition=prior,
+    )
+
+
+def keymapped_unit(center: tuple[float, float]):
+    """A rescue-state whole page whose key map places it at ``center``."""
+    lon, lat = center
+    return dataclasses.replace(
+        make_unit("nofit"),
+        stem="p1n",
+        keymap_centers=[center],
+        keymap_regions=[
+            [[lon, lat], [lon + 0.0001, lat], [lon + 0.0001, lat - 0.0001]]
+        ],
+    )
+
+
+def test_page_other_edition_plan_serves_only_a_rescue_state_whole_page(tmp_path):
+    """The adapter from PageUnit to other_edition_prior.other_edition_plan."""
+    from mapsnap.osm_snap_experiment import page_other_edition_plan
+
+    context = other_edition_context(tmp_path)
+    # No key map at all: replaced, at the prior's 50 m window.
+    unplaced = dataclasses.replace(make_unit("nofit"), stem="p1n")
+    plan = page_other_edition_plan(context, unplaced, context.radius_m)
+    assert (plan.sheet_center, plan.replaced_key_map) == ((-87.6, 41.9), True)
+    assert (plan.centers, plan.regions, plan.radius_m) == ([(-87.6, 41.9)], None, 50.0)
+    # A key map 8 km out is wrong; one 100 m out agrees and is left alone.
+    far = page_other_edition_plan(context, keymapped_unit((-87.7, 41.8)), 250.0)
+    assert far.replaced_key_map
+    near = page_other_edition_plan(
+        context, keymapped_unit((-87.6, 41.9 - 100.0 / 110_540.0)), 250.0
+    )
+    assert not near.replaced_key_map
+    assert near.sheet_center == (-87.6, 41.9)  # served, but the key map stands
+    assert near.centers == [(-87.6, 41.9 - 100.0 / 110_540.0)] + near.centers[1:]
+    assert near.radius_m == 250.0
+    # A fitted page, a panel, a sheet the other edition never placed, and none.
+    for unit in (
+        dataclasses.replace(make_unit("fitted"), stem="p1n"),
+        dataclasses.replace(make_unit("nofit"), stem="p1n__1"),
+        dataclasses.replace(unplaced, stem="p2n"),
+    ):
+        plan = page_other_edition_plan(context, unit, 250.0)
+        assert (plan.sheet_center, plan.replaced_key_map) == (None, False)
+    plain = page_other_edition_plan(
+        dataclasses.replace(context, other_edition=None),
+        keymapped_unit((-87.7, 41.8)),
+        250.0,
+    )
+    assert (plain.sheet_center, plain.replaced_key_map, plain.radius_m) == (
+        None,
+        False,
+        250.0,
+    )
+    assert plain.centers[0] == (-87.7, 41.8)  # page_keymap_data's own answer
+
+
+def test_a_cached_record_is_stale_when_the_other_edition_prior_changes():
+    """A record searched from the key map must not serve an edition-seeded run."""
+    record = {
+        "fit_state": "nofit",
+        "georef_mtime": None,
+        "status": "ok",
+        "other_edition_signature": "sig",
+    }
+    unit = make_unit("nofit")
+    assert candidates_record_fresh(record, unit, None, other_edition_signature="sig")
+    # A different annotation, and no other edition at all.
+    assert not candidates_record_fresh(
+        record, unit, None, other_edition_signature="other"
+    )
+    assert not candidates_record_fresh(record, unit, None)

@@ -130,3 +130,43 @@ def test_clear_derived_sidecars_clears_snap_caches(tmp_path: Path):
     assert not (snap / "candidates.jsonl").exists()
     assert not (snap / "selection_volume.jsonl").exists()
     assert not (street / "candidates.jsonl").exists()
+
+
+def test_fit_checks_the_other_edition_before_running_anything(monkeypatch, tmp_path):
+    """Both errors fire before fit touches the directory, so this reads no data."""
+    import sys
+
+    import pytest
+
+    from mapsnap import fit
+
+    annotation = tmp_path / "main.iiif.json"
+    annotation.write_text("{}")
+    for argv in (
+        # snap is what spends it, so --no-snap makes the flag meaningless...
+        ["fit", "d", "--other-edition", str(annotation), "--no-snap"],
+        # ...and a path that is not a file would fail only after the georef pass.
+        ["fit", "d", "--other-edition", str(tmp_path / "absent.iiif.json")],
+        ["fit", "d", "--other-edition", str(tmp_path)],
+    ):
+        monkeypatch.setattr(sys, "argv", argv)
+        with pytest.raises(SystemExit):
+            fit.main()
+
+
+def test_two_editions_never_share_a_run_id_token():
+    """Every volume's annotation is called main.iiif.json; the name alone collides."""
+    from mapsnap.fit import other_edition_token
+
+    assert other_edition_token("data/chicago_il_1906_vol_1/main.iiif.json") == (
+        "chicago_il_1906_vol_1/main.iiif.json"
+    )
+    assert other_edition_token(
+        "data/chicago_il_1906_vol_1/main.iiif.json"
+    ) != other_edition_token("data/queens_ny_1947_vol_1/main.iiif.json")
+    # An absolute path spells the same as a relative one, so a run id does not
+    # move with the checkout.
+    assert other_edition_token("/srv/data/sib/main.iiif.json") == other_edition_token(
+        "data/sib/main.iiif.json"
+    )
+    assert other_edition_token("main.iiif.json") == "main.iiif.json"

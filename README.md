@@ -343,6 +343,7 @@ The four arguments here are:
 - `mapsnap fit`: another pipeline that runs:
   - `mapsnap georef`: georeferences images based on street detections, writing out `georef.json` files where it can find a good fit.
   - `mapsnap snap`: the geometry-first channel — matches each page's road-UNet mask directly against OSM street geometry to rescue pages the street-name georeferencer couldn't place, replace fits that OSM actively contradicts, and refine mid-tier fits to street-grid precision. Writes `georef-snap.json` sidecars for the arbiter to weigh. Skip with `--no-snap`.
+  - `mapsnap snap --other-edition FILE.iiif.json`: if another edition of the same atlas has been georeferenced, pass its IIIF annotation. Sanborn kept sheet numbers across editions, so sheet N there says where this volume's sheet N is, and a page the key map cannot place — or places more than 200 m away — searches from it instead of from the key map.
   - `mapsnap iiif`: produces a IIIF Georeference Extension with clipping masks. You can find examples of these in the `gallery` directory. View them on Allmaps.
   - `mapsnap compare`: compares the generated IIIF file with the human-generated one from OIM, producing a report on the accuracy of the fit.
 
