@@ -593,3 +593,14 @@ def test_threads_per_worker_shares_the_cores_without_oversubscribing() -> None:
     assert threads_per_worker(8, 8) == 1
     assert threads_per_worker(8, 3) == 2
     assert threads_per_worker(4, 16) == 1
+
+
+def test_detect_text_sidecar_flag_controls_the_streets_file(tmp_path, monkeypatch):
+    """The write is a side effect callers must be able to decline."""
+    import inspect
+
+    from mapsnap.detect_text import detect_text
+
+    params = inspect.signature(detect_text).parameters
+    assert "sidecar" in params
+    assert params["sidecar"].default is True, "existing callers keep the file"

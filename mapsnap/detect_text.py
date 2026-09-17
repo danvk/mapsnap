@@ -647,8 +647,14 @@ def detect_text(
     craft_scale: float = 1.0,
     tile_size: int = 2560,
     fallback_vocab: list[str] | None = None,
+    sidecar: bool = True,
 ) -> list[dict]:
     """Run CRAFT-based text detection at 0°, 90°, and 270° and return all results.
+
+    ``sidecar=False`` returns the reads without writing ``<stem>.streets.json``.
+    A caller running its own vocabulary over a sheet -- the cartouche pass, say
+    -- wants the reads, not the page's street file, and writing it there
+    silently replaced the real OCR of that sheet.
 
     Runs three passes to catch both horizontal and vertical text. Polygons from
     rotated passes are mapped back to original image coordinates. Returns all raw
@@ -769,8 +775,9 @@ def detect_text(
         "paper": paper,
         "streets": all_detections,
     }
-    with open(_streets_path(image_path), "w") as f:
-        json.dump(streets_doc, f, indent=2)
+    if sidecar:
+        with open(_streets_path(image_path), "w") as f:
+            json.dump(streets_doc, f, indent=2)
 
     return all_detections
 
