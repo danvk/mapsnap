@@ -228,3 +228,19 @@ def test_lease_without_a_handle_is_a_no_op(monkeypatch) -> None:
     monkeypatch.setattr(work_queue, "extend", boom)
     with work_queue.lease("u", None, seconds=1):
         pass
+
+
+def test_shuffle_is_reproducible_and_actually_reorders() -> None:
+    """Any prefix of the run should sample the corpus, not the first states."""
+    import random
+
+    names = [f"sanborn{i:05d}_001" for i in range(500)]
+    first = list(names)
+    random.Random(0).shuffle(first)
+    second = list(names)
+    random.Random(0).shuffle(second)
+    assert first == second, "same seed must give the same order"
+    assert first != names, "shuffling must change the order"
+    assert sorted(first) == sorted(names), "shuffling must not lose items"
+    # A prefix should span the corpus rather than clustering at the start.
+    assert max(int(n[7:12]) for n in first[:50]) > 400

@@ -33,6 +33,7 @@ queue instead, where it can be looked at rather than retried blindly.
 
 import argparse
 import json
+import random
 import re
 import sys
 import threading
@@ -355,6 +356,19 @@ def main(argv: list[str] | None = None) -> int:
     )
     filled.add_argument("--limit", type=int, help="Send only this many (a pilot).")
     filled.add_argument(
+        "--shuffle",
+        nargs="?",
+        const=0,
+        type=int,
+        metavar="SEED",
+        help=(
+            "Shuffle the items before sending, so any prefix of the run is a "
+            "representative sample of the corpus rather than the first states "
+            "alphabetically. Takes an optional seed (default 0) so a fill can "
+            "be reproduced."
+        ),
+    )
+    filled.add_argument(
         "--run-tag",
         metavar="TAG",
         help=(
@@ -385,6 +399,15 @@ def main(argv: list[str] | None = None) -> int:
 
         manifest = resolve_manifest(args.manifest, args.bucket, args.work_dir)
         names = [item.item for item in read_manifest(manifest)]
+        if args.shuffle:
+            # The manifest is ordered by state, so draining it in order finishes
+            # Alabama before it starts Wyoming. A run that dies partway then has
+            # complete coverage of a few states and none of the rest, which is
+            # the least useful shape for a corpus that is interesting precisely
+            # for its breadth. Shuffling makes any prefix a representative
+            # sample, and it spreads the big-city volumes -- which cluster by
+            # state -- evenly over the run instead of in bursts.
+            random.Random(args.shuffle).shuffle(names)
         if args.limit:
             names = names[: args.limit]
         sent = fill_queue(args.url, names, args.run_tag)
