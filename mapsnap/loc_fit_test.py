@@ -190,12 +190,16 @@ def test_run_chain_derives_panel_boxes_and_reads_effective_pages(
     (tmp_path / "raw").mkdir()
     for name in ("p0.jpg", "p0__1.jpg"):
         (tmp_path / "raw" / name).write_bytes(b"")
-    write_keymaps_record(tmp_path, ["p0__1"])
-
     commands: list[list[str]] = []
-    monkeypatch.setattr(
-        loc_fit, "stage", lambda command, local: commands.append(command)
-    )
+
+    def record(command, local):
+        commands.append(command)
+        # The chain identifies the key map itself now, so the record appears
+        # when keymap-detect runs rather than being seeded beforehand.
+        if command[1] == "keymap-detect":
+            write_keymaps_record(tmp_path, ["p0__1"])
+
+    monkeypatch.setattr(loc_fit, "stage", record)
     work = plan_fit(
         ALPHA,
         ["p1.jpg", "p2.jpg", "p1.boxes.json", "p2.boxes.json"],
@@ -206,6 +210,7 @@ def test_run_chain_derives_panel_boxes_and_reads_effective_pages(
 
     assert [c[1] for c in commands] == [
         "split",
+        "keymap-detect",
         "craft",
         "adjacency",
         "keymap",
@@ -214,16 +219,18 @@ def test_run_chain_derives_panel_boxes_and_reads_effective_pages(
     ]
     names = lambda c: {Path(a).name for a in c if a.endswith(".jpg")}
     assert names(commands[0]) == {"p1.jpg", "p2.jpg"}  # split runs on the parents
-    craft = commands[1]
+    by_stage = {c[1]: c for c in commands}
+    craft = by_stage["craft"]
     assert "--resume" in craft
     assert names(craft) == {"p1__1.jpg", "p1__2.jpg", "p2.jpg", "p0.jpg", "p0__1.jpg"}
-    assert commands[3][2:] == [str(tmp_path / "raw" / "p0__1.jpg")]  # the recorded key
-    assert names(commands[4]) == {
+    # the recorded key, now identified by this run rather than read from S3
+    assert by_stage["keymap"][2:] == [str(tmp_path / "raw" / "p0__1.jpg")]
+    assert names(by_stage["ocr"]) == {
         "p1__1.jpg",
         "p1__2.jpg",
         "p2.jpg",
     }  # not the split parent
-    assert commands[5][:5] == ["mapsnap", "fit", str(tmp_path), "--tag", "mapsnap"]
+    assert by_stage["fit"][:5] == ["mapsnap", "fit", str(tmp_path), "--tag", "mapsnap"]
 
 
 def test_resolve_counties_downloads_s3_urls_by_basename(
@@ -550,3 +557,66 @@ def test_the_done_marker_is_not_the_keymap_page() -> None:
     """Both end in .iiif.json; retiring an item on the wrong one would be silent."""
     assert DONE_MARKER == f"{ARCHIVE_TAG}.iiif.json"
     assert DONE_MARKER != f"{ARCHIVE_TAG}.keymap.iiif.json"
+
+
+def test_keymap_is_identified_after_the_split(monkeypatch, tmp_path):
+    """The mirror's keymaps.json names whole sheets; a split volume needs panels.
+
+    `loc-keymaps` runs before anything is split, so it named Los Angeles 1949
+    vol 14's key map `p0a` -- the whole sheet, key map AND p1499 inset. A local
+    run splits first and names `pa__2`, the panel that is actually the key map.
+    Identifying here, after the split, is what makes the two agree.
+    """
+    from mapsnap import loc_fit
+
+    commands: list[list[str]] = []
+    monkeypatch.setattr(
+        loc_fit, "stage", lambda command, local: commands.append(command)
+    )
+    work = plan_fit(ALPHA, present(2), County("US01001"), TAG)
+    loc_fit.run_chain(tmp_path, work, TAG)
+
+    names = [c[1] for c in commands]
+    assert names.index("keymap-detect") > names.index("split"), (
+        "identification must see the panels the split produced"
+    )
+    assert names.index("keymap-detect") < names.index("craft"), (
+        "craft derives boxes for the raw key-map sheets this names"
+    )
+    assert "keymap-detect" in names and names.index("keymap-detect") < (
+        names.index("ocr")
+    )
+
+
+def test_keymap_detect_is_given_the_volume_not_the_pages(monkeypatch, tmp_path):
+    """It takes a volume directory and writes keymaps.json into it."""
+    from mapsnap import loc_fit
+
+    commands: list[list[str]] = []
+    monkeypatch.setattr(
+        loc_fit, "stage", lambda command, local: commands.append(command)
+    )
+    work = plan_fit(ALPHA, present(2), County("US01001"), TAG)
+    loc_fit.run_chain(tmp_path, work, TAG)
+
+    detect = next(c for c in commands if c[1] == "keymap-detect")
+    assert detect[2:] == [str(tmp_path)]
+
+
+def test_the_mirrors_keymap_record_is_dropped_before_identifying(monkeypatch, tmp_path):
+    """A stale whole-sheet record must not survive a failed identification."""
+    from mapsnap import loc_fit
+
+    stale = tmp_path / "keymaps.json"
+    stale.write_text('{"keys": ["p0a"]}')
+    seen: list[bool] = []
+    monkeypatch.setattr(
+        loc_fit,
+        "stage",
+        lambda command, local: (
+            seen.append(stale.exists()) if command[1] == "keymap-detect" else None
+        ),
+    )
+    work = plan_fit(ALPHA, present(2), County("US01001"), TAG)
+    loc_fit.run_chain(tmp_path, work, TAG)
+    assert seen == [False], "the mirror's record is gone before identification runs"

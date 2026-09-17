@@ -85,6 +85,9 @@ COUNTY_PREFIX = "osm-by-county"
 # What `default_centerlines` looks for beside the pages; load_centerlines reads
 # the .pbf directly, so the county extract needs no conversion (#408).
 CENTERLINES_NAME = "centerlines.osm.pbf"
+# The mirror's key-map record, written by `loc-keymaps` before anything is
+# split. This chain re-derives it after the split instead (see run_chain).
+KEYMAPS_NAME = "keymaps.json"
 # `fit`'s own archive name and the annotation filename. NOT the run tag: that
 # names a whole corpus pass and comes from the queue message.
 ARCHIVE_TAG = "mapsnap"
@@ -420,6 +423,23 @@ def run_chain(local: Path, work: FitWork, run_tag: str | None = None) -> None:
     """
     pages = [str(local / name) for name in work.pages]
     stage(["mapsnap", "split", *pages], local)
+    # Identify the key map HERE, after the split, rather than trusting the
+    # keymaps.json the mirror carries. `loc-keymaps` runs before anything is
+    # split, so it names the whole sheet -- p0a -- while a local run, splitting
+    # first, names the panel that is actually the key map -- pa__2. The keymap
+    # pipeline then ran on the whole sheet, which for Los Angeles 1949 vol 14
+    # meant fitting one transform across the key map AND its p1499 inset.
+    # `mapsnap split` already mirrors its cut onto the full-resolution copy, so
+    # by this point raw/<parent>__N.jpg exists and can be named.
+    #
+    # Costs about 15 seconds a volume, near enough independent of page count
+    # (only the low-numbered candidates are tested), against roughly 10,140
+    # vCPU-hours for the corpus: about 1%.
+    # Drop the mirror's copy first. keymap-detect writes a record either way,
+    # but an item whose identification fails partway would otherwise fall back
+    # to the stale whole-sheet answer, which is the bug being fixed.
+    (local / KEYMAPS_NAME).unlink(missing_ok=True)
+    stage(["mapsnap", "keymap-detect", str(local)], local)
     # The *effective* pages: a panel supersedes its parent, so a split sheet is
     # read panel by panel and the whole sheet is not read at all.
     effective = [str(path) for path in list_pages(local)]
