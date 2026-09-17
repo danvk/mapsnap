@@ -144,3 +144,27 @@ def test_cartouche_log_lines_mark_specific_words():
         "  MAP @0.95 (volumes, weak) at (25, 22)",
     ]
     assert cartouche_log_lines([]) == ["no cartouche words read"]
+
+
+def test_cartouche_does_not_write_the_sheets_streets_json(tmp_path, monkeypatch):
+    """detect_text writes <stem>.streets.json by default; this pass must not.
+
+    Los Angeles 1949 vol 14 lost its p0a key map to exactly this: the cartouche
+    reads landed in p0a.streets.json, `ocr --resume` skipped the sheet as done,
+    and georef fitted 3 confident detections instead of 225.
+    """
+    from mapsnap.keymap import cartouche
+
+    seen = {}
+
+    def fake_detect_text(path, vocab, **kwargs):
+        seen.update(kwargs)
+        return []
+
+    monkeypatch.setattr(cartouche, "detect_text", fake_detect_text)
+    image = tmp_path / "p0a.jpg"
+    image.touch()
+    cartouche.cartouche_reads(image)
+
+    assert seen.get("sidecar") is False, "cartouche must not write streets.json"
+    assert not (tmp_path / "p0a.streets.json").exists()

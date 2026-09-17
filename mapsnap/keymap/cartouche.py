@@ -112,7 +112,16 @@ def cartouche_reads(
     (volumes | legend | corrections) and ``specific``. Requires the sheet's
     cached CRAFT boxes, like any detect_text call.
     """
-    reads = detect_text(str(image_path), CARTOUCHE_VOCAB, min_size=10, reader=reader)
+    # sidecar=False: detect_text writes <stem>.streets.json by default, and this
+    # pass runs a five-word vocabulary over a key-map sheet. Writing it here
+    # replaced the sheet's real OCR with cartouche-only reads, and `ocr
+    # --resume` then skipped the sheet as already done. Los Angeles 1949 vol 14
+    # lost its p0a key map that way: 2,387 reads of which 3 cleared confidence
+    # 0.5, so georef's auto floor came out at 105px instead of 32 and discarded
+    # 85% of the real street labels. The volume scored 63.6% against 89.1%.
+    reads = detect_text(
+        str(image_path), CARTOUCHE_VOCAB, min_size=10, reader=reader, sidecar=False
+    )
     kept = [
         {
             **read,
