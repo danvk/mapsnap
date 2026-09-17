@@ -598,3 +598,54 @@ def test_upload_failure_survives_a_restart(
     )
     again = run_pipeline(items, settings, streams=1, decode_workers=1, progress=False)
     assert again["uploaded"] == 2 and again["items"] == 0 and len(synced) == 2
+
+
+def test_sheet_outputs_keeps_raw_for_a_named_key(tmp_path) -> None:
+    """A page-1 key map has no raw copy by default and cannot be georeferenced
+    without one; --raw-keys names the sheets identification found."""
+    from mapsnap.loc_mirror import Sheet, sheet_outputs
+
+    sheet = Sheet(
+        seq=2,
+        stem="00003_1885-0002",
+        key="p1",
+        source="torrent-jp2",
+        bytes=1,
+        storage_dir="gmd/x",
+    )
+    _, raw = sheet_outputs(tmp_path, sheet)
+    assert raw is None, "p1 is outside the families kept raw by default"
+    _, raw = sheet_outputs(tmp_path, sheet, frozenset({"p1"}))
+    assert raw == tmp_path / "raw" / "p1.jpg"
+
+
+def test_sheet_outputs_still_keeps_the_default_families(tmp_path) -> None:
+    """The exception must not become the rule: p0 was always kept."""
+    from mapsnap.loc_mirror import Sheet, sheet_outputs
+
+    sheet = Sheet(
+        seq=1,
+        stem="00003_1885-0001",
+        key="p0",
+        source="torrent-jp2",
+        bytes=1,
+        storage_dir="gmd/x",
+    )
+    _, raw = sheet_outputs(tmp_path, sheet, frozenset())
+    assert raw == tmp_path / "raw" / "p0.jpg"
+
+
+def test_named_keys_do_not_leak_between_items(tmp_path) -> None:
+    """raw_keys is per item; another volume's p1 must stay unkept."""
+    from mapsnap.loc_mirror import Sheet, sheet_outputs
+
+    sheet = Sheet(
+        seq=2,
+        stem="00009_1885-0002",
+        key="p2",
+        source="torrent-jp2",
+        bytes=1,
+        storage_dir="gmd/y",
+    )
+    _, raw = sheet_outputs(tmp_path, sheet, frozenset({"p1"}))
+    assert raw is None

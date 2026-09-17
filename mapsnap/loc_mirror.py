@@ -147,6 +147,15 @@ class Settings:
     bucket: str | None = None
     upload: bool = False
     keep_staging: bool = False
+    # item -> page keys to keep a raw copy of even though is_candidate says
+    # no. The mirror keeps raw copies of the page-0 family and letter sheets,
+    # because a raw copy of every volume's sheet 1 would be 34,000 full-
+    # resolution decodes for candidates that are almost all ordinary map pages.
+    # But `loc-keymaps` does identify page-1 key maps -- 846 of them in the
+    # 2026-09-17 backfill, every one a p1 -- and those sheets need a raw copy
+    # after all. This names them, so the exception stays as small as the
+    # evidence for it.
+    raw_keys: dict[str, frozenset[str]] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
@@ -248,10 +257,20 @@ def quarter_url(mirror: str, sheet: Sheet) -> str:
     return f"{mirror}/{source_relative(sheet, '.jpg')}"
 
 
-def sheet_outputs(staging_item: Path, sheet: Sheet) -> tuple[Path, Path | None]:
-    """(25% JPEG path, raw full-resolution path or None) for a sheet."""
+def sheet_outputs(
+    staging_item: Path,
+    sheet: Sheet,
+    raw_keys: frozenset[str] = frozenset(),
+) -> tuple[Path, Path | None]:
+    """(25% JPEG path, raw full-resolution path or None) for a sheet.
+
+    ``raw_keys`` are this item's page keys that get a raw copy regardless of
+    ``is_candidate`` -- the key maps the identification pass found outside the
+    families the mirror keeps raw by default.
+    """
     quarter = staging_item / f"{sheet.key}.jpg"
-    raw = staging_item / "raw" / f"{sheet.key}.jpg" if is_candidate(sheet.key) else None
+    wanted = is_candidate(sheet.key) or sheet.key in raw_keys
+    raw = staging_item / "raw" / f"{sheet.key}.jpg" if wanted else None
     return quarter, raw
 
 
@@ -417,7 +436,11 @@ def fetch_sheet(plan: ItemPlan, sheet: Sheet, settings: Settings) -> Fetched | N
     try:
         if not sheet.source.startswith("torrent"):
             return fetch_loc_sheet(plan, sheet, settings)
-        quarter, raw = sheet_outputs(settings.staging_dir / item_relative(plan), sheet)
+        quarter, raw = sheet_outputs(
+            settings.staging_dir / item_relative(plan),
+            sheet,
+            settings.raw_keys.get(plan.item, frozenset()),
+        )
         local = jp2_path(settings.jp2_dir, sheet)
         if local.exists() and (not sheet.bytes or local.stat().st_size == sheet.bytes):
             return Fetched(prerendered=False, bytes=0)
@@ -445,7 +468,11 @@ def fetch_sheet(plan: ItemPlan, sheet: Sheet, settings: Settings) -> Fetched | N
 
 def fetch_loc_sheet(plan: ItemPlan, sheet: Sheet, settings: Settings) -> Fetched:
     """A LoC-only sheet: its 25% rendering (and raw copy, for a candidate) straight into staging."""
-    quarter, raw = sheet_outputs(settings.staging_dir / item_relative(plan), sheet)
+    quarter, raw = sheet_outputs(
+        settings.staging_dir / item_relative(plan),
+        sheet,
+        settings.raw_keys.get(plan.item, frozenset()),
+    )
     size = 0
     if not quarter.exists():
         size += fetch(source_url(settings.mirror, sheet), quarter)
@@ -527,7 +554,11 @@ def decode_sheet(
     Whatever the download stage staged ready-made (a pre-rendered 25% JPEG) is
     kept as is; the rest is decoded from the local JP2 or TIFF.
     """
-    quarter, raw = sheet_outputs(settings.staging_dir / item_relative(plan), sheet)
+    quarter, raw = sheet_outputs(
+        settings.staging_dir / item_relative(plan),
+        sheet,
+        settings.raw_keys.get(plan.item, frozenset()),
+    )
     row = asdict(sheet)
     local = (
         jp2_path(settings.jp2_dir, sheet)
@@ -698,7 +729,9 @@ def retry_broken(plan: ItemPlan, settings: Settings) -> list[str]:
     staging_item = settings.staging_dir / item_relative(plan)
     for sheet in plan.sheets:
         if sheet.stem in broken:
-            for path in sheet_outputs(staging_item, sheet):
+            for path in sheet_outputs(
+                staging_item, sheet, settings.raw_keys.get(plan.item, frozenset())
+            ):
                 if path is not None:
                     path.unlink(missing_ok=True)
             if sheet.source.startswith("torrent"):
@@ -1093,6 +1126,19 @@ def main() -> None:
         "--items", default=None, help="Comma-separated item ids to include."
     )
     parser.add_argument(
+        "--raw-keys",
+        type=Path,
+        default=None,
+        metavar="FILE",
+        help=(
+            "JSON {item: [page keys]} naming sheets to keep a RAW copy of even "
+            "though they are outside the page-0/letter families the mirror keeps "
+            "raw by default. Written from the key maps `loc-keymaps` identified: "
+            "a page-1 key map has no raw copy and cannot be georeferenced without "
+            "one. Implies --items over the file's keys."
+        ),
+    )
+    parser.add_argument(
         "--limit", type=int, default=0, help="Stop after this many items (0 = all)."
     )
     parser.add_argument(
@@ -1126,6 +1172,19 @@ def main() -> None:
             "warning: opj_decompress not found; decoding with Pillow (several times slower)",
             file=sys.stderr,
         )
+    raw_keys: dict[str, frozenset[str]] = {}
+    if args.raw_keys:
+        raw_keys = {
+            item: frozenset(keys)
+            for item, keys in json.loads(args.raw_keys.read_text()).items()
+        }
+        print(
+            f"--raw-keys: {sum(len(v) for v in raw_keys.values())} extra raw sheet(s) "
+            f"across {len(raw_keys)} item(s)",
+            file=sys.stderr,
+        )
+        if not args.items:
+            args.items = ",".join(sorted(raw_keys))
     settings = Settings(
         jp2_dir=args.jp2_dir,
         out_dir=args.out_dir,
@@ -1134,6 +1193,7 @@ def main() -> None:
         bucket=args.bucket,
         upload=args.upload,
         keep_staging=args.keep_staging,
+        raw_keys=raw_keys,
     )
     if settings.upload and not settings.bucket:
         sys.exit("--upload needs --bucket")
