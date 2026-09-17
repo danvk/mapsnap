@@ -146,6 +146,14 @@ uv run python -c "import easyocr; easyocr.Reader(['en'], gpu=False, verbose=Fals
 # count and OMP_NUM_THREADS, so asking it again afterwards reports the cap back
 # and the line reads "4 threads each (of 4 cores)" on an 8-core box.
 CORES=$(nproc)
+# "auto" means one worker per core, which is what a diversified fleet needs: a
+# fixed count wastes half of every larger instance in the pool. Measured on an
+# 8-vCPU m5.2xlarge, one worker per core is the best configuration by a factor
+# of two in cost per sheet -- 1 worker holds the box at 13-37% CPU, 8 hold it
+# at 100% ($1.22 vs $0.54 per 1,000 sheets).
+if [ "$WORKERS" = auto ]; then
+  WORKERS=$CORES
+fi
 THREADS=$(( CORES / WORKERS ))
 [ "$THREADS" -lt 1 ] && THREADS=1
 export OMP_NUM_THREADS=$THREADS

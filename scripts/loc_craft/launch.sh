@@ -26,6 +26,7 @@ SHARDS=4
 # quota, where they fail with MaxSpotInstanceCountExceeded while 256 vCPUs of
 # Standard spot sit idle.
 INSTANCE_TYPE=""
+DRY_RUN=0
 ONLY=""
 ON_DEMAND_FROM=""
 EXTRA_ARGS=""
@@ -40,9 +41,10 @@ while [ $# -gt 0 ]; do
     --shards) SHARDS="$2"; shift 2 ;;
     --only) ONLY="$2"; shift 2 ;;   # one shard, a list, or a range: 2 / 0,3 / 4-5
     --on-demand-from) ON_DEMAND_FROM="$2"; shift 2 ;;
-    --instance-type) INSTANCE_TYPE="$2"; shift 2 ;;
+    --instance-type) INSTANCE_TYPE="$2"; shift 2 ;;   # one type, or a comma-separated list
+    --dry-run) DRY_RUN=1; shift ;;
     --extra-args) EXTRA_ARGS="$2"; shift 2 ;;
-    --workers) WORKERS="$2"; shift 2 ;;
+    --workers) WORKERS="$2"; shift 2 ;;   # a count, or "auto" for one per vCPU
     --job) JOB="$2"; shift 2 ;;
     --git-ref) GIT_REF="$2"; shift 2 ;;
     --region) REGION="$2"; shift 2 ;;
@@ -158,6 +160,11 @@ launch_shard() {
   if [ "$market" != spot ]; then
     subnets=$(printf 'any -\n'; echo "$SUBNETS")
   fi
+  # Asking for ONE instance type is what made 6 of 11 spot instances fail or be
+  # reclaimed on 2026-09-16. AWS scores a single-type request 1-3 out of 10 for
+  # capacity and a diversified list 9, so every type is tried in every zone
+  # before a shard is called a failure (#448).
+  local types=${INSTANCE_TYPE//,/ }
   if [ "$market" = spot ]; then
     # Rotate the price-ordered list by the shard number so consecutive shards
     # start in different pools.
@@ -174,13 +181,19 @@ launch_shard() {
     market_args=(--instance-market-options \
       "MarketType=spot,SpotOptions={SpotInstanceType=one-time,InstanceInterruptionBehavior=terminate}")
   fi
+  local itype
+  for itype in $types; do
   while read -r zone subnet; do
     # "-" is the unpinned attempt: no subnet, so EC2 picks a zone with capacity.
     local placement=(--subnet-id "$subnet")
     if [ "$subnet" = "-" ]; then placement=(); fi
+    if [ "$DRY_RUN" = 1 ]; then
+      echo "shard $shard/$SHARDS would try $itype ($market, $zone)"
+      return 0
+    fi
     if output=$(aws ec2 run-instances \
         --image-id "$AMI" \
-        --instance-type "$INSTANCE_TYPE" \
+        --instance-type "$itype" \
         ${placement[@]+"${placement[@]}"} \
         --iam-instance-profile "Name=$ROLE" \
         ${market_args[@]+"${market_args[@]}"} \
@@ -191,7 +204,7 @@ launch_shard() {
         --tag-specifications "ResourceType=instance,Tags=[{Key=Name,Value=$JOB-$shard},{Key=project,Value=mapsnap-craft},{Key=job,Value=$JOB},{Key=shard,Value=$shard}]" \
         --query 'Instances[0].InstanceId' --output text 2>&1); then
       instance_id=$output
-      echo "shard $shard/$SHARDS ($market, $zone): $instance_id"
+      echo "shard $shard/$SHARDS ($itype, $market, $zone): $instance_id"
       return 0
     fi
     case "$output" in
@@ -199,11 +212,12 @@ launch_shard() {
       *) echo "shard $shard: $output" >&2; return 1 ;;
     esac
   done <<< "$subnets"
+  done
   # Report why the last zone refused. Swallowing it made two separate failures
   # on 2026-09-15 -- g6.xlarge spot in both regions, and three of four zones for
   # c6i.2xlarge -- indistinguishable from a quota problem, which is a different
   # fix entirely: capacity means wait or change zone, quota means ask AWS.
-  echo "shard $shard: no $market capacity for $INSTANCE_TYPE in any zone" >&2
+  echo "shard $shard: no $market capacity for any of [$types] in any zone" >&2
   echo "shard $shard: last zone said: ${last_error:-(no error recorded)}" >&2
   return 1
 }
