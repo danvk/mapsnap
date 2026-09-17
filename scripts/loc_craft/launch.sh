@@ -185,11 +185,18 @@ launch_shard() {
     types+="${all_types[$(((shard + i) % n))]} "
   done
   if [ "$market" = spot ]; then
-    # Rotate the price-ordered list by the shard number so consecutive shards
-    # start in different pools.
-    local count offset
+    # Rotate the price-ordered list so consecutive shards start in different
+    # pools -- but NOT by the shard number alone. The type list above rotates by
+    # shard % n_types, so with four types and four zones the two rotations move
+    # in lockstep: every shard tries only the diagonal (type_i, zone_i) pairs,
+    # four of the sixteen combinations, and shards 0/4, 1/5, 2/6, 3/7 make
+    # identical requests. Measured on 2026-09-17: eight shards across four types
+    # landed 6 in us-west-2c and 2 in us-west-2a, each type in a single zone.
+    # Adding the type-cycle number walks the grid instead.
+    local count offset types_n
     count=$(echo "$SPOT_SUBNETS" | grep -c .)
-    offset=$((shard % count))
+    types_n=${#all_types[@]}
+    offset=$(((shard + shard / types_n) % count))
     if [ "$offset" -eq 0 ]; then
       subnets=$SPOT_SUBNETS   # BSD head rejects -n 0
     else
