@@ -709,9 +709,14 @@ def test_metadata_index_keeps_an_uppercase_page_suffix() -> None:
     data["sheets"][0]["key"] = "p5S"
     data["sheets"][0]["stem"] = "00015_01_1951-0005S"
     index = _load_metadata_index(data)
-    assert list(index) == ["p5S"]
+    assert "p5S" in index, "the mirror's own casing, which names the sidecars"
     # The URL parser is where the case would have been lost.
     assert _service_url_to_page_key(index["p5S"]["target"]["source"]["id"]) == "p5s"
+    # ...and that lowercased form is exactly what a georef path parses to, so
+    # the index answers it too and resolves to the same sheet. Keeping only the
+    # mirror's case published Chicago 1950 vol 1 with no annotations at all: it
+    # fitted 108 of 123 pages and every one of its sheets is lettered.
+    assert index["p5s"] is index["p5S"]
 
 
 def test_metadata_index_skips_a_sheet_missing_any_field() -> None:
@@ -882,3 +887,17 @@ def test_label_note_distinguishes_a_volume_second_annotation_page(tmp_path) -> N
             )
         else:
             assert "key map" not in page_label
+
+
+def test_page_key_lower_matches_what_a_georef_path_parses_to() -> None:
+    """The two sides must agree, or a lettered page is silently unpublished."""
+    from mapsnap.make_iiif_georef import georef_path_to_page_key, page_key_lower
+
+    for key in ("p97W", "p9N", "p5S", "p1499H"):
+        assert page_key_lower(key) == georef_path_to_page_key(
+            f"data/vol/{key}.georef-final.json"
+        )
+    # Keys with no suffix, and split panels, are untouched.
+    assert page_key_lower("p20") == "p20"
+    assert page_key_lower("p20__3") == "p20__3"
+    assert page_key_lower("p97W__2") == "p97w__2"

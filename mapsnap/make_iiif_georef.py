@@ -691,6 +691,16 @@ def loc_service_id(storage_dir: str, stem: str) -> str:
     return f"{LOC_IIIF_SERVICE}:{storage_dir.strip('/').replace('/', ':')}:{stem}"
 
 
+def page_key_lower(key: str) -> str:
+    """A page key with its letter suffix lowercased: ``p97W`` -> ``p97w``.
+
+    The form page_key_from_georef_path and page_key_from_url produce, so an
+    index built from the mirror's own casing can still answer them.
+    """
+    match = re.fullmatch(r"(p\d+)([A-Za-z]*)((?:__\d+)?)", key)
+    return f"{match.group(1)}{match.group(2).lower()}{match.group(3)}" if match else key
+
+
 def _load_metadata_index(data: dict) -> dict[str, dict]:
     """Build page_key -> item dict from the mirror's ``metadata.json``.
 
@@ -726,7 +736,7 @@ def _load_metadata_index(data: dict) -> dict[str, dict]:
         if not (key and storage_dir and stem and width and height):
             continue
         service_id = loc_service_id(storage_dir, stem)
-        index[key] = {
+        entry = {
             "label": f"{volume_label} {key}",
             "target": {
                 "source": {
@@ -737,6 +747,14 @@ def _load_metadata_index(data: dict) -> dict[str, dict]:
                 }
             },
         }
+        index[key] = entry
+        # ...and under the key a georef sidecar's path parses to, which
+        # lowercases the suffix. Keeping only the mirror's case meant a lookup
+        # for p97w never found p97W: Chicago 1950 vol 1 fitted 108 of its 123
+        # pages and published an annotation page with NOTHING in it, because
+        # every one of its sheets is lettered. 10,882 of the corpus's sheets
+        # have an uppercase suffix.
+        index.setdefault(page_key_lower(key), entry)
     return index
 
 
