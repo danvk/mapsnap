@@ -144,6 +144,16 @@ def main() -> None:
     )
     parser.add_argument("--seed", type=int, default=1)
     parser.add_argument(
+        "--threshold-band",
+        type=int,
+        default=0,
+        metavar="LEVELS",
+        help=(
+            "Decide each split by majority over Otsu-LEVELS, Otsu and Otsu+LEVELS "
+            "instead of Otsu alone (#471); 0 keeps the single-threshold behaviour."
+        ),
+    )
+    parser.add_argument(
         "--min-panel-frac",
         type=float,
         default=None,
@@ -176,6 +186,7 @@ def main() -> None:
                 image,
                 min_panel_frac=args.min_panel_frac,
                 small_face_policy=args.small_face,
+                threshold_band=args.threshold_band,
             )
         ]
         iou, per_truth = score_case(truth, gen)
@@ -205,6 +216,7 @@ def main() -> None:
             image,
             min_panel_frac=args.min_panel_frac,
             small_face_policy=args.small_face,
+            threshold_band=args.threshold_band,
         )
         ok = len(gen) == 1
         neg_ok += ok

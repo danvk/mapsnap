@@ -17,6 +17,7 @@ import argparse
 import json
 import re
 import sys
+from collections import Counter
 from itertools import pairwise
 from pathlib import Path
 from typing import TypedDict
@@ -170,15 +171,24 @@ def crop_border(arr: np.ndarray, border: int = BORDER_PX) -> np.ndarray:
     return arr[border:-border, border:-border, :]
 
 
-def binarize(rgb: np.ndarray, gray: np.ndarray) -> np.ndarray:
+def binarize(
+    rgb: np.ndarray, gray: np.ndarray, threshold_offset: int = 0
+) -> np.ndarray:
     """Threshold to a black-ink mask: dark pixels become 255, paper and color become 0.
 
     Otsu on luminance selects dark pixels, then a chroma gate drops any that are colored.
     Dividers are always black, so colored map content (brick, vegetation, water tints) —
     which can be dark enough to pass an Otsu luminance threshold — is excluded. For grayscale
     scans the chroma gate is a no-op, matching plain Otsu.
+
+    ``threshold_offset`` moves Otsu's level by that many grey values, which is
+    how ``compute_panels`` samples a band around it (see THRESHOLD_BAND_PX).
     """
-    _, dark = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY_INV | cv2.THRESH_OTSU)
+    level, dark = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY_INV | cv2.THRESH_OTSU)
+    if threshold_offset:
+        _, dark = cv2.threshold(
+            gray, level + threshold_offset, 255, cv2.THRESH_BINARY_INV
+        )
     spread = rgb.max(axis=2).astype(np.int16) - rgb.min(axis=2).astype(np.int16)
     achromatic = (spread <= COLOR_SPREAD_MAX).astype(np.uint8) * 255
     return cv2.bitwise_and(dark, achromatic)
@@ -1087,23 +1097,18 @@ def finalize_panels(
     return expand_to_full_frame(panels, cropped_h, cropped_w, border), bridged
 
 
-def compute_panels(
+def panels_at_threshold(
     image_path: Path,
-    border: int = BORDER_PX,
-    min_panel_frac: float | None = None,
-    small_face_policy: str = "glue",
+    threshold_offset: int,
+    border: int,
+    min_panel_frac: float | None,
+    small_face_policy: str,
 ) -> list:
-    """Detect panels for one image as polygons in the full (uncropped) scaled-image frame.
-
-    The I/O-free pipeline used by the scoring harness; process_image mirrors it while also
-    writing per-stage debug images. ``min_panel_frac`` and ``small_face_policy`` are the
-    #83 small-inset experiment knobs (see assemble_panels); production defaults are
-    unchanged.
-    """
+    """Panels for one image at one Otsu offset, in the full (uncropped) frame."""
     rgb = crop_border(load_rgb(image_path), border)
     gray = crop_border(load_gray(image_path), border)
     h, w = gray.shape
-    binary = binarize(rgb, gray)
+    binary = binarize(rgb, gray, threshold_offset)
     thick = compute_thick_mask(binary) if small_face_policy == "verified" else None
     connected = connected_dividers(detect_lines(binary), h, w, binary)
     panels, _ = finalize_panels(
@@ -1116,6 +1121,47 @@ def compute_panels(
         thick_mask=thick,
     )
     return panels
+
+
+def compute_panels(
+    image_path: Path,
+    border: int = BORDER_PX,
+    min_panel_frac: float | None = None,
+    small_face_policy: str = "glue",
+    threshold_band: int = 0,
+) -> list:
+    """Detect panels for one image as polygons in the full (uncropped) scaled-image frame.
+
+    The I/O-free pipeline used by the scoring harness; process_image mirrors it while also
+    writing per-stage debug images. ``min_panel_frac`` and ``small_face_policy`` are the
+    #83 small-inset experiment knobs (see assemble_panels); production defaults are
+    unchanged.
+
+    ``threshold_band`` decides the split by majority over three Otsu levels --
+    offset -band, 0 and +band -- instead of trusting the one Otsu picks. A
+    single grey level is enough to change the answer: Nashville p46 is one panel
+    at Otsu 199 and three at 200, on the same image. That matters because the
+    corpus mirror serves LoC's pre-rendered 25% JPEG while data/ volumes were
+    built from the IIIF server's pct:25 render, and the re-encode alone moves
+    Otsu 1-2 levels (#471) -- enough to split 8 Nashville sheets where the
+    baseline split 3, against a truth of 4. A divider that does not survive a
+    few grey levels either way was never a divider. Zero (the default) keeps
+    the single-threshold behaviour.
+    """
+
+    def at(offset: int) -> list:
+        return panels_at_threshold(
+            image_path, offset, border, min_panel_frac, small_face_policy
+        )
+
+    if not threshold_band:
+        return at(0)
+    # Offset 0 first, so it wins a three-way tie and the geometry stays the one
+    # Otsu itself chose whenever the band agrees with it.
+    found = [at(0), at(-threshold_band), at(threshold_band)]
+    counts = Counter(len(panels) for panels in found)
+    winner = counts.most_common(1)[0][0]
+    return next(panels for panels in found if len(panels) == winner)
 
 
 def order_panels(panels: list, height: float | None = None) -> list:
