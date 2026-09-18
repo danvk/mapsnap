@@ -719,3 +719,29 @@ def test_prepare_next_settles_an_unprocessable_item_and_releases_the_rest(
     assert released == [uncrafted.item], "the GPU pass will catch up"
     assert prepared.unprocessable == 1 and prepared.waiting == 1
     assert prepared.work is None
+
+
+def test_failure_tail_keeps_the_error_not_the_progress_bar() -> None:
+    """Miami's key-map failure (sanborn01309_018) was reported to the corpus log
+    as three lines of detector thresholds, because a tqdm bar writes to stderr
+    and the reporter kept the last six lines. The answer -- "Could not derive a
+    --pages spec" -- sat just above the cut and was thrown away, so the item
+    could not be diagnosed from the run at all."""
+    from mapsnap.loc_fit import failure_tail
+
+    output = (
+        "Using centerlines: /opt/craft/scratch-0/centerlines.geojson\n"
+        "Could not derive a --pages spec from the volume's page images; pass --pages.\n"
+        "  0%|          | 0/1 [00:00<?, ?it/s]"
+        "\rBlock index: 91370 segments across 10521 streets\n"
+        "Auto min-short-side: 26.0px (p25 of confidence>=0.5 detections)\n"
+        "Thresholds: min_confidence=0.15 min_long_side=52.0px min_short_side=26.0px\n"
+        "  0%|          | 0/1 [00:00<?, ?it/s]\n"
+        " 50%|#####     | 1/2 [00:01<00:01,  1.2s/it]\n"
+    )
+    tail = failure_tail(output)
+    assert "Could not derive a --pages spec" in tail
+    assert "it/s]" not in tail and "%|" not in tail
+    # The surviving non-progress lines stay, in order.
+    assert tail.index("centerlines") < tail.index("Could not derive")
+    assert failure_tail("") == "(no output)"
