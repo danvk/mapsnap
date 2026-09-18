@@ -491,3 +491,19 @@ def test_git_head_info_outside_a_repo_has_every_key(tmp_path) -> None:
 
     info = experiments.git_head_info(tmp_path)
     assert set(info) == {"sha", "branch", "subject", "clean", "describe"}
+
+
+def test_git_head_info_reads_the_baked_sha_outside_a_checkout(monkeypatch, tmp_path):
+    """The corpus image has neither .git nor a git binary; the commit it was
+    built from arrives as MAPSNAP_GIT_SHA (--build-arg GIT_SHA). Without the
+    fallback every item the image fits records sha: null."""
+    from mapsnap.experiments import git_head_info
+
+    monkeypatch.setenv("MAPSNAP_GIT_SHA", "5e4b87c0a1b2c3d4e5f60718293a4b5c6d7e8f90")
+    info = git_head_info(tmp_path)  # a tmp dir is not inside any repository
+    assert info["sha"] == "5e4b87c0a1b2c3d4e5f60718293a4b5c6d7e8f90"
+    assert info["describe"] == "5e4b87c"
+    assert info["clean"] is None and info["branch"] is None
+
+    monkeypatch.delenv("MAPSNAP_GIT_SHA")
+    assert git_head_info(tmp_path)["sha"] is None, "no env, no checkout: still null"

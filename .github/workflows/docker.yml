@@ -1,0 +1,70 @@
+# Does the Dockerfile build, and does the image run the CLI? Kept as its own
+# workflow so the cost is visible on its own line and the trigger can be
+# narrowed without touching CI proper -- the Python and app jobs are seconds;
+# this one downloads ~2 GB of torch on a cold cache.
+#
+# Cold vs. warm is the number to read: the dependency layer is keyed on
+# pyproject.toml + uv.lock, so a PR that touches neither should hit the layer
+# cache and skip the download entirely.
+#
+# GHA's cache is scoped by ref, and a PR can read its own ref's entries and
+# the base branch's -- nothing else. Measured on 2026-09-18: the first
+# pull_request run wrote 3.2 GB under refs/pull/474/merge, and a dispatch run
+# on the branch could not see any of it and rebuilt cold (583 s vs 592 s).
+# The push-to-main trigger is what seeds refs/heads/main, so a NEW PR's first
+# run has a cache to hit; without it every new PR starts cold.
+#
+# To scope this to the files that matter, add under both push and pull_request:
+#
+#   paths: [Dockerfile, .dockerignore, pyproject.toml, uv.lock, mapsnap/**]
+name: Docker
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  image:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # The image is 6.4 GB and the runner's disk is finite; the before/after
+      # readings say how close this is to the edge.
+      - name: Disk before
+        run: df -h / | tail -1
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Build start
+        id: start
+        run: echo "t=$(date +%s)" >> "$GITHUB_OUTPUT"
+
+      - name: Build image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          platforms: linux/amd64
+          load: true
+          tags: mapsnap:ci
+          build-args: GIT_SHA=${{ github.sha }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Build time
+        run: echo "build took $(( $(date +%s) - ${{ steps.start.outputs.t }} ))s"
+
+      # How a Batch job definition will invoke it: the job as the argument.
+      - name: mapsnap --help (entrypoint)
+        run: docker run --rm mapsnap:ci --help
+
+      # The venv and the project install, through uv, inside the image.
+      - name: uv run mapsnap --help
+        run: docker run --rm --entrypoint uv mapsnap:ci run mapsnap --help
+
+      - name: Image size and disk after
+        run: |
+          docker images mapsnap:ci --format '{{.Size}}  {{.ID}}'
+          df -h / | tail -1
