@@ -525,3 +525,80 @@ def test_an_empty_queue_with_nothing_in_flight_still_drains(monkeypatch):
         loc_craft.work_queue, "depth", lambda url: Depth(visible=0, in_flight=0)
     )
     assert list(QueueSource("u", {})) == []
+
+
+def test_the_in_flight_wait_is_bounded_by_one_lease(monkeypatch):
+    """Waiting out a DEAD worker's lease is the point; waiting forever is not.
+
+    A lease lapses within the visibility timeout, so after a full one with
+    nothing to receive, whatever is still invisible is held by a live worker who
+    will retire it, or was released and is waiting out a lease nobody is using.
+    On 2026-09-18 the two-worker test-200b fleet ran 40 minutes with shard 0 at
+    39% CPU and shard 1 at 3.5%, both printing "nothing visible, 3 in flight":
+    three messages, one worker fitting, one paying for an idle m5.2xlarge.
+    """
+    from mapsnap import loc_craft
+    from mapsnap.loc_craft import Item, QueueSource
+    from mapsnap.work_queue import Depth
+
+    monkeypatch.setattr(loc_craft, "IN_FLIGHT_WAIT_SECONDS", 60)
+    monkeypatch.setattr(loc_craft, "MAX_IN_FLIGHT_WAIT_SECONDS", 180)
+    monkeypatch.setattr(loc_craft.time, "sleep", lambda seconds: None)
+    monkeypatch.setattr(loc_craft.work_queue, "receive", lambda url, **kw: [])
+    polls = []
+    monkeypatch.setattr(
+        loc_craft.work_queue,
+        "depth",
+        lambda url: polls.append(1) or Depth(visible=0, in_flight=3),
+    )
+
+    source = QueueSource("u", {"sanborn1": Item("sanborn1", "alabama", "1900")})
+    assert [item.item for _, item in source] == []
+    assert len(polls) == 4, "three waits of 60s, then it stopped rather than idle"
+
+
+def test_a_receive_restarts_the_in_flight_budget(monkeypatch):
+    """The bound is on CONSECUTIVE idling: a worker still being fed must not
+    stop just because it once waited."""
+    from mapsnap import loc_craft
+    from mapsnap.loc_craft import Item, QueueSource
+    from mapsnap.work_queue import Depth, Message
+
+    monkeypatch.setattr(loc_craft, "IN_FLIGHT_WAIT_SECONDS", 60)
+    monkeypatch.setattr(loc_craft, "MAX_IN_FLIGHT_WAIT_SECONDS", 60)
+    monkeypatch.setattr(loc_craft.time, "sleep", lambda seconds: None)
+    receives = [[], [Message(body="sanborn1", handle="h")], [], []]
+    monkeypatch.setattr(
+        loc_craft.work_queue, "receive", lambda url, **kw: receives.pop(0)
+    )
+    monkeypatch.setattr(
+        loc_craft.work_queue, "depth", lambda url: Depth(visible=0, in_flight=3)
+    )
+
+    source = QueueSource("u", {"sanborn1": Item("sanborn1", "alabama", "1900")})
+    assert [item.item for _, item in source] == ["sanborn1"]
+
+
+def test_a_released_item_is_named_in_the_wait(monkeypatch, capsys):
+    """An item this worker handed back stays invisible for the whole lease, so
+    it counts as in flight as if someone were working on it. Saying so is the
+    difference between a fleet that is busy and one that is waiting on itself."""
+    from mapsnap import loc_craft
+    from mapsnap.loc_craft import Item, QueueSource
+    from mapsnap.work_queue import Depth
+
+    monkeypatch.setattr(loc_craft, "IN_FLIGHT_WAIT_SECONDS", 60)
+    monkeypatch.setattr(loc_craft, "MAX_IN_FLIGHT_WAIT_SECONDS", 60)
+    monkeypatch.setattr(loc_craft.time, "sleep", lambda seconds: None)
+    monkeypatch.setattr(loc_craft.work_queue, "receive", lambda url, **kw: [])
+    monkeypatch.setattr(
+        loc_craft.work_queue, "depth", lambda url: Depth(visible=0, in_flight=1)
+    )
+
+    item = Item("sanborn1", "alabama", "1900")
+    source = QueueSource("u", {"sanborn1": item})
+    source.handles["sanborn1"] = "h"
+    source.release(item)
+    assert source.released == {"sanborn1"}
+    list(source)
+    assert "1 released by me" in capsys.readouterr().err
