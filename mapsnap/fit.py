@@ -125,6 +125,7 @@ def clear_derived_sidecars(dir_path: Path) -> int:
     for cache in (
         *sorted((dir_path / "artifacts" / "osm_snap").glob("candidates.jsonl")),
         *sorted((dir_path / "artifacts" / "osm_snap").glob("selection_*.jsonl")),
+        *sorted((dir_path / "artifacts" / "osm_snap").glob("other_edition_prior.json")),
         *sorted((dir_path / "artifacts" / "street_solve").glob("candidates.jsonl")),
     ):
         cache.unlink()
@@ -132,6 +133,16 @@ def clear_derived_sidecars(dir_path: Path) -> int:
     if removed:
         print(f"Cleared {removed} derived georef sidecar(s) from {dir_path}")
     return removed
+
+
+def other_edition_token(annotation: str) -> str:
+    """How another edition spells itself in a run id: volume and file name.
+
+    Not the bare name — every volume's is `main.iiif.json` — because an id
+    collision silently skips the second run as already archived.
+    """
+    path = Path(annotation)
+    return f"{path.parent.name}/{path.name}" if path.parent.name else path.name
 
 
 def main() -> None:
@@ -191,7 +202,23 @@ def main() -> None:
         default="Image",
         help="IIIF source type for --image-base-url (default: %(default)s).",
     )
+    parser.add_argument(
+        "--other-edition",
+        default=None,
+        metavar="FILE",
+        help=(
+            "A IIIF annotation placing another edition of this atlas. Snap "
+            "rescues unplaced pages from its same-numbered sheets."
+        ),
+    )
     args, georef_extra = parser.parse_known_args()
+    if args.other_edition is not None:
+        # snap is the only stage that reads the prior, and it runs late: check
+        # the file up front rather than after the whole georef pass.
+        if args.no_snap:
+            parser.error("--other-edition needs the snap stage; drop --no-snap")
+        if not Path(args.other_edition).is_file():
+            parser.error(f"--other-edition {args.other_edition}: not a file")
 
     dir_path = Path(args.dir)
     centerlines = find_centerlines(dir_path)
@@ -216,7 +243,15 @@ def main() -> None:
     # snap on vs off produce different outputs and need different run ids
     # (an id collision would silently SKIP the second variant as already
     # archived).
-    id_tokens = [*georef_extra, *(["--no-snap"] if args.no_snap else [])]
+    id_tokens = [
+        *georef_extra,
+        *(["--no-snap"] if args.no_snap else []),
+        *(
+            ["--other-edition", other_edition_token(args.other_edition)]
+            if args.other_edition
+            else []
+        ),
+    ]
     run_id = resolve_run_id(dir_path, args.tag, id_tokens, inputs, git)
 
     archive_dir = dir_path / experiments.ARTIFACTS_DIRNAME / run_id
@@ -281,7 +316,20 @@ def main() -> None:
     if not args.no_snap:
         # Both passes are per-page and CPU-bound, so one --num-workers governs
         # both; the rest of the georef passthrough is georef-only.
-        timed("snap", ["mapsnap", "snap", str(dir_path), *worker_flag(georef_extra)])
+        timed(
+            "snap",
+            [
+                "mapsnap",
+                "snap",
+                str(dir_path),
+                *(
+                    ["--other-edition", args.other_edition]
+                    if args.other_edition
+                    else []
+                ),
+                *worker_flag(georef_extra),
+            ],
+        )
         # The street-constraint channel: fit key-map-prior pages from their
         # street labels. Writes pN.georef-street.json. Runs after snap because
         # its referee shares machinery with the snap channel; skipped with

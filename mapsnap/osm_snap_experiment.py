@@ -63,6 +63,14 @@ from mapsnap.osm_snap import (
     snap_page,
 )
 from mapsnap.osm_to_centerlines import load_centerlines
+from mapsnap.other_edition_prior import (
+    OtherEditionPlan,
+    OtherEditionPrior,
+    ensure_prior,
+    load_prior,
+    other_edition_plan,
+    prior_path,
+)
 from mapsnap.streets import Block, build_block_index
 from mapsnap.utils import default_centerlines, haversine_m, pose_is_upside_down
 
@@ -103,6 +111,9 @@ class VolumeContext:
     # Lazily-built map of stem -> FittedPage for neighbor-stamp priors
     # (#335 phase 2); None until the first unplaced page asks for it.
     stamp_fitted: dict | None = None
+    # Sheet centers from another edition's IIIF annotation; None without
+    # `snap --other-edition`.
+    other_edition: OtherEditionPrior | None = None
 
 
 def ring_centroid(ring: list[list[float]]) -> tuple[float, float]:
@@ -433,6 +444,8 @@ def candidates_record_fresh(
     mtime: int | None,
     hint_mtime: int | None = None,
     keymap_mtime: int | None = None,
+    *,
+    other_edition_signature: str | None = None,
 ) -> bool:
     """Whether a cached candidates record still matches the page's fit state.
 
@@ -454,6 +467,9 @@ def candidates_record_fresh(
     page that just gained a key-map location — or had a wrong one corrected —
     would otherwise keep candidates searched around the old place, or none at
     all.
+
+    ``other_edition_signature`` identifies that prior (None without one): a
+    key-map search must not serve an other-edition-seeded run, nor the reverse.
     """
     if record.get("status") != "ok":
         return False
@@ -462,6 +478,7 @@ def candidates_record_fresh(
         and record.get("georef_mtime") == mtime
         and record.get("contradiction_mtime") == hint_mtime
         and record.get("keymap_mtime") == keymap_mtime
+        and record.get("other_edition_signature") == other_edition_signature
     )
 
 
@@ -520,6 +537,7 @@ def load_volume_context(
         radius_m=radius,
         radius_source=radius_source,
         median_theta_deg=volume_median_theta(units),
+        other_edition=load_prior(volume),
     )
 
 
@@ -744,14 +762,40 @@ def with_incumbent_scale(
     return [*scales, ScalePrior(scale, 0.05, "incumbent")]
 
 
+def page_other_edition_plan(
+    vctx: VolumeContext, unit: PageUnit, radius_m: float
+) -> OtherEditionPlan:
+    """other_edition_prior.other_edition_plan for one page, from its key-map data.
+
+    ``radius_m`` is the window the page falls back to where the other edition
+    does not replace its key map; snap's is the volume's, reconcile's is the
+    page's own.
+    """
+    centers, regions = page_keymap_data(vctx, unit)
+    return other_edition_plan(
+        vctx.other_edition,
+        unit.stem,
+        centers=centers,
+        regions=regions,
+        radius_m=radius_m,
+        rescued=unit.fit_state in RESCUE_STATES,
+    )
+
+
 def build_page_context(
-    vctx: VolumeContext, unit: PageUnit
+    vctx: VolumeContext, unit: PageUnit, plan: OtherEditionPlan | None = None
 ) -> tuple[PageContext | None, str]:
-    """(PageContext, status) for one page; context is None unless status 'ok'."""
+    """(PageContext, status) for one page; context is None unless status 'ok'.
+
+    ``plan`` reuses an other-edition plan the caller already resolved for this
+    page.
+    """
     prob = load_prob(vctx.volume, unit.stem)
     if prob is None:
         return None, "no_prob"
-    centers, regions = page_keymap_data(vctx, unit)
+    if plan is None:
+        plan = page_other_edition_plan(vctx, unit, vctx.radius_m)
+    centers, regions = plan.centers, plan.regions
     # A page the adjacency gate demoted carries its neighbors' printed-claim
     # positions — world points on the shared seam the page must sit against.
     # They join the search centers, and stand alone for pages the keymap
@@ -815,7 +859,7 @@ def build_page_context(
     labels = page_label_features(vctx, unit)
     priors = rotation_priors_for(vctx, unit, centers, labels)
     base = panel_base(unit.stem)
-    radius = vctx.radius_m
+    radius = plan.radius_m
     if base is not None:
         # The keymap places the SHEET; a panel's center can sit up to half the
         # base diagonal away from it, so widen the center-search accordingly.
@@ -944,7 +988,8 @@ def candidate_record(candidate: SnapCandidate, unit: PageUnit) -> dict:
 
 def page_record(vctx: VolumeContext, unit: PageUnit) -> dict:
     """Generate the full candidates.jsonl record for one page."""
-    ctx, status = build_page_context(vctx, unit)
+    plan = page_other_edition_plan(vctx, unit, vctx.radius_m)
+    ctx, status = build_page_context(vctx, unit, plan)
     record: dict = {
         "target": unit.stem,
         "status": status,
@@ -956,13 +1001,22 @@ def page_record(vctx: VolumeContext, unit: PageUnit) -> dict:
         "height": unit.height,
         "has_truth": unit.truth is not None,
     }
+    if vctx.other_edition is not None:
+        record["other_edition_signature"] = vctx.other_edition.signature
     if ctx is None:
         return record
+    replaced = plan.replaced_key_map
     record["search"] = {
         "centers": [[round(c[0], 7), round(c[1], 7)] for c in ctx.search_centers],
-        "radius_m": round(vctx.radius_m, 1),
-        "radius_source": vctx.radius_source,
+        "radius_m": round(plan.radius_m if replaced else vctx.radius_m, 1),
+        "radius_source": "other-edition" if replaced else vctx.radius_source,
     }
+    if plan.sheet_center is not None:
+        lon, lat = plan.sheet_center
+        record["search"]["other_edition"] = {
+            "replaced_key_map": replaced,
+            "center": [round(lon, 7), round(lat, 7)],
+        }
     record["priors"] = {
         "rotation": [
             {
@@ -1202,11 +1256,22 @@ def cmd_candidates(
     vis: bool,
     *,
     num_workers: int = 1,
+    other_edition: Path | None = None,
 ) -> None:
-    """Generate candidates.jsonl for the volume's rescue targets."""
+    """Generate candidates.jsonl for the volume's rescue targets.
+
+    ``other_edition`` is a IIIF annotation placing another edition; its prior is
+    written under artifacts/osm_snap, and removed when the flag is absent.
+    """
     out_dir = artifacts_dir(volume)
     out_dir.mkdir(parents=True, exist_ok=True)
     out_path = out_dir / "candidates.jsonl"
+    if other_edition is not None:
+        prior = ensure_prior(volume, other_edition)
+        print(f"{volume.name}: {prior.describe()}")
+    elif prior_path(volume).exists():
+        prior_path(volume).unlink()
+        print(f"{volume.name}: removed the other-edition prior of a previous run")
     units = load_page_units(volume)
     if not any(u.fit_state == "fitted" and u.gen_affine is not None for u in units):
         # Nothing to calibrate scale/radius/rotation against — and nothing for
@@ -1275,6 +1340,9 @@ def cmd_candidates(
             georef_variant_mtime(volume, unit.stem),
             contradiction_hint_mtime(volume, unit.stem),
             keymap_mtime,
+            other_edition_signature=(
+                vctx.other_edition.signature if vctx.other_edition else None
+            ),
         )
     ]
     by_stem = {unit.stem: unit for unit in targets}
@@ -3551,6 +3619,15 @@ def main() -> None:
         help="include fitted pages (arbitration study), not just rescue targets",
     )
     p_cand.add_argument("--limit", type=int, default=None)
+    p_cand.add_argument(
+        "--other-edition",
+        type=Path,
+        default=None,
+        help=(
+            "a IIIF annotation placing another edition; "
+            "seeds rescues from its sheet centers"
+        ),
+    )
     p_cand.add_argument("--recompute", action="store_true")
     p_cand.add_argument("--no-vis", action="store_true", help="skip contact sheets")
     p_cand.add_argument(
@@ -3623,6 +3700,7 @@ def main() -> None:
             args.recompute,
             vis=not args.no_vis,
             num_workers=args.num_workers,
+            other_edition=args.other_edition,
         )
     elif args.command == "report":
         if args.sweep_refine:

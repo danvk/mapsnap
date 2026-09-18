@@ -246,6 +246,28 @@ gate-demoted pages) get **rescue**: the top candidate publishes as
   p55 — correct RANSAC fit killed in stage 1 by the wrong key-map location,
   then snap "rescued" it near that same wrong location (the standing #248
   trust problem).*
+- **Other-edition prior** (`mapsnap snap --other-edition FILE.iiif.json`, also
+  on `fit`): a rescue-state whole sheet also searches from the same-numbered
+  sheet of another georeferenced edition, read from its IIIF annotation —
+  Sanborn kept sheet numbers across editions, and the two centers agree to 7 m
+  at the median on Chicago's stable pairs. Written to
+  `artifacts/osm_snap/other_edition_prior.json`, keyed there by a content hash
+  of the annotation so a key-map search never serves an edition-seeded run;
+  `reconcile` scores the same centers, and `fit` clears it.
+- **Replace the key map, or leave it** (`other_edition_plan().replaced_key_map`,
+  recorded as `search.other_edition.replaced_key_map`). A split panel and a page
+  that already has a pose are never served: the center locates the *sheet*.
+
+  | `replaced_key_map` | when | search centers | window |
+  |---|---|---|---|
+  | `true` | no key-map center, or the nearest more than `OTHER_EDITION_CONTRADICTION_M` (200 m) away — measured distances are not a continuum, so every threshold in 65-249 m selects the same sheets | that edition's center alone, no region rings | `OTHER_EDITION_RADIUS_M` (50 m) |
+  | `false` | the key map agrees | the page's own, untouched | the caller's own fallback: snap's volume radius, reconcile's page key-map radius |
+
+  *Example (replaced): chicago 1950 vol 1 p5N, p9N, p35N — key map 1-4 km out,
+  unplaced; rescued at 7 ft. At a 100 m window a one-block alias entered two of
+  the three searches and the margin rule refused both; p35N survives either way.*
+  *Example (left alone): chicago 1919 vol 22 — key map already median 99 m from
+  truth; a 50 m window there cost four placed sheets and 1.1 points.*
 
 **Fitted pages** face two head-to-heads against the top candidate:
 

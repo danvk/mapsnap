@@ -921,7 +921,10 @@ def build_nodes(volume: Path, sidecar_dir: Path, vctx) -> dict[str, PageNode]:
 
 def score_nodes(vctx, nodes: dict[str, PageNode], note_ratios: dict) -> None:
     """Uniformly score every pose hypothesis and fill in unary energies."""
-    from mapsnap.osm_snap_experiment import build_page_context, page_keymap_data
+    from mapsnap.osm_snap_experiment import (
+        build_page_context,
+        page_other_edition_plan,
+    )
 
     fitted_log2 = [
         pose_scale_log2(affine)
@@ -933,8 +936,15 @@ def score_nodes(vctx, nodes: dict[str, PageNode], note_ratios: dict) -> None:
 
     for stem in sorted(nodes):
         node = nodes[stem]
-        ctx, status = build_page_context(vctx, node.unit)
-        centers, regions = page_keymap_data(vctx, node.unit)
+        # The keymap-distance penalty is measured from the plan's centers, so
+        # it is scored against their window: snap's where another edition
+        # replaced the key map, the page's own key-map radius otherwise.
+        plan = page_other_edition_plan(
+            vctx, node.unit, node.unit.keymap_radius_m or vctx.radius_m
+        )
+        ctx, status = build_page_context(vctx, node.unit, plan)
+        centers, regions = plan.centers, plan.regions
+        window = plan.radius_m
         for hypothesis in node.hypotheses:
             if hypothesis.affine is None:
                 continue
@@ -973,7 +983,7 @@ def score_nodes(vctx, nodes: dict[str, PageNode], note_ratios: dict) -> None:
             unary_energy(
                 hypothesis,
                 i == node.published_index,
-                node.unit.keymap_radius_m or vctx.radius_m,
+                window,
                 family_log2,
                 note_ratios.get(stem),
                 page_placed=node.published_index is not None,

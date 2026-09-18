@@ -837,3 +837,38 @@ def test_provenance_records_the_rung_verdict(tmp_path):
     # still explains itself rather than dropping the key.
     assert rung["verdict"] == "no volume family"
     assert rung["penalty"] == 0.0
+
+
+def test_the_keymap_window_follows_the_center_the_penalty_is_measured_from():
+    """An edition that replaced the key map supplies the window and the center.
+
+    The arbiter penalizes a pose by its distance from the page's key-map
+    center. Where the other edition REPLACED that center, measuring the
+    distance from it while scoring against the volume's much wider radius
+    would make the penalty toothless on exactly the pages the prior placed.
+    """
+    import dataclasses
+
+    from mapsnap.osm_snap_experiment import page_other_edition_plan
+    from mapsnap.osm_snap_experiment_test import keymapped_unit, other_edition_context
+
+    def window(context, unit) -> float:
+        """score_nodes' rule, which is the point being pinned."""
+        fallback = unit.keymap_radius_m or context.radius_m
+        return page_other_edition_plan(context, unit, fallback).radius_m
+
+    context = other_edition_context(Path("/nonexistent"))  # radius_m 250, prior 50 m
+    replaced = keymapped_unit((-87.7, 41.8))  # key map 8 km from the other edition
+    agreeing = keymapped_unit((-87.6, 41.9))  # key map on the other edition
+
+    assert window(context, replaced) == 50.0
+    # The penalty is then measured from that center, not the key map's.
+    assert page_other_edition_plan(context, replaced, 250.0).centers == [(-87.6, 41.9)]
+    # An agreeing key map keeps its own window, and so does every page when
+    # no other edition is configured at all: the default path is untouched.
+    assert window(context, agreeing) == 250.0
+    plain = dataclasses.replace(context, other_edition=None)
+    assert window(plain, replaced) == 250.0
+    assert window(
+        plain, dataclasses.replace(replaced, keymap_radius_m=180.0)
+    ) == pytest.approx(180.0)
