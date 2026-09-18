@@ -745,3 +745,48 @@ def test_failure_tail_keeps_the_error_not_the_progress_bar() -> None:
     # The surviving non-progress lines stay, in order.
     assert tail.index("centerlines") < tail.index("Could not derive")
     assert failure_tail("") == "(no output)"
+
+
+def test_single_item_exit_codes_follow_the_outcome() -> None:
+    from mapsnap.loc_fit import (
+        EXIT_FAILED,
+        EXIT_FITTED,
+        EXIT_NOT_READY,
+        EXIT_UNPROCESSABLE,
+        EXIT_USAGE,
+        single_item_exit_code,
+    )
+
+    code = lambda **k: single_item_exit_code(
+        **{"done": 0, "skipped": 0, "unprocessable": 0, "waiting": 0, "failed": 0, **k}
+    )
+    assert code(done=1) == EXIT_FITTED
+    assert code(skipped=1) == EXIT_FITTED, "already done for this run tag is success"
+    assert code(unprocessable=1) == EXIT_UNPROCESSABLE
+    assert code(waiting=1) == EXIT_NOT_READY
+    assert code(failed=1) == EXIT_FAILED
+    assert code(failed=1, unprocessable=1) == EXIT_FAILED, "a crash outranks a skip"
+    assert code() == EXIT_USAGE, "nothing happened at all"
+
+
+def test_item_from_list_takes_the_batch_array_index(
+    monkeypatch, tmp_path: Path
+) -> None:
+    import pytest
+
+    from mapsnap.loc_fit import item_from_list, read_item_list, select_item
+
+    items = [Item(f"sanborn{n}", "alabama", "1900") for n in range(3)]
+    listing = tmp_path / "items.txt"
+    listing.write_text("sanborn2\n\nsanborn0\n")
+    assert read_item_list(str(listing), tmp_path) == ["sanborn2", "sanborn0"]
+    assert item_from_list(items, str(listing), 1, tmp_path).item == "sanborn0"
+    monkeypatch.setenv("AWS_BATCH_JOB_ARRAY_INDEX", "0")
+    assert item_from_list(items, str(listing), None, tmp_path).item == "sanborn2"
+    monkeypatch.delenv("AWS_BATCH_JOB_ARRAY_INDEX")
+    with pytest.raises(SystemExit, match="item-index"):
+        item_from_list(items, str(listing), None, tmp_path)
+    with pytest.raises(SystemExit, match="outside the list"):
+        item_from_list(items, str(listing), 7, tmp_path)
+    with pytest.raises(SystemExit, match="not in the manifest"):
+        select_item(items, "sanborn99")
