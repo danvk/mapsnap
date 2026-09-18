@@ -28,7 +28,11 @@
 # One-shot by default, so it can live in cron or launchd and survive a laptop
 # restart, which a --watch loop in a terminal does not:
 #
+#   PATH=/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin
 #   */15 * * * * cd ~/github/mapsnap && scripts/loc_craft/supervise.sh --job loc-craft --shards 4 --workers 2 >> /tmp/supervise.log 2>&1
+#
+# The PATH line is not optional: cron's own PATH is /usr/bin:/bin, which has
+# neither aws nor a Homebrew git.
 set -euo pipefail
 
 JOB=loc-craft
@@ -59,10 +63,24 @@ while [ $# -gt 0 ]; do
     *) echo "unknown flag: $1" >&2; exit 2 ;;
   esac
 done
+# cron runs with PATH=/usr/bin:/bin, and Homebrew's aws is not there. Every
+# call then exits 127, which reads as "cannot list ..." below -- a
+# credential-shaped message for a binary that was never found. The crontab
+# installed on 2026-09-18 said that 55 times in a row, launched nothing all
+# night, and looked from the outside like an AWS problem.
+if ! command -v aws > /dev/null 2>&1; then
+  echo "aws not found on PATH=$PATH" >&2
+  echo "  cron does not use your shell's PATH: put a PATH= line at the top of the crontab," >&2
+  echo "  e.g. PATH=/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin" >&2
+  exit 2
+fi
+
 export AWS_PROFILE=${AWS_PROFILE:-mapsnap}
 export AWS_REGION=$REGION
 HERE=$(cd -- "$(dirname -- "$0")" > /dev/null && pwd -P)
 source "$HERE/shards.sh"
+AWS_ERR=$(mktemp)
+trap 'rm -f "$AWS_ERR"' EXIT
 MINE=$(expand_shards "${OWN:-0-$((SHARDS - 1))}" "$SHARDS")
 MINE_COUNT=$(echo "$MINE" | wc -l | tr -d " ")
 
@@ -80,7 +98,7 @@ PASSTHROUGH+=(--git-ref "$GIT_REF")
 # error (exit 255) aborts the sweep.
 finished_shards() {
   local raw status=0
-  raw=$(aws s3 ls "$BUCKET/_craft/done/" 2>/dev/null) || status=$?
+  raw=$(aws s3 ls "$BUCKET/_craft/done/" 2> "$AWS_ERR") || status=$?
   if [ "$status" -ge 2 ]; then
     return 1
   fi
@@ -112,6 +130,7 @@ sweep() {
   local finished running relaunched=0 alive=0 done_count=0
   if ! finished=$(finished_shards); then
     echo "$(date -u +%H:%M) cannot list $BUCKET/_craft/done/; skipping this sweep" >&2
+    sed 's/^/    /' "$AWS_ERR" >&2
     return 1
   fi
   if ! running=$(running_shards); then
