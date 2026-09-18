@@ -313,6 +313,17 @@ def process_item(
 # ending a fleet early.
 IN_FLIGHT_WAIT_SECONDS = 60
 
+# ...and how long to keep doing that. The wait exists for leases held by workers
+# that died (see __iter__), and those lapse within one visibility timeout: after
+# a full one with nothing to receive, whatever is still invisible is held by a
+# LIVE worker, who will retire it, or was released and is waiting out a lease
+# nobody is using. Neither is worth a second instance standing by. On
+# 2026-09-18 the two-worker test-200b fleet ran 40 minutes with shard 0 at 39%
+# CPU and shard 1 at 3.5%, both printing "nothing visible, 3 in flight" every
+# minute: three messages, one worker fitting, one idling. Without a bound that
+# idle runs to maxReceiveCount x visibility -- five hours on that queue.
+MAX_IN_FLIGHT_WAIT_SECONDS = work_queue.DEFAULT_VISIBILITY_SECONDS
+
 
 class QueueSource:
     """Items taken from an SQS queue, with the handles that retire them.
@@ -331,9 +342,14 @@ class QueueSource:
         # this worker's flags, so the S3 prefix and the recorded provenance
         # cannot disagree. None for an untagged queue (loc-craft fills those).
         self.tags: dict[str, str | None] = {}
+        # Items this worker handed back. Their messages stay invisible until the
+        # lease lapses, so they show up in the queue's in-flight count as if
+        # someone were working on them; naming them makes an idle wait legible.
+        self.released: set[str] = set()
         self.taken = 0
 
     def __iter__(self) -> Iterator[tuple[int, Item]]:
+        waited = 0
         while True:
             messages = work_queue.receive(self.url, count=1)
             if not messages:
@@ -348,13 +364,25 @@ class QueueSource:
                 left = work_queue.depth(self.url)
                 if left.in_flight == 0:
                     return  # really drained
+                if waited >= MAX_IN_FLIGHT_WAIT_SECONDS:
+                    print(
+                        f"queue: {left.in_flight} item(s) still in flight after "
+                        f"{waited // 60} minutes with nothing to receive, which is "
+                        "longer than a lease: they are held by a live worker or "
+                        "waiting out a lease nobody is using. Stopping.",
+                        file=sys.stderr,
+                        flush=True,
+                    )
+                    return
+                mine = f", {len(self.released)} released by me" if self.released else ""
                 print(
-                    f"queue: nothing visible, {left.in_flight} item(s) in flight "
-                    f"to other workers; waiting {IN_FLIGHT_WAIT_SECONDS}s",
+                    f"queue: nothing visible, {left.in_flight} item(s) in flight"
+                    f"{mine}; waiting {IN_FLIGHT_WAIT_SECONDS}s",
                     file=sys.stderr,
                     flush=True,
                 )
                 time.sleep(IN_FLIGHT_WAIT_SECONDS)
+                waited += IN_FLIGHT_WAIT_SECONDS
                 continue
             for message in messages:
                 name, run_tag = work_queue.parse_body(message.body)
@@ -366,7 +394,9 @@ class QueueSource:
                     continue
                 self.handles[item.item] = message.handle
                 self.tags[item.item] = run_tag
+                self.released.discard(item.item)
                 self.taken += 1
+                waited = 0
                 yield self.taken, item
 
     def retire(self, item: Item) -> None:
@@ -377,7 +407,8 @@ class QueueSource:
 
     def release(self, item: Item) -> None:
         """Forget the handle without deleting, so the lease lapses and it retries."""
-        self.handles.pop(item.item, None)
+        if self.handles.pop(item.item, None) is not None:
+            self.released.add(item.item)
 
     def handle_for(self, item: Item) -> str | None:
         """The item's receipt handle, for holding its lease open while it runs."""
