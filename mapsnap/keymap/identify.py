@@ -59,7 +59,7 @@ from mapsnap.split import (
     panels_json_path,
     read_panels_json,
 )
-from mapsnap.utils import image_stem
+from mapsnap.utils import image_stem, is_page_image, source_images
 
 DEFAULT_CNN_WEIGHTS = Path("models/number_detector.pt")
 DEFAULT_CRNN_WEIGHTS = Path("models/number_crnn.pt")
@@ -110,7 +110,7 @@ def candidate_keys(volume: Path) -> list[str]:
     """
     letters: list[str] = []
     by_number: dict[int, list[str]] = defaultdict(list)
-    for image in sorted(volume.glob("p*.jpg")):
+    for image in source_images(volume):
         stem = image_stem(str(image))
         if "__" in stem:
             continue
@@ -134,7 +134,7 @@ def page_zero_stems(volume: Path) -> tuple[list[str], list[str]]:
     """
     unsplit: list[str] = []
     splits: list[str] = []
-    for image in sorted(volume.glob("p0*.jpg")):
+    for image in source_images(volume):
         stem = image_stem(str(image))
         if page_number(stem) != 0:
             continue
@@ -177,7 +177,9 @@ def legitimate_keymap_split(volume: Path, parent: str) -> bool:
     return True
 
 
-def detection_plan(volume: Path) -> tuple[list[str], list[str]]:
+def detection_plan(
+    volume: Path, *, min_distinct: int = MIN_DISTINCT
+) -> tuple[list[str], list[str]]:
     """(keys assumed to be key maps untested, keys to confirm by coverage).
 
     A census of every volume under data/ (34 volumes, 64 page-0 files,
@@ -190,7 +192,20 @@ def detection_plan(volume: Path) -> tuple[list[str], list[str]]:
     confirmed individually by coverage and the unsplit parent is dropped --
     unless the split is not a legitimate one (legitimate_keymap_split), in
     which case the panels are ignored and the parent sheet is tested whole.
+
+    That census saw only real multi-sheet volumes, and the convention does not
+    reach the corpus's smallest ones: a key map is an index to the volume's
+    OTHER sheets, and Gardiner NY 1913 (LOC sanborn05939_001) is a single sheet
+    of town with nothing to index, yet was reported a key map by convention --
+    which left the volume with no scannable page at all. So the convention is
+    held to the same floor as the test that stands in for it: ``is_keymap``
+    needs ``min_distinct`` distinct valid page reads and a candidate can never
+    read more than the volume has, so below that floor NO candidate could be
+    confirmed either way and the honest answer is that the volume has no key
+    map.
     """
+    if len(volume_valid_pages(volume)) < min_distinct:
+        return [], []
     page_zero, page_zero_splits = page_zero_stems(volume)
     if page_zero and not page_zero_splits:
         return page_zero, []
@@ -200,7 +215,9 @@ def detection_plan(volume: Path) -> tuple[list[str], list[str]]:
     keys: list[str] = []
     for key in candidate_keys(volume):
         panels = sorted(
-            image_stem(str(image)) for image in volume.glob(f"{key}__*.jpg")
+            image_stem(str(image))
+            for image in volume.glob(f"{key}__*.jpg")
+            if is_page_image(image)
         )
         if panels and legitimate_keymap_split(volume, key):
             keys.extend(panels)
@@ -331,11 +348,11 @@ def identify_keymaps(
     if scan_all:
         keys = [
             image_stem(str(image))
-            for image in sorted(volume.glob("p*.jpg"))
+            for image in source_images(volume)
             if "__" not in image_stem(str(image))
         ]
     else:
-        assumed, keys = detection_plan(volume)
+        assumed, keys = detection_plan(volume, min_distinct=min_distinct)
         log_plan(volume, assumed, keys)
         if assumed:
             for key in assumed:
