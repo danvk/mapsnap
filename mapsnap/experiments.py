@@ -92,12 +92,18 @@ def git_head_info(cwd: Path) -> dict:
 
     sha = git("rev-parse", "HEAD")
     if sha is None:
+        # Not a checkout. The corpus image COPYs the source in without .git
+        # (963 MB) or a git binary, and carries the commit it was built from as
+        # MAPSNAP_GIT_SHA -- set from --build-arg GIT_SHA in the Dockerfile.
+        # Without this every item the image fits records sha: null, the one
+        # field that says which code produced the run.
+        baked = os.environ.get("MAPSNAP_GIT_SHA") or None
         return {
-            "sha": None,
+            "sha": baked,
             "branch": None,
             "subject": None,
             "clean": None,
-            "describe": None,
+            "describe": baked[:7] if baked else None,
         }
     status = git("status", "--porcelain")
     return {

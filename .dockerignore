@@ -1,0 +1,41 @@
+# What the worker image does NOT need. The repo root is 22 GB with data/;
+# the image needs mapsnap/, models/, pyproject.toml and uv.lock.
+
+# Volumes, baselines, experiments -- gigabytes, and never read by a worker.
+data/
+backup-data/
+baselines/
+dist/
+gallery/
+images/
+docs/
+testdata/
+
+# The debugger app and its node_modules; the worker has no UI.
+app/
+
+# Built inside the image from the lockfile; the host's is arm64 anyway.
+.venv/
+
+# 963 MB. The commit goes in as --build-arg GIT_SHA instead.
+.git/
+.github/
+
+# Fleet scripts run on the host, not in the container.
+scripts/
+
+# Editor, agent and tool state.
+.claude/
+.vscode/
+.pytest_cache/
+.ruff_cache/
+__pycache__/
+**/__pycache__/
+.DS_Store
+*.log
+
+# A superseded checkpoint kept beside the live one.
+models/*.bak
+
+Dockerfile
+.dockerignore
