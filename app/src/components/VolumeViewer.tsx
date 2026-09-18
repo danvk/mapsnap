@@ -36,6 +36,7 @@ import {
 } from '../iiif/api';
 import type { KeymapInfo } from '../../server/api';
 import { isTypingTarget } from '../keyboard';
+import { firstImage, roadProbCandidates } from '../roadProb';
 import { fetchVolumeNotes } from '../notes/api';
 import { adjacencyClaimFeatures } from '../iiif/adjacency';
 import {
@@ -431,7 +432,7 @@ export function VolumeViewer() {
   // P(road) overlay for it (image at the pose's own corner coordinates).
   const snapRecord =
     selectedStem !== null ? (snapRecords.get(selectedStem) ?? null) : null;
-  const snapOverlay = useMemo(() => {
+  const snapPose = useMemo(() => {
     if (!snapOpen || !snapRecord || snapSelected === null || !volumeName)
       return null;
     const pose =
@@ -442,7 +443,7 @@ export function VolumeViewer() {
           : rankedCandidates(snapRecord)[snapSelected];
     if (!pose?.world_affine) return null;
     return {
-      url: `/data/${volumeName}/artifacts/edge_join/roadprob/${snapRecord.target}.png`,
+      candidates: roadProbCandidates(`/data/${volumeName}`, snapRecord.target),
       corners: poseCorners(
         pose.world_affine,
         snapRecord.width,
@@ -450,6 +451,30 @@ export function VolumeViewer() {
       ),
     };
   }, [snapOpen, snapRecord, snapSelected, volumeName]);
+  // Which of the two P(road) namings this volume uses is a question for the
+  // disk, so the overlay waits on a HEAD rather than guessing: pointing at one
+  // name left every volume of the other era with a silently empty overlay.
+  const [snapProbUrl, setSnapProbUrl] = useState<string | null>(null);
+  useEffect(() => {
+    if (!snapPose) {
+      setSnapProbUrl(null);
+      return;
+    }
+    let live = true;
+    void firstImage(snapPose.candidates).then((url) => {
+      if (live) setSnapProbUrl(url);
+    });
+    return () => {
+      live = false;
+    };
+  }, [snapPose]);
+  const snapOverlay = useMemo(
+    () =>
+      snapPose && snapProbUrl
+        ? { url: snapProbUrl, corners: snapPose.corners }
+        : null,
+    [snapPose, snapProbUrl],
+  );
   // Nothing is fetched until the underlay is first turned up; after that it
   // stays loaded and opacity is only opacity. Clearing the allmaps layer at 0
   // and re-adding the same map at 50 left it blank until a zoom: the clear

@@ -44,6 +44,7 @@ import { VolumeViewer } from './components/VolumeViewer';
 import { NoteButton } from './components/NoteButton';
 import { noteContextFromFiles, type NoteContext } from './notes/api';
 import { isTypingTarget } from './keyboard';
+import { firstImage, roadProbCandidates } from './roadProb';
 import { loadImage } from './loadImage';
 
 // The seed pair the pipeline chose: the two intersections flagged `initial`.
@@ -147,12 +148,12 @@ function resolveDataUrl(file: string): string {
   return import.meta.env.BASE_URL.replace(/\/$/, '') + '/' + file;
 }
 
-// The standard road-probability map path for a `data/<vol>/<stem>.jpg` image
-// (`data/<vol>/artifacts/edge_join/roadprob/<stem>.png`), or null for a non-data path.
-function roadProbPath(imagePath: string): string | null {
+// The road-probability maps to try for a `data/<vol>/<stem>.jpg` image, current
+// naming first (see roadProbCandidates), or empty for a non-data path.
+function roadProbPaths(imagePath: string): string[] {
   const slash = imagePath.lastIndexOf('/');
-  if (slash < 0 || !imagePath.startsWith('data/')) return null;
-  return `${imagePath.slice(0, slash)}/artifacts/edge_join/roadprob/${pageStem(imagePath)}.png`;
+  if (slash < 0 || !imagePath.startsWith('data/')) return [];
+  return roadProbCandidates(imagePath.slice(0, slash), pageStem(imagePath));
 }
 
 /**
@@ -207,20 +208,6 @@ async function cutPanelFromParent(
   }
 }
 
-// Whether a sibling road-probability map exists at `url`. The dev server falls
-// back to the SPA (text/html) for a missing file, so an image content-type is
-// the reliable signal that the PNG is really there.
-async function roadMapExists(url: string): Promise<boolean> {
-  try {
-    const response = await fetch(url, { method: 'HEAD' });
-    return (
-      response.ok &&
-      (response.headers.get('content-type')?.startsWith('image/') ?? false)
-    );
-  } catch {
-    return false;
-  }
-}
 /**
  * Debug API exposed on `window.mapsnap` so data can be injected without the UI
  * (e.g. from the browser console or automated tests). `loadJson` accepts either
@@ -706,11 +693,9 @@ export function DebugView({ files: filesProp, onClose }: DebugViewProps = {}) {
         // Offer the road-probability map toggle when a sibling map exists.
         setShowRoadMap(false);
         setRoadMapSrc(null);
-        const probPath = roadProbPath(imageFile);
-        if (probPath) {
-          const probUrl = resolveDataUrl(probPath);
-          if (await roadMapExists(probUrl)) setRoadMapSrc(probUrl);
-        }
+        setRoadMapSrc(
+          await firstImage(roadProbPaths(imageFile).map(resolveDataUrl)),
+        );
       }
 
       if (jsonFile) {
