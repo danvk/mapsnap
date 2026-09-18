@@ -54,6 +54,7 @@ again once the GPU pass has been through it.
 import argparse
 import csv
 import json
+import re
 import shutil
 import subprocess
 import sys
@@ -403,6 +404,28 @@ def borrow_reads(local: Path, bucket: str, item: Item, source: str) -> None:
     sync(run_prefix(bucket, item, source), str(local), *filters)
 
 
+# A tqdm bar rewrites one line with \r and writes it to stderr, so the LAST
+# lines of a crashed stage are its progress, not its error. Miami's key-map
+# failure (sanborn01309_018, test-200b) was reported as three lines of detector
+# thresholds while "Could not derive a --pages spec from the volume's page
+# images" -- the whole answer -- sat just above the cut and was dropped.
+PROGRESS_LINE = re.compile(r"^\s*\d+%\|| it/s\]|s/it\]|\|\s*\d+/\d+\s*\[")
+
+
+def failure_tail(output: str, lines: int = 12) -> str:
+    """The part of a failed stage's output worth reporting: its last real lines.
+
+    Carriage returns are split like newlines so only each progress bar's final
+    state survives, then anything that still looks like a bar is dropped.
+    """
+    kept = [
+        line.strip()
+        for line in output.replace("\r", "\n").splitlines()
+        if line.strip() and not PROGRESS_LINE.search(line)
+    ]
+    return " | ".join(kept[-lines:]) if kept else "(no output)"
+
+
 def stage(
     command: list[str], local: Path, ok_if: Callable[[], bool] | None = None
 ) -> None:
@@ -424,8 +447,14 @@ def stage(
     """
     result = subprocess.run(command, capture_output=True, text=True, check=False)
     if result.returncode != 0 and not (ok_if and ok_if()):
-        tail = (result.stderr or result.stdout or "").strip().splitlines()[-6:]
-        raise OSError(f"{' '.join(command[:2])} failed: {' | '.join(tail)}")
+        detail = failure_tail(result.stderr or result.stdout or "")
+        # The exit code, always: a stage that was KILLED (-9, out of memory on a
+        # box running one chain per core) raises nothing and prints nothing, so
+        # the text alone cannot tell that from a crash. Miami's key-map failure
+        # read as three lines of detector thresholds either way.
+        raise OSError(
+            f"{' '.join(command[:2])} failed (exit {result.returncode}): {detail}"
+        )
 
 
 def raw_images(local: Path) -> list[str]:
