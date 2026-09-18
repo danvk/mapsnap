@@ -5,13 +5,23 @@
 #
 # Cold vs. warm is the number to read: the dependency layer is keyed on
 # pyproject.toml + uv.lock, so a PR that touches neither should hit the layer
-# cache and skip the download entirely. To scope this to the files that matter,
-# add under both triggers:
+# cache and skip the download entirely.
+#
+# GHA's cache is scoped by ref, and a PR can read its own ref's entries and
+# the base branch's -- nothing else. Measured on 2026-09-18: the first
+# pull_request run wrote 3.2 GB under refs/pull/474/merge, and a dispatch run
+# on the branch could not see any of it and rebuilt cold (583 s vs 592 s).
+# The push-to-main trigger is what seeds refs/heads/main, so a NEW PR's first
+# run has a cache to hit; without it every new PR starts cold.
+#
+# To scope this to the files that matter, add under both push and pull_request:
 #
 #   paths: [Dockerfile, .dockerignore, pyproject.toml, uv.lock, mapsnap/**]
 name: Docker
 
 on:
+  push:
+    branches: [main]
   pull_request:
   workflow_dispatch:
 
