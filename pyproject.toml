@@ -15,7 +15,8 @@ dependencies = [
     "osmium>=4.3.1",
     "pillow>=12.2.0",
     "shapely>=2.0",
-    "torchvision>=0.27",
+    "torch>=2.12,<2.13",
+    "torchvision>=0.27,<0.28",
     "tqdm>=4.67.1",
 ]
 
@@ -45,3 +46,18 @@ name = "testpypi"
 url = "https://test.pypi.org/simple/"
 publish-url = "https://test.pypi.org/legacy/"
 explicit = true
+
+# torch from the PyTorch CPU index on Linux. PyPI's Linux wheel is the CUDA
+# build -- 4.6 GB of nvidia-*, triton and libtorch_cuda in the corpus image,
+# measured 2026-09-18 -- and the CPU chain (loc-fit) never uses a device. The
+# CPU wheel is 183 MB. macOS is unaffected (PyPI's Mac wheel has no CUDA), and a
+# GPU image sets --build-arg TORCH_INDEX to a CUDA index, which reinstalls over
+# this (see Dockerfile); bootstrap.sh does the same on an instance with a GPU.
+[[tool.uv.index]]
+name = "pytorch-cpu"
+url = "https://download.pytorch.org/whl/cpu"
+explicit = true
+
+[tool.uv.sources]
+torch = [{ index = "pytorch-cpu", marker = "sys_platform == 'linux'" }]
+torchvision = [{ index = "pytorch-cpu", marker = "sys_platform == 'linux'" }]

@@ -110,19 +110,19 @@ git checkout --quiet "$GIT_REF"
 git log -1 --oneline
 uv sync --frozen --no-dev
 
-# The lockfile's Linux torch is the CUDA 13 build, which needs driver >= 580.
-# Older AMI drivers get the cu126 wheel so torch.cuda.is_available() stays true.
-# The Deep Learning AMI ships nvidia-smi even on GPU-less instances, where it
-# exits non-zero, so test that it works rather than that it exists.
+# The lockfile's Linux torch is the CPU build (pyproject's pytorch-cpu index,
+# since 2026-09-18), so a GPU instance ALWAYS swaps in a CUDA wheel -- without
+# this loc-craft would run on the CPU with no error. cu126 loads on every driver
+# the Deep Learning AMIs ship (cu130 needs >= 580). The AMI ships nvidia-smi
+# even on GPU-less instances, where it exits non-zero, so test that it works
+# rather than that it exists.
 GPU_FLAG=""
 if nvidia-smi > /dev/null 2>&1; then
   nvidia-smi
   DRIVER=$(nvidia-smi --query-gpu=driver_version --format=csv,noheader | head -1)
-  if [ "${DRIVER%%.*}" -lt 580 ]; then
-    echo "driver $DRIVER < 580: swapping torch to the $TORCH_CUDA_FALLBACK wheel"
-    uv pip install --reinstall --index-url "https://download.pytorch.org/whl/$TORCH_CUDA_FALLBACK" \
-      torch torchvision
-  fi
+  echo "driver $DRIVER: installing the $TORCH_CUDA_FALLBACK torch wheel over the lockfile's CPU build"
+  uv pip install --reinstall --index-url "https://download.pytorch.org/whl/$TORCH_CUDA_FALLBACK" \
+    torch torchvision
   uv run python -c "import torch; print('cuda:', torch.cuda.is_available(), torch.cuda.get_device_name(0) if torch.cuda.is_available() else '-')"
   GPU_FLAG="--gpu"
 fi

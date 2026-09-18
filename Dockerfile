@@ -1,7 +1,8 @@
 # The corpus worker as an image: everything scripts/loc_craft/bootstrap.sh
-# builds at boot, built once instead. One image serves both jobs -- loc-craft
-# on GPU instances, loc-fit on CPU -- because the lockfile's Linux torch is a
-# CUDA build that falls back to CPU when no device is present.
+# builds at boot, built once instead. The lockfile's Linux torch is the CPU
+# build (pyproject's pytorch-cpu index; 183 MB against 4.6 GB for CUDA), which
+# is all the CPU chain -- loc-fit -- ever uses. A loc-craft image, which needs
+# the GPU, builds with --build-arg TORCH_INDEX=https://download.pytorch.org/whl/cu126.
 #
 # Build for EC2 from an Apple Silicon Mac (the builder emulates amd64):
 #
@@ -15,8 +16,8 @@
 #     loc-fit --queue https://sqs... --run-tag v1.3 --counties s3://... s3://...
 #
 # Layers are ordered so the expensive ones survive a code change: base + apt,
-# then the dependency set from pyproject.toml/uv.lock alone (torch, easyocr,
-# ~2 GB), then the EasyOCR weights, and only then the source. Editing a .py
+# then the dependency set from pyproject.toml/uv.lock alone, then the EasyOCR
+# weights, and only then the source. Editing a .py
 # file rebuilds the last layer only.
 
 FROM python:3.12-slim-bookworm
@@ -55,11 +56,11 @@ COPY pyproject.toml uv.lock ./
 RUN --mount=type=cache,target=/root/.cache/uv \
     uv sync --frozen --no-dev --no-install-project
 
-# bootstrap.sh's driver check, at build time: the locked Linux torch is the
-# CUDA 13 build, which needs driver >= 580 on the host. An AMI with an older
-# driver gets an image built with --build-arg TORCH_INDEX=https://download.pytorch.org/whl/cu126
-# instead, which is the wheel bootstrap.sh swaps to. Empty (the default) keeps
-# the lockfile's build.
+# The GPU escape hatch. The lockfile installs CPU torch on Linux; an image for
+# loc-craft needs CUDA, so it is built with --build-arg TORCH_INDEX set to a
+# PyTorch CUDA index (cu126 works on every driver the Deep Learning AMIs ship;
+# cu130 needs driver >= 580), which reinstalls torch and torchvision over the
+# CPU wheels. Empty (the default) keeps the lockfile's CPU build.
 ARG TORCH_INDEX=""
 RUN --mount=type=cache,target=/root/.cache/uv \
     if [ -n "$TORCH_INDEX" ]; then \
