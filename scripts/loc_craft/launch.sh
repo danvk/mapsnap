@@ -89,6 +89,20 @@ export AWS_REGION=$REGION
 HERE=$(cd -- "$(dirname -- "$0")" > /dev/null && pwd -P)
 source "$HERE/shards.sh"
 
+# --job is not a label: bootstrap.sh runs `uv run mapsnap "$JOB"`, so it has
+# to be a real subcommand. It ALSO names the instance tag and the done marker,
+# which is what invites treating it as one -- `--job loc-fit-kc`, meant to keep
+# a one-off's marker apart from another run's, bootstrapped for ten minutes on
+# 2026-09-18 and then died on "Unknown command: 'loc-fit-kc'". Ask the CLI's
+# own table, here, before anything is launched.
+if ! uv run --project "$HERE/../.." python -c \
+    'import sys; from mapsnap.cli import SUBCOMMANDS; sys.exit(0 if sys.argv[1] in SUBCOMMANDS else 1)' \
+    "$JOB" 2>/dev/null; then
+  echo "--job $JOB is not a mapsnap subcommand (bootstrap runs 'mapsnap $JOB'); use loc-fit or loc-craft." >&2
+  echo "  To isolate a one-off run, give it its own queue and --run-tag, not its own job name." >&2
+  exit 2
+fi
+
 if ! git branch -r --contains "$GIT_REF" 2>/dev/null | grep -q origin; then
   echo "git ref $GIT_REF is not on origin; push it first (instances clone from GitHub)" >&2
   exit 1
