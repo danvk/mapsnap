@@ -9,6 +9,7 @@ import type {
   IntersectionPoint,
   KeymapLocation,
   PanelPolygon,
+  PanelsJsonData,
   Street,
   Detection,
 } from './types';
@@ -26,6 +27,12 @@ import {
 } from './detections';
 import { filterBoxes } from './boxes';
 import { isKeymapJson, pageStem, parseDroppedJson } from './fileLoading';
+import {
+  cutPanel,
+  panelCrop,
+  panelIndexFromStem,
+  parentStem,
+} from './panelCrop';
 import { ImageColumn, type Mode } from './components/ImageColumn';
 import { MapView } from './components/MapView';
 import { GcpControls, type GcpFitStats } from './components/GcpControls';
@@ -146,6 +153,58 @@ function roadProbPath(imagePath: string): string | null {
   const slash = imagePath.lastIndexOf('/');
   if (slash < 0 || !imagePath.startsWith('data/')) return null;
   return `${imagePath.slice(0, slash)}/artifacts/edge_join/roadprob/${pageStem(imagePath)}.png`;
+}
+
+/**
+ * The parent's `<stem>.panels.json` when an image and a JSON name a panel split.
+ *
+ * `p20.jpg` with `p20__3.streets.json` is the shape a corpus run leaves behind:
+ * the parent page and a panel's reads. Returns null when the two are not that
+ * pair, so an ordinary page is untouched.
+ */
+function siblingPanelsPath(imageFile: string, jsonFile: string): string | null {
+  const jsonStem = pageStem(jsonFile);
+  const index = panelIndexFromStem(jsonStem);
+  if (index === null) return null;
+  if (pageStem(imageFile) !== parentStem(jsonStem)) return null;
+  const slash = imageFile.lastIndexOf('/');
+  const directory = slash < 0 ? '' : imageFile.slice(0, slash + 1);
+  return `${directory}${parentStem(jsonStem)}.panels.json`;
+}
+
+/**
+ * Re-cut the panel a JSON names out of its parent image, or null.
+ *
+ * Null whenever anything does not line up -- no panels file, a stem that names
+ * no panel, an index the file does not have -- so the caller falls back to
+ * showing the parent whole, which is what it did before.
+ */
+async function cutPanelFromParent(
+  parent: HTMLImageElement,
+  imageFile: string,
+  jsonFile: string | undefined,
+  panelsFile: string,
+): Promise<{ image: HTMLImageElement; src: string } | null> {
+  if (!jsonFile) return null;
+  const index = panelIndexFromStem(pageStem(jsonFile));
+  if (index === null) return null;
+  try {
+    const response = await fetch(resolveDataUrl(panelsFile));
+    if (!response.ok) return null;
+    const data = (await response.json()) as PanelsJsonData;
+    const crop = panelCrop(
+      data.panels ?? [],
+      index,
+      parent.naturalWidth,
+      parent.naturalHeight,
+    );
+    if (!crop) return null;
+    const canvas = cutPanel(parent, crop);
+    const src = canvas.toDataURL('image/png');
+    return { image: await loadImage(src), src };
+  } catch {
+    return null;
+  }
 }
 
 // Whether a sibling road-probability map exists at `url`. The dev server falls
@@ -606,7 +665,17 @@ export function DebugView({ files: filesProp, onClose }: DebugViewProps = {}) {
   // Mirrors handleFiles, but fetches served files instead of reading File blobs.
   async function loadFromUrls(files: string[]): Promise<void> {
     const imageFile = files.find(isImageUrl);
-    const jsonFile = files.find((f) => f.endsWith('.json'));
+    const jsonFile = files.find(
+      (f) => f.endsWith('.json') && !f.endsWith('.panels.json'),
+    );
+    // A corpus run keeps the parent page and each panel's reads, but not the
+    // panel images -- those are re-cut on the worker and never uploaded. So
+    // `p20.jpg` + `p20__3.streets.json` is the only pair on disk, and the reads
+    // are in the panel's frame while the image is in the parent's. Given the
+    // parent's panels.json we can re-cut the panel here and make them agree.
+    const panelsFile =
+      files.find((f) => f.endsWith('.panels.json')) ??
+      (imageFile && jsonFile ? siblingPanelsPath(imageFile, jsonFile) : null);
 
     let fallbackWidth = jsonWidth;
     let fallbackHeight = jsonHeight;
@@ -619,10 +688,21 @@ export function DebugView({ files: filesProp, onClose }: DebugViewProps = {}) {
         }
         const src = resolveDataUrl(imageFile);
         const el = await loadImage(src);
-        applyImage(el, src);
-        setImageStem(pageStem(imageFile));
-        fallbackWidth = el.naturalWidth;
-        fallbackHeight = el.naturalHeight;
+        const cut = panelsFile
+          ? await cutPanelFromParent(el, imageFile, jsonFile, panelsFile)
+          : null;
+        if (cut) {
+          applyImage(cut.image, cut.src);
+          prevObjectUrlRef.current = cut.src;
+          setImageStem(pageStem(jsonFile as string));
+          fallbackWidth = cut.image.naturalWidth;
+          fallbackHeight = cut.image.naturalHeight;
+        } else {
+          applyImage(el, src);
+          setImageStem(pageStem(imageFile));
+          fallbackWidth = el.naturalWidth;
+          fallbackHeight = el.naturalHeight;
+        }
         // Offer the road-probability map toggle when a sibling map exists.
         setShowRoadMap(false);
         setRoadMapSrc(null);
