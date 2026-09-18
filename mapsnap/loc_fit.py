@@ -253,6 +253,9 @@ class FitWork:
     done: bool
     reason: str = ""
     run_tag: str = ""
+    # Not ready AND never going to be, so the queue must settle it rather than
+    # hand it to the next worker (see plan_fit).
+    unprocessable: bool = False
 
 
 def plan_fit(
@@ -261,8 +264,19 @@ def plan_fit(
     """Decide whether this item can run the CPU chain, and whether it already has.
 
     Not ready is not failure: an item whose CRAFT boxes are missing is waiting on
-    the GPU pass, and an item with no county extract cannot read street names at
-    all. Both go back to the queue rather than being retired.
+    the GPU pass, and an item with no county extract cannot read street names
+    until someone uploads one. Both go back to the queue rather than being
+    retired -- the condition is somebody else's to clear, and a later worker
+    gets the item once it is.
+
+    An item with no page images at all is different: nothing this pipeline does
+    will ever put one in the mirror, so going back on the queue only buys
+    another worker the same dead end. loc_mirror.keep_sheet drops any page key
+    that is not p<number> or a one-or-two-letter page, which loses every sheet
+    of the 45 items whose sheets are ALL non-numeric -- 43 of them CBD
+    (central business district) volumes, Des Moines 1906 and Memphis 1907 among
+    them. They rode the test-200b queue to its dead-letter queue, ten receives
+    each. Recorded and settled instead; #467 is the mirror-side fix.
     """
     keys = set(present)
     images = sorted(key for key in keys if key.endswith(".jpg") and key.count(".") == 1)
@@ -273,7 +287,14 @@ def plan_fit(
         return FitWork(item, pages, county, True, True, run_tag=run_tag)
     if not pages:
         return FitWork(
-            item, pages, county, False, False, "no pages in the mirror", run_tag
+            item,
+            pages,
+            county,
+            False,
+            False,
+            "no pages in the mirror",
+            run_tag,
+            unprocessable=True,
         )
     unboxed = [
         page for page in pages if f"{page[: -len('.jpg')]}.boxes.json" not in keys
@@ -562,6 +583,7 @@ class Prepared:
     index: int
     skipped: int = 0
     waiting: int = 0
+    unprocessable: int = 0
     failures: list[tuple[str, str]] = field(default_factory=list)
 
 
@@ -584,7 +606,7 @@ def prepare_next(
     take it. Getting those two the wrong way round would either lose items or
     spin on them.
     """
-    skipped = waiting = 0
+    skipped = waiting = unprocessable = 0
     failures: list[tuple[str, str]] = []
     for index, item in items:
         try:
@@ -592,6 +614,16 @@ def prepare_next(
             work = plan_fit(item, present, counties.get(item.item), tag_for(item))
             if work.done:
                 skipped += 1
+                if retire is not None:
+                    retire(item)
+                continue
+            if work.unprocessable:
+                unprocessable += 1
+                print(
+                    f"{item.item}: skipped ({work.reason}); nothing to retry",
+                    file=sys.stderr,
+                    flush=True,
+                )
                 if retire is not None:
                     retire(item)
                 continue
@@ -613,8 +645,8 @@ def prepare_next(
         except OSError as error:
             failures.append((item.item, str(error)))
             continue
-        return Prepared(work, local, index, skipped, waiting, failures)
-    return Prepared(None, None, 0, skipped, waiting, failures)
+        return Prepared(work, local, index, skipped, waiting, unprocessable, failures)
+    return Prepared(None, None, 0, skipped, waiting, unprocessable, failures)
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -716,12 +748,14 @@ def main() -> None:
 
     started = time.perf_counter()
     done = skipped = waiting = failed = pages = 0
+    unprocessable = 0
     broken = args.work_dir / f"broken-{args.shard}.log"
 
     def record(prepared: Prepared) -> None:
-        nonlocal skipped, waiting, failed
+        nonlocal skipped, waiting, unprocessable, failed
         skipped += prepared.skipped
         waiting += prepared.waiting
+        unprocessable += prepared.unprocessable
         for name, error in prepared.failures:
             print(f"{name}: {error}", file=sys.stderr, flush=True)
             with broken.open("a") as handle:
@@ -800,7 +834,8 @@ def main() -> None:
     elapsed = time.perf_counter() - started
     print(
         f"{label}: {done} items fitted, {skipped} already done, {waiting} awaiting "
-        f"craft, {failed} failed; {pages} pages in {format_duration(elapsed)}",
+        f"craft, {unprocessable} not in the mirror, {failed} failed; "
+        f"{pages} pages in {format_duration(elapsed)}",
         flush=True,
     )
 
