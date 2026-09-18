@@ -59,9 +59,25 @@ def test_plan_fit_waits_when_no_county_extract_is_known() -> None:
 
 
 def test_plan_fit_reports_an_item_the_mirror_never_produced() -> None:
+    """And settles it: no worker will ever find pages the mirror does not hold,
+    so putting it back only buys the next one the same dead end. The 45 items
+    whose sheets are all non-numeric (Des Moines 1906's lone pcbd sheet among
+    them) rode the test-200b queue into its dead-letter queue this way."""
     work = plan_fit(ALPHA, ["metadata.json"], County("US01001"), TAG)
     assert not work.ready
     assert "no pages" in work.reason
+    assert work.unprocessable
+
+
+def test_plan_fit_keeps_the_fixable_not_ready_cases_retryable() -> None:
+    # Someone else clears these -- the GPU pass, or an uploaded extract -- so
+    # they go back on the queue and a later worker gets them.
+    waiting_on_craft = present(3)
+    waiting_on_craft.remove("p2.boxes.json")
+    for keys, county in ((waiting_on_craft, County("US01001")), (present(2), None)):
+        work = plan_fit(ALPHA, keys, county, TAG)
+        assert not work.ready
+        assert not work.unprocessable
 
 
 def test_plan_fit_ignores_panels_when_listing_parent_pages() -> None:
@@ -668,3 +684,38 @@ def test_a_crash_with_no_record_is_still_a_failure(monkeypatch, tmp_path):
             tmp_path,
             ok_if=lambda: (tmp_path / "keymaps.json").exists(),
         )
+
+
+def test_prepare_next_settles_an_unprocessable_item_and_releases_the_rest(
+    monkeypatch, tmp_path: Path
+) -> None:
+    """The half that matters: which queue callback each not-ready item gets.
+    Releasing one the mirror will never hold is what dead-lettered Des Moines
+    1906 -- ten receives, then the DLQ -- while a genuinely transient item must
+    still go back so a later worker can take it."""
+    from mapsnap import loc_fit
+
+    missing = Item("sanborn02629_005", "iowa", "1906")
+    uncrafted = Item("sanborn2", "alabama", "1900")
+    listings = {
+        missing.prefix: ["metadata.json"],
+        uncrafted.prefix: present(1, boxes=False),
+    }
+    monkeypatch.setattr(loc_fit, "list_prefix", lambda bucket, prefix: listings[prefix])
+
+    retired: list[str] = []
+    released: list[str] = []
+    prepared = loc_fit.prepare_next(
+        iter(list(enumerate([missing, uncrafted], start=1))),
+        "s3://bucket",
+        tmp_path,
+        counties={item.item: County("US01001") for item in (missing, uncrafted)},
+        tag_for=lambda item: TAG,
+        fetch=False,
+        retire=lambda item: retired.append(item.item),
+        release=lambda item: released.append(item.item),
+    )
+    assert retired == [missing.item], "settled, not handed to the next worker"
+    assert released == [uncrafted.item], "the GPU pass will catch up"
+    assert prepared.unprocessable == 1 and prepared.waiting == 1
+    assert prepared.work is None
