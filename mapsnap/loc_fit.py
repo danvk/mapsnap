@@ -54,7 +54,9 @@ again once the GPU pass has been through it.
 import argparse
 import csv
 import json
+import os
 import re
+import resource
 import shutil
 import subprocess
 import sys
@@ -690,6 +692,25 @@ def build_parser() -> argparse.ArgumentParser:
         "--queue", help="SQS queue URL to take items from, instead of --shard/--shards."
     )
     parser.add_argument("--manifest")
+    # One item per process: the AWS Batch shape (#448), where an array job's
+    # child N runs line N of a list. Exactly one of --item, --items, --queue or
+    # the --shard/--shards partition.
+    parser.add_argument(
+        "--item", metavar="ID", help="Run exactly this item (e.g. sanborn02404_004)."
+    )
+    parser.add_argument(
+        "--items",
+        metavar="LIST",
+        help="A file (local or s3://) with one item id per line; run the line "
+        "--item-index names, or line $AWS_BATCH_JOB_ARRAY_INDEX.",
+    )
+    parser.add_argument(
+        "--item-index",
+        type=int,
+        metavar="N",
+        help="Which line of --items to run (0-based); defaults to "
+        "$AWS_BATCH_JOB_ARRAY_INDEX under Batch.",
+    )
     parser.add_argument(
         "--counties",
         nargs="+",
@@ -743,6 +764,75 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
+# Exit codes of a single-item run, for a scheduler's retry policy to read
+# (Batch's evaluateOnExit). A multi-item run keeps exiting 0: bootstrap.sh
+# writes the shard's done marker on a clean exit, and one bad item in a shard
+# of 1,100 is not a failed shard.
+EXIT_FITTED = 0
+EXIT_FAILED = 1  # the chain raised: retry once, then give up
+EXIT_USAGE = 2
+EXIT_UNPROCESSABLE = 3  # nothing will ever make it runnable: never retry
+EXIT_NOT_READY = 4  # inputs missing (boxes, county extract): visible, not retried
+
+
+def single_item_exit_code(
+    *, done: int, skipped: int, unprocessable: int, waiting: int, failed: int
+) -> int:
+    """The exit code a one-item run reports for its item's outcome."""
+    if failed:
+        return EXIT_FAILED
+    if unprocessable:
+        return EXIT_UNPROCESSABLE
+    if waiting:
+        return EXIT_NOT_READY
+    if done or skipped:
+        return EXIT_FITTED
+    return EXIT_USAGE
+
+
+def select_item(all_items: list[Item], name: str) -> Item:
+    """The manifest's item called ``name``, or a usage exit naming what was asked for."""
+    for item in all_items:
+        if item.item == name:
+            return item
+    sys.exit(f"{name} is not in the manifest ({len(all_items):,} items).")
+
+
+def read_item_list(path: str, work_dir: Path) -> list[str]:
+    """Item ids, one per line, from a local file or an s3:// object; blanks ignored."""
+    local = Path(path)
+    if path.startswith("s3://"):
+        local = work_dir / "items.txt"
+        work_dir.mkdir(parents=True, exist_ok=True)
+        run_aws(["aws", "s3", "cp", path, str(local), "--only-show-errors"])
+    return [line.strip() for line in local.read_text().splitlines() if line.strip()]
+
+
+def item_from_list(
+    all_items: list[Item], path: str, index: int | None, work_dir: Path
+) -> Item:
+    """Line ``index`` of the list at ``path``; the index falls back to Batch's array index."""
+    if index is None:
+        env = os.environ.get("AWS_BATCH_JOB_ARRAY_INDEX")
+        if env is None:
+            sys.exit("--items needs --item-index, or $AWS_BATCH_JOB_ARRAY_INDEX.")
+        index = int(env)
+    names = read_item_list(path, work_dir)
+    if not 0 <= index < len(names):
+        sys.exit(f"--item-index {index} is outside the list ({len(names)} items).")
+    return select_item(all_items, names[index])
+
+
+def peak_stage_rss_mb() -> float:
+    """The largest resident set any finished stage reached, in MB.
+
+    The chain's stages are subprocesses, so RUSAGE_CHILDREN is where their peak
+    lives: it is the number that sizes a Batch job definition's memory honestly.
+    """
+    peak = resource.getrusage(resource.RUSAGE_CHILDREN).ru_maxrss
+    return peak / 1e6 if sys.platform == "darwin" else peak / 1e3
+
+
 def main() -> None:
     args = build_parser().parse_args()
     if args.check_args:
@@ -757,11 +847,22 @@ def main() -> None:
     print(f"{len(counties):,} items mapped to a county extract", file=sys.stderr)
 
     source: QueueSource | None = None
-    if args.queue:
+    if sum(bool(x) for x in (args.item, args.items, args.queue)) > 1:
+        sys.exit("--item, --items and --queue are mutually exclusive.")
+    single = None
+    if args.item:
+        single = select_item(all_items, args.item)
+    elif args.items:
+        single = item_from_list(all_items, args.items, args.item_index, args.work_dir)
+    if single is not None:
+        total = 1
+        label = single.item
+        pending: Iterator[tuple[int, Item]] = iter([(1, single)])
+    elif args.queue:
         source = QueueSource(args.queue, {item.item: item for item in all_items})
         total = work_queue.depth(args.queue).total
         label = "queue"
-        pending: Iterator[tuple[int, Item]] = iter(source)
+        pending = iter(source)
     else:
         items = select_shard(all_items, args.shard, args.shards)
         total = len(items)
@@ -864,9 +965,20 @@ def main() -> None:
     print(
         f"{label}: {done} items fitted, {skipped} already done, {waiting} awaiting "
         f"craft, {unprocessable} not in the mirror, {failed} failed; "
-        f"{pages} pages in {format_duration(elapsed)}",
+        f"{pages} pages in {format_duration(elapsed)}; "
+        f"peak stage RSS {peak_stage_rss_mb():.0f} MB",
         flush=True,
     )
+    if single is not None:
+        sys.exit(
+            single_item_exit_code(
+                done=done,
+                skipped=skipped,
+                unprocessable=unprocessable,
+                waiting=waiting,
+                failed=failed,
+            )
+        )
 
 
 if __name__ == "__main__":

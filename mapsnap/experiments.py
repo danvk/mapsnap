@@ -317,7 +317,26 @@ def build_manifest(
     }
     if label is not None:
         manifest["label"] = label
+    # Under AWS Batch the job is the unit of provenance the scheduler knows:
+    # its id, attempt and array index are what a CloudWatch log stream and a
+    # FAILED row in the console are keyed by, so a run's manifest carries them.
+    batch = batch_job_identity()
+    if batch:
+        manifest["batch"] = batch
     return manifest
+
+
+def batch_job_identity() -> dict[str, str | int] | None:
+    """The AWS Batch job this process runs under, from its environment, or None."""
+    job_id = os.environ.get("AWS_BATCH_JOB_ID")
+    if not job_id:
+        return None
+    identity: dict[str, str | int] = {"job_id": job_id}
+    if attempt := os.environ.get("AWS_BATCH_JOB_ATTEMPT"):
+        identity["attempt"] = int(attempt)
+    if index := os.environ.get("AWS_BATCH_JOB_ARRAY_INDEX"):
+        identity["array_index"] = int(index)
+    return identity
 
 
 def find_dedup_streets_dir(
