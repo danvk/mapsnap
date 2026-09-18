@@ -473,3 +473,18 @@ def test_sub_floor_rescue_keys_do_not_vouch_for_other_reads_of_the_same_key():
     assert rescued == {"p10": {"9"}}
     assert qualifying_claim(good, pages["p10"], 28.0)
     assert not qualifying_claim(junk, pages["p10"], 28.0)
+
+
+def test_empty_adjacency_carries_every_collection_a_consumer_reads():
+    """A volume can legitimately have no page to scan (Gardiner NY 1913 is one
+    sheet of town), and a missing adjacency.json is indistinguishable from a
+    stage that never ran -- so the scan writes an empty graph instead of
+    failing the volume."""
+    from mapsnap.page_adjacency import empty_adjacency
+
+    doc = empty_adjacency()
+    assert doc["pages"] == {}
+    assert doc["adjacency"] == []
+    assert doc["one_sided"] == []
+    assert doc["promoted"] == []
+    assert doc["no_neighbor"] == {}

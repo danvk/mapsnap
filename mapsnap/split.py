@@ -16,6 +16,7 @@ Usage:
 import argparse
 import json
 import re
+import sys
 from itertools import pairwise
 from pathlib import Path
 from typing import TypedDict
@@ -814,11 +815,27 @@ def assemble_panels(
             panels[best] = unary_union([panels[best], face])
             progressed = True
         leftovers = deferred
-    # Any face never adjacent to a panel (shouldn't happen in a connected partition) is
-    # attached to the nearest panel so the panels still tile the whole page.
+    # Any face never adjacent to a panel is attached to the nearest panel so the
+    # panels still tile the whole page. A face CAN end up adjacent to nothing --
+    # the adjacency test wants a shared boundary of positive length, and a face
+    # meeting its neighbours only at a corner point shares none -- and gluing
+    # such a face onto a panel it does not touch leaves that panel in two
+    # disconnected pieces, which is not a shape anything downstream can crop:
+    # expand_to_full_frame wants one exterior ring and died on the MultiPolygon
+    # (sanborn00519_002, Long Beach CA 1914, dead-lettered in test-200b). A
+    # leftover is by definition below the panel floor, so an unreachable one is
+    # dropped instead; the panels lose a sliver of coverage, not their shape.
     for face in leftovers:
         nearest = min(range(len(panels)), key=lambda i: panels[i].distance(face))
-        panels[nearest] = unary_union([panels[nearest], face])
+        glued = unary_union([panels[nearest], face])
+        if isinstance(glued, Polygon):
+            panels[nearest] = glued
+        else:
+            print(
+                f"  dropped an orphan face ({face.area / total:.2%} of the page): "
+                "it touches no panel, and gluing it on would disconnect one",
+                file=sys.stderr,
+            )
     return panels
 
 

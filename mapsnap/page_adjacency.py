@@ -795,6 +795,23 @@ def one_sided_edges(claims_by_page: dict[str, set[str]]) -> list[tuple[str, str]
     return sorted(edges)
 
 
+def empty_adjacency() -> dict:
+    """The adjacency document for a volume with no page to scan.
+
+    Every collection a consumer reads, empty: ``adjacency_graphs`` wants
+    ``adjacency`` and ``one_sided``, the assignment repair wants ``pages``.
+    """
+    return {
+        "timestamp": datetime.now(UTC).isoformat(),
+        "command": sys.argv[:],
+        "pages": {},
+        "adjacency": [],
+        "one_sided": [],
+        "promoted": [],
+        "no_neighbor": {},
+    }
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(
         description="Detect printed adjacent-sheet numbers and build a volume adjacency graph."
@@ -836,11 +853,25 @@ def main() -> None:
     )
     args = parser.parse_args()
 
-    import easyocr
-
     images = volume_page_images(args.volume)
+    output = args.output or (args.volume / "adjacency.json")
     if not images:
-        sys.exit(f"No page images found in {args.volume}.")
+        # Nothing to scan is a legitimate outcome, not a failure: Gardiner NY
+        # 1913 (LOC sanborn05939_001) is a single sheet of town, and a volume
+        # whose every page is a key map has no ordinary sheet to read margin
+        # numbers from either. An absent adjacency.json is indistinguishable
+        # from a stage that never ran, so say so with an empty graph. A volume
+        # with no page images AT ALL is a different thing -- a bad path, or an
+        # item that never downloaded -- and still fails.
+        if not source_images(args.volume):
+            sys.exit(f"No page images found in {args.volume}.")
+        output.write_text(json.dumps(empty_adjacency(), indent=2))
+        print(
+            f"Wrote {output}: no pages to scan "
+            f"(all {len(source_images(args.volume))} are key maps or split panels).",
+            file=sys.stderr,
+        )
+        return
     valid_keys = {
         key for image in images if (key := page_key(image_stem(str(image)))) is not None
     }
@@ -848,6 +879,8 @@ def main() -> None:
         f"Scanning {len(images)} pages ({len(valid_keys)} page keys)...",
         file=sys.stderr,
     )
+    import easyocr
+
     reader = easyocr.Reader(["en"], gpu=not args.no_gpu, verbose=False)
 
     pages: dict[str, dict] = {}
@@ -1040,7 +1073,6 @@ def main() -> None:
             stem: sorted(edges) for stem, edges in sorted(no_neighbor.items())
         },
     }
-    output = args.output or (args.volume / "adjacency.json")
     output.write_text(json.dumps(doc, indent=2))
     total_claims = sum(len(c) for c in claims_by_page.values())
     print(

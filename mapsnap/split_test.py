@@ -411,3 +411,35 @@ def test_process_image_cuts_a_corner_box_the_divider_gate_hid(tmp_path):
     log = (tmp_path / "raw" / "p0.keymap.txt").read_text()
     assert "corner boxes: 1 found" in log
     assert "bottom-left box" in log
+
+
+def test_an_orphan_face_never_disconnects_a_panel():
+    """sanborn00519_002 (Long Beach CA 1914) crashed the corpus run: a leftover
+    face touching its neighbours only at a corner point is adjacent to nothing
+    (the test wants a shared boundary of positive LENGTH), and gluing it onto
+    the nearest panel left that panel in two pieces -- a MultiPolygon, which
+    has no ``.exterior`` for expand_to_full_frame to read."""
+    from shapely.geometry import Polygon, box
+
+    from mapsnap.split import assemble_panels, expand_to_full_frame
+
+    orphan = box(47, 47, 52, 52)  # in the gap between the two panels
+    faces = [box(0, 0, 45, 100), box(55, 0, 100, 100), orphan]
+    panels = assemble_panels(faces, 100, 100)
+    assert [type(panel) for panel in panels] == [Polygon, Polygon]
+    assert all(
+        isinstance(panel, Polygon)
+        for panel in expand_to_full_frame(panels, 100, 100, 4)
+    )
+
+
+def test_a_leftover_touching_a_panel_is_still_glued_on():
+    # The orphan case must not cost the ordinary one: a face sharing an edge
+    # with a panel is absorbed, so the panels keep tiling the page.
+    from shapely.geometry import box
+
+    from mapsnap.split import assemble_panels
+
+    faces = [box(0, 0, 45, 100), box(55, 0, 100, 100), box(45, 0, 55, 100)]
+    panels = assemble_panels(faces, 100, 100)
+    assert sum(panel.area for panel in panels) == 100 * 100
