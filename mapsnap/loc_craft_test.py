@@ -398,6 +398,11 @@ def _queue_source(monkeypatch, bodies: list[str], items: dict[str, Item]):
     monkeypatch.setattr(
         work_queue, "delete", lambda url, handle: deleted.append(handle)
     )
+    # Nothing is leased in these fixtures, so an empty receive really is a
+    # drained queue (QueueSource checks, since an empty receive alone is not).
+    monkeypatch.setattr(
+        work_queue, "depth", lambda url: work_queue.Depth(visible=0, in_flight=0)
+    )
     return QueueSource("https://q", items), deleted
 
 
@@ -480,3 +485,43 @@ def test_prepare_next_leaves_a_failed_item_for_another_worker(monkeypatch) -> No
     )
     assert [name for name, _ in prepared.failures] == ["flaky"]
     assert retired == []
+
+
+def test_a_queue_with_work_in_flight_is_not_drained(monkeypatch):
+    """An empty receive is not an empty queue.
+
+    Replacing a fleet leaves every item leased to instances that no longer
+    exist, invisible until the visibility timeout lapses. On 2026-09-17 eight
+    replacement workers each saw nothing, called the queue drained and powered
+    off while 133 items sat in flight to the instances they were replacing.
+    """
+    from mapsnap import loc_craft
+    from mapsnap.loc_craft import Item, QueueSource
+    from mapsnap.work_queue import Depth, Message
+
+    monkeypatch.setattr(loc_craft, "IN_FLIGHT_WAIT_SECONDS", 0)
+    receives = [[], [Message(body="sanborn1", handle="h")], []]
+    depths = [Depth(visible=0, in_flight=133), Depth(visible=0, in_flight=0)]
+    monkeypatch.setattr(
+        loc_craft.work_queue, "receive", lambda url, **kw: receives.pop(0)
+    )
+    monkeypatch.setattr(loc_craft.work_queue, "depth", lambda url: depths.pop(0))
+
+    source = QueueSource("u", {"sanborn1": Item("sanborn1", "alabama", "1900")})
+    taken = [item.item for _, item in source]
+    assert taken == ["sanborn1"], "it waited for the in-flight item to reappear"
+    assert not depths, "and only stopped once nothing was in flight"
+
+
+def test_an_empty_queue_with_nothing_in_flight_still_drains(monkeypatch):
+    """The stop condition must still exist, or a finished fleet never exits."""
+    from mapsnap import loc_craft
+    from mapsnap.loc_craft import QueueSource
+    from mapsnap.work_queue import Depth
+
+    monkeypatch.setattr(loc_craft, "IN_FLIGHT_WAIT_SECONDS", 0)
+    monkeypatch.setattr(loc_craft.work_queue, "receive", lambda url, **kw: [])
+    monkeypatch.setattr(
+        loc_craft.work_queue, "depth", lambda url: Depth(visible=0, in_flight=0)
+    )
+    assert list(QueueSource("u", {})) == []
