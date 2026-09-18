@@ -1410,8 +1410,126 @@ def _inlier_residuals(
 # count and only this many top candidates get the full label scoring.
 STAGE2_MAX_CANDIDATES = 60
 
+# Stage 1 of that pre-rank scores every C(n, 2) seed pair against all n GCPs,
+# which is cubic in n. It was built for key maps with n in the hundreds --
+# "hundreds of thousands of pairs" -- where that is seconds. Miami 1950's key
+# map against its county extract yields n = 21,905 GCPs (240 million pairs),
+# measured on 2026-09-18 on the unmodified code:
+#
+#     n =   800    2.4 s        n = 1,500   16 s
+#     n = 1,000    4.9 s        n = 2,000   40 s
+#     n = 1,200    8.4 s        n = 2,500   79 s      -> n = 21,905: ~880 min
+#
+# (cubic predictions match within 2% at every step). Above this many GCPs the
+# ranking runs over a stratified subset of them -- spread evenly across the
+# sheet in pixel space, which is what a similarity fit needs -- and the winning
+# pairs are mapped back to the full list; the label-scored stage 2 still sees
+# every feature. Below the cap the code path is unchanged. 0 disables the cap
+# (`georef --max-consensus-gcps 0`).
+#
+# The subset is drawn from GCPs whose pixel lies ON the sheet. An intersection
+# GCP is where two labels' direction lines cross, and on a key map most of
+# those crossings land far outside the sheet (Miami: x from -5,605 to 19,007 on
+# a 6,515 px sheet) where no intersection can be. A grid over that extent
+# spends its cells on empty space; over the sheet it resolves where the GCPs
+# are. Only 2% of Miami's 21,905 GCPs are inliers of the pose eventually found,
+# and the subset's inlier count is what decides whether a correct seed pair can
+# outrank the junk in stage 1:
+#
+#     subset of   1,000    2,000    3,000        (inliers it contains)
+#     full extent    16       52       68        <- 1,000 found NO pose; 3,000 did
+#     on-sheet       65      107        -
+#
+# so on-sheet at 2,000 carries more inliers than the uniform 3,000 that worked,
+# for 40 s of stage 1 rather than 130. Filtering costs Miami one inlier of 446
+# and Kansas City none of 1,385; when fewer than the cap are on the sheet, all
+# GCPs are used.
+MAX_CONSENSUS_GCPS = 2000
+
+
+def stratified_gcp_subset(pixels: np.ndarray, k: int) -> np.ndarray:
+    """Indices of ``k`` points spread evenly over the sheet, deterministically.
+
+    Buckets the points into a ceil(sqrt(k))-square grid over their pixel extent
+    and takes them round-robin across the occupied cells, lowest index first
+    within a cell, until ``k`` are chosen -- so a crowded corner cannot claim the
+    whole subset, and the same input always gives the same subset. Returns the
+    chosen indices sorted ascending; all of them when ``k >= len(pixels)``.
+    """
+    n = len(pixels)
+    if k >= n:
+        return np.arange(n)
+    side = max(1, math.ceil(math.sqrt(k)))
+    px, py = pixels[:, 0], pixels[:, 1]
+    cx = np.floor(
+        (px - px.min()) / max(float(np.ptp(px)), 1e-9) * side * 0.999999
+    ).astype(int)
+    cy = np.floor(
+        (py - py.min()) / max(float(np.ptp(py)), 1e-9) * side * 0.999999
+    ).astype(int)
+    cell = cx * side + cy
+    order = np.lexsort((np.arange(n), cell))
+    _, starts = np.unique(cell[order], return_index=True)
+    buckets = [order[a:b] for a, b in zip(starts, list(starts[1:]) + [n])]
+    chosen: list[int] = []
+    depth = 0
+    while len(chosen) < k:
+        took = 0
+        for bucket in buckets:
+            if depth < len(bucket):
+                chosen.append(int(bucket[depth]))
+                took += 1
+                if len(chosen) == k:
+                    break
+        if not took:
+            break
+        depth += 1
+    return np.array(sorted(chosen))
+
 
 def _rank_pairs_by_consensus(
+    gcps: list["IntersectionGCP"],
+    cos_phi: float,
+    pos_threshold: float,
+    top_k: int,
+    sheet: tuple[float, float] | None = None,
+) -> list[tuple[int, int]]:
+    """The best ``top_k`` seed pairs by GCP consensus, over at most MAX_CONSENSUS_GCPS GCPs.
+
+    Exhaustive over all of ``gcps`` up to the cap (see MAX_CONSENSUS_GCPS for why
+    there is one); past it, over a stratified subset drawn from the GCPs on the
+    sheet -- ``sheet`` is its (width, height) in pixels -- with the returned pair
+    indices mapped back into ``gcps``.
+    """
+    n = len(gcps)
+    cap = MAX_CONSENSUS_GCPS
+    if not cap or n <= cap:
+        return _rank_pairs_by_consensus_exhaustive(gcps, cos_phi, pos_threshold, top_k)
+    pixels = np.array([g.pixel for g in gcps], dtype=float)
+    pool = np.arange(n)
+    if sheet is not None:
+        on_sheet = (
+            (pixels[:, 0] >= 0)
+            & (pixels[:, 0] <= sheet[0])
+            & (pixels[:, 1] >= 0)
+            & (pixels[:, 1] <= sheet[1])
+        )
+        if on_sheet.sum() >= cap:
+            pool = np.flatnonzero(on_sheet)
+    keep = pool[stratified_gcp_subset(pixels[pool], cap)]
+    print(
+        f"GCP-consensus pre-rank: {n} GCPs is over MAX_CONSENSUS_GCPS={cap}; ranking "
+        f"pairs over a stratified subset of {len(keep)} drawn from {len(pool)} "
+        f"{'on-sheet' if len(pool) < n else 'GCPs (no sheet filter)'}",
+        file=sys.stderr,
+    )
+    ranked = _rank_pairs_by_consensus_exhaustive(
+        [gcps[i] for i in keep], cos_phi, pos_threshold, top_k
+    )
+    return [(int(keep[i]), int(keep[j])) for i, j in ranked]
+
+
+def _rank_pairs_by_consensus_exhaustive(
     gcps: list["IntersectionGCP"],
     cos_phi: float,
     pos_threshold: float,
@@ -1620,6 +1738,7 @@ def ransac_hybrid(
     pair_records: list[dict] | None = None,
     scored_sink: list | None = None,
     force_pair_pixels: tuple | None = None,
+    sheet: tuple[float, float] | None = None,
 ) -> tuple[np.ndarray | None, list[int], tuple[int, int] | None]:
     """Find the best similarity affine using intersection GCPs as seeds, label-based inlier scoring.
 
@@ -1701,7 +1820,7 @@ def ransac_hybrid(
         pair_list = list(combinations(range(n), 2))
     else:
         pair_list = _rank_pairs_by_consensus(
-            gcps, cos_phi, pos_threshold, STAGE2_MAX_CANDIDATES
+            gcps, cos_phi, pos_threshold, STAGE2_MAX_CANDIDATES, sheet=sheet
         )
         print(
             f"GCP-consensus pre-rank: label-scoring top {len(pair_list)} of {total_pairs} pairs",
@@ -3350,6 +3469,7 @@ def process_image(
         cos_phi,
         force_pair=force_intersection,
         debug=debug,
+        sheet=(float(img_w), float(img_h)),
         pair_records=pair_records,
         scored_sink=scored_poses,
         force_pair_pixels=force_pair_pixels,
@@ -3725,6 +3845,7 @@ def process_deferred_image(
 
 
 def main() -> None:
+    global MAX_CONSENSUS_GCPS
     parser = argparse.ArgumentParser(
         description=(
             "Fit a pixel→(lon,lat) affine from detected street label polygons "
@@ -3902,6 +4023,18 @@ def main() -> None:
         "--debug", action="store_true", help="Print additional debug information"
     )
     parser.add_argument(
+        "--max-consensus-gcps",
+        type=int,
+        default=MAX_CONSENSUS_GCPS,
+        metavar="N",
+        help=(
+            "Rank seed pairs over at most N GCPs (a stratified subset past that); "
+            "0 ranks over all of them, which is cubic in their count "
+            "(default: %(default)s). Applies to the in-process path; multiprocessing "
+            "workers keep the default."
+        ),
+    )
+    parser.add_argument(
         "--geocode_keymaps",
         action="store_true",
         help="Geocode key maps in addition to regular pages.",
@@ -3948,6 +4081,7 @@ def main() -> None:
         ),
     )
     args = parser.parse_args()
+    MAX_CONSENSUS_GCPS = args.max_consensus_gcps
 
     if args.centerlines is None:
         centerlines = default_centerlines(Path(args.images[0]).parent)
