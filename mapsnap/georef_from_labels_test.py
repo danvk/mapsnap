@@ -2056,3 +2056,106 @@ def test_prepare_label_features_stays_quiet_when_every_read_matches(tmp_path, ca
     )
 
     assert "matching no street" not in capsys.readouterr().err
+
+
+def _known_similarity_gcps(n_inliers: int, n_outliers: int, seed: int = 5):
+    """Outliers FIRST, so a pair index that was not mapped back from the subset
+    lands on an outlier and is caught."""
+    rng = np.random.default_rng(seed)
+    a, b, tx, ty = 1e-4, 2e-5, -80.0, 40.0
+    outliers = [
+        _make_gcp(tuple(rng.uniform(0, 3000, 2)), (-70.0, 45.0))
+        for _ in range(n_outliers)
+    ]
+    inliers = [
+        _make_gcp((px, py), (a * px - b * py + tx, b * px + a * py + ty))
+        for px, py in rng.uniform(0, 3000, size=(n_inliers, 2))
+    ]
+    return outliers + inliers, n_outliers
+
+
+def test_rank_pairs_by_consensus_caps_the_ranking_set_and_maps_pairs_back(monkeypatch):
+    """Miami 1950's key map yields 21,905 GCPs; ranking all pairs against all of
+    them is cubic and was measured at ~880 minutes. Past the cap the ranking runs
+    over a stratified subset and the winning pairs must index the ORIGINAL list."""
+    from mapsnap import georef_from_labels as g
+
+    gcps, n_out = _known_similarity_gcps(200, 20)
+    monkeypatch.setattr(g, "MAX_CONSENSUS_GCPS", 60)
+    top = g._rank_pairs_by_consensus(gcps, 1.0, 1e-3, 8)
+    assert len(top) == 8
+    assert all(i < j for i, j in top)
+    assert all(i >= n_out and j >= n_out for i, j in top), "every pair is inliers"
+    assert top == g._rank_pairs_by_consensus(gcps, 1.0, 1e-3, 8), "deterministic"
+
+
+def test_rank_pairs_by_consensus_below_the_cap_is_the_exhaustive_ranking():
+    from mapsnap import georef_from_labels as g
+
+    gcps, _ = _known_similarity_gcps(25, 5)
+    assert len(gcps) < g.MAX_CONSENSUS_GCPS
+    assert g._rank_pairs_by_consensus(gcps, 1.0, 1e-3, 10) == (
+        g._rank_pairs_by_consensus_exhaustive(gcps, 1.0, 1e-3, 10)
+    )
+
+
+def test_stratified_gcp_subset_spreads_over_the_sheet():
+    from mapsnap.georef_from_labels import stratified_gcp_subset
+
+    rng = np.random.default_rng(11)
+    pts = rng.uniform(0, 1000, size=(400, 2))
+    pts[:300] += 0  # uniform; then a crowded corner:
+    pts = np.vstack([pts, rng.uniform(0, 50, size=(400, 2))])
+    idx = stratified_gcp_subset(pts, 100)
+    assert len(idx) == 100 and len(set(idx.tolist())) == 100
+    assert list(idx) == sorted(idx.tolist())
+    quadrants = {(int(x > 500), int(y > 500)) for x, y in pts[idx]}
+    assert quadrants == {(0, 0), (0, 1), (1, 0), (1, 1)}, (
+        "a crowded corner cannot take it all"
+    )
+    assert (pts[idx] < 50).all(axis=1).sum() < 60, (
+        "the crowded corner is not most of the subset"
+    )
+    assert np.array_equal(idx, stratified_gcp_subset(pts, 100))
+    assert np.array_equal(stratified_gcp_subset(pts[:10], 50), np.arange(10))
+
+
+def test_rank_pairs_by_consensus_draws_the_subset_from_on_sheet_gcps(monkeypatch):
+    """Most key-map intersection GCPs are label-line crossings far off the sheet
+    (Miami: x from -5,605 to 19,007 on a 6,515 px sheet), where no intersection
+    can be. Stratifying over that extent wastes the subset on them: 16 inliers
+    in a 1,000-subset against 65 when the grid is confined to the sheet."""
+    from mapsnap import georef_from_labels as g
+
+    rng = np.random.default_rng(9)
+    a, b, tx, ty = 1e-4, 2e-5, -80.0, 40.0
+    # 120 inliers ON the 3000x3000 sheet, 400 junk crossings far off it.
+    inliers = [
+        _make_gcp((px, py), (a * px - b * py + tx, b * px + a * py + ty))
+        for px, py in rng.uniform(0, 3000, size=(120, 2))
+    ]
+    junk = [
+        _make_gcp(tuple(pt), (-70.0 + 1e-3 * i, 45.0))
+        for i, pt in enumerate(rng.uniform(-20000, 20000, size=(400, 2)))
+        if not (0 <= pt[0] <= 3000 and 0 <= pt[1] <= 3000)
+    ]
+    gcps = junk + inliers
+    monkeypatch.setattr(g, "MAX_CONSENSUS_GCPS", 100)
+    top = g._rank_pairs_by_consensus(gcps, 1.0, 1e-3, 8, sheet=(3000.0, 3000.0))
+    assert len(top) == 8
+    assert all(i >= len(junk) and j >= len(junk) for i, j in top), (
+        "seed pairs are inliers"
+    )
+    # Without the sheet the grid spans the junk's extent and the subset is mostly junk.
+    blind = g._rank_pairs_by_consensus(gcps, 1.0, 1e-3, 8, sheet=None)
+    assert sum(i >= len(junk) and j >= len(junk) for i, j in blind) < 8
+
+
+def test_rank_pairs_by_consensus_uses_every_gcp_when_few_are_on_the_sheet(monkeypatch):
+    from mapsnap import georef_from_labels as g
+
+    gcps, n_out = _known_similarity_gcps(200, 20)  # all within 0..3000
+    monkeypatch.setattr(g, "MAX_CONSENSUS_GCPS", 60)
+    # A "sheet" so small that fewer than the cap are on it: the filter stands down.
+    top = g._rank_pairs_by_consensus(gcps, 1.0, 1e-3, 8, sheet=(10.0, 10.0))
+    assert len(top) == 8 and all(i >= n_out and j >= n_out for i, j in top)
