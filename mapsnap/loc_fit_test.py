@@ -192,7 +192,7 @@ def test_run_chain_derives_panel_boxes_and_reads_effective_pages(
         (tmp_path / "raw" / name).write_bytes(b"")
     commands: list[list[str]] = []
 
-    def record(command, local):
+    def record(command, local, **kw):
         commands.append(command)
         # The chain identifies the key map itself now, so the record appears
         # when keymap-detect runs rather than being seeded beforehand.
@@ -302,7 +302,7 @@ def test_run_chain_clears_the_previous_archive(tmp_path, monkeypatch) -> None:
     stale = tmp_path / "artifacts" / "mapsnap"
     stale.mkdir(parents=True)
     (stale / "manifest.json").write_text("{}")
-    monkeypatch.setattr(loc_fit, "stage", lambda command, local: None)
+    monkeypatch.setattr(loc_fit, "stage", lambda command, local, **kw: None)
     work = plan_fit(ALPHA, ["p1.jpg", "p1.boxes.json"], County("US01001"), TAG)
     loc_fit.run_chain(tmp_path, work)
     assert not stale.exists()
@@ -571,7 +571,7 @@ def test_keymap_is_identified_after_the_split(monkeypatch, tmp_path):
 
     commands: list[list[str]] = []
     monkeypatch.setattr(
-        loc_fit, "stage", lambda command, local: commands.append(command)
+        loc_fit, "stage", lambda command, local, **kw: commands.append(command)
     )
     work = plan_fit(ALPHA, present(2), County("US01001"), TAG)
     loc_fit.run_chain(tmp_path, work, TAG)
@@ -594,7 +594,7 @@ def test_keymap_detect_is_given_the_volume_not_the_pages(monkeypatch, tmp_path):
 
     commands: list[list[str]] = []
     monkeypatch.setattr(
-        loc_fit, "stage", lambda command, local: commands.append(command)
+        loc_fit, "stage", lambda command, local, **kw: commands.append(command)
     )
     work = plan_fit(ALPHA, present(2), County("US01001"), TAG)
     loc_fit.run_chain(tmp_path, work, TAG)
@@ -613,10 +613,58 @@ def test_the_mirrors_keymap_record_is_dropped_before_identifying(monkeypatch, tm
     monkeypatch.setattr(
         loc_fit,
         "stage",
-        lambda command, local: (
+        lambda command, local, **kw: (
             seen.append(stale.exists()) if command[1] == "keymap-detect" else None
         ),
     )
     work = plan_fit(ALPHA, present(2), County("US01001"), TAG)
     loc_fit.run_chain(tmp_path, work, TAG)
     assert seen == [False], "the mirror's record is gone before identification runs"
+
+
+def test_no_key_map_is_an_answer_not_a_failure(monkeypatch, tmp_path):
+    """keymap-detect exits 1 when it finds none, which most volumes are.
+
+    Failing the item on that broke the test-200b run: volumes with no key map
+    failed outright, returned to the queue, and failed again.
+    """
+    import subprocess
+
+    from mapsnap import loc_fit
+
+    monkeypatch.setattr(
+        loc_fit.subprocess,
+        "run",
+        lambda command, **kw: subprocess.CompletedProcess(
+            command, 1, "", "No key map identified."
+        ),
+    )
+    (tmp_path / "keymaps.json").write_text('{"keys": []}')
+    loc_fit.stage(
+        ["mapsnap", "keymap-detect", str(tmp_path)],
+        tmp_path,
+        ok_if=lambda: (tmp_path / "keymaps.json").exists(),
+    )  # must not raise
+
+
+def test_a_crash_with_no_record_is_still_a_failure(monkeypatch, tmp_path):
+    """The record's presence is the signal, not the exit code."""
+    import subprocess
+
+    import pytest
+
+    from mapsnap import loc_fit
+
+    monkeypatch.setattr(
+        loc_fit.subprocess,
+        "run",
+        lambda command, **kw: subprocess.CompletedProcess(
+            command, 1, "", "Traceback: model not found"
+        ),
+    )
+    with pytest.raises(OSError, match="keymap-detect failed"):
+        loc_fit.stage(
+            ["mapsnap", "keymap-detect", str(tmp_path)],
+            tmp_path,
+            ok_if=lambda: (tmp_path / "keymaps.json").exists(),
+        )

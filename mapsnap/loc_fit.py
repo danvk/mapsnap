@@ -382,8 +382,18 @@ def borrow_reads(local: Path, bucket: str, item: Item, source: str) -> None:
     sync(run_prefix(bucket, item, source), str(local), *filters)
 
 
-def stage(command: list[str], local: Path) -> None:
+def stage(
+    command: list[str], local: Path, ok_if: Callable[[], bool] | None = None
+) -> None:
     """Run one pipeline command, failing loudly.
+
+    ``ok_if`` names the thing the stage was for, when a non-zero exit does not
+    mean it failed. keymap-detect exits 1 when it finds no key map, which most
+    volumes are -- 20,753 of the corpus's 35,158 items are under the coverage
+    floor and cannot have one -- and it writes its record either way. Failing
+    the item on that exit code broke the 2026-09-17 test-200b run: volumes with
+    no key map failed outright, went back to the queue, and failed again. A
+    crash leaves no record, so it is still a failure.
 
     Deliberately does NOT set ``cwd`` to the item's directory. Several stages
     load their weights from a path relative to the repo -- keymap wants
@@ -392,7 +402,7 @@ def stage(command: list[str], local: Path) -> None:
     so the working directory only ever needs to be the repo.
     """
     result = subprocess.run(command, capture_output=True, text=True, check=False)
-    if result.returncode != 0:
+    if result.returncode != 0 and not (ok_if and ok_if()):
         tail = (result.stderr or result.stdout or "").strip().splitlines()[-6:]
         raise OSError(f"{' '.join(command[:2])} failed: {' | '.join(tail)}")
 
@@ -439,7 +449,11 @@ def run_chain(local: Path, work: FitWork, run_tag: str | None = None) -> None:
     # but an item whose identification fails partway would otherwise fall back
     # to the stale whole-sheet answer, which is the bug being fixed.
     (local / KEYMAPS_NAME).unlink(missing_ok=True)
-    stage(["mapsnap", "keymap-detect", str(local)], local)
+    stage(
+        ["mapsnap", "keymap-detect", str(local)],
+        local,
+        ok_if=lambda: (local / KEYMAPS_NAME).exists(),
+    )
     # The *effective* pages: a panel supersedes its parent, so a split sheet is
     # read panel by panel and the whole sheet is not read at all.
     effective = [str(path) for path in list_pages(local)]
