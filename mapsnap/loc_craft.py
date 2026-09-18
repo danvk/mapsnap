@@ -307,6 +307,13 @@ def process_item(
         shutil.rmtree(local, ignore_errors=True)
 
 
+# How long to wait before looking again when the queue has work in flight but
+# nothing visible. A lease lapses within the visibility timeout (30 minutes by
+# default), so polling at this interval costs a handful of API calls to avoid
+# ending a fleet early.
+IN_FLIGHT_WAIT_SECONDS = 60
+
+
 class QueueSource:
     """Items taken from an SQS queue, with the handles that retire them.
 
@@ -330,7 +337,25 @@ class QueueSource:
         while True:
             messages = work_queue.receive(self.url, count=1)
             if not messages:
-                return  # drained
+                # An empty receive is not an empty queue. Items leased to other
+                # workers are invisible, and a worker that died holds its lease
+                # until the visibility timeout lapses -- so right after a fleet
+                # is replaced, every item can be in flight to an instance that
+                # no longer exists. On 2026-09-17 that ended a replacement fleet
+                # in seconds: eight new workers each saw nothing, called the
+                # queue drained, and powered off while 133 items sat leased to
+                # the instances they were replacing.
+                left = work_queue.depth(self.url)
+                if left.in_flight == 0:
+                    return  # really drained
+                print(
+                    f"queue: nothing visible, {left.in_flight} item(s) in flight "
+                    f"to other workers; waiting {IN_FLIGHT_WAIT_SECONDS}s",
+                    file=sys.stderr,
+                    flush=True,
+                )
+                time.sleep(IN_FLIGHT_WAIT_SECONDS)
+                continue
             for message in messages:
                 name, run_tag = work_queue.parse_body(message.body)
                 item = self.by_name.get(name)
