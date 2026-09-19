@@ -80,6 +80,26 @@ and array index beside the git sha, and `loc-fit`'s summary line prints the
 peak resident set of any stage, which is what to size the job definition's
 memory from after a pilot (2 vCPU / 7 GB to start).
 
+## If `setup.sh` stops
+
+**"Compute Environment ... is not valid. It must be valid before attaching it
+to the job queue"** -- the environment was still `CREATING`. The script now
+waits for `VALID`; re-run it and it will skip everything that exists and
+create the queue. If it reports `INVALID` instead, that is a configuration
+fault and re-running cannot repair it: the environment has to be disabled,
+deleted and recreated, which the error message spells out. The usual causes
+are a missing `AWSServiceRoleForEC2Spot` (the script now creates it), an
+`ecsInstanceRole` whose instance profile has not propagated, or a default VPC
+with no subnets in the region.
+
+Check by hand with:
+
+```
+aws batch describe-compute-environments --region us-west-2 \
+  --compute-environments mapsnap-cpu-spot \
+  --query 'computeEnvironments[0].[status,statusReason]' --output text
+```
+
 ## Limits worth knowing
 
 An array job holds at most 10,000 children: the full corpus is four arrays.

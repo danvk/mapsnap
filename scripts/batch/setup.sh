@@ -68,6 +68,19 @@ if ! aws iam get-instance-profile --instance-profile-name ecsInstanceRole > /dev
   echo "IAM: $(did ecsInstanceRole)"; sleep 10   # IAM propagation before the CE references it
 else echo "IAM: ecsInstanceRole exists"; fi
 
+# --- IAM: the service-linked roles a SPOT compute environment needs -----------
+# Batch asks EC2 for spot capacity through AWSServiceRoleForEC2Spot. Without it
+# the compute environment is created and then goes INVALID ("not authorized to
+# perform: ec2:RequestSpotFleet" or a role-not-found), which only shows up as
+# the job queue refusing to attach. Creating an existing one is an error we can
+# ignore -- most accounts already have them from any past spot use.
+for service in spot.amazonaws.com batch.amazonaws.com; do
+  if [ "$DRY_RUN" = 1 ]; then echo "+ aws iam create-service-linked-role --aws-service-name $service"; continue; fi
+  if aws iam create-service-linked-role --aws-service-name "$service" > /dev/null 2>&1; then
+    echo "IAM: created the service-linked role for $service"
+  fi
+done
+
 # --- Batch: compute environment -----------------------------------------------
 # The default VPC's subnets, one per zone, so spot can diversify across pools;
 # the type list is what launch.sh rotated through, plus the memory-heavy r5s.
@@ -99,6 +112,38 @@ JSON
 )" > /dev/null
   echo "Batch: $(did "compute environment mapsnap-cpu-spot")"
 else echo "Batch: compute environment exists"; fi
+
+# --- Batch: wait for the compute environment -----------------------------------
+# create-compute-environment returns while the environment is still CREATING;
+# create-job-queue refuses anything but VALID ("It must be valid before
+# attaching it to the job queue"), so poll until it settles. An INVALID
+# environment is a configuration fault, not a delay: report the reason Batch
+# gives and stop, because re-running cannot repair one -- it has to be deleted
+# and recreated.
+wait_for_compute_environment() {
+  local name=$1 status reason
+  for _ in $(seq 60); do
+    status=$(aws batch describe-compute-environments --region "$REGION" --compute-environments "$name" \
+      --query 'computeEnvironments[0].status' --output text 2>/dev/null)
+    case "$status" in
+      VALID) echo "Batch: compute environment $name is valid"; return 0 ;;
+      INVALID)
+        reason=$(aws batch describe-compute-environments --region "$REGION" --compute-environments "$name" \
+          --query 'computeEnvironments[0].statusReason' --output text 2>/dev/null)
+        echo "compute environment $name is INVALID: $reason" >&2
+        echo "fix the cause, then delete and recreate it:" >&2
+        echo "  aws batch update-compute-environment --region $REGION --compute-environment $name --state DISABLED" >&2
+        echo "  aws batch delete-compute-environment --region $REGION --compute-environment $name" >&2
+        echo "  $0" >&2
+        return 1 ;;
+    esac
+    sleep 5
+  done
+  echo "compute environment $name still $status after 5 minutes" >&2
+  return 1
+}
+if [ "$DRY_RUN" = 1 ]; then echo "+ wait for compute environment mapsnap-cpu-spot to be VALID"
+else wait_for_compute_environment mapsnap-cpu-spot; fi
 
 # --- Batch: job queue ---------------------------------------------------------
 if ! aws batch describe-job-queues --region "$REGION" --job-queues mapsnap-fit \
