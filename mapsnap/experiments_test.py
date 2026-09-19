@@ -507,3 +507,26 @@ def test_git_head_info_reads_the_baked_sha_outside_a_checkout(monkeypatch, tmp_p
 
     monkeypatch.delenv("MAPSNAP_GIT_SHA")
     assert git_head_info(tmp_path)["sha"] is None, "no env, no checkout: still null"
+
+
+def test_manifest_carries_the_batch_job_identity_when_present(monkeypatch, tmp_path):
+    from mapsnap.experiments import batch_job_identity, build_manifest
+
+    monkeypatch.delenv("AWS_BATCH_JOB_ID", raising=False)
+    assert batch_job_identity() is None
+    monkeypatch.setenv("AWS_BATCH_JOB_ID", "a1b2c3d4:17")
+    monkeypatch.setenv("AWS_BATCH_JOB_ATTEMPT", "2")
+    monkeypatch.setenv("AWS_BATCH_JOB_ARRAY_INDEX", "17")
+    assert batch_job_identity() == {
+        "job_id": "a1b2c3d4:17",
+        "attempt": 2,
+        "array_index": 17,
+    }
+    manifest = build_manifest(
+        tmp_path, "run", [], {}, {"sha": None}, ["mapsnap"], None, None
+    )
+    assert manifest["batch"] == {
+        "job_id": "a1b2c3d4:17",
+        "attempt": 2,
+        "array_index": 17,
+    }

@@ -32,8 +32,12 @@ RUN apt-get update -q \
 
 # The workers shell out to `aws s3 cp/sync` (loc_craft.run_aws), so the CLI
 # is part of the runtime, not a build tool. v2 from the same archive
-# bootstrap.sh fetches; the platform is amd64 by construction (see above).
-RUN curl -sSf https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip -o /tmp/awscli.zip \
+# bootstrap.sh fetches, for whichever architecture is being built: amd64 for
+# the x86 fleet, arm64 for a native run on an Apple Silicon Mac (x86 torch
+# inference SIGILLs under Docker's emulation) or for Graviton instances.
+ARG TARGETARCH
+RUN case "$TARGETARCH" in arm64) arch=aarch64 ;; *) arch=x86_64 ;; esac \
+    && curl -sSf "https://awscli.amazonaws.com/awscli-exe-linux-${arch}.zip" -o /tmp/awscli.zip \
     && unzip -q /tmp/awscli.zip -d /tmp \
     && /tmp/aws/install \
     && rm -rf /tmp/aws /tmp/awscli.zip
