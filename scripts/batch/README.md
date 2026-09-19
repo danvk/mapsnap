@@ -31,8 +31,10 @@ no job needs a GPU.
 ```
 # once, as the account admin (the `aws login` session):
 scripts/batch/setup.sh
-aws iam put-user-policy --user-name mapsnap-mirror --policy-name mapsnap-batch-operator \
+aws iam create-policy --policy-name mapsnap-batch-operator \
   --policy-document file://scripts/batch/mapsnap-mirror-batch-policy.json
+aws iam attach-user-policy --user-name mapsnap-mirror \
+  --policy-arn arn:aws:iam::213478311378:policy/mapsnap-batch-operator
 
 # everything after that under the stable profile:
 export AWS_PROFILE=mapsnap
@@ -46,6 +48,12 @@ scripts/batch/status.sh <array-job-id> --watch
 The operator policy lets `mapsnap-mirror` push images, submit and inspect
 jobs and read their CloudWatch logs; it cannot create or change the
 infrastructure, which stays with the admin identity and `setup.sh`.
+
+It is attached as a *managed* policy rather than an inline one: all of a
+user's inline policies together may not exceed 2,048 bytes, and
+`mapsnap-mirror` already spends most of that on its S3, SQS and EC2 grants,
+so `put-user-policy` fails with `LimitExceeded`. A managed policy has its own
+6,144-byte budget and can be edited later with `create-policy-version`.
 
 ## A run
 
