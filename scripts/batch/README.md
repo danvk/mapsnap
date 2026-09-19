@@ -20,6 +20,33 @@ S3/SQS/EC2 and cannot; run it as the account's admin identity, or grant
 `mapsnap-mirror` `ecr:*`, `batch:*`, `iam:CreateServiceLinkedRole` and
 `iam:PassRole`. `--dry-run` prints the resource JSON without creating anything.
 
+## The pilot: the test-200 items, fit-only, on Batch
+
+`pilot-200.txt` is the test-200b list: the 192 items that finished under the
+EC2 fleet plus the two it never took and the six it dead-lettered. Rerunning
+them under a new run tag exercises the whole Docker + Batch path against
+inputs whose outcomes are known; CRAFT boxes already exist for every one, so
+no job needs a GPU.
+
+```
+# once, as the account admin (the `aws login` session):
+scripts/batch/setup.sh
+aws iam put-user-policy --user-name mapsnap-mirror --policy-name mapsnap-batch-operator \
+  --policy-document file://scripts/batch/mapsnap-mirror-batch-policy.json
+
+# everything after that under the stable profile:
+export AWS_PROFILE=mapsnap
+docker buildx build --platform linux/amd64 --build-arg GIT_SHA=$(git rev-parse HEAD) \
+  -t mapsnap:$(git rev-parse --short HEAD) --load .
+scripts/batch/push-image.sh                      # ~40 min the first time
+scripts/batch/submit.sh batch-test-200 scripts/batch/pilot-200.txt
+scripts/batch/status.sh <array-job-id> --watch
+```
+
+The operator policy lets `mapsnap-mirror` push images, submit and inspect
+jobs and read their CloudWatch logs; it cannot create or change the
+infrastructure, which stays with the admin identity and `setup.sh`.
+
 ## A run
 
 ```
@@ -52,6 +79,26 @@ The run's `artifacts/mapsnap/manifest.json` records the Batch job id, attempt
 and array index beside the git sha, and `loc-fit`'s summary line prints the
 peak resident set of any stage, which is what to size the job definition's
 memory from after a pilot (2 vCPU / 7 GB to start).
+
+## If `setup.sh` stops
+
+**"Compute Environment ... is not valid. It must be valid before attaching it
+to the job queue"** -- the environment was still `CREATING`. The script now
+waits for `VALID`; re-run it and it will skip everything that exists and
+create the queue. If it reports `INVALID` instead, that is a configuration
+fault and re-running cannot repair it: the environment has to be disabled,
+deleted and recreated, which the error message spells out. The usual causes
+are a missing `AWSServiceRoleForEC2Spot` (the script now creates it), an
+`ecsInstanceRole` whose instance profile has not propagated, or a default VPC
+with no subnets in the region.
+
+Check by hand with:
+
+```
+aws batch describe-compute-environments --region us-west-2 \
+  --compute-environments mapsnap-cpu-spot \
+  --query 'computeEnvironments[0].[status,statusReason]' --output text
+```
 
 ## Limits worth knowing
 
