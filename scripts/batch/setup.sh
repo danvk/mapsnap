@@ -25,7 +25,9 @@ REGION=${AWS_REGION:-us-west-2}
 ACCOUNT=$(aws sts get-caller-identity --query Account --output text)
 DRY_RUN=0; [ "${1:-}" = "--dry-run" ] && DRY_RUN=1
 IMAGE=${IMAGE:-$ACCOUNT.dkr.ecr.$REGION.amazonaws.com/mapsnap:latest}
-run() { if [ "$DRY_RUN" = 1 ]; then echo "+ $*"; else "$@"; fi; }
+# Dry-run echoes go to stderr so the callers' "> /dev/null" redirects cannot swallow them.
+run() { if [ "$DRY_RUN" = 1 ]; then echo "+ $*" >&2; else "$@"; fi; }
+did() { if [ "$DRY_RUN" = 1 ]; then echo "would create $*"; else echo "created $*"; fi; }
 
 echo "account $ACCOUNT, region $REGION, image $IMAGE"
 
@@ -35,7 +37,7 @@ if ! aws ecr describe-repositories --repository-names mapsnap --region "$REGION"
     --image-scanning-configuration scanOnPush=false > /dev/null
   run aws ecr put-lifecycle-policy --repository-name mapsnap --region "$REGION" --lifecycle-policy-text \
     '{"rules":[{"rulePriority":1,"description":"keep the last 10","selection":{"tagStatus":"any","countType":"imageCountMoreThan","countNumber":10},"action":{"type":"expire"}}]}' > /dev/null
-  echo "ECR: created mapsnap"
+  echo "ECR: $(did mapsnap)"
 else echo "ECR: mapsnap exists"; fi
 
 # --- IAM: the job role (what the container is) --------------------------------
@@ -52,7 +54,7 @@ if ! aws iam get-role --role-name $JOB_ROLE > /dev/null 2>&1; then
     doc=$(aws iam get-role-policy --role-name mapsnap-craft --policy-name "$name" --query PolicyDocument --output json)
     run aws iam put-role-policy --role-name $JOB_ROLE --policy-name "$name" --policy-document "$doc"
   done
-  echo "IAM: created $JOB_ROLE with mapsnap-craft's policies"
+  echo "IAM: $(did "$JOB_ROLE with mapsnap-craft's policies")"
 else echo "IAM: $JOB_ROLE exists"; fi
 
 # --- IAM: the instance role (what the EC2 host under ECS is) ------------------
@@ -63,7 +65,7 @@ if ! aws iam get-instance-profile --instance-profile-name ecsInstanceRole > /dev
     --policy-arn arn:aws:iam::aws:policy/service-role/AmazonEC2ContainerServiceforEC2Role
   run aws iam create-instance-profile --instance-profile-name ecsInstanceRole > /dev/null
   run aws iam add-role-to-instance-profile --instance-profile-name ecsInstanceRole --role-name ecsInstanceRole
-  echo "IAM: created ecsInstanceRole"; sleep 10   # IAM propagation before the CE references it
+  echo "IAM: $(did ecsInstanceRole)"; sleep 10   # IAM propagation before the CE references it
 else echo "IAM: ecsInstanceRole exists"; fi
 
 # --- Batch: compute environment -----------------------------------------------
@@ -95,7 +97,7 @@ if ! aws batch describe-compute-environments --region "$REGION" --compute-enviro
 }
 JSON
 )" > /dev/null
-  echo "Batch: created compute environment mapsnap-cpu-spot"
+  echo "Batch: $(did "compute environment mapsnap-cpu-spot")"
 else echo "Batch: compute environment exists"; fi
 
 # --- Batch: job queue ---------------------------------------------------------
@@ -103,7 +105,7 @@ if ! aws batch describe-job-queues --region "$REGION" --job-queues mapsnap-fit \
      --query 'jobQueues[0].jobQueueName' --output text 2>/dev/null | grep -q mapsnap-fit; then
   run aws batch create-job-queue --region "$REGION" --job-queue-name mapsnap-fit --priority 1 --state ENABLED \
     --compute-environment-order order=1,computeEnvironment=mapsnap-cpu-spot > /dev/null
-  echo "Batch: created job queue mapsnap-fit"
+  echo "Batch: $(did "job queue mapsnap-fit")"
 else echo "Batch: job queue exists"; fi
 
 # --- Batch: the loc-fit job definition ----------------------------------------
