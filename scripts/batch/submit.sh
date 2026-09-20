@@ -33,7 +33,13 @@ COUNT=$(grep -c . "$LIST")
 SIZE=$(( (COUNT + PER_JOB - 1) / PER_JOB ))
 [ "$SIZE" -ge 2 ] || { echo "an array job needs at least 2 children ($COUNT items at $PER_JOB per job); use --item for one" >&2; exit 2; }
 [ "$SIZE" -le 10000 ] || { echo "$COUNT items at $PER_JOB per job needs $SIZE children; Batch arrays cap at 10,000 -- raise PER_JOB" >&2; exit 2; }
-ITEMS=$BUCKET/_runs/$TAG/items.txt
+# Key the list by its own content, not by the run tag. A corpus run is filled
+# in several passes under one tag -- a sample, then the rest, then a mop-up --
+# and a fixed key meant the second pass overwrote the first's record. That is
+# not only lost bookkeeping: a child of the earlier array retried after the
+# overwrite would read the new list and fit the wrong items.
+LIST_ID=$(cksum < "$LIST" | cut -d' ' -f1)
+ITEMS=$BUCKET/_runs/$TAG/items-$LIST_ID.txt
 aws s3 cp "$LIST" "$ITEMS" --only-show-errors --region "$REGION"
 
 JOB_ID=$(aws batch submit-job --region "$REGION" \
