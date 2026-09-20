@@ -198,6 +198,68 @@ left. Exit 3 and 4 are left out of both lists, since neither is fixed by
 running it again. An array needs at least two children, so a lone survivor
 goes through `mapsnap loc-fit --item` instead.
 
+## Running a sample first, then the rest
+
+`sample-items.py` splits the mirror into a seeded random sample and everything
+else, and the two together are every item exactly once:
+
+```
+scripts/batch/sample-items.py --size 1000 --out-prefix corpus
+  corpus-sample.txt: 1,000 items, 13,132 sheets, mean 13.1, median 4, p90 32
+  corpus-rest.txt:  34,159 items, 428,047 sheets, mean 12.5, median 4, p90 28
+  the sample averages 1.05x the typical item
+```
+
+Run the sample, check the cost and the failure rate, then run the rest **under
+the same run tag** and the halves are a complete corpus run. A run tag does not
+care that it was filled in several passes: an item already published under it
+is skipped for the price of one listing, so the passes can even overlap.
+`submit.sh` keys each uploaded list by its own contents (`items-<cksum>.txt`),
+so they sit beside each other rather than overwriting.
+
+`--exclude` takes a list to leave out of both halves, which is how the second
+pass avoids the first:
+
+```
+aws s3 cp s3://mapsnap-sanborn/_runs/corpus-v1/items-<cksum>.txt done-so-far.txt
+scripts/batch/sample-items.py --size 1000 --seed 20260921 \
+  --exclude done-so-far.txt --out-prefix corpus-2
+```
+
+That 1.05x is the line worth reading. A random draw is representative and
+projects honestly; the 200-item pilot was 2.37x the typical item and its
+per-item cost overstated the corpus by the same factor.
+
+## Measuring what a run cost
+
+Two of the three numbers expire: Batch drops a child's attempt history 24 hours
+after it finishes, and a terminated instance leaves `describe-instances` within
+the hour, taking its spot-reclamation reason with it. So the fleet is sampled
+*while* the job runs:
+
+```
+scripts/batch/snapshot-instances.sh "$JOB" instances.tsv &   # stops with the job
+scripts/batch/status.sh "$JOB" --watch
+
+scripts/batch/collect-run.py "$JOB" planned.txt \
+  --instances instances.tsv --items-per-job 8 --out run-report.json
+```
+
+`collect-run.py` prices the instance-seconds the fleet actually ran at each
+type and zone's spot rate, counts the children whose host was reclaimed, and
+reads pages and peak RSS out of `loc-fit`'s own summary lines.
+
+**vCPU utilisation is the number to watch**: the share of what we rented that
+the jobs occupied. 46% is what two-jobs-to-a-box packing looks like; anything
+near 90% means the shapes and the memory request agree.
+
+Two cautions. Its fixed-plus-per-page **model line is meaningless on a chunked
+run** -- balancing makes pages-per-child nearly constant, so the regression has
+no spread to fit a slope through and returns a negative per-page cost. Use cost
+per sheet. And `mapsnap fit` records its own sub-stage seconds in every item's
+`artifacts/mapsnap/manifest.json`, which is where `snap` versus `street-solve`
+versus `georef` can be read for a finished run.
+
 ## Items per child
 
 A Batch array caps at 10,000 children and the mirror holds 35,159 items, so
