@@ -252,6 +252,48 @@ def skeleton_points(prob: np.ndarray, threshold: float, min_area: int) -> np.nda
     return np.column_stack([xs, ys]).astype(np.float64)
 
 
+def bilinear_distance_sampler(distance_m: np.ndarray):
+    """Bilinear sampler over a distance map, returning distances for page points.
+
+    The matcher's hottest loop -- least_squares evaluates the residuals ~115
+    times per candidate, and a volume runs ~200 candidates per page. Gathering
+    from a flat view off one precomputed corner offset costs about half what
+    four 2D fancy-index gathers do, and the expression below keeps the original
+    operand order and association so every value is bit-for-bit what the
+    four-gather form produced.
+    """
+    height, width = distance_m.shape
+    flat_distance = distance_m.reshape(-1)
+    worst_distance = float(flat_distance.max()) if flat_distance.size else 0.0
+
+    def sample(pts: np.ndarray) -> np.ndarray:
+        # np.clip passes NaN straight through, and casting NaN to int gives
+        # INT_MIN, which indexes the flat array from somewhere absurd: the
+        # 2026-09-20 sample died on "index -9223372036854775808 is out of
+        # bounds". A pose that puts a point nowhere is a bad pose, so score it
+        # as the worst distance on the map and let least_squares walk away
+        # from it rather than raising out of the optimiser.
+        finite = np.isfinite(pts[:, 0]) & np.isfinite(pts[:, 1])
+        x = np.clip(np.where(finite, pts[:, 0], 0.0), 0, width - 1.001)
+        y = np.clip(np.where(finite, pts[:, 1], 0.0), 0, height - 1.001)
+        x0 = x.astype(int)
+        y0 = y.astype(int)
+        fx = x - x0
+        fy = y - y0
+        corner = y0 * width + x0
+        one_minus_fx = 1 - fx
+        one_minus_fy = 1 - fy
+        d = (
+            flat_distance[corner] * one_minus_fx * one_minus_fy
+            + flat_distance[corner + 1] * fx * one_minus_fy
+            + flat_distance[corner + width] * one_minus_fx * fy
+            + flat_distance[corner + width + 1] * fx * fy
+        )
+        return np.where(finite, d, worst_distance)
+
+    return sample
+
+
 def chamfer_refine(
     distance_m: np.ndarray,
     points_page: np.ndarray,
@@ -291,32 +333,7 @@ def chamfer_refine(
         points_page = points_page[::step]
     homogeneous = np.column_stack([points_page, np.ones(len(points_page))])
 
-    height, width = distance_m.shape
-    # sample() is the matcher's hottest loop — least_squares evaluates the
-    # residuals ~115 times per candidate, and a volume runs ~200 candidates per
-    # page. Gathering from a flat view off one precomputed corner offset costs
-    # about half what four 2D fancy-index gathers do. The bilinear expression
-    # below keeps the original operand order and association, so every value it
-    # produces is bit-for-bit what the four-gather form produced.
-    flat_distance = distance_m.reshape(-1)
-
-    def sample(pts: np.ndarray) -> np.ndarray:
-        x = np.clip(pts[:, 0], 0, width - 1.001)
-        y = np.clip(pts[:, 1], 0, height - 1.001)
-        x0 = x.astype(int)
-        y0 = y.astype(int)
-        fx = x - x0
-        fy = y - y0
-        corner = y0 * width + x0
-        one_minus_fx = 1 - fx
-        one_minus_fy = 1 - fy
-        d = (
-            flat_distance[corner] * one_minus_fx * one_minus_fy
-            + flat_distance[corner + 1] * fx * one_minus_fy
-            + flat_distance[corner + width] * one_minus_fx * fy
-            + flat_distance[corner + width + 1] * fx * fy
-        )
-        return d
+    sample = bilinear_distance_sampler(distance_m)
 
     base = pose.copy()
     anchor_pts = homogeneous @ base.T

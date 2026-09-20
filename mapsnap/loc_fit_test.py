@@ -919,3 +919,27 @@ def test_balance_items_returns_every_name_once_for_any_chunk_size() -> None:
             [len(c) for c in chunks],
         )
     assert balance_items([], sheets, 8) == []
+
+
+def test_keymap_sheets_skips_a_key_map_with_no_scan(tmp_path, capsys) -> None:
+    """Some items mirror their 25% pages but an empty raw/; naming a scan that
+    is not there took the whole item down with a FileNotFoundError."""
+    import json as json_module
+
+    from mapsnap.loc_fit import keymap_sheets
+
+    (tmp_path / "raw").mkdir()
+    (tmp_path / "raw" / "p1__1.jpg").write_bytes(b"")
+    (tmp_path / "keymaps.json").write_text(json_module.dumps({"keys": ["p1__1", "p2"]}))
+    assert keymap_sheets(tmp_path) == [str(tmp_path / "raw" / "p1__1.jpg")]
+    assert "p2 has no scan" in capsys.readouterr().err
+
+
+def test_keymap_sheets_returns_nothing_when_raw_is_empty(tmp_path) -> None:
+    import json as json_module
+
+    from mapsnap.loc_fit import keymap_sheets
+
+    (tmp_path / "raw").mkdir()
+    (tmp_path / "keymaps.json").write_text(json_module.dumps({"keys": ["p1"]}))
+    assert keymap_sheets(tmp_path) == []
