@@ -448,7 +448,14 @@ def stage(
     them fail on a missing model. Every command here is given absolute paths,
     so the working directory only ever needs to be the repo.
     """
+    started = time.perf_counter()
     result = subprocess.run(command, capture_output=True, text=True, check=False)
+    elapsed = time.perf_counter() - started
+    # One line per stage, per item. `fit` prints its own sub-stage times but
+    # into a pipe this captures, so without this the only timing that reaches
+    # CloudWatch is the whole item, and a 6,000-job-hour corpus run cannot say
+    # where it went.
+    print(f"[{command[1]}: {elapsed:.0f}s]", file=sys.stderr, flush=True)
     if result.returncode != 0 and not (ok_if and ok_if()):
         detail = failure_tail(result.stderr or result.stdout or "")
         # The exit code, always: a stage that was KILLED (-9, out of memory on a
