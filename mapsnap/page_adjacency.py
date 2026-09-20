@@ -323,6 +323,50 @@ def box_center(bbox: list[list[float]]) -> tuple[float, float]:
     return (sum(p[0] for p in bbox) / 4, sum(p[1] for p in bbox) / 4)
 
 
+def could_be_claim(box: list, width: int, height: int) -> bool:
+    """Whether a box is worth recognising at all, for adjacency's purposes.
+
+    A printed sheet reference is a large numeral in the page's margin, so a box
+    that is short or sits well inside the page is discarded further down
+    whatever it turns out to say -- and recognising it costs exactly as much as
+    recognising a real one. Across four volumes three quarters of a page's
+    CRAFT boxes fail this, and recognition is 85% of the stage's runtime.
+
+    Deliberately the *loosest* form of the tests applied later: MIN_HEIGHT is
+    the corpus-wide floor that the volume-calibrated one can only exceed, and
+    EDGE_BAND is a hard rule in classify_edge. Anything skipped here would have
+    been dropped anyway, so the adjacency graph is unchanged -- only the raw
+    detections record shrinks, and both of its consumers read `claim` entries
+    only.
+    """
+    xs = [p[0] for p in box]
+    ys = [p[1] for p in box]
+    if (max(ys) - min(ys)) < MIN_HEIGHT:
+        return False
+    centre_x = (min(xs) + max(xs)) / 2 / width
+    centre_y = (min(ys) + max(ys)) / 2 / height
+    return min(centre_x, 1 - centre_x, centre_y, 1 - centre_y) < EDGE_BAND
+
+
+def horizontal_polygon(box: list) -> list[list[float]]:
+    """A CRAFT horizontal_list entry [x1, x2, y1, y2] as the 4-point polygon form."""
+    x1, x2, y1, y2 = box
+    return [[x1, y1], [x2, y1], [x2, y2], [x1, y2]]
+
+
+def same_box(a: list, b: list) -> bool:
+    """Whether two boxes are the same rectangle, to the pixel.
+
+    The isolation floor measures the gap to every *other* box, and a box is
+    always zero away from itself.
+    """
+    return all(
+        abs(min(p[i] for p in a) - min(p[i] for p in b)) < 1
+        and abs(max(p[i] for p in a) - max(p[i] for p in b)) < 1
+        for i in (0, 1)
+    )
+
+
 def cached_craft_boxes(image_path: Path) -> tuple[list, list] | None:
     """The angle-0 CRAFT boxes from ``<stem>.boxes.json`` (written by ``mapsnap craft``), or None.
 
@@ -384,14 +428,36 @@ def digit_detections(
         horizontal_lists, free_lists = [craft_boxes[0]], [craft_boxes[1]]
     else:
         horizontal_lists, free_lists = reader.detect(img)
-    results = reader.recognize(
-        img_grey, horizontal_lists[0], free_lists[0], allowlist="0123456789"
-    )
+
+    # Recognise only the boxes that could possibly be a claim. A printed sheet
+    # reference is a large numeral in the margin, so a box that is short or
+    # well inside the page is thrown away further down whatever it says --
+    # and recognising it costs the same as recognising a real one. Across four
+    # volumes that is three quarters of the boxes on a page, and recognition
+    # is 85% of this stage's runtime.
+    #
+    # The gate is deliberately the *loosest* form of the tests applied below:
+    # MIN_HEIGHT is the corpus-wide floor that the volume-calibrated one can
+    # only exceed, and EDGE_BAND is a hard rule in classify_edge. Anything this
+    # skips would have been dropped anyway.
+    horizontal = [
+        b
+        for b in horizontal_lists[0]
+        if could_be_claim(horizontal_polygon(b), width, height)
+    ]
+    free = [b for b in free_lists[0] if could_be_claim(b, width, height)]
+    results = reader.recognize(img_grey, horizontal, free, allowlist="0123456789")
     letter_results = reader.recognize(
         img_grey,
-        horizontal_lists[0],
-        free_lists[0],
+        horizontal,
+        free,
         allowlist="0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ",
+    )
+    # The isolation floor asks how far a digit sits from any other text, so it
+    # needs every box CRAFT found, not just the ones worth recognising. Keeping
+    # this list complete is what makes the gate above a pure speed-up.
+    neighbour_boxes = [horizontal_polygon(b) for b in horizontal_lists[0]] + list(
+        free_lists[0]
     )
     letter_centers = [box_center(bbox) for bbox, _, _ in letter_results]
     detections = []
@@ -441,9 +507,10 @@ def digit_detections(
         glyph_height = float(max(p[1] for p in bbox) - min(p[1] for p in bbox))
         nearest_box = min(
             (
-                bbox_gap(bbox, other_bbox)
-                for other_index, (other_bbox, _, _) in enumerate(results)
-                if other_index != index
+                gap
+                for other_bbox in neighbour_boxes
+                if (gap := bbox_gap(bbox, other_bbox)) > 0
+                or not same_box(bbox, other_bbox)
             ),
             default=math.inf,
         )
