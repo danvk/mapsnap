@@ -108,6 +108,75 @@ aws batch describe-compute-environments --region us-west-2 \
   --query 'computeEnvironments[0].[status,statusReason]' --output text
 ```
 
+## What the 200-item pilot cost and found (2026-09-19)
+
+194 of 200 items, 5,459 pages, in 2.6 hours of wall clock over 34 spot
+instances: **$5.88**, or $0.0011 per page. Two instances were reclaimed by
+spot mid-run and all eight of their children retried and succeeded, which is
+the behaviour the EC2 fleet never had.
+
+Fitting a fixed-plus-marginal model to the per-item times -- 189 s of fixed
+cost per item, 39 s per page -- and projecting over the manifest's 35,159
+items and 441,179 sheets gives **about $550 and 13,000 vCPU-hours** for the
+whole corpus, or 52 hours of wall clock at 128 concurrent jobs and 26 at 256.
+Do not project per *item* from this pilot: its items average 29.7 sheets
+against the corpus's 12.5, so a per-item extrapolation overstates the bill by
+2.4x.
+
+Four items failed for reasons worth knowing: three were SIGKILLed against the
+7,000 MB ceiling (hence the `-large` definition), and one hit a crash in the
+clip-mask pass that is now fixed. The two exit-3 items are genuinely absent
+from the mirror.
+
+### Why that $550 is roughly twice what it should be
+
+The fleet supplied 308 vCPU-hours and the jobs consumed 143: **46% vCPU
+utilisation**. The cause is packing, not Batch, which charges nothing of its
+own. A job asks for 2 vCPU and 7.5 GB, so four fit on an 8 vCPU box -- but
+only if the box carries 30 GB. `c5.2xlarge` and `c6i.2xlarge` carry 16 GB, so
+memory capped them at two jobs each and half of their vCPUs sat idle while we
+paid for them. 23 of the 38.5 instance-hours were on those shapes. They are
+out of the compute environment now, which should roughly halve the corpus
+bill on its own.
+
+The second overhead is per-job startup: a one-page item takes 57 s at best and
+113 s typically, nearly all of it container start plus parsing the 3.8 MB
+county manifest. The EC2+SQS worker paid that once and then drained a queue;
+one job per item pays it 35,159 times, about 18% of the corpus bill. The fix
+is to give each Batch child a slice of the list rather than a single line,
+which needs a `loc-fit` change and is worth roughly another $30-40.
+
+Projected corpus cost, fit-only, at the pilot's spot prices:
+
+| | job-hours | cost |
+|---|---|---|
+| as the pilot ran | 6,168 | $507 |
+| 32 GB+ shapes only | 6,168 | ~$254 |
+| plus 8 items per child | 5,202 | ~$214 |
+
+### Mopping up after a run
+
+Nothing retries into the larger definition on its own: Batch cannot change a
+job definition on retry, so it takes a second submission. `retry-list.sh`
+works out which failures are worth one. `loc-fit` exits 1 whether a stage was
+killed for memory or raised, and only its log tells them apart, so this reads
+the logs and splits them:
+
+```
+scripts/batch/retry-list.sh <array-job-id> items.txt retry
+  sanborn03769_007  index 77   memory
+  sanborn05831_001  index 111  FAILED: mapsnap fit failed (exit 1): ...
+3 out of memory, 1 other, 2 not worth retrying (exit 3 or 4)
+
+PER_JOB=1 JOBDEF=mapsnap-loc-fit-large scripts/batch/submit.sh <run-tag> retry-oom.txt
+```
+
+Reuse the same run tag. Items that already finished are marked done by
+`plan_fit` and cost one listing each, so a resubmission only does what is
+left. Exit 3 and 4 are left out of both lists, since neither is fixed by
+running it again. An array needs at least two children, so a lone survivor
+goes through `mapsnap loc-fit --item` instead.
+
 ## Limits worth knowing
 
 An array job holds at most 10,000 children: the full corpus is four arrays.

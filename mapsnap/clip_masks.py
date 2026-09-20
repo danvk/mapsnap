@@ -153,6 +153,13 @@ def _score_block_on_page(block: Polygon, pcd: PageColorData) -> float:
     for lon, lat in block.exterior.coords:
         px, py = _geo_to_pixel(lon, lat, pcd.A_fwd, pcd.A_inv)
         coords_px.append((px * pcd.scale_x, py * pcd.scale_y))
+    # An empty or degenerate block covers no pixels and so retains no colour.
+    # PIL raises on anything under two points ("coordinate list must contain at
+    # least 2 coordinates"), which aborted a whole volume mid-run: the
+    # polygonised street network of sanborn05831_001 handed this an empty
+    # polygon and `mapsnap fit` died after every page had been georeferenced.
+    if len(coords_px) < 3:
+        return 0.0
     mask_img = Image.new("L", (W, H), 0)
     draw = ImageDraw.Draw(mask_img)
     draw.polygon(coords_px, fill=1)
