@@ -154,11 +154,28 @@ Projected corpus cost, fit-only, at the pilot's spot prices:
 | 32 GB+ shapes only | 6,168 | ~$254 |
 | plus 8 items per child | 5,202 | ~$214 |
 
-To rerun the heavy tail against the larger definition:
+### Mopping up after a run
+
+Nothing retries into the larger definition on its own: Batch cannot change a
+job definition on retry, so it takes a second submission. `retry-list.sh`
+works out which failures are worth one. `loc-fit` exits 1 whether a stage was
+killed for memory or raised, and only its log tells them apart, so this reads
+the logs and splits them:
 
 ```
-JOBDEF=mapsnap-loc-fit-large scripts/batch/submit.sh <run-tag> heavy-items.txt
+scripts/batch/retry-list.sh <array-job-id> items.txt retry
+  sanborn03769_007  index 77   memory
+  sanborn05831_001  index 111  FAILED: mapsnap fit failed (exit 1): ...
+3 out of memory, 1 other, 2 not worth retrying (exit 3 or 4)
+
+PER_JOB=1 JOBDEF=mapsnap-loc-fit-large scripts/batch/submit.sh <run-tag> retry-oom.txt
 ```
+
+Reuse the same run tag. Items that already finished are marked done by
+`plan_fit` and cost one listing each, so a resubmission only does what is
+left. Exit 3 and 4 are left out of both lists, since neither is fixed by
+running it again. An array needs at least two children, so a lone survivor
+goes through `mapsnap loc-fit --item` instead.
 
 ## Limits worth knowing
 
