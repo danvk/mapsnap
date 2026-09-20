@@ -82,8 +82,15 @@ for service in spot.amazonaws.com batch.amazonaws.com; do
 done
 
 # --- Batch: compute environment -----------------------------------------------
-# The default VPC's subnets, one per zone, so spot can diversify across pools;
-# the type list is what launch.sh rotated through, plus the memory-heavy r5s.
+# The default VPC's subnets, one per zone, so spot can diversify across pools.
+#
+# Only 32 GiB and 64 GiB shapes, which is what the pilot's bill turned on. A
+# job asks for 2 vCPU and 7.5 GB, so an 8 vCPU box can run four of them -- but
+# only if it carries 30 GB. The c5/c6i.2xlarge the fleet used have 16 GB, so
+# memory capped them at two jobs and half of every compute-optimised vCPU we
+# rented sat idle. 23 of the pilot's 38.5 instance-hours went to those shapes
+# and overall vCPU utilisation came out at 46%. Dropping them is the single
+# biggest cost lever in this file.
 SUBNETS=$(aws ec2 describe-subnets --region "$REGION" --filters Name=default-for-az,Values=true \
   --query 'Subnets[].SubnetId' --output json)
 SG=$(aws ec2 describe-security-groups --region "$REGION" --filters Name=group-name,Values=default \
@@ -101,7 +108,7 @@ if ! aws batch describe-compute-environments --region "$REGION" --compute-enviro
     "minvCpus": 0,
     "maxvCpus": 256,
     "instanceTypes": ["m5.2xlarge", "m5a.2xlarge", "m6a.2xlarge", "m6i.2xlarge",
-                      "c5.2xlarge", "c6a.2xlarge", "c6i.2xlarge", "r5.2xlarge", "r6i.2xlarge"],
+                      "r5.2xlarge", "r6i.2xlarge"],
     "subnets": $SUBNETS,
     "securityGroupIds": ["$SG"],
     "instanceRole": "ecsInstanceRole",
@@ -111,7 +118,14 @@ if ! aws batch describe-compute-environments --region "$REGION" --compute-enviro
 JSON
 )" > /dev/null
   echo "Batch: $(did "compute environment mapsnap-cpu-spot")"
-else echo "Batch: compute environment exists"; fi
+else
+  # Already there: bring its instance types up to date, so a rerun of this
+  # script is how the shape list changes rather than a hand-edited console.
+  run aws batch update-compute-environment --region "$REGION" \
+    --compute-environment mapsnap-cpu-spot \
+    --compute-resources "$(printf '{"instanceTypes":["m5.2xlarge","m5a.2xlarge","m6a.2xlarge","m6i.2xlarge","r5.2xlarge","r6i.2xlarge"],"maxvCpus":256,"minvCpus":0}')" > /dev/null
+  echo "Batch: compute environment exists (instance types refreshed)"
+fi
 
 # --- Batch: wait for the compute environment -----------------------------------
 # create-compute-environment returns while the environment is still CREATING;
@@ -160,12 +174,14 @@ else echo "Batch: job queue exists"; fi
 # Memory, measured over the 200-item pilot (2026-09-19): peak stage RSS was
 # 1.8 GB median, 3.3 GB at p90, 5.7 GB at p99 and 6.6 GB at the worst success,
 # and three items -- big-city volumes whose OCR vocabulary runs to 40,000 name
-# forms -- were SIGKILLed at the original 7,000 MB ceiling. 8 GB covers the
-# p99 with headroom and still packs four jobs onto an 8 vCPU / 32 GB instance,
-# so it costs nothing; the ~1.5% of items that need more go to the -large
-# definition below, which packs two per instance and is worth it for a
-# handful. Raising the default to 16 GB instead would halve density across the
-# whole corpus to rescue those few.
+# forms -- were SIGKILLed at the 7,000 MB ceiling.
+#
+# The ceiling is set by packing, not by the p99: four jobs must fit on a 32 GB
+# instance or the fourth vCPU pair goes to waste, which costs far more than
+# the handful of items a bigger ceiling would rescue. 7,500 leaves 900 MB over
+# the worst success and still packs four; 8,192 would drop an m5.2xlarge to
+# three jobs and a 16 GB instance to one. The three that need more go to the
+# -large definition below, which packs three on an r5.2xlarge.
 #
 # The retry policy reads loc-fit's exit codes: 3 (unprocessable) and 4 (inputs
 # missing) are never retried, a spot reclamation always is, anything else
@@ -191,7 +207,8 @@ register_fit_definition() {
                 "--bucket", "Ref::bucket", "--counties", "Ref::counties", "Ref::cityCounties"],
     "jobRoleArn": "arn:aws:iam::$ACCOUNT:role/$JOB_ROLE",
     "resourceRequirements": [{"type": "VCPU", "value": "2"}, {"type": "MEMORY", "value": "$memory"}],
-    "environment": [{"name": "OMP_NUM_THREADS", "value": "2"}, {"name": "AWS_REGION", "value": "$REGION"}]
+    "environment": [{"name": "OMP_NUM_THREADS", "value": "2"}, {"name": "AWS_REGION", "value": "$REGION"},
+                    {"name": "PYTHONHASHSEED", "value": "0"}]
   },
   "retryStrategy": {
     "attempts": 2,
@@ -208,7 +225,7 @@ JSON
 )" --query 'jobDefinitionArn' --output text
 }
 
-register_fit_definition mapsnap-loc-fit 8192
+register_fit_definition mapsnap-loc-fit 7500
 register_fit_definition mapsnap-loc-fit-large 16384
 
 echo "done. Next: scripts/batch/push-image.sh, then scripts/batch/submit.sh <run-tag> <items.txt>"

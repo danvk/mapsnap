@@ -124,9 +124,35 @@ against the corpus's 12.5, so a per-item extrapolation overstates the bill by
 2.4x.
 
 Four items failed for reasons worth knowing: three were SIGKILLed against the
-old 7,000 MB ceiling (hence the 8 GB default and the `-large` definition),
-and one hit a crash in the clip-mask pass that is now fixed. The two exit-3
-items are genuinely absent from the mirror.
+7,000 MB ceiling (hence the `-large` definition), and one hit a crash in the
+clip-mask pass that is now fixed. The two exit-3 items are genuinely absent
+from the mirror.
+
+### Why that $550 is roughly twice what it should be
+
+The fleet supplied 308 vCPU-hours and the jobs consumed 143: **46% vCPU
+utilisation**. The cause is packing, not Batch, which charges nothing of its
+own. A job asks for 2 vCPU and 7.5 GB, so four fit on an 8 vCPU box -- but
+only if the box carries 30 GB. `c5.2xlarge` and `c6i.2xlarge` carry 16 GB, so
+memory capped them at two jobs each and half of their vCPUs sat idle while we
+paid for them. 23 of the 38.5 instance-hours were on those shapes. They are
+out of the compute environment now, which should roughly halve the corpus
+bill on its own.
+
+The second overhead is per-job startup: a one-page item takes 57 s at best and
+113 s typically, nearly all of it container start plus parsing the 3.8 MB
+county manifest. The EC2+SQS worker paid that once and then drained a queue;
+one job per item pays it 35,159 times, about 18% of the corpus bill. The fix
+is to give each Batch child a slice of the list rather than a single line,
+which needs a `loc-fit` change and is worth roughly another $30-40.
+
+Projected corpus cost, fit-only, at the pilot's spot prices:
+
+| | job-hours | cost |
+|---|---|---|
+| as the pilot ran | 6,168 | $507 |
+| 32 GB+ shapes only | 6,168 | ~$254 |
+| plus 8 items per child | 5,202 | ~$214 |
 
 To rerun the heavy tail against the larger definition:
 
