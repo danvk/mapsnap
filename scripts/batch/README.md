@@ -104,6 +104,13 @@ memory from after a pilot (2 vCPU / 7 GB to start).
 
 ## If `setup.sh` stops
 
+**`JOB_ROLE: unbound variable` under `--job-definitions-only`** -- fixed; the
+name is declared with the other settings now. If you see it, the checkout
+predates that fix. The aws call that follows builds invalid JSON from the
+empty expansion, so the error to read is the bash one above it.
+
+
+
 **"Compute Environment ... is not valid. It must be valid before attaching it
 to the job queue"** -- the environment was still `CREATING`. The script now
 waits for `VALID`; re-run it and it will skip everything that exists and
