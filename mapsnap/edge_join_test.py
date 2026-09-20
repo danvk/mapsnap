@@ -185,3 +185,18 @@ def test_rotated_bounds_nonnegative() -> None:
     )
     warped = corners @ tight.T
     assert warped.min() > -1e-6
+
+
+def test_chamfer_refine_survives_a_pose_that_samples_nowhere() -> None:
+    """np.clip passes NaN through and int(NaN) is INT_MIN, which indexed the
+    flat distance array from nowhere and raised out of the optimiser, killing
+    a whole volume in the 2026-09-20 corpus sample."""
+    import numpy as np
+
+    from mapsnap.edge_join import bilinear_distance_sampler
+
+    distance = np.arange(12, dtype=float).reshape(3, 4)
+    sample = bilinear_distance_sampler(distance)
+    assert np.isfinite(sample(np.array([[1.0, 1.0]]))).all()
+    nowhere = sample(np.array([[np.nan, 1.0], [1.0, np.inf], [-np.inf, np.nan]]))
+    assert (nowhere == distance.max()).all()

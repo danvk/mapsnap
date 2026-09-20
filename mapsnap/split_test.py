@@ -443,3 +443,19 @@ def test_a_leftover_touching_a_panel_is_still_glued_on():
     faces = [box(0, 0, 45, 100), box(55, 0, 100, 100), box(45, 0, 55, 100)]
     panels = assemble_panels(faces, 100, 100)
     assert sum(panel.area for panel in panels) == 100 * 100
+
+
+def test_order_panels_drops_an_empty_polygon() -> None:
+    """Shapely reports NaN bounds for an empty polygon, and sorting on them
+    raised "cannot convert float NaN to integer" mid-volume."""
+    from shapely.geometry import Polygon as ShapelyPolygon
+
+    from mapsnap.split import order_panels
+
+    real = [
+        ShapelyPolygon([(0, 0), (100, 0), (100, 100), (0, 100)]),
+        ShapelyPolygon([(0, 200), (100, 200), (100, 300), (0, 300)]),
+    ]
+    ordered = order_panels([real[0], ShapelyPolygon(), real[1]], 400)
+    assert len(ordered) == 2
+    assert all(not p.is_empty for p in ordered)

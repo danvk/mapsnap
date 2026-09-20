@@ -478,10 +478,25 @@ def keymap_sheets(local: Path) -> list[str]:
     The record, not a glob: a split key-map sheet is recorded by its panel
     (``p0__1``), and the chain must run on that panel rather than on the whole
     sheet, exactly as `run-loc` does.
+
+    A key that has no scan is dropped. Some items are mirrored with their
+    25%-scale pages but an empty ``raw/``, and the key-map pipeline opens the
+    full-resolution image first thing, so naming one that is not there took
+    the whole item down with a FileNotFoundError -- three of a thousand in the
+    2026-09-20 sample. A key map we cannot read is a key map we do without.
     """
-    return [
-        str(local / "raw" / f"{key}.jpg") for key in sorted(recorded_keymap_keys(local))
-    ]
+    scans = []
+    for key in sorted(recorded_keymap_keys(local)):
+        path = local / "raw" / f"{key}.jpg"
+        if path.exists():
+            scans.append(str(path))
+        else:
+            print(
+                f"{local.name}: key map {key} has no scan under raw/; skipping it",
+                file=sys.stderr,
+                flush=True,
+            )
+    return scans
 
 
 def run_chain(local: Path, work: FitWork, run_tag: str | None = None) -> None:

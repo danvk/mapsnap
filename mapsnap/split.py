@@ -1135,6 +1135,11 @@ def order_panels(panels: list, height: float | None = None) -> list:
     raw-resolution copy written from scaled polygons keeps identical numbering
     (the row-bucketing would bucket differently at 4x coordinates).
     """
+    # An empty polygon has no bounds -- shapely reports NaN -- and sorting on
+    # them raises "cannot convert float NaN to integer", which killed a whole
+    # volume in the 2026-09-20 sample. One covers no pixels and cannot be
+    # written out as a panel, so it is not a panel.
+    panels = [panel for panel in panels if not panel.is_empty]
     if len(panels) == 2 and height is not None:
         bottom_left = Point(0.0, float(height))
         return sorted(panels, key=lambda p: p.distance(bottom_left))
