@@ -878,3 +878,34 @@ def test_split_selector_never_escapes_the_panel_ring():
     clipped = ShapelyPolygon(pts)
     ring_poly = ShapelyPolygon(ring)
     assert clipped.difference(ring_poly.buffer(1.0)).area < 1.0  # nothing outside
+
+
+def _color_data(width: int = 8, height: int = 6) -> PageColorData:
+    """A page whose colour score is 1 everywhere, with an identity geo-to-pixel map."""
+    return PageColorData(
+        color_score=np.ones((height, width), dtype=float),
+        A_fwd=np.array([[1.0, 0.0, 0.0], [0.0, 1.0, 0.0]]),  # pixel -> geo, 2x3
+        A_inv=np.eye(2),  # the geo -> pixel inverse of A_fwd[:, :2], 2x2
+        scale_x=1.0,
+        scale_y=1.0,
+    )
+
+
+def test_score_block_on_page_sums_the_colour_under_a_block():
+    score = _score_block_on_page(
+        Polygon([(1, 1), (5, 1), (5, 4), (1, 4)]), _color_data()
+    )
+    assert score > 0
+
+
+def test_score_block_on_page_ignores_an_empty_block():
+    # PIL rejects a polygon with fewer than two points, which killed a whole
+    # volume's fit after every page was georeferenced (sanborn05831_001).
+    assert _score_block_on_page(Polygon(), _color_data()) == 0.0
+
+
+def test_score_block_on_page_ignores_a_degenerate_block():
+    assert (
+        _score_block_on_page(Polygon([(2, 2), (2, 2), (2, 2)]).buffer(0), _color_data())
+        == 0.0
+    )

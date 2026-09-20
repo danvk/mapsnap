@@ -153,16 +153,29 @@ if ! aws batch describe-job-queues --region "$REGION" --job-queues mapsnap-fit \
   echo "Batch: $(did "job queue mapsnap-fit")"
 else echo "Batch: job queue exists"; fi
 
-# --- Batch: the loc-fit job definition ----------------------------------------
+# --- Batch: the loc-fit job definitions ----------------------------------------
 # One job = one item: child N of an array runs line N of Ref::items (loc-fit
-# reads AWS_BATCH_JOB_ARRAY_INDEX). 2 vCPU / 7 GB: the key-map georef peaked
-# at 2.5 GB on Miami and OCR runs beside it; loc-fit prints the peak stage RSS
-# so this can be tightened after the pilot. The retry policy reads loc-fit's
-# exit codes: 3 (unprocessable) and 4 (inputs missing) are never retried, a
-# spot reclamation always is, anything else once.
-run aws batch register-job-definition --region "$REGION" --cli-input-json "$(cat <<JSON
+# reads AWS_BATCH_JOB_ARRAY_INDEX).
+#
+# Memory, measured over the 200-item pilot (2026-09-19): peak stage RSS was
+# 1.8 GB median, 3.3 GB at p90, 5.7 GB at p99 and 6.6 GB at the worst success,
+# and three items -- big-city volumes whose OCR vocabulary runs to 40,000 name
+# forms -- were SIGKILLed at the original 7,000 MB ceiling. 8 GB covers the
+# p99 with headroom and still packs four jobs onto an 8 vCPU / 32 GB instance,
+# so it costs nothing; the ~1.5% of items that need more go to the -large
+# definition below, which packs two per instance and is worth it for a
+# handful. Raising the default to 16 GB instead would halve density across the
+# whole corpus to rescue those few.
+#
+# The retry policy reads loc-fit's exit codes: 3 (unprocessable) and 4 (inputs
+# missing) are never retried, a spot reclamation always is, anything else
+# once. The pilot lost two instances to spot mid-run; all eight of their
+# children retried and succeeded.
+register_fit_definition() {
+  local name=$1 memory=$2
+  run aws batch register-job-definition --region "$REGION" --cli-input-json "$(cat <<JSON
 {
-  "jobDefinitionName": "mapsnap-loc-fit",
+  "jobDefinitionName": "$name",
   "type": "container",
   "platformCapabilities": ["EC2"],
   "parameters": {
@@ -177,7 +190,7 @@ run aws batch register-job-definition --region "$REGION" --cli-input-json "$(cat
     "command": ["loc-fit", "--items", "Ref::items", "--run-tag", "Ref::runTag",
                 "--bucket", "Ref::bucket", "--counties", "Ref::counties", "Ref::cityCounties"],
     "jobRoleArn": "arn:aws:iam::$ACCOUNT:role/$JOB_ROLE",
-    "resourceRequirements": [{"type": "VCPU", "value": "2"}, {"type": "MEMORY", "value": "7000"}],
+    "resourceRequirements": [{"type": "VCPU", "value": "2"}, {"type": "MEMORY", "value": "$memory"}],
     "environment": [{"name": "OMP_NUM_THREADS", "value": "2"}, {"name": "AWS_REGION", "value": "$REGION"}]
   },
   "retryStrategy": {
@@ -193,4 +206,9 @@ run aws batch register-job-definition --region "$REGION" --cli-input-json "$(cat
 }
 JSON
 )" --query 'jobDefinitionArn' --output text
+}
+
+register_fit_definition mapsnap-loc-fit 8192
+register_fit_definition mapsnap-loc-fit-large 16384
+
 echo "done. Next: scripts/batch/push-image.sh, then scripts/batch/submit.sh <run-tag> <items.txt>"

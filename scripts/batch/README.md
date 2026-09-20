@@ -108,6 +108,32 @@ aws batch describe-compute-environments --region us-west-2 \
   --query 'computeEnvironments[0].[status,statusReason]' --output text
 ```
 
+## What the 200-item pilot cost and found (2026-09-19)
+
+194 of 200 items, 5,459 pages, in 2.6 hours of wall clock over 34 spot
+instances: **$5.88**, or $0.0011 per page. Two instances were reclaimed by
+spot mid-run and all eight of their children retried and succeeded, which is
+the behaviour the EC2 fleet never had.
+
+Fitting a fixed-plus-marginal model to the per-item times -- 189 s of fixed
+cost per item, 39 s per page -- and projecting over the manifest's 35,159
+items and 441,179 sheets gives **about $550 and 13,000 vCPU-hours** for the
+whole corpus, or 52 hours of wall clock at 128 concurrent jobs and 26 at 256.
+Do not project per *item* from this pilot: its items average 29.7 sheets
+against the corpus's 12.5, so a per-item extrapolation overstates the bill by
+2.4x.
+
+Four items failed for reasons worth knowing: three were SIGKILLed against the
+old 7,000 MB ceiling (hence the 8 GB default and the `-large` definition),
+and one hit a crash in the clip-mask pass that is now fixed. The two exit-3
+items are genuinely absent from the mirror.
+
+To rerun the heavy tail against the larger definition:
+
+```
+JOBDEF=mapsnap-loc-fit-large scripts/batch/submit.sh <run-tag> heavy-items.txt
+```
+
 ## Limits worth knowing
 
 An array job holds at most 10,000 children: the full corpus is four arrays.
