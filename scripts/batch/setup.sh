@@ -199,12 +199,14 @@ register_fit_definition() {
     "runTag": "UNSET",
     "bucket": "s3://mapsnap-sanborn",
     "counties": "s3://mapsnap-sanborn/_craft/items.tsv",
-    "cityCounties": "s3://mapsnap-sanborn/_craft/city-items.tsv"
+    "cityCounties": "s3://mapsnap-sanborn/_craft/city-items.tsv",
+    "itemsPerJob": "1"
   },
   "containerProperties": {
     "image": "$IMAGE",
-    "command": ["loc-fit", "--items", "Ref::items", "--run-tag", "Ref::runTag",
-                "--bucket", "Ref::bucket", "--counties", "Ref::counties", "Ref::cityCounties"],
+    "command": ["loc-fit", "--items", "Ref::items", "--items-per-job", "Ref::itemsPerJob",
+                "--run-tag", "Ref::runTag", "--bucket", "Ref::bucket",
+                "--counties", "Ref::counties", "Ref::cityCounties"],
     "jobRoleArn": "arn:aws:iam::$ACCOUNT:role/$JOB_ROLE",
     "resourceRequirements": [{"type": "VCPU", "value": "2"}, {"type": "MEMORY", "value": "$memory"}],
     "environment": [{"name": "OMP_NUM_THREADS", "value": "2"}, {"name": "AWS_REGION", "value": "$REGION"},

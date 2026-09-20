@@ -747,17 +747,17 @@ def test_failure_tail_keeps_the_error_not_the_progress_bar() -> None:
     assert failure_tail("") == "(no output)"
 
 
-def test_single_item_exit_codes_follow_the_outcome() -> None:
+def test_listed_items_exit_codes_follow_the_outcome() -> None:
     from mapsnap.loc_fit import (
         EXIT_FAILED,
         EXIT_FITTED,
         EXIT_NOT_READY,
         EXIT_UNPROCESSABLE,
         EXIT_USAGE,
-        single_item_exit_code,
+        listed_items_exit_code,
     )
 
-    code = lambda **k: single_item_exit_code(
+    code = lambda **k: listed_items_exit_code(
         **{"done": 0, "skipped": 0, "unprocessable": 0, "waiting": 0, "failed": 0, **k}
     )
     assert code(done=1) == EXIT_FITTED
@@ -769,24 +769,153 @@ def test_single_item_exit_codes_follow_the_outcome() -> None:
     assert code() == EXIT_USAGE, "nothing happened at all"
 
 
-def test_item_from_list_takes_the_batch_array_index(
+def test_items_from_list_takes_the_batch_array_index(
     monkeypatch, tmp_path: Path
 ) -> None:
     import pytest
 
-    from mapsnap.loc_fit import item_from_list, read_item_list, select_item
+    from mapsnap.loc_fit import items_from_list, read_item_list, select_item
 
     items = [Item(f"sanborn{n}", "alabama", "1900") for n in range(3)]
     listing = tmp_path / "items.txt"
     listing.write_text("sanborn2\n\nsanborn0\n")
     assert read_item_list(str(listing), tmp_path) == ["sanborn2", "sanborn0"]
-    assert item_from_list(items, str(listing), 1, tmp_path).item == "sanborn0"
+    assert [i.item for i in items_from_list(items, str(listing), 1, tmp_path)] == [
+        "sanborn0"
+    ]
     monkeypatch.setenv("AWS_BATCH_JOB_ARRAY_INDEX", "0")
-    assert item_from_list(items, str(listing), None, tmp_path).item == "sanborn2"
+    assert [i.item for i in items_from_list(items, str(listing), None, tmp_path)] == [
+        "sanborn2"
+    ]
     monkeypatch.delenv("AWS_BATCH_JOB_ARRAY_INDEX")
     with pytest.raises(SystemExit, match="item-index"):
-        item_from_list(items, str(listing), None, tmp_path)
+        items_from_list(items, str(listing), None, tmp_path)
     with pytest.raises(SystemExit, match="outside the list"):
-        item_from_list(items, str(listing), 7, tmp_path)
+        items_from_list(items, str(listing), 7, tmp_path)
     with pytest.raises(SystemExit, match="not in the manifest"):
         select_item(items, "sanborn99")
+
+
+def test_items_from_list_slices_the_list_for_a_chunked_child(tmp_path) -> None:
+    import pytest
+
+    from mapsnap.loc_fit import items_from_list
+
+    listing = tmp_path / "items.txt"
+    listing.write_text("\n".join(f"sanborn{n}" for n in range(10)) + "\n")
+    items = [Item(f"sanborn{n}", "alabama", "1900") for n in range(10)]
+    took = lambda index: [
+        i.item for i in items_from_list(items, str(listing), index, tmp_path, 4)
+    ]
+    assert took(0) == ["sanborn0", "sanborn1", "sanborn2", "sanborn3"]
+    assert took(1) == ["sanborn4", "sanborn5", "sanborn6", "sanborn7"]
+    # The last child of an array takes the short remainder.
+    assert took(2) == ["sanborn8", "sanborn9"]
+    with pytest.raises(SystemExit):
+        items_from_list(items, str(listing), 3, tmp_path, 4)
+    with pytest.raises(SystemExit):
+        items_from_list(items, str(listing), 0, tmp_path, 0)
+
+
+def test_chunk_exit_code_lets_a_mixed_chunk_succeed() -> None:
+    from mapsnap.loc_fit import (
+        EXIT_FAILED,
+        EXIT_FITTED,
+        EXIT_NOT_READY,
+        EXIT_UNPROCESSABLE,
+        listed_items_exit_code,
+    )
+
+    code = lambda **k: listed_items_exit_code(
+        **{"done": 0, "skipped": 0, "unprocessable": 0, "waiting": 0, "failed": 0, **k}
+    )
+    # One item missing from the mirror does not condemn the chunk that fitted
+    # the other three; Batch never retries a 3, so it must mean "nothing ran".
+    assert code(done=3, unprocessable=1) == EXIT_FITTED
+    assert code(unprocessable=4) == EXIT_UNPROCESSABLE
+    # Anything that failed asks for the retry, which re-runs the whole chunk;
+    # the items already published under the run tag are skipped on the way past.
+    assert code(done=3, failed=1) == EXIT_FAILED
+    # An item still awaiting CRAFT leaves the chunk incomplete.
+    assert code(done=2, waiting=1) == EXIT_NOT_READY
+
+
+def test_balance_items_evens_out_the_chunks_and_keeps_every_item() -> None:
+    from mapsnap.loc_fit import balance_items
+
+    sheets = {"big1": 100, "big2": 90, "big3": 80} | {f"small{n}": 1 for n in range(9)}
+    names = sorted(sheets)
+    planned = balance_items(names, sheets, 4)
+    assert sorted(planned) == sorted(names)
+    chunks = [planned[i : i + 4] for i in range(0, len(planned), 4)]
+    loads = [sum(sheets[n] for n in c) for c in chunks]
+    # List order would put all three big volumes in one child; spreading them
+    # one to a child is the whole point.
+    assert all(sum(1 for n in c if sheets[n] > 50) == 1 for c in chunks), chunks
+    assert max(loads) - min(loads) <= 20, loads
+
+
+def test_balance_items_charges_a_short_item_for_its_fixed_cost() -> None:
+    from mapsnap.loc_fit import balance_items
+
+    # Without the fixed-cost weight every one-sheet item looks free and they
+    # all pile into one child, which then pays 8 container starts back to back.
+    sheets = {f"tiny{n}": 1 for n in range(8)} | {"mid1": 4, "mid2": 4}
+    planned = balance_items(sorted(sheets), sheets, 5)
+    chunks = [planned[i : i + 5] for i in range(0, len(planned), 5)]
+    assert all(len(c) == 5 for c in chunks)
+    assert sorted(planned) == sorted(sheets)
+
+
+def test_balance_items_handles_a_short_final_chunk() -> None:
+    from mapsnap.loc_fit import balance_items
+
+    sheets = {f"item{n}": n for n in range(1, 8)}
+    planned = balance_items(sorted(sheets), sheets, 3)
+    assert sorted(planned) == sorted(sheets)
+    assert len(planned) == 7
+
+
+def test_count_sheets_counts_rows_per_item(tmp_path) -> None:
+    from mapsnap.loc_fit import count_sheets
+
+    manifest = tmp_path / "mapping.tsv"
+    manifest.write_text(
+        "item\tstate\tyear\n"
+        "sanborn1\tohio\t1950\n"
+        "sanborn1\tohio\t1950\n"
+        "sanborn2\tohio\t1950\n"
+    )
+    assert count_sheets(manifest) == {"sanborn1": 2, "sanborn2": 1}
+
+
+def test_balance_items_keeps_the_chunks_aligned_when_the_count_does_not_divide() -> (
+    None
+):
+    from mapsnap.loc_fit import balance_items
+
+    # The caller slices the result by per_job, so a short chunk anywhere but
+    # the end shifts every chunk after it and quietly undoes the balancing --
+    # the corpus put its two largest volumes in one child that way.
+    sheets = {"a": 100, "b": 90, "c": 80, "d": 70} | {f"s{n}": 1 for n in range(6)}
+    planned = balance_items(sorted(sheets), sheets, 3)
+    chunks = [planned[i : i + 3] for i in range(0, len(planned), 3)]
+    assert [len(c) for c in chunks] == [3, 3, 3, 1], chunks
+    for chunk in chunks:
+        assert sum(1 for n in chunk if sheets[n] > 50) <= 1, chunks
+
+
+def test_balance_items_returns_every_name_once_for_any_chunk_size() -> None:
+    from mapsnap.loc_fit import balance_items
+
+    sheets = {f"item{n}": (n * 7) % 23 + 1 for n in range(50)}
+    names = sorted(sheets)
+    for per_job in (1, 3, 7, 8, 50, 64):
+        planned = balance_items(names, sheets, per_job)
+        assert sorted(planned) == names, per_job
+        chunks = [planned[i : i + per_job] for i in range(0, len(planned), per_job)]
+        assert all(len(c) == per_job for c in chunks[:-1]), (
+            per_job,
+            [len(c) for c in chunks],
+        )
+    assert balance_items([], sheets, 8) == []

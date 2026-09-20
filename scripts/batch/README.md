@@ -177,12 +177,68 @@ left. Exit 3 and 4 are left out of both lists, since neither is fixed by
 running it again. An array needs at least two children, so a lone survivor
 goes through `mapsnap loc-fit --item` instead.
 
+## Items per child
+
+A Batch array caps at 10,000 children and the mirror holds 35,159 items, so
+the corpus **cannot** run one item to a child. `PER_JOB` sets how many
+consecutive lines of the list each child takes, and `submit.sh` sizes the
+array from it:
+
+```
+PER_JOB=8 scripts/batch/submit.sh corpus-v1 corpus-items.txt   # 4,395 children
+```
+
+| items per child | children | fits the cap |
+|---|---|---|
+| 1 | 35,159 | no |
+| 2 | 17,580 | no |
+| 4 | 8,790 | yes |
+| 8 | 4,395 | yes |
+
+**Plan the list before submitting.** Item ids say nothing about volume size,
+so chunking the list in its natural order hands one child several 150-sheet
+volumes while another gets eight single sheets. `plan-items.py` reorders the
+list so consecutive runs of `PER_JOB` are similar work -- `submit.sh` slices
+by position, so reordering is all it takes:
+
+```
+scripts/batch/plan-items.py corpus-items.txt --per-job 8 --out planned.txt
+PER_JOB=8 scripts/batch/submit.sh corpus-v1 planned.txt
+```
+
+Simulated over the whole mirror at 8 items a child and 128 slots:
+
+| | list order | balanced |
+|---|---|---|
+| longest child | 10.0 h | 1.7 h |
+| makespan | 54 h | 49 h |
+| idle slot-hours | 770 | 133 |
+| work redone at a 4% interrupt rate | 4.7% | 2.0% |
+
+The rework column is the part that is easy to miss: a spot reclamation costs
+whatever the child had done so far, so a 10-hour child is a far worse thing to
+lose than a 1.7-hour one. Sheet count is the weight, which balances as well
+here as the pilot's measured timings and needs no measurements to stay true.
+
+It also puts `loc-fit`'s prefetch back to work. The driver runs `prepare_next`
+on a worker thread, downloading the next item while the current one fits; a
+one-item process has nothing to overlap, so that thread has been idle since
+the queue went away.
+
+Do not expect it to move the bill much. The per-item fixed cost is 57 s at
+best and 113 s typically, and the parts a chunk actually amortises are small:
+container start is ~4 s and parsing the county manifest is 0.1 s. Most of the
+rest is the chain itself spawning a subprocess per stage, each importing
+torch and friends -- 9.1 s of import floor per item, about 89 job-hours across
+the corpus -- and that is paid per item however the children are grouped.
+Chunking is for the array cap and the prefetch; packing was the money.
+
 ## Limits worth knowing
 
-An array job holds at most 10,000 children: the full corpus is four arrays.
-A job has no cross-item prefetch (the fleet downloaded the next item while
-fitting the current one); parallelism across jobs covers it. Spot
-reclamation shows as a `Host EC2…` status reason and is always retried.
+An array job holds at most 10,000 children, which is why the corpus runs
+several items to a child (see above) rather than as four arrays. Spot
+reclamation shows as a `Host EC2…` status reason and is always retried; the
+pilot lost two instances that way and all eight of their children recovered.
 
 ## Running the image locally on an Apple Silicon Mac
 
