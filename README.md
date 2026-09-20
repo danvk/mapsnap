@@ -506,6 +506,22 @@ Then visit localhost:5173/mapsnap/.
 
 The same app also hosts the **volume viewer** (`localhost:5173/mapsnap/?view=iiif`), which draws a whole run's pages warped onto OpenStreetMap; it needs the local API server (`npm run server`) alongside `npm run dev`. Its Page / Region / P(road) toggle draws each page as its sheet, its content-region map, or its road-probability map. Region maps come from `mapsnap region data/<vol>` (written to `artifacts/region/`), P(road) maps from `mapsnap roadprob data/<vol>/p*.jpg` (written beside each page as `<stem>.roadprob.jpg`; the pre-#354 `artifacts/edge_join/roadprob/` PNGs are still read).
 
+The viewer also reads an annotation straight out of the mirror, which is how a
+corpus run is looked at without waiting on loc.gov:
+
+```
+AWS_PROFILE=mapsnap npm run server        # the aws CLI needs working credentials
+open 'http://localhost:8182/mapsnap/?view=iiif&iiif=s3://mapsnap-sanborn/by-state/illinois/1950/sanborn01790_090/runs/corpus-v1/mapsnap.iiif.json'
+```
+
+The annotations a run publishes point their image services at loc.gov, which is
+unreliable enough that a 120-page volume mostly draws holes. Given an `s3://`
+path the server reads the annotation from the bucket, measures each scan from a
+ranged read of its first 128 KB, and rewrites the services to point at itself;
+scans are then fetched and cached on the first tile that needs one, under
+`~/.cache/mapsnap/s3` or `$MAPSNAP_S3_CACHE`. Set `MAPSNAP_S3_PROFILE` to name
+a profile explicitly.
+
 To deploy the debugger:
 
 ```

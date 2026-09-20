@@ -24,16 +24,24 @@
  * here; a production build (`npm run build`) is served standalone at /mapsnap.
  */
 
-import { resolve } from 'path';
+import { homedir } from 'os';
+import { join, resolve } from 'path';
 import express from 'express';
 import { TypedRouter } from 'crosswalk';
 import type { API } from './api.ts';
 import { registerIiifApi, registerIiifImages } from './iiifRoutes.ts';
+import { registerS3IiifImages } from './s3Routes.ts';
 import { registerAdjacencyTruthApi } from './adjacencyRoutes.ts';
 import { registerKeymapApi, registerKeymapImages } from './keymapRoutes.ts';
 import { registerNotesApi } from './notesRoutes.ts';
 
 const dataDir = resolve(process.argv[2] ?? '../data');
+// Mirror scans fetched for `?iiif=s3://…`, kept out of the repo and out of
+// data/ so nothing walks them as a volume. Persistent on purpose: a debugging
+// session revisits the same pages, and refetching a 120-page volume each time
+// is what made loc.gov unusable in the first place.
+const s3CacheDir =
+  process.env.MAPSNAP_S3_CACHE ?? join(homedir(), '.cache', 'mapsnap', 's3');
 const port = parseInt(process.argv[3] ?? '8182', 10);
 
 const app = express();
@@ -52,11 +60,12 @@ app.use((req, res, next) => {
 // Binary endpoints (raw Express): the IIIF image service and key-map images.
 // Registered before the typed router so their more specific paths win.
 registerIiifImages(app, dataDir);
+registerS3IiifImages(app, s3CacheDir);
 registerKeymapImages(app, dataDir);
 
 // The typed JSON API (crosswalk), defined by the API interface in ./api.
 const router = new TypedRouter<API>(app);
-registerIiifApi(router, dataDir);
+registerIiifApi(router, dataDir, s3CacheDir);
 registerKeymapApi(router, dataDir);
 registerAdjacencyTruthApi(router, dataDir);
 registerNotesApi(router, dataDir);
@@ -70,5 +79,6 @@ app.use('/mapsnap', express.static(resolve('dist')));
 app.listen(port, () => {
   console.error(`mapsnap server running at http://localhost:${port}`);
   console.error(`  data:    ${dataDir}`);
+  console.error(`  s3 cache: ${s3CacheDir}`);
   console.error(`  UI (after build): http://localhost:${port}/mapsnap/`);
 });
