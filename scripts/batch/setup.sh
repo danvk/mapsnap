@@ -35,6 +35,10 @@ for arg in "$@"; do
   esac
 done
 IMAGE=${IMAGE:-$ACCOUNT.dkr.ecr.$REGION.amazonaws.com/mapsnap:latest}
+# Named here rather than beside the role that creates it: the job definitions
+# reference it in every mode, including --job-definitions-only, which skips
+# the IAM section entirely.
+JOB_ROLE=mapsnap-batch-job
 # Dry-run echoes go to stderr so the callers' "> /dev/null" redirects cannot swallow them.
 run() { if [ "$DRY_RUN" = 1 ]; then echo "+ $*" >&2; else "$@"; fi; }
 
@@ -88,7 +92,6 @@ else echo "ECR: mapsnap exists"; fi
 # --- IAM: the job role (what the container is) --------------------------------
 # Trusted by ECS tasks, carrying whatever mapsnap-craft carries today, so a job
 # can read the mirror and write a run's outputs exactly as an instance did.
-JOB_ROLE=mapsnap-batch-job
 exists aws iam get-role --role-name $JOB_ROLE; state=$?
 [ "$state" = 2 ] && needs_admin "The job role $JOB_ROLE"
 if [ "$state" = 1 ]; then
