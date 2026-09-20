@@ -233,53 +233,6 @@ torch and friends -- 9.1 s of import floor per item, about 89 job-hours across
 the corpus -- and that is paid per item however the children are grouped.
 Chunking is for the array cap and the prefetch; packing was the money.
 
-## Running a sample first, then the rest
-
-`sample-items.py` splits the mirror into a seeded random sample and everything
-else, and the two together are every item exactly once:
-
-```
-scripts/batch/sample-items.py --size 1000 --out-prefix corpus
-  corpus-sample.txt: 1,000 items, 13,132 sheets, mean 13.1, median 4, p90 32
-  corpus-rest.txt:  34,159 items, 428,047 sheets, mean 12.5, median 4, p90 28
-  the sample averages 1.05x the typical item
-```
-
-Run the sample, check the cost and the failure rate, then run the rest **under
-the same run tag** and the two halves are a complete corpus run. A run tag does
-not care that it was filled in two passes, and an item already published under
-it is skipped for the price of one listing, so the halves can even overlap.
-
-That 1.05x is the line worth reading. A random draw is representative and
-projects honestly; the 200-item pilot was 2.37x the typical item and its
-per-item cost overstated the corpus by the same factor.
-
-## Measuring what a run cost
-
-Three numbers decide whether the next run is affordable, and two of the three
-expire: Batch drops a child's attempt history 24 hours after it finishes, and
-a terminated instance leaves `describe-instances` within the hour, taking its
-spot-reclamation reason with it. So the fleet is sampled *while* the job runs:
-
-```
-scripts/batch/snapshot-instances.sh "$JOB" instances.tsv &   # stops with the job
-scripts/batch/status.sh "$JOB" --watch
-
-scripts/batch/collect-run.py "$JOB" planned.txt \
-  --instances instances.tsv --items-per-job 8 --out run-report.json
-```
-
-`collect-run.py` prices the instance-seconds the fleet actually ran at that
-type and zone's spot rate, counts the children whose host was reclaimed, reads
-pages and peak RSS out of `loc-fit`'s own summary lines, and projects the
-corpus by applying the run's measured size-to-seconds curve to the mirror's
-distribution. On the pilot it reports $5.86, 46% vCPU utilisation, $0.0011 per
-page and a $507 corpus.
-
-**vCPU utilisation is the number to watch.** It is the share of what we rented
-that the jobs occupied; 46% is what two-jobs-to-a-box packing looks like, and
-anything near 90% means the shapes and the memory request agree.
-
 ## Limits worth knowing
 
 An array job holds at most 10,000 children, which is why the corpus runs
