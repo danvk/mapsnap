@@ -45,9 +45,23 @@ scripts/batch/submit.sh batch-test-200 scripts/batch/pilot-200.txt
 scripts/batch/status.sh <array-job-id> --watch
 ```
 
-The operator policy lets `mapsnap-mirror` push images, submit and inspect
-jobs and read their CloudWatch logs; it cannot create or change the
-infrastructure, which stays with the admin identity and `setup.sh`.
+The operator policy lets `mapsnap-mirror` push images, register job
+definitions, submit and inspect jobs and read their CloudWatch logs. It cannot
+create or change the roles, the queue or the compute environment, which stay
+with the admin identity and a full `setup.sh`.
+
+That split matters in practice because the admin session expires every ten to
+twenty minutes. Pointing the job definitions at a newly pushed image is the
+one setup step that comes up on every code change, so it is the one the scoped
+identity can do:
+
+```
+scripts/batch/setup.sh --job-definitions-only \
+  IMAGE=...  # or leave IMAGE unset to keep :latest
+```
+
+A full `setup.sh` under the scoped profile now says so plainly instead of
+failing on a `CreateRole` for a role that already exists.
 
 It is attached as a *managed* policy rather than an inline one: all of a
 user's inline policies together may not exceed 2,048 bytes, and

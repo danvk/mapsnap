@@ -23,16 +23,61 @@ set -euo pipefail
 
 REGION=${AWS_REGION:-us-west-2}
 ACCOUNT=$(aws sts get-caller-identity --query Account --output text)
-DRY_RUN=0; [ "${1:-}" = "--dry-run" ] && DRY_RUN=1
+DRY_RUN=0; JOBDEFS_ONLY=""
+for arg in "$@"; do
+  case "$arg" in
+    --dry-run) DRY_RUN=1 ;;
+    # A new image, or a changed command line, needs only the job definitions
+    # re-registered. The roles, the queue and the compute environment are
+    # already there, and it is reading those that a scoped identity trips on.
+    --job-definitions-only) JOBDEFS_ONLY=1 ;;
+    *) echo "unknown argument: $arg" >&2; exit 2 ;;
+  esac
+done
 IMAGE=${IMAGE:-$ACCOUNT.dkr.ecr.$REGION.amazonaws.com/mapsnap:latest}
 # Dry-run echoes go to stderr so the callers' "> /dev/null" redirects cannot swallow them.
 run() { if [ "$DRY_RUN" = 1 ]; then echo "+ $*" >&2; else "$@"; fi; }
+
+# Does this thing exist? "I am not allowed to look" is not the same answer as
+# "it is not there", and treating them alike is how this script came to report
+# an AccessDenied on CreateRole for a role that was already sitting there.
+#   0 it exists   1 it is genuinely absent   2 we cannot see it
+exists() {
+  local err
+  if err=$("$@" 2>&1 > /dev/null); then return 0; fi
+  case "$err" in
+    *AccessDenied*|*"not authorized"*|*UnauthorizedOperation*) return 2 ;;
+    *) return 1 ;;
+  esac
+}
+
+needs_admin() {
+  cat >&2 <<MESSAGE
+
+$1 cannot be read or created by $(aws sts get-caller-identity --query Arn --output text 2>/dev/null || echo "this identity").
+
+Creating and updating the IAM, ECR and Batch resources wants the account's
+admin identity, not the scoped one. Re-run without the profile:
+
+  env -u AWS_PROFILE ${IMAGE:+IMAGE=$IMAGE }$0
+
+Everything after setup -- pushing an image, submitting, watching, collecting --
+works as mapsnap-mirror. If all you are doing is pointing the job definitions
+at a new image, --job-definitions-only skips every step that needs more.
+MESSAGE
+  exit 3
+}
 did() { if [ "$DRY_RUN" = 1 ]; then echo "would create $*"; else echo "created $*"; fi; }
 
 echo "account $ACCOUNT, region $REGION, image $IMAGE"
 
+if [ -n "$JOBDEFS_ONLY" ]; then
+  echo "re-registering the job definitions only; leaving the roles, queue and compute environment alone"
+else
 # --- ECR ----------------------------------------------------------------------
-if ! aws ecr describe-repositories --repository-names mapsnap --region "$REGION" > /dev/null 2>&1; then
+exists aws ecr describe-repositories --repository-names mapsnap --region "$REGION"; state=$?
+[ "$state" = 2 ] && needs_admin "The ECR repository mapsnap"
+if [ "$state" = 1 ]; then
   run aws ecr create-repository --repository-name mapsnap --region "$REGION" \
     --image-scanning-configuration scanOnPush=false > /dev/null
   run aws ecr put-lifecycle-policy --repository-name mapsnap --region "$REGION" --lifecycle-policy-text \
@@ -44,7 +89,9 @@ else echo "ECR: mapsnap exists"; fi
 # Trusted by ECS tasks, carrying whatever mapsnap-craft carries today, so a job
 # can read the mirror and write a run's outputs exactly as an instance did.
 JOB_ROLE=mapsnap-batch-job
-if ! aws iam get-role --role-name $JOB_ROLE > /dev/null 2>&1; then
+exists aws iam get-role --role-name $JOB_ROLE; state=$?
+[ "$state" = 2 ] && needs_admin "The job role $JOB_ROLE"
+if [ "$state" = 1 ]; then
   run aws iam create-role --role-name $JOB_ROLE --assume-role-policy-document \
     '{"Version":"2012-10-17","Statement":[{"Effect":"Allow","Principal":{"Service":"ecs-tasks.amazonaws.com"},"Action":"sts:AssumeRole"}]}' > /dev/null
   for arn in $(aws iam list-attached-role-policies --role-name mapsnap-craft --query 'AttachedPolicies[].PolicyArn' --output text); do
@@ -58,7 +105,9 @@ if ! aws iam get-role --role-name $JOB_ROLE > /dev/null 2>&1; then
 else echo "IAM: $JOB_ROLE exists"; fi
 
 # --- IAM: the instance role (what the EC2 host under ECS is) ------------------
-if ! aws iam get-instance-profile --instance-profile-name ecsInstanceRole > /dev/null 2>&1; then
+exists aws iam get-instance-profile --instance-profile-name ecsInstanceRole; state=$?
+[ "$state" = 2 ] && needs_admin "The instance profile ecsInstanceRole"
+if [ "$state" = 1 ]; then
   run aws iam create-role --role-name ecsInstanceRole --assume-role-policy-document \
     '{"Version":"2012-10-17","Statement":[{"Effect":"Allow","Principal":{"Service":"ec2.amazonaws.com"},"Action":"sts:AssumeRole"}]}' > /dev/null
   run aws iam attach-role-policy --role-name ecsInstanceRole \
@@ -166,6 +215,7 @@ if ! aws batch describe-job-queues --region "$REGION" --job-queues mapsnap-fit \
     --compute-environment-order order=1,computeEnvironment=mapsnap-cpu-spot > /dev/null
   echo "Batch: $(did "job queue mapsnap-fit")"
 else echo "Batch: job queue exists"; fi
+fi
 
 # --- Batch: the loc-fit job definitions ----------------------------------------
 # One job = one item: child N of an array runs line N of Ref::items (loc-fit
