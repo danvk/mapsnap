@@ -488,3 +488,40 @@ def test_empty_adjacency_carries_every_collection_a_consumer_reads():
     assert doc["one_sided"] == []
     assert doc["promoted"] == []
     assert doc["no_neighbor"] == {}
+
+
+def test_could_be_claim_keeps_a_tall_margin_numeral() -> None:
+    from mapsnap.page_adjacency import could_be_claim
+
+    # A 40 px numeral in the top margin of a 1000x1200 page.
+    assert could_be_claim([[500, 20], [560, 20], [560, 60], [500, 60]], 1000, 1200)
+
+
+def test_could_be_claim_drops_what_the_later_filters_would_drop() -> None:
+    from mapsnap.page_adjacency import could_be_claim
+
+    # Tall enough, but in the middle of the page: classify_edge rejects it.
+    assert not could_be_claim(
+        [[480, 580], [540, 580], [540, 620], [480, 620]], 1000, 1200
+    )
+    # In the margin, but under the corpus-wide height floor.
+    assert not could_be_claim([[500, 20], [540, 20], [540, 40], [500, 40]], 1000, 1200)
+
+
+def test_horizontal_polygon_matches_the_craft_box_it_came_from() -> None:
+    from mapsnap.page_adjacency import horizontal_polygon
+
+    assert horizontal_polygon([10, 50, 100, 140]) == [
+        [10, 100],
+        [50, 100],
+        [50, 140],
+        [10, 140],
+    ]
+
+
+def test_same_box_ignores_a_sub_pixel_difference() -> None:
+    from mapsnap.page_adjacency import same_box
+
+    a = [[10, 100], [50, 100], [50, 140], [10, 140]]
+    assert same_box(a, [[10.2, 100.1], [50.1, 100], [50, 140.3], [10, 139.8]])
+    assert not same_box(a, [[10, 100], [50, 100], [50, 180], [10, 180]])
