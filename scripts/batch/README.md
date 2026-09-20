@@ -177,13 +177,20 @@ killed for memory or raised, and only its log tells them apart, so this reads
 the logs and splits them:
 
 ```
-scripts/batch/retry-list.sh <array-job-id> items.txt retry
-  sanborn03769_007  index 77   memory
-  sanborn05831_001  index 111  FAILED: mapsnap fit failed (exit 1): ...
-3 out of memory, 1 other, 2 not worth retrying (exit 3 or 4)
+scripts/batch/retry-list.sh <array-job-id> retry
+  sanborn06645_034  child 28   memory   mapsnap ocr failed (exit -9)
+  sanborn01711_002  child 38   memory   mapsnap fit failed (exit 247)
+6 out of memory, 0 other, 0 not worth retrying (exit 3 or 4), 0 unattributed
 
 PER_JOB=1 JOBDEF=mapsnap-loc-fit-large scripts/batch/submit.sh <run-tag> retry-oom.txt
 ```
+
+The failing items come out of the logs, not off the items list: in a chunked
+run a child holds eight items and its index says nothing about which one died.
+A memory kill wears three different exit codes depending on how deep it
+happened -- `-9` for a stage killed outright, `247` for a stage whose own
+child was killed, `137` for the container itself -- and all three mean the
+same thing.
 
 Reuse the same run tag. Items that already finished are marked done by
 `plan_fit` and cost one listing each, so a resubmission only does what is
