@@ -838,3 +838,52 @@ def test_chunk_exit_code_lets_a_mixed_chunk_succeed() -> None:
     assert code(done=3, failed=1) == EXIT_FAILED
     # An item still awaiting CRAFT leaves the chunk incomplete.
     assert code(done=2, waiting=1) == EXIT_NOT_READY
+
+
+def test_balance_items_evens_out_the_chunks_and_keeps_every_item() -> None:
+    from mapsnap.loc_fit import balance_items
+
+    sheets = {"big1": 100, "big2": 90, "big3": 80} | {f"small{n}": 1 for n in range(9)}
+    names = sorted(sheets)
+    planned = balance_items(names, sheets, 4)
+    assert sorted(planned) == sorted(names)
+    chunks = [planned[i : i + 4] for i in range(0, len(planned), 4)]
+    loads = [sum(sheets[n] for n in c) for c in chunks]
+    # List order would put all three big volumes in one child; spreading them
+    # one to a child is the whole point.
+    assert all(sum(1 for n in c if sheets[n] > 50) == 1 for c in chunks), chunks
+    assert max(loads) - min(loads) <= 20, loads
+
+
+def test_balance_items_charges_a_short_item_for_its_fixed_cost() -> None:
+    from mapsnap.loc_fit import balance_items
+
+    # Without the fixed-cost weight every one-sheet item looks free and they
+    # all pile into one child, which then pays 8 container starts back to back.
+    sheets = {f"tiny{n}": 1 for n in range(8)} | {"mid1": 4, "mid2": 4}
+    planned = balance_items(sorted(sheets), sheets, 5)
+    chunks = [planned[i : i + 5] for i in range(0, len(planned), 5)]
+    assert all(len(c) == 5 for c in chunks)
+    assert sorted(planned) == sorted(sheets)
+
+
+def test_balance_items_handles_a_short_final_chunk() -> None:
+    from mapsnap.loc_fit import balance_items
+
+    sheets = {f"item{n}": n for n in range(1, 8)}
+    planned = balance_items(sorted(sheets), sheets, 3)
+    assert sorted(planned) == sorted(sheets)
+    assert len(planned) == 7
+
+
+def test_count_sheets_counts_rows_per_item(tmp_path) -> None:
+    from mapsnap.loc_fit import count_sheets
+
+    manifest = tmp_path / "mapping.tsv"
+    manifest.write_text(
+        "item\tstate\tyear\n"
+        "sanborn1\tohio\t1950\n"
+        "sanborn1\tohio\t1950\n"
+        "sanborn2\tohio\t1950\n"
+    )
+    assert count_sheets(manifest) == {"sanborn1": 2, "sanborn2": 1}

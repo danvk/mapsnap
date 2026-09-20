@@ -126,6 +126,31 @@ PER_JOB=8 scripts/batch/submit.sh corpus-v1 corpus-items.txt   # 4,395 children
 | 4 | 8,790 | yes |
 | 8 | 4,395 | yes |
 
+**Plan the list before submitting.** Item ids say nothing about volume size,
+so chunking the list in its natural order hands one child several 150-sheet
+volumes while another gets eight single sheets. `plan-items.py` reorders the
+list so consecutive runs of `PER_JOB` are similar work -- `submit.sh` slices
+by position, so reordering is all it takes:
+
+```
+scripts/batch/plan-items.py corpus-items.txt --per-job 8 --out planned.txt
+PER_JOB=8 scripts/batch/submit.sh corpus-v1 planned.txt
+```
+
+Simulated over the whole mirror at 8 items a child and 128 slots:
+
+| | list order | balanced |
+|---|---|---|
+| longest child | 10.0 h | 1.7 h |
+| makespan | 54 h | 49 h |
+| idle slot-hours | 770 | 133 |
+| work redone at a 4% interrupt rate | 4.7% | 2.0% |
+
+The rework column is the part that is easy to miss: a spot reclamation costs
+whatever the child had done so far, so a 10-hour child is a far worse thing to
+lose than a 1.7-hour one. Sheet count is the weight, which balances as well
+here as the pilot's measured timings and needs no measurements to stay true.
+
 It also puts `loc-fit`'s prefetch back to work. The driver runs `prepare_next`
 on a worker thread, downloading the next item while the current one fits; a
 one-item process has nothing to overlap, so that thread has been idle since

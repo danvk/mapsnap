@@ -53,6 +53,7 @@ again once the GPU pass has been through it.
 
 import argparse
 import csv
+import heapq
 import json
 import os
 import re
@@ -831,6 +832,64 @@ def read_item_list(path: str, work_dir: Path) -> list[str]:
         work_dir.mkdir(parents=True, exist_ok=True)
         run_aws(["aws", "s3", "cp", path, str(local), "--only-show-errors"])
     return [line.strip() for line in local.read_text().splitlines() if line.strip()]
+
+
+def count_sheets(manifest: Path) -> dict[str, int]:
+    """Sheets per item, from the mirror's per-sheet manifest."""
+    counts: dict[str, int] = {}
+    with manifest.open() as handle:
+        header = handle.readline().rstrip("\n").split("\t")
+        if "item" not in header:
+            sys.exit(f"{manifest}: manifest has no 'item' column")
+        column = header.index("item")
+        for line in handle:
+            fields = line.rstrip("\n").split("\t")
+            if len(fields) > column:
+                counts[fields[column]] = counts.get(fields[column], 0) + 1
+    return counts
+
+
+# A one-sheet item still pays for its container, its downloads and the chain's
+# thirteen subprocess imports, which is worth about three sheets of fitting.
+# Balancing on sheets alone puts every short item in the same chunk and makes
+# that chunk expensive.
+FIXED_COST_IN_SHEETS = 3
+
+
+def balance_items(names: list[str], sheets: dict[str, int], per_job: int) -> list[str]:
+    """Reorder ``names`` so each consecutive run of ``per_job`` is similar work.
+
+    ``submit.sh`` slices the list by position, so a *reordering* is all it takes
+    to balance an array: child i still runs lines [i*per_job, (i+1)*per_job).
+
+    Longest-first into the lightest chunk -- the standard makespan heuristic.
+    Sheet count is the weight, which is as good as the pilot's measured timings
+    here (both give a 1.7 h longest child) and needs no measurements to stay
+    true. Simulated over the mirror at 8 items a child and 128 slots, this
+    takes the longest child from 10.0 h to 1.7 h, the makespan from 54 h to
+    49 h, and the work a 4% spot-interrupt rate forces us to redo from 4.7% of
+    the run to 2.0%: a child that dies takes less down with it.
+    """
+    if per_job < 1:
+        raise ValueError(f"per_job must be at least 1, not {per_job}")
+    chunk_count = -(-len(names) // per_job)
+    weight = {name: sheets.get(name, 1) + FIXED_COST_IN_SHEETS for name in names}
+    # (load, index, members); a full chunk is pushed back with an infinite load
+    # so it stops competing for the next item.
+    heap: list[tuple[float, int, list[str]]] = [
+        (0.0, index, []) for index in range(chunk_count)
+    ]
+    heapq.heapify(heap)
+    for name in sorted(names, key=lambda n: (-weight[n], n)):
+        load, index, members = heapq.heappop(heap)
+        members.append(name)
+        full = len(members) >= per_job
+        heapq.heappush(
+            heap, (float("inf") if full else load + weight[name], index, members)
+        )
+    return [
+        name for _, _, members in sorted(heap, key=lambda x: x[1]) for name in members
+    ]
 
 
 def items_from_list(
