@@ -17,6 +17,9 @@ set -euo pipefail
 REGION=${AWS_REGION:-us-west-2}
 BUCKET=${BUCKET:-s3://mapsnap-sanborn}
 QUEUE=${QUEUE:-mapsnap-fit}
+# The ~1.5% of items whose OCR vocabulary needs more than 8 GB go to the
+# 16 GB definition; a run only learns which those are by killing them, so
+# this is how the retry run is submitted, not something to guess up front.
 JOBDEF=${JOBDEF:-mapsnap-loc-fit}
 TAG=${1:?run tag}; LIST=${2:?items.txt}
 HERE=$(cd -- "$(dirname -- "$0")" > /dev/null && pwd -P)
