@@ -679,3 +679,25 @@ def test_name_evidence_of_recomputes_for_pre_375_records():
     assert name_evidence_of({}) is None
     # A record with a score but no counts keeps the reward-only value.
     assert name_evidence_of({"score": 0.3}) == pytest.approx(0.3)
+
+
+def test_scale_priors_ignore_a_fragment_region() -> None:
+    """A torn key-map region implies any scale at all. One on the 2026-09-20
+    corpus sample implied 128x, which asked osm_rasters for a 360 km frame and
+    a 120 GiB array."""
+    from mapsnap.osm_snap import page_scale_priors
+
+    square = [[[0.0, 0.0], [0.001, 0.0], [0.001, 0.001], [0.0, 0.001]]]
+    # A region this small against the page implies a scale many folds off.
+    priors = page_scale_priors(1.0, square, width=40000, height=40000)
+    assert [p.source for p in priors] == ["volume-median"]
+
+
+def test_scale_priors_still_offer_a_half_scale_sheet() -> None:
+    from mapsnap.osm_snap import page_scale_priors
+
+    # A region ~4x the page area is the double-scale sheet the prior is for.
+    ring = [[[0.0, 0.0], [0.02, 0.0], [0.02, 0.02], [0.0, 0.02]]]
+    priors = page_scale_priors(1.0, ring, width=1200, height=1200)
+    sources = [p.source for p in priors]
+    assert "family-rung" in sources, sources

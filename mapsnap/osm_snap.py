@@ -21,6 +21,7 @@ objects, and evaluates against truth; nothing in this module reads truth data.
 import dataclasses
 import math
 import os
+import sys
 from dataclasses import dataclass, field
 
 import cv2
@@ -45,6 +46,16 @@ from mapsnap.streets import Block, street_base_name
 from mapsnap.utils import haversine_m
 
 OSM_RES_M = 2.0  # raster resolution
+# How far a key-map region may imply a page is drawn from the volume's median
+# scale before the suggestion stops being believable. A half- or double-scale
+# sheet is one fold; beyond that the region is a segmentation fragment.
+MIN_SCALE_FOLDS = 0.6
+MAX_SCALE_FOLDS = 1.6
+# The widest ground a single sheet's search frame may cover. A Sanborn sheet is
+# half a kilometre to two across, so 50 km is already absurd -- this is the
+# floor under a bad scale prior, not a working limit, and hitting it means the
+# pose is not worth evaluating rather than that the frame should be smaller.
+MAX_FRAME_M = 50_000.0
 OSM_WIDTH_M = 12.0  # stroked corridor width for the OSM "P(road)" analog
 REFINE_SHIFT_MAX_M = 30.0  # chamfer refinement may not slide farther than this
 # Hard containment gate: only egregious slides fail it. Schematic keymap
@@ -687,8 +698,16 @@ def page_scale_priors(
             [[(p[0], p[1]) for p in ring] for ring in region_rings], width, height
         )
         if region_scale and region_scale > 0:
-            rung = round(math.log2(region_scale / volume_m_per_px))
-            if rung != 0 and abs(math.log2(region_scale / volume_m_per_px)) >= 0.6:
+            folds = math.log2(region_scale / volume_m_per_px)
+            rung = round(folds)
+            # Half and double, and no further. A key-map region can be a
+            # fragment -- a block the segmentation tore in three -- and a
+            # fragment implies any scale you like: one on the 2026-09-20 corpus
+            # sample implied 128x, which asked osm_rasters for a 360 km frame
+            # and a 120 GiB array, and took the item down with it. Sanborn
+            # sheets are drawn at 50 or 100 ft to the inch, so the only fold
+            # this prior was ever describing is one.
+            if rung != 0 and MIN_SCALE_FOLDS <= abs(folds) <= MAX_SCALE_FOLDS:
                 priors.append(
                     ScalePrior(volume_m_per_px * (2.0**rung), 0.05, "family-rung")
                 )
@@ -838,6 +857,15 @@ def evaluate_pose(
     diag_m = math.hypot(ctx.width, ctx.height) * max(
         sp.m_per_px for sp in ctx.scale_priors
     )
+    if diag_m > MAX_FRAME_M:
+        # Whatever produced this scale is wrong by orders of magnitude, and
+        # osm_rasters would raise trying to allocate the square it implies.
+        # A pose we cannot frame is a pose we cannot score.
+        print(
+            f"  skipping pose: a {diag_m / 1000:.0f} km frame is not a page",
+            file=sys.stderr,
+        )
+        return None
     frame = frame_around((lon_c, lat_c), half_m=diag_m / 2 + 100.0, res_m=res)
     osm_prob, valid, skeleton = osm_rasters(frame, features)
     if not skeleton.any():
