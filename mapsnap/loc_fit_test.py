@@ -887,3 +887,35 @@ def test_count_sheets_counts_rows_per_item(tmp_path) -> None:
         "sanborn2\tohio\t1950\n"
     )
     assert count_sheets(manifest) == {"sanborn1": 2, "sanborn2": 1}
+
+
+def test_balance_items_keeps_the_chunks_aligned_when_the_count_does_not_divide() -> (
+    None
+):
+    from mapsnap.loc_fit import balance_items
+
+    # The caller slices the result by per_job, so a short chunk anywhere but
+    # the end shifts every chunk after it and quietly undoes the balancing --
+    # the corpus put its two largest volumes in one child that way.
+    sheets = {"a": 100, "b": 90, "c": 80, "d": 70} | {f"s{n}": 1 for n in range(6)}
+    planned = balance_items(sorted(sheets), sheets, 3)
+    chunks = [planned[i : i + 3] for i in range(0, len(planned), 3)]
+    assert [len(c) for c in chunks] == [3, 3, 3, 1], chunks
+    for chunk in chunks:
+        assert sum(1 for n in chunk if sheets[n] > 50) <= 1, chunks
+
+
+def test_balance_items_returns_every_name_once_for_any_chunk_size() -> None:
+    from mapsnap.loc_fit import balance_items
+
+    sheets = {f"item{n}": (n * 7) % 23 + 1 for n in range(50)}
+    names = sorted(sheets)
+    for per_job in (1, 3, 7, 8, 50, 64):
+        planned = balance_items(names, sheets, per_job)
+        assert sorted(planned) == names, per_job
+        chunks = [planned[i : i + per_job] for i in range(0, len(planned), per_job)]
+        assert all(len(c) == per_job for c in chunks[:-1]), (
+            per_job,
+            [len(c) for c in chunks],
+        )
+    assert balance_items([], sheets, 8) == []

@@ -861,6 +861,9 @@ def balance_items(names: list[str], sheets: dict[str, int], per_job: int) -> lis
 
     ``submit.sh`` slices the list by position, so a *reordering* is all it takes
     to balance an array: child i still runs lines [i*per_job, (i+1)*per_job).
+    That is also the constraint on the result -- every chunk but the last must
+    hold exactly ``per_job`` names, or the slicing walks off the boundaries and
+    undoes the balancing for every chunk after the short one.
 
     Longest-first into the lightest chunk -- the standard makespan heuristic.
     Sheet count is the weight, which is as good as the pilot's measured timings
@@ -872,10 +875,16 @@ def balance_items(names: list[str], sheets: dict[str, int], per_job: int) -> lis
     """
     if per_job < 1:
         raise ValueError(f"per_job must be at least 1, not {per_job}")
+    if not names:
+        return []
     chunk_count = -(-len(names) // per_job)
+    # The remainder rides in the final chunk, so every earlier one is exactly
+    # per_job long and positional slicing reproduces these chunks.
+    remainder = len(names) % per_job
+    capacity = [per_job] * (chunk_count - 1) + [remainder or per_job]
     weight = {name: sheets.get(name, 1) + FIXED_COST_IN_SHEETS for name in names}
-    # (load, index, members); a full chunk is pushed back with an infinite load
-    # so it stops competing for the next item.
+    # (load, index, members); a chunk at capacity is pushed back with an
+    # infinite load so it stops competing for the next item.
     heap: list[tuple[float, int, list[str]]] = [
         (0.0, index, []) for index in range(chunk_count)
     ]
@@ -883,7 +892,7 @@ def balance_items(names: list[str], sheets: dict[str, int], per_job: int) -> lis
     for name in sorted(names, key=lambda n: (-weight[n], n)):
         load, index, members = heapq.heappop(heap)
         members.append(name)
-        full = len(members) >= per_job
+        full = len(members) >= capacity[index]
         heapq.heappush(
             heap, (float("inf") if full else load + weight[name], index, members)
         )
