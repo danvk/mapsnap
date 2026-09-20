@@ -21,16 +21,22 @@ JOBDEF=${JOBDEF:-mapsnap-loc-fit}
 TAG=${1:?run tag}; LIST=${2:?items.txt}
 HERE=$(cd -- "$(dirname -- "$0")" > /dev/null && pwd -P)
 
-SIZE=$(grep -c . "$LIST")
-[ "$SIZE" -ge 2 ] || { echo "an array job needs at least 2 items ($SIZE in $LIST); use --item for one" >&2; exit 2; }
-[ "$SIZE" -le 10000 ] || { echo "$SIZE items: Batch arrays cap at 10,000; split the list" >&2; exit 2; }
+# Items per child. A Batch array caps at 10,000 children and the mirror holds
+# 35,159 items, so the corpus does not fit one item to a child at all; 8 also
+# gives loc-fit's prefetch something to overlap, which a one-item process has
+# not had since the queue went away.
+PER_JOB=${PER_JOB:-1}
+COUNT=$(grep -c . "$LIST")
+SIZE=$(( (COUNT + PER_JOB - 1) / PER_JOB ))
+[ "$SIZE" -ge 2 ] || { echo "an array job needs at least 2 children ($COUNT items at $PER_JOB per job); use --item for one" >&2; exit 2; }
+[ "$SIZE" -le 10000 ] || { echo "$COUNT items at $PER_JOB per job needs $SIZE children; Batch arrays cap at 10,000 -- raise PER_JOB" >&2; exit 2; }
 ITEMS=$BUCKET/_runs/$TAG/items.txt
 aws s3 cp "$LIST" "$ITEMS" --only-show-errors --region "$REGION"
 
 JOB_ID=$(aws batch submit-job --region "$REGION" \
   --job-name "fit-$TAG" --job-queue "$QUEUE" --job-definition "$JOBDEF" \
   --array-properties "size=$SIZE" \
-  --parameters "items=$ITEMS,runTag=$TAG,bucket=$BUCKET" \
+  --parameters "items=$ITEMS,runTag=$TAG,bucket=$BUCKET,itemsPerJob=$PER_JOB" \
   --query jobId --output text)
 echo "submitted fit-$TAG: $SIZE children, array job $JOB_ID"
 echo "console: https://$REGION.console.aws.amazon.com/batch/home?region=$REGION#jobs/array/$JOB_ID"

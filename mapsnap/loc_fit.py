@@ -705,6 +705,18 @@ def build_parser() -> argparse.ArgumentParser:
         "--item-index names, or line $AWS_BATCH_JOB_ARRAY_INDEX.",
     )
     parser.add_argument(
+        "--items-per-job",
+        type=int,
+        default=1,
+        metavar="N",
+        help=(
+            "How many consecutive lines of --items this process runs (default: "
+            "%(default)s). Child i takes lines [i*N, (i+1)*N), so a Batch array "
+            "of ceil(len/N) children covers the list; above 1 also lets the "
+            "prefetch overlap the next item's download with the current fit."
+        ),
+    )
+    parser.add_argument(
         "--item-index",
         type=int,
         metavar="N",
@@ -775,18 +787,31 @@ EXIT_UNPROCESSABLE = 3  # nothing will ever make it runnable: never retry
 EXIT_NOT_READY = 4  # inputs missing (boxes, county extract): visible, not retried
 
 
-def single_item_exit_code(
+def listed_items_exit_code(
     *, done: int, skipped: int, unprocessable: int, waiting: int, failed: int
 ) -> int:
-    """The exit code a one-item run reports for its item's outcome."""
+    """The exit code a ``--item``/``--items`` run reports for the work it was given.
+
+    With one item this is that item's outcome. With a chunk the worst outcome
+    wins, because Batch reads one code for the whole child: anything that
+    failed asks for the retry, and an item still awaiting CRAFT leaves the
+    chunk incomplete even if its neighbours fitted. Re-running a chunk is
+    cheap and safe -- the items that finished are already published under the
+    run tag, so ``plan_fit`` marks them done and they cost a listing each.
+
+    3 (unprocessable) is reported only when *nothing* in the chunk could run,
+    since Batch never retries it; a chunk that mixed real work with an item
+    missing from the mirror has done its job and exits 0, with the count in
+    the summary line.
+    """
     if failed:
         return EXIT_FAILED
-    if unprocessable:
-        return EXIT_UNPROCESSABLE
     if waiting:
         return EXIT_NOT_READY
     if done or skipped:
         return EXIT_FITTED
+    if unprocessable:
+        return EXIT_UNPROCESSABLE
     return EXIT_USAGE
 
 
@@ -808,19 +833,39 @@ def read_item_list(path: str, work_dir: Path) -> list[str]:
     return [line.strip() for line in local.read_text().splitlines() if line.strip()]
 
 
-def item_from_list(
-    all_items: list[Item], path: str, index: int | None, work_dir: Path
-) -> Item:
-    """Line ``index`` of the list at ``path``; the index falls back to Batch's array index."""
+def items_from_list(
+    all_items: list[Item],
+    path: str,
+    index: int | None,
+    work_dir: Path,
+    per_job: int = 1,
+) -> list[Item]:
+    """The slice of the list at ``path`` this child owns, in list order.
+
+    Child ``index`` takes lines ``[index * per_job, (index + 1) * per_job)``, so an
+    array of ``ceil(len(list) / per_job)`` children covers the list exactly once.
+    The index falls back to Batch's own array index.
+
+    ``per_job`` above 1 is how the corpus fits at all: a Batch array caps at
+    10,000 children and the mirror holds 35,159 items. It also puts the
+    prefetch back to work -- ``prepare_next`` downloads the next item while the
+    current one fits, which a one-item process has nothing to overlap.
+    """
+    if per_job < 1:
+        sys.exit(f"--items-per-job must be at least 1, not {per_job}.")
     if index is None:
         env = os.environ.get("AWS_BATCH_JOB_ARRAY_INDEX")
         if env is None:
             sys.exit("--items needs --item-index, or $AWS_BATCH_JOB_ARRAY_INDEX.")
         index = int(env)
     names = read_item_list(path, work_dir)
-    if not 0 <= index < len(names):
-        sys.exit(f"--item-index {index} is outside the list ({len(names)} items).")
-    return select_item(all_items, names[index])
+    start = index * per_job
+    if not 0 <= start < len(names):
+        sys.exit(
+            f"--item-index {index} at {per_job} per job starts at line {start}, "
+            f"outside the list ({len(names)} items)."
+        )
+    return [select_item(all_items, name) for name in names[start : start + per_job]]
 
 
 def peak_stage_rss_mb() -> float:
@@ -849,15 +894,17 @@ def main() -> None:
     source: QueueSource | None = None
     if sum(bool(x) for x in (args.item, args.items, args.queue)) > 1:
         sys.exit("--item, --items and --queue are mutually exclusive.")
-    single = None
+    listed: list[Item] | None = None
     if args.item:
-        single = select_item(all_items, args.item)
+        listed = [select_item(all_items, args.item)]
     elif args.items:
-        single = item_from_list(all_items, args.items, args.item_index, args.work_dir)
-    if single is not None:
-        total = 1
-        label = single.item
-        pending: Iterator[tuple[int, Item]] = iter([(1, single)])
+        listed = items_from_list(
+            all_items, args.items, args.item_index, args.work_dir, args.items_per_job
+        )
+    if listed is not None:
+        total = len(listed)
+        label = listed[0].item if total == 1 else f"{listed[0].item}+{total - 1}"
+        pending: Iterator[tuple[int, Item]] = iter(list(enumerate(listed, start=1)))
     elif args.queue:
         source = QueueSource(args.queue, {item.item: item for item in all_items})
         total = work_queue.depth(args.queue).total
@@ -969,9 +1016,9 @@ def main() -> None:
         f"peak stage RSS {peak_stage_rss_mb():.0f} MB",
         flush=True,
     )
-    if single is not None:
+    if listed is not None:
         sys.exit(
-            single_item_exit_code(
+            listed_items_exit_code(
                 done=done,
                 skipped=skipped,
                 unprocessable=unprocessable,

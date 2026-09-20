@@ -747,17 +747,17 @@ def test_failure_tail_keeps_the_error_not_the_progress_bar() -> None:
     assert failure_tail("") == "(no output)"
 
 
-def test_single_item_exit_codes_follow_the_outcome() -> None:
+def test_listed_items_exit_codes_follow_the_outcome() -> None:
     from mapsnap.loc_fit import (
         EXIT_FAILED,
         EXIT_FITTED,
         EXIT_NOT_READY,
         EXIT_UNPROCESSABLE,
         EXIT_USAGE,
-        single_item_exit_code,
+        listed_items_exit_code,
     )
 
-    code = lambda **k: single_item_exit_code(
+    code = lambda **k: listed_items_exit_code(
         **{"done": 0, "skipped": 0, "unprocessable": 0, "waiting": 0, "failed": 0, **k}
     )
     assert code(done=1) == EXIT_FITTED
@@ -769,24 +769,72 @@ def test_single_item_exit_codes_follow_the_outcome() -> None:
     assert code() == EXIT_USAGE, "nothing happened at all"
 
 
-def test_item_from_list_takes_the_batch_array_index(
+def test_items_from_list_takes_the_batch_array_index(
     monkeypatch, tmp_path: Path
 ) -> None:
     import pytest
 
-    from mapsnap.loc_fit import item_from_list, read_item_list, select_item
+    from mapsnap.loc_fit import items_from_list, read_item_list, select_item
 
     items = [Item(f"sanborn{n}", "alabama", "1900") for n in range(3)]
     listing = tmp_path / "items.txt"
     listing.write_text("sanborn2\n\nsanborn0\n")
     assert read_item_list(str(listing), tmp_path) == ["sanborn2", "sanborn0"]
-    assert item_from_list(items, str(listing), 1, tmp_path).item == "sanborn0"
+    assert [i.item for i in items_from_list(items, str(listing), 1, tmp_path)] == [
+        "sanborn0"
+    ]
     monkeypatch.setenv("AWS_BATCH_JOB_ARRAY_INDEX", "0")
-    assert item_from_list(items, str(listing), None, tmp_path).item == "sanborn2"
+    assert [i.item for i in items_from_list(items, str(listing), None, tmp_path)] == [
+        "sanborn2"
+    ]
     monkeypatch.delenv("AWS_BATCH_JOB_ARRAY_INDEX")
     with pytest.raises(SystemExit, match="item-index"):
-        item_from_list(items, str(listing), None, tmp_path)
+        items_from_list(items, str(listing), None, tmp_path)
     with pytest.raises(SystemExit, match="outside the list"):
-        item_from_list(items, str(listing), 7, tmp_path)
+        items_from_list(items, str(listing), 7, tmp_path)
     with pytest.raises(SystemExit, match="not in the manifest"):
         select_item(items, "sanborn99")
+
+
+def test_items_from_list_slices_the_list_for_a_chunked_child(tmp_path) -> None:
+    import pytest
+
+    from mapsnap.loc_fit import items_from_list
+
+    listing = tmp_path / "items.txt"
+    listing.write_text("\n".join(f"sanborn{n}" for n in range(10)) + "\n")
+    items = [Item(f"sanborn{n}", "alabama", "1900") for n in range(10)]
+    took = lambda index: [
+        i.item for i in items_from_list(items, str(listing), index, tmp_path, 4)
+    ]
+    assert took(0) == ["sanborn0", "sanborn1", "sanborn2", "sanborn3"]
+    assert took(1) == ["sanborn4", "sanborn5", "sanborn6", "sanborn7"]
+    # The last child of an array takes the short remainder.
+    assert took(2) == ["sanborn8", "sanborn9"]
+    with pytest.raises(SystemExit):
+        items_from_list(items, str(listing), 3, tmp_path, 4)
+    with pytest.raises(SystemExit):
+        items_from_list(items, str(listing), 0, tmp_path, 0)
+
+
+def test_chunk_exit_code_lets_a_mixed_chunk_succeed() -> None:
+    from mapsnap.loc_fit import (
+        EXIT_FAILED,
+        EXIT_FITTED,
+        EXIT_NOT_READY,
+        EXIT_UNPROCESSABLE,
+        listed_items_exit_code,
+    )
+
+    code = lambda **k: listed_items_exit_code(
+        **{"done": 0, "skipped": 0, "unprocessable": 0, "waiting": 0, "failed": 0, **k}
+    )
+    # One item missing from the mirror does not condemn the chunk that fitted
+    # the other three; Batch never retries a 3, so it must mean "nothing ran".
+    assert code(done=3, unprocessable=1) == EXIT_FITTED
+    assert code(unprocessable=4) == EXIT_UNPROCESSABLE
+    # Anything that failed asks for the retry, which re-runs the whole chunk;
+    # the items already published under the run tag are skipped on the way past.
+    assert code(done=3, failed=1) == EXIT_FAILED
+    # An item still awaiting CRAFT leaves the chunk incomplete.
+    assert code(done=2, waiting=1) == EXIT_NOT_READY

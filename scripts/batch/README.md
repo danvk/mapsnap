@@ -108,6 +108,37 @@ aws batch describe-compute-environments --region us-west-2 \
   --query 'computeEnvironments[0].[status,statusReason]' --output text
 ```
 
+## Items per child
+
+A Batch array caps at 10,000 children and the mirror holds 35,159 items, so
+the corpus **cannot** run one item to a child. `PER_JOB` sets how many
+consecutive lines of the list each child takes, and `submit.sh` sizes the
+array from it:
+
+```
+PER_JOB=8 scripts/batch/submit.sh corpus-v1 corpus-items.txt   # 4,395 children
+```
+
+| items per child | children | fits the cap |
+|---|---|---|
+| 1 | 35,159 | no |
+| 2 | 17,580 | no |
+| 4 | 8,790 | yes |
+| 8 | 4,395 | yes |
+
+It also puts `loc-fit`'s prefetch back to work. The driver runs `prepare_next`
+on a worker thread, downloading the next item while the current one fits; a
+one-item process has nothing to overlap, so that thread has been idle since
+the queue went away.
+
+Do not expect it to move the bill much. The per-item fixed cost is 57 s at
+best and 113 s typically, and the parts a chunk actually amortises are small:
+container start is ~4 s and parsing the county manifest is 0.1 s. Most of the
+rest is the chain itself spawning a subprocess per stage, each importing
+torch and friends -- 9.1 s of import floor per item, about 89 job-hours across
+the corpus -- and that is paid per item however the children are grouped.
+Chunking is for the array cap and the prefetch; packing was the money.
+
 ## Limits worth knowing
 
 An array job holds at most 10,000 children: the full corpus is four arrays.
