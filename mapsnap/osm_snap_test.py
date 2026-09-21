@@ -701,3 +701,46 @@ def test_scale_priors_still_offer_a_half_scale_sheet() -> None:
     priors = page_scale_priors(1.0, ring, width=1200, height=1200)
     sources = [p.source for p in priors]
     assert "family-rung" in sources, sources
+
+
+def test_frame_is_affordable_rejects_only_absurd_frames() -> None:
+    """A working frame is a page plus its search radius; the cap is far above."""
+    from mapsnap.osm_snap import frame_is_affordable
+
+    # A 3 km half-frame at 2 m/px is 3,000 px a side: an ordinary page.
+    assert frame_is_affordable(3_000.0, 2.0)
+    # 30 km a side is what a scale tens of times too coarse asks for.
+    assert not frame_is_affordable(30_000.0, 2.0)
+    # The cap counts pixels, so a finer resolution reaches it sooner.
+    assert frame_is_affordable(10_000.0, 2.0)
+    assert not frame_is_affordable(10_000.0, 0.5)
+
+
+def test_snap_page_skips_a_frame_it_cannot_afford() -> None:
+    """A volume median scale tens of times too coarse must not allocate.
+
+    Four small volumes on the 2026-09-20 corpus sample died here: one bad
+    fitted page set the volume scale, and snap asked for a frame tens of
+    kilometres across the moment it started its first page.
+    """
+    from mapsnap.osm_snap import snap_page
+
+    page, _, _ = make_world_and_page(25.0)
+    ctx = PageContext(
+        stem="p1",
+        number=1,
+        width=300,
+        height=420,
+        prob=page,
+        search_centers=[(LON0, LAT0)],
+        radius_m=300.0,
+        rotation_priors=[RotationPrior(0.0, 4.0, "test")],
+        # 64 m per page pixel: a 300x420 page would span 33 km.
+        scale_priors=[ScalePrior(64.0, 0.05, "volume-median")],
+    )
+
+    class ExplodingIndex(FeatureIndex):
+        def near_bbox(self, bounds: tuple[float, float, float, float]) -> list[dict]:
+            raise AssertionError("snap_page framed a page it could not afford")
+
+    assert snap_page(ctx, ExplodingIndex([])) == []
