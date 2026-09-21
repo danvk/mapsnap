@@ -19,10 +19,12 @@ objects, and evaluates against truth; nothing in this module reads truth data.
 """
 
 import dataclasses
+import functools
 import math
 import os
 import sys
 from dataclasses import dataclass, field
+from pathlib import Path
 
 import cv2
 import numpy as np
@@ -51,15 +53,23 @@ OSM_RES_M = 2.0  # raster resolution
 # sheet is one fold; beyond that the region is a segmentation fragment.
 MIN_SCALE_FOLDS = 0.6
 MAX_SCALE_FOLDS = 1.6
-# The widest search frame worth allocating, as a side in raster pixels. Cost
-# goes as the square of the side: snap holds six frame-sized arrays at once --
-# the OSM probability and its blur, the skeleton, the chamfer distance, the
-# validity mask and the search region -- before the correlation surfaces on
-# top, so about 15 bytes a pixel at rest. A real frame is a page diagonal plus
-# the key-map search radius, a couple of thousand pixels across; this sits an
-# order of magnitude above that and only ever catches a scale that is wrong by
-# orders of magnitude. Pixels rather than metres because pixels are what gets
-# allocated, and the resolution is a parameter.
+# What a search frame costs, per pixel of its area, measured rather than
+# reasoned: sanborn00138_001 built a 6,164 px frame and peaked at 10,179 MB,
+# against about 3,000 MB for the ~3,150 px frames of an ordinary volume. That
+# is 268 bytes a pixel, not the 15 the six resting arrays suggest -- the
+# correlation surfaces and rotated copies inside match_at_rotation dominate,
+# and they are allocated per rotation and scale prior.
+FRAME_BYTES_PER_PX = 280
+# How much of the process's memory the frame may claim. The rest holds the
+# interpreter, the street vocabulary, the OSM feature index and the page's own
+# rasters.
+FRAME_MEMORY_FRACTION = 0.7
+# Never clip below this. The largest frame measured across the 30 local
+# volumes is 3,152 px a side (Champaign 1915, at a 2 km search radius), so a
+# floor here keeps a small container from refusing legitimate work -- better
+# to risk one kill than to silently stop snapping every page.
+MIN_FRAME_PX = 4_000
+# The ceiling when there is no memory limit to read, as on a dev machine.
 MAX_FRAME_PX = 12_000
 OSM_WIDTH_M = 12.0  # stroked corridor width for the OSM "P(road)" analog
 REFINE_SHIFT_MAX_M = 30.0  # chamfer refinement may not slide farther than this
@@ -375,14 +385,60 @@ def cluster_search_centers(
     ]
 
 
+def frame_budget_px(memory_bytes: int | None) -> int:
+    """The widest frame side a process with this much memory should allocate.
+
+    Cost goes as the square of the side, so the budget is a square root. Pixels
+    rather than metres because pixels are what gets allocated, and the
+    resolution is a parameter. `None` means no limit was found.
+    """
+    if memory_bytes is None:
+        return MAX_FRAME_PX
+    budget = memory_bytes * FRAME_MEMORY_FRACTION
+    side = int(math.sqrt(budget / FRAME_BYTES_PER_PX))
+    return max(MIN_FRAME_PX, min(MAX_FRAME_PX, side))
+
+
+def container_memory_bytes() -> int | None:
+    """This process's cgroup memory limit, or None when it is not capped.
+
+    Batch runs each job in a container with the job definition's memory as a
+    hard limit, which is the number that matters -- not the host's RAM, which
+    is many times larger and shared with the other jobs on the box.
+    """
+    for path in (
+        "/sys/fs/cgroup/memory.max",  # cgroup v2
+        "/sys/fs/cgroup/memory/memory.limit_in_bytes",  # cgroup v1
+    ):
+        try:
+            raw = Path(path).read_text().strip()
+        except OSError:
+            continue
+        if raw == "max":
+            return None
+        try:
+            value = int(raw)
+        except ValueError:
+            continue
+        # An uncapped cgroup reports a sentinel near 2**63 rather than "max".
+        if 0 < value < (1 << 62):
+            return value
+    return None
+
+
+@functools.cache
+def max_frame_px() -> int:
+    """The frame budget for this process, read once."""
+    return frame_budget_px(container_memory_bytes())
+
+
 def frame_is_affordable(half_m: float, res_m: float) -> bool:
     """Whether a frame of +/-half_m at this resolution is worth allocating.
 
     A frame this large does not mean the frame should be smaller -- it means
     the scale that asked for it is wrong, and the pose is not worth scoring.
-    See MAX_FRAME_PX.
     """
-    return round(2 * half_m / res_m) <= MAX_FRAME_PX
+    return round(2 * half_m / res_m) <= max_frame_px()
 
 
 def frame_around(
@@ -878,7 +934,8 @@ def evaluate_pose(
         # osm_rasters would raise trying to allocate the square it implies.
         # A pose we cannot frame is a pose we cannot score.
         print(
-            f"  skipping pose: a {2 * half_m / 1000:.0f} km frame is not a page",
+            f"  skipping pose: a {2 * half_m / 1000:.0f} km frame is not a page "
+            f"(budget {max_frame_px():,} px)",
             file=sys.stderr,
         )
         return None
@@ -1048,7 +1105,8 @@ def snap_page(
         # asking for a frame tens of kilometres across and taking the item's
         # container down the moment snap started its first page.
         print(
-            f"  skipping snap: a {2 * half_m / 1000:.0f} km frame is not a page",
+            f"  skipping snap: a {2 * half_m / 1000:.0f} km frame is not a page "
+            f"(budget {max_frame_px():,} px)",
             file=sys.stderr,
         )
         return []

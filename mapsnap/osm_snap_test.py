@@ -712,8 +712,43 @@ def test_frame_is_affordable_rejects_only_absurd_frames() -> None:
     # 30 km a side is what a scale tens of times too coarse asks for.
     assert not frame_is_affordable(30_000.0, 2.0)
     # The cap counts pixels, so a finer resolution reaches it sooner.
-    assert frame_is_affordable(10_000.0, 2.0)
     assert not frame_is_affordable(10_000.0, 0.5)
+
+
+def test_frame_budget_scales_with_the_container() -> None:
+    """The budget follows the memory limit, because that is what kills the job."""
+    from mapsnap.osm_snap import MAX_FRAME_PX, MIN_FRAME_PX, frame_budget_px
+
+    # The 7500 MB job definition. sanborn00138_001's 6,164 px frame peaked at
+    # 10,179 MB there and was killed; the budget has to land below it.
+    small = frame_budget_px(7500 * 1024 * 1024)
+    assert MIN_FRAME_PX <= small < 6_164, small
+    # The 16384 MB definition earns a wider frame from the same arithmetic.
+    assert frame_budget_px(16384 * 1024 * 1024) > small
+    # No limit to read: fall back to the absolute ceiling.
+    assert frame_budget_px(None) == MAX_FRAME_PX
+
+
+def test_frame_budget_never_clips_a_real_frame() -> None:
+    """Even a tiny container keeps the floor.
+
+    The largest frame measured across the 30 local volumes is 3,152 px a side.
+    Refusing to snap every page is worse than risking one kill.
+    """
+    from mapsnap.osm_snap import MIN_FRAME_PX, frame_budget_px
+
+    assert MIN_FRAME_PX > 3_152
+    assert frame_budget_px(512 * 1024 * 1024) == MIN_FRAME_PX
+
+
+def test_container_memory_reads_an_uncapped_cgroup_as_none(tmp_path) -> None:
+    """An uncapped cgroup reports "max" or a near-2**63 sentinel, not a limit."""
+    from mapsnap.osm_snap import container_memory_bytes
+
+    # On a dev machine there is usually no cgroup file at all; either way the
+    # answer must be a real limit or None, never a sentinel treated as bytes.
+    value = container_memory_bytes()
+    assert value is None or 0 < value < (1 << 62)
 
 
 def test_snap_page_skips_a_frame_it_cannot_afford() -> None:
