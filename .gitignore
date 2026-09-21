@@ -221,3 +221,4 @@ data
 backup-data
 .claude/settings.local.json
 models/*.pth
+instances*.tsv
