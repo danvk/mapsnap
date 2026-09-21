@@ -2159,3 +2159,66 @@ def test_rank_pairs_by_consensus_uses_every_gcp_when_few_are_on_the_sheet(monkey
     # A "sheet" so small that fewer than the cap are on it: the filter stands down.
     top = g._rank_pairs_by_consensus(gcps, 1.0, 1e-3, 8, sheet=(10.0, 10.0))
     assert len(top) == 8 and all(i >= n_out and j >= n_out for i, j in top)
+
+
+def _crossing_streets() -> dict[str, list[Block]]:
+    """Two streets sharing one vertex: A runs east-west, B north-south through it."""
+    shared = (-86.795, 36.16)
+    return {
+        "A": [Block(street_name="A", coords=np.array([(-86.8, 36.16), shared]))],
+        "B": [Block(street_name="B", coords=np.array([shared, (-86.795, 36.17)]))],
+    }
+
+
+def test_sub_floor_read_may_not_anchor_a_long_extrapolation():
+    """A relaxed-admission read's axis is noisy, so its reach to a crossing is capped (#487).
+
+    Miami p19's 14 px "3RD" (floor 16 px) anchored crossings up to 50x its own length and
+    tilted the fit 6.6 deg. Here the sub-floor read A sits 1,000 px from the crossing, 42x
+    its 24 px long side; the ordinary read B is 5x its own length away.
+    """
+    from mapsnap.georef_from_labels import find_intersection_gcps
+
+    small = LabelFeature("A", "A", (0.0, 0.0), 0.0, 24.0, 14.0)
+    normal = LabelFeature("B", "B", (1000.0, 500.0), math.pi / 2, 100.0, 24.0)
+    streets = _crossing_streets()
+    size = (2000, 2000)
+
+    # Cap off: the crossing is built as before.
+    assert len(find_intersection_gcps([small, normal], streets, size)) == 1
+    # Cap on: the sub-floor read is 42x its length from the crossing, so it is dropped.
+    capped = find_intersection_gcps(
+        [small, normal],
+        streets,
+        size,
+        min_short_side=16.0,
+        min_long_side=32.0,
+        relaxed_reach_factor=15.0,
+    )
+    assert capped == []
+    # The same geometry with a read that clears the floor on its own is untouched.
+    big = LabelFeature("A", "A", (0.0, 0.0), 0.0, 60.0, 24.0)
+    kept = find_intersection_gcps(
+        [big, normal],
+        streets,
+        size,
+        min_short_side=16.0,
+        min_long_side=32.0,
+        relaxed_reach_factor=15.0,
+    )
+    assert len(kept) == 1
+    # A promoted letter is never a relaxed admission, whatever its size.
+    promoted = LabelFeature("A", "A", (0.0, 0.0), 0.0, 24.0, 14.0, promoted=True)
+    assert (
+        len(
+            find_intersection_gcps(
+                [promoted, normal],
+                streets,
+                size,
+                min_short_side=16.0,
+                min_long_side=32.0,
+                relaxed_reach_factor=15.0,
+            )
+        )
+        == 1
+    )

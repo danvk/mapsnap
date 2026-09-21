@@ -1161,12 +1161,46 @@ def cluster_gcp_hints(
     return hints
 
 
+def is_relaxed_feature(
+    feature: LabelFeature, min_short_side: float, min_long_side: float
+) -> bool:
+    """Whether a feature cleared the size gate only on the strength of its confidence.
+
+    The :class:`LabelFeature` twin of :func:`needs_size_relaxation`. Promoted letters
+    bypass the size gate, so they are never relaxed admissions; anything else below
+    either base floor is present only because the confidence discount let it in.
+    """
+    if feature.promoted:
+        return False
+    return feature.short_side < min_short_side or feature.long_side < min_long_side
+
+
+def reach_exceeds_label(
+    feature: LabelFeature, crossing: tuple[float, float], factor: float
+) -> bool:
+    """Whether ``crossing`` lies farther from the label than ``factor`` times its long side."""
+    reach = math.hypot(crossing[0] - feature.center[0], crossing[1] - feature.center[1])
+    return reach > factor * feature.long_side
+
+
 def find_intersection_gcps(
     features: list[LabelFeature],
     block_index: dict[str, list[Block]],
     image_size: tuple[int, int],
+    *,
+    min_short_side: float = 0.0,
+    min_long_side: float = 0.0,
+    relaxed_reach_factor: float = 0.0,
 ) -> list[IntersectionGCP]:
     """Find GCPs from pairs of detected labels whose streets share a GeoJSON coordinate.
+
+    A read admitted below the base size floor (:func:`is_relaxed_feature`) may not anchor a
+    crossing farther than ``relaxed_reach_factor`` times its own long side; 0 disables the
+    cap (#487). Small reads have noisy axes -- Miami p19's 14 px "3RD" is 2.9 deg off where
+    every other inlier is within 0.7 deg -- and the axis is what gets extrapolated to the
+    crossing, so the error grows with reach. That read anchored 8 of 21 inlier GCPs at up to
+    50x its own length and tilted the fit 6.6 deg; ordinary reads anchor at 4-10x. Capping
+    the reach keeps the read's positional evidence and removes the lever arm.
 
     A shared coordinate means the streets physically meet at that point. The pixel
     coordinate is the crossing of the two label direction lines (extrapolated from each
@@ -1215,6 +1249,7 @@ def find_intersection_gcps(
             feats_by_text.setdefault(f.text, []).append(f)
     texts = list(feats_by_text.keys())
     gcps: list[IntersectionGCP] = []
+    dropped_reach = 0
 
     for i in range(len(texts)):
         for j in range(i + 1, len(texts)):
@@ -1258,6 +1293,13 @@ def find_intersection_gcps(
                         )
                         if crossing is None:
                             continue
+                        if relaxed_reach_factor > 0 and any(
+                            is_relaxed_feature(f, min_short_side, min_long_side)
+                            and reach_exceeds_label(f, crossing, relaxed_reach_factor)
+                            for f in (fa, fb)
+                        ):
+                            dropped_reach += 1
+                            continue
                         candidates.append(
                             IntersectionGCP(
                                 label_a=text_a,
@@ -1272,6 +1314,12 @@ def find_intersection_gcps(
                         )
                 gcps.extend(_dedupe_crossings_by_pixel(candidates, tol_px))
 
+    if dropped_reach:
+        print(
+            f"Dropped {dropped_reach} crossing(s) beyond {relaxed_reach_factor:g}x a "
+            "sub-floor read's length",
+            file=sys.stderr,
+        )
     return sorted(gcps, key=lambda g: g.pixel_dist)
 
 
@@ -2703,9 +2751,11 @@ def _init_worker(
     keep_labels_on_fill: bool = False,
     collinear_perp_tolerance_px: float = COLLINEAR_PERP_TOLERANCE_PX,
     embed_locator: KeymapLocator | None = None,
+    relaxed_reach_factor: float = 0.0,
 ) -> None:
     """Populate _worker_state once per worker process (or once in the main process)."""
     _worker_state.update(
+        relaxed_reach_factor=relaxed_reach_factor,
         keep_labels_on_fill=keep_labels_on_fill,
         collinear_perp_tolerance_px=collinear_perp_tolerance_px,
         block_index=block_index,
@@ -2795,6 +2845,7 @@ def _process_one_image(image_path: str) -> tuple[str, ProcessResult]:
             truth_polygons=truth_polygons,
             keep_labels_on_fill=_worker_state["keep_labels_on_fill"],
             collinear_perp_tolerance_px=_worker_state["collinear_perp_tolerance_px"],
+            relaxed_reach_factor=_worker_state["relaxed_reach_factor"],
         )
 
     with _captured_page_log(log_path, _worker_state["debug"]):
@@ -3367,6 +3418,7 @@ def process_image(
     truth_polygons: list[list[list[float]]] | None = None,
     keep_labels_on_fill: bool = False,
     collinear_perp_tolerance_px: float = COLLINEAR_PERP_TOLERANCE_PX,
+    relaxed_reach_factor: float = 0.0,
 ) -> ProcessResult:
     """Fit a georeference model for one image and write GCPs to output_path.
 
@@ -3410,7 +3462,14 @@ def process_image(
         collinear_perp_tolerance_px=collinear_perp_tolerance_px,
     )
 
-    gcps = find_intersection_gcps(features, block_index, (img_w, img_h))
+    gcps = find_intersection_gcps(
+        features,
+        block_index,
+        (img_w, img_h),
+        min_short_side=min_short_side,
+        min_long_side=min_long_side,
+        relaxed_reach_factor=relaxed_reach_factor,
+    )
     print(f"Intersection GCPs: {len(gcps)}", file=sys.stderr)
     if len(gcps) == 0:
         print("No intersection GCPs found.", file=sys.stderr)
@@ -3933,6 +3992,17 @@ def main() -> None:
         help="Minimum long/short side ratio for a text polygon (default: %(default)s)",
     )
     parser.add_argument(
+        "--relaxed-reach-factor",
+        type=float,
+        default=0.0,
+        metavar="FACTOR",
+        help=(
+            "A read admitted below the size floor only by its confidence may not anchor "
+            "an intersection GCP farther than FACTOR times its own long side (#487). "
+            "0 disables the cap (default: %(default)s)"
+        ),
+    )
+    parser.add_argument(
         "--high-confidence-size-fraction",
         type=float,
         default=0.7,
@@ -4252,6 +4322,7 @@ def main() -> None:
         "auto_threshold_percentile": args.auto_threshold_percentile,
         "auto_threshold_include_hints": auto_threshold_include_hints,
         "high_confidence_size_fraction": args.high_confidence_size_fraction,
+        "relaxed_reach_factor": args.relaxed_reach_factor,
         "edge_margin": args.edge_margin,
         "keep_labels_on_fill": args.keep_labels_on_fill,
     }
@@ -4289,6 +4360,7 @@ def main() -> None:
         args.keep_labels_on_fill,
         args.collinear_perp_tolerance,
         embed_locator,
+        args.relaxed_reach_factor,
     )
     if args.num_workers > 1:
         with multiprocessing.Pool(
