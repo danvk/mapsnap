@@ -43,6 +43,16 @@ while read -r index code; do
     [ -n "$line" ] || continue
     named=1
     item=${line%%:*}
+    # An allocation the machine could never satisfy is a bug, not a ceiling: a
+    # bad scale prior asked osm_rasters for a 120 GiB square on the 2026-09-20
+    # sample, and no job definition has that. Those belong with the errors,
+    # where someone will read one, rather than in a retry that fails again.
+    if grep -qE 'Unable to allocate [0-9.]+ [GT]iB|_ArrayMemoryError' <<< "$line"; then
+      echo "$item" >> "$PREFIX-failed.txt"
+      printf '  %-22s child %-5s impossible allocation, not a ceiling: %s\n' "$item" "$index" \
+        "$(grep -oE 'Unable to allocate [0-9.]+ [KMGT]iB[^|]*' <<< "$line" | head -1)"
+      continue
+    fi
     # Memory shows up three ways: a stage killed outright (-9), a stage whose
     # own child was killed and whose status came back through the shell's
     # 256-N convention (247), and the container itself being OOM-killed (137).
