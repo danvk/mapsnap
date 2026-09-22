@@ -105,6 +105,36 @@ async function measurePage(
   }
 }
 
+/**
+ * Serve a run's JSON sidecars out of the mirror, cached like everything else.
+ *
+ * The viewer needs a split sheet's `pN.panels.json` to grey the panels a
+ * selected one was cut from. For a local volume it reads that from
+ * `/data/<volume>/`; an annotation in the bucket has no such directory, and
+ * without the panels the viewer falls back to punching the panel's own ring
+ * out of the sheet rectangle -- a hole whose edges lie on the outer ring,
+ * which degenerates MapLibre's triangulation into visible wedges.
+ */
+export function registerS3Objects(app: Express, cacheRoot: string): void {
+  app.get('/s3-api/object', (request, response) => {
+    void (async () => {
+      const uri = String(request.query.uri ?? '');
+      const object = parseS3Uri(uri);
+      if (!object || !object.key.endsWith('.json')) {
+        response.status(400).json({ error: `not a JSON object: ${uri}` });
+        return;
+      }
+      try {
+        response
+          .type('application/json')
+          .send(await readCachedS3Text(cacheRoot, object));
+      } catch (error) {
+        response.status(404).json({ error: String(error) });
+      }
+    })();
+  });
+}
+
 /** Mount the on-demand image server for cached mirror scans. */
 export function registerS3IiifImages(app: Express, cacheRoot: string): void {
   mountIiifImages(app, '/s3-iiif', cacheRoot, async (identifier) => {

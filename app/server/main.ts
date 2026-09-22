@@ -30,7 +30,7 @@ import express from 'express';
 import { TypedRouter } from 'crosswalk';
 import type { API } from './api.ts';
 import { registerIiifApi, registerIiifImages } from './iiifRoutes.ts';
-import { registerS3IiifImages } from './s3Routes.ts';
+import { registerS3IiifImages, registerS3Objects } from './s3Routes.ts';
 import { registerAdjacencyTruthApi } from './adjacencyRoutes.ts';
 import { registerKeymapApi, registerKeymapImages } from './keymapRoutes.ts';
 import { registerNotesApi } from './notesRoutes.ts';
@@ -61,6 +61,7 @@ app.use((req, res, next) => {
 // Registered before the typed router so their more specific paths win.
 registerIiifImages(app, dataDir);
 registerS3IiifImages(app, s3CacheDir);
+registerS3Objects(app, s3CacheDir);
 registerKeymapImages(app, dataDir);
 
 // The typed JSON API (crosswalk), defined by the API interface in ./api.
