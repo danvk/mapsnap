@@ -714,3 +714,116 @@ def test_with_incumbent_scale_adds_a_missing_rung_and_dedupes_an_existing_one():
         [ScalePrior(0.55, 0.05, "volume-median")], np.array(affine())
     )
     assert [p.source for p in same] == ["volume-median"]
+
+
+def _affine(dx_m: float, theta_deg: float = 0.0) -> list[list[float]]:
+    """A page->world affine at 0.2 m/px, shifted dx_m east and rotated theta_deg."""
+    import math as _math
+
+    s = 0.2 / 111_000.0
+    c, k = _math.cos(_math.radians(theta_deg)), _math.sin(_math.radians(theta_deg))
+    return [[s * c, -s * k, -80.0 + dx_m / 111_000.0], [s * k, s * c, 25.0]]
+
+
+def _co_incumbent_record(**overrides) -> dict:
+    """Miami p19 in miniature: the top candidate is a block over, #2 is the truth."""
+    record = {
+        "target": "p19",
+        "width": 1600,
+        "height": 1900,
+        "incumbent": {
+            "world_affine": _affine(0.0),
+            "verification": 0.5,
+            "effective_gcps": 21,
+        },
+        "candidates": [
+            {
+                "world_affine": _affine(166.0),
+                "verification": 1.75,
+                "select_score": 1.85,
+                "plausible": True,
+            },
+            {
+                "world_affine": _affine(3.0),
+                "verification": 1.69,
+                "select_score": 1.79,
+                "plausible": True,
+            },
+            {
+                "world_affine": _affine(108.0),
+                "verification": 1.63,
+                "select_score": 1.73,
+                "plausible": True,
+            },
+        ],
+    }
+    record.update(overrides)
+    return record
+
+
+def test_refine_adoption_only_judges_the_top_candidate_by_default() -> None:
+    from mapsnap.osm_snap_experiment import refine_adoption
+
+    # The block-over alias is 548 ft from the incumbent: not refinement territory.
+    assert refine_adoption(_co_incumbent_record()) is None
+
+
+def test_refine_adoption_agreeing_mode_finds_the_runner_up() -> None:
+    """#487: p19's true pose was candidate #2, 50 ft from the incumbent, never examined."""
+    from mapsnap.osm_snap_experiment import refine_adoption
+
+    choice = refine_adoption(_co_incumbent_record(), agreeing=True)
+    assert choice is not None and choice["chosen"] == 1 and choice["reason"] == "refine"
+
+
+def test_refine_adoption_agreeing_mode_requires_a_near_top_candidate() -> None:
+    """An agreeing pose the matcher scored far below its favourite is coincidence."""
+    from mapsnap.osm_snap_experiment import refine_adoption
+
+    record = _co_incumbent_record()
+    record["candidates"][1]["verification"] = 1.2  # 69% of the top's 1.75
+    assert refine_adoption(record, agreeing=True) is None
+    # ... and the co-incumbent stand-in is never a refinement target.
+    record = _co_incumbent_record()
+    record["candidates"][1]["source"] = "co-incumbent"
+    assert refine_adoption(record, agreeing=True) is None
+
+
+def test_choose_co_incumbent_takes_a_runner_up_snap_prefers(monkeypatch) -> None:
+    """RANSAC's tie-break is not evidence; snap's verification of each tied pose is."""
+    import numpy as np
+
+    import mapsnap.osm_snap_experiment as exp
+
+    scores = {0.0: 0.5, 3.0: 1.69, 40.0: 0.45}
+
+    def fake_evaluate_pose(ctx, index, affine):
+        dx_m = round((affine[0][2] + 80.0) * 111_000.0, 1)
+        return {"verification": scores[dx_m], "name": {"score": 0.0}}
+
+    monkeypatch.setattr(exp, "evaluate_pose", fake_evaluate_pose)
+    winner = {"world_affine": _affine(0.0), "verification": 0.5}
+    runner_ups = [np.array(_affine(40.0)), np.array(_affine(3.0))]
+    chosen = exp.choose_co_incumbent(None, None, winner, runner_ups)  # type: ignore[arg-type]
+    assert chosen is not None and chosen["source"] == "runner-up 2"
+    assert chosen["verification"] == 1.69
+    # A runner-up that does not beat the winner by the refinement margin stays a runner-up.
+    winner["verification"] = 1.66
+    assert exp.choose_co_incumbent(None, None, winner, runner_ups) is None  # type: ignore[arg-type]
+
+
+def test_co_incumbent_adoption_publishes_the_stand_in() -> None:
+    from mapsnap.osm_snap_experiment import (
+        co_incumbent_adoption,
+        co_incumbent_candidate,
+    )
+
+    record = _co_incumbent_record(ransac_winner={"verification": 0.5})
+    record["candidates"].append(co_incumbent_candidate(record["incumbent"]))
+    choice = co_incumbent_adoption(record)
+    assert (
+        choice is not None
+        and choice["chosen"] == 3
+        and choice["reason"] == "co-incumbent"
+    )
+    assert co_incumbent_adoption(_co_incumbent_record()) is None

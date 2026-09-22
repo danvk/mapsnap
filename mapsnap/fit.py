@@ -170,6 +170,11 @@ def main() -> None:
         ),
     )
     parser.add_argument(
+        "--co-incumbents",
+        action="store_true",
+        help="Forwarded to `mapsnap snap` (#487 A/B); part of the run id.",
+    )
+    parser.add_argument(
         "--no-snap",
         action="store_true",
         help=(
@@ -216,7 +221,11 @@ def main() -> None:
     # snap on vs off produce different outputs and need different run ids
     # (an id collision would silently SKIP the second variant as already
     # archived).
-    id_tokens = [*georef_extra, *(["--no-snap"] if args.no_snap else [])]
+    id_tokens = [
+        *georef_extra,
+        *(["--no-snap"] if args.no_snap else []),
+        *(["--co-incumbents"] if args.co_incumbents else []),
+    ]
     run_id = resolve_run_id(dir_path, args.tag, id_tokens, inputs, git)
 
     archive_dir = dir_path / experiments.ARTIFACTS_DIRNAME / run_id
@@ -281,7 +290,16 @@ def main() -> None:
     if not args.no_snap:
         # Both passes are per-page and CPU-bound, so one --num-workers governs
         # both; the rest of the georef passthrough is georef-only.
-        timed("snap", ["mapsnap", "snap", str(dir_path), *worker_flag(georef_extra)])
+        timed(
+            "snap",
+            [
+                "mapsnap",
+                "snap",
+                str(dir_path),
+                *worker_flag(georef_extra),
+                *(["--co-incumbents"] if args.co_incumbents else []),
+            ],
+        )
         # The street-constraint channel: fit key-map-prior pages from their
         # street labels. Writes pN.georef-street.json. Runs after snap because
         # its referee shares machinery with the snap channel; skipped with

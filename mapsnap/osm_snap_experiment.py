@@ -103,6 +103,10 @@ class VolumeContext:
     # Lazily-built map of stem -> FittedPage for neighbor-stamp priors
     # (#335 phase 2); None until the first unplaced page asks for it.
     stamp_fitted: dict | None = None
+    # #487: let a RANSAC runner-up stand as the incumbent when snap's own
+    # evidence prefers it, and refine to the best AGREEING candidate rather
+    # than only the top one. Off by default; the A/B flag.
+    co_incumbents: bool = False
 
 
 def ring_centroid(ring: list[list[float]]) -> tuple[float, float]:
@@ -993,6 +997,14 @@ def page_record(vctx: VolumeContext, unit: PageUnit) -> dict:
             if unit.rmse_ft is not None:
                 incumbent["rmse_ft"] = round(unit.rmse_ft, 1)
             record["incumbent"] = incumbent
+            if vctx.co_incumbents and unit.runner_up_affines:
+                chosen = choose_co_incumbent(
+                    ctx, vctx.feature_index, incumbent, unit.runner_up_affines
+                )
+                if chosen is not None:
+                    chosen["effective_gcps"] = unit.inlier_intersections
+                    record["ransac_winner"] = incumbent
+                    record["incumbent"] = incumbent = chosen
             # A defensible incumbent can only be improved LOCALLY: refinement
             # requires <100 ft agreement and a rung flip is co-located by
             # construction, while arbitration (the only rule that moves a page
@@ -1004,14 +1016,15 @@ def page_record(vctx: VolumeContext, unit: PageUnit) -> dict:
                 incumbent.get("verification") is not None
                 and incumbent["verification"] >= INCUMBENT_DEFENSIBLE_VERIFICATION
             ):
+                pose = np.array(incumbent["world_affine"])
                 lon_c = float(
-                    unit.gen_affine[0, 0] * unit.width / 2
-                    + unit.gen_affine[0, 1] * unit.height / 2
-                    + unit.gen_affine[0, 2]
+                    pose[0, 0] * unit.width / 2
+                    + pose[0, 1] * unit.height / 2
+                    + pose[0, 2]
                 )
                 lat_c = float(
-                    unit.gen_affine[1, 0] * unit.width / 2
-                    + unit.gen_affine[1, 1] * unit.height / 2
+                    pose[1, 0] * unit.width / 2
+                    + pose[1, 1] * unit.height / 2
                     + unit.gen_affine[1, 2]
                 )
                 ctx.search_centers = [(lon_c, lat_c)]
@@ -1087,10 +1100,15 @@ def page_record(vctx: VolumeContext, unit: PageUnit) -> dict:
                     )
                     candidate.verification = -math.inf
             candidates.sort(key=lambda c: -c.select_score())
-    if not candidates:
+    if not candidates and record.get("ransac_winner") is None:
         record["status"] = "no_candidates"
         return record
     record["candidates"] = [candidate_record(c, unit) for c in candidates]
+    if record.get("ransac_winner") is not None:
+        # Materialize adopts by candidate index and the reconciler reads the
+        # candidate list, so a co-incumbent that nothing refines still has to
+        # be *in* the list to reach the published pose.
+        record["candidates"].append(co_incumbent_candidate(record["incumbent"]))
     scores = [
         c["select_score"] for c in record["candidates"] if c["select_score"] is not None
     ]
@@ -1099,7 +1117,7 @@ def page_record(vctx: VolumeContext, unit: PageUnit) -> dict:
         if len(scores) >= 2
         else (round(scores[0], 4) if scores else None)
     )
-    record["decision"] = decision_block(record)
+    record["decision"] = decision_block(record, co_incumbents=vctx.co_incumbents)
     return record
 
 
@@ -1161,7 +1179,9 @@ def ensure_probs(volume: Path, stems: list[str]) -> None:
 worker_state: dict[str, Any] = {}
 
 
-def init_worker(volume: Path, vctx: VolumeContext | None = None) -> None:
+def init_worker(
+    volume: Path, vctx: VolumeContext | None = None, co_incumbents: bool = False
+) -> None:
     """Give this process the volume context snap_one_page reads.
 
     A pool worker receives only the volume path and rebuilds the context
@@ -1171,6 +1191,7 @@ def init_worker(volume: Path, vctx: VolumeContext | None = None) -> None:
     sequential path passes the context the caller already built.
     """
     context = load_volume_context(volume) if vctx is None else vctx
+    context.co_incumbents = co_incumbents or context.co_incumbents
     worker_state["vctx"] = context
     worker_state["units"] = {
         unit.stem: unit for unit in list(context.units) + list(context.panel_units)
@@ -1202,6 +1223,7 @@ def cmd_candidates(
     vis: bool,
     *,
     num_workers: int = 1,
+    co_incumbents: bool = False,
 ) -> None:
     """Generate candidates.jsonl for the volume's rescue targets."""
     out_dir = artifacts_dir(volume)
@@ -1220,6 +1242,7 @@ def cmd_candidates(
             out_path.write_text("")
         return
     vctx = load_volume_context(volume, units)
+    vctx.co_incumbents = co_incumbents
     existing: dict[str, dict] = {}
     if out_path.exists():
         for line in out_path.read_text().splitlines():
@@ -1312,7 +1335,9 @@ def cmd_candidates(
         # costs about a second each; results are consumed as they land so the
         # checkpoint file keeps pace with an interrupted run.
         with multiprocessing.Pool(
-            num_workers, initializer=init_worker, initargs=(volume,)
+            num_workers,
+            initializer=init_worker,
+            initargs=(volume, None, co_incumbents),
         ) as pool:
             for stem, record in pool.imap_unordered(
                 snap_one_page, [unit.stem for unit in stale]
@@ -2054,9 +2079,140 @@ REFINE_MIN_EFFECTIVE_GCPS = 2
 # -0.154 vs -0.249. Corpus-wide this gate touches exactly one adoption of 605
 # (#291), and that one is the loss.
 REFINE_MIN_VERIFICATION = 0.0
+# Refinement's agreeing mode (#487): choose among the candidates that AGREE
+# with the incumbent rather than only judging the top one. On Miami p19 the
+# top candidate was the grid one block over, out-verifying the true pose by
+# 0.058; the true pose sat at #2, 50 ft from the incumbent, and was never
+# examined. A candidate is only eligible if the matcher ranked it within this
+# fraction of its favourite: an agreeing pose the matcher scored far below its
+# top is coincidence, not corroboration. The offline oracle over 992 truth
+# pages: 887 -> 892 <=25 ft and one fewer disaster at 0.9; without the
+# fraction, 950 gains 8 and loses 3.
+REFINE_AGREEING_TOP_FRACTION = 0.9
 
 
-def refine_adoption(record: dict, margin: float = REFINE_VER_MARGIN) -> dict | None:
+def best_agreeing_candidate(record: dict) -> tuple[int, dict] | None:
+    """(index, candidate) of the best-verified candidate agreeing with the incumbent.
+
+    Agreement is the arbitration disagreement floor (grid RMSE under
+    ARBITRATE_MIN_DISAGREE_FT). Only plausible, real matcher candidates count --
+    not the co-incumbent stand-in -- and only those the matcher ranked within
+    REFINE_AGREEING_TOP_FRACTION of its own favourite's verification.
+    """
+    incumbent = record.get("incumbent") or {}
+    candidates = record.get("candidates") or []
+    if not incumbent.get("world_affine"):
+        return None
+    pool = [
+        (k, c)
+        for k, c in enumerate(candidates)
+        if c.get("plausible", True)
+        and c.get("world_affine") is not None
+        and c.get("verification") is not None
+        and c.get("source") != "co-incumbent"
+    ]
+    if not pool:
+        return None
+    top_verification = max(c["verification"] for _, c in pool)
+    incumbent_affine = np.array(incumbent["world_affine"])
+    agreeing = [
+        (k, c)
+        for k, c in pool
+        if grid_rmse_ft_between(
+            incumbent_affine,
+            np.array(c["world_affine"]),
+            record["width"],
+            record["height"],
+        )
+        < ARBITRATE_MIN_DISAGREE_FT
+    ]
+    if not agreeing:
+        return None
+    k, c = max(agreeing, key=lambda kc: kc[1]["verification"])
+    if c["verification"] < REFINE_AGREEING_TOP_FRACTION * top_verification:
+        return None
+    return k, c
+
+
+def choose_co_incumbent(
+    ctx: PageContext,
+    feature_index: FeatureIndex,
+    winner: dict,
+    runner_ups: list[np.ndarray],
+) -> dict | None:
+    """The RANSAC near-tie pose snap's own evidence prefers to the winner, or None.
+
+    RANSAC's label objective ties often -- Miami p19's true pose and a pose
+    rotated 7.45 deg share the same eight inlier labels and tie to three
+    decimals -- and the tie-break is not evidence. #340 records the near-ties
+    as runner-up poses; this scores each with evaluate_pose, exactly as the
+    winner is scored, and hands the incumbency to a runner-up that beats the
+    winner by the refinement margin. Nothing is iterated: every pose scored
+    here came out of RANSAC, and the evidence is the page's P(road) against
+    OSM, which none of them was fitted on.
+    """
+    best: dict | None = None
+    for k, affine in enumerate(runner_ups):
+        scored = evaluate_pose(ctx, feature_index, affine)
+        if scored is None or scored.get("verification") is None:
+            continue
+        if best is None or scored["verification"] > best["verification"]:
+            scored["world_affine"] = [[float(v) for v in row] for row in affine]
+            scored["source"] = f"runner-up {k + 1}"
+            best = scored
+    if best is None or winner.get("verification") is None:
+        return None
+    if best["verification"] <= winner["verification"] + REFINE_VER_MARGIN:
+        return None
+    return best
+
+
+def co_incumbent_candidate(incumbent: dict) -> dict:
+    """A candidate-shaped stand-in for the co-incumbent pose, for select/materialize."""
+    affine = np.array(incumbent["world_affine"])
+    theta = math.degrees(math.atan2(affine[1, 0], affine[0, 0]))
+    return {
+        "world_affine": incumbent["world_affine"],
+        "verification": incumbent.get("verification"),
+        "inlier_frac": incumbent.get("inlier_frac"),
+        "chamfer_mean_m": incumbent.get("chamfer_mean_m"),
+        "ncc_fine": incumbent.get("ncc_fine"),
+        "n_points": incumbent.get("n_points"),
+        "name": incumbent.get("name"),
+        "select_score": None,
+        "plausible": True,
+        "gate_reasons": [],
+        "theta_deg": round(theta, 2),
+        "theta_source": "co-incumbent",
+        "center_dist_m": 0.0,
+        "refine_shift_m": 0.0,
+        "scale_source": "co-incumbent",
+        "source": "co-incumbent",
+    }
+
+
+def co_incumbent_adoption(record: dict) -> dict | None:
+    """Adopt the co-incumbent stand-in when nothing else did, so it gets published."""
+    winner = record.get("ransac_winner")
+    if winner is None:
+        return None
+    for k, c in enumerate(record.get("candidates") or []):
+        if c.get("source") == "co-incumbent":
+            return {
+                "target": record["target"],
+                "chosen": k,
+                "reason": "co-incumbent",
+                "co_incumbent": True,
+                "select_score": None,
+                "incumbent_verification": winner.get("verification"),
+                "challenger_verification": c.get("verification"),
+            }
+    return None
+
+
+def refine_adoption(
+    record: dict, margin: float = REFINE_VER_MARGIN, *, agreeing: bool = False
+) -> dict | None:
     """Adopt an agreeing challenger as a precision refinement, or None.
 
     The complement of arbitrate_challenge: same head-to-head evidence, but for
@@ -2078,7 +2234,12 @@ def refine_adoption(record: dict, margin: float = REFINE_VER_MARGIN) -> dict | N
     effective_gcps = incumbent.get("effective_gcps")
     if effective_gcps is not None and effective_gcps < REFINE_MIN_EFFECTIVE_GCPS:
         return None
-    top = candidates[0]
+    chosen_index, top = 0, candidates[0]
+    if agreeing:
+        picked = best_agreeing_candidate(record)
+        if picked is None:
+            return None
+        chosen_index, top = picked
     if top.get("select_score") is None:
         return None
     incumbent_verification = incumbent.get("verification")
@@ -2099,7 +2260,7 @@ def refine_adoption(record: dict, margin: float = REFINE_VER_MARGIN) -> dict | N
         return None  # that far apart is arbitration territory, not refinement
     return {
         "target": record["target"],
-        "chosen": 0,
+        "chosen": chosen_index,
         "reason": "refine",
         "refine": True,
         "select_score": top["select_score"],
@@ -2533,6 +2694,7 @@ def cmd_select(
     gate_margin: float,
     arbitrate_gate: float = 2.0,
     refine_margin: float | None = None,
+    co_incumbents: bool = False,
 ) -> None:
     """Pick one candidate (or abstain) per page; write selection_<mode>.jsonl."""
     records = load_candidates(volume)
@@ -2549,7 +2711,7 @@ def cmd_select(
         # The union rescue selection, plus challenges to placed RANSAC fits.
         selections = select_union(volume, rescue, gate_score, gate_margin, allowed)
         note_ratios = printed_note_ratios(volume, records)
-        challenged = refined = flipped = 0
+        challenged = refined = flipped = co_adopted = 0
         for record in records:
             if record.get("fit_state") != "fitted":
                 continue
@@ -2559,7 +2721,9 @@ def cmd_select(
                 challenged += 1
                 continue
             refinement = refine_adoption(
-                record, REFINE_VER_MARGIN if refine_margin is None else refine_margin
+                record,
+                REFINE_VER_MARGIN if refine_margin is None else refine_margin,
+                agreeing=co_incumbents,
             )
             if refinement is not None:
                 selections.append(refinement)
@@ -2569,9 +2733,15 @@ def cmd_select(
             if flip is not None:
                 selections.append(flip)
                 flipped += 1
+                continue
+            if co_incumbents:
+                adoption = co_incumbent_adoption(record)
+                if adoption is not None:
+                    selections.append(adoption)
+                    co_adopted += 1
         print(
             f"{challenged} challenges, {refined} refinements, "
-            f"{flipped} rung flips accepted"
+            f"{flipped} rung flips, {co_adopted} co-incumbents accepted"
         )
     else:
         selections = select_argmax(rescue, gate_score, gate_margin, allowed)
@@ -2642,6 +2812,7 @@ def decision_block(
     gate_margin: float = PRODUCTION_GATE_MARGIN,
     arbitrate_gate: float = PRODUCTION_ARBITRATE_GATE,
     refine_margin: float = REFINE_VER_MARGIN,
+    co_incumbents: bool = False,
 ) -> dict:
     """The per-page decision trace for the debugger (#325 phase 2).
 
@@ -2888,7 +3059,7 @@ def decision_block(
         )
         if arbitrate_challenge(record, arbitrate_gate) is not None:
             decision["page_verdict"] = "challenge"
-        elif refine_adoption(record, refine_margin) is not None:
+        elif refine_adoption(record, refine_margin, agreeing=co_incumbents) is not None:
             decision["page_verdict"] = "refine"
         elif flip is not None:
             decision["page_verdict"] = "rung-flip"

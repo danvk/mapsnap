@@ -73,6 +73,15 @@ def main() -> None:
             "so expect about a gigabyte of memory apiece on a large volume."
         ),
     )
+    parser.add_argument(
+        "--co-incumbents",
+        action="store_true",
+        help=(
+            "#487 A/B: let a RANSAC runner-up pose stand as the incumbent when "
+            "snap's evidence prefers it, and refine to the best AGREEING "
+            "candidate rather than only the top one."
+        ),
+    )
     args = parser.parse_args()
 
     # The production gates are frozen alongside the selection code (see the
@@ -96,6 +105,7 @@ def main() -> None:
         recompute=args.recompute,
         vis=False,
         num_workers=args.num_workers,
+        co_incumbents=args.co_incumbents,
     )
     cmd_select(
         args.dir,
@@ -103,6 +113,7 @@ def main() -> None:
         PRODUCTION_GATE_SCORE,
         PRODUCTION_GATE_MARGIN,
         PRODUCTION_ARBITRATE_GATE,
+        co_incumbents=args.co_incumbents,
     )
     cmd_materialize(args.dir, mode)
 
