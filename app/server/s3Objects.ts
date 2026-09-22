@@ -122,6 +122,7 @@ export async function readS3Head(uri: S3Uri, bytes: number): Promise<Buffer> {
     process.env.TMPDIR ?? '/tmp',
     `mapsnap-head-${process.pid}-${Math.random().toString(36).slice(2)}`,
   );
+  console.log(`s3 get-object for `, uri);
   await aws([
     's3api',
     'get-object',
@@ -152,16 +153,20 @@ export async function ensureCached(root: string, uri: S3Uri): Promise<string> {
   const destination = cachePathOf(root, uri);
   try {
     const existing = await stat(destination);
-    if (existing.size > 0) return destination;
+    if (existing.size > 0) {
+      return destination;
+    }
   } catch {
     // Not cached yet.
   }
+  console.log(`Cache miss on ${destination}`);
   await mkdir(dirname(destination), { recursive: true });
   const temporary = `${destination}.${process.pid}.${Math.random().toString(36).slice(2)}`;
   await aws(['s3', 'cp', `s3://${uri.bucket}/${uri.key}`, temporary]);
   await rename(temporary, destination);
   return destination;
 }
+
 /**
  * An object's contents as text, cached on disk like the scans are.
  *
