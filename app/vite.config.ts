@@ -153,6 +153,15 @@ export default defineConfig({
       '/iiif': 'http://localhost:8182',
       '/api': 'http://localhost:8182',
       '/notes-api': 'http://localhost:8182',
+      // Mirror-backed viewing (#496). Scans need no entry: the rewritten
+      // annotation points their image service at the server's own origin, so
+      // they never traverse this proxy (nor could they -- notFoundForMissing-
+      // Files answers an extension-bearing path before the proxy sees it).
+      // A sidecar fetched by relative URL does traverse it, and without this
+      // vite hands back index.html with a 200 -- a "successful" fetch of
+      // something that will not parse, which silently drops the panel mask
+      // onto its degenerate fallback.
+      '/s3-api': 'http://localhost:8182',
     },
   },
   test: {
