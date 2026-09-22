@@ -26,6 +26,8 @@ import {
   type VolumeInfo,
 } from './iiifAnnotations.ts';
 import { jpegDimensions } from './jpegDimensions.ts';
+import { isS3Uri } from './s3Objects.ts';
+import { s3Annotation } from './s3Routes.ts';
 import { pngDimensions } from './pngDimensions.ts';
 import {
   parseCompareFooter,
@@ -172,24 +174,68 @@ function alternatePageImage(
 }
 
 export function registerIiifImages(app: Express, dataDir: string): void {
-  app.use('/iiif', (request, response, next) => {
-    if (!request.path.endsWith('/info.json')) return next();
-    const json = response.json.bind(response);
-    response.json = (body: unknown) =>
-      json(
-        body && typeof body === 'object'
-          ? withTiles(body as Record<string, unknown>)
-          : body,
-      );
-    next();
+  mountIiifImages(app, '/iiif', dataDir);
+}
+
+/**
+ * A IIIF image server over `imageDir`, with tiles advertised on info.json.
+ *
+ * `before` runs first and may put the requested file in place; that is how the
+ * S3 mount fetches a scan on demand rather than mirroring a whole item up
+ * front. Any error it throws becomes a 502, since by then the only thing that
+ * can have gone wrong is the fetch.
+ */
+export function mountIiifImages(
+  app: Express,
+  mount: string,
+  imageDir: string,
+  before?: (identifier: string) => Promise<void>,
+): void {
+  app.use(mount, (request, response, next) => {
+    if (request.path.endsWith('/info.json')) {
+      const json = response.json.bind(response);
+      response.json = (body: unknown) =>
+        json(
+          body && typeof body === 'object'
+            ? withTiles(body as Record<string, unknown>)
+            : body,
+        );
+    }
+    if (!before) return next();
+    const identifier = iiifIdentifierOf(request.path);
+    if (!identifier) return next();
+    before(identifier).then(
+      () => next(),
+      (error: unknown) => {
+        response.status(502).json({ error: String(error) });
+      },
+    );
   });
-  app.use('/iiif', iiif({ imageDir: dataDir }));
+  app.use(mount, iiif({ imageDir }));
+}
+
+/**
+ * The image a IIIF request names, or null if the path is not one.
+ *
+ * Two shapes reach the mount: `<identifier>/info.json`, and the image request
+ * `<identifier>/{region}/{size}/{rotation}/{quality}.{format}`. The identifier
+ * is whatever comes before those, and it is a path because these servers are
+ * mounted over a directory tree.
+ */
+export function iiifIdentifierOf(path: string): string | null {
+  const parts = path.split('/').filter(Boolean);
+  if (parts[parts.length - 1] === 'info.json') {
+    return parts.slice(0, -1).join('/') || null;
+  }
+  if (parts.length >= 5) return parts.slice(0, -4).join('/') || null;
+  return null;
 }
 
 /** Register the typed volume/annotation JSON API (`/iiif-api/*`). */
 export function registerIiifApi(
   router: TypedRouter<API>,
   dataDir: string,
+  s3CacheDir: string,
 ): void {
   // Volume directories that have local page images and annotation files.
   //
@@ -246,6 +292,12 @@ export function registerIiifApi(
   // "data/" is tolerated (dataDir already points at the data directory).
   router.get('/iiif-api/annotation', async (_params, request) => {
     const rawPath = request.query.path;
+    // An s3:// path is a run's own output read straight out of the mirror; the
+    // rewrite is the same, only the pages come from the bucket.
+    if (isS3Uri(rawPath)) {
+      const origin = `${request.protocol}://${request.get('host')}`;
+      return s3Annotation(rawPath, origin, s3CacheDir);
+    }
     const image = pageImageOf(request.query.image);
     const relativePath = rawPath.replace(/^data\//, '');
     const parts = relativePath.split('/');

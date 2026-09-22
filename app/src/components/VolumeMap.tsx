@@ -83,6 +83,12 @@ interface VolumeMapProps {
    * volume) but keeps the viewport when only the annotation file changes within a volume.
    */
   fitVolumeKey: string | null;
+  /**
+   * Where to fetch a split parent's `<stem>.panels.json`, or null when the
+   * annotation has no sidecars to read. Without it the panel mask falls back to
+   * holing the sheet rectangle, which triangulates badly (#496).
+   */
+  panelsUrl: (parentStem: string) => string | null;
   /** Called when the map settles after a move, with the new center/zoom (for the URL). */
   onViewportChange: (center: [number, number], zoom: number) => void;
   /** Called with per-page add results whenever a new annotation is shown. */
@@ -729,15 +735,16 @@ export function VolumeMap(props: VolumeMapProps) {
     if (page.splitIndex === null) {
       offpanel?.setData(EMPTY_FEATURES);
     } else {
-      const parent = page.stem.split('__')[0];
-      const cacheKey = `${fitVolumeKey}/${parent}`;
+      const parent = page.stem.split('__')[0] ?? '';
+      const url = props.panelsUrl(parent);
+      const cacheKey = url ?? '';
       const cached = panelDocsRef.current.get(cacheKey);
       offpanel?.setData(
         (cached ? maskFromPanels(cached) : null) ?? selectorFallback(),
       );
-      if (!panelDocsRef.current.has(cacheKey) && fitVolumeKey) {
+      if (url && !panelDocsRef.current.has(cacheKey)) {
         const selectedAtFetch = selectedItemIndex;
-        fetch(`/data/${fitVolumeKey}/${parent}.panels.json`)
+        fetch(url)
           .then((r) => (r.ok ? r.json() : null))
           .then(
             (

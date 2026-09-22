@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   keymapUnderlays,
   underlayImageFromParam,
@@ -51,6 +51,7 @@ import type { SnapRecord } from '../snap';
 import { InfoPanel, type RunArtifacts } from './InfoPanel';
 import { PageList } from './PageList';
 import { VolumeMap } from './VolumeMap';
+import { panelsUrlFor } from '../iiif/panelsUrl';
 import { parseAnnotationPath } from '../iiif/volumePath';
 
 // Map viewport from the URL's `center=lng,lat` and `zoom=Z` params, or null when absent/invalid.
@@ -269,6 +270,13 @@ export function VolumeViewer() {
   // notes drive the list markers/tooltip, the sidecars the per-page georef links, the
   // adjacency the claim overlay.
   const volumeName = selection?.volume;
+
+  // A split parent's panels.json, wherever this annotation came from: beside it
+  // in the bucket for an s3:// object, under data/ for a local volume.
+  const panelsUrl = useCallback(
+    (parent: string) => panelsUrlFor(selectedPath, volumeName, parent),
+    [selectedPath, volumeName],
+  );
   useEffect(() => {
     if (!volumeName) {
       setNotes(new Map());
@@ -771,7 +779,12 @@ export function VolumeViewer() {
             osmRelationWays={osmRelation ? osmRelation.ways : null}
             selectedStem={selectedPage?.stem ?? null}
             initialViewport={initialViewport}
-            fitVolumeKey={volumeName ?? null}
+            // An annotation in the mirror has no data/<volume>/ path to name,
+            // so the object itself is the identity to fit once to. Without
+            // one, null === null skipped the initial fit and the map sat on
+            // its default view until a page was clicked.
+            fitVolumeKey={volumeName ?? selectedPath}
+            panelsUrl={panelsUrl}
             onViewportChange={(center, zoom) =>
               updateUrl({
                 center: `${center[0].toFixed(5)},${center[1].toFixed(5)}`,
