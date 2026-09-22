@@ -703,20 +703,40 @@ def test_scale_priors_still_offer_a_half_scale_sheet() -> None:
     assert "family-rung" in sources, sources
 
 
-def test_frame_is_affordable_rejects_only_absurd_frames() -> None:
-    """A working frame is a page plus its search radius; the cap is far above."""
-    from mapsnap.osm_snap import frame_is_affordable
+def test_page_extent_cap_clears_every_real_sheet() -> None:
+    """The cap sits between the largest Sanborn page and the smallest absurd one.
 
-    # A 3 km half-frame at 2 m/px is 3,000 px a side: an ordinary page.
-    assert frame_is_affordable(3_000.0, 2.0)
-    # 30 km a side is what a scale tens of times too coarse asks for.
-    assert not frame_is_affordable(30_000.0, 2.0)
-    # The cap counts pixels, so a finer resolution reaches it sooner.
-    assert frame_is_affordable(10_000.0, 2.0)
-    assert not frame_is_affordable(10_000.0, 0.5)
+    Measured over the 1,943 truth annotations of 20 volumes, split panels
+    included: median 0.52 km, p99 1.11 km, largest 3.08 km (Hudson p92 [1]).
+    The scales that took items down on the 2026-09-20 corpus sample imply
+    10.9, 35.4 and 94.6 km.
+    """
+    from mapsnap.osm_snap import page_extent_is_plausible
+
+    for real_km in (0.52, 1.11, 2.05, 2.19, 3.08):  # median, p99, Columbus p297,
+        assert page_extent_is_plausible(real_km * 1000)  # Asheville p42, Hudson p92
+    for absurd_km in (10.9, 35.4, 94.6):
+        assert not page_extent_is_plausible(absurd_km * 1000)
 
 
-def test_snap_page_skips_a_frame_it_cannot_afford() -> None:
+def test_key_map_extents_are_never_judged_by_this_cap() -> None:
+    """A key map covers 4-18 km of ground, and would fail a sheet's cap outright.
+
+    It never reaches the cap with its own scale: nothing hands a key map a
+    key-map scale, so snap frames it at the volume's sheet scale and the
+    extent it is judged on is a sheet's (0.47-0.63 km across the corpus).
+    """
+    from mapsnap.osm_snap import page_extent_is_plausible
+
+    sheet_scale_m_per_px = 0.2
+    key_map_pixels = 3000.0  # a key map sheet is no bigger in pixels than any other
+    assert page_extent_is_plausible(key_map_pixels * sheet_scale_m_per_px)
+    # Its TRUE extent, were it ever judged, would not clear the cap -- which is
+    # why the cap must be applied to the implied extent and not to ground truth.
+    assert not page_extent_is_plausible(18_250.0)
+
+
+def test_snap_page_skips_a_page_that_cannot_be_a_sheet() -> None:
     """A volume median scale tens of times too coarse must not allocate.
 
     Four small volumes on the 2026-09-20 corpus sample died here: one bad
@@ -741,6 +761,6 @@ def test_snap_page_skips_a_frame_it_cannot_afford() -> None:
 
     class ExplodingIndex(FeatureIndex):
         def near_bbox(self, bounds: tuple[float, float, float, float]) -> list[dict]:
-            raise AssertionError("snap_page framed a page it could not afford")
+            raise AssertionError("snap_page framed a page it could not believe")
 
     assert snap_page(ctx, ExplodingIndex([])) == []
