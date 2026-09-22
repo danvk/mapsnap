@@ -385,65 +385,27 @@ ALPHA = Item("sanborn1", "alabama", "1900")
 BETA = Item("sanborn2", "alabama", "1901")
 
 
-def _queue_source(monkeypatch, bodies: list[str], items: dict[str, Item]):
-    """A QueueSource backed by a scripted queue, plus the deletes it performs."""
-    from mapsnap import work_queue
-    from mapsnap.loc_craft import QueueSource
-
-    pending = [work_queue.Message(body, f"handle-{body}") for body in bodies]
-    deleted: list[str] = []
-    monkeypatch.setattr(
-        work_queue, "receive", lambda url, **kw: [pending.pop(0)] if pending else []
-    )
-    monkeypatch.setattr(
-        work_queue, "delete", lambda url, handle: deleted.append(handle)
-    )
-    # Nothing is leased in these fixtures, so an empty receive really is a
-    # drained queue (QueueSource checks, since an empty receive alone is not).
-    monkeypatch.setattr(
-        work_queue, "depth", lambda url: work_queue.Depth(visible=0, in_flight=0)
-    )
-    return QueueSource("https://q", items), deleted
-
-
-def test_queue_source_yields_manifest_items_until_drained(monkeypatch) -> None:
-    source, deleted = _queue_source(
-        monkeypatch, ["sanborn1", "sanborn2"], {"sanborn1": ALPHA, "sanborn2": BETA}
-    )
-    assert [(i, it.item) for i, it in source] == [(1, "sanborn1"), (2, "sanborn2")]
-    assert deleted == []  # nothing is retired merely by being taken
-
-
-def test_queue_source_drops_a_name_the_manifest_does_not_have(monkeypatch) -> None:
-    """Otherwise it is redelivered forever and the queue never drains."""
-    source, deleted = _queue_source(
-        monkeypatch, ["ghost", "sanborn1"], {"sanborn1": ALPHA}
-    )
-    assert [it.item for _, it in source] == ["sanborn1"]
-    assert deleted == ["handle-ghost"]
-
-
-def test_queue_source_retire_deletes_and_release_does_not(monkeypatch) -> None:
-    source, deleted = _queue_source(
-        monkeypatch, ["sanborn1", "sanborn2"], {"sanborn1": ALPHA, "sanborn2": BETA}
-    )
-    taken = [it for _, it in source]
-    source.retire(taken[0])
-    assert deleted == ["handle-sanborn1"]
-    # A failure leaves the lease to lapse so another worker retries it.
-    source.release(taken[1])
-    assert deleted == ["handle-sanborn1"]
-    source.retire(taken[1])  # already released: nothing left to delete
-    assert deleted == ["handle-sanborn1"]
-
-
-def test_prepare_next_retires_what_it_settles_itself(monkeypatch) -> None:
-    """Skipped and absent items must leave the queue; failures must not."""
+def test_prepare_next_reports_a_failed_listing_rather_than_raising(monkeypatch) -> None:
+    """The caller keeps the counting and the logging in one place."""
     from mapsnap import loc_craft
 
-    complete = Item("done", "alabama", "1900")
-    absent = Item("gone", "alabama", "1901")
-    retired: list[str] = []
+    def boom(bucket, prefix):
+        raise OSError("listing failed")
+
+    monkeypatch.setattr(loc_craft, "list_prefix", boom)
+    prepared = loc_craft.prepare_next(
+        iter([(1, Item("flaky", "alabama", "1900"))]),
+        "s3://b",
+        Path("/tmp"),
+        fetch=False,
+    )
+    assert [name for name, _ in prepared.failures] == ["flaky"]
+    assert prepared.work is None
+
+
+def test_prepare_next_counts_complete_and_absent_items(monkeypatch) -> None:
+    """Skipped and absent are reported apart, so a run's summary adds up."""
+    from mapsnap import loc_craft
 
     monkeypatch.setattr(
         loc_craft,
@@ -456,149 +418,12 @@ def test_prepare_next_retires_what_it_settles_itself(monkeypatch) -> None:
         lambda item, present: loc_craft.ItemWork(item, [], [], []),
     )
     prepared = loc_craft.prepare_next(
-        iter([(1, complete), (2, absent)]),
+        iter(
+            [(1, Item("done", "alabama", "1900")), (2, Item("gone", "alabama", "1901"))]
+        ),
         "s3://b",
         Path("/tmp"),
         fetch=False,
-        retire=lambda item: retired.append(item.item),
     )
     assert prepared.work is None
     assert (prepared.skipped, prepared.absent) == (1, 1)
-    assert retired == ["done", "gone"]
-
-
-def test_prepare_next_leaves_a_failed_item_for_another_worker(monkeypatch) -> None:
-    """A listing failure is transient; retiring it would lose the item."""
-    from mapsnap import loc_craft
-
-    def boom(bucket, prefix):
-        raise OSError("listing failed")
-
-    retired: list[str] = []
-    monkeypatch.setattr(loc_craft, "list_prefix", boom)
-    prepared = loc_craft.prepare_next(
-        iter([(1, Item("flaky", "alabama", "1900"))]),
-        "s3://b",
-        Path("/tmp"),
-        fetch=False,
-        retire=lambda item: retired.append(item.item),
-    )
-    assert [name for name, _ in prepared.failures] == ["flaky"]
-    assert retired == []
-
-
-def test_a_queue_with_work_in_flight_is_not_drained(monkeypatch):
-    """An empty receive is not an empty queue.
-
-    Replacing a fleet leaves every item leased to instances that no longer
-    exist, invisible until the visibility timeout lapses. On 2026-09-17 eight
-    replacement workers each saw nothing, called the queue drained and powered
-    off while 133 items sat in flight to the instances they were replacing.
-    """
-    from mapsnap import loc_craft
-    from mapsnap.loc_craft import Item, QueueSource
-    from mapsnap.work_queue import Depth, Message
-
-    monkeypatch.setattr(loc_craft, "IN_FLIGHT_WAIT_SECONDS", 0)
-    receives = [[], [Message(body="sanborn1", handle="h")], []]
-    depths = [Depth(visible=0, in_flight=133), Depth(visible=0, in_flight=0)]
-    monkeypatch.setattr(
-        loc_craft.work_queue, "receive", lambda url, **kw: receives.pop(0)
-    )
-    monkeypatch.setattr(loc_craft.work_queue, "depth", lambda url: depths.pop(0))
-
-    source = QueueSource("u", {"sanborn1": Item("sanborn1", "alabama", "1900")})
-    taken = [item.item for _, item in source]
-    assert taken == ["sanborn1"], "it waited for the in-flight item to reappear"
-    assert not depths, "and only stopped once nothing was in flight"
-
-
-def test_an_empty_queue_with_nothing_in_flight_still_drains(monkeypatch):
-    """The stop condition must still exist, or a finished fleet never exits."""
-    from mapsnap import loc_craft
-    from mapsnap.loc_craft import QueueSource
-    from mapsnap.work_queue import Depth
-
-    monkeypatch.setattr(loc_craft, "IN_FLIGHT_WAIT_SECONDS", 0)
-    monkeypatch.setattr(loc_craft.work_queue, "receive", lambda url, **kw: [])
-    monkeypatch.setattr(
-        loc_craft.work_queue, "depth", lambda url: Depth(visible=0, in_flight=0)
-    )
-    assert list(QueueSource("u", {})) == []
-
-
-def test_the_in_flight_wait_is_bounded_by_one_lease(monkeypatch):
-    """Waiting out a DEAD worker's lease is the point; waiting forever is not.
-
-    A lease lapses within the visibility timeout, so after a full one with
-    nothing to receive, whatever is still invisible is held by a live worker who
-    will retire it, or was released and is waiting out a lease nobody is using.
-    On 2026-09-18 the two-worker test-200b fleet ran 40 minutes with shard 0 at
-    39% CPU and shard 1 at 3.5%, both printing "nothing visible, 3 in flight":
-    three messages, one worker fitting, one paying for an idle m5.2xlarge.
-    """
-    from mapsnap import loc_craft
-    from mapsnap.loc_craft import Item, QueueSource
-    from mapsnap.work_queue import Depth
-
-    monkeypatch.setattr(loc_craft, "IN_FLIGHT_WAIT_SECONDS", 60)
-    monkeypatch.setattr(loc_craft, "MAX_IN_FLIGHT_WAIT_SECONDS", 180)
-    monkeypatch.setattr(loc_craft.time, "sleep", lambda seconds: None)
-    monkeypatch.setattr(loc_craft.work_queue, "receive", lambda url, **kw: [])
-    polls = []
-    monkeypatch.setattr(
-        loc_craft.work_queue,
-        "depth",
-        lambda url: polls.append(1) or Depth(visible=0, in_flight=3),
-    )
-
-    source = QueueSource("u", {"sanborn1": Item("sanborn1", "alabama", "1900")})
-    assert [item.item for _, item in source] == []
-    assert len(polls) == 4, "three waits of 60s, then it stopped rather than idle"
-
-
-def test_a_receive_restarts_the_in_flight_budget(monkeypatch):
-    """The bound is on CONSECUTIVE idling: a worker still being fed must not
-    stop just because it once waited."""
-    from mapsnap import loc_craft
-    from mapsnap.loc_craft import Item, QueueSource
-    from mapsnap.work_queue import Depth, Message
-
-    monkeypatch.setattr(loc_craft, "IN_FLIGHT_WAIT_SECONDS", 60)
-    monkeypatch.setattr(loc_craft, "MAX_IN_FLIGHT_WAIT_SECONDS", 60)
-    monkeypatch.setattr(loc_craft.time, "sleep", lambda seconds: None)
-    receives = [[], [Message(body="sanborn1", handle="h")], [], []]
-    monkeypatch.setattr(
-        loc_craft.work_queue, "receive", lambda url, **kw: receives.pop(0)
-    )
-    monkeypatch.setattr(
-        loc_craft.work_queue, "depth", lambda url: Depth(visible=0, in_flight=3)
-    )
-
-    source = QueueSource("u", {"sanborn1": Item("sanborn1", "alabama", "1900")})
-    assert [item.item for _, item in source] == ["sanborn1"]
-
-
-def test_a_released_item_is_named_in_the_wait(monkeypatch, capsys):
-    """An item this worker handed back stays invisible for the whole lease, so
-    it counts as in flight as if someone were working on it. Saying so is the
-    difference between a fleet that is busy and one that is waiting on itself."""
-    from mapsnap import loc_craft
-    from mapsnap.loc_craft import Item, QueueSource
-    from mapsnap.work_queue import Depth
-
-    monkeypatch.setattr(loc_craft, "IN_FLIGHT_WAIT_SECONDS", 60)
-    monkeypatch.setattr(loc_craft, "MAX_IN_FLIGHT_WAIT_SECONDS", 60)
-    monkeypatch.setattr(loc_craft.time, "sleep", lambda seconds: None)
-    monkeypatch.setattr(loc_craft.work_queue, "receive", lambda url, **kw: [])
-    monkeypatch.setattr(
-        loc_craft.work_queue, "depth", lambda url: Depth(visible=0, in_flight=1)
-    )
-
-    item = Item("sanborn1", "alabama", "1900")
-    source = QueueSource("u", {"sanborn1": item})
-    source.handles["sanborn1"] = "h"
-    source.release(item)
-    assert source.released == {"sanborn1"}
-    list(source)
-    assert "1 released by me" in capsys.readouterr().err

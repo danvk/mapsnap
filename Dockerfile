@@ -1,5 +1,5 @@
-# The corpus worker as an image: everything scripts/loc_craft/bootstrap.sh
-# builds at boot, built once instead. The lockfile's Linux torch is the CPU
+# The corpus worker as an image, and the only way a corpus job runs (#448).
+# It replaced a 1,335-line EC2 fleet that built this environment at boot. The lockfile's Linux torch is the CPU
 # build (pyproject's pytorch-cpu index; 183 MB against 4.6 GB for CUDA), which
 # is all the CPU chain -- loc-fit -- ever uses. A loc-craft image, which needs
 # the GPU, builds with --build-arg TORCH_INDEX=https://download.pytorch.org/whl/cu126.
@@ -10,10 +10,10 @@
 #     --build-arg GIT_SHA=$(git rev-parse HEAD) \
 #     -t mapsnap:$(git rev-parse --short HEAD) --load .
 #
-# Run a job exactly as bootstrap.sh does, the job and its flags as arguments:
+# Run a job: the job name and its flags as arguments.
 #
 #   docker run --rm -e AWS_REGION=us-west-2 mapsnap:abc1234 \
-#     loc-fit --queue https://sqs... --run-tag v1.3 --counties s3://... s3://...
+#     loc-fit --items items.txt --run-tag v1.3 --counties s3://... s3://...
 #
 # Layers are ordered so the expensive ones survive a code change: base + apt,
 # then the dependency set from pyproject.toml/uv.lock alone, then the EasyOCR
@@ -22,7 +22,7 @@
 
 FROM python:3.12-slim-bookworm
 
-# What bootstrap.sh apt-installs, minus git: the source is COPYed in, not
+# What the chain needs from apt, minus git: the source is COPYed in, not
 # cloned, and .git is 963 MB. libgl1/libglib2.0-0 are OpenCV's runtime;
 # libopenjp2-tools decodes the mirror's JP2s.
 RUN apt-get update -q \
@@ -32,7 +32,7 @@ RUN apt-get update -q \
 
 # The workers shell out to `aws s3 cp/sync` (loc_craft.run_aws), so the CLI
 # is part of the runtime, not a build tool. v2 from the same archive
-# bootstrap.sh fetches, for whichever architecture is being built: amd64 for
+# Fetched for whichever architecture is being built: amd64 for
 # the x86 fleet, arm64 for a native run on an Apple Silicon Mac (x86 torch
 # inference SIGILLs under Docker's emulation) or for Graviton instances.
 ARG TARGETARCH
@@ -91,13 +91,12 @@ LABEL org.opencontainers.image.revision=$GIT_SHA \
       org.opencontainers.image.source=https://github.com/danvk/mapsnap
 
 # One torch thread per job by default. A container sees the HOST's core count,
-# so torch's own default oversubscribes a box running several jobs -- the bug
-# #444 fixed in bootstrap.sh by splitting cores between workers. A Batch job
+# so torch's own default oversubscribes a box running several jobs (#444).
+# A Batch job
 # definition that grants N vCPUs sets OMP_NUM_THREADS=N in its environment.
 ENV OMP_NUM_THREADS=1 \
     PATH=/app/.venv/bin:$PATH
 
-# The job name is the first argument -- loc-fit, loc-craft -- then its flags,
-# exactly the `uv run mapsnap "$JOB" ...` line in bootstrap.sh. No default
-# command: a Batch job definition supplies it.
+# The job name is the first argument -- loc-fit, loc-craft -- then its flags.
+# No default command: a Batch job definition supplies it.
 ENTRYPOINT ["mapsnap"]

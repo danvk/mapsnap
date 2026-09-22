@@ -119,10 +119,6 @@ SUBCOMMANDS: dict[str, tuple[str, str]] = {
         "mapsnap.loc_counties",
         "Map LoC Sanborn items to Natural Earth counties, the OSM extraction units.",
     ),
-    "work-queue": (
-        "mapsnap.work_queue",
-        "Create, fill and inspect an SQS queue of corpus items (#354)",
-    ),
     "loc-cities": (
         "mapsnap.loc_cities",
         "Map the independent-city items to OSM boundary relations (#407)",

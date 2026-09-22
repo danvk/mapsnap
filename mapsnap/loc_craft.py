@@ -35,13 +35,12 @@ import random
 import shutil
 import sys
 import time
-from collections.abc import Callable, Iterator
+from collections.abc import Iterator
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
 
-from mapsnap import work_queue
 from mapsnap.aws_cli import run_aws
 
 # Columns of the mirror's manifest (loc-sanborn-maps.mapping.tsv at the bucket root).
@@ -50,7 +49,6 @@ ITEM_COLUMNS = ("item", "state", "year")
 # What this pass writes for one page, and for one raw key-map sheet.
 # Fixed so a resumed shard, and a --limit sample, are reproducible.
 # A queue has no fixed denominator, so its depth is re-read now and then.
-QUEUE_DEPTH_EVERY = 25
 SHUFFLE_SEED = 0
 PAGE_OUTPUTS = ("boxes.json", "roadprob.jpg")
 RAW_OUTPUTS = ("boxes.json",)
@@ -307,118 +305,6 @@ def process_item(
         shutil.rmtree(local, ignore_errors=True)
 
 
-# How long to wait before looking again when the queue has work in flight but
-# nothing visible. A lease lapses within the visibility timeout (30 minutes by
-# default), so polling at this interval costs a handful of API calls to avoid
-# ending a fleet early.
-IN_FLIGHT_WAIT_SECONDS = 60
-
-# ...and how long to keep doing that. The wait exists for leases held by workers
-# that died (see __iter__), and those lapse within one visibility timeout: after
-# a full one with nothing to receive, whatever is still invisible is held by a
-# LIVE worker, who will retire it, or was released and is waiting out a lease
-# nobody is using. Neither is worth a second instance standing by. On
-# 2026-09-18 the two-worker test-200b fleet ran 40 minutes with shard 0 at 39%
-# CPU and shard 1 at 3.5%, both printing "nothing visible, 3 in flight" every
-# minute: three messages, one worker fitting, one idling. Without a bound that
-# idle runs to maxReceiveCount x visibility -- five hours on that queue.
-MAX_IN_FLIGHT_WAIT_SECONDS = work_queue.DEFAULT_VISIBILITY_SECONDS
-
-
-class QueueSource:
-    """Items taken from an SQS queue, with the handles that retire them.
-
-    Stands in for a shard's item list, so the fleet no longer has to agree on a
-    partition: every worker just takes the next item. Two items are in flight at
-    once because the prefetcher runs a step ahead, which is why the handles are
-    kept in a dict rather than a single slot.
-    """
-
-    def __init__(self, url: str, by_name: dict[str, Item]) -> None:
-        self.url = url
-        self.by_name = by_name
-        self.handles: dict[str, str] = {}
-        # The run each item belongs to, taken from its message rather than from
-        # this worker's flags, so the S3 prefix and the recorded provenance
-        # cannot disagree. None for an untagged queue (loc-craft fills those).
-        self.tags: dict[str, str | None] = {}
-        # Items this worker handed back. Their messages stay invisible until the
-        # lease lapses, so they show up in the queue's in-flight count as if
-        # someone were working on them; naming them makes an idle wait legible.
-        self.released: set[str] = set()
-        self.taken = 0
-
-    def __iter__(self) -> Iterator[tuple[int, Item]]:
-        waited = 0
-        while True:
-            messages = work_queue.receive(self.url, count=1)
-            if not messages:
-                # An empty receive is not an empty queue. Items leased to other
-                # workers are invisible, and a worker that died holds its lease
-                # until the visibility timeout lapses -- so right after a fleet
-                # is replaced, every item can be in flight to an instance that
-                # no longer exists. On 2026-09-17 that ended a replacement fleet
-                # in seconds: eight new workers each saw nothing, called the
-                # queue drained, and powered off while 133 items sat leased to
-                # the instances they were replacing.
-                left = work_queue.depth(self.url)
-                if left.in_flight == 0:
-                    return  # really drained
-                if waited >= MAX_IN_FLIGHT_WAIT_SECONDS:
-                    print(
-                        f"queue: {left.in_flight} item(s) still in flight after "
-                        f"{waited // 60} minutes with nothing to receive, which is "
-                        "longer than a lease: they are held by a live worker or "
-                        "waiting out a lease nobody is using. Stopping.",
-                        file=sys.stderr,
-                        flush=True,
-                    )
-                    return
-                mine = f", {len(self.released)} released by me" if self.released else ""
-                print(
-                    f"queue: nothing visible, {left.in_flight} item(s) in flight"
-                    f"{mine}; waiting {IN_FLIGHT_WAIT_SECONDS}s",
-                    file=sys.stderr,
-                    flush=True,
-                )
-                time.sleep(IN_FLIGHT_WAIT_SECONDS)
-                waited += IN_FLIGHT_WAIT_SECONDS
-                continue
-            for message in messages:
-                name, run_tag = work_queue.parse_body(message.body)
-                item = self.by_name.get(name)
-                if item is None:
-                    # Named in the queue but not in the manifest: nothing to do,
-                    # and leaving it would keep the queue from ever draining.
-                    work_queue.delete(self.url, message.handle)
-                    continue
-                self.handles[item.item] = message.handle
-                self.tags[item.item] = run_tag
-                self.released.discard(item.item)
-                self.taken += 1
-                waited = 0
-                yield self.taken, item
-
-    def retire(self, item: Item) -> None:
-        """Delete the item's message: it is finished and must not come back."""
-        handle = self.handles.pop(item.item, None)
-        if handle is not None:
-            work_queue.delete(self.url, handle)
-
-    def release(self, item: Item) -> None:
-        """Forget the handle without deleting, so the lease lapses and it retries."""
-        if self.handles.pop(item.item, None) is not None:
-            self.released.add(item.item)
-
-    def handle_for(self, item: Item) -> str | None:
-        """The item's receipt handle, for holding its lease open while it runs."""
-        return self.handles.get(item.item)
-
-    def tag_for(self, item: Item) -> str | None:
-        """The run this item's message named, or None on an untagged queue."""
-        return self.tags.get(item.item)
-
-
 @dataclass
 class Prepared:
     """The next item to compute, plus everything passed over while finding it.
@@ -442,7 +328,6 @@ def prepare_next(
     work_dir: Path,
     *,
     fetch: bool = True,
-    retire: Callable[[Item], None] | None = None,
 ) -> Prepared:
     """List forward until an item needs work, download it, and return it.
 
@@ -451,10 +336,6 @@ def prepare_next(
     download, with the GPU idle. Items already complete, and items whose listing
     or download fails, are reported in the result rather than raised, so the
     caller keeps the counting and the logging in one place.
-
-    ``retire`` is called for items this pass settles on its own -- already
-    complete, or never mirrored -- so a queue can drop them. Items whose listing
-    or download fails are deliberately left alone: those should come back.
     """
     skipped = absent = 0
     failures: list[tuple[str, str]] = []
@@ -464,14 +345,10 @@ def prepare_next(
             if not present:
                 # In the manifest but not in the mirror: 45 of 35,159 items.
                 absent += 1
-                if retire is not None:
-                    retire(item)
                 continue
             work = plan_item(item, present)
             if work.complete:
                 skipped += 1
-                if retire is not None:
-                    retire(item)
                 continue
             local = (
                 fetch_item(work, bucket, work_dir) if fetch else work_dir / item.item
@@ -533,11 +410,6 @@ def main() -> None:
         default=SHUFFLE_SEED,
         help="Seed for the shard's item order (default: %(default)s).",
     )
-    parser.add_argument(
-        "--queue",
-        help="SQS queue URL to take items from, instead of --shard/--shards. "
-        "Workers sharing a queue need not agree on anything.",
-    )
     parser.add_argument("--gpu", action="store_true", help="Run the models on the GPU.")
     parser.add_argument(
         "--dry-run",
@@ -551,24 +423,15 @@ def main() -> None:
 
     manifest = resolve_manifest(args.manifest, args.bucket, args.work_dir)
     all_items = read_manifest(manifest)
-    source: QueueSource | None = None
-    if args.queue:
-        source = QueueSource(args.queue, {item.item: item for item in all_items})
-        total = work_queue.depth(args.queue).total
-        label = "queue"
-        print(f"queue: {total:,} items waiting", file=sys.stderr, flush=True)
-        pending: Iterator[tuple[int, Item]] = iter(source)
-    else:
-        items = select_shard(all_items, args.shard, args.shards, args.seed)
-        total = len(items)
-        label = f"s{args.shard}"
-        print(
-            f"shard {args.shard}/{args.shards}: {len(items)} items",
-            file=sys.stderr,
-            flush=True,
-        )
-        pending = iter(list(enumerate(items, start=1)))
-    retire = source.retire if source is not None else None
+    items = select_shard(all_items, args.shard, args.shards, args.seed)
+    total = len(items)
+    label = f"s{args.shard}"
+    print(
+        f"shard {args.shard}/{args.shards}: {len(items)} items",
+        file=sys.stderr,
+        flush=True,
+    )
+    pending: Iterator[tuple[int, Item]] = iter(list(enumerate(items, start=1)))
 
     worker = None
     started = time.perf_counter()
@@ -595,7 +458,6 @@ def main() -> None:
             args.bucket,
             args.work_dir,
             fetch=not args.dry_run,
-            retire=retire,
         )
         while True:
             prepared = future.result()
@@ -615,7 +477,6 @@ def main() -> None:
                 args.bucket,
                 args.work_dir,
                 fetch=not args.dry_run,
-                retire=retire,
             )
             if args.dry_run:
                 print(
@@ -633,21 +494,13 @@ def main() -> None:
                 with broken.open("a") as handle:
                     handle.write(f"{work.item.item}\t{error}\n")
                 failed += 1
-                # Leave the lease to lapse: another worker retries, and an item
-                # that keeps failing lands in the dead-letter queue.
-                if source is not None:
-                    source.release(work.item)
                 continue
-            if retire is not None:
-                retire(work.item)
             done += 1
             pages_detected += detected
             pages_predicted += predicted
             elapsed = time.perf_counter() - started
             rate = done / elapsed if elapsed else 0.0
-            if source is not None and done % QUEUE_DEPTH_EVERY == 0:
-                total = work_queue.depth(args.queue).total
-            left = total - index if source is None else total
+            left = total - index
             remaining = left / rate if rate else 0.0
             print(
                 f"{datetime.now(UTC):%H:%M:%S} {label} [{index}/{total}] "
