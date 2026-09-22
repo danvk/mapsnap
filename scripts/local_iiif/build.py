@@ -27,7 +27,6 @@ can open.
 
 import argparse
 import json
-import math
 import re
 import sys
 from pathlib import Path
@@ -65,21 +64,27 @@ def page_key(service_id: str, label: str, annotation_id: str) -> str | None:
     return None
 
 
-def js_round(value: float) -> int:
-    """Round half UP, the way JavaScript's Math.round does.
+def tile_size(dimension: int, factor: int) -> int:
+    """The size a client asks for, for a single tile covering the whole image.
 
-    The viewer derives the size it asks for as `Math.round(region / factor)`,
-    and Python's round() is banker's: 796.5 becomes 796 here and 797 there. A
-    pixel of disagreement is a 404, so the sizes written must be its arithmetic.
+    The Image API's tile region calculation, which the viewer follows exactly:
+
+        tileWidth = floor((imageWidth - regionX + scaleFactor - 1) / scaleFactor)
+
+    With one tile the region starts at 0, so this is ceil(dimension / factor).
+    It is NOT round: 1593 at factor 8 is 200, not 199, and a pixel of
+    disagreement is a 404 -- which is how the first build of this failed.
+
+    https://iiif.io/api/image/3.0/implementation/#3-tile-region-parameter-calculation
     """
-    return math.floor(value + 0.5)
+    return max(1, -(-dimension // factor))
 
 
 def pyramid_sizes(width: int, height: int) -> list[tuple[int, int]]:
     """(width, height) at each scale factor, largest first, stopping at 1 px."""
     sizes: list[tuple[int, int]] = []
     for factor in SCALE_FACTORS:
-        w, h = max(1, js_round(width / factor)), max(1, js_round(height / factor))
+        w, h = tile_size(width, factor), tile_size(height, factor)
         if sizes and (w, h) == sizes[-1]:
             continue
         sizes.append((w, h))

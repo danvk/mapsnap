@@ -30,7 +30,9 @@ Each page is a halving pyramid of whole images — four levels, no grid. The ser
 A level-0 service must therefore declare either `tiles` or support for arbitrary regions, and only the first is true here. Two consequences worth knowing if you change the level maths:
 
 - A tiled client asks for an explicit region (`0,0,1593,1887/797,944/0/default.jpg`) even when that region is the whole image, so those paths exist as symlinks to the `full/` ones.
-- It derives the size as `Math.round(region / factor)`, which rounds half **up**, while Python's `round` is banker's — 796.5 is 797 there and 796 here. `js_round` exists for that pixel, because a pixel of disagreement is a 404.
+- The size is `ceil(dimension / scaleFactor)`, per the Image API's [tile region calculation](https://iiif.io/api/image/3.0/implementation/#3-tile-region-parameter-calculation) — **not** round. 1593 at factor 8 is 200, not 199. The first build of this used round and 404'd on the smallest level of every page.
+
+Take the URLs from `image.getTileImageRequest`, which is what the renderer calls. Reimplementing the arithmetic is how the rounding bug above survived its own validation: the check agreed with the builder and both disagreed with the viewer.
 
 ## Measured on the 20 cached volumes
 
@@ -43,7 +45,12 @@ A level-0 service must therefore declare either `tiles` or support for arbitrary
 | objects | 4 files a page → 1.8 M for the corpus, against 9.5 M for the tiled plan |
 | build | 53 s for 483 pages, single process |
 
-Validated by parsing every output with the libraries the viewer actually uses (`@allmaps/annotation`, `@allmaps/iiif-parser`) and fetching every URL the parser builds: 2,485 URLs across the 20 items, none missing.
+Validated with `app/validate-local-iiif.mjs`, which parses every output with the libraries the viewer uses (`@allmaps/annotation`, `@allmaps/iiif-parser`) and fetches every URL `getTileImageRequest` produces, plus every declared size and `full/max`:
+
+```
+$ cd app && node validate-local-iiif.mjs ~/.cache/mapsnap/local-iiif/annotations/*.json
+  4473 URLs resolve, 0 missing
+```
 
 ## Viewing it
 

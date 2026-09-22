@@ -32,6 +32,12 @@ CACHE_CONTROL = "public, max-age=31536000, immutable"
 class Handler(SimpleHTTPRequestHandler):
     """Static files under /iiif, with the headers a IIIF client needs."""
 
+    # SimpleHTTPRequestHandler answers 1.0 and closes the connection, which a
+    # client that pipelines -- a viewer fetching a volume's tiles, or the
+    # validator -- sees as ECONNRESET partway through. It already sends a
+    # Content-Length on every response, so keep-alive is safe to honour.
+    protocol_version = "HTTP/1.1"
+
     def translate_path(self, path: str) -> str:
         # /iiif/<item>/<page>/... -> <root>/<item>/<page>/...
         cleaned = path.split("?", 1)[0].split("#", 1)[0]
