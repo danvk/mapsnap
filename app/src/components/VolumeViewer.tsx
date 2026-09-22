@@ -50,6 +50,7 @@ import { parseSnapRecords, poseCorners, rankedCandidates } from '../snap';
 import type { SnapRecord } from '../snap';
 import { InfoPanel, type RunArtifacts } from './InfoPanel';
 import { PageList } from './PageList';
+import { VolumeCharts } from './VolumeCharts';
 import { VolumeMap } from './VolumeMap';
 import { panelsUrlFor } from '../iiif/panelsUrl';
 import { passesFilter, type MetricFilter } from '../iiif/metrics';
@@ -833,37 +834,43 @@ export function VolumeViewer() {
             </div>
           )}
         </div>
-        <InfoPanel
-          onOpenDebugView={(files, label) => setDebugView({ files, label })}
-          onOpenSnapView={snapRecord ? () => setSnapOpen(true) : undefined}
-          runArtifacts={runArtifacts}
-          pages={pages}
-          filter={filter}
-          onFilterChange={setFilter}
-          onSelectPage={handleSelectPage}
-          missingCount={missingPages.length}
-          skipped={skipped}
-          annotationName={selection?.file ?? null}
-          selectedPage={selectedPage}
-          selectedMissing={selectedIsMissing}
-          selectedGeorefFiles={
-            selectedPage ? (georefSidecars.get(selectedPage.stem) ?? []) : []
-          }
-          selectedStats={
-            selectedItemIndex === null
-              ? null
-              : (truthStats?.get(selectedItemIndex) ?? null)
-          }
-          selectedNote={
-            selectedPage ? (notes.get(selectedPage.stem) ?? null) : null
-          }
-          hasAdjacency={adjacencyData !== null}
-          compareFooter={compareFooter}
-          oimSlug={selectedVolume?.oimSlug ?? null}
-          keymaps={keymaps}
-          volume={selection?.volume ?? ''}
-          onClose={() => setSelectedStem(null)}
-        />
+        <div className="volume-viewer-sidebar">
+          <InfoPanel
+            onOpenDebugView={(files, label) => setDebugView({ files, label })}
+            onOpenSnapView={snapRecord ? () => setSnapOpen(true) : undefined}
+            runArtifacts={runArtifacts}
+            pages={pages}
+            missingCount={missingPages.length}
+            skipped={skipped}
+            annotationName={selection?.file ?? null}
+            selectedPage={selectedPage}
+            selectedMissing={selectedIsMissing}
+            selectedGeorefFiles={
+              selectedPage ? (georefSidecars.get(selectedPage.stem) ?? []) : []
+            }
+            selectedStats={
+              selectedItemIndex === null
+                ? null
+                : (truthStats?.get(selectedItemIndex) ?? null)
+            }
+            selectedNote={
+              selectedPage ? (notes.get(selectedPage.stem) ?? null) : null
+            }
+            hasAdjacency={adjacencyData !== null}
+            compareFooter={compareFooter}
+            oimSlug={selectedVolume?.oimSlug ?? null}
+            keymaps={keymaps}
+            volume={selection?.volume ?? ''}
+            onClose={() => setSelectedStem(null)}
+          />
+          <VolumeCharts
+            pages={pages}
+            filter={filter}
+            selectedItemIndex={selectedItemIndex}
+            onFilterChange={setFilter}
+            onSelectPage={handleSelectPage}
+          />
+        </div>
       </div>
     </div>
   );

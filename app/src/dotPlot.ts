@@ -66,15 +66,43 @@ export function domainOf(values: number[]): [number, number] {
 }
 
 /**
+ * A fixed permutation of 0..n-1: the order dots are placed in.
+ *
+ * Placing in ascending x gives every dense cluster a visible up-and-right
+ * diagonal -- consecutive values fill rows 0, 1, 2 as x creeps rightward, so
+ * the pile leans. The slope is an artifact of the traversal and says nothing
+ * about the data. Shuffling removes it.
+ *
+ * Derived from the index alone so it is stable: a re-render that reshuffled
+ * would make every dot jump.
+ */
+export function stackOrder(count: number): number[] {
+  const key = (index: number) => {
+    let hash = Math.imul(index ^ 0x9e3779b9, 0x85ebca6b);
+    hash ^= hash >>> 13;
+    return Math.imul(hash, 0xc2b2ae35) >>> 0;
+  };
+  return Array.from({ length: count }, (_unused, index) => index).sort(
+    (a, b) => key(a) - key(b),
+  );
+}
+
+/**
  * Positions for every value, in the order given.
  *
- * A dot goes in the lowest row whose rightmost dot it clears by a diameter, so
- * piles grow upward from the baseline in reading order. The vertical step is
- * then whatever makes the deepest pile fit the height: a diameter when there is
- * room, less when there is not. Squashing rather than dropping dots or growing
- * the chart is deliberate -- these distributions are often near-degenerate (a
- * volume whose every page shares one rotation piles 90-odd dots into a single
- * column), and a solid bar is the honest picture of that.
+ * A dot goes in the lowest row where it clears every dot already there by a
+ * diameter, so piles grow upward from the baseline. Dots are placed in a
+ * shuffled order rather than left to right, which is what keeps a dense cluster
+ * from leaning (see stackOrder); that in turn means a row's occupants are not
+ * sorted, so each candidate row is checked against all of them rather than just
+ * its rightmost.
+ *
+ * The vertical step is then whatever makes the deepest pile fit the height: a
+ * diameter when there is room, less when there is not. Squashing rather than
+ * dropping dots or growing the chart is deliberate -- these distributions are
+ * often near-degenerate (a volume whose every page shares one rotation piles
+ * 90-odd dots into a single column), and a solid bar is the honest picture of
+ * that.
  */
 export function layoutDots(
   values: number[],
@@ -87,20 +115,20 @@ export function layoutDots(
   }
   const domain = domainOf(values);
   const { toX } = scaleFor(domain, width, radius);
-  const order = values
-    .map((value, index) => ({ value, index }))
-    .sort((a, b) => a.value - b.value);
+  const xs = values.map(toX);
 
-  const rightmost: number[] = [];
+  const occupied: number[][] = [];
   const rows = new Array<number>(values.length);
-  for (const { value, index } of order) {
-    const x = toX(value);
-    let row = rightmost.findIndex((right) => x - right >= 2 * radius);
+  for (const index of stackOrder(values.length)) {
+    const x = xs[index] ?? 0;
+    let row = occupied.findIndex((placed) =>
+      placed.every((other) => Math.abs(x - other) >= 2 * radius),
+    );
     if (row === -1) {
-      row = rightmost.length;
-      rightmost.push(x);
+      row = occupied.length;
+      occupied.push([x]);
     } else {
-      rightmost[row] = x;
+      occupied[row]?.push(x);
     }
     rows[index] = row;
   }
@@ -110,9 +138,9 @@ export function layoutDots(
     deepest > 1
       ? Math.min(2 * radius, (height - 2 * radius) / (deepest - 1))
       : 2 * radius;
-  const dots = values.map((value, index) => {
+  const dots = values.map((_value, index) => {
     const row = rows[index] ?? 0;
-    return { x: toX(value), y: height - radius - row * step, row };
+    return { x: xs[index] ?? 0, y: height - radius - row * step, row };
   });
   return { dots, rows: deepest, domain, step };
 }

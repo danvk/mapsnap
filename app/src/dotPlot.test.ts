@@ -1,6 +1,12 @@
 import { describe, expect, it } from 'vitest';
 
-import { domainOf, dotAt, layoutDots, scaleFor } from './dotPlot.ts';
+import {
+  domainOf,
+  dotAt,
+  layoutDots,
+  scaleFor,
+  stackOrder,
+} from './dotPlot.ts';
 
 describe('layoutDots', () => {
   it('puts well-separated values in the bottom row, at their own x', () => {
@@ -19,6 +25,45 @@ describe('layoutDots', () => {
     expect(new Set(layout.dots.map((d) => d.row))).toEqual(new Set([0, 1, 2]));
     // ... and a single pile sits mid-axis rather than at the left edge.
     expect(layout.dots[0]?.x).toBeCloseTo(50, 5);
+  });
+
+  it('does not lean uphill across a dense cluster', () => {
+    // Placing in ascending x gives a cluster a diagonal: row would climb with
+    // value, so row and x would correlate almost perfectly. The shuffle is what
+    // breaks that, and the correlation is how you see it is still broken.
+    const values = Array.from({ length: 120 }, (_unused, i) => 1.4 + i * 0.001);
+    const { dots } = layoutDots(values, 200, 60, 3);
+    const n = dots.length;
+    const meanX = dots.reduce((sum, d) => sum + d.x, 0) / n;
+    const meanRow = dots.reduce((sum, d) => sum + d.row, 0) / n;
+    const cov = dots.reduce(
+      (sum, d) => sum + (d.x - meanX) * (d.row - meanRow),
+      0,
+    );
+    const sdX = Math.sqrt(dots.reduce((sum, d) => sum + (d.x - meanX) ** 2, 0));
+    const sdRow = Math.sqrt(
+      dots.reduce((sum, d) => sum + (d.row - meanRow) ** 2, 0),
+    );
+    expect(Math.abs(cov / (sdX * sdRow))).toBeLessThan(0.3);
+  });
+
+  it('never overlaps two dots in the same row', () => {
+    // Shuffled placement means a row's dots are not sorted, so "clear of the
+    // rightmost" is no longer enough; every occupant has to be checked.
+    const values = Array.from({ length: 80 }, (_unused, i) => Math.sin(i) * 2);
+    const { dots } = layoutDots(values, 200, 60, 3);
+    const byRow = new Map<number, number[]>();
+    for (const dot of dots) {
+      byRow.set(dot.row, [...(byRow.get(dot.row) ?? []), dot.x]);
+    }
+    for (const xs of byRow.values()) {
+      const sorted = [...xs].sort((a, b) => a - b);
+      for (let i = 1; i < sorted.length; i++) {
+        expect((sorted[i] ?? 0) - (sorted[i - 1] ?? 0)).toBeGreaterThanOrEqual(
+          6,
+        );
+      }
+    }
   });
 
   it('keeps the input order, whatever order the values arrive in', () => {
@@ -98,5 +143,24 @@ describe('domainOf', () => {
 
   it('widens a run of zeros too, which has no magnitude to scale from', () => {
     expect(domainOf([0, 0])).toEqual([-0.5, 0.5]);
+  });
+});
+
+describe('stackOrder', () => {
+  it('is a permutation of every index', () => {
+    const order = stackOrder(50);
+    expect([...order].sort((a, b) => a - b)).toEqual(
+      Array.from({ length: 50 }, (_unused, i) => i),
+    );
+  });
+
+  it('is stable, so a re-render does not rearrange the pile', () => {
+    expect(stackOrder(40)).toEqual(stackOrder(40));
+  });
+
+  it('is not the identity, which is the order that causes the lean', () => {
+    expect(stackOrder(50)).not.toEqual(
+      Array.from({ length: 50 }, (_unused, i) => i),
+    );
   });
 });
