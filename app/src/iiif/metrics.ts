@@ -37,11 +37,16 @@ export const METRICS: Metric[] = [
     of: (page) => page.rotationDegrees,
     format: (value) => value.toFixed(1),
     // A sheet turned a quarter turn carries the same street grid, so folding
-    // onto [0, 90) lands it on top of its upright siblings -- Miami's -91.6
-    // degree page joins the -1.8 degree pile at 88. The cost is that a volume
-    // whose rotations straddle zero splits across the wrap, which is why both
-    // axes are offered rather than one replacing the other.
-    fold: { label: '0-90', apply: (deg) => ((deg % 90) + 90) % 90 },
+    // modulo 90 lands it on top of its upright siblings -- Miami's -91.6 degree
+    // page joins the -1.8 degree pile at -1.6. The window is centered on zero
+    // rather than starting there because almost every volume's rotations
+    // straddle zero, and [0, 90) would split that mode across the two ends of
+    // the axis. 45 degrees, where the fold does cut, is as far from any sheet's
+    // intended orientation as a rotation gets.
+    fold: {
+      label: '\u00b145\u00b0',
+      apply: (deg) => ((((deg + 45) % 90) + 90) % 90) - 45,
+    },
   },
 ];
 

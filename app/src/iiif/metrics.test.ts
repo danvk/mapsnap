@@ -40,18 +40,18 @@ describe('passesFilter', () => {
   });
 
   it('reads a folded filter on the folded axis', () => {
-    // 87 to 89 on the folded axis is -3 to -1 raw, which the same numbers read
-    // unfolded would exclude. Dropping `folded` would silently filter the wrong
+    // -2 to -1 folded catches a page at -91.8 raw, which the same numbers read
+    // unfolded would miss. Dropping `folded` would silently filter the wrong
     // pages rather than fail.
     const filter = {
       metric: 'rotation' as const,
       folded: true,
-      range: [87, 89] as [number, number],
+      range: [-2, -1] as [number, number],
     };
     expect(passesFilter(page(3, -1.8), filter)).toBe(true);
     expect(passesFilter(page(3, -91.8), filter)).toBe(true);
-    expect(passesFilter(page(3, 45), filter)).toBe(false);
-    expect(passesFilter(page(3, -1.8), { ...filter, folded: false })).toBe(
+    expect(passesFilter(page(3, 40), filter)).toBe(false);
+    expect(passesFilter(page(3, -91.8), { ...filter, folded: false })).toBe(
       false,
     );
   });
@@ -61,15 +61,24 @@ describe('the rotation fold', () => {
   it('lands a quarter-turned page on its upright siblings', () => {
     // Miami p11 sits at -91.6 degrees and the rest of the volume near -1.8;
     // folded they are the same grid, two tenths of a degree apart.
-    expect(metricValue(rotationMetric, page(3, -1.8), true)).toBeCloseTo(88.2);
-    expect(metricValue(rotationMetric, page(3, -91.6), true)).toBeCloseTo(88.4);
+    expect(metricValue(rotationMetric, page(3, -1.8), true)).toBeCloseTo(-1.8);
+    expect(metricValue(rotationMetric, page(3, -91.6), true)).toBeCloseTo(-1.6);
   });
 
-  it('stays inside [0, 90)', () => {
-    for (const degrees of [-180, -90, -0.001, 0, 89.999, 90, 179.5]) {
+  it('keeps a mode that straddles zero together', () => {
+    // The reason the window is centered rather than [0, 90): these two pages
+    // are eight tenths of a degree apart, and a fold starting at zero would put
+    // them at opposite ends of the axis.
+    const below = metricValue(rotationMetric, page(3, -0.4), true);
+    const above = metricValue(rotationMetric, page(3, 0.4), true);
+    expect(above - below).toBeCloseTo(0.8);
+  });
+
+  it('stays inside [-45, 45)', () => {
+    for (const degrees of [-180, -90, -45, -0.001, 0, 44.999, 45, 179.5]) {
       const folded = metricValue(rotationMetric, page(3, degrees), true);
-      expect(folded).toBeGreaterThanOrEqual(0);
-      expect(folded).toBeLessThan(90);
+      expect(folded).toBeGreaterThanOrEqual(-45);
+      expect(folded).toBeLessThan(45);
     }
   });
 

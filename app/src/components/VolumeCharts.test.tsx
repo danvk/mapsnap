@@ -39,10 +39,10 @@ describe('VolumeCharts', () => {
   });
 
   it('offers the fold only where a metric has one', () => {
-    // Rotation folds onto [0, 90); scale has no period to fold on, so a
+    // Rotation folds onto [-45, 45); scale has no period to fold on, so a
     // checkbox beside it would do nothing.
     expect((render().match(/type="checkbox"/g) ?? []).length).toBe(1);
-    expect(render()).toContain('0-90');
+    expect(render()).toContain('45');
   });
 
   it('starts on the raw axis', () => {
