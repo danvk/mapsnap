@@ -16,7 +16,7 @@
  * ~100 MB at 25% scale and the viewer only ever draws the pages in view.
  */
 
-import { mkdir } from 'fs/promises';
+import { mkdir, open } from 'fs/promises';
 import { join } from 'path';
 import type { Express } from 'express';
 import { HTTPError } from 'crosswalk';
@@ -31,6 +31,7 @@ import {
 import { jpegDimensionsFromBuffer } from './jpegDimensions.ts';
 import { mountIiifImages } from './iiifRoutes.ts';
 import {
+  cachePathOf,
   ensureCached,
   imagePrefixOf,
   parseS3Uri,
@@ -39,8 +40,66 @@ import {
   uriFromCacheRelative,
 } from './s3Objects.ts';
 
-/** Bytes pulled to read a JPEG's start-of-frame marker. */
+/** Bytes that reach a JPEG's start-of-frame marker. */
 const HEAD_BYTES = 128 * 1024;
+
+/** One sheet of an item's `metadata.json`, as the mirror writes it. */
+interface MirrorSheet {
+  key?: string;
+  width?: number;
+  height?: number;
+}
+
+/**
+ * Page sizes from the item's own `metadata.json`, or an empty map.
+ *
+ * The mirror recorded every sheet's scaled width and height when it wrote the
+ * scan, so one object answers the whole volume. Measuring instead costs a
+ * ranged read per page -- 120 of them before the viewer can draw anything --
+ * and produces the same numbers.
+ */
+async function mirrorPageSizes(
+  bucket: string,
+  prefix: string,
+): Promise<Map<string, LocalPageImage>> {
+  const sizes = new Map<string, LocalPageImage>();
+  let sheets: MirrorSheet[];
+  try {
+    const text = await readS3Text({ bucket, key: `${prefix}/metadata.json` });
+    sheets = (JSON.parse(text) as { sheets?: MirrorSheet[] }).sheets ?? [];
+  } catch {
+    // An item mirrored before metadata.json carried sizes, or not mirrored at
+    // all: every page falls through to being measured.
+    return sizes;
+  }
+  for (const sheet of sheets) {
+    if (sheet.key && sheet.width && sheet.height) {
+      sizes.set(sheet.key, { width: sheet.width, height: sheet.height });
+    }
+  }
+  return sizes;
+}
+
+/** A JPEG's dimensions from its first bytes, on disk or in the bucket. */
+async function measurePage(
+  cacheRoot: string,
+  uri: { bucket: string; key: string },
+): Promise<LocalPageImage> {
+  const cached = cachePathOf(cacheRoot, uri);
+  try {
+    // Already fetched: read the head off the disk rather than the network.
+    const handle = await open(cached, 'r');
+    try {
+      const buffer = Buffer.alloc(HEAD_BYTES);
+      const { bytesRead } = await handle.read(buffer, 0, HEAD_BYTES, 0);
+      return jpegDimensionsFromBuffer(buffer.subarray(0, bytesRead));
+    } finally {
+      await handle.close();
+    }
+  } catch {
+    return jpegDimensionsFromBuffer(await readS3Head(uri, HEAD_BYTES));
+  }
+}
 
 /** Mount the on-demand image server for cached mirror scans. */
 export function registerS3IiifImages(app: Express, cacheRoot: string): void {
@@ -54,10 +113,12 @@ export function registerS3IiifImages(app: Express, cacheRoot: string): void {
 /**
  * The rewritten annotation for an object in the mirror.
  *
- * Page sizes come from a ranged read of each scan's first 128 KB, which is
- * enough for the dimensions and avoids pulling a whole volume to draw its
- * first tile. A page whose scan is missing is left to the rewrite to report,
- * exactly as a missing local file is.
+ * Page sizes come from the item's `metadata.json`, which the mirror wrote with
+ * every sheet's scaled dimensions -- one object for the volume rather than a
+ * ranged read per page. Anything it does not name is measured: from the cached
+ * scan when there is one, and only otherwise from the bucket. A page whose scan
+ * is missing entirely is left to the rewrite to report, exactly as a missing
+ * local file is.
  */
 export async function s3Annotation(
   uri: string,
@@ -93,14 +154,22 @@ export async function s3Annotation(
     const parent = derived?.replace(/__\d+$/, '');
     if (parent) wanted.add(parent);
   }
+  const recorded = await mirrorPageSizes(object.bucket, prefix);
   await Promise.all(
     [...wanted].map(async (key) => {
+      const known = recorded.get(key);
+      if (known) {
+        pages.set(key, known);
+        return;
+      }
       try {
-        const head = await readS3Head(
-          { bucket: object.bucket, key: `${prefix}/${key}.jpg` },
-          HEAD_BYTES,
+        pages.set(
+          key,
+          await measurePage(cacheRoot, {
+            bucket: object.bucket,
+            key: `${prefix}/${key}.jpg`,
+          }),
         );
-        pages.set(key, jpegDimensionsFromBuffer(head));
       } catch {
         // No scan for this page in the mirror; the rewrite reports it as
         // missing-image, which is what the viewer already knows how to show.

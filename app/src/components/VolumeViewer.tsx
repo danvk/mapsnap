@@ -771,7 +771,11 @@ export function VolumeViewer() {
             osmRelationWays={osmRelation ? osmRelation.ways : null}
             selectedStem={selectedPage?.stem ?? null}
             initialViewport={initialViewport}
-            fitVolumeKey={volumeName ?? null}
+            // An annotation in the mirror has no data/<volume>/ path to name,
+            // so the object itself is the identity to fit once to. Without
+            // one, null === null skipped the initial fit and the map sat on
+            // its default view until a page was clicked.
+            fitVolumeKey={volumeName ?? selectedPath}
             onViewportChange={(center, zoom) =>
               updateUrl({
                 center: `${center[0].toFixed(5)},${center[1].toFixed(5)}`,
