@@ -116,6 +116,16 @@ export function DotPlot(props: DotPlotProps) {
     setDrag(null);
   };
 
+  // SVG has no z-index: the last circle drawn is the one on top. A selected dot
+  // early in the data would otherwise sit under every translucent dot placed
+  // after it, which in a deep pile hides it almost entirely.
+  const paintOrder = data.map((_datum, index) => index);
+  const selectedIndex = data.findIndex((datum) => datum.id === selectedId);
+  if (selectedIndex >= 0) {
+    paintOrder.splice(selectedIndex, 1);
+    paintOrder.push(selectedIndex);
+  }
+
   const active = drag ?? (range ? [toX(range[0]), toX(range[1])] : null);
   const inRange = (value: number) =>
     !range || (value >= range[0] && value <= range[1]);
@@ -161,9 +171,10 @@ export function DotPlot(props: DotPlotProps) {
             className="dot-plot-brush"
           />
         )}
-        {layout.dots.map((dot, index) => {
+        {paintOrder.map((index) => {
+          const dot = layout.dots[index];
           const datum = data[index];
-          if (!datum) return null;
+          if (!dot || !datum) return null;
           const selected = datum.id === selectedId;
           return (
             <circle

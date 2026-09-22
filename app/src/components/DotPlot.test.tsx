@@ -58,6 +58,23 @@ describe('DotPlot', () => {
     expect(render()).not.toContain('is-selected');
   });
 
+  it('draws the selected dot last, so nothing covers it', () => {
+    // SVG has no z-index. Selecting the first page -- the one that would
+    // otherwise be painted under every dot after it -- has to move it to the
+    // end of the markup, or a deep pile hides it.
+    const html = render({ selectedId: 0 });
+    const selected = html.indexOf('is-selected');
+    const lastPlain = html.lastIndexOf('class="dot-plot-dot"');
+    expect(selected).toBeGreaterThan(lastPlain);
+  });
+
+  it('keeps the selected dot opaque even when a filter excludes it', () => {
+    // is-out would otherwise grey it out and drop it to half opacity, which is
+    // the opposite of standing out.
+    const html = render({ selectedId: 0, range: [5.5, 6.2] });
+    expect(html).toContain('dot-plot-dot is-out is-selected');
+  });
+
   it('renders nothing to click for an empty volume', () => {
     const html = render({ data: [] });
     expect(html).not.toContain('dot-plot-dot');
