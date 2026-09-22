@@ -1,7 +1,7 @@
 # Running the corpus fit on AWS Batch
 
-The replacement for `scripts/loc_craft/{bootstrap,launch,supervise,shards}.sh`
-and the SQS worker loop (#448): the image built from the repo's `Dockerfile`
+How the corpus runs (#448), since the hand-rolled EC2 fleet and its SQS
+worker loop were deleted: the image built from the repo's `Dockerfile`
 runs one item per Batch job, an array job maps over an item list, and Batch
 owns scheduling, retries, spot replacement, logs and completion.
 
@@ -162,7 +162,7 @@ bill on its own.
 
 The second overhead is per-job startup: a one-page item takes 57 s at best and
 113 s typically, nearly all of it container start plus parsing the 3.8 MB
-county manifest. The EC2+SQS worker paid that once and then drained a queue;
+county manifest. The old EC2 worker paid that once and then drained a queue;
 one job per item pays it 35,159 times, about 18% of the corpus bill. The fix
 is to give each Batch child a slice of the list rather than a single line,
 which needs a `loc-fit` change and is worth roughly another $30-40.
@@ -337,7 +337,7 @@ Apple Silicon: EasyOCR's first forward pass dies with
 `qemu: uncaught target signal 4 (Illegal instruction)`, and neither
 `ATEN_CPU_CAPABILITY` nor `DNNL_MAX_CPU_ISA` reaches whichever kernel QEMU
 lacks. That is a property of the emulator, not the image -- the same wheel is
-what `bootstrap.sh` installs on EC2, where it fits whole volumes. To run an
+what the image installs, and on a real x86 box it fits whole volumes. To run an
 item locally, build the arm64 variant of the same Dockerfile (the AWS CLI
 archive is picked by `TARGETARCH`) and it runs natively:
 

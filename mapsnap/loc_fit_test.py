@@ -274,17 +274,6 @@ def test_resolve_counties_downloads_s3_urls_by_basename(
     assert len(calls) == 2  # already downloaded
 
 
-def test_parser_accepts_gpu_as_a_no_op() -> None:
-    """bootstrap.sh passes --gpu to every job on a GPU box; the chain must not choke."""
-    from mapsnap.loc_fit import build_parser
-
-    args = build_parser().parse_args(
-        ["--counties", "a.tsv", "b.tsv", "--gpu", "--queue", "https://q"]
-    )
-    assert args.gpu is True
-    assert args.counties == ["a.tsv", "b.tsv"]
-
-
 def test_upload_keeps_the_run_manifest_but_not_the_rest_of_the_archive() -> None:
     """fit archives a second copy of every sidecar; only its manifest is worth it."""
     import fnmatch
@@ -372,25 +361,15 @@ def test_upload_targets_the_run_directory_and_skips_the_stable_half(
     assert calls[0].index("--include") > calls[0].index(f"artifacts/{ARCHIVE_TAG}/*")
 
 
-def test_resolve_run_tag_takes_the_message_as_the_authority() -> None:
-    """One value, so the S3 prefix and the recorded provenance cannot disagree."""
-    from mapsnap.loc_fit import resolve_run_tag
-
-    assert resolve_run_tag("v1.3", None) == "v1.3"
-    assert resolve_run_tag("v1.3", "v1.3") == "v1.3"
-    assert resolve_run_tag(None, "v1.3") == "v1.3"
-
-
-def test_resolve_run_tag_stops_a_worker_pointed_at_the_wrong_queue() -> None:
-    """A mismatch is a launch error, not something to paper over."""
+def test_resolve_run_tag_requires_a_name_for_the_run() -> None:
+    """Outputs go to <item>/runs/<tag>/, so an unnamed run would scatter."""
     import pytest
 
     from mapsnap.loc_fit import resolve_run_tag
 
-    with pytest.raises(ValueError, match="wrong queue|queue says"):
-        resolve_run_tag("v1.3", "v1.2")
+    assert resolve_run_tag("v1.3") == "v1.3"
     with pytest.raises(ValueError, match="no run tag"):
-        resolve_run_tag(None, None)
+        resolve_run_tag(None)
 
 
 def test_fetch_item_does_not_pull_other_runs(monkeypatch, tmp_path):
@@ -509,11 +488,10 @@ def test_one_item_touches_s3_in_the_right_order(monkeypatch, tmp_path):
 
 
 def test_check_args_validates_without_touching_anything(capsys, monkeypatch) -> None:
-    """A worker's flags must be checkable before a fleet boots on them.
+    """A job's flags must be checkable before an array queues children on them.
 
     The first test-200 launch died because `--counties` is required and the
-    launcher did not pass it: three instances booted, argparse refused, and the
-    queue was never touched. Nothing here may reach AWS.
+    launcher did not pass it. Nothing here may reach AWS.
     """
     import sys
 
@@ -530,8 +508,8 @@ def test_check_args_validates_without_touching_anything(capsys, monkeypatch) -> 
         [
             "mapsnap loc-fit",
             "--check-args",
-            "--queue",
-            "https://sqs.example/q",
+            "--item",
+            "sanborn1",
             "--run-tag",
             "v1.3",
             "--counties",
@@ -552,7 +530,7 @@ def test_check_args_still_requires_the_counties(monkeypatch) -> None:
     from mapsnap import loc_fit
 
     monkeypatch.setattr(
-        sys, "argv", ["mapsnap loc-fit", "--check-args", "--queue", "https://q"]
+        sys, "argv", ["mapsnap loc-fit", "--check-args", "--item", "sanborn1"]
     )
     with pytest.raises(SystemExit) as caught:
         loc_fit.main()
@@ -686,13 +664,12 @@ def test_a_crash_with_no_record_is_still_a_failure(monkeypatch, tmp_path):
         )
 
 
-def test_prepare_next_settles_an_unprocessable_item_and_releases_the_rest(
+def test_prepare_next_counts_unprocessable_and_waiting_apart(
     monkeypatch, tmp_path: Path
 ) -> None:
-    """The half that matters: which queue callback each not-ready item gets.
-    Releasing one the mirror will never hold is what dead-lettered Des Moines
-    1906 -- ten receives, then the DLQ -- while a genuinely transient item must
-    still go back so a later worker can take it."""
+    """An item the mirror will never hold and one merely awaiting craft are
+    counted apart: the first is unprocessable (Des Moines 1906, never mirrored),
+    the second is waiting, and the exit code the chain reports turns on which."""
     from mapsnap import loc_fit
 
     missing = Item("sanborn02629_005", "iowa", "1906")
@@ -703,8 +680,6 @@ def test_prepare_next_settles_an_unprocessable_item_and_releases_the_rest(
     }
     monkeypatch.setattr(loc_fit, "list_prefix", lambda bucket, prefix: listings[prefix])
 
-    retired: list[str] = []
-    released: list[str] = []
     prepared = loc_fit.prepare_next(
         iter(list(enumerate([missing, uncrafted], start=1))),
         "s3://bucket",
@@ -712,11 +687,7 @@ def test_prepare_next_settles_an_unprocessable_item_and_releases_the_rest(
         counties={item.item: County("US01001") for item in (missing, uncrafted)},
         tag_for=lambda item: TAG,
         fetch=False,
-        retire=lambda item: retired.append(item.item),
-        release=lambda item: released.append(item.item),
     )
-    assert retired == [missing.item], "settled, not handed to the next worker"
-    assert released == [uncrafted.item], "the GPU pass will catch up"
     assert prepared.unprocessable == 1 and prepared.waiting == 1
     assert prepared.work is None
 

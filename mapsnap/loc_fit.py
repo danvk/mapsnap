@@ -1,15 +1,15 @@
-"""Run the CPU half of the pipeline over one shard or queue of the mirror (#354).
+"""Run the CPU half of the pipeline over a list of the mirror's items (#354).
 
 ``loc-craft`` leaves every sheet with its CRAFT boxes and its P(road) map, which
 is everything the GPU is needed for. What remains -- split, adjacency, keymap,
 ocr and fit -- is CPU work, and all of it is scoped to the *volume*: the key map
 is confirmed against the volume's page set, adjacency needs every sheet, georef
 needs the volume's reference scale, and reconcile is explicitly one joint
-decision per volume. An LoC item is a volume, so one queue message is one unit
-of work for the whole chain, and running the stages as separate passes would
-only re-download the same item three times.
+decision per volume. An LoC item is a volume, so one Batch array child is one
+unit of work for the whole chain, and running the stages as separate passes
+would only re-download the same item three times.
 
-    mapsnap loc-fit --queue "$QUEUE" --counties items.tsv
+    mapsnap loc-fit --items items.txt --run-tag v1.3 --counties items.tsv
 
 Where the outputs go
 --------------------
@@ -23,11 +23,8 @@ buys a great deal: a pilot cannot collide with the full pass, two runs at the
 same commit can be compared to see how deterministic the chain is, and a bad run
 is one ``aws s3 rm --recursive`` rather than an unpickable mixture.
 
-The tag comes from the queue message, not from this worker's flags, so the
-prefix the outputs land in and the run recorded inside them are the same string.
-Use one queue per run: SQS has no selective receive, so a worker cannot decline
-a message meant for another run, and merely passing one over counts against
-``maxReceiveCount`` until it dead-letters.
+``--run-tag`` names the run: the prefix the outputs land in and the run
+recorded inside them are the same string.
 
 What is uploaded, and what is not
 ---------------------------------
@@ -68,18 +65,16 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
 
-from mapsnap import experiments, work_queue
+from mapsnap import experiments
 from mapsnap.aws_cli import run_aws
 from mapsnap.keymap.records import recorded_keymap_keys
 from mapsnap.loc_craft import (
     Item,
-    QueueSource,
     format_duration,
     item_prefix,
     list_prefix,
     read_manifest,
     resolve_manifest,
-    select_shard,
     sync,
 )
 from mapsnap.utils import list_pages, source_images
@@ -167,7 +162,6 @@ UPLOAD_EXCLUDES = (
 # Applied after the excludes, so it wins: aws s3 sync takes the last matching
 # filter.
 UPLOAD_INCLUDES = (f"artifacts/{ARCHIVE_TAG}/manifest.json",)
-QUEUE_DEPTH_EVERY = 25
 
 
 def run_prefix(bucket: str, item: Item, run_tag: str) -> str:
@@ -175,27 +169,15 @@ def run_prefix(bucket: str, item: Item, run_tag: str) -> str:
     return f"{item_prefix(bucket, item)}/{RUNS_DIRNAME}/{run_tag}"
 
 
-def resolve_run_tag(message_tag: str | None, flag_tag: str | None) -> str:
-    """The run this item belongs to, from exactly one source.
+def resolve_run_tag(flag_tag: str | None) -> str:
+    """The run this pass belongs to, or a refusal.
 
-    The message is the authority: it travels with the work, so the S3 prefix and
-    the provenance recorded inside the outputs cannot name different runs. A
-    ``--run-tag`` on the worker is an assertion against it, not an override --
-    a mismatch means the fleet was pointed at the wrong queue, which is worth
-    stopping for rather than quietly writing into another run's directory.
+    Outputs go to ``<item>/runs/<tag>/`` and the tag is recorded inside them, so
+    a run without a name would scatter into an unpickable mixture.
     """
-    if message_tag and flag_tag and message_tag != flag_tag:
-        raise ValueError(
-            f"queue says run {message_tag!r}, this worker was launched for "
-            f"{flag_tag!r}. Point it at the right queue, or drop --run-tag."
-        )
-    tag = message_tag or flag_tag
-    if not tag:
-        raise ValueError(
-            "no run tag: fill the queue with `work-queue fill --run-tag TAG`, "
-            "or pass --run-tag to this worker."
-        )
-    return tag
+    if not flag_tag:
+        raise ValueError("no run tag: pass --run-tag to name this pass.")
+    return flag_tag
 
 
 @dataclass(frozen=True)
@@ -650,16 +632,8 @@ def prepare_next(
     tag_for: Callable[[Item], str],
     fetch: bool = True,
     ocr_from: str | None = None,
-    retire: Callable[[Item], None] | None = None,
-    release: Callable[[Item], None] | None = None,
 ) -> Prepared:
-    """List forward until an item can run, download it, and return it.
-
-    ``retire`` settles an item that is finished; ``release`` puts back one that
-    is merely not ready yet, so the GPU pass can catch up and a later worker can
-    take it. Getting those two the wrong way round would either lose items or
-    spin on them.
-    """
+    """List forward until an item can run, download it, and return it."""
     skipped = waiting = unprocessable = 0
     failures: list[tuple[str, str]] = []
     for index, item in items:
@@ -668,8 +642,6 @@ def prepare_next(
             work = plan_fit(item, present, counties.get(item.item), tag_for(item))
             if work.done:
                 skipped += 1
-                if retire is not None:
-                    retire(item)
                 continue
             if work.unprocessable:
                 unprocessable += 1
@@ -678,8 +650,6 @@ def prepare_next(
                     file=sys.stderr,
                     flush=True,
                 )
-                if retire is not None:
-                    retire(item)
                 continue
             if not work.ready:
                 waiting += 1
@@ -688,8 +658,6 @@ def prepare_next(
                     file=sys.stderr,
                     flush=True,
                 )
-                if release is not None:
-                    release(item)
                 continue
             local = (
                 fetch_item(work, bucket, work_dir, ocr_from)
@@ -709,15 +677,9 @@ def build_parser() -> argparse.ArgumentParser:
         description="Run split, adjacency, keymap, ocr and fit over the mirror."
     )
     parser.add_argument("--bucket", default="s3://mapsnap-sanborn")
-    parser.add_argument("--shard", type=int, default=0)
-    parser.add_argument("--shards", type=int, default=1)
-    parser.add_argument(
-        "--queue", help="SQS queue URL to take items from, instead of --shard/--shards."
-    )
     parser.add_argument("--manifest")
     # One item per process: the AWS Batch shape (#448), where an array job's
-    # child N runs line N of a list. Exactly one of --item, --items, --queue or
-    # the --shard/--shards partition.
+    # child N runs line N of a list. Exactly one of --item or --items.
     parser.add_argument(
         "--item", metavar="ID", help="Run exactly this item (e.g. sanborn02404_004)."
     )
@@ -753,11 +715,6 @@ def build_parser() -> argparse.ArgumentParser:
         help="items.tsv and city-items.tsv, local paths or s3:// URLs: "
         "the item -> county FIPS mapping.",
     )
-    parser.add_argument(
-        "--gpu",
-        action="store_true",
-        help="Accepted so the fleet bootstrap can pass it; the chain is CPU work.",
-    )
     parser.add_argument("--work-dir", type=Path, default=Path("/tmp/loc-fit"))
     parser.add_argument("--limit", type=int)
     parser.add_argument(
@@ -766,12 +723,7 @@ def build_parser() -> argparse.ArgumentParser:
         help=(
             "Name for this corpus pass -- a cut release, say. Outputs go to "
             "<item>/runs/TAG/ and the tag is recorded in every manifest and "
-            "published annotation page. On a queue whose messages carry a tag "
-            "this is an ASSERTION against them, not an override: a mismatch "
-            "means this worker was pointed at the wrong queue and it stops. "
-            "Use one queue per run -- a worker cannot decline a message it has "
-            "received, and passing one over counts toward maxReceiveCount "
-            f"(default {work_queue.DEFAULT_MAX_RECEIVES}) until it dead-letters."
+            "published annotation page."
         ),
     )
     parser.add_argument(
@@ -790,19 +742,16 @@ def build_parser() -> argparse.ArgumentParser:
         "--check-args",
         action="store_true",
         help=(
-            "Parse the arguments and exit 0. A worker's flags are otherwise "
-            "first checked on the instance, after boot: a missing required one "
-            "then costs a whole fleet and leaves the queue untouched, which is "
-            "how the first test-200 launch died. Let a launcher check here."
+            "Parse the arguments and exit 0, so a submitter can check a job's "
+            "flags before it queues thousands of children against them."
         ),
     )
     return parser
 
 
 # Exit codes of a single-item run, for a scheduler's retry policy to read
-# (Batch's evaluateOnExit). A multi-item run keeps exiting 0: bootstrap.sh
-# writes the shard's done marker on a clean exit, and one bad item in a shard
-# of 1,100 is not a failed shard.
+# (Batch's evaluateOnExit). A chunk of items reports its worst outcome, so one
+# bad item does not mask the rest -- see listed_items_exit_code.
 EXIT_FITTED = 0
 EXIT_FAILED = 1  # the chain raised: retry once, then give up
 EXIT_USAGE = 2
@@ -971,8 +920,8 @@ def peak_stage_rss_mb() -> float:
 def main() -> None:
     args = build_parser().parse_args()
     if args.check_args:
-        # Nothing is fetched and no queue is touched: reaching here is the
-        # whole answer, because argparse has already rejected what is invalid.
+        # Nothing is fetched and nothing is listed: reaching here is the whole
+        # answer, because argparse has already rejected what is invalid.
         print("loc-fit arguments OK")
         return
 
@@ -981,42 +930,28 @@ def main() -> None:
     counties = read_counties(resolve_counties(args.counties, args.work_dir))
     print(f"{len(counties):,} items mapped to a county extract", file=sys.stderr)
 
-    source: QueueSource | None = None
-    if sum(bool(x) for x in (args.item, args.items, args.queue)) > 1:
-        sys.exit("--item, --items and --queue are mutually exclusive.")
-    listed: list[Item] | None = None
+    if args.item and args.items:
+        sys.exit("--item and --items are mutually exclusive.")
     if args.item:
         listed = [select_item(all_items, args.item)]
     elif args.items:
         listed = items_from_list(
             all_items, args.items, args.item_index, args.work_dir, args.items_per_job
         )
-    if listed is not None:
-        total = len(listed)
-        label = listed[0].item if total == 1 else f"{listed[0].item}+{total - 1}"
-        pending: Iterator[tuple[int, Item]] = iter(list(enumerate(listed, start=1)))
-    elif args.queue:
-        source = QueueSource(args.queue, {item.item: item for item in all_items})
-        total = work_queue.depth(args.queue).total
-        label = "queue"
-        pending = iter(source)
     else:
-        items = select_shard(all_items, args.shard, args.shards)
-        total = len(items)
-        label = f"s{args.shard}"
-        pending = iter(list(enumerate(items, start=1)))
+        sys.exit("pass --item or --items to name the work.")
+    total = len(listed)
+    label = listed[0].item if total == 1 else f"{listed[0].item}+{total - 1}"
+    pending: Iterator[tuple[int, Item]] = iter(list(enumerate(listed, start=1)))
     print(f"{label}: {total:,} items", file=sys.stderr, flush=True)
-    retire = source.retire if source is not None else None
-    release = source.release if source is not None else None
 
     def tag_for(item: Item) -> str:
-        message_tag = source.tag_for(item) if source is not None else None
-        return resolve_run_tag(message_tag, args.run_tag)
+        return resolve_run_tag(args.run_tag)
 
     started = time.perf_counter()
     done = skipped = waiting = failed = pages = 0
     unprocessable = 0
-    broken = args.work_dir / f"broken-{args.shard}.log"
+    broken = args.work_dir / "broken.log"
 
     def record(prepared: Prepared) -> None:
         nonlocal skipped, waiting, unprocessable, failed
@@ -1039,8 +974,6 @@ def main() -> None:
             tag_for=tag_for,
             fetch=not args.dry_run,
             ocr_from=args.ocr_from,
-            retire=retire,
-            release=release,
         )
         while True:
             prepared = future.result()
@@ -1060,8 +993,6 @@ def main() -> None:
                 tag_for=tag_for,
                 fetch=not args.dry_run,
                 ocr_from=args.ocr_from,
-                retire=retire,
-                release=release,
             )
             if args.dry_run:
                 print(
@@ -1070,26 +1001,17 @@ def main() -> None:
                 done += 1
                 continue
             try:
-                with work_queue.lease(
-                    args.queue, source.handle_for(work.item) if source else None
-                ):
-                    pages += process_item(work, local, args.bucket)
+                pages += process_item(work, local, args.bucket)
             except OSError as error:
                 print(f"{work.item.item}: FAILED: {error}", file=sys.stderr, flush=True)
                 with broken.open("a") as handle:
                     handle.write(f"{work.item.item}\t{error}\n")
                 failed += 1
-                if source is not None:
-                    source.release(work.item)
                 continue
-            if retire is not None:
-                retire(work.item)
             done += 1
-            if source is not None and done % QUEUE_DEPTH_EVERY == 0:
-                total = work_queue.depth(args.queue).total
             elapsed = time.perf_counter() - started
             rate = done / elapsed if elapsed else 0.0
-            left = total - index if source is None else total
+            left = total - index
             print(
                 f"{datetime.now(UTC):%H:%M:%S} {label} [{index}/{total}] "
                 f"{work.item.item}: {len(work.pages)} pages"
@@ -1106,16 +1028,15 @@ def main() -> None:
         f"peak stage RSS {peak_stage_rss_mb():.0f} MB",
         flush=True,
     )
-    if listed is not None:
-        sys.exit(
-            listed_items_exit_code(
-                done=done,
-                skipped=skipped,
-                unprocessable=unprocessable,
-                waiting=waiting,
-                failed=failed,
-            )
+    sys.exit(
+        listed_items_exit_code(
+            done=done,
+            skipped=skipped,
+            unprocessable=unprocessable,
+            waiting=waiting,
+            failed=failed,
         )
+    )
 
 
 if __name__ == "__main__":
