@@ -222,3 +222,8 @@ backup-data
 .claude/settings.local.json
 models/*.pth
 instances*.tsv
+
+# The atlas app's place index: 9 MB generated from the LoC catalogue and the
+# mirror's mapping TSV, neither of which lives here. Build it with
+# scripts/atlas/build_places.py; the app says so when it is missing.
+app/public/atlas/

@@ -1,0 +1,263 @@
+/* The atlas: a full-bleed map with a bar above it and a panel over its right. */
+
+:root {
+  --atlas-border: #d4d4d8;
+  --atlas-muted: #6b7280;
+  --atlas-accent: #2563eb;
+}
+
+body {
+  margin: 0;
+  font-family:
+    system-ui,
+    -apple-system,
+    sans-serif;
+}
+
+.atlas {
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+}
+
+.atlas-bar {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--atlas-border);
+  flex-shrink: 0;
+}
+
+.atlas-title {
+  font-size: 15px;
+  font-weight: 600;
+}
+
+.atlas-bar-note,
+.atlas-size-by {
+  color: var(--atlas-muted);
+  font-size: 12px;
+}
+
+.atlas-size-by select {
+  margin-left: 6px;
+  font-size: 12px;
+}
+
+.atlas-body {
+  flex: 1;
+  position: relative;
+  min-height: 0;
+}
+
+.atlas-map {
+  position: absolute;
+  inset: 0;
+}
+
+/* Type-ahead ------------------------------------------------------------- */
+
+.place-search {
+  position: relative;
+  width: 260px;
+}
+
+.place-search input {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 5px 8px;
+  border: 1px solid var(--atlas-border);
+  border-radius: 6px;
+  font-size: 13px;
+}
+
+.place-search-results {
+  position: absolute;
+  z-index: 10;
+  top: 100%;
+  left: 0;
+  right: 0;
+  margin: 2px 0 0;
+  padding: 0;
+  list-style: none;
+  background: #fff;
+  border: 1px solid var(--atlas-border);
+  border-radius: 6px;
+  box-shadow: 0 6px 20px rgb(0 0 0 / 12%);
+  overflow: hidden;
+}
+
+.place-search-results button {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 8px;
+  width: 100%;
+  padding: 6px 8px;
+  border: none;
+  background: none;
+  cursor: pointer;
+  font-size: 13px;
+  text-align: left;
+}
+
+.place-search-results button.is-active {
+  background: #eff6ff;
+}
+
+.place-search-meta {
+  color: var(--atlas-muted);
+  font-size: 11px;
+  white-space: nowrap;
+}
+
+/* The town panel --------------------------------------------------------- */
+
+.atlas-panel {
+  position: absolute;
+  top: 10px;
+  right: 10px;
+  bottom: 10px;
+  width: 260px;
+  overflow-y: auto;
+  padding: 10px 12px;
+  background: #fff;
+  border: 1px solid var(--atlas-border);
+  border-radius: 8px;
+  box-shadow: 0 6px 20px rgb(0 0 0 / 12%);
+  font-size: 13px;
+}
+
+.atlas-panel-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  font-size: 16px;
+}
+
+.atlas-panel-header button {
+  border: none;
+  background: none;
+  cursor: pointer;
+  font-size: 18px;
+  line-height: 1;
+  color: var(--atlas-muted);
+}
+
+.atlas-panel-sub,
+.atlas-note {
+  color: var(--atlas-muted);
+  font-size: 12px;
+}
+
+.atlas-section-label {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 8px;
+  margin: 14px 0 6px;
+  padding-top: 8px;
+  border-top: 1px solid #eee;
+  font-weight: 600;
+}
+
+.atlas-section-note {
+  color: var(--atlas-muted);
+  font-size: 11px;
+  font-weight: 400;
+  text-align: right;
+}
+
+/* Years ------------------------------------------------------------------ */
+
+.atlas-years {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.atlas-year {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 3px;
+  padding: 3px 7px;
+  border: 1px solid var(--atlas-border);
+  border-radius: 999px;
+  background: #fff;
+  cursor: pointer;
+  font-size: 12px;
+}
+
+.atlas-year.is-current {
+  background: var(--atlas-accent);
+  border-color: var(--atlas-accent);
+  color: #fff;
+}
+
+/* A year the mirror never took: still offered, since it is part of what the
+   town has, but it will draw nothing. */
+.atlas-year.is-empty {
+  color: #9ca3af;
+  border-style: dashed;
+}
+
+.atlas-year.is-empty.is-current {
+  color: #e5e7eb;
+}
+
+.atlas-year-count {
+  font-size: 10px;
+  opacity: 0.75;
+}
+
+/* Volumes and the selected sheet ----------------------------------------- */
+
+.atlas-volumes {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.atlas-volumes li {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 2px 0;
+  font-size: 12px;
+}
+
+.atlas-volume-item {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 11px;
+}
+
+.atlas-volume-status {
+  color: var(--atlas-muted);
+  white-space: nowrap;
+}
+
+.atlas-volume-status.is-gap {
+  color: #b45309;
+}
+
+.atlas-page {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 3px 10px;
+  margin: 0 0 8px;
+}
+
+.atlas-page dt {
+  color: var(--atlas-muted);
+}
+
+.atlas-page dd {
+  margin: 0;
+  text-align: right;
+}
+
+.atlas-link {
+  color: var(--atlas-accent);
+  font-size: 12px;
+}
