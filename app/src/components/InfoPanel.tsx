@@ -3,6 +3,8 @@ import type { KeymapInfo } from '../../server/api';
 import type { SkippedItem } from '../../server/iiifAnnotations';
 import type { PageCompareStats } from '../iiif/compare';
 import { hasFootprint, type PageGeo } from '../iiif/pages';
+import { DotPlot } from './DotPlot';
+import { METRICS, type MetricFilter } from '../iiif/metrics';
 
 /**
  * One page view, offered both inline and as a standalone tab.
@@ -54,6 +56,11 @@ export interface RunArtifacts {
 interface InfoPanelProps {
   /** All pages in the loaded annotation, or [] before one is loaded. */
   pages: PageGeo[];
+  /** The metric filter the summary charts drive, and its setter. */
+  filter: MetricFilter | null;
+  onFilterChange: (filter: MetricFilter | null) => void;
+  /** Selecting a page from a chart, same handler the page list uses. */
+  onSelectPage: (itemIndex: number | null) => void;
   /** How many truth pages the run never georeferenced, for the volume summary. */
   missingCount: number;
   /** Items the server dropped while rewriting the annotation. */
@@ -208,9 +215,53 @@ function DistortionRows({ page }: { page: PageGeo }) {
   );
 }
 
+/**
+ * The volume's metric charts, shown whether or not a page is selected.
+ *
+ * They always plot every page, never the filtered subset: a chart that hid the
+ * dots its own brush excluded could not be widened again. The selected page is
+ * marked in each, so clicking through outliers shows where each one sits in the
+ * distribution.
+ */
+function VolumeCharts(props: {
+  pages: PageGeo[];
+  filter: MetricFilter | null;
+  selectedId: number | null;
+  onFilterChange: (filter: MetricFilter | null) => void;
+  onSelectPage: (itemIndex: number | null) => void;
+}) {
+  const { pages, filter, selectedId, onFilterChange, onSelectPage } = props;
+  // One dot is not a distribution, and the axis would have no range to label.
+  if (pages.length < 2) return null;
+  return (
+    <div className="page-info-charts">
+      {METRICS.map((metric) => (
+        <DotPlot
+          key={metric.key}
+          label={metric.label}
+          data={pages.map((page) => ({
+            id: page.itemIndex,
+            value: metric.of(page),
+          }))}
+          format={metric.format}
+          selectedId={selectedId}
+          range={filter?.metric === metric.key ? filter.range : null}
+          onSelect={onSelectPage}
+          onRangeChange={(range) =>
+            onFilterChange(range ? { metric: metric.key, range } : null)
+          }
+        />
+      ))}
+    </div>
+  );
+}
+
 export function InfoPanel(props: InfoPanelProps) {
   const {
     pages,
+    filter,
+    onFilterChange,
+    onSelectPage,
     missingCount,
     skipped,
     annotationName,
@@ -365,6 +416,13 @@ export function InfoPanel(props: InfoPanelProps) {
             </button>
           )}
         </div>
+        <VolumeCharts
+          pages={pages}
+          filter={filter}
+          selectedId={selectedPage.itemIndex}
+          onFilterChange={onFilterChange}
+          onSelectPage={onSelectPage}
+        />
       </div>
     );
   }
@@ -411,6 +469,13 @@ export function InfoPanel(props: InfoPanelProps) {
           {median(pages.map((p) => p.scalePixelsPerFoot)).toFixed(2)} px/ft
         </dd>
       </dl>
+      <VolumeCharts
+        pages={pages}
+        filter={filter}
+        selectedId={null}
+        onFilterChange={onFilterChange}
+        onSelectPage={onSelectPage}
+      />
       {oimSlug && (
         <div className="page-info-keymaps">
           Truth source:{' '}
