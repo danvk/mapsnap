@@ -3,7 +3,7 @@ import { tmpdir } from 'os';
 import { join } from 'path';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-const readS3Text = vi.fn();
+const readCachedS3Text = vi.fn();
 const readS3Head = vi.fn();
 
 vi.mock('./s3Objects.ts', async () => {
@@ -11,7 +11,7 @@ vi.mock('./s3Objects.ts', async () => {
     await vi.importActual<typeof import('./s3Objects.ts')>('./s3Objects.ts');
   return {
     ...actual,
-    readS3Text: (...args: unknown[]) => readS3Text(...args),
+    readCachedS3Text: (...args: unknown[]) => readCachedS3Text(...args),
     readS3Head: (...args: unknown[]) => readS3Head(...args),
     ensureCached: vi.fn(),
   };
@@ -84,14 +84,15 @@ describe('s3Annotation', () => {
 
   beforeEach(async () => {
     cacheRoot = await mkdtemp(join(tmpdir(), 'mapsnap-s3-test-'));
-    readS3Text.mockReset();
+    readCachedS3Text.mockReset();
     readS3Head.mockReset();
     readS3Head.mockRejectedValue(new Error('no ranged read expected'));
   });
 
   it('takes page sizes from metadata.json without reading any scan', async () => {
-    readS3Text.mockImplementation(async ({ key }: { key: string }) =>
-      key.endsWith('metadata.json') ? metadataJson() : annotationJson(),
+    readCachedS3Text.mockImplementation(
+      async (_root: string, { key }: { key: string }) =>
+        key.endsWith('metadata.json') ? metadataJson() : annotationJson(),
     );
 
     const { annotation } = await s3Annotation(
@@ -102,7 +103,7 @@ describe('s3Annotation', () => {
 
     expect(readS3Head).not.toHaveBeenCalled();
     // One object for the whole volume: the annotation, then the metadata.
-    expect(readS3Text).toHaveBeenCalledTimes(2);
+    expect(readCachedS3Text).toHaveBeenCalledTimes(2);
     const service = annotation.items[0]?.target?.source;
     expect(service?.width).toBe(1627);
     expect(service?.height).toBe(1920);
@@ -111,10 +112,11 @@ describe('s3Annotation', () => {
 
   it('measures a cached scan rather than fetching it again', async () => {
     // metadata.json without this sheet: the page has to be measured.
-    readS3Text.mockImplementation(async ({ key }: { key: string }) =>
-      key.endsWith('metadata.json')
-        ? JSON.stringify({ sheets: [{ key: 'p20', width: 1, height: 1 }] })
-        : annotationJson(),
+    readCachedS3Text.mockImplementation(
+      async (_root: string, { key }: { key: string }) =>
+        key.endsWith('metadata.json')
+          ? JSON.stringify({ sheets: [{ key: 'p20', width: 1, height: 1 }] })
+          : annotationJson(),
     );
     // A 20x10 JPEG, already in the cache.
     const jpeg = Buffer.from([
@@ -140,8 +142,9 @@ describe('s3Annotation', () => {
   });
 
   it('falls back to a ranged read when neither knows the size', async () => {
-    readS3Text.mockImplementation(async ({ key }: { key: string }) =>
-      key.endsWith('metadata.json') ? '{}' : annotationJson(),
+    readCachedS3Text.mockImplementation(
+      async (_root: string, { key }: { key: string }) =>
+        key.endsWith('metadata.json') ? '{}' : annotationJson(),
     );
     readS3Head.mockResolvedValue(
       Buffer.from([
@@ -160,10 +163,12 @@ describe('s3Annotation', () => {
   });
 
   it('survives an item whose metadata.json is missing', async () => {
-    readS3Text.mockImplementation(async ({ key }: { key: string }) => {
-      if (key.endsWith('metadata.json')) throw new Error('NoSuchKey');
-      return annotationJson();
-    });
+    readCachedS3Text.mockImplementation(
+      async (_root: string, { key }: { key: string }) => {
+        if (key.endsWith('metadata.json')) throw new Error('NoSuchKey');
+        return annotationJson();
+      },
+    );
     readS3Head.mockRejectedValue(new Error('NoSuchKey'));
 
     const { annotation, skipped } = await s3Annotation(

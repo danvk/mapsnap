@@ -35,8 +35,8 @@ import {
   ensureCached,
   imagePrefixOf,
   parseS3Uri,
+  readCachedS3Text,
   readS3Head,
-  readS3Text,
   uriFromCacheRelative,
 } from './s3Objects.ts';
 
@@ -59,13 +59,17 @@ interface MirrorSheet {
  * and produces the same numbers.
  */
 async function mirrorPageSizes(
+  cacheRoot: string,
   bucket: string,
   prefix: string,
 ): Promise<Map<string, LocalPageImage>> {
   const sizes = new Map<string, LocalPageImage>();
   let sheets: MirrorSheet[];
   try {
-    const text = await readS3Text({ bucket, key: `${prefix}/metadata.json` });
+    const text = await readCachedS3Text(cacheRoot, {
+      bucket,
+      key: `${prefix}/metadata.json`,
+    });
     sheets = (JSON.parse(text) as { sheets?: MirrorSheet[] }).sheets ?? [];
   } catch {
     // An item mirrored before metadata.json carried sizes, or not mirrored at
@@ -131,7 +135,9 @@ export async function s3Annotation(
   }
   let page: GeorefAnnotationPage;
   try {
-    page = JSON.parse(await readS3Text(object)) as GeorefAnnotationPage;
+    page = JSON.parse(
+      await readCachedS3Text(cacheRoot, object),
+    ) as GeorefAnnotationPage;
   } catch (error) {
     throw new HTTPError(404, `could not read ${uri}: ${String(error)}`);
   }
@@ -154,7 +160,7 @@ export async function s3Annotation(
     const parent = derived?.replace(/__\d+$/, '');
     if (parent) wanted.add(parent);
   }
-  const recorded = await mirrorPageSizes(object.bucket, prefix);
+  const recorded = await mirrorPageSizes(cacheRoot, object.bucket, prefix);
   await Promise.all(
     [...wanted].map(async (key) => {
       const known = recorded.get(key);

@@ -14,7 +14,7 @@
  */
 
 import { execFile } from 'child_process';
-import { mkdir, rename, stat } from 'fs/promises';
+import { mkdir, readFile, rename, stat } from 'fs/promises';
 import { dirname, join } from 'path';
 import { promisify } from 'util';
 
@@ -110,17 +110,6 @@ async function aws(args: string[], encoding: 'utf8' | 'buffer' = 'utf8') {
   }
 }
 
-/** An object's contents as text. Throws with the CLI's own message. */
-export async function readS3Text(uri: S3Uri): Promise<string> {
-  const { stdout } = await aws([
-    's3',
-    'cp',
-    `s3://${uri.bucket}/${uri.key}`,
-    '-',
-  ]);
-  return String(stdout);
-}
-
 /**
  * The first `bytes` of an object.
  *
@@ -172,4 +161,20 @@ export async function ensureCached(root: string, uri: S3Uri): Promise<string> {
   await aws(['s3', 'cp', `s3://${uri.bucket}/${uri.key}`, temporary]);
   await rename(temporary, destination);
   return destination;
+}
+/**
+ * An object's contents as text, cached on disk like the scans are.
+ *
+ * Both objects the viewer reads per volume -- a run's AnnotationPage and the
+ * item's metadata.json -- are written once and not rewritten afterwards, so
+ * re-fetching them on every page load buys nothing but latency. A run
+ * republished under the same tag is the one case that goes stale; delete the
+ * cache directory (MAPSNAP_S3_CACHE, ~/.cache/mapsnap/s3 by default) to
+ * refetch.
+ */
+export async function readCachedS3Text(
+  root: string,
+  uri: S3Uri,
+): Promise<string> {
+  return readFile(await ensureCached(root, uri), 'utf8');
 }
