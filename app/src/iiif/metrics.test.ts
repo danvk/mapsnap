@@ -86,6 +86,14 @@ describe('the rotation fold', () => {
     expect(metricValue(rotationMetric, page(3, -91.6), false)).toBe(-91.6);
   });
 
+  it('marks upright on the rotation axis, and nothing on scale', () => {
+    // Which side of upright a page leans is the thing to read off a rotation
+    // chart; no Sanborn scale is anywhere near zero, so a zero there would only
+    // ever fall off the end of the axis.
+    expect(rotationMetric.origin).toBe(0);
+    expect(METRICS[0]?.origin).toBeUndefined();
+  });
+
   it('offers no fold for scale, which has no period to fold on', () => {
     expect(METRICS[0]?.fold).toBeUndefined();
     expect(metricValue(METRICS[0]!, page(0.74, 0), true)).toBe(0.74);

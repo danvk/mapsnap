@@ -68,6 +68,7 @@ export function VolumeCharts(props: VolumeChartsProps) {
               format={metric.format}
               selectedId={selectedItemIndex}
               range={filter?.metric === metric.key ? filter.range : null}
+              origin={metric.origin}
               onSelect={onSelectPage}
               onRangeChange={(range) =>
                 onFilterChange(

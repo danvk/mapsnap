@@ -22,6 +22,13 @@ export interface Metric {
   of: (page: PageGeo) => number;
   format: (value: number) => string;
   fold?: MetricFold;
+  /**
+   * A value worth marking on the axis wherever it falls inside the data's
+   * range. Only for metrics with a meaningful zero: which side of upright a
+   * page leans is the thing to see in a rotation, and the axis ends alone do
+   * not say where upright is.
+   */
+  origin?: number;
 }
 
 export const METRICS: Metric[] = [
@@ -47,6 +54,8 @@ export const METRICS: Metric[] = [
       label: '\u00b145\u00b0',
       apply: (deg) => ((((deg + 45) % 90) + 90) % 90) - 45,
     },
+    // Upright. Survives the fold, which keeps zero at zero.
+    origin: 0,
   },
 ];
 

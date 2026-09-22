@@ -28,6 +28,8 @@ interface DotPlotProps {
   selectedId: number | null;
   /** The filter this chart owns, in value units, or null for none. */
   range: [number, number] | null;
+  /** A value to mark on the axis when it falls inside the data's range. */
+  origin?: number;
   onSelect: (id: number | null) => void;
   onRangeChange: (range: [number, number] | null) => void;
   width?: number;
@@ -41,6 +43,8 @@ const AXIS_HEIGHT = 14;
 // A press that moves less than this is a click, not a drag. Small enough that
 // a deliberate narrow brush still works, large enough to absorb a shaky click.
 const DRAG_SLOP_PX = 3;
+// How far the little vertical marks hang below the axis line.
+const TICK_PX = 3;
 
 /** Which side to hang a label off, so it stays inside the chart at the edges. */
 function edgeAnchor(x: number, width: number): 'start' | 'middle' | 'end' {
@@ -56,6 +60,7 @@ export function DotPlot(props: DotPlotProps) {
     format,
     selectedId,
     range,
+    origin,
     onSelect,
     onRangeChange,
     width = 176,
@@ -126,6 +131,18 @@ export function DotPlot(props: DotPlotProps) {
     paintOrder.push(selectedIndex);
   }
 
+  // Strictly inside: an origin sitting on an end is already marked by that
+  // end's own tick, and labelled by it too.
+  const originInRange = origin !== undefined && origin > low && origin < high;
+  const originX = originInRange ? toX(origin) : null;
+  // Three labels do not fit a 176px axis when the middle one crowds an end, and
+  // an origin that close to an end reads nearly the same as it anyway. The tick
+  // stays either way -- it is the part that says where the value falls.
+  const originLabelFits =
+    originX !== null &&
+    originX > 3 * LABEL_HALF_PX &&
+    originX < width - 3 * LABEL_HALF_PX;
+
   const active = drag ?? (range ? [toX(range[0]), toX(range[1])] : null);
   const inRange = (value: number) =>
     !range || (value >= range[0] && value <= range[1]);
@@ -162,6 +179,35 @@ export function DotPlot(props: DotPlotProps) {
           y2={height + 0.5}
           className="dot-plot-axis"
         />
+        {data.length > 0 && (
+          <>
+            {/* End ticks anchor the two range labels to the points they name;
+                without them a label floats under the axis naming nothing. */}
+            <line
+              x1={0.5}
+              y1={height}
+              x2={0.5}
+              y2={height + TICK_PX}
+              className="dot-plot-axis"
+            />
+            <line
+              x1={width - 0.5}
+              y1={height}
+              x2={width - 0.5}
+              y2={height + TICK_PX}
+              className="dot-plot-axis"
+            />
+            {originX !== null && (
+              <line
+                x1={originX}
+                y1={height}
+                x2={originX}
+                y2={height + TICK_PX}
+                className="dot-plot-axis"
+              />
+            )}
+          </>
+        )}
         {active && (
           <rect
             x={Math.min(active[0], active[1])}
@@ -207,6 +253,16 @@ export function DotPlot(props: DotPlotProps) {
             >
               {format(high)}
             </text>
+            {originLabelFits && originX !== null && (
+              <text
+                x={originX}
+                y={height + AXIS_HEIGHT - 2}
+                textAnchor="middle"
+                className="dot-plot-tick"
+              >
+                {format(origin ?? 0)}
+              </text>
+            )}
             {range && (
               <>
                 {/* A brush at either extreme puts its label half outside the

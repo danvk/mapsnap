@@ -81,6 +81,51 @@ describe('DotPlot', () => {
   });
 });
 
+describe('axis ticks', () => {
+  // Two end ticks, and a third only when an origin lands inside the range.
+  const ticks = (html: string) =>
+    (html.match(/<line[^>]*class="dot-plot-axis"/g) ?? []).length;
+
+  it('anchors each end label with a tick', () => {
+    // One axis line plus two end ticks.
+    expect(ticks(render())).toBe(3);
+  });
+
+  it('marks an origin inside the range', () => {
+    const spread = [-4, -1, 0.5, 3, 9].map((value, id) => ({ id, value }));
+    const html = render({
+      data: spread,
+      origin: 0,
+      format: (v) => v.toFixed(1),
+    });
+    expect(ticks(html)).toBe(4);
+    expect(html).toContain('>0.0</text>');
+  });
+
+  it('leaves the axis alone when the origin is outside the range', () => {
+    // Every Sanborn scale is well above zero, which is why scale declares no
+    // origin; a chart given one out of range must not draw a tick off the end.
+    expect(ticks(render({ origin: 0 }))).toBe(3);
+  });
+
+  it('draws no ticks for an empty volume', () => {
+    expect(ticks(render({ data: [] }))).toBe(1);
+  });
+
+  it('keeps the origin tick but drops its label when it crowds an end', () => {
+    // -0.2 to 40: zero sits a few pixels from the left label, which already
+    // says -0.2. The tick still shows where upright is.
+    const lopsided = [-0.2, 10, 20, 40].map((value, id) => ({ id, value }));
+    const html = render({
+      data: lopsided,
+      origin: 0,
+      format: (v) => v.toFixed(1),
+    });
+    expect(ticks(html)).toBe(4);
+    expect(html).not.toContain('>0.0</text>');
+  });
+});
+
 describe('brush labels at the edges', () => {
   it('hangs a label inward rather than off the chart', () => {
     // A brush covering the whole range puts both labels on the boundary.
