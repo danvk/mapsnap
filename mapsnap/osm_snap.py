@@ -67,6 +67,18 @@ MAX_SCALE_FOLDS = 1.6
 # hold, so the same volume behaves differently on a 7500 MB job and a 16 GB
 # one -- and what is wrong here is the scale, not the hardware.
 MAX_PAGE_EXTENT_M = 6_000.0
+# The largest keymap search radius believable for any volume, in metres.
+#
+# The same failure as MAX_PAGE_EXTENT_M, reached through the key map instead
+# of the scale. The locator's radius is twice the median page-to-page spacing
+# measured on the georeferenced key map, so a key map placed at a wildly wrong
+# scale reports a continental radius -- and snap_page frames every search by
+# that radius. The corpus-v1 mop-up lost two items this way: radii of about
+# 176 km (sanborn00682_003, a 120 GiB raster) and 3,200 km (sanborn00226_003,
+# 38 TiB). Over the 20 truth volumes the locator radius runs 261-684 m and the
+# calibrated radius 150-583 m, so 2 km is three times the largest real value
+# and still two orders of magnitude below the smaller failure.
+MAX_SEARCH_RADIUS_M = 2_000.0
 OSM_WIDTH_M = 12.0  # stroked corridor width for the OSM "P(road)" analog
 REFINE_SHIFT_MAX_M = 30.0  # chamfer refinement may not slide farther than this
 # Hard containment gate: only egregious slides fail it. Schematic keymap
@@ -389,6 +401,17 @@ def page_extent_is_plausible(diag_m: float) -> bool:
     cannot be believed is not worth scoring. See MAX_PAGE_EXTENT_M.
     """
     return diag_m <= MAX_PAGE_EXTENT_M
+
+
+def search_radius_is_plausible(radius_m: float) -> bool:
+    """Whether a keymap search radius could come from a correctly placed key map.
+
+    Past the ceiling it is the key map's georeference that is wrong, which
+    moves its search centers as far as it inflates the radius; clamping the
+    radius would only make a search around the wrong places cheaper. See
+    MAX_SEARCH_RADIUS_M.
+    """
+    return radius_m <= MAX_SEARCH_RADIUS_M
 
 
 def frame_around(
@@ -1054,6 +1077,13 @@ def snap_page(
         # container down the moment snap started its first page.
         print(
             f"  skipping snap: a {page_diag_m / 1000:.1f} km page is not a sheet",
+            file=sys.stderr,
+        )
+        return []
+    if not search_radius_is_plausible(ctx.radius_m):
+        print(
+            f"  skipping snap: a {ctx.radius_m / 1000:.1f} km search radius"
+            " means the key map is misplaced",
             file=sys.stderr,
         )
         return []

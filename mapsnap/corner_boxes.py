@@ -383,10 +383,18 @@ def panels_with_boxes(boxes: list[Polygon], h: int, w: int) -> list[Polygon]:
     The remainder comes first. A remainder that is not one solid polygon (boxes
     that meet and sever it, or leave a hole) means the boxes do not describe a
     real layout, and no panels are returned.
+
+    Nor does a remainder with no area. Boxes that tile the whole sheet leave the
+    key map nothing, and an empty polygon is still a Polygon with no holes, so
+    it used to pass as clean: split then tried to save a 0x0 crop and died
+    ("cannot write empty image"), taking sanborn01345_005 p1 -- four boxes of
+    28, 19, 32 and 22% -- down on every attempt of the corpus-v1 mop-up.
     """
     if not boxes:
         return []
     remainder = box(0, 0, w, h).difference(unary_union(boxes))
     if not isinstance(remainder, Polygon) or remainder.interiors:
+        return []
+    if remainder.is_empty or remainder.area < 1.0:
         return []
     return [remainder, *boxes]
