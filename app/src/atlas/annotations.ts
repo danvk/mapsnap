@@ -23,7 +23,37 @@ import type { Volume } from './places';
 export interface LoadedVolume {
   volume: Volume;
   annotation: GeorefAnnotationPage;
+  /**
+   * The annotation's items, as geometry. One per PLACED image, which counts a
+   * split panel separately from its siblings -- so this is neither the
+   * volume's sheet count nor the number of sheets that got placed.
+   */
   pages: PageGeo[];
+  /**
+   * Images the run decomposed the volume into, placed or not, from the
+   * annotation's own report. Null for an annotation that carries no report.
+   */
+  totalImages: number | null;
+}
+
+/**
+ * An integer the annotation reports about itself, e.g. how many images the run
+ * split the volume into.
+ *
+ * `fit` writes a report card into the annotation page's top-level metadata --
+ * pages, placed, unplaced, fit sources. Reading `pages` from there beats
+ * recomputing it: the app never sees the images a run declined to place, so
+ * counting what it can see would always say everything was placed.
+ */
+export function reportedCount(
+  annotation: GeorefAnnotationPage,
+  label: string,
+): number | null {
+  const entry = (
+    annotation as { metadata?: { label?: string; value?: string }[] }
+  ).metadata?.find((m) => m.label === label);
+  const value = Number(entry?.value);
+  return Number.isFinite(value) ? value : null;
 }
 
 /** A volume that has no annotation to draw, and why. */
@@ -111,7 +141,12 @@ export async function loadVolume(
     // The rewrite route wraps its result; the raw object route does not.
     const raw = body.annotation ?? body;
     const annotation = withPageMetadata(raw);
-    return { volume, annotation, pages: pagesFromAnnotation(annotation) };
+    return {
+      volume,
+      annotation,
+      pages: pagesFromAnnotation(annotation),
+      totalImages: reportedCount(annotation, 'pages'),
+    };
   } catch {
     return { volume, reason: 'unreadable' };
   }

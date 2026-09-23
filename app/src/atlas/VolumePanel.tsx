@@ -38,17 +38,42 @@ function selectedPageGeo(
   return null;
 }
 
-/** "3 of 4 volumes placed" for the year on screen. */
+/**
+ * "44/67 images placed from 42 sheets" for the year on screen.
+ *
+ * Three different numbers, and the panel used to call two of them "sheets".
+ * A run cuts a sheet that holds several maps into panels and georeferences
+ * each separately, so Mansfield 1921 is 42 physical sheets, 67 images after
+ * the cut, and 44 of those images placed. Sheets come from the catalogue,
+ * the other two from the annotation's own report.
+ */
 function coverageLine(results: (LoadedVolume | MissingVolume)[]): string {
-  const placed = results.filter(isLoaded).length;
-  const sheets = results
-    .filter(isLoaded)
-    .reduce((sum, result) => sum + result.pages.length, 0);
   if (results.length === 0) return 'no volumes';
-  return (
-    `${placed} of ${results.length} volume${results.length === 1 ? '' : 's'} ` +
-    `placed · ${sheets.toLocaleString()} sheets`
-  );
+  const loaded = results.filter(isLoaded);
+  const placed = loaded.reduce((sum, result) => sum + result.pages.length, 0);
+  const sheets = results.reduce((sum, result) => sum + result.volume.sheets, 0);
+  // An annotation with no report card cannot say how many images it declined
+  // to place, and inventing a denominator would overstate the coverage.
+  const reported = loaded.every((result) => result.totalImages !== null)
+    ? loaded.reduce((sum, result) => sum + (result.totalImages ?? 0), 0)
+    : null;
+  const images =
+    reported === null
+      ? `${placed.toLocaleString()} images placed`
+      : `${placed.toLocaleString()}/${reported.toLocaleString()} images placed`;
+  const missing = results.length - loaded.length;
+  const gap =
+    missing > 0
+      ? ` · ${missing} volume${missing === 1 ? '' : 's'} missing`
+      : '';
+  return `${images} from ${sheets.toLocaleString()} sheets${gap}`;
+}
+
+/** "44/67 images" for one volume, or just the placed count without a report. */
+function volumeCoverage(result: LoadedVolume): string {
+  return result.totalImages === null
+    ? `${result.pages.length} images`
+    : `${result.pages.length}/${result.totalImages} images`;
 }
 
 export function VolumePanel(props: VolumePanelProps) {
@@ -107,8 +132,11 @@ export function VolumePanel(props: VolumePanelProps) {
                   }
                   title={
                     mirrored === 0
-                      ? `${ofYear.length} volume(s), none mirrored`
-                      : `${mirrored} of ${ofYear.length} volume(s) mirrored`
+                      ? // No volume of this year is in the mirror, which for
+                        // all but 0.1% of the catalogue means the Library
+                        // never scanned it: there is no image to place.
+                        `not digitized — ${ofYear.length} volume${ofYear.length === 1 ? '' : 's'} on paper only`
+                      : `${mirrored} of ${ofYear.length} volume${ofYear.length === 1 ? '' : 's'} digitized`
                   }
                   onClick={() => onSelectYear(candidate)}
                 >
@@ -136,9 +164,7 @@ export function VolumePanel(props: VolumePanelProps) {
                     'atlas-volume-status' + (isLoaded(result) ? '' : ' is-gap')
                   }
                 >
-                  {isLoaded(result)
-                    ? `${result.pages.length} sheets`
-                    : result.reason}
+                  {isLoaded(result) ? volumeCoverage(result) : result.reason}
                 </span>
               </li>
             ))}
