@@ -18,7 +18,9 @@
 #          mapsnap-craft copied over) and ecsInstanceRole + instance profile
 #   Batch  compute environment mapsnap-cpu-spot  (SPOT_CAPACITY_OPTIMIZED, 0-256 vCPU)
 #          job queue           mapsnap-fit
-#          job definition      mapsnap-loc-fit  (2 vCPU / 7 GB, retry policy below)
+#          job definitions     mapsnap-loc-fit (2 vCPU / 7.5 GB), mapsnap-loc-fit-large
+#                              (2 vCPU / 16 GB); ATTEMPTS, ATTEMPT_SECONDS and IMAGE
+#                              override the retry count, per-attempt timeout and image
 set -euo pipefail
 
 REGION=${AWS_REGION:-us-west-2}
@@ -35,6 +37,18 @@ for arg in "$@"; do
   esac
 done
 IMAGE=${IMAGE:-$ACCOUNT.dkr.ecr.$REGION.amazonaws.com/mapsnap:latest}
+# Attempts per child, and how long each may run. Settable because they are the
+# two things a mop-up run wants changed, and editing a copy of the live
+# definition by hand is how corpus-v1's mop-up briefly got a definition built
+# from revision 1 -- a command line without --items-per-job, which would have
+# run one item per child and reported success for the rest.
+#
+# 5 attempts, not 2: corpus-v1 lost 496 of 4,149 children to spot reclaiming
+# them on BOTH attempts, roughly a 1-in-3 chance per attempt. A retry resumes
+# (published items are skipped), so an extra attempt costs a re-sync and the
+# item in flight. Exit 3 and 4 still stop at once, so nothing unrunnable pays.
+ATTEMPTS=${ATTEMPTS:-5}
+ATTEMPT_SECONDS=${ATTEMPT_SECONDS:-10800}
 # Named here rather than beside the role that creates it: the job definitions
 # reference it in every mode, including --job-definitions-only, which skips
 # the IAM section entirely.
@@ -237,9 +251,10 @@ fi
 # -large definition below, which packs three on an r5.2xlarge.
 #
 # The retry policy reads loc-fit's exit codes: 3 (unprocessable) and 4 (inputs
-# missing) are never retried, a spot reclamation always is, anything else
-# once. The pilot lost two instances to spot mid-run; all eight of their
-# children retried and succeeded.
+# missing) are never retried; a spot reclamation and anything else are, up to
+# $ATTEMPTS attempts in all (see ATTEMPTS above). The pilot lost two instances
+# to spot and all eight children recovered on their second attempt; the full
+# corpus, at 128 jobs, did not get off so lightly.
 register_fit_definition() {
   local name=$1 memory=$2
   run aws batch register-job-definition --region "$REGION" --cli-input-json "$(cat <<JSON
@@ -266,7 +281,7 @@ register_fit_definition() {
                     {"name": "PYTHONHASHSEED", "value": "0"}]
   },
   "retryStrategy": {
-    "attempts": 2,
+    "attempts": $ATTEMPTS,
     "evaluateOnExit": [
       {"onStatusReason": "Host EC2*", "action": "RETRY"},
       {"onExitCode": "3", "action": "EXIT"},
@@ -274,7 +289,7 @@ register_fit_definition() {
       {"onReason": "*", "action": "RETRY"}
     ]
   },
-  "timeout": {"attemptDurationSeconds": 10800}
+  "timeout": {"attemptDurationSeconds": $ATTEMPT_SECONDS}
 }
 JSON
 )" --query 'jobDefinitionArn' --output text

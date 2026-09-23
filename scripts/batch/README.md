@@ -56,8 +56,31 @@ one setup step that comes up on every code change, so it is the one the scoped
 identity can do:
 
 ```
-scripts/batch/setup.sh --job-definitions-only \
-  IMAGE=...  # or leave IMAGE unset to keep :latest
+IMAGE=213478311378.dkr.ecr.us-west-2.amazonaws.com/mapsnap:<sha> \
+  scripts/batch/setup.sh --job-definitions-only
+```
+
+`ATTEMPTS` (default 5) and `ATTEMPT_SECONDS` (default 10800, three hours) set
+the retry count and per-attempt timeout the same way. Register a changed
+definition with the script rather than by editing a copy of what
+`describe-job-definitions` returns: that call lists revisions in no particular
+order, so `jobDefinitions[-1]` is not the newest, and copying an old revision
+silently brings back an old command line. A mop-up of heavy items wants more
+time per attempt and one or a few items per child:
+
+```
+ATTEMPT_SECONDS=21600 IMAGE=...:<sha> scripts/batch/setup.sh --job-definitions-only
+PER_JOB=4 JOBDEF=mapsnap-loc-fit-large scripts/batch/submit.sh <run-tag> mopup.txt
+```
+
+If `mapsnap-mirror` is refused `RegisterJobDefinition`, the live
+`mapsnap-batch-operator` policy is older than `mapsnap-mirror-batch-policy.json`
+here; push the file as a new default version (admin identity):
+
+```
+aws iam create-policy-version --set-as-default \
+  --policy-arn arn:aws:iam::213478311378:policy/mapsnap-batch-operator \
+  --policy-document file://scripts/batch/mapsnap-mirror-batch-policy.json
 ```
 
 A full `setup.sh` under the scoped profile now says so plainly instead of
