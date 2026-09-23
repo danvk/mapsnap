@@ -169,6 +169,10 @@ class Placement:
     target_lines: int
     named_lines: int
     truth_score: float | None = None
+    #: The objective at the pose the pipeline published, when it published one.
+    incumbent_score: float | None = None
+    #: Distance from the published pose to the best candidate, in feet.
+    incumbent_offset_ft: float | None = None
 
     @property
     def best(self) -> Candidate | None:
@@ -186,7 +190,7 @@ class Placement:
                 return best.score / other.score
         return float("inf")
 
-    def accepted(self, *, min_score: float = 10.0, min_margin: float = 1.15) -> bool:
+    def accepted(self, *, min_score: float = 5.0, min_margin: float = 1.15) -> bool:
         """The gate: a confident, unambiguous best candidate."""
         best = self.best
         return (
@@ -907,11 +911,18 @@ def place_page(
     *,
     rasters: dict[str, np.ndarray] | None = None,
     truth: np.ndarray | None = None,
+    incumbent: np.ndarray | None = None,
 ) -> Placement:
     """Rank poses for ``target`` by how its roads continue the anchors' roads.
 
     ``truth`` (a px -> frame-xy affine) only annotates candidates with their
     corner error and scores the truth pose; it never steers the search.
+
+    ``incumbent`` is the pose the pipeline already published for this page, if
+    any. It is scored on the same objective and reported, never searched from:
+    a page whose own roads do not continue its neighbours' is a candidate
+    disaster, and that judgement is worth having for pages this search would
+    otherwise never be asked about.
     """
     lines = world_lines(anchors, extension_m=options.extension_m)
     index = WorldIndex(lines, target.lines)
@@ -941,6 +952,7 @@ def place_page(
         target_lines=len(target.lines),
         named_lines=sum(1 for line in target.lines if line.names),
         truth_score=objective(truth)[0] if truth is not None else None,
+        incumbent_score=objective(incumbent)[0] if incumbent is not None else None,
     )
     if not target.lines or not lines:
         return placement
@@ -1022,6 +1034,10 @@ def place_page(
         ):
             distinct.append(candidate)
     placement.candidates = distinct
+    if incumbent is not None and distinct:
+        placement.incumbent_offset_ft = corner_rmse_ft(
+            (target.width, target.height), distinct[0].affine, incumbent
+        )
     return placement
 
 
@@ -1295,8 +1311,23 @@ def unplaced_pages(volume: Volume) -> list[str]:
     return sorted(stems, key=lambda s: (int(re.sub(r"\D", "", s) or 0), s))
 
 
+def every_page(volume: Volume) -> list[str]:
+    """Every whole sheet with street reads, placed or not (split panels excluded)."""
+    stems = []
+    for path in volume.path.glob("p*.streets.json"):
+        stem = path.name[: -len(".streets.json")]
+        if "__" not in stem and stem != "p0":
+            stems.append(stem)
+    return sorted(stems, key=lambda s: (int(re.sub(r"\D", "", s) or 0), s))
+
+
 def run_page(
-    volume: Volume, stem: str, options: PlacementOptions, *, evaluate: bool = False
+    volume: Volume,
+    stem: str,
+    options: PlacementOptions,
+    *,
+    evaluate: bool = False,
+    score_incumbent: bool = False,
 ) -> tuple[TargetPage, Placement] | None:
     """Place one page against the volume's current anchors; None without a key-map prior."""
     located = volume.prior_of(stem)
@@ -1310,10 +1341,66 @@ def run_page(
         a.stem: r for a in anchors if (r := volume.raster_of(a.stem)) is not None
     }
     truth = volume.truth.get(stem) if evaluate else None
+    # The published pose is excluded from the anchors above, so scoring it here
+    # asks a real question: does this page's own road content continue its
+    # NEIGHBOURS' roads where the pipeline put it?
+    incumbent = volume.affines.get(stem) if score_incumbent else None
     placement = place_page(
-        target, anchors, prior, options, rasters=rasters, truth=truth
+        target,
+        anchors,
+        prior,
+        options,
+        rasters=rasters,
+        truth=truth,
+        incumbent=incumbent,
     )
     return target, placement
+
+
+def jsonl_record(
+    volume: Volume,
+    placement: Placement,
+    *,
+    round_number: int,
+    baseline_ft: float | None,
+    truth_rmse_of_incumbent: float | None,
+    max_candidates: int = 8,
+) -> dict:
+    """Everything about one page's placement, for analysis after the run.
+
+    Every candidate is recorded, not just the winner, so a threshold or a margin
+    can be re-chosen from the file instead of by re-running: the gate is a
+    function of `score` and the gap to the next candidate more than 60 ft away,
+    and both are here. `incumbent_score` and `truth_score` are the same
+    objective at the published and the true pose, which is what a disaster
+    detector would be trained on.
+    """
+    return {
+        "volume": volume.path.name,
+        "page": placement.stem,
+        "round": round_number,
+        "baseline_ft": baseline_ft,
+        "truth_rmse_ft": truth_rmse_of_incumbent,
+        "target_lines": placement.target_lines,
+        "named_lines": placement.named_lines,
+        "anchors": len(placement.anchors),
+        "truth_score": placement.truth_score,
+        "incumbent_score": placement.incumbent_score,
+        "incumbent_offset_ft": placement.incumbent_offset_ft,
+        "margin": None if math.isinf(placement.margin) else placement.margin,
+        "candidates": [
+            {
+                "score": c.score,
+                "vote": c.vote,
+                "rotation_deg": c.rotation_deg,
+                "rmse_ft": c.rmse_ft,
+                "names": sorted(c.names),
+                "x": float(c.translation[0]),
+                "y": float(c.translation[1]),
+            }
+            for c in placement.candidates[:max_candidates]
+        ],
+    }
 
 
 def report(placement: Placement, *, evaluate: bool) -> None:
@@ -1373,6 +1460,36 @@ def main() -> None:
         help="Score candidates against main.iiif.json truth (never steers the search)",
     )
     parser.add_argument(
+        "--all-pages",
+        action="store_true",
+        help=(
+            "Place every page with a key-map prior, placed ones included. The "
+            "published pose is never an anchor for its own page, so a page "
+            "already fitted gets an independent second opinion -- which is the "
+            "data for improving a fit or flagging it as a disaster."
+        ),
+    )
+    parser.add_argument(
+        "--emit-jsonl",
+        type=Path,
+        metavar="PATH",
+        help="Append one JSON record per page: every candidate, both reference scores",
+    )
+    parser.add_argument(
+        "--min-score",
+        type=float,
+        default=5.0,
+        metavar="S",
+        help="Gate: best candidate's score (default: %(default)s)",
+    )
+    parser.add_argument(
+        "--min-margin",
+        type=float,
+        default=1.15,
+        metavar="R",
+        help="Gate: best score over the next distinct candidate (default: %(default)s)",
+    )
+    parser.add_argument(
         "--prior-sigma",
         type=float,
         default=60.0,
@@ -1385,7 +1502,21 @@ def main() -> None:
     options = PlacementOptions(
         scale_m_per_px=volume.scale, prior_sigma_m=args.prior_sigma or None
     )
-    pending = args.pages.split(",") if args.pages else unplaced_pages(volume)
+    if args.pages:
+        pending = args.pages.split(",")
+    elif args.all_pages:
+        pending = every_page(volume)
+    else:
+        pending = unplaced_pages(volume)
+    # The published poses, kept before any chaining overwrites them: a page's
+    # baseline is what the pipeline said before this pass touched anything.
+    incumbents = dict(volume.affines)
+    truth_rmse = {
+        stem: corner_rmse_ft(page_size_of(volume.path, stem), affine, truth)
+        for stem, affine in incumbents.items()
+        if (truth := volume.truth.get(stem)) is not None
+    }
+    emit = args.emit_jsonl.open("a") if args.emit_jsonl else None
     print(
         f"{args.dir.name}: {len(volume.affines)} placed pages, scale {volume.scale:.3f} m/px; placing {pending}"
     )
@@ -1394,12 +1525,34 @@ def main() -> None:
             print(f"--- round {round_number} ---")
         still = []
         for stem in pending:
-            result = run_page(volume, stem, options, evaluate=args.eval)
+            result = run_page(
+                volume,
+                stem,
+                options,
+                evaluate=args.eval,
+                score_incumbent=stem in incumbents,
+            )
             if result is None:
                 continue
             target, placement = result
             report(placement, evaluate=args.eval)
-            if not placement.accepted():
+            if emit is not None:
+                emit.write(
+                    json.dumps(
+                        jsonl_record(
+                            volume,
+                            placement,
+                            round_number=round_number,
+                            baseline_ft=truth_rmse.get(stem),
+                            truth_rmse_of_incumbent=truth_rmse.get(stem),
+                        )
+                    )
+                    + "\n"
+                )
+                emit.flush()
+            if not placement.accepted(
+                min_score=args.min_score, min_margin=args.min_margin
+            ):
                 still.append(stem)
                 continue
             best = placement.best
@@ -1414,6 +1567,8 @@ def main() -> None:
         if not args.chain or still == pending:
             break
         pending = still
+    if emit is not None:
+        emit.close()
     if args.chain:
         print(f"unplaced after chaining: {pending}")
 

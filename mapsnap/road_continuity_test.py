@@ -319,11 +319,18 @@ def test_placement_margin_and_gate() -> None:
     )
     assert placement.margin == 2.0  # the 5 m neighbour is the same pose, not a rival
     assert placement.accepted()
+    # Thresholds are stated, not inherited: the default moved from 10 to 5 once
+    # the ledger showed 5 was the knee, and a test that rides the default would
+    # have passed either way and told us nothing.
+    assert placement.accepted(min_score=20.0, min_margin=2.0)
+    assert not placement.accepted(min_score=20.5)
+    assert not placement.accepted(min_margin=2.5)
     weak = Placement(
         stem="p",
-        candidates=[candidate(8.0, 0.0)],
+        candidates=[candidate(4.0, 0.0)],
         anchors=[],
         target_lines=5,
         named_lines=2,
     )
     assert not weak.accepted()
+    assert weak.accepted(min_score=3.0)
