@@ -51,16 +51,22 @@ OSM_RES_M = 2.0  # raster resolution
 # sheet is one fold; beyond that the region is a segmentation fragment.
 MIN_SCALE_FOLDS = 0.6
 MAX_SCALE_FOLDS = 1.6
-# The widest search frame worth allocating, as a side in raster pixels. Cost
-# goes as the square of the side: snap holds six frame-sized arrays at once --
-# the OSM probability and its blur, the skeleton, the chamfer distance, the
-# validity mask and the search region -- before the correlation surfaces on
-# top, so about 15 bytes a pixel at rest. A real frame is a page diagonal plus
-# the key-map search radius, a couple of thousand pixels across; this sits an
-# order of magnitude above that and only ever catches a scale that is wrong by
-# orders of magnitude. Pixels rather than metres because pixels are what gets
-# allocated, and the resolution is a parameter.
-MAX_FRAME_PX = 12_000
+# How much ground a Sanborn page may cover before the scale that says so is
+# not believable. Measured over the 1,943 truth annotations of 20 volumes,
+# split panels included, as the ground diagonal of the sheet each is drawn
+# against: median 0.52 km, p99 1.11 km, and a single largest at 3.08 km
+# (Hudson County 1950 vol 9 p92, itself a split). Against that, the scales
+# that took items down on the 2026-09-20 corpus sample imply 10.9 km
+# (sanborn00138_001), 35.4 km (sanborn01711_002) and 94.6 km
+# (sanborn09046_002). This sits in the gap, near its geometric middle: about
+# twice the largest sheet anyone has drawn, and not quite half the smallest
+# impossible one.
+#
+# A cap on ground extent rather than on the frame's pixels because the sheet
+# is the thing with a real size. A pixel budget says only what a machine can
+# hold, so the same volume behaves differently on a 7500 MB job and a 16 GB
+# one -- and what is wrong here is the scale, not the hardware.
+MAX_PAGE_EXTENT_M = 6_000.0
 OSM_WIDTH_M = 12.0  # stroked corridor width for the OSM "P(road)" analog
 REFINE_SHIFT_MAX_M = 30.0  # chamfer refinement may not slide farther than this
 # Hard containment gate: only egregious slides fail it. Schematic keymap
@@ -375,14 +381,14 @@ def cluster_search_centers(
     ]
 
 
-def frame_is_affordable(half_m: float, res_m: float) -> bool:
-    """Whether a frame of +/-half_m at this resolution is worth allocating.
+def page_extent_is_plausible(diag_m: float) -> bool:
+    """Whether a page of this ground diagonal could be a Sanborn sheet.
 
-    A frame this large does not mean the frame should be smaller -- it means
-    the scale that asked for it is wrong, and the pose is not worth scoring.
-    See MAX_FRAME_PX.
+    Exceeding it does not mean the frame should be smaller -- it means the
+    scale that implied it is wrong by orders of magnitude, and a pose that
+    cannot be believed is not worth scoring. See MAX_PAGE_EXTENT_M.
     """
-    return round(2 * half_m / res_m) <= MAX_FRAME_PX
+    return diag_m <= MAX_PAGE_EXTENT_M
 
 
 def frame_around(
@@ -872,16 +878,16 @@ def evaluate_pose(
     diag_m = math.hypot(ctx.width, ctx.height) * max(
         sp.m_per_px for sp in ctx.scale_priors
     )
-    half_m = diag_m / 2 + 100.0
-    if not frame_is_affordable(half_m, res):
+    if not page_extent_is_plausible(diag_m):
         # Whatever produced this scale is wrong by orders of magnitude, and
         # osm_rasters would raise trying to allocate the square it implies.
-        # A pose we cannot frame is a pose we cannot score.
+        # A pose we cannot believe is a pose we cannot score.
         print(
-            f"  skipping pose: a {2 * half_m / 1000:.0f} km frame is not a page",
+            f"  skipping pose: a {diag_m / 1000:.1f} km page is not a sheet",
             file=sys.stderr,
         )
         return None
+    half_m = diag_m / 2 + 100.0
     frame = frame_around((lon_c, lat_c), half_m=half_m, res_m=res)
     osm_prob, valid, skeleton = osm_rasters(frame, features)
     if not skeleton.any():
@@ -1040,18 +1046,18 @@ def snap_page(
     )
     if params.min_overlap_m2 > 0.5 * page_area_m2:
         params = dataclasses.replace(params, min_overlap_m2=0.5 * page_area_m2)
-    half_m = ctx.radius_m + page_diag_m / 2 + 100.0
-    if not frame_is_affordable(half_m, res):
+    if not page_extent_is_plausible(page_diag_m):
         # The same bad scale, reached by the other road. This is the call that
         # died on the 2026-09-20 corpus sample: four small volumes whose only
         # fitted page set a volume median scale tens of times too coarse, each
-        # asking for a frame tens of kilometres across and taking the item's
+        # implying a page tens of kilometres across and taking the item's
         # container down the moment snap started its first page.
         print(
-            f"  skipping snap: a {2 * half_m / 1000:.0f} km frame is not a page",
+            f"  skipping snap: a {page_diag_m / 1000:.1f} km page is not a sheet",
             file=sys.stderr,
         )
         return []
+    half_m = ctx.radius_m + page_diag_m / 2 + 100.0
     points = ctx.road_points(params)
     sigma_px = max(params.blur_sigma_m / res, 0.5)
     border_px = max(1, round(REFINE_SHIFT_MAX_M / res))
