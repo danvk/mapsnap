@@ -26,9 +26,10 @@ What comes from where, and why:
   vintage and saves 20 MB an item. It feeds label canonicalisation, not the
   search.
 
-Needs AWS credentials (`aws login`); an expired session shows up as an empty
-listing rather than an error, so this checks that each item actually yielded
-files and says so.
+Reads S3 as the ``mapsnap`` profile, not the default one: the default is a root
+login session that dies every 10-20 minutes and fails mid-sync as an empty
+listing rather than an error. Each item is still checked for having yielded
+files, since a run can simply not have reached it yet.
 """
 
 import argparse
@@ -46,9 +47,11 @@ DEFAULT_MAPPING = Path.home() / "Downloads/loc-sanborn-maps.mapping.tsv"
 LOCAL_INPUTS = ("main.iiif.json", "centerlines.geojson")
 
 
-def run_aws(args: list[str]) -> str:
-    """An aws CLI call, or exit naming what failed."""
-    result = subprocess.run(args, capture_output=True, text=True, check=False)
+def run_aws(args: list[str], profile: str) -> str:
+    """An aws CLI call under ``profile``, or exit naming what failed."""
+    result = subprocess.run(
+        [*args, "--profile", profile], capture_output=True, text=True, check=False
+    )
     if result.returncode != 0:
         message = result.stderr.strip() or result.stdout.strip()
         if "expired" in message or "credentials" in message.lower():
@@ -101,6 +104,7 @@ def stage_volume(
     bucket: str,
     run_tag: str,
     out: Path,
+    profile: str,
     dry_run: bool,
 ) -> tuple[int, int]:
     """Pull one volume's corpus inputs; return (sidecar files, roadprob files)."""
@@ -126,8 +130,8 @@ def stage_volume(
     if dry_run:
         print(f"  would run: {' '.join(sidecars[:5])} ...")
         return (0, 0)
-    run_aws(sidecars)
-    run_aws(rasters)
+    run_aws(sidecars, profile)
+    run_aws(rasters, profile)
 
     for name in LOCAL_INPUTS:
         source = volume / name
@@ -153,6 +157,16 @@ def main() -> None:
     parser.add_argument(
         "--volumes",
         help="Comma-separated volume directory names (default: every truth volume)",
+    )
+    parser.add_argument(
+        "--profile",
+        default="mapsnap",
+        help=(
+            "AWS profile (default: %(default)s). The default profile is a root "
+            "login session that expires every 10-20 minutes, which shows up "
+            "mid-sync as an empty listing rather than an error; the mapsnap "
+            "profile is a long-lived IAM user."
+        ),
     )
     parser.add_argument("--dry-run", action="store_true")
     args = parser.parse_args()
@@ -183,6 +197,7 @@ def main() -> None:
             bucket=args.bucket.rstrip("/"),
             run_tag=args.run_tag,
             out=args.out,
+            profile=args.profile,
             dry_run=args.dry_run,
         )
         print(f"  {name:30s} {item:20s} {n_sidecars:4d} reads, {n_rasters:4d} P(road)")
