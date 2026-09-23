@@ -68,6 +68,10 @@ SUBCOMMANDS: dict[str, tuple[str, str]] = {
         "mapsnap.street_solve_run",
         "Street-constraint georeferencing: solve key-map-prior pages, adopt where the referee prefers",
     ),
+    "road-continuity": (
+        "mapsnap.road_continuity",
+        "Place pages by continuing their placed neighbours' roads (experimental; not consumed by fit)",
+    ),
     "iiif": (
         "mapsnap.make_iiif_georef",
         "Combine georeferences into a IIIF AnnotationPage",
