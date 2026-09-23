@@ -16,7 +16,9 @@ whatever the job state says.
 
 Writes ``<prefix>-done.txt`` and ``<prefix>-missing.txt``; the latter is what
 ``submit.sh`` wants. One HEAD per item, 64 at a time: 33,000 items take about a
-minute, against hours of listing a bucket that holds millions of keys.
+minute, against hours of listing a bucket that holds millions of keys. boto3
+rather than the aws CLI for the same reason -- 33,000 process spawns would cost
+more than the requests do.
 """
 
 import argparse
@@ -25,14 +27,9 @@ import sys
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
-try:
-    import boto3
-    from botocore.config import Config
-    from botocore.exceptions import ClientError
-except ModuleNotFoundError:  # pragma: no cover - a dependency of this script only
-    sys.exit(
-        "needs boto3: run with `uv run --with boto3 scripts/batch/missing-items.py`"
-    )
+import boto3
+from botocore.config import Config
+from botocore.exceptions import ClientError
 
 DEFAULT_MAPPING = Path.home() / "Downloads/loc-sanborn-maps.mapping.tsv"
 MARKER = "mapsnap.iiif.json"
