@@ -67,7 +67,7 @@ export function reportedCount(
 /** A volume that has no annotation to draw, and why. */
 export interface MissingVolume {
   volume: Volume;
-  reason: 'not mirrored' | 'not in this run' | 'unreadable';
+  reason: 'not digitized' | 'not in this run' | 'unreadable';
 }
 
 /**
@@ -221,7 +221,7 @@ export async function loadVolume(
   uri: string | null,
   source: ImageSource,
 ): Promise<LoadedVolume | MissingVolume> {
-  if (!uri) return { volume, reason: 'not mirrored' };
+  if (!uri) return { volume, reason: 'not digitized' };
   try {
     const response = await fetch(annotationUrl(uri));
     if (!response.ok) return { volume, reason: 'not in this run' };

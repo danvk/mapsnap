@@ -1,8 +1,17 @@
 """Tests for build_places.py's loc.gov sheet index."""
 
+from collections import defaultdict
 from pathlib import Path
 
-from build_places import compact_stems, loc_resource, read_loc_sheets
+from build_places import (
+    Lookups,
+    Place,
+    compact_stems,
+    loc_resource,
+    read_loc_sheets,
+    read_record,
+)
+from gazetteer import Gazetteer
 
 HEADER = "item\tstate\tyear\tcity\tseq\tstem\tpage_key\tsource\tbytes\tstorage_dir\n"
 
@@ -51,3 +60,52 @@ def test_read_loc_sheets_orders_sheets_by_seq(tmp_path: Path):
         "02502_1917-0000",
         "02502_1917-0001",
     ]
+
+
+def catalogue_record(item: str, city: str, coordinates: list[float] | None) -> dict:
+    """A catalogue record for a Queens volume, geocoded or not."""
+    location = [{"Coordinates": coordinates}] if coordinates else []
+    return {
+        "Id": f"http://www.loc.gov/item/{item}/",
+        "Date": "1913",
+        "Title": f"Sanborn Fire Insurance Map from {city}, Queens County, New York.",
+        "City_text": [city],
+        "County_text": ["Queens County"],
+        "State_text": ["New York"],
+        "Location": location,
+    }
+
+
+def test_read_record_places_an_ungeocoded_town_by_the_gazetteer():
+    gazetteer = Gazetteer(
+        places={}, subdivisions={}, counties={("NY", "queens"): (40.654658, -73.841209)}
+    )
+    lookups = Lookups(prefixes={}, mirror_sheets={}, gazetteer=gazetteer)
+    places: dict[tuple[str, str], Place] = {}
+    skipped: dict[str, int] = defaultdict(int)
+    read_record(
+        catalogue_record("sanborn06185_002", "Queens", None), places, skipped, lookups
+    )
+    queens = places[("new-york", "queens")]
+    assert (queens.lat, queens.lon, queens.approximate) == (40.654658, -73.841209, True)
+    assert skipped["gazetteer_county"] == 1
+
+    # A record the catalogue did geocode moves the town to its own point.
+    read_record(
+        catalogue_record("sanborn06185_003", "Queens", [40.7, -73.8]),
+        places,
+        skipped,
+        lookups,
+    )
+    assert (queens.lat, queens.lon, queens.approximate) == (40.7, -73.8, False)
+    assert len(queens.volumes) == 2
+
+
+def test_read_record_drops_an_ungeocoded_town_without_a_gazetteer():
+    lookups = Lookups(prefixes={}, mirror_sheets={}, gazetteer=None)
+    places: dict[tuple[str, str], Place] = {}
+    skipped: dict[str, int] = defaultdict(int)
+    read_record(
+        catalogue_record("sanborn06185_002", "Queens", None), places, skipped, lookups
+    )
+    assert places == {} and skipped["no_coordinates"] == 1

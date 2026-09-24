@@ -18,6 +18,10 @@ Two inputs, and the join between them is the point:
   for each, the ``by-state/<state>/<year>/<item>`` prefix its run published
   under.
 
+A third input fills a hole in the first: the catalogue never geocoded 996
+towns, among them Manhattan, Queens, Saint Louis and Baltimore, and the Census
+Gazetteer places all but 48 of them (see gazetteer.py).
+
 The year comes from the TSV, never from the catalogue's ``Date``: they disagree
 for 310 items (sanborn00518_001 is catalogued 1890 and mirrored under 1899),
 and a derived year sends the app to a key that does not exist.
@@ -33,8 +37,11 @@ from collections import defaultdict
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from gazetteer import Gazetteer, read_gazetteer
+
 DEFAULT_METADATA = Path.home() / "Documents/mapsnap/metadata.jsonl"
 DEFAULT_MAPPING = Path.home() / "Downloads/loc-sanborn-maps.mapping.tsv"
+DEFAULT_GAZETTEER = Path.home() / "Documents/mapsnap/gazetteer"
 
 
 @dataclass
@@ -76,6 +83,9 @@ class Place:
     lon: float
     lat: float
     volumes: list[Volume] = field(default_factory=list)
+    # Placed by the Census Gazetteer rather than the catalogue's own geocode,
+    # so the first geocoded record to come along moves it.
+    approximate: bool = False
 
 
 def slugify(text: str) -> str:
@@ -170,15 +180,34 @@ def year_of(date: str) -> int | None:
     return int(match.group(1)) if match else None
 
 
+@dataclass
+class Lookups:
+    """What read_record consults besides the record itself."""
+
+    # Each mirrored item's (state, year) prefix and its mirrored sheet count.
+    prefixes: dict[str, tuple[str, str]]
+    mirror_sheets: dict[str, int]
+    # Where to put a town the catalogue never geocoded; None skips such towns.
+    gazetteer: Gazetteer | None
+
+
 def collect_places(
-    metadata: Path, prefixes: dict[str, tuple[str, str]], mirror_sheets: dict[str, int]
+    metadata: Path, lookups: Lookups
 ) -> tuple[dict[tuple[str, str], Place], dict[str, int]]:
     """Group every catalogued volume under its town; count what had to be dropped."""
     places: dict[tuple[str, str], Place] = {}
-    skipped = {"no_coordinates": 0, "no_name": 0, "no_item": 0, "year_differs": 0}
+    skipped = {
+        "no_coordinates": 0,
+        "no_name": 0,
+        "no_item": 0,
+        "year_differs": 0,
+        "gazetteer_place": 0,
+        "gazetteer_subdivision": 0,
+        "gazetteer_county": 0,
+    }
     with open(metadata) as handle:
         for line in handle:
-            read_record(json.loads(line), places, skipped, prefixes, mirror_sheets)
+            read_record(json.loads(line), places, skipped, lookups)
     return places, skipped
 
 
@@ -186,20 +215,18 @@ def read_record(
     record: dict,
     places: dict[tuple[str, str], Place],
     skipped: dict[str, int],
-    prefixes: dict[str, tuple[str, str]],
-    mirror_sheets: dict[str, int],
+    lookups: Lookups,
 ) -> None:
-    """Fold one catalogue record into its town, or count why it cannot be placed."""
+    """Fold one catalogue record into its town, or count why it cannot be placed.
+
+    A record the catalogue never geocoded is placed by the Census Gazetteer
+    instead (see gazetteer.py), and counted under ``gazetteer_<source>``.
+    """
     item = item_id(record.get("Id") or "")
     if not item:
         skipped["no_item"] += 1
         return
     location = next(iter(record.get("Location") or []), None)
-    coordinates = (location or {}).get("Coordinates")
-    if not coordinates or len(coordinates) != 2:
-        skipped["no_coordinates"] += 1
-        return
-    latitude, longitude = float(coordinates[0]), float(coordinates[1])
     state = next(iter(record.get("State_text") or []), None)
     # The town's own name, not the geocoder's full string: "Abbeville", not
     # "Abbeville, Henry County, Alabama, 36310, United States".
@@ -209,13 +236,32 @@ def read_record(
     if not state or not name:
         skipped["no_name"] += 1
         return
+    coordinates = (location or {}).get("Coordinates")
+    approximate = not (coordinates and len(coordinates) == 2)
+    if coordinates and len(coordinates) == 2:
+        latitude, longitude = float(coordinates[0]), float(coordinates[1])
+    else:
+        located = (
+            lookups.gazetteer.locate(name, state, record.get("County_text") or [])
+            if lookups.gazetteer
+            else None
+        )
+        if located is None:
+            skipped["no_coordinates"] += 1
+            return
+        skipped[f"gazetteer_{located.source}"] += 1
+        latitude, longitude = located.lat, located.lon
 
     key = (slugify(state), slugify(name))
     place = places.get(key)
     if place is None:
-        place = Place(name=name, state=state, lon=longitude, lat=latitude)
+        place = Place(
+            name=name, state=state, lon=longitude, lat=latitude, approximate=approximate
+        )
         places[key] = place
-    prefix = prefixes.get(item)
+    elif place.approximate and not approximate:
+        place.lon, place.lat, place.approximate = longitude, latitude, False
+    prefix = lookups.prefixes.get(item)
     date = record.get("Date") or ""
     # The mirror's year wins where the two disagree. The mirror takes its year
     # from LoC's own storage path, and the catalogue's Date can be plain wrong:
@@ -232,7 +278,7 @@ def read_record(
             year=mirror_year if mirror_year is not None else year_of(date),
             # A mirrored item's sheet count is the mirror's own, which is what
             # the annotation will actually hold.
-            sheets=mirror_sheets.get(item) or sheet_count(record),
+            sheets=lookups.mirror_sheets.get(item) or sheet_count(record),
             title=record.get("Title") or "",
             mirror_state=prefix[0] if prefix else None,
             mirror_year=prefix[1] if prefix else None,
@@ -319,6 +365,16 @@ def main() -> None:
     parser.add_argument("--metadata", type=Path, default=DEFAULT_METADATA)
     parser.add_argument("--mapping", type=Path, default=DEFAULT_MAPPING)
     parser.add_argument(
+        "--gazetteer",
+        type=Path,
+        default=DEFAULT_GAZETTEER,
+        help=(
+            "Directory holding the Census Gazetteer place, county subdivision and "
+            "county files, which place the towns the catalogue never geocoded "
+            "(see gazetteer.py; default: %(default)s)"
+        ),
+    )
+    parser.add_argument(
         "--out-dir",
         type=Path,
         default=Path(__file__).resolve().parents[2] / "app/public/atlas",
@@ -333,7 +389,16 @@ def main() -> None:
 
     prefixes, mirror_sheets = read_mirror(args.mapping)
     print(f"{len(prefixes):,} mirrored items", file=sys.stderr)
-    places, skipped = collect_places(args.metadata, prefixes, mirror_sheets)
+    gazetteer = read_gazetteer(args.gazetteer) if args.gazetteer.is_dir() else None
+    if gazetteer is None:
+        print(
+            f"no Gazetteer at {args.gazetteer}: towns the catalogue never "
+            "geocoded will be left off the map",
+            file=sys.stderr,
+        )
+    places, skipped = collect_places(
+        args.metadata, Lookups(prefixes, mirror_sheets, gazetteer)
+    )
     loc_sheets = read_loc_sheets(args.mapping)
     for place in places.values():
         for volume in place.volumes:
