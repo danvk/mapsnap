@@ -392,6 +392,24 @@ def prefix_constrained_ctc(
 _PADDING_BLANK_THRESHOLD = 0.9999
 
 
+@dataclass
+class ConstrainedDecoding:
+    """What the patched recognizer decodes against: one vocabulary's trie and beam."""
+
+    trie_root: TrieNode
+    char_list: list[str]
+    beam_width: int
+
+
+# The vocabulary the patched EasyOCR functions currently decode against. The
+# patches read it at call time, so installing a new vocabulary replaces this and
+# nothing else -- the previous trie becomes unreachable and is freed.
+active_decoding: ConstrainedDecoding | None = None
+# Whether the two EasyOCR patches are installed. They must go in exactly once:
+# see patch_easyocr_reader.
+patches_installed = False
+
+
 def patch_easyocr_reader(
     reader,
     vocab_strings: list[str],
@@ -413,16 +431,42 @@ def patch_easyocr_reader(
 
     Both patches are module-/class-level; creating a new ``Reader`` does NOT revert them.
 
+    Safe to call once per page, per angle and per vocabulary pass, which is how
+    ``detect_text`` uses it. The patches are installed on the first call only;
+    every later call just swaps the vocabulary they decode against. Re-installing
+    them each time wrapped each new patch around the previous one, capturing it
+    as "the original": on CPU every recognition then walked the whole chain,
+    which hit Python's 1,000-frame limit on 150-odd-page volumes (#511), and
+    every trie ever built stayed reachable through it -- about 210 MB a call at a
+    90k-form vocabulary, which is what killed big volumes' OCR for memory.
+
     Returns the trie root (for inspection / debugging).
+    """
+    global active_decoding, patches_installed
+
+    trie_root = build_trie(vocab_strings)
+    active_decoding = ConstrainedDecoding(
+        trie_root=trie_root,
+        char_list=reader.converter.character,
+        beam_width=beam_width,
+    )
+    if not patches_installed:
+        install_easyocr_patches()
+        patches_installed = True
+    return trie_root
+
+
+def install_easyocr_patches() -> None:
+    """Replace EasyOCR's recognizer_predict and Reader.recognize, once.
+
+    The replacements decode against ``active_decoding`` at call time, so the
+    vocabulary can change without re-patching.
     """
     import easyocr
     import easyocr.easyocr as _easyocr_mod
     import easyocr.recognition as _recog
     import torch
     import torch.nn.functional as F
-
-    trie_root = build_trie(vocab_strings)
-    char_list: list[str] = reader.converter.character
 
     original_predict = _recog.recognizer_predict
 
@@ -434,7 +478,7 @@ def patch_easyocr_reader(
         ignore_idx,
         char_group_idx,
         decoder: str = "greedy",
-        beamWidth: int = 5,  # ignored; the outer beam_width closure is used instead
+        beamWidth: int = 5,  # ignored; the active decoding's beam_width is used instead
         device: str = "cpu",
     ) -> list[list]:
         if decoder != "wordbeamsearch":
@@ -487,6 +531,8 @@ def patch_easyocr_reader(
         # per-crop effective T, keeping CTC beam search as fast as it was
         # in the batch_size=1 path.
         T_global = all_probs.shape[1]
+        decoding = active_decoding
+        assert decoding is not None, "patch_easyocr_reader sets the vocabulary first"
         result: list[list] = []
         for i in range(len(all_probs)):
             crop = all_probs[i]  # (T_global, C)
@@ -498,7 +544,10 @@ def patch_easyocr_reader(
                 else:
                     break
             text, path_prob = prefix_constrained_ctc(
-                crop[:effective_T], trie_root, char_list, beam_width
+                crop[:effective_T],
+                decoding.trie_root,
+                decoding.char_list,
+                decoding.beam_width,
             )
             # Per-character geometric mean of the constrained path probability.
             # Analogous to EasyOCR's custom_mean but derived from the actual
@@ -672,5 +721,3 @@ def patch_easyocr_reader(
             return result
 
     easyocr.Reader.recognize = _patched_recognize
-
-    return trie_root
