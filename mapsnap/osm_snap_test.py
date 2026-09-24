@@ -764,3 +764,43 @@ def test_snap_page_skips_a_page_that_cannot_be_a_sheet() -> None:
             raise AssertionError("snap_page framed a page it could not believe")
 
     assert snap_page(ctx, ExplodingIndex([])) == []
+
+
+def test_search_radius_cap_clears_every_real_volume() -> None:
+    """The 20 truth volumes' radii pass; the two mop-up failures do not."""
+    from mapsnap.osm_snap import search_radius_is_plausible
+
+    # Largest locator radius (Grand Rapids) and largest calibrated one (Miami).
+    for real_m in (684.0, 583.0):
+        assert search_radius_is_plausible(real_m)
+    # sanborn00682_003 and sanborn00226_003 on the corpus-v1 mop-up.
+    for absurd_m in (176_000.0, 3_240_000.0):
+        assert not search_radius_is_plausible(absurd_m)
+
+
+def test_snap_page_skips_a_continental_search_radius() -> None:
+    """A misplaced key map must not allocate a frame the size of its radius.
+
+    The page itself is an ordinary sheet here, so this is the radius's guard
+    and not the page-extent one: without it the frame is ~350 km square.
+    """
+    from mapsnap.osm_snap import snap_page
+
+    page, _, _ = make_world_and_page(25.0)
+    ctx = PageContext(
+        stem="p1",
+        number=1,
+        width=300,
+        height=420,
+        prob=page,
+        search_centers=[(LON0, LAT0)],
+        radius_m=176_000.0,
+        rotation_priors=[RotationPrior(0.0, 4.0, "test")],
+        scale_priors=[ScalePrior(0.6, 0.05, "volume-median")],
+    )
+
+    class ExplodingIndex(FeatureIndex):
+        def near_bbox(self, bounds: tuple[float, float, float, float]) -> list[dict]:
+            raise AssertionError("snap_page framed a search it could not believe")
+
+    assert snap_page(ctx, ExplodingIndex([])) == []
