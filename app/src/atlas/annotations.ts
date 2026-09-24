@@ -10,7 +10,7 @@
  * host answering 429 to everything for minutes afterwards. The browser reports
  * those as CORS failures, since a 429 error page carries no CORS headers.
  *
- * So the default is the chronoscope CDN, a static (level 0) IIIF service built
+ * So the default is the Chronoscope CDN, a static (level 0) IIIF service built
  * from the mirrored 25% scans of every sheet: each page's service is repointed
  * there, in the browser, and the tiles never touch our own server. `loc`
  * remains selectable -- loc.gov is where the scans come from, and the right

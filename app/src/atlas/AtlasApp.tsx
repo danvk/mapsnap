@@ -23,7 +23,9 @@ import {
   type LoadedVolume,
   type MissingVolume,
 } from './annotations';
+import { isTypingTarget } from '../keyboard';
 import { AtlasMap, type PageRef } from './AtlasMap';
+import { nextOpacity } from './opacity';
 import { PlaceSearch } from './PlaceSearch';
 import { VolumePanel } from './VolumePanel';
 import {
@@ -48,6 +50,17 @@ export function AtlasApp() {
   // The CDN by default: loc.gov rate-limits long before a town-year's worth of
   // tiles is drawn (see annotations.ts).
   const [imageSource, setImageSource] = useState<ImageSource>('cdn');
+  // Sheet opacity in percent, as in the volume viewer: a slider, and `p` to
+  // step through 100/50/0 so the map underneath can be checked at a keypress.
+  const [opacity, setOpacity] = useState(100);
+  useEffect(() => {
+    function onKeydown(event: KeyboardEvent): void {
+      if (event.key !== 'p' || isTypingTarget(event.target)) return;
+      setOpacity(nextOpacity);
+    }
+    window.addEventListener('keydown', onKeydown);
+    return () => window.removeEventListener('keydown', onKeydown);
+  }, []);
 
   const [place, setPlace] = useState<Place | null>(null);
   const [volumes, setVolumes] = useState<Volume[] | null>(null);
@@ -154,10 +167,24 @@ export function AtlasApp() {
               setImageSource(event.target.value as ImageSource)
             }
           >
-            <option value="cdn">the CDN</option>
+            <option value="cdn">Chronoscope</option>
             <option value="loc">loc.gov</option>
           </select>
         </label>
+        <div
+          className="atlas-opacity"
+          title="Sheet opacity. Press p to cycle 100/50/0%."
+        >
+          <input
+            type="range"
+            id="atlas-opacity-slider"
+            min={0}
+            max={100}
+            value={opacity}
+            onChange={(event) => setOpacity(Number(event.target.value))}
+          />
+          <label htmlFor="atlas-opacity-slider">Opacity (p)</label>
+        </div>
         <label className="atlas-size-by">
           Dot size
           <select
@@ -185,6 +212,7 @@ export function AtlasApp() {
           loaded={drawn}
           selectedPlace={place}
           selectedPage={selectedPage}
+          opacity={opacity / 100}
           onSelectPlace={selectPlace}
           onSelectPage={setSelectedPage}
         />

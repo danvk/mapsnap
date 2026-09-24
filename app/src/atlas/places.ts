@@ -47,6 +47,51 @@ export interface Volume {
    */
   state?: string;
   mirrorYear?: string;
+  /**
+   * Where the volume's sheets sit at loc.gov, when the mirror knows: the sheet
+   * at `?sp=i+1` of `https://www.loc.gov/resource/<resource>/` has the LoC
+   * stem `prefix + sheets[i]`. See scripts/atlas/build_places.py.
+   */
+  loc?: { resource: string; prefix: string; sheets: string[] };
+}
+
+/** A volume's own page at loc.gov. */
+export function locItemUrl(item: string): string {
+  return `https://www.loc.gov/item/${item}/`;
+}
+
+/**
+ * The LoC stem an image service names, e.g. "02502_1917-0028".
+ *
+ * Both a loc.gov service and the CDN's copy of it end in LoC's service id,
+ * `service:gmd:...:02502_1917-0028`, optionally followed by `/info.json`.
+ */
+export function locStemOf(serviceUrl: string | undefined): string | null {
+  const match = /service:[^/]*:([^:/]+)(?:\/info\.json)?\/?$/.exec(
+    serviceUrl ?? '',
+  );
+  return match?.[1] ?? null;
+}
+
+/**
+ * The loc.gov page showing one sheet of a volume, e.g.
+ * `https://www.loc.gov/resource/g4094sm.g4094sm_g025021917/?sp=33` for
+ * South Bend 1917's p28. Falls back to the volume's item page when the
+ * volume carries no sheet list or the sheet is not in it.
+ */
+export function locSheetUrl(
+  volume: Volume,
+  serviceUrl: string | undefined,
+): string {
+  const stem = locStemOf(serviceUrl);
+  const loc = volume.loc;
+  if (stem && loc && stem.startsWith(loc.prefix)) {
+    const index = loc.sheets.indexOf(stem.slice(loc.prefix.length));
+    if (index >= 0) {
+      return `https://www.loc.gov/resource/${loc.resource}/?sp=${index + 1}`;
+    }
+  }
+  return locItemUrl(volume.item);
 }
 
 /** The state slug of a place id, which is also its volumes file's name. */

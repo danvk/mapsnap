@@ -45,6 +45,22 @@ body {
   font-size: 12px;
 }
 
+/* The volume viewer's slider: the control, with its label underneath. */
+.atlas-opacity {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  width: 120px;
+  color: var(--atlas-muted);
+  font-size: 11px;
+}
+
+.atlas-opacity input[type='range'] {
+  width: 100%;
+  margin: 0;
+}
+
 .atlas-body {
   flex: 1;
   position: relative;
@@ -230,6 +246,12 @@ body {
 .atlas-volume-item {
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
   font-size: 11px;
+  color: var(--atlas-accent);
+  text-decoration: none;
+}
+
+.atlas-volume-item:hover {
+  text-decoration: underline;
 }
 
 .atlas-volume-status {

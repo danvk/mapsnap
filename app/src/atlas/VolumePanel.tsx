@@ -9,7 +9,14 @@
 import { isLoaded, type LoadedVolume, type MissingVolume } from './annotations';
 import type { PageGeo } from '../iiif/pages';
 import type { PageRef } from './AtlasMap';
-import { volumesOfYear, yearsOf, type Place, type Volume } from './places';
+import {
+  locItemUrl,
+  locSheetUrl,
+  volumesOfYear,
+  yearsOf,
+  type Place,
+  type Volume,
+} from './places';
 
 interface VolumePanelProps {
   place: Place;
@@ -24,16 +31,23 @@ interface VolumePanelProps {
   onClose: () => void;
 }
 
-/** The page a selection points at, when its volume finished loading. */
+/**
+ * The page a selection points at, when its volume finished loading, with the
+ * image service it is drawn from (which names its LoC sheet).
+ */
 function selectedPageGeo(
   results: (LoadedVolume | MissingVolume)[],
   selected: PageRef | null,
-): { page: PageGeo; volume: Volume } | null {
+): { page: PageGeo; volume: Volume; serviceUrl: string | undefined } | null {
   if (!selected) return null;
   for (const result of results) {
     if (!isLoaded(result) || result.volume.item !== selected.item) continue;
     const page = result.pages.find((p) => p.itemIndex === selected.itemIndex);
-    if (page) return { page, volume: result.volume };
+    if (page) {
+      const serviceUrl =
+        result.annotation.items?.[page.itemIndex]?.target?.source?.id;
+      return { page, volume: result.volume, serviceUrl };
+    }
   }
   return null;
 }
@@ -158,7 +172,15 @@ export function VolumePanel(props: VolumePanelProps) {
           <ul className="atlas-volumes">
             {results.map((result) => (
               <li key={result.volume.item}>
-                <span className="atlas-volume-item">{result.volume.item}</span>
+                <a
+                  className="atlas-volume-item"
+                  href={locItemUrl(result.volume.item)}
+                  target="_blank"
+                  rel="noreferrer"
+                  title="This volume at the Library of Congress"
+                >
+                  {result.volume.item}
+                </a>
                 <span
                   className={
                     'atlas-volume-status' + (isLoaded(result) ? '' : ' is-gap')
@@ -189,7 +211,7 @@ export function VolumePanel(props: VolumePanelProps) {
           </dl>
           <a
             className="atlas-link"
-            href={`https://www.loc.gov/item/${selected.volume.item}/`}
+            href={locSheetUrl(selected.volume, selected.serviceUrl)}
             target="_blank"
             rel="noreferrer"
           >

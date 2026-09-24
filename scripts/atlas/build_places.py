@@ -26,6 +26,7 @@ and a derived year sends the app to a key that does not exist.
 import argparse
 import csv
 import json
+import os
 import re
 import sys
 from collections import defaultdict
@@ -34,6 +35,22 @@ from pathlib import Path
 
 DEFAULT_METADATA = Path.home() / "Documents/mapsnap/metadata.jsonl"
 DEFAULT_MAPPING = Path.home() / "Downloads/loc-sanborn-maps.mapping.tsv"
+
+
+@dataclass
+class LocSheets:
+    """Where a mirrored volume's sheets sit at loc.gov, for linking to one of them.
+
+    ``prefix + sheets[i]`` is the LoC stem of the sheet at ``?sp=i+1`` of
+    ``https://www.loc.gov/resource/<resource>/``. The prefix is shared by every
+    stem of the volume and written once. Even so the per-state files grow by
+    about two thirds (New York 577 -> 949 KB), which is 50 -> 93 KB gzipped:
+    small for a file fetched once when a town in that state is picked.
+    """
+
+    resource: str
+    prefix: str
+    sheets: list[str]
 
 
 @dataclass
@@ -47,6 +64,7 @@ class Volume:
     title: str
     mirror_state: str | None = None
     mirror_year: str | None = None
+    loc: LocSheets | None = None
 
 
 @dataclass
@@ -96,6 +114,54 @@ def read_mirror(path: Path) -> tuple[dict[str, tuple[str, str]], dict[str, int]]
             prefixes.setdefault(item, (row["state"], row["year"]))
             sheets[item] += 1
     return prefixes, dict(sheets)
+
+
+def loc_resource(storage_dir: str) -> str | None:
+    """The loc.gov resource id of a mirror storage directory, if it names one.
+
+    ``gmd/gmd409m/g4094m/g4094sm/g4094sm_g025021917`` is served at
+    ``https://www.loc.gov/resource/g4094sm.g4094sm_g025021917/``, and
+    ``.../g4124pm/g096701899`` at ``.../resource/g4124pm.g096701899/``. None
+    for a path too short to name one: the mapping's lone "ghost" row has none.
+    """
+    parts = [part for part in storage_dir.split("/") if part]
+    return f"{parts[-2]}.{parts[-1]}" if len(parts) >= 2 else None
+
+
+def compact_stems(stems: list[str]) -> tuple[str, list[str]]:
+    """Factor out the stems' common prefix: (prefix, what each stem adds to it)."""
+    prefix = os.path.commonprefix(stems)
+    return prefix, [stem[len(prefix) :] for stem in stems]
+
+
+def read_loc_sheets(path: Path) -> dict[str, LocSheets]:
+    """Each mirrored item's loc.gov resource and its sheets in ``?sp=`` order.
+
+    The mapping's ``seq`` is a sheet's position in its LoC resource: ``?sp=33``
+    of sanborn02502_005 shows 02502_1917-0028, its p28, and 12 random sheets
+    from 12 other items agreed. Two items are left out because their sheets
+    span two storage directories, and so two resources; so is any item whose
+    seq does not run 1..N, which no item does today, or whose storage path names
+    no resource.
+    """
+    rows: dict[str, list[tuple[int, str, str]]] = defaultdict(list)
+    with open(path, newline="") as handle:
+        for row in csv.DictReader(handle, delimiter="\t"):
+            rows[row["item"]].append((int(row["seq"]), row["stem"], row["storage_dir"]))
+    sheets_by_item: dict[str, LocSheets] = {}
+    for item, sheets in rows.items():
+        sheets.sort()
+        storage_dirs = {storage_dir for _, _, storage_dir in sheets}
+        if len(storage_dirs) != 1:
+            continue
+        if [seq for seq, _, _ in sheets] != list(range(1, len(sheets) + 1)):
+            continue
+        resource = loc_resource(storage_dirs.pop())
+        if resource is None:
+            continue
+        prefix, rest = compact_stems([stem for _, stem, _ in sheets])
+        sheets_by_item[item] = LocSheets(resource, prefix, rest)
+    return sheets_by_item
 
 
 def year_of(date: str) -> int | None:
@@ -215,6 +281,17 @@ def write_outputs(
                     if volume.mirror_state
                     else {}
                 ),
+                **(
+                    {
+                        "loc": {
+                            "resource": volume.loc.resource,
+                            "prefix": volume.loc.prefix,
+                            "sheets": volume.loc.sheets,
+                        }
+                    }
+                    if volume.loc
+                    else {}
+                ),
             }
             for volume in sorted(
                 place.volumes,
@@ -257,6 +334,10 @@ def main() -> None:
     prefixes, mirror_sheets = read_mirror(args.mapping)
     print(f"{len(prefixes):,} mirrored items", file=sys.stderr)
     places, skipped = collect_places(args.metadata, prefixes, mirror_sheets)
+    loc_sheets = read_loc_sheets(args.mapping)
+    for place in places.values():
+        for volume in place.volumes:
+            volume.loc = loc_sheets.get(volume.item)
     n_places, n_states = write_outputs(places, args.out_dir, args.run_tag, args.bucket)
 
     volumes = sum(len(p.volumes) for p in places.values())

@@ -3,6 +3,9 @@ import { describe, expect, it } from 'vitest';
 import {
   annotationUri,
   defaultYear,
+  locItemUrl,
+  locSheetUrl,
+  locStemOf,
   searchPlaces,
   stateSlug,
   volumesOfYear,
@@ -129,5 +132,88 @@ describe('stateSlug', () => {
   it('is the volumes file a place needs', () => {
     expect(stateSlug('illinois/chicago')).toBe('illinois');
     expect(stateSlug('new-york/new-york')).toBe('new-york');
+  });
+});
+
+// South Bend 1917, whose p28 is the 33rd image of its LoC resource.
+const southBend: Volume = {
+  item: 'sanborn02502_005',
+  date: '1917',
+  year: 1917,
+  sheets: 123,
+  title: 'South Bend',
+  loc: {
+    resource: 'g4094sm.g4094sm_g025021917',
+    prefix: '02502_1917-',
+    sheets: [
+      'titl',
+      'ind1',
+      'ind2',
+      'cbd1',
+      '0000',
+      '0001',
+      '0002',
+      '0003',
+      '0004',
+      '0005',
+      '0006',
+      '0007',
+      '0008',
+      '0009',
+      '0010',
+      '0011',
+      '0012',
+      '0013',
+      '0014',
+      '0015',
+      '0016',
+      '0017',
+      '0018',
+      '0019',
+      '0020',
+      '0021',
+      '0022',
+      '0023',
+      '0024',
+      '0025',
+      '0026',
+      '0027',
+      '0028',
+      '0029',
+    ],
+  },
+};
+const P28 =
+  'service:gmd:gmd409m:g4094m:g4094sm:g4094sm_g025021917:02502_1917-0028';
+
+describe('locStemOf', () => {
+  it('reads the stem off a loc.gov service or the CDN copy of it', () => {
+    expect(
+      locStemOf(`https://tile.loc.gov/image-services/iiif/${P28}/info.json`),
+    ).toBe('02502_1917-0028');
+    expect(locStemOf(`https://cdn.chronoscope.io/mapsnap/${P28}`)).toBe(
+      '02502_1917-0028',
+    );
+  });
+
+  it("is null for a service that is not LoC's", () => {
+    expect(locStemOf('http://localhost:8182/iiif/vol/p28.jpg')).toBeNull();
+    expect(locStemOf(undefined)).toBeNull();
+  });
+});
+
+describe('locSheetUrl', () => {
+  it("links to the sheet's own page of the LoC resource", () => {
+    expect(
+      locSheetUrl(southBend, `https://cdn.chronoscope.io/mapsnap/${P28}`),
+    ).toBe('https://www.loc.gov/resource/g4094sm.g4094sm_g025021917/?sp=33');
+  });
+
+  it('falls back to the item page when the sheet cannot be found', () => {
+    const itemPage = 'https://www.loc.gov/item/sanborn02502_005/';
+    expect(locItemUrl('sanborn02502_005')).toBe(itemPage);
+    expect(locSheetUrl({ ...southBend, loc: undefined }, P28)).toBe(itemPage);
+    expect(locSheetUrl(southBend, P28.replace('0028', '0099'))).toBe(itemPage);
+    expect(locSheetUrl(southBend, undefined)).toBe(itemPage);
   });
 });

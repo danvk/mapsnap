@@ -6,8 +6,10 @@
  * gesture, and it has to be a continuous movement -- a map that unmounts and
  * remounts loses that, and with it any sense of where the town was.
  *
- * The dots stay in the style throughout, fading out as the warped sheets come
- * up, so backing out of a town lands you where you started.
+ * The dots stay in the style throughout, above the warped sheets and growing
+ * as you zoom, so a neighbouring town stays one click away and backing out of
+ * a town lands you where you started. Only the selected town's dot is hidden,
+ * so it does not sit on top of its own map.
  */
 
 import { useEffect, useRef, useState } from 'react';
@@ -33,26 +35,49 @@ interface AtlasMapProps {
   loaded: LoadedVolume[];
   selectedPlace: Place | null;
   selectedPage: PageRef | null;
+  /** Opacity of the warped sheets, in [0, 1]. */
+  opacity: number;
   onSelectPlace: (place: Place) => void;
   onSelectPage: (page: PageRef | null) => void;
 }
 
-/** Zoom at which the dots have finished handing over to the sheets. */
-const DOTS_FADE_ZOOM = 11;
-
-/** A place's dot area tracks its size, so radius tracks the square root. */
+/**
+ * A place's dot area tracks its size, so radius tracks the square root.
+ *
+ * Dots keep growing past the country view, though more slowly than the ground
+ * does: a small town's dot is 3 px at zoom 7 and 8 px at zoom 16, so zooming
+ * toward one makes it bigger rather than leaving a speck to aim at.
+ */
 function radiusExpression(sizeBy: 'sheets' | 'volumes'): unknown {
   const magnitude = ['sqrt', ['max', ['get', sizeBy], 1]];
   const ceiling = sizeBy === 'sheets' ? 60 : 13; // sqrt(3600) and sqrt(170)
+  const radii = (smallest: number, largest: number) => [
+    'interpolate',
+    ['linear'],
+    magnitude,
+    1,
+    smallest,
+    ceiling,
+    largest,
+  ];
   return [
     'interpolate',
     ['linear'],
     ['zoom'],
     3,
-    ['interpolate', ['linear'], magnitude, 1, 1.5, ceiling, 11],
+    radii(1.5, 11),
     7,
-    ['interpolate', ['linear'], magnitude, 1, 3, ceiling, 26],
+    radii(3, 26),
+    12,
+    radii(5, 34),
+    16,
+    radii(8, 44),
   ];
+}
+
+/** The dot layer's filter: every town but the selected one. */
+function dotsFilter(selectedId: string | null): unknown {
+  return selectedId ? ['!=', ['get', 'id'], selectedId] : ['literal', true];
 }
 
 /** GeoJSON for the dot layer: one point per town. */
@@ -84,6 +109,7 @@ export function AtlasMap(props: AtlasMapProps) {
     loaded,
     selectedPlace,
     selectedPage,
+    opacity,
     onSelectPlace,
     onSelectPage,
   } = props;
@@ -159,26 +185,10 @@ export function AtlasMap(props: AtlasMapProps) {
             '#2563eb',
             '#9ca3af',
           ],
-          'circle-opacity': [
-            'interpolate',
-            ['linear'],
-            ['zoom'],
-            DOTS_FADE_ZOOM - 2,
-            0.65,
-            DOTS_FADE_ZOOM,
-            0,
-          ],
+          'circle-opacity': 0.65,
           'circle-stroke-color': '#fff',
           'circle-stroke-width': 0.5,
-          'circle-stroke-opacity': [
-            'interpolate',
-            ['linear'],
-            ['zoom'],
-            DOTS_FADE_ZOOM - 2,
-            0.9,
-            DOTS_FADE_ZOOM,
-            0,
-          ],
+          'circle-stroke-opacity': 0.9,
         },
       });
       setReady(true);
@@ -191,7 +201,7 @@ export function AtlasMap(props: AtlasMapProps) {
         layers: ['place-dots'],
       });
       const id = hits[0]?.properties?.id as string | undefined;
-      if (id && map.getZoom() < DOTS_FADE_ZOOM) {
+      if (id) {
         const place = placesRef.current.find((entry) => entry.id === id);
         if (place) {
           onSelectPlaceRef.current(place);
@@ -204,7 +214,6 @@ export function AtlasMap(props: AtlasMapProps) {
     });
     map.on('mousemove', (event) => {
       const onDot =
-        map.getZoom() < DOTS_FADE_ZOOM &&
         map.queryRenderedFeatures(event.point, { layers: ['place-dots'] })
           .length > 0;
       const onPage =
@@ -238,6 +247,20 @@ export function AtlasMap(props: AtlasMapProps) {
       radiusExpression(sizeBy) as never,
     );
   }, [sizeBy, ready]);
+
+  // Hide the selected town's dot. A filter rather than zero opacity, so the
+  // hidden dot also stops catching clicks meant for the sheets under it.
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !ready) return;
+    map.setFilter('place-dots', dotsFilter(selectedPlace?.id ?? null) as never);
+  }, [selectedPlace, ready]);
+
+  useEffect(() => {
+    const layer = layerRef.current;
+    if (!layer || !ready) return;
+    layer.setLayerOptions({ opacity }, { animate: false });
+  }, [opacity, ready]);
 
   // Draw the fetched volumes, and frame them. Every volume of a town-year goes
   // onto one layer, so sheets from different volumes of the same year overlap
