@@ -753,6 +753,11 @@ def load_split_polygons(
     }
 
 
+# A page key whose suffix is a letter followed by 's' ('p6ns', 'p0005ls'): the
+# trailing 's' could mark a skeleton sheet or just end the suffix.
+COMPOUND_SKELETON_KEY = re.compile(r"p\d+[a-zA-Z]s(?:__\d+)?")
+
+
 def redundant_skeleton_keys(truth_keys: set[str], generated_keys: set[str]) -> set[str]:
     """Truth page keys to drop under the skeleton rule.
 
@@ -766,7 +771,7 @@ def redundant_skeleton_keys(truth_keys: set[str], generated_keys: set[str]) -> s
     dropping a real page silently is worse than failing loudly.
     """
     for key in truth_keys | generated_keys:
-        assert not re.fullmatch(r"p\d+[a-zA-Z]s(?:__\d+)?", key), (
+        assert not COMPOUND_SKELETON_KEY.fullmatch(key), (
             f"page key {key!r} has a compound suffix ending in 's'; the "
             "skeleton rule cannot tell a skeleton sheet from a direction or "
             "sequence letter here"

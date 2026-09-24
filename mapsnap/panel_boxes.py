@@ -80,6 +80,13 @@ def derive_panel_boxes(
     appear in that panel's document instead.
     """
     parent_w, parent_h = parent_doc["width"], parent_doc["height"]
+    # A panel ring pinched to a single point is invalid, and GEOS refuses to
+    # intersect it ("side location conflict"), which failed craft for a whole
+    # volume (Chicago 1950 p96, #516). buffer(0) repairs a pinch without
+    # changing the area.
+    panel_polygons = [
+        polygon if polygon.is_valid else polygon.buffer(0) for polygon in panel_polygons
+    ]
     polygon = panel_polygons[panel_index - 1]
     width, height = panel_size
     offset_x, offset_y = panel_frame(polygon, panel_size, (parent_w, parent_h))

@@ -9,10 +9,12 @@ from mapsnap.make_iiif_georef import (
     GcpPoint,
     _load_oim_index,
     _service_url_to_page_key,
+    drop_redundant_skeletons,
     expand_georef_globs,
     fill_missing_source_ids,
     georef_gcp_points,
     georef_path_to_page_key,
+    glob_matched_anything,
     make_annotation,
     own_label,
 )
@@ -901,3 +903,23 @@ def test_page_key_lower_matches_what_a_georef_path_parses_to() -> None:
     assert page_key_lower("p20") == "p20"
     assert page_key_lower("p20__3") == "p20__3"
     assert page_key_lower("p97W__2") == "p97w__2"
+
+
+def test_expand_georef_globs_accepts_a_comma_in_the_path(tmp_path):
+    """The mirror holds an item named sanborn09511_002,5 (#515)."""
+    volume = tmp_path / "sanborn09511_002,5"
+    volume.mkdir()
+    (volume / "p1.georef-final.json").write_text(json.dumps(_POSED))
+    pattern = f"{volume}/*.georef-final.json"
+    assert [Path(p).name for p in expand_georef_globs(pattern)] == [
+        "p1.georef-final.json"
+    ]
+    assert glob_matched_anything(pattern)
+
+
+def test_skeleton_rule_keeps_pages_it_cannot_judge_when_publishing():
+    """'p0005ls' is ambiguous; publishing keeps it rather than asserting (#512)."""
+    items = [(key, None, None, None, None) for key in ["p1l", "p0005ls", "p7", "p7s"]]
+    kept = [item[0] for item in drop_redundant_skeletons(items)]
+    # The unambiguous skeleton pair is still resolved; the ambiguous key stays.
+    assert kept == ["p1l", "p0005ls", "p7"]

@@ -53,7 +53,12 @@ from mapsnap.streets import (
     is_number_only,
     normalize_street,
 )
-from mapsnap.utils import default_centerlines, image_stem, pose_is_upside_down
+from mapsnap.utils import (
+    default_centerlines,
+    haversine_m,
+    image_stem,
+    pose_is_upside_down,
+)
 
 
 @dataclass
@@ -1975,6 +1980,31 @@ def ransac_hybrid(
     return best_A, best_inliers, best_pair
 
 
+def page_diagonal_m(A: np.ndarray, width: float, height: float) -> float:
+    """The longer ground diagonal, in meters, of a width x height page under A."""
+    corners = [
+        apply_affine(A, 0, 0),
+        apply_affine(A, width, 0),
+        apply_affine(A, width, height),
+        apply_affine(A, 0, height),
+    ]
+    return max(
+        haversine_m(corners[0][1], corners[0][0], corners[2][1], corners[2][0]),
+        haversine_m(corners[1][1], corners[1][0], corners[3][1], corners[3][0]),
+    )
+
+
+def page_extent_is_plausible(diagonal_m: float) -> bool:
+    """Whether a page this big on the ground could be a Sanborn sheet.
+
+    osm_snap owns the ceiling; imported here, not at module level, because
+    osm_snap imports this module.
+    """
+    from mapsnap.osm_snap import page_extent_is_plausible as plausible
+
+    return plausible(diagonal_m)
+
+
 def _finalize_georef(
     A: np.ndarray,
     features: list[LabelFeature],
@@ -3530,6 +3560,18 @@ def process_image(
         f"RANSAC: {len(inlier_feat_indices)} / {len(features)} inlier labels",
         file=sys.stderr,
     )
+    diagonal_m = page_diagonal_m(A, img_w, img_h)
+    if not page_extent_is_plausible(diagonal_m):
+        # A fit whose page would span kilometers beyond any drawn sheet is wrong
+        # by orders of magnitude, however many labels agree with it. Accepted, it
+        # became the volume's reference scale, snap's scale prior and a
+        # published pose: Orleans 1929's p1 fitted at 0.044 px/ft -- a 17.3 km
+        # sheet -- and went out as the volume's only page (#517).
+        print(
+            f"RANSAC fit rejected: a {diagonal_m / 1000:.1f} km page is not a sheet.",
+            file=sys.stderr,
+        )
+        return ProcessResult(success=False, gcp_hints=cluster_gcp_hints(gcps))
 
     residuals = _inlier_residuals(features, block_index, A, inlier_feat_indices)
 
