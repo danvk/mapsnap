@@ -53,6 +53,7 @@ from mapsnap.keymap.align_page_region import (
     pose_world_of,
     solve_pose,
 )
+from mapsnap.osm_snap import search_radius_is_plausible
 from mapsnap.streets import Block, street_name_family
 
 Point = tuple[float, float]
@@ -593,6 +594,13 @@ def solve_streets_pose(
     neighborhood and expressed in a metre frame whose origin is the prior location.
     """
     result = StreetSolveResult(n_constraints=len(constraints))
+    if not search_radius_is_plausible(prior_radius_m):
+        # The radius snap refuses (#509) reaches here too, through the same
+        # misplaced key map, and every street within it is a candidate match: a
+        # 769 km radius gave Puyallup 1900's p7 732,451 consensus poses, each
+        # measured against 757 segments, and killed fit at 16 GB.
+        result.abstain = "implausible-prior-radius"
+        return result
     if not psi_priors:
         result.abstain = "no-rotation-prior"
         return result

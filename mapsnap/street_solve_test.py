@@ -215,6 +215,18 @@ def test_abstains_outside_the_prior_radius():
     assert result.pose is None and result.abstain == "outside-prior-radius"
 
 
+def test_abstains_on_a_continental_prior_radius():
+    """A misplaced key map's radius is refused before the search, not by it."""
+    result = solve_streets_pose(
+        scene(),
+        size=SIZE,
+        prior_log_scale=LOG_SCALE,
+        psi_priors=[(TRUE_POSE[2], "label-pair-exact")],
+        prior_radius_m=768_949.0,  # Puyallup 1900, which ran fit out of memory
+    )
+    assert result.pose is None and result.abstain == "implausible-prior-radius"
+
+
 def test_truncated_street_produces_a_large_residual_not_a_plausible_one():
     # G2/G3: OSM keeps only a stub of a street the sheet drew in full. Snapping is
     # clipped to the stub, so the label lands far from it and the gate drops it.
