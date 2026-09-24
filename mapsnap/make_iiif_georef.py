@@ -38,10 +38,7 @@ from shapely.geometry import Polygon as ShapelyPolygon
 from shapely.geometry import mapping as geom_mapping
 
 from mapsnap.clip_masks import compute_all_clip_masks, geo_polygon_to_svg
-from mapsnap.compare_iiif_georef import (
-    COMPOUND_SKELETON_KEY,
-    redundant_skeleton_keys,
-)
+from mapsnap.compare_iiif_georef import redundant_skeleton_keys
 from mapsnap.osm_to_centerlines import load_centerlines
 from mapsnap.split import panels_json_path, read_panels_json
 from mapsnap.utils import default_centerlines, jpeg_dimensions, label_to_page_key
@@ -67,8 +64,8 @@ def georef_path_to_page_key(path: str) -> str | None:
     Any letter page suffix is kept (Sanborn sheets run 'a', 'b', … past the
     directional 's'/'n'/'e'/'w'/'l'/'r' letters), not just a known few — a
     dropped suffix silently loses that page from the manifest. Compound suffixes
-    that are ambiguous with a skeleton sheet (a letter then 's', e.g. 'p6ns')
-    still parse here; drop_redundant_skeletons raises on them rather than guess.
+    ending in 's' ('p6ns') parse too; drop_redundant_skeletons decides whether
+    one is a skeleton.
     """
     m = re.search(
         r"(?:\b|_)(p\d+)([a-z]*)((?:__\d+)?)(?:\.[^.]+)?\.georef(?:2|-[a-z0-9-]+)?\.json$",
@@ -170,26 +167,12 @@ def expand_georef_globs(pattern: str) -> list[str]:
 def drop_redundant_skeletons(valid_items: list) -> list:
     """Drop skeleton pages ('s' suffix) whose full-color counterpart also fit.
 
-    Delegates to compare_iiif_georef.redundant_skeleton_keys, which also
-    asserts that no key carries a compound suffix ending in 's' (where the
-    rule could not tell a skeleton from a direction/sequence letter).
+    Delegates to compare_iiif_georef.redundant_skeleton_keys, which pairs
+    'p0005ls' with 'p5l' as well as 'p153s' with 'p153' -- the mirror's compound
+    skeleton keys used to fail fit outright (#512).
     """
     keys = {page_key for page_key, *_ in valid_items}
-    # A compound suffix ending in 's' ('p0005ls') is ambiguous: the rule cannot
-    # tell a skeleton from a direction or sequence letter, and the scoring side
-    # asserts rather than guess. Publishing must not: that assertion failed fit
-    # for every item carrying such a key -- all six in the corpus, 43 keys (#512).
-    # Those pages are simply kept; at worst a skeleton and its full-color sheet
-    # are both published, which beats an empty volume.
-    ambiguous = {key for key in keys if COMPOUND_SKELETON_KEY.fullmatch(key)}
-    if ambiguous:
-        print(
-            f"Keeping {len(ambiguous)} page(s) the skeleton rule cannot judge: "
-            + ", ".join(sorted(ambiguous)),
-            file=sys.stderr,
-        )
-    judged = keys - ambiguous
-    skipped = redundant_skeleton_keys(judged, judged)
+    skipped = redundant_skeleton_keys(keys, keys)
     if skipped:
         print(
             f"Dropping {len(skipped)} skeleton page(s) with full-color "

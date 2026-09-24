@@ -753,9 +753,24 @@ def load_split_polygons(
     }
 
 
-# A page key whose suffix is a letter followed by 's' ('p6ns', 'p0005ls'): the
-# trailing 's' could mark a skeleton sheet or just end the suffix.
-COMPOUND_SKELETON_KEY = re.compile(r"p\d+[a-zA-Z]s(?:__\d+)?")
+def skeleton_base(key: str, keys: set[str]) -> str | None:
+    """The full-color page in keys that a skeleton sheet's key belongs to, if any.
+
+    A skeleton sheet's key is its full-color sheet's plus 's' ('p153s' for
+    'p153'). The LoC mirror zero-pads the number when the full-color key already
+    carries a letter ('p0005ls' beside 'p5l', 'p0001As' beside 'p1A'), so the
+    base is looked for both as written and without the padding. A trailing 's'
+    alone could be a direction or sequence letter; the counterpart being in the
+    volume is what makes the key a skeleton. Case is ignored.
+    """
+    if not key.lower().endswith("s"):
+        return None
+    by_lower = {other.lower(): other for other in keys}
+    written = key[:-1].lower()
+    for candidate in (written, re.sub(r"^p0+(?=\d)", "p", written)):
+        if candidate in by_lower:
+            return by_lower[candidate]
+    return None
 
 
 def redundant_skeleton_keys(truth_keys: set[str], generated_keys: set[str]) -> set[str]:
@@ -764,23 +779,14 @@ def redundant_skeleton_keys(truth_keys: set[str], generated_keys: set[str]) -> s
     A skeleton sheet (pNs) maps the same ground as its full-color page (pN),
     so when both are in the truth exactly one may contribute to a comparison:
     pNs when it alone has a generated fit, pN in every other case (including
-    when neither fit — the miss is counted once, against pN).
-
-    Keys with a compound suffix (e.g. 'p6ns', where the trailing 's' is
-    ambiguous with a direction or sequence letter) raise instead of guessing:
-    dropping a real page silently is worse than failing loudly.
+    when neither fit — the miss is counted once, against pN). See
+    skeleton_base for how a skeleton finds its pN.
     """
-    for key in truth_keys | generated_keys:
-        assert not COMPOUND_SKELETON_KEY.fullmatch(key), (
-            f"page key {key!r} has a compound suffix ending in 's'; the "
-            "skeleton rule cannot tell a skeleton sheet from a direction or "
-            "sequence letter here"
-        )
     drop: set[str] = set()
     for key in truth_keys:
-        if not key.endswith("s") or key[:-1] not in truth_keys:
+        base = skeleton_base(key, truth_keys)
+        if base is None:
             continue
-        base = key[:-1]
         if key in generated_keys and base not in generated_keys:
             drop.add(base)
         else:

@@ -294,7 +294,7 @@ def test_georef_path_sequence_letter_split():
 
 def test_georef_path_multi_letter_suffix_parses():
     # A compound suffix parses (rather than silently dropping the page);
-    # drop_redundant_skeletons is what raises on the ambiguous trailing 's'.
+    # drop_redundant_skeletons decides whether it is a skeleton.
     assert georef_path_to_page_key("data/vol/p6ns.georef.json") == "p6ns"
 
 
@@ -917,9 +917,11 @@ def test_expand_georef_globs_accepts_a_comma_in_the_path(tmp_path):
     assert glob_matched_anything(pattern)
 
 
-def test_skeleton_rule_keeps_pages_it_cannot_judge_when_publishing():
-    """'p0005ls' is ambiguous; publishing keeps it rather than asserting (#512)."""
-    items = [(key, None, None, None, None) for key in ["p1l", "p0005ls", "p7", "p7s"]]
+def test_publishing_drops_the_mirrors_zero_padded_skeletons():
+    """'p0005ls' is the skeleton of 'p5l', and used to fail fit (#512)."""
+    keys = ["p5l", "p0005ls", "p0005rs", "p7", "p7s", "p0319as"]
+    items = [(key, None, None, None, None) for key in keys]
     kept = [item[0] for item in drop_redundant_skeletons(items)]
-    # The unambiguous skeleton pair is still resolved; the ambiguous key stays.
-    assert kept == ["p1l", "p0005ls", "p7"]
+    # p0005rs has no p5r and p0319as no p319a: with no full-color sheet to
+    # stand in for them, they are published as they are.
+    assert kept == ["p5l", "p0005rs", "p7", "p0319as"]
