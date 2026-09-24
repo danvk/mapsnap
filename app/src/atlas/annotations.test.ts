@@ -1,6 +1,16 @@
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import { inParallel, stemFromLabel, withPageMetadata } from './annotations.ts';
+import {
+  CDN_BASE,
+  cdnImageSize,
+  cdnServiceUrl,
+  inParallel,
+  loadVolume,
+  rewriteForCdn,
+  stemFromLabel,
+  withPageMetadata,
+} from './annotations.ts';
+import type { Volume } from './places.ts';
 import type { GeorefAnnotationPage } from '../../server/iiifAnnotations.ts';
 
 describe('stemFromLabel', () => {
@@ -84,5 +94,162 @@ describe('inParallel', () => {
 
   it('has nothing to do for an empty list', async () => {
     expect(await inParallel([], 4, async () => 1)).toEqual([]);
+  });
+});
+
+// Champaign 1915 p10, as a corpus run publishes it: LoC's full-resolution
+// frame, 6450 x 7650, which the CDN serves at 1613 x 1913.
+const CHAMPAIGN_SERVICE =
+  'service:gmd:gmd410m:g4104m:g4104cm:g017781915:01778_1915-0010';
+const champaign = (): GeorefAnnotationPage =>
+  ({
+    type: 'AnnotationPage',
+    items: [
+      {
+        type: 'Annotation',
+        label: 'Champaign, Illinois | 1915 | sanborn01778_006 p10',
+        target: {
+          source: {
+            id: `https://tile.loc.gov/image-services/iiif/${CHAMPAIGN_SERVICE}/info.json`,
+            type: 'ImageService2',
+            width: 6450,
+            height: 7650,
+          },
+          selector: {
+            type: 'SvgSelector',
+            value:
+              '<svg><polygon points="0,0 6450,0 6450,7650 130,550.8" /></svg>',
+          },
+        },
+        body: {
+          features: [
+            {
+              type: 'Feature',
+              properties: { resourceCoords: [6450, 7650] },
+              geometry: null,
+            },
+            {
+              type: 'Feature',
+              properties: { resourceCoords: [1000, 2000] },
+              geometry: null,
+            },
+          ],
+        },
+      },
+    ],
+  }) as unknown as GeorefAnnotationPage;
+
+describe('cdnServiceUrl', () => {
+  it("keeps LoC's service id as the CDN's directory", () => {
+    expect(
+      cdnServiceUrl(
+        `https://tile.loc.gov/image-services/iiif/${CHAMPAIGN_SERVICE}/info.json`,
+      ),
+    ).toBe(`${CDN_BASE}/${CHAMPAIGN_SERVICE}`);
+    expect(
+      cdnServiceUrl(
+        `https://tile.loc.gov/image-services/iiif/${CHAMPAIGN_SERVICE}`,
+      ),
+    ).toBe(`${CDN_BASE}/${CHAMPAIGN_SERVICE}`);
+  });
+
+  it('is null for anything but a loc.gov image service', () => {
+    expect(cdnServiceUrl('http://localhost:8182/iiif/vol/p10.jpg')).toBeNull();
+    expect(cdnServiceUrl(undefined)).toBeNull();
+  });
+});
+
+describe('cdnImageSize', () => {
+  it('rounds a quarter up, as the CDN does', () => {
+    // Rounding to nearest would give 1612 x 1912 (half to even) or 1613 x 1913
+    // (half up) depending on the language; the CDN's info.json says 1613.
+    expect(cdnImageSize({ width: 6450, height: 7650 })).toEqual({
+      width: 1613,
+      height: 1913,
+    });
+    expect(cdnImageSize({ width: 6452, height: 7652 })).toEqual({
+      width: 1613,
+      height: 1913,
+    });
+  });
+});
+
+describe('rewriteForCdn', () => {
+  it("moves the page onto the CDN's image and frame", () => {
+    const input = champaign();
+    const item = rewriteForCdn(input).items[0]!;
+    expect(item.target?.source).toEqual({
+      id: `${CDN_BASE}/${CHAMPAIGN_SERVICE}`,
+      type: 'ImageService3',
+      width: 1613,
+      height: 1913,
+    });
+    const coords = item.body?.features?.map((f) => f.properties.resourceCoords);
+    // The far corner lands on the far corner, not a fraction of a pixel short.
+    expect(coords?.[0]).toEqual([1613, 1913]);
+    expect(coords?.[1]).toEqual([250.1, 500.1]);
+    expect(item.target?.selector?.value).toBe(
+      '<svg><polygon points="0,0 1613,0 1613,1913 32.5,137.7" /></svg>',
+    );
+    // The published annotation is untouched.
+    expect(input.items[0]?.target?.source.width).toBe(6450);
+  });
+
+  it('leaves a page that is not on loc.gov alone', () => {
+    const input = champaign();
+    input.items[0]!.target!.source.id =
+      'http://localhost:8182/iiif/vol/p10.jpg';
+    expect(rewriteForCdn(input)).toEqual(input);
+  });
+});
+
+describe('loadVolume from the CDN', () => {
+  const volume = { item: 'sanborn01778_006' } as Volume;
+  const uri =
+    's3://mapsnap-sanborn/by-state/illinois/1915/sanborn01778_006/runs/corpus-v1/mapsnap.iiif.json';
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  // A fetch that serves the published annotation, the server's mirror rewrite,
+  // and the CDN's info.json only when `cdnHasIt`.
+  function stubFetch(cdnHasIt: boolean) {
+    const requested: string[] = [];
+    vi.stubGlobal('fetch', async (url: string) => {
+      requested.push(url);
+      if (url.startsWith(CDN_BASE))
+        return new Response('{}', { status: cdnHasIt ? 200 : 404 });
+      if (url.startsWith('/iiif-api/annotation')) {
+        const mirrored = champaign();
+        mirrored.items[0]!.target!.source.id =
+          'http://localhost:8182/iiif/vol/p10.jpg';
+        return Response.json({ annotation: mirrored });
+      }
+      return Response.json(champaign());
+    });
+    return requested;
+  }
+
+  it('draws a volume the CDN holds from the CDN', async () => {
+    const requested = stubFetch(true);
+    const result = await loadVolume(volume, uri, 'cdn');
+    expect('source' in result && result.source).toBe('cdn');
+    expect(
+      'annotation' in result && result.annotation.items[0]?.target?.source.id,
+    ).toBe(`${CDN_BASE}/${CHAMPAIGN_SERVICE}`);
+    expect(requested).toEqual([
+      `/s3-api/object?uri=${encodeURIComponent(uri)}`,
+      `${CDN_BASE}/${CHAMPAIGN_SERVICE}/info.json`,
+    ]);
+  });
+
+  it('falls back to our mirror for a volume the CDN does not hold yet', async () => {
+    stubFetch(false);
+    const result = await loadVolume(volume, uri, 'cdn');
+    expect('source' in result && result.source).toBe('mirror');
+    expect(
+      'annotation' in result && result.annotation.items[0]?.target?.source.id,
+    ).toBe('http://localhost:8182/iiif/vol/p10.jpg');
   });
 });

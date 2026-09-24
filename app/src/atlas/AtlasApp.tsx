@@ -10,7 +10,7 @@
  * state's volume list when a town is picked, and one annotation per volume of
  * the chosen year. Sheet tiles are pulled by Allmaps as it draws, and only for
  * what is on screen; where they come from is the "Sheets from" control, and
- * annotations.ts explains why the mirror is the default.
+ * annotations.ts explains why the CDN is the default.
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
@@ -45,9 +45,10 @@ export function AtlasApp() {
   const [index, setIndex] = useState<PlaceIndex | null>(null);
   const [indexError, setIndexError] = useState<string | null>(null);
   const [sizeBy, setSizeBy] = useState<'sheets' | 'volumes'>('sheets');
-  // The mirror by default: loc.gov rate-limits long before a town-year's worth
-  // of tiles is drawn (see annotations.ts).
-  const [imageSource, setImageSource] = useState<ImageSource>('mirror');
+  // The CDN by default, falling back to our mirror per volume: loc.gov
+  // rate-limits long before a town-year's worth of tiles is drawn (see
+  // annotations.ts).
+  const [imageSource, setImageSource] = useState<ImageSource>('cdn');
 
   const [place, setPlace] = useState<Place | null>(null);
   const [volumes, setVolumes] = useState<Volume[] | null>(null);
@@ -154,7 +155,8 @@ export function AtlasApp() {
               setImageSource(event.target.value as ImageSource)
             }
           >
-            <option value="mirror">the mirror</option>
+            <option value="cdn">the CDN</option>
+            <option value="mirror">our mirror</option>
             <option value="loc">loc.gov</option>
           </select>
         </label>
@@ -198,6 +200,7 @@ export function AtlasApp() {
               setSelectedPage(null);
             }}
             results={results}
+            imageSource={imageSource}
             loading={loading}
             selectedPage={selectedPage}
             onClose={close}

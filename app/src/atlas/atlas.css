@@ -221,6 +221,7 @@ body {
 
 .atlas-volumes li {
   display: flex;
+  flex-wrap: wrap;
   justify-content: space-between;
   gap: 8px;
   padding: 2px 0;
@@ -239,6 +240,14 @@ body {
 
 .atlas-volume-status.is-gap {
   color: #b45309;
+}
+
+/* A volume drawn from somewhere other than the source asked for. */
+.atlas-volume-source {
+  flex-basis: 100%;
+  color: var(--atlas-muted);
+  font-size: 11px;
+  font-style: italic;
 }
 
 .atlas-page {

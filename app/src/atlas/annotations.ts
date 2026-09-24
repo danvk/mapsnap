@@ -10,14 +10,23 @@
  * host answering 429 to everything for minutes afterwards. The browser reports
  * those as CORS failures, since a 429 error page carries no CORS headers.
  *
- * So the default is the mirror, through the same rewrite the debugger uses:
- * each page's service is repointed at our own cache of the mirrored 25% scans.
- * `loc` remains selectable, and is the right source for a single volume.
+ * So the default is the chronoscope CDN, a static (level 0) IIIF service built
+ * from the mirrored 25% scans: each page's service is repointed there, in the
+ * browser, and the tiles never touch our own server. A volume the CDN does not
+ * hold yet falls back to `mirror`, the same rewrite the debugger uses against
+ * our own cache of those scans. `loc` remains selectable, and is the right
+ * source for a single volume.
  */
 
 import { pagesFromAnnotation, type PageGeo } from '../iiif/pages';
-import type { GeorefAnnotationPage } from '../../server/iiifAnnotations';
+import {
+  rescaleSvgSelector,
+  type GeorefAnnotationPage,
+} from '../../server/iiifAnnotations';
 import type { Volume } from './places';
+
+/** The static IIIF service for the mirrored scans, one directory per sheet. */
+export const CDN_BASE = 'https://cdn.chronoscope.io/mapsnap';
 
 /** A volume's annotation, and the page geometry derived from it. */
 export interface LoadedVolume {
@@ -34,6 +43,12 @@ export interface LoadedVolume {
    * annotation's own report. Null for an annotation that carries no report.
    */
   totalImages: number | null;
+  /**
+   * Where this volume's sheets are actually drawn from, which is not always
+   * the source asked for: a volume the CDN does not hold falls back to the
+   * mirror.
+   */
+  source: ImageSource;
 }
 
 /**
@@ -104,19 +119,127 @@ export function withPageMetadata(
 }
 
 /** Where a volume's sheet images come from. */
-export type ImageSource = 'mirror' | 'loc';
+export type ImageSource = 'cdn' | 'mirror' | 'loc';
 
 /**
  * Where to fetch a volume's annotation, for the chosen image source.
  *
  * `loc` takes the published annotation verbatim, so its pages resolve to
- * loc.gov. `mirror` asks the server to rewrite it against the cached scans,
- * which also fills in the `page` metadata the raw file lacks.
+ * loc.gov; `cdn` takes it verbatim too, and rewrites it in the browser.
+ * `mirror` asks the server to rewrite it against the cached scans, which also
+ * fills in the `page` metadata the raw file lacks.
  */
 export function annotationUrl(uri: string, source: ImageSource): string {
-  return source === 'loc'
-    ? `/s3-api/object?uri=${encodeURIComponent(uri)}`
-    : `/iiif-api/annotation?path=${encodeURIComponent(uri)}`;
+  return source === 'mirror'
+    ? `/iiif-api/annotation?path=${encodeURIComponent(uri)}`
+    : `/s3-api/object?uri=${encodeURIComponent(uri)}`;
+}
+
+/**
+ * The CDN's service for a sheet, from its loc.gov service URL.
+ *
+ * The CDN keeps LoC's own service id as the directory name, e.g.
+ * `.../iiif/service:gmd:gmd410m:...:01778_1915-0010` becomes
+ * `${CDN_BASE}/service:gmd:gmd410m:...:01778_1915-0010`. Null for a source
+ * that is not a loc.gov image service.
+ */
+export function cdnServiceUrl(
+  locServiceUrl: string | undefined,
+): string | null {
+  const match = /\/iiif\/(service:[^/]+)/.exec(locServiceUrl ?? '');
+  return match ? `${CDN_BASE}/${match[1]}` : null;
+}
+
+/**
+ * The size of the CDN's image for a sheet LoC serves at width x height.
+ *
+ * The CDN's images are the mirror's 25% scans, which LoC renders at
+ * ceil(dimension / 4) -- 6450 x 7650 is 1613 x 1913, where rounding would give
+ * 1612 x 1912 and misplace every control point by a fraction of a pixel. Held
+ * for all 86 sheets checked against the CDN's info.json, across 40 volumes.
+ */
+export function cdnImageSize(size: { width: number; height: number }): {
+  width: number;
+  height: number;
+} {
+  return {
+    width: Math.ceil(size.width / 4),
+    height: Math.ceil(size.height / 4),
+  };
+}
+
+// Round to 1 decimal, as the server's rewrite does.
+function round1(value: number): number {
+  return Math.round(value * 10) / 10;
+}
+
+/**
+ * Repoint every loc.gov page of an annotation at the CDN.
+ *
+ * The published annotation's control points and clipping polygon are in the
+ * pixels of LoC's full-resolution image, so both are rescaled into the CDN
+ * image's frame, per axis. An item whose source is not a loc.gov service is
+ * left as it is. The argument is not mutated.
+ */
+export function rewriteForCdn(
+  annotation: GeorefAnnotationPage,
+): GeorefAnnotationPage {
+  const result = structuredClone(annotation);
+  for (const item of result.items ?? []) {
+    const source = item.target?.source;
+    const service = cdnServiceUrl(source?.id);
+    if (
+      !item.target ||
+      !source ||
+      !service ||
+      !source.width ||
+      !source.height
+    ) {
+      continue;
+    }
+    const size = cdnImageSize(source);
+    const scale = {
+      scaleX: size.width / source.width,
+      scaleY: size.height / source.height,
+    };
+    item.target.source = { id: service, type: 'ImageService3', ...size };
+    for (const feature of item.body?.features ?? []) {
+      const coords = feature.properties?.resourceCoords;
+      if (coords && coords.length >= 2) {
+        feature.properties.resourceCoords = [
+          round1((coords[0] ?? 0) * scale.scaleX),
+          round1((coords[1] ?? 0) * scale.scaleY),
+        ];
+      }
+    }
+    const selector = item.target.selector;
+    if (selector?.type === 'SvgSelector') {
+      selector.value = rescaleSvgSelector(selector.value, scale, size);
+    }
+  }
+  return result;
+}
+
+/**
+ * Whether the CDN holds this volume's sheets, judged by its first page.
+ *
+ * The CDN is being filled a volume at a time, and so far a volume is either
+ * all there or not there at all, so one info.json stands for the rest. It is
+ * the request Allmaps would make first anyway, and the CDN lets the browser
+ * cache it.
+ */
+async function cdnHoldsVolume(
+  annotation: GeorefAnnotationPage,
+): Promise<boolean> {
+  const service = (annotation.items ?? [])
+    .map((item) => cdnServiceUrl(item.target?.source?.id))
+    .find((url) => url !== null);
+  if (!service) return false;
+  try {
+    return (await fetch(`${service}/info.json`)).ok;
+  } catch {
+    return false;
+  }
 }
 
 /**
@@ -140,12 +263,18 @@ export async function loadVolume(
     };
     // The rewrite route wraps its result; the raw object route does not.
     const raw = body.annotation ?? body;
-    const annotation = withPageMetadata(raw);
+    if (source === 'cdn' && !(await cdnHoldsVolume(raw))) {
+      return loadVolume(volume, uri, 'mirror');
+    }
+    const annotation = withPageMetadata(
+      source === 'cdn' ? rewriteForCdn(raw) : raw,
+    );
     return {
       volume,
       annotation,
       pages: pagesFromAnnotation(annotation),
       totalImages: reportedCount(annotation, 'pages'),
+      source,
     };
   } catch {
     return { volume, reason: 'unreadable' };
