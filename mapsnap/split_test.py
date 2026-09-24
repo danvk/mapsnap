@@ -459,3 +459,21 @@ def test_order_panels_drops_an_empty_polygon() -> None:
     ordered = order_panels([real[0], ShapelyPolygon(), real[1]], 400)
     assert len(ordered) == 2
     assert all(not p.is_empty for p in ordered)
+
+
+def test_repair_panel_mends_a_pinched_ring_without_losing_area():
+    """Chicago 1950 p96: a panel ring touching itself at one point (#516)."""
+    from shapely.geometry import Polygon
+
+    from mapsnap.split import repair_panel
+
+    pinched = Polygon(
+        [(0, 0), (10, 0), (10, 10), (5, 5), (4, 6), (5, 5), (0, 10), (0, 0)]
+    )
+    assert not pinched.is_valid
+    repaired = repair_panel(pinched)
+    assert repaired.is_valid
+    assert repaired.geom_type == "Polygon"
+    assert abs(repaired.area - pinched.buffer(0).area) < 1e-9
+    valid = Polygon([(0, 0), (1, 0), (1, 1), (0, 1)])
+    assert repair_panel(valid) is valid

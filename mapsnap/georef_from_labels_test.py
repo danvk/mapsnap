@@ -21,6 +21,8 @@ from mapsnap.georef_from_labels import (
     dominant_axis_near,
     is_rotation_outlier,
     label_features,
+    page_diagonal_m,
+    page_extent_is_plausible,
     project_to_polyline,
     promote_avenue_letters,
     ransac_hybrid,
@@ -2159,3 +2161,25 @@ def test_rank_pairs_by_consensus_uses_every_gcp_when_few_are_on_the_sheet(monkey
     # A "sheet" so small that fewer than the cap are on it: the filter stands down.
     top = g._rank_pairs_by_consensus(gcps, 1.0, 1e-3, 8, sheet=(10.0, 10.0))
     assert len(top) == 8 and all(i >= n_out and j >= n_out for i, j in top)
+
+
+def page_affine(feet_per_pixel: float, lat: float = 30.0) -> np.ndarray:
+    """A north-up pixel -> (lon, lat) affine at the given ground scale."""
+    deg_lat_per_px = feet_per_pixel / _FT_PER_DEG_LAT
+    deg_lon_per_px = deg_lat_per_px / math.cos(math.radians(lat))
+    return np.array([[deg_lon_per_px, 0.0, -90.0], [0.0, -deg_lat_per_px, lat]])
+
+
+def test_page_diagonal_m_measures_the_page_on_the_ground():
+    # 3,000 x 4,000 px at 1 ft/px: a 5,000 ft diagonal.
+    diagonal_m = page_diagonal_m(page_affine(1.0), 3000, 4000)
+    assert math.isclose(diagonal_m, 5000 * 0.3048, rel_tol=0.01)
+
+
+def test_a_sheet_sized_fit_is_plausible_and_a_town_sized_one_is_not():
+    """Orleans 1929 p1 fitted at 0.044 px/ft, a 17.3 km sheet (#517)."""
+    width, height = 1500, 2000  # a small split panel, 2,500 px corner to corner
+    assert page_extent_is_plausible(page_diagonal_m(page_affine(1.0), width, height))
+    orleans = page_diagonal_m(page_affine(1 / 0.044), width, height)
+    assert 15_000 < orleans < 20_000
+    assert not page_extent_is_plausible(orleans)

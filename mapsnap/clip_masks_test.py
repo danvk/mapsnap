@@ -6,6 +6,7 @@ from pathlib import Path
 import numpy as np
 import pytest
 from shapely.geometry import MultiPolygon, Polygon
+from shapely.ops import unary_union
 
 from mapsnap.clip_masks import (
     PageColorData,
@@ -909,3 +910,30 @@ def test_score_block_on_page_ignores_a_degenerate_block():
         _score_block_on_page(Polygon([(2, 2), (2, 2), (2, 2)]).buffer(0), _color_data())
         == 0.0
     )
+
+
+def test_unrepairable_mask_leaves_the_page_unclipped(monkeypatch, capsys):
+    """Two mask pieces that not even their hull can join: no mask, not a crash.
+
+    The hull fallback assumes a convex page quadrilateral. A badly placed page
+    need not have one -- the corpus-v1 key maps that failed here sat near 0°, 0°
+    (#513) -- and one page's mask must not fail the whole annotation.
+    """
+    from mapsnap import clip_masks
+
+    # An arrowhead, concave at (3, 5). Its two wing tips reach x < 1 but the
+    # page between them does not, so the tips' hull meets the page in two pieces.
+    page = Polygon([(0, 0), (10, 5), (0, 10), (3, 5)])
+    lobes = [
+        page.intersection(Polygon([(0, 0), (1, 0), (1, 2), (0, 2)])),
+        page.intersection(Polygon([(0, 8), (1, 8), (1, 10), (0, 10)])),
+    ]
+    assert not isinstance(unary_union(lobes).convex_hull.intersection(page), Polygon)
+    monkeypatch.setattr(clip_masks, "_polygonize_streets", lambda *_: lobes)
+    monkeypatch.setattr(
+        clip_masks, "_assign_blocks_to_pages_with_splits", lambda *_: {0: lobes}
+    )
+    georef = {"corners": list(page.exterior.coords)[:4], "width": 100, "height": 100}
+    masks = clip_masks.compute_all_clip_masks([georef], {"features": []})
+    assert masks == [None]
+    assert "leaving it unclipped" in capsys.readouterr().err

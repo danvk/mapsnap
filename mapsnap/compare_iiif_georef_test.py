@@ -2,7 +2,6 @@
 
 import json
 
-import pytest
 from shapely.geometry import Polygon as ShapelyPolygon
 
 from mapsnap.compare_iiif_georef import (
@@ -417,11 +416,27 @@ def test_redundant_skeleton_keys_prefers_whichever_fit():
     assert redundant_skeleton_keys({"p12s"}, set()) == set()
 
 
-def test_redundant_skeleton_keys_rejects_compound_suffixes():
+def test_skeleton_base_finds_the_full_color_sheet():
+    from mapsnap.compare_iiif_georef import skeleton_base
+
+    assert skeleton_base("p153s", {"p153", "p153s"}) == "p153"
+    # A compound suffix pairs with its own letter, not the bare number.
+    assert skeleton_base("p6ns", {"p6", "p6n", "p6ns"}) == "p6n"
+    # The mirror zero-pads compound skeleton keys; either spelling of the base.
+    assert skeleton_base("p0005ls", {"p5l", "p0005ls"}) == "p5l"
+    assert skeleton_base("p0005ls", {"p0005l", "p0005ls"}) == "p0005l"
+    assert skeleton_base("p0001As", {"p1A", "p0001As"}) == "p1A"
+    # A trailing 's' with no counterpart is just a letter.
+    assert skeleton_base("p0033rs", {"p33", "p33s", "p0033rs"}) is None
+    assert skeleton_base("p12s", {"p12s"}) is None
+    assert skeleton_base("p153", {"p153", "p153s"}) is None
+
+
+def test_redundant_skeleton_keys_pairs_compound_suffixes():
     from mapsnap.compare_iiif_georef import redundant_skeleton_keys
 
-    with pytest.raises(AssertionError):
-        redundant_skeleton_keys({"p6ns", "p6n"}, set())
+    assert redundant_skeleton_keys({"p6ns", "p6n"}, set()) == {"p6ns"}
+    assert redundant_skeleton_keys({"p0005ls", "p5l"}, {"p0005ls"}) == {"p5l"}
 
 
 def test_truth_polygons_by_page_groups_splits(tmp_path):
