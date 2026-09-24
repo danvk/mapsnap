@@ -529,3 +529,33 @@ def test_usable_keymaps_skips_a_split_parent(tmp_path: Path):
     ]
     (tmp_path / "p0.panels.json").write_text("{}")
     assert usable_keymaps(tmp_path) == [tmp_path / "p0__1.keymap.json"]
+
+
+def test_from_point_answers_for_any_page() -> None:
+    """A volume with no key map knows its town, not which page is where."""
+    from mapsnap.keymap.locate import KeymapLocator
+
+    locator = KeymapLocator.from_point((-74.1504231, 41.6798157), 5000.0)
+    assert locator.centers_for("p1") == [(-74.1504231, 41.6798157)]
+    assert locator.centers_for(37) == [(-74.1504231, 41.6798157)]
+    assert locator.radius_m == 5000.0
+    # It places no page in particular, and should not claim to.
+    assert locator.located_keys() == set()
+
+
+def test_fallback_never_overrides_a_real_key_map_reading() -> None:
+    """Knowing the block beats knowing the town; the fallback is for the gap."""
+    from mapsnap.keymap.locate import KeymapLocator
+
+    locator = KeymapLocator(
+        {"12": [(-74.0, 41.0)]}, 600.0, fallback_center=(-70.0, 40.0)
+    )
+    assert locator.centers_for("12") == [(-74.0, 41.0)]
+    assert locator.centers_for("99") == [(-70.0, 40.0)]
+
+
+def test_without_a_fallback_an_unplaced_page_stays_unrestricted() -> None:
+    """The old behaviour: no location means no restriction, not a wrong one."""
+    from mapsnap.keymap.locate import KeymapLocator
+
+    assert KeymapLocator({"12": [(-74.0, 41.0)]}, 600.0).centers_for("99") == []
