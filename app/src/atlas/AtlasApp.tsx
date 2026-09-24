@@ -45,9 +45,8 @@ export function AtlasApp() {
   const [index, setIndex] = useState<PlaceIndex | null>(null);
   const [indexError, setIndexError] = useState<string | null>(null);
   const [sizeBy, setSizeBy] = useState<'sheets' | 'volumes'>('sheets');
-  // The CDN by default, falling back to our mirror per volume: loc.gov
-  // rate-limits long before a town-year's worth of tiles is drawn (see
-  // annotations.ts).
+  // The CDN by default: loc.gov rate-limits long before a town-year's worth of
+  // tiles is drawn (see annotations.ts).
   const [imageSource, setImageSource] = useState<ImageSource>('cdn');
 
   const [place, setPlace] = useState<Place | null>(null);
@@ -156,7 +155,6 @@ export function AtlasApp() {
             }
           >
             <option value="cdn">the CDN</option>
-            <option value="mirror">our mirror</option>
             <option value="loc">loc.gov</option>
           </select>
         </label>
@@ -200,7 +198,6 @@ export function AtlasApp() {
               setSelectedPage(null);
             }}
             results={results}
-            imageSource={imageSource}
             loading={loading}
             selectedPage={selectedPage}
             onClose={close}

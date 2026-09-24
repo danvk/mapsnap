@@ -6,12 +6,7 @@
  * actually placed -- is the first thing worth knowing about a place.
  */
 
-import {
-  isLoaded,
-  type ImageSource,
-  type LoadedVolume,
-  type MissingVolume,
-} from './annotations';
+import { isLoaded, type LoadedVolume, type MissingVolume } from './annotations';
 import type { PageGeo } from '../iiif/pages';
 import type { PageRef } from './AtlasMap';
 import { volumesOfYear, yearsOf, type Place, type Volume } from './places';
@@ -24,8 +19,6 @@ interface VolumePanelProps {
   onSelectYear: (year: number | null) => void;
   /** Load results for the selected year, in the order they were requested. */
   results: (LoadedVolume | MissingVolume)[];
-  /** The source asked for; a volume drawn from another one says so. */
-  imageSource: ImageSource;
   loading: boolean;
   selectedPage: PageRef | null;
   onClose: () => void;
@@ -83,13 +76,6 @@ function volumeCoverage(result: LoadedVolume): string {
     : `${result.pages.length}/${result.totalImages} images`;
 }
 
-/** Where a volume's sheets came from, when that is not the source asked for. */
-const FALLBACK_NOTE: Record<ImageSource, string> = {
-  cdn: 'from the CDN',
-  mirror: 'from our mirror: not on the CDN yet',
-  loc: 'from loc.gov',
-};
-
 export function VolumePanel(props: VolumePanelProps) {
   const {
     place,
@@ -97,7 +83,6 @@ export function VolumePanel(props: VolumePanelProps) {
     year,
     onSelectYear,
     results,
-    imageSource,
     loading,
     selectedPage,
     onClose,
@@ -181,11 +166,6 @@ export function VolumePanel(props: VolumePanelProps) {
                 >
                   {isLoaded(result) ? volumeCoverage(result) : result.reason}
                 </span>
-                {isLoaded(result) && result.source !== imageSource && (
-                  <span className="atlas-volume-source">
-                    {FALLBACK_NOTE[result.source]}
-                  </span>
-                )}
               </li>
             ))}
           </ul>

@@ -203,7 +203,7 @@ describe('rewriteForCdn', () => {
   });
 });
 
-describe('loadVolume from the CDN', () => {
+describe('loadVolume', () => {
   const volume = { item: 'sanborn01778_006' } as Volume;
   const uri =
     's3://mapsnap-sanborn/by-state/illinois/1915/sanborn01778_006/runs/corpus-v1/mapsnap.iiif.json';
@@ -212,44 +212,40 @@ describe('loadVolume from the CDN', () => {
     vi.unstubAllGlobals();
   });
 
-  // A fetch that serves the published annotation, the server's mirror rewrite,
-  // and the CDN's info.json only when `cdnHasIt`.
-  function stubFetch(cdnHasIt: boolean) {
+  // A fetch that serves the published annotation, recording what was asked.
+  function stubFetch() {
     const requested: string[] = [];
     vi.stubGlobal('fetch', async (url: string) => {
       requested.push(url);
-      if (url.startsWith(CDN_BASE))
-        return new Response('{}', { status: cdnHasIt ? 200 : 404 });
-      if (url.startsWith('/iiif-api/annotation')) {
-        const mirrored = champaign();
-        mirrored.items[0]!.target!.source.id =
-          'http://localhost:8182/iiif/vol/p10.jpg';
-        return Response.json({ annotation: mirrored });
-      }
       return Response.json(champaign());
     });
     return requested;
   }
 
-  it('draws a volume the CDN holds from the CDN', async () => {
-    const requested = stubFetch(true);
+  it('draws the published annotation from the CDN', async () => {
+    const requested = stubFetch();
     const result = await loadVolume(volume, uri, 'cdn');
-    expect('source' in result && result.source).toBe('cdn');
     expect(
-      'annotation' in result && result.annotation.items[0]?.target?.source.id,
-    ).toBe(`${CDN_BASE}/${CHAMPAIGN_SERVICE}`);
+      'annotation' in result && result.annotation.items[0]?.target?.source,
+    ).toEqual({
+      id: `${CDN_BASE}/${CHAMPAIGN_SERVICE}`,
+      type: 'ImageService3',
+      width: 1613,
+      height: 1913,
+    });
+    // The annotation is the only request; the tiles are Allmaps' to fetch.
     expect(requested).toEqual([
       `/s3-api/object?uri=${encodeURIComponent(uri)}`,
-      `${CDN_BASE}/${CHAMPAIGN_SERVICE}/info.json`,
     ]);
   });
 
-  it('falls back to our mirror for a volume the CDN does not hold yet', async () => {
-    stubFetch(false);
-    const result = await loadVolume(volume, uri, 'cdn');
-    expect('source' in result && result.source).toBe('mirror');
+  it('draws it verbatim from loc.gov', async () => {
+    stubFetch();
+    const result = await loadVolume(volume, uri, 'loc');
     expect(
       'annotation' in result && result.annotation.items[0]?.target?.source.id,
-    ).toBe('http://localhost:8182/iiif/vol/p10.jpg');
+    ).toBe(
+      `https://tile.loc.gov/image-services/iiif/${CHAMPAIGN_SERVICE}/info.json`,
+    );
   });
 });

@@ -11,11 +11,10 @@
  * those as CORS failures, since a 429 error page carries no CORS headers.
  *
  * So the default is the chronoscope CDN, a static (level 0) IIIF service built
- * from the mirrored 25% scans: each page's service is repointed there, in the
- * browser, and the tiles never touch our own server. A volume the CDN does not
- * hold yet falls back to `mirror`, the same rewrite the debugger uses against
- * our own cache of those scans. `loc` remains selectable, and is the right
- * source for a single volume.
+ * from the mirrored 25% scans of every sheet: each page's service is repointed
+ * there, in the browser, and the tiles never touch our own server. `loc`
+ * remains selectable -- loc.gov is where the scans come from, and the right
+ * source for reading a single volume.
  */
 
 import { pagesFromAnnotation, type PageGeo } from '../iiif/pages';
@@ -43,12 +42,6 @@ export interface LoadedVolume {
    * annotation's own report. Null for an annotation that carries no report.
    */
   totalImages: number | null;
-  /**
-   * Where this volume's sheets are actually drawn from, which is not always
-   * the source asked for: a volume the CDN does not hold falls back to the
-   * mirror.
-   */
-  source: ImageSource;
 }
 
 /**
@@ -119,20 +112,16 @@ export function withPageMetadata(
 }
 
 /** Where a volume's sheet images come from. */
-export type ImageSource = 'cdn' | 'mirror' | 'loc';
+export type ImageSource = 'cdn' | 'loc';
 
 /**
- * Where to fetch a volume's annotation, for the chosen image source.
+ * Where to fetch a volume's published annotation, whatever the image source.
  *
- * `loc` takes the published annotation verbatim, so its pages resolve to
- * loc.gov; `cdn` takes it verbatim too, and rewrites it in the browser.
- * `mirror` asks the server to rewrite it against the cached scans, which also
- * fills in the `page` metadata the raw file lacks.
+ * `loc` draws it verbatim, so its pages resolve to loc.gov; `cdn` rewrites it
+ * in the browser (rewriteForCdn).
  */
-export function annotationUrl(uri: string, source: ImageSource): string {
-  return source === 'mirror'
-    ? `/iiif-api/annotation?path=${encodeURIComponent(uri)}`
-    : `/s3-api/object?uri=${encodeURIComponent(uri)}`;
+export function annotationUrl(uri: string): string {
+  return `/s3-api/object?uri=${encodeURIComponent(uri)}`;
 }
 
 /**
@@ -221,28 +210,6 @@ export function rewriteForCdn(
 }
 
 /**
- * Whether the CDN holds this volume's sheets, judged by its first page.
- *
- * The CDN is being filled a volume at a time, and so far a volume is either
- * all there or not there at all, so one info.json stands for the rest. It is
- * the request Allmaps would make first anyway, and the CDN lets the browser
- * cache it.
- */
-async function cdnHoldsVolume(
-  annotation: GeorefAnnotationPage,
-): Promise<boolean> {
-  const service = (annotation.items ?? [])
-    .map((item) => cdnServiceUrl(item.target?.source?.id))
-    .find((url) => url !== null);
-  if (!service) return false;
-  try {
-    return (await fetch(`${service}/info.json`)).ok;
-  } catch {
-    return false;
-  }
-}
-
-/**
  * Fetch one volume's annotation, or say why there is none.
  *
  * A 404 is the ordinary case while a run is still going, not an error worth
@@ -256,16 +223,9 @@ export async function loadVolume(
 ): Promise<LoadedVolume | MissingVolume> {
   if (!uri) return { volume, reason: 'not mirrored' };
   try {
-    const response = await fetch(annotationUrl(uri, source));
+    const response = await fetch(annotationUrl(uri));
     if (!response.ok) return { volume, reason: 'not in this run' };
-    const body = (await response.json()) as GeorefAnnotationPage & {
-      annotation?: GeorefAnnotationPage;
-    };
-    // The rewrite route wraps its result; the raw object route does not.
-    const raw = body.annotation ?? body;
-    if (source === 'cdn' && !(await cdnHoldsVolume(raw))) {
-      return loadVolume(volume, uri, 'mirror');
-    }
+    const raw = (await response.json()) as GeorefAnnotationPage;
     const annotation = withPageMetadata(
       source === 'cdn' ? rewriteForCdn(raw) : raw,
     );
@@ -274,7 +234,6 @@ export async function loadVolume(
       annotation,
       pages: pagesFromAnnotation(annotation),
       totalImages: reportedCount(annotation, 'pages'),
-      source,
     };
   } catch {
     return { volume, reason: 'unreadable' };
