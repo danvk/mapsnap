@@ -57,7 +57,7 @@ import statistics
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from mapsnap.keymap.fit_keymap import collapse_skeleton_keys
+from mapsnap.keymap.fit_keymap import keymap_nameable_keys
 from mapsnap.keymap.records import is_inset, split_parent
 
 PROXIMITY_FACTOR = 1.5
@@ -698,8 +698,9 @@ def plan_volume_repairs(
     mutual, one_sided = adjacency_graphs(volume)
     if not mutual:
         return [], {}
-    # Skeleton twins are not key-map expectations: the sheet names 201 once.
-    volume_keys = collapse_skeleton_keys(volume_page_keys(volume))
+    # Skeleton twins and half-sheet scans are not key-map expectations: the
+    # sheet names 201 once, and 85 rather than 85L and 85R.
+    volume_keys = keymap_nameable_keys(volume_page_keys(volume))
     splits = split_multiplicity(volume)
 
     sheet_panels: list[SheetNumbers] = []

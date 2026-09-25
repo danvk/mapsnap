@@ -52,8 +52,8 @@ from mapsnap.keymap.detect_numbers_cnn import (
     nms_peaks,
 )
 from mapsnap.keymap.fit_keymap import (
-    collapse_skeleton_keys,
     key_stem,
+    keymap_nameable_keys,
     volume_page_keys,
 )
 from mapsnap.keymap.log import append_keymap_log
@@ -77,7 +77,7 @@ def volume_pages_for(image_path: str) -> list[str]:
     """
     from mapsnap.keymap.pipeline import keymap_volume_dir
 
-    keys = collapse_skeleton_keys(volume_page_keys(keymap_volume_dir(Path(image_path))))
+    keys = keymap_nameable_keys(volume_page_keys(keymap_volume_dir(Path(image_path))))
     return sorted(
         (key for key in keys if page_key_sort(key)[0] >= 1), key=page_key_sort
     )

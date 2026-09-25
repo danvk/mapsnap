@@ -143,6 +143,8 @@ def test_string_key_lookup_prefers_exact_then_family():
     # a lettered lookup against a bare-printed key map falls back to the stem
     bare = KeymapLocator(locations={"51": [(3.0, 3.0)]}, radius_m=100.0)
     assert bare.centers_for("51N") == [(3.0, 3.0)]
+    # so does each half of a sheet scanned in halves (85L, 85R -> 85)
+    assert bare.centers_for("51L") == [(3.0, 3.0)]
     assert locator.centers_for(None) == []
 
 
