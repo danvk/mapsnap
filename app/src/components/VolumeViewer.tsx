@@ -193,6 +193,7 @@ export function VolumeViewer() {
   // Every page-image stem in the selected volume; the un-fit list for a volume with
   // no truth annotation is these minus the ones the run placed.
   const [volumeStems, setVolumeStems] = useState<string[]>([]);
+  const [pageImages, setPageImages] = useState<Set<string> | null>(null);
   // The selected volume's key-map sheets (raw/*.keymap.json), for the info-panel links.
   const [keymaps, setKeymaps] = useState<KeymapInfo[]>([]);
 
@@ -320,15 +321,17 @@ export function VolumeViewer() {
         if (!cancelled) setNotes(new Map());
       });
     fetchVolumePageFiles(volumeName, volumeRun)
-      .then(({ stems, georefs }) => {
+      .then(({ stems, georefs, images }) => {
         if (cancelled) return;
         setGeorefSidecars(georefs);
         setVolumeStems(stems);
+        setPageImages(images);
       })
       .catch(() => {
         if (cancelled) return;
         setGeorefSidecars(new Map());
         setVolumeStems([]);
+        setPageImages(null);
       });
     setSnapRecords(new Map());
     setSnapOpen(false);
@@ -845,6 +848,7 @@ export function VolumeViewer() {
             onOpenSnapView={snapRecord ? () => setSnapOpen(true) : undefined}
             runArtifacts={runArtifacts}
             run={volumeRun}
+            pageImages={pageImages}
             pages={pages}
             missingCount={missingPages.length}
             skipped={skipped}

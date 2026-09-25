@@ -11,6 +11,7 @@ import {
   panelParent,
   readTruth,
   truthPath,
+  pageImageStems,
   volumePages,
   withRunPanels,
   writePageTruth,
@@ -177,5 +178,20 @@ describe('withRunPanels', () => {
       'p1',
       'p2',
     ]);
+  });
+});
+
+describe('pageImageStems', () => {
+  it('lists page images, sheets and panels, in page order', () => {
+    expect(
+      pageImageStems([
+        'p10.jpg',
+        'p2.jpg',
+        'p2__1.jpg',
+        'p2.roadprob.jpg',
+        'p2.boxes.json',
+        'metadata.json',
+      ]),
+    ).toEqual(['p2', 'p2__1', 'p10']);
   });
 });

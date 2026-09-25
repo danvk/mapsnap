@@ -140,6 +140,14 @@ export async function volumePages(
     .sort(comparePages);
 }
 
+/** The page-image stems among a directory's file names: `p2.jpg`, `p2__1.jpg`. */
+export function pageImageStems(files: string[]): string[] {
+  return files
+    .filter((file) => PAGE_IMAGE.test(file))
+    .map((file) => file.replace(/\.jpe?g$/, ''))
+    .sort(comparePages);
+}
+
 /**
  * A volume's pages with the split panels a mirror run knows about merged in.
  *

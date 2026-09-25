@@ -35,7 +35,12 @@ import {
   parseLandByPage,
   parseMissingTruthKeys,
 } from './compareTxt.ts';
-import { findVolumes, volumePages, withRunPanels } from './adjacencyTruth.ts';
+import {
+  findVolumes,
+  pageImageStems,
+  volumePages,
+  withRunPanels,
+} from './adjacencyTruth.ts';
 import { keymapAnnotation } from './keymapAnnotation.ts';
 import { keymapInfos } from './keymapInfos.ts';
 import {
@@ -583,7 +588,16 @@ export function registerIiifApi(
     // volumePages drops a split sheet in favour of its panels, so a sheet whose panels
     // all fitted is not reported as an unplaced page.
     const pages = await volumePages(dataDir, volume);
-    return { georefs, pages: run ? withRunPanels(pages, files) : pages };
+    // Page images are always at the volume root, whichever directory the
+    // sidecars were listed from.
+    const rootFiles = run
+      ? await readdir(join(dataDir, volume)).catch(() => [])
+      : files;
+    return {
+      georefs,
+      pages: run ? withRunPanels(pages, files) : pages,
+      images: pageImageStems(rootFiles),
+    };
   });
 
   // A volume's key-map sheets and which visualization sidecars each has, so the viewer can link

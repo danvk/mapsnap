@@ -41,6 +41,8 @@ export interface VolumePageFiles {
   /** Page stem → failure kind ("nofit", "1gcp", …), for linking to the georef view. */
   /** Page stem → its `<stem>.georef*.json` sidecars, plain first (#252). */
   georefs: Map<string, string[]>;
+  /** Stems with a page image on disk; null from a server that does not say. */
+  images: Set<string> | null;
 }
 
 /**
@@ -53,13 +55,14 @@ export async function fetchVolumePageFiles(
   volume: string,
   run: string | null = null,
 ): Promise<VolumePageFiles> {
-  const { georefs, pages } = await api.get('/iiif-api/failed-georefs')(
+  const { georefs, pages, images } = await api.get('/iiif-api/failed-georefs')(
     null,
     run ? { volume, run } : { volume },
   );
   return {
     stems: pages ?? [],
     georefs: new Map(Object.entries(georefs ?? {})),
+    images: images ? new Set(images) : null,
   };
 }
 

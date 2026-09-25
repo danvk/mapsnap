@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { parseAnnotationPath } from './volumePath';
+import { debugImageStem, parseAnnotationPath } from './volumePath';
 
 describe('parseAnnotationPath', () => {
   it('splits a single-directory volume', () => {
@@ -60,5 +60,23 @@ describe('parseAnnotationPath with a mirror run', () => {
       run: 'runs/v2',
       file: 'mapsnap.iiif.json',
     });
+  });
+});
+
+describe('debugImageStem', () => {
+  it("links a split panel's own image when it has one", () => {
+    expect(debugImageStem('p2__2', new Set(['p2', 'p2__1', 'p2__2']))).toBe(
+      'p2__2',
+    );
+  });
+
+  it('links the sheet when only the sheet is on disk', () => {
+    // A mirror volume: the debugger maps p2.jpg to the panel via p2.panels.json.
+    expect(debugImageStem('p2__2', new Set(['p1', 'p2']))).toBe('p2');
+  });
+
+  it('keeps the stem for a whole sheet or an unknown image list', () => {
+    expect(debugImageStem('p4', new Set(['p4']))).toBe('p4');
+    expect(debugImageStem('p2__2', null)).toBe('p2__2');
   });
 });

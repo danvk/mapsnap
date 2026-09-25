@@ -43,3 +43,22 @@ export function parseAnnotationPath(
     ? { volume: match[1] ?? '', file: match[2] ?? '', run: null }
     : null;
 }
+
+/**
+ * The page image a debug view should open for a page: its own if it has one,
+ * else its sheet's.
+ *
+ * A volume synced from the mirror has only whole-sheet scans, so a split
+ * panel (`p2__2`) has no `p2__2.jpg`. The debugger handles `p2.jpg` with the
+ * panel's sidecars by mapping through `p2.panels.json`, so the sheet is the
+ * right link. With no image list (an older server) the page's own stem is
+ * kept, as before.
+ */
+export function debugImageStem(
+  stem: string,
+  pageImages: ReadonlySet<string> | null,
+): string {
+  if (!pageImages || pageImages.has(stem)) return stem;
+  const sheet = stem.replace(/__\d+$/, '');
+  return pageImages.has(sheet) ? sheet : stem;
+}

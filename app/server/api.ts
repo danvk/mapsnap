@@ -157,6 +157,13 @@ export interface FailedGeorefsResponse {
    */
   georefs: Record<string, string[]>;
   pages?: string[];
+  /**
+   * Stems with a page image on disk at the volume root. A split panel of a
+   * volume synced from the mirror has none -- only its sheet does -- so its
+   * debug views link the sheet, which the debugger maps to the panel through
+   * panels.json.
+   */
+  images?: string[];
 }
 
 /** One key-map sheet in a volume's `raw/` directory and which sidecars it has. */
