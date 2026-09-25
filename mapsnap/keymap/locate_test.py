@@ -13,10 +13,12 @@ from mapsnap.keymap.locate import (
     estimate_radius,
     geometry_segments,
     geometry_vertices,
+    keymap_extent_m,
     keymap_megapixels,
     meters_between,
     page_key,
     page_number,
+    plausibly_sized,
     redundant_keymaps,
     resolve_keymaps,
     usable_keymaps,
@@ -529,3 +531,51 @@ def test_usable_keymaps_skips_a_split_parent(tmp_path: Path):
     ]
     (tmp_path / "p0.panels.json").write_text("{}")
     assert usable_keymaps(tmp_path) == [tmp_path / "p0__1.keymap.json"]
+
+
+# Bronx 1898's key map (sanborn06116_018 p0) as corpus-v1 georeferenced it:
+# 48 x 110 m (142 m corner to corner) around the Pelham Parkway / Boston Road junction.
+BRONX_CORNERS = [
+    [-73.86729471178546, 40.857582167041656],
+    [-73.86747845937751, 40.857169586229],
+    [-73.86874957066881, 40.856941283423645],
+    [-73.86856582307676, 40.8573538642363],
+]
+
+
+def write_georef(directory: Path, stem: str, corners: list[list[float]]) -> Path:
+    """A <stem>.keymap.json whose georef sidecar holds the given corners."""
+    (directory / f"{stem}.keymap.json").write_text(json.dumps({"streets": []}))
+    (directory / f"{stem}.georef.json").write_text(json.dumps({"corners": corners}))
+    return directory / f"{stem}.keymap.json"
+
+
+def test_keymap_extent_m_is_the_longer_diagonal(tmp_path: Path):
+    write_georef(tmp_path, "p0", BRONX_CORNERS)
+    assert keymap_extent_m(tmp_path / "p0.georef.json") == pytest.approx(
+        142, abs=1
+    )  # hypot(48, 110)
+
+
+def test_keymap_extent_m_none_without_corners(tmp_path: Path):
+    (tmp_path / "p0.georef.json").write_text(json.dumps({"corners": []}))
+    assert keymap_extent_m(tmp_path / "p0.georef.json") is None
+    assert keymap_extent_m(tmp_path / "missing.georef.json") is None
+
+
+def test_plausibly_sized_refuses_a_junction_sized_key_map(tmp_path: Path):
+    bronx = write_georef(tmp_path, "bronx", BRONX_CORNERS)
+    # make_keymap's 0.1 x 0.1 degree box is ~13 km across.
+    town = make_keymap(tmp_path, "town")
+    assert not plausibly_sized(bronx)
+    assert plausibly_sized(town)
+
+
+def test_usable_keymaps_skips_an_implausibly_small_key_map(tmp_path: Path):
+    """The mis-scaled sheet is dropped for every consumer, not just OCR."""
+    write_georef(tmp_path, "p0", BRONX_CORNERS)
+    make_keymap(tmp_path, "p0b")
+    assert usable_keymaps(tmp_path) == [tmp_path / "p0b.keymap.json"]
+    assert discover_keymaps([str(tmp_path / "p5.jpg")]) == [
+        tmp_path / "p0b.keymap.json"
+    ]
