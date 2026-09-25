@@ -424,8 +424,16 @@ def keymap_region_adjacency(
         if not polys:
             continue
         shape = unary_union(polys)
+        centroid = shape.centroid
+        # Every ring above can be non-empty and their union still have no
+        # centroid (on Linux x86 one Bonham key-map region did; the same inputs
+        # pass on macOS, so the degenerate case is numerical). One page's region
+        # is not worth failing fit for the volume (#514): skip it, as a page
+        # with no usable rings is skipped.
+        if shape.is_empty or centroid.is_empty:
+            continue
         shapes[number] = shape
-        centroids[number] = (lon0 + shape.centroid.x / kx, lat0 + shape.centroid.y / ky)
+        centroids[number] = (lon0 + centroid.x / kx, lat0 + centroid.y / ky)
     numbers = sorted(shapes)
     pairs: set[frozenset[int]] = set()
     for i, a in enumerate(numbers):

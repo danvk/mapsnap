@@ -362,6 +362,7 @@ def main() -> None:
                 ),
                 "--label-note",
                 "key map",
+                "--no-clip-masks",
                 "--output",
                 str(keymap_iiif),
                 *(["--run-tag", run_tag] if run_tag else []),

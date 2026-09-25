@@ -190,3 +190,22 @@ def test_panels_with_boxes_tile_the_sheet():
     assert panels[0].area == pytest.approx(H * W - 400 * 400 - 300 * 200, rel=0.01)
     assert sum(panel.area for panel in panels) == pytest.approx(H * W, rel=1e-6)
     assert panels_with_boxes([], H, W) == []
+
+
+def test_panels_with_boxes_refuses_boxes_that_leave_no_key_map():
+    """Four boxes tiling the whole sheet leave an empty remainder, not a panel.
+
+    sanborn01345_005 p1 on the corpus-v1 mop-up: four corner boxes covering
+    100% of the sheet, and split died writing the 0x0 remainder.
+    """
+    from shapely.geometry import box
+
+    quadrants = [
+        box(0, 0, 400, 500),
+        box(400, 0, 1000, 500),
+        box(0, 500, 400, 1200),
+        box(400, 500, 1000, 1200),
+    ]
+    assert panels_with_boxes(quadrants, 1200, 1000) == []
+    # One box short of tiling it, the key map keeps the rest and the cut stands.
+    assert len(panels_with_boxes(quadrants[:3], 1200, 1000)) == 4

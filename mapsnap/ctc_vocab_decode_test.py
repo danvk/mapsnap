@@ -281,3 +281,64 @@ def test_ctc_empty_sequence_returns_empty():
     text, prob = prefix_constrained_ctc(mat, trie, _CHARS, beam_width=10)
     assert text == ""
     assert prob == 0.0
+
+
+def fake_reader():
+    """The one attribute of an EasyOCR Reader that patching reads."""
+    from types import SimpleNamespace
+
+    return SimpleNamespace(
+        converter=SimpleNamespace(
+            character=list("0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ ")
+        )
+    )
+
+
+def test_patching_repeatedly_installs_the_patches_once():
+    """Calling once per page and angle must not wrap patch around patch (#511).
+
+    Each call used to capture the previous patch as "the original", so on CPU a
+    recognition walked every earlier patch before reaching EasyOCR, and a
+    150-page volume hit Python's recursion limit.
+    """
+    import easyocr
+    from easyocr import recognition
+
+    from mapsnap.ctc_vocab_decode import patch_easyocr_reader
+
+    patch_easyocr_reader(fake_reader(), ["MAIN", "ELM"], 5)
+    recognize, predict = easyocr.Reader.recognize, recognition.recognizer_predict
+    for _ in range(50):
+        patch_easyocr_reader(fake_reader(), ["MAIN", "ELM"], 5)
+    assert easyocr.Reader.recognize is recognize
+    assert recognition.recognizer_predict is predict
+
+
+def test_patching_frees_the_previous_vocabulary():
+    """A replaced trie must become garbage, not stay reachable through a closure.
+
+    Every trie ever built used to be retained -- about 210 MB a call at a
+    90k-form vocabulary, which is what killed big volumes' OCR for memory.
+    """
+    import gc
+    import weakref
+
+    from mapsnap.ctc_vocab_decode import patch_easyocr_reader
+
+    first = patch_easyocr_reader(fake_reader(), ["MAIN", "ELM"], 5)
+    alive = weakref.ref(first)
+    del first
+    patch_easyocr_reader(fake_reader(), ["OAK"], 5)
+    gc.collect()
+    assert alive() is None
+
+
+def test_the_latest_vocabulary_is_the_one_decoded_against():
+    import mapsnap.ctc_vocab_decode as decode
+
+    decode.patch_easyocr_reader(fake_reader(), ["MAIN"], 5)
+    latest = decode.patch_easyocr_reader(fake_reader(), ["OAK"], 7)
+    active = decode.active_decoding
+    assert active is not None
+    assert active.trie_root is latest
+    assert active.beam_width == 7

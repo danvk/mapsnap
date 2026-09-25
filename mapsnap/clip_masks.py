@@ -716,11 +716,9 @@ def compute_all_clip_masks(
 
     Returns one entry per georef: a Shapely Polygon in geo (lon/lat) space
     clipped to that page's boundary, or None if no street blocks were
-    assigned to the page (caller should fall back to the full-page rectangle).
-
-    Raises ValueError if any page's mask turns out to be a MultiPolygon
-    (unexpected; indicates a problem with the street network or assignment
-    algorithm worth investigating).
+    assigned to the page, or its blocks formed several substantial pieces that
+    not even their convex hull could join (caller should fall back to the
+    full-page rectangle).
 
     Args:
         georefs: list of parsed georef.json dicts with 'corners', 'width', 'height'.
@@ -835,13 +833,19 @@ def compute_all_clip_masks(
                     mask_geo = hull_mask
                     convex_hull_count += 1
                 else:
-                    raise ValueError(
-                        f"Page {page_idx} (corners starting at {georef['corners'][0]}) "
-                        f"produced a MultiPolygon clipping mask with {len(substantial)} "
-                        f"substantial parts (each ≥5% of largest), and the convex hull "
-                        f"fallback also failed. Investigate the street network or block "
-                        f"assignment for this page."
+                    # The hull argument above assumes a convex page quadrilateral,
+                    # and a badly placed page need not have one: the corpus-v1 key
+                    # maps that failed here were georeferenced near 0°, 0° (#513).
+                    # One page's mask is not worth the volume's annotation, so
+                    # this page goes unclipped, as a page with no blocks does.
+                    print(
+                        f"Warning: page {page_idx} mask had {len(substantial)} disconnected "
+                        f"substantial parts and the convex hull fallback also failed; "
+                        f"leaving it unclipped. Corners: {georef['corners'][0]}",
+                        file=sys.stderr,
                     )
+                    masks.append(None)
+                    continue
 
         # Remove backtrack vertices from any path (direct Polygon or resolved
         # MultiPolygon). Simplification can introduce spikes when it removes

@@ -64,8 +64,8 @@ def georef_path_to_page_key(path: str) -> str | None:
     Any letter page suffix is kept (Sanborn sheets run 'a', 'b', … past the
     directional 's'/'n'/'e'/'w'/'l'/'r' letters), not just a known few — a
     dropped suffix silently loses that page from the manifest. Compound suffixes
-    that are ambiguous with a skeleton sheet (a letter then 's', e.g. 'p6ns')
-    still parse here; drop_redundant_skeletons raises on them rather than guess.
+    ending in 's' ('p6ns') parse too; drop_redundant_skeletons decides whether
+    one is a skeleton.
     """
     m = re.search(
         r"(?:\b|_)(p\d+)([a-z]*)((?:__\d+)?)(?:\.[^.]+)?\.georef(?:2|-[a-z0-9-]+)?\.json$",
@@ -93,6 +93,21 @@ def has_pose(path: str) -> bool:
     return bool(doc.get("corners"))
 
 
+def split_glob_list(pattern: str) -> list[str]:
+    """The globs in a comma-separated pattern, or the whole pattern when it is one.
+
+    A comma separates globs ('v/p*.georef.json,v/p*.georef-neighbor.json'), but it
+    can also sit inside a path: the mirror holds an item named
+    sanborn09511_002,5, and splitting its directory in two matched nothing and
+    failed fit (#515). The whole pattern is therefore tried as one glob first. A
+    genuine list never matches literally, since no file is named after two
+    globs joined by a comma.
+    """
+    if glob.glob(pattern.strip()):
+        return [pattern.strip()]
+    return [sub.strip() for sub in pattern.split(",") if sub.strip()]
+
+
 def glob_matched_anything(pattern: str) -> bool:
     """Whether the pattern matched any file at all, posed or not.
 
@@ -102,9 +117,7 @@ def glob_matched_anything(pattern: str) -> bool:
     exiting there left `fit` with a non-zero status and no annotation -- which
     at corpus scale is an item that never records its own outcome.
     """
-    return any(
-        sorted(glob.glob(sub.strip())) for sub in pattern.split(",") if sub.strip()
-    )
+    return any(glob.glob(sub) for sub in split_glob_list(pattern))
 
 
 def expand_georef_globs(pattern: str) -> list[str]:
@@ -123,8 +136,8 @@ def expand_georef_globs(pattern: str) -> list[str]:
     chosen: dict[str, str] = {}
     ordered: list[str] = []
     unplaced = 0
-    for sub_pattern in pattern.split(","):
-        for path in sorted(glob.glob(sub_pattern.strip())):
+    for sub_pattern in split_glob_list(pattern):
+        for path in sorted(glob.glob(sub_pattern)):
             page_key = georef_path_to_page_key(path)
             if page_key is None:
                 print(
@@ -154,9 +167,9 @@ def expand_georef_globs(pattern: str) -> list[str]:
 def drop_redundant_skeletons(valid_items: list) -> list:
     """Drop skeleton pages ('s' suffix) whose full-color counterpart also fit.
 
-    Delegates to compare_iiif_georef.redundant_skeleton_keys, which also
-    asserts that no key carries a compound suffix ending in 's' (where the
-    rule could not tell a skeleton from a direction/sequence letter).
+    Delegates to compare_iiif_georef.redundant_skeleton_keys, which pairs
+    'p0005ls' with 'p5l' as well as 'p153s' with 'p153' -- the mirror's compound
+    skeleton keys used to fail fit outright (#512).
     """
     keys = {page_key for page_key, *_ in valid_items}
     skipped = redundant_skeleton_keys(keys, keys)
@@ -1000,6 +1013,15 @@ def main() -> None:
         help="GeoJSON centerlines file for block-based clipping masks",
     )
     parser.add_argument(
+        "--no-clip-masks",
+        action="store_true",
+        help=(
+            "Compute no block-based clipping masks, even when a centerlines file "
+            "sits beside the georefs. For pages that are not street sheets, such "
+            "as key maps."
+        ),
+    )
+    parser.add_argument(
         "--label-note",
         metavar="TEXT",
         help=(
@@ -1106,7 +1128,13 @@ def main() -> None:
 
     # Clipping masks are optional here, so fall back to a centerlines.geojson next to the
     # georef files only if one exists; absence simply means no block-based clipping.
-    if args.centerlines is None and georef_globs:
+    # --no-clip-masks has to win over this fallback: `fit` renders the key map
+    # from raw/*.georef.json, whose parent directory is the volume, so the
+    # fallback found the volume's centerlines and masked a key map it was meant
+    # to leave alone -- which on two corpus-v1 items failed fit outright (#513).
+    if args.no_clip_masks:
+        args.centerlines = None
+    elif args.centerlines is None and georef_globs:
         centerlines = default_centerlines(Path(georef_globs[0]).parent)
         if centerlines is not None:
             args.centerlines = str(centerlines)

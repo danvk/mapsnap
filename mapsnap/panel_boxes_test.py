@@ -134,3 +134,37 @@ def test_derive_boxes_for_panel_image_end_to_end(tmp_path):
     assert derive_boxes_for_panel_image(tmp_path / "p8.jpg") is False
     Image.new("RGB", (10, 10), "white").save(tmp_path / "p9__1.jpg")
     assert derive_boxes_for_panel_image(tmp_path / "p9__1.jpg") is False
+
+
+# Chicago 1950 p96's two panels exactly as split wrote them: each ring pinches
+# itself near (978.8, 1636.2), and GEOS refused to intersect them (#516).
+CHICAGO_P96_PANELS = [
+    [[1216.4, 1960.6], [755.9, 1467.9], [978.5, 1635.9], [988.1, 1645.3],
+     [978.8, 1636.2], [1192.0, 1797.1], [1435.0, 1982.3], [1435.0, 1942.8],
+     [1435.0, 0.0], [0.0, 0.0], [0.0, 2126.0], [1156.9, 2126.0],
+     [1238.4, 2126.0], [1284.3, 2126.0], [1324.3, 2126.0], [1216.4, 1960.6]],
+    [[1435.0, 2126.0], [1435.0, 1982.3], [1192.0, 1797.1], [978.8, 1636.2],
+     [988.1, 1645.3], [978.5, 1635.9], [755.9, 1467.9], [1216.4, 1960.6],
+     [1324.3, 2126.0], [1435.0, 2126.0]],
+]  # fmt: skip
+
+
+def test_derive_boxes_repairs_pinched_panel_rings():
+    polys = [Polygon(ring) for ring in CHICAGO_P96_PANELS]
+    assert not any(poly.is_valid for poly in polys)
+    doc = parent_doc(
+        width=1435,
+        height=2126,
+        boxes=[
+            {
+                "angle": 0,
+                # One box in each panel, and one straddling the pinch itself.
+                "horizontal_list": [[100, 300, 100, 150], [1300, 1400, 2050, 2100]],
+                "free_list": [[[970, 1630], [990, 1630], [990, 1650], [970, 1650]]],
+            }
+        ],
+    )
+    first = derive_panel_boxes(doc, polys, 1, (1435, 2126))
+    second = derive_panel_boxes(doc, polys, 2, (1435 - 755, 2126 - 1467))
+    assert first["boxes"][0]["horizontal_list"] == [[100, 300, 100, 150]]
+    assert len(second["boxes"][0]["horizontal_list"]) == 1

@@ -1223,6 +1223,23 @@ def invalidate_changed_panels(
     return changed
 
 
+def repair_panel(panel: Polygon) -> Polygon:
+    """A valid version of a panel polygon, where one can be had without loss.
+
+    Panels come out of the divider graph as rings, and two dividers meeting at
+    a point can pinch one: Chicago 1950 p96's two panels touched themselves at
+    (978.8, 1636.2), and every reader that intersected them failed (#516).
+    buffer(0) repairs a pinch; a repair that splits the panel in two is not
+    taken, since panels.json holds one ring per panel.
+    """
+    if panel.is_valid:
+        return panel
+    repaired = panel.buffer(0)
+    return (
+        repaired if isinstance(repaired, Polygon) and not repaired.is_empty else panel
+    )
+
+
 def write_panels(image_path: Path, panels: list, base: str) -> list[Path]:
     """Write each panel to <base>__N.jpg next to image_path; return the written paths.
 
@@ -1451,6 +1468,7 @@ def process_image(image_path: Path, debug: bool = False) -> None:
 
     connected = connected_dividers(lines, h, w, binary)
     panels, bridged = finalize_panels(connected, h, w)
+    panels = [repair_panel(panel) for panel in panels]
     full_h, full_w = h + 2 * BORDER_PX, w + 2 * BORDER_PX
 
     if debug:

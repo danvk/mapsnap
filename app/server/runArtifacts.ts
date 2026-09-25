@@ -24,6 +24,11 @@ export function runArtifactDir(relativePath: string): string | null {
   if (!file?.endsWith('.iiif.json')) return null;
   const tag = file.slice(0, -'.iiif.json'.length);
 
+  // A corpus run synced from the mirror: `<volume>/runs/<tag>/mapsnap.iiif.json`,
+  // with every sidecar beside it.
+  const run = splitRunPath(relativePath);
+  if (run.runDir) return `${run.volume}/${run.runDir}`;
+
   // Already inside the run's directory: `<volume>/artifacts/<tag>/<tag>.iiif.json`.
   if (parts.length >= 3 && parts[parts.length - 2] === tag) {
     return parts.slice(0, -1).join('/');
@@ -33,6 +38,41 @@ export function runArtifactDir(relativePath: string): string | null {
     return [...parts.slice(0, -1), 'artifacts', tag].join('/');
   }
   return null;
+}
+
+/** A run directory of the mirror's layout, relative to its volume: `runs/<tag>`. */
+const RUN_DIR = /^runs\/[A-Za-z0-9._-]+$/;
+
+/** Whether `runDir` names one run directory (`runs/corpus-v1`), and nothing else. */
+export function isRunDir(runDir: unknown): runDir is string {
+  return typeof runDir === 'string' && RUN_DIR.test(runDir);
+}
+
+/**
+ * Split a volume-relative file path around a mirror run directory.
+ *
+ * A volume synced from the mirror keeps each corpus run under `runs/<tag>/`:
+ * `wernersville_pa_1914/runs/corpus-v1/mapsnap.iiif.json` is the file
+ * `mapsnap.iiif.json` of run `runs/corpus-v1` in volume `wernersville_pa_1914`.
+ * Page scans stay at the volume root, which is why the two must be told apart.
+ * A path with no run directory is a file at its own directory, as before.
+ */
+export function splitRunPath(relativePath: string): {
+  volume: string;
+  runDir: string | null;
+  file: string;
+} {
+  const parts = relativePath.split('/');
+  const file = parts[parts.length - 1] ?? '';
+  const runsIndex = parts.length - 3;
+  if (runsIndex >= 1 && parts[runsIndex] === 'runs') {
+    return {
+      volume: parts.slice(0, runsIndex).join('/'),
+      runDir: parts.slice(runsIndex, -1).join('/'),
+      file,
+    };
+  }
+  return { volume: parts.slice(0, -1).join('/'), runDir: null, file };
 }
 
 /** Page sidecars a run archived: `p12.georef.json`, `p12.georef-snap.json`, `p12.streets.json`. */

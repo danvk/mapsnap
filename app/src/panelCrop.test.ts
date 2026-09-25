@@ -1,5 +1,10 @@
 import { describe, expect, it } from 'vitest';
-import { panelCrop, panelIndexFromStem, parentStem } from './panelCrop';
+import {
+  panelCrop,
+  panelIndexFromStem,
+  parentStem,
+  siblingPanelsPaths,
+} from './panelCrop';
 
 describe('panelIndexFromStem', () => {
   it('reads the 1-based index a split stem names', () => {
@@ -72,5 +77,37 @@ describe('panelCrop', () => {
     expect(panelCrop([square], 2, 500, 500)).toBeNull();
     expect(panelCrop([], 1, 500, 500)).toBeNull();
     expect(panelCrop([[]], 1, 500, 500)).toBeNull();
+  });
+});
+
+describe('siblingPanelsPaths', () => {
+  it("looks beside a mirror run's reads, then beside the sheet", () => {
+    expect(
+      siblingPanelsPaths(
+        'data/wernersville_pa_1914/p2.jpg',
+        'data/wernersville_pa_1914/runs/corpus-v1/p2__2.streets.json',
+      ),
+    ).toEqual([
+      'data/wernersville_pa_1914/runs/corpus-v1/p2.panels.json',
+      'data/wernersville_pa_1914/p2.panels.json',
+    ]);
+  });
+
+  it('names one place when the image and reads share a directory', () => {
+    expect(
+      siblingPanelsPaths(
+        'data/werner_pa_1914/p2.jpg',
+        'data/werner_pa_1914/p2__2.streets.json',
+      ),
+    ).toEqual(['data/werner_pa_1914/p2.panels.json']);
+  });
+
+  it('is empty unless the JSON names a panel of that image', () => {
+    expect(
+      siblingPanelsPaths('data/v/p2.jpg', 'data/v/p2.streets.json'),
+    ).toEqual([]);
+    expect(
+      siblingPanelsPaths('data/v/p3.jpg', 'data/v/p2__2.streets.json'),
+    ).toEqual([]);
   });
 });

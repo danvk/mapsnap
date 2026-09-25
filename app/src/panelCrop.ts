@@ -1,3 +1,4 @@
+import { pageStem } from './fileLoading';
 import type { PanelPolygon } from './types';
 
 /** A panel's crop box in its parent's pixel frame. */
@@ -89,4 +90,28 @@ export function cutPanel(
   context.drawImage(image, -crop.x, -crop.y);
   context.restore();
   return canvas;
+}
+
+/**
+ * Where the parent's `<stem>.panels.json` may be, when an image and a JSON name a
+ * panel split; empty when they are not that pair, so an ordinary page is untouched.
+ *
+ * `p20.jpg` with `p20__3.streets.json` is the shape a corpus run leaves behind:
+ * the parent page and a panel's reads. The panels file is a run output like the
+ * reads, so it is looked for beside the JSON first -- in a volume synced from the
+ * mirror that is `runs/<tag>/`, while the page image is at the volume root --
+ * and then beside the image, where a flattened volume keeps everything.
+ */
+export function siblingPanelsPaths(
+  imageFile: string,
+  jsonFile: string,
+): string[] {
+  const jsonStem = pageStem(jsonFile);
+  if (panelIndexFromStem(jsonStem) === null) return [];
+  if (pageStem(imageFile) !== parentStem(jsonStem)) return [];
+  const beside = (file: string) => {
+    const slash = file.lastIndexOf('/');
+    return `${slash < 0 ? '' : file.slice(0, slash + 1)}${parentStem(jsonStem)}.panels.json`;
+  };
+  return [...new Set([beside(jsonFile), beside(imageFile)])];
 }

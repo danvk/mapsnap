@@ -27,5 +27,9 @@ export function panelsUrlFor(
     );
     return `/s3-api/object?uri=${encodeURIComponent(sibling)}`;
   }
+  // A mirror run's annotation (`data/<volume>/runs/<tag>/…`) keeps its
+  // panels.json beside it, like the bucket does; anything else is at the root.
+  const inRun = annotationPath?.match(/^(data\/.+\/runs\/[^/]+)\/[^/]+$/);
+  if (inRun) return `/${inRun[1]}/${parentStem}.panels.json`;
   return volume ? `/data/${volume}/${parentStem}.panels.json` : null;
 }

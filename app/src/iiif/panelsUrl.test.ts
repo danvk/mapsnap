@@ -36,3 +36,15 @@ describe('panelsUrlFor', () => {
     expect(panelsUrlFor(S3, undefined, '')).toBeNull();
   });
 });
+
+describe('panelsUrlFor a mirror run synced into data/', () => {
+  it("reads the run's panels.json beside its annotation", () => {
+    expect(
+      panelsUrlFor(
+        'data/wernersville_pa_1914/runs/corpus-v1/mapsnap.iiif.json',
+        'wernersville_pa_1914',
+        'p2',
+      ),
+    ).toBe('/data/wernersville_pa_1914/runs/corpus-v1/p2.panels.json');
+  });
+});
