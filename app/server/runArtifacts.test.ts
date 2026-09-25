@@ -1,5 +1,10 @@
 import { describe, expect, it } from 'vitest';
-import { runArtifactDir, runArtifactStems } from './runArtifacts.ts';
+import {
+  isRunDir,
+  runArtifactDir,
+  runArtifactStems,
+  splitRunPath,
+} from './runArtifacts.ts';
 
 describe('runArtifactDir', () => {
   it('maps a volume-root annotation to its artifacts directory', () => {
@@ -79,5 +84,46 @@ describe('runArtifactStems', () => {
         'p7.georef.json',
       ]),
     ).toEqual(['p7']);
+  });
+});
+
+describe('mirror runs synced into data/', () => {
+  it('splits a run annotation around its run directory', () => {
+    expect(
+      splitRunPath('wernersville_pa_1914/runs/corpus-v1/mapsnap.iiif.json'),
+    ).toEqual({
+      volume: 'wernersville_pa_1914',
+      runDir: 'runs/corpus-v1',
+      file: 'mapsnap.iiif.json',
+    });
+    expect(
+      splitRunPath('brooklyn_1904-1908/vol13/runs/v2/mapsnap.iiif.json'),
+    ).toEqual({
+      volume: 'brooklyn_1904-1908/vol13',
+      runDir: 'runs/v2',
+      file: 'mapsnap.iiif.json',
+    });
+  });
+
+  it('leaves a volume-root annotation where it is', () => {
+    expect(splitRunPath('detroit_mich_1929_vol_11/base.iiif.json')).toEqual({
+      volume: 'detroit_mich_1929_vol_11',
+      runDir: null,
+      file: 'base.iiif.json',
+    });
+  });
+
+  it("treats a run's own directory as its artifact directory", () => {
+    expect(
+      runArtifactDir('wernersville_pa_1914/runs/corpus-v1/mapsnap.iiif.json'),
+    ).toBe('wernersville_pa_1914/runs/corpus-v1');
+  });
+
+  it('accepts one run directory and nothing else', () => {
+    expect(isRunDir('runs/corpus-v1')).toBe(true);
+    expect(isRunDir('runs/../secrets')).toBe(false);
+    expect(isRunDir('runs/a/b')).toBe(false);
+    expect(isRunDir('artifacts/corpus-v1')).toBe(false);
+    expect(isRunDir(undefined)).toBe(false);
   });
 });

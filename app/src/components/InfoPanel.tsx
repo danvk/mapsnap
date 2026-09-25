@@ -3,6 +3,7 @@ import type { KeymapInfo } from '../../server/api';
 import type { SkippedItem } from '../../server/iiifAnnotations';
 import type { PageCompareStats } from '../iiif/compare';
 import { hasFootprint, type PageGeo } from '../iiif/pages';
+import { debugImageStem } from '../iiif/volumePath';
 
 /**
  * One page view, offered both inline and as a standalone tab.
@@ -85,6 +86,16 @@ interface InfoPanelProps {
   keymaps: KeymapInfo[];
   /** Volume directory name, e.g. "brooklyn_ny_1906_vol_6". */
   volume: string;
+  /**
+   * The mirror run the annotation came from (`runs/corpus-v1`), whose own
+   * adjacency.json is the one to link; null for an annotation at the volume root.
+   */
+  run?: string | null;
+  /**
+   * Stems with a page image on disk, so a split panel without its own image
+   * links its sheet's instead (see debugImageStem); null when unknown.
+   */
+  pageImages?: ReadonlySet<string> | null;
   /**
    * Opens a page view inline, in place of the map. Absent in contexts with
    * nowhere to put it, in which case the labels stay plain links.
@@ -224,6 +235,8 @@ export function InfoPanel(props: InfoPanelProps) {
     oimSlug,
     keymaps,
     volume,
+    run,
+    pageImages = null,
     runArtifacts,
     onOpenDebugView,
     onOpenSnapView,
@@ -239,7 +252,7 @@ export function InfoPanel(props: InfoPanelProps) {
     // output, never page images -- those exist once, at the volume root -- so
     // the image and its sidecar cannot share a base path.
     const fromRun = !!runArtifacts?.stems.includes(selectedPage.stem);
-    const imageBase = `data/${volume}/${selectedPage.stem}`;
+    const imageBase = `data/${volume}/${debugImageStem(selectedPage.stem, pageImages)}`;
     const sidecarDir = fromRun ? runArtifacts!.dir! : `data/${volume}`;
     const sidecarBase = `${sidecarDir}/${selectedPage.stem}`;
 
@@ -263,8 +276,11 @@ export function InfoPanel(props: InfoPanelProps) {
         ? [
             {
               label: 'adjacency view',
-              // Adjacency is volume-wide, not per run.
-              files: [`${imageBase}.jpg`, `data/${volume}/adjacency.json`],
+              // Adjacency is volume-wide, but a mirror run keeps its own copy.
+              files: [
+                `${imageBase}.jpg`,
+                `data/${volume}/${run ? `${run}/` : ''}adjacency.json`,
+              ],
             },
           ]
         : []),

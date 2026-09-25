@@ -31,7 +31,7 @@ import {
   cutPanel,
   panelCrop,
   panelIndexFromStem,
-  parentStem,
+  siblingPanelsPaths,
 } from './panelCrop';
 import { ImageColumn, type Mode } from './components/ImageColumn';
 import { MapView } from './components/MapView';
@@ -157,42 +157,31 @@ function roadProbPaths(imagePath: string): string[] {
 }
 
 /**
- * The parent's `<stem>.panels.json` when an image and a JSON name a panel split.
- *
- * `p20.jpg` with `p20__3.streets.json` is the shape a corpus run leaves behind:
- * the parent page and a panel's reads. Returns null when the two are not that
- * pair, so an ordinary page is untouched.
- */
-function siblingPanelsPath(imageFile: string, jsonFile: string): string | null {
-  const jsonStem = pageStem(jsonFile);
-  const index = panelIndexFromStem(jsonStem);
-  if (index === null) return null;
-  if (pageStem(imageFile) !== parentStem(jsonStem)) return null;
-  const slash = imageFile.lastIndexOf('/');
-  const directory = slash < 0 ? '' : imageFile.slice(0, slash + 1);
-  return `${directory}${parentStem(jsonStem)}.panels.json`;
-}
-
-/**
  * Re-cut the panel a JSON names out of its parent image, or null.
  *
- * Null whenever anything does not line up -- no panels file, a stem that names
- * no panel, an index the file does not have -- so the caller falls back to
+ * `panelsFiles` are tried in order and the first that loads is used. Null
+ * whenever anything does not line up -- no panels file, a stem that names no
+ * panel, an index the file does not have -- so the caller falls back to
  * showing the parent whole, which is what it did before.
  */
 async function cutPanelFromParent(
   parent: HTMLImageElement,
-  imageFile: string,
   jsonFile: string | undefined,
-  panelsFile: string,
+  panelsFiles: string[],
 ): Promise<{ image: HTMLImageElement; src: string } | null> {
   if (!jsonFile) return null;
   const index = panelIndexFromStem(pageStem(jsonFile));
   if (index === null) return null;
   try {
-    const response = await fetch(resolveDataUrl(panelsFile));
-    if (!response.ok) return null;
-    const data = (await response.json()) as PanelsJsonData;
+    let data: PanelsJsonData | null = null;
+    for (const panelsFile of panelsFiles) {
+      const response = await fetch(resolveDataUrl(panelsFile));
+      if (response.ok) {
+        data = (await response.json()) as PanelsJsonData;
+        break;
+      }
+    }
+    if (!data) return null;
     const crop = panelCrop(
       data.panels ?? [],
       index,
@@ -660,9 +649,12 @@ export function DebugView({ files: filesProp, onClose }: DebugViewProps = {}) {
     // `p20.jpg` + `p20__3.streets.json` is the only pair on disk, and the reads
     // are in the panel's frame while the image is in the parent's. Given the
     // parent's panels.json we can re-cut the panel here and make them agree.
-    const panelsFile =
-      files.find((f) => f.endsWith('.panels.json')) ??
-      (imageFile && jsonFile ? siblingPanelsPath(imageFile, jsonFile) : null);
+    const explicitPanels = files.find((f) => f.endsWith('.panels.json'));
+    const panelsFiles = explicitPanels
+      ? [explicitPanels]
+      : imageFile && jsonFile
+        ? siblingPanelsPaths(imageFile, jsonFile)
+        : [];
 
     let fallbackWidth = jsonWidth;
     let fallbackHeight = jsonHeight;
@@ -675,9 +667,10 @@ export function DebugView({ files: filesProp, onClose }: DebugViewProps = {}) {
         }
         const src = resolveDataUrl(imageFile);
         const el = await loadImage(src);
-        const cut = panelsFile
-          ? await cutPanelFromParent(el, imageFile, jsonFile, panelsFile)
-          : null;
+        const cut =
+          panelsFiles.length > 0
+            ? await cutPanelFromParent(el, jsonFile, panelsFiles)
+            : null;
         if (cut) {
           applyImage(cut.image, cut.src);
           prevObjectUrlRef.current = cut.src;

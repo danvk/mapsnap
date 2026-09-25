@@ -140,6 +140,34 @@ export async function volumePages(
     .sort(comparePages);
 }
 
+/** The page-image stems among a directory's file names: `p2.jpg`, `p2__1.jpg`. */
+export function pageImageStems(files: string[]): string[] {
+  return files
+    .filter((file) => PAGE_IMAGE.test(file))
+    .map((file) => file.replace(/\.jpe?g$/, ''))
+    .sort(comparePages);
+}
+
+/**
+ * A volume's pages with the split panels a mirror run knows about merged in.
+ *
+ * A volume synced from the mirror has only whole-sheet scans on disk; its
+ * panels exist as the run's per-panel sidecars (`p2__3.streets.json`,
+ * `p2__3.georef-final.json`). Each panel those files name joins the list and
+ * replaces its sheet, the same as a panel image does in {@link volumePages}.
+ */
+export function withRunPanels(pages: string[], runFiles: string[]): string[] {
+  const panels = new Set<string>();
+  for (const file of runFiles) {
+    const stem = file.match(/^(p\d+[A-Za-z]{0,2}__\d+)\./)?.[1];
+    if (stem) panels.add(stem);
+  }
+  const split = new Set([...panels].map(panelParent));
+  return [...new Set([...pages, ...panels])]
+    .filter((stem) => stem.includes('__') || !split.has(stem))
+    .sort(comparePages);
+}
+
 /** Whether a stem names a sheet that the volume has split into panels. */
 export function isSupersededSheet(stem: string, pages: string[]): boolean {
   return (

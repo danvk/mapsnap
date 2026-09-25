@@ -98,6 +98,14 @@ export interface VolumeQuery {
   volume: string;
 }
 
+/**
+ * A volume, and optionally one of its mirror runs (`runs/<tag>`) to read the
+ * run's own outputs from rather than the volume root.
+ */
+export interface VolumeRunQuery extends VolumeQuery {
+  run?: string;
+}
+
 /** Query naming the underlay image of one key map: its sheet or its P(road) map. */
 export interface KeymapAnnotationQuery {
   volume: string;
@@ -149,6 +157,13 @@ export interface FailedGeorefsResponse {
    */
   georefs: Record<string, string[]>;
   pages?: string[];
+  /**
+   * Stems with a page image on disk at the volume root. A split panel of a
+   * volume synced from the mirror has none -- only its sheet does -- so its
+   * debug views link the sheet, which the debugger maps to the panel through
+   * panels.json.
+   */
+  images?: string[];
 }
 
 /** One key-map sheet in a volume's `raw/` directory and which sidecars it has. */
@@ -240,13 +255,13 @@ export interface API {
     get: GetEndpoint<RewrittenAnnotationResponse, AnnotationQuery>;
   };
   '/iiif-api/failed-georefs': {
-    get: GetEndpoint<FailedGeorefsResponse, VolumeQuery>;
+    get: GetEndpoint<FailedGeorefsResponse, VolumeRunQuery>;
   };
   '/iiif-api/compare': {
     get: GetEndpoint<CompareResponse, AnnotationQuery>;
   };
   '/iiif-api/adjacency': {
-    get: GetEndpoint<AdjacencyResponse, VolumeQuery>;
+    get: GetEndpoint<AdjacencyResponse, VolumeRunQuery>;
   };
   '/iiif-api/osm-relation': {
     get: GetEndpoint<OsmRelationResponse, VolumeQuery>;
