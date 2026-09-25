@@ -86,6 +86,11 @@ interface InfoPanelProps {
   /** Volume directory name, e.g. "brooklyn_ny_1906_vol_6". */
   volume: string;
   /**
+   * The mirror run the annotation came from (`runs/corpus-v1`), whose own
+   * adjacency.json is the one to link; null for an annotation at the volume root.
+   */
+  run?: string | null;
+  /**
    * Opens a page view inline, in place of the map. Absent in contexts with
    * nowhere to put it, in which case the labels stay plain links.
    */
@@ -224,6 +229,7 @@ export function InfoPanel(props: InfoPanelProps) {
     oimSlug,
     keymaps,
     volume,
+    run,
     runArtifacts,
     onOpenDebugView,
     onOpenSnapView,
@@ -263,8 +269,11 @@ export function InfoPanel(props: InfoPanelProps) {
         ? [
             {
               label: 'adjacency view',
-              // Adjacency is volume-wide, not per run.
-              files: [`${imageBase}.jpg`, `data/${volume}/adjacency.json`],
+              // Adjacency is volume-wide, but a mirror run keeps its own copy.
+              files: [
+                `${imageBase}.jpg`,
+                `data/${volume}/${run ? `${run}/` : ''}adjacency.json`,
+              ],
             },
           ]
         : []),

@@ -9,7 +9,7 @@
 import { existsSync } from 'fs';
 import { readdir, readFile, stat } from 'fs/promises';
 import { createRequire } from 'module';
-import { dirname, join } from 'path';
+import { join } from 'path';
 import type { Express } from 'express';
 import { HTTPError, type TypedRouter } from 'crosswalk';
 import type { API } from './api.ts';
@@ -35,10 +35,15 @@ import {
   parseLandByPage,
   parseMissingTruthKeys,
 } from './compareTxt.ts';
-import { findVolumes, volumePages } from './adjacencyTruth.ts';
+import { findVolumes, volumePages, withRunPanels } from './adjacencyTruth.ts';
 import { keymapAnnotation } from './keymapAnnotation.ts';
 import { keymapInfos } from './keymapInfos.ts';
-import { runArtifactDir, runArtifactStems } from './runArtifacts.ts';
+import {
+  isRunDir,
+  runArtifactDir,
+  runArtifactStems,
+  splitRunPath,
+} from './runArtifacts.ts';
 import { withTiles } from './iiifAnnotations.ts';
 import { isSafeSegment, isSafeVolume } from './volumePaths.ts';
 
@@ -173,6 +178,41 @@ function alternatePageImage(
   return null;
 }
 
+/**
+ * Annotation files a volume's mirror runs published, volume-relative:
+ * `runs/corpus-v1/mapsnap.iiif.json`, `runs/corpus-v1/mapsnap.keymap.iiif.json`.
+ *
+ * A volume synced from the mirror (scripts/pull_item.py) keeps each run under
+ * `runs/<tag>/`; one without that directory simply has none.
+ */
+async function runAnnotationFiles(volumeDir: string): Promise<string[]> {
+  let runs: string[];
+  try {
+    runs = await readdir(join(volumeDir, 'runs'));
+  } catch {
+    return [];
+  }
+  const files = await Promise.all(
+    runs.map(async (run) => {
+      try {
+        return (await readdir(join(volumeDir, 'runs', run)))
+          .filter((file) => file.endsWith('.iiif.json'))
+          .map((file) => `runs/${run}/${file}`);
+      } catch {
+        return [];
+      }
+    }),
+  );
+  return files.flat();
+}
+
+// The optional `run` of a volume-scoped query, checked; undefined when absent.
+function runOf(run: unknown): string | undefined {
+  if (run === undefined || run === '') return undefined;
+  if (!isRunDir(run)) throw new HTTPError(400, `invalid run: ${String(run)}`);
+  return run;
+}
+
 export function registerIiifImages(app: Express, dataDir: string): void {
   mountIiifImages(app, '/iiif', dataDir);
 }
@@ -257,11 +297,14 @@ export function registerIiifApi(
         ).length;
         if (pageCount === 0) return null;
         let oimSlug: string | undefined;
+        const annotationFiles = [
+          ...files.filter((f) => f.endsWith('.iiif.json')),
+          ...(await runAnnotationFiles(join(dataDir, name))),
+        ];
         const annotations = (
           await Promise.all(
-            files
-              .filter((f) => f.endsWith('.iiif.json'))
-              .map(async (file): Promise<AnnotationFileInfo | null> => {
+            annotationFiles.map(
+              async (file): Promise<AnnotationFileInfo | null> => {
                 const path = join(dataDir, name, file);
                 const info = await stat(path);
                 const facts = await annotationFacts(path, info.mtimeMs);
@@ -274,7 +317,8 @@ export function registerIiifApi(
                   modifiedMs: Math.round(info.mtimeMs),
                   itemCount: facts.itemCount,
                 };
-              }),
+              },
+            ),
           )
         ).filter((a): a is AnnotationFileInfo => a !== null);
         if (annotations.length === 0) return null;
@@ -316,7 +360,10 @@ export function registerIiifApi(
         `not found or not an AnnotationPage: ${rawPath}`,
       );
     }
-    const volumeDir = dirname(annotationPath);
+    // A mirror run's annotation sits in `<volume>/runs/<tag>/`, but its pages
+    // are the volume's own scans, at the volume root.
+    const { volume: volumePath } = splitRunPath(relativePath);
+    const volumeDir = join(dataDir, volumePath);
     const stems = await imageStemsByLowercase(volumeDir);
     const localPages = new Map<string, LocalPageImage>();
     const fallbacks: string[] = [];
@@ -356,7 +403,6 @@ export function registerIiifApi(
         // No local image for this page; rewriteAnnotationPage reports it.
       }
     }
-    const volumePath = parts.slice(0, -1).join('/');
     const serviceBaseUrl = `${request.protocol}://${request.get('host')}/iiif/${volumePath}`;
     const rewritten = rewriteAnnotationPage(
       page,
@@ -433,20 +479,26 @@ export function registerIiifApi(
 
   // A volume's adjacency.json (per-page sheet-number claims + the mutual-edge graph),
   // for the viewer's adjacency overlay. Null when the volume has no adjacency data.
+  // With a `run`, that run's own adjacency.json comes first: a mirror run
+  // writes one under runs/<tag>/ and the volume root has none.
   router.get('/iiif-api/adjacency', async (_params, request) => {
     const { volume } = request.query;
+    const run = runOf(request.query.run);
     if (!isSafeVolume(volume)) {
       throw new HTTPError(400, `invalid volume: ${volume}`);
     }
-    try {
-      const text = await readFile(
-        join(dataDir, volume, 'adjacency.json'),
-        'utf8',
-      );
-      return { adjacency: JSON.parse(text) };
-    } catch {
-      return { adjacency: null };
+    const candidates = [
+      ...(run ? [join(dataDir, volume, run, 'adjacency.json')] : []),
+      join(dataDir, volume, 'adjacency.json'),
+    ];
+    for (const path of candidates) {
+      try {
+        return { adjacency: JSON.parse(await readFile(path, 'utf8')) };
+      } catch {
+        continue;
+      }
     }
+    return { adjacency: null };
   });
 
   // The boundary of the OSM relation this volume's streets were downloaded from
@@ -502,14 +554,19 @@ export function registerIiifApi(
   // page has, so the viewer can link to all of them and — for a volume with no
   // truth annotation — work out which pages went unplaced. ?volume=<dir> →
   // { pages: ["p1", …], georefs: { "p12": ["p12.georef.json", "p12.georef-snap.json"] } }.
+  //
+  // With a `run`, the georef sidecars are that run's (`runs/<tag>/`), and the
+  // split panels its sidecars name count as pages: a volume synced from the
+  // mirror has no panel images to find them by.
   router.get('/iiif-api/failed-georefs', async (_params, request) => {
     const { volume } = request.query;
+    const run = runOf(request.query.run);
     if (!isSafeVolume(volume)) {
       throw new HTTPError(400, `invalid volume: ${volume}`);
     }
     let files: string[];
     try {
-      files = await readdir(join(dataDir, volume));
+      files = await readdir(join(dataDir, volume, run ?? ''));
     } catch {
       throw new HTTPError(404, `no such volume: ${volume}`);
     }
@@ -525,7 +582,8 @@ export function registerIiifApi(
     }
     // volumePages drops a split sheet in favour of its panels, so a sheet whose panels
     // all fitted is not reported as an unplaced page.
-    return { georefs, pages: await volumePages(dataDir, volume) };
+    const pages = await volumePages(dataDir, volume);
+    return { georefs, pages: run ? withRunPanels(pages, files) : pages };
   });
 
   // A volume's key-map sheets and which visualization sidecars each has, so the viewer can link

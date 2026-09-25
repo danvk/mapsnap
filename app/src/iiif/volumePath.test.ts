@@ -10,6 +10,7 @@ describe('parseAnnotationPath', () => {
     ).toEqual({
       volume: 'detroit_mich_1929_vol_11',
       file: '2026-08-05-base.iiif.json',
+      run: null,
     });
   });
 
@@ -19,6 +20,7 @@ describe('parseAnnotationPath', () => {
     ).toEqual({
       volume: 'brooklyn_1904-1908/vol13',
       file: '2026-08-04.iiif.json',
+      run: null,
     });
   });
 
@@ -32,5 +34,31 @@ describe('parseAnnotationPath', () => {
     expect(parseAnnotationPath(null)).toBeNull();
     expect(parseAnnotationPath('data/x.iiif.json')).toBeNull();
     expect(parseAnnotationPath('other/vol/x.iiif.json')).toBeNull();
+  });
+});
+
+describe('parseAnnotationPath with a mirror run', () => {
+  it('splits a run annotation into volume, run and file', () => {
+    expect(
+      parseAnnotationPath(
+        'data/wernersville_pa_1914/runs/corpus-v1/mapsnap.iiif.json',
+      ),
+    ).toEqual({
+      volume: 'wernersville_pa_1914',
+      run: 'runs/corpus-v1',
+      file: 'mapsnap.iiif.json',
+    });
+  });
+
+  it('allows a run under a multi-volume atlas', () => {
+    expect(
+      parseAnnotationPath(
+        'data/brooklyn_1904-1908/vol13/runs/v2/mapsnap.iiif.json',
+      ),
+    ).toEqual({
+      volume: 'brooklyn_1904-1908/vol13',
+      run: 'runs/v2',
+      file: 'mapsnap.iiif.json',
+    });
   });
 });

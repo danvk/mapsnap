@@ -51,10 +51,12 @@ export interface VolumePageFiles {
  */
 export async function fetchVolumePageFiles(
   volume: string,
+  run: string | null = null,
 ): Promise<VolumePageFiles> {
-  const { georefs, pages } = await api.get('/iiif-api/failed-georefs')(null, {
-    volume,
-  });
+  const { georefs, pages } = await api.get('/iiif-api/failed-georefs')(
+    null,
+    run ? { volume, run } : { volume },
+  );
   return {
     stems: pages ?? [],
     georefs: new Map(Object.entries(georefs ?? {})),
@@ -85,11 +87,19 @@ export async function fetchOsmRelation(
   return relation;
 }
 
-/** Fetch a volume's adjacency.json (per-page sheet-number claims + mutual graph), or null. */
+/**
+ * Fetch a volume's adjacency.json (per-page sheet-number claims + mutual graph), or null.
+ *
+ * With a mirror `run` (`runs/<tag>`), that run's own adjacency.json is read first.
+ */
 export async function fetchAdjacency(
   volume: string,
+  run: string | null = null,
 ): Promise<AdjacencyData | null> {
-  const { adjacency } = await api.get('/iiif-api/adjacency')(null, { volume });
+  const { adjacency } = await api.get('/iiif-api/adjacency')(
+    null,
+    run ? { volume, run } : { volume },
+  );
   return adjacency;
 }
 

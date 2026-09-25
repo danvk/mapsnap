@@ -275,6 +275,9 @@ export function VolumeViewer() {
   // notes drive the list markers/tooltip, the sidecars the per-page georef links, the
   // adjacency the claim overlay.
   const volumeName = selection?.volume;
+  // A mirror run (`runs/<tag>`) keeps its own sidecars, adjacency and snap
+  // records; null when the annotation sits at the volume root.
+  const volumeRun = selection?.run ?? null;
 
   // A split parent's panels.json, wherever this annotation came from: beside it
   // in the bucket for an s3:// object, under data/ for a local volume.
@@ -316,7 +319,7 @@ export function VolumeViewer() {
       .catch(() => {
         if (!cancelled) setNotes(new Map());
       });
-    fetchVolumePageFiles(volumeName)
+    fetchVolumePageFiles(volumeName, volumeRun)
       .then(({ stems, georefs }) => {
         if (cancelled) return;
         setGeorefSidecars(georefs);
@@ -333,7 +336,9 @@ export function VolumeViewer() {
     // The snap channel's per-page record (#325). JSONL, so fetched as text; a
     // volume without snap artifacts 404s into the SPA fallback, which fails
     // the parse harmlessly (no rows -> empty map).
-    fetch(`/data/${volumeName}/artifacts/osm_snap/candidates.jsonl`)
+    fetch(
+      `/data/${volumeName}/${volumeRun ? `${volumeRun}/` : ''}artifacts/osm_snap/candidates.jsonl`,
+    )
       .then((r) => (r.ok ? r.text() : ''))
       .then((text) => {
         if (!cancelled) setSnapRecords(parseSnapRecords(text));
@@ -342,7 +347,7 @@ export function VolumeViewer() {
         if (!cancelled) setSnapRecords(new Map());
       });
     setAdjacencyData(null);
-    fetchAdjacency(volumeName)
+    fetchAdjacency(volumeName, volumeRun)
       .then((data) => {
         if (!cancelled) setAdjacencyData(data);
       })
@@ -352,7 +357,7 @@ export function VolumeViewer() {
     return () => {
       cancelled = true;
     };
-  }, [volumeName]);
+  }, [volumeName, volumeRun]);
 
   // Cycle warped-image opacity through 0/50/100% on the 'p' key, matching the
   // georef view (skipped while the user is typing).
@@ -839,6 +844,7 @@ export function VolumeViewer() {
             onOpenDebugView={(files, label) => setDebugView({ files, label })}
             onOpenSnapView={snapRecord ? () => setSnapOpen(true) : undefined}
             runArtifacts={runArtifacts}
+            run={volumeRun}
             pages={pages}
             missingCount={missingPages.length}
             skipped={skipped}

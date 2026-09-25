@@ -12,6 +12,7 @@ import {
   readTruth,
   truthPath,
   volumePages,
+  withRunPanels,
   writePageTruth,
 } from './adjacencyTruth.ts';
 
@@ -150,5 +151,31 @@ describe('truth round-trip', () => {
       await readFile(truthPath(dataDir, 'champaign'), 'utf8'),
     );
     expect(Object.keys(raw.pages)).toEqual(['p2', 'p10']);
+  });
+});
+
+describe('withRunPanels', () => {
+  it("replaces a split sheet with the panels its run's sidecars name", () => {
+    const pages = ['p1', 'p2', 'p10'];
+    const runFiles = [
+      'p2__1.streets.json',
+      'p2__2.georef-final.json',
+      'p2.panels.json',
+      'p1.provenance.json',
+      'mapsnap.iiif.json',
+    ];
+    expect(withRunPanels(pages, runFiles)).toEqual([
+      'p1',
+      'p2__1',
+      'p2__2',
+      'p10',
+    ]);
+  });
+
+  it('leaves the pages alone when the run split nothing', () => {
+    expect(withRunPanels(['p1', 'p2'], ['p1.streets.json'])).toEqual([
+      'p1',
+      'p2',
+    ]);
   });
 });
