@@ -342,6 +342,42 @@ def collapse_skeleton_keys(keys: set[str]) -> set[str]:
     }
 
 
+def collapse_half_sheet_keys(keys: set[str]) -> set[str]:
+    """Merge a sheet scanned in halves back into the sheet: ``85L`` + ``85R`` -> ``85``.
+
+    Some volumes were scanned a half-sheet at a time -- 154 of the mirror's
+    items, New York, Chicago and Cincinnati among them -- so their page keys
+    are ``85L``, ``85R``, ``86L``… while the key map, drawn for the bound
+    sheets, prints ``85``, ``86``. Checked against the halves, every read
+    missed: sanborn06116_006's key map read 16 of its 18 numbers and matched
+    none, so it was rejected, and sanborn06116_007's, detected by convention,
+    placed no page at all.
+
+    Only an exact pair merges: ``NL`` with ``NR`` present. A lone ``NL`` is
+    kept, as the sheet presumably names it. A half-sheet page still finds its
+    sheet's key-map location through KeymapLocator's family fallback
+    (``85L`` -> ``85``).
+    """
+    paired = {
+        key[:-1]
+        for key in keys
+        if key.endswith("L") and key[:-1].isdigit() and f"{key[:-1]}R" in keys
+    }
+    return {
+        key for key in keys if key[:-1] not in paired or key[-1] not in "LR"
+    } | paired
+
+
+def keymap_nameable_keys(keys: set[str]) -> set[str]:
+    """The page keys a key map can print: half-sheet pairs merged, skeleton twins dropped.
+
+    Wherever a set of page keys stands for "what the key map can name" -- a
+    coverage denominator, a decode vocabulary -- this is the set to use (see
+    collapse_half_sheet_keys and collapse_skeleton_keys).
+    """
+    return collapse_skeleton_keys(collapse_half_sheet_keys(keys))
+
+
 def volume_page_keys(volume: Path) -> set[str]:
     """All page keys present in the volume, letter suffixes included.
 

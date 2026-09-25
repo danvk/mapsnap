@@ -204,3 +204,19 @@ def test_collapse_skeleton_keys_is_why_reads_stop_landing_on_skeletons():
     pages = collapse_skeleton_keys({"219", "219S", "227", "227S"})
     assert "219S" not in pages and "227S" not in pages
     assert pages == {"219", "227"}
+
+
+def test_collapse_half_sheet_keys_merges_exact_pairs():
+    from mapsnap.keymap.fit_keymap import collapse_half_sheet_keys
+
+    # 85 and 86 were scanned in halves; 87L has no right half, and 3A/3B are
+    # lettered sheets, not halves.
+    keys = {"85L", "85R", "86L", "86R", "87L", "3A", "3B", "12"}
+    assert collapse_half_sheet_keys(keys) == {"85", "86", "87L", "3A", "3B", "12"}
+
+
+def test_keymap_nameable_keys_merges_halves_and_drops_skeletons():
+    from mapsnap.keymap.fit_keymap import keymap_nameable_keys
+
+    keys = {"85L", "85R", "201", "201S", "7"}
+    assert keymap_nameable_keys(keys) == {"85", "201", "7"}

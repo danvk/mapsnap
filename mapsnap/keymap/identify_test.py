@@ -287,3 +287,14 @@ def test_detection_plan_floor_is_the_one_is_keymap_applies(tmp_path: Path):
     (tmp_path / "short").mkdir()
     one_short = make_volume(tmp_path / "short", ["p0.jpg", *names[:-1]])
     assert detection_plan(one_short) == ([], [])
+
+
+def test_volume_valid_pages_names_half_scanned_sheets_by_number(tmp_path: Path):
+    # sanborn06116_006: each sheet scanned as a left and a right half, while
+    # the key map prints the sheet's number. Checked against the halves, the
+    # 16 of 18 numbers it read matched nothing and it was rejected.
+    names = ["p0L.jpg", "p0R.jpg"] + [
+        f"p{number}{half}.jpg" for number in range(85, 88) for half in "LR"
+    ]
+    volume = make_volume(tmp_path, names)
+    assert volume_valid_pages(volume) == ["85", "86", "87"]

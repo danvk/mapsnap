@@ -46,7 +46,7 @@ from mapsnap.keymap.detect_numbers_cnn import (
 )
 from mapsnap.keymap.detect_numbers_crnn import read_candidates, snap_to_pages
 from mapsnap.keymap.fit_keymap import (
-    collapse_skeleton_keys,
+    keymap_nameable_keys,
     page_number,
     volume_page_keys,
 )
@@ -91,7 +91,7 @@ def volume_valid_pages(volume: Path) -> list[str]:
     return sorted(
         (
             key
-            for key in collapse_skeleton_keys(volume_page_keys(volume))
+            for key in keymap_nameable_keys(volume_page_keys(volume))
             if page_key_sort(key)[0] >= 1
         ),
         key=page_key_sort,

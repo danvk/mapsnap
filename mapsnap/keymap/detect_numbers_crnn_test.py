@@ -221,3 +221,12 @@ def test_plan_repairs_spatial_gate_blocks_distant_stems():
         {8: {"470": -2.2, "600": 0.9}},
     )
     assert plan_repairs(texts, centers, margins, pages) == []
+
+
+def test_volume_pages_for_reads_half_scanned_sheets_by_number(tmp_path):
+    volume = tmp_path / "vol"
+    volume.mkdir()
+    for name in ("p0L.jpg", "p0R.jpg", "p103L.jpg", "p103R.jpg", "p104L.jpg"):
+        (volume / name).touch()
+    # 103 was scanned in halves, so its reads snap to 103; 104L is alone.
+    assert volume_pages_for(str(volume / "p0R.jpg")) == ["103", "104L"]

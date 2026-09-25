@@ -22,6 +22,7 @@ from mapsnap import sidecar
 from mapsnap.feature_index import FeatureIndex
 from mapsnap.keymap.fit_keymap import (
     key_stem,
+    keymap_nameable_keys,
     load_detections,
     page_key,
     page_number,
@@ -508,7 +509,7 @@ class KeymapLocator:
 
         locators = [cls.from_keymap(path) for path in keymap_jsons]
         volume_keys = (
-            volume_page_keys(keymap_volume_dir(keymap_jsons[0]))
+            keymap_nameable_keys(volume_page_keys(keymap_volume_dir(keymap_jsons[0])))
             if keymap_jsons
             else set()
         )
