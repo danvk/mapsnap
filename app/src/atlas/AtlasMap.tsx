@@ -1,15 +1,15 @@
 /**
- * The atlas's one map: a country of dots that becomes a town of sheets.
+ * The atlas's one map: a country of dots that becomes a map of volumes.
  *
  * Both states share a single maplibre instance rather than swapping between
- * two. Zooming from the whole country into one town is the app's central
- * gesture, and it has to be a continuous movement -- a map that unmounts and
- * remounts loses that, and with it any sense of where the town was.
+ * two, so zooming from the country into a town is one continuous movement.
  *
- * The dots stay in the style throughout, above the warped sheets and growing
- * as you zoom, so a neighbouring town stays one click away and backing out of
- * a town lands you where you started. Only the selected town's dot is hidden,
- * so it does not sit on top of its own map.
+ * Zoomed out, each town is a dot. From FOOTPRINT_ZOOM in, the dots give way
+ * to the footprints of the volumes in view: each town's newest coverage, a
+ * patchwork rather than a stack of editions. A click on a footprint asks the
+ * app for the newest volume there; only that volume's imagery is drawn, and
+ * its footprint is outlined over it. Clicking inside it picks a sheet, and
+ * clicking any other footprint moves on to that volume.
  */
 
 import { useEffect, useRef, useState } from 'react';
@@ -19,6 +19,7 @@ import { WarpedMapLayer } from '@allmaps/maplibre';
 
 import { pointInPolygon } from '../geometry';
 import type { LoadedVolume } from './annotations';
+import { inMultiPolygon, type MultiPolygonCoords } from './footprints';
 import type { Place } from './places';
 
 /** Which sheet of which volume the pointer is over. */
@@ -27,26 +28,47 @@ export interface PageRef {
   itemIndex: number;
 }
 
+/** Where the map should move to: a box to fit, or a point and zoom. */
+export type MapTarget =
+  | { bounds: [number, number, number, number]; key: number }
+  | { center: [number, number]; zoom: number; key: number };
+
+/** Zoom from which volume footprints replace the town dots. */
+export const FOOTPRINT_ZOOM = 10;
+/** A footprint's shading when nothing is selected. */
+const FILL_OPACITY = 0.12;
+
 interface AtlasMapProps {
   places: Place[];
   /** What a dot's area means. */
   sizeBy: 'sheets' | 'volumes';
-  /** The volumes to draw, already fetched. Empty while showing the country. */
-  loaded: LoadedVolume[];
-  selectedPlace: Place | null;
+  /** The footprints to draw (see footprintFeatures). */
+  footprints: GeoJSON.FeatureCollection;
+  /** The selected volume's footprint, inside which a click picks a sheet. */
+  selectedFootprint: MultiPolygonCoords | null;
+  /** The selected volume's annotation, once fetched. */
+  loaded: LoadedVolume | null;
   selectedPage: PageRef | null;
   /** Opacity of the warped sheets, in [0, 1]. */
   opacity: number;
+  target: MapTarget | null;
+  /** A town's dot was clicked. */
   onSelectPlace: (place: Place) => void;
+  /** A spot outside the selected volume was clicked, from FOOTPRINT_ZOOM in. */
+  onPickLocation: (lng: number, lat: number) => void;
   onSelectPage: (page: PageRef | null) => void;
+  /** The view settled: [west, south, east, north] and zoom. */
+  onViewChange: (
+    bounds: [number, number, number, number],
+    zoom: number,
+  ) => void;
 }
 
 /**
  * A place's dot area tracks its size, so radius tracks the square root.
  *
- * Dots keep growing past the country view, though more slowly than the ground
- * does: a small town's dot is 3 px at zoom 7 and 8 px at zoom 16, so zooming
- * toward one makes it bigger rather than leaving a speck to aim at.
+ * Dots keep growing as you zoom toward a town, more slowly than the ground,
+ * until the footprints take over.
  */
 function radiusExpression(sizeBy: 'sheets' | 'volumes'): unknown {
   const magnitude = ['sqrt', ['max', ['get', sizeBy], 1]];
@@ -68,16 +90,9 @@ function radiusExpression(sizeBy: 'sheets' | 'volumes'): unknown {
     radii(1.5, 11),
     7,
     radii(3, 26),
-    12,
-    radii(5, 34),
-    16,
-    radii(8, 44),
+    FOOTPRINT_ZOOM,
+    radii(4.5, 32),
   ];
-}
-
-/** The dot layer's filter: every town but the selected one. */
-function dotsFilter(selectedId: string | null): unknown {
-  return selectedId ? ['!=', ['get', 'id'], selectedId] : ['literal', true];
 }
 
 /** GeoJSON for the dot layer: one point per town. */
@@ -102,34 +117,54 @@ function placesGeoJson(places: Place[]): GeoJSON.FeatureCollection {
   };
 }
 
+const EMPTY: GeoJSON.FeatureCollection = {
+  type: 'FeatureCollection',
+  features: [],
+};
+
 export function AtlasMap(props: AtlasMapProps) {
   const {
     places,
     sizeBy,
+    footprints,
+    selectedFootprint,
     loaded,
-    selectedPlace,
     selectedPage,
     opacity,
+    target,
     onSelectPlace,
+    onPickLocation,
     onSelectPage,
+    onViewChange,
   } = props;
   const containerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<maplibregl.Map | null>(null);
   const layerRef = useRef<WarpedMapLayer | null>(null);
   const [ready, setReady] = useState(false);
 
-  // Handlers and hit-test data reach the map's own listeners through refs: the
-  // listeners are registered once, and re-registering them on every render
-  // would drop clicks between removal and re-add.
-  const placesRef = useRef(places);
-  const loadedRef = useRef(loaded);
-  const onSelectPlaceRef = useRef(onSelectPlace);
-  const onSelectPageRef = useRef(onSelectPage);
+  // The map's own listeners are registered once and read the latest props
+  // through a ref; re-registering them every render would drop clicks between
+  // removal and re-add.
+  const latest = useRef({
+    places,
+    loaded,
+    selectedFootprint,
+    onSelectPlace,
+    onPickLocation,
+    onSelectPage,
+    onViewChange,
+  });
   useEffect(() => {
-    loadedRef.current = loaded;
-    onSelectPlaceRef.current = onSelectPlace;
-    onSelectPageRef.current = onSelectPage;
-  }, [loaded, onSelectPlace, onSelectPage]);
+    latest.current = {
+      places,
+      loaded,
+      selectedFootprint,
+      onSelectPlace,
+      onPickLocation,
+      onSelectPage,
+      onViewChange,
+    };
+  });
 
   useEffect(() => {
     if (!containerRef.current) return;
@@ -162,22 +197,69 @@ export function AtlasMap(props: AtlasMapProps) {
     );
     map.addControl(new maplibregl.ScaleControl({ unit: 'imperial' }));
 
+    const reportView = () => {
+      const b = map.getBounds();
+      latest.current.onViewChange(
+        [b.getWest(), b.getSouth(), b.getEast(), b.getNorth()],
+        map.getZoom(),
+      );
+    };
+
     map.on('load', () => {
       const layer = new WarpedMapLayer();
       map.addLayer(layer);
       layerRef.current = layer;
       (window as { mapsnapAtlas?: { layer?: unknown } }).mapsnapAtlas!.layer =
         layer;
-      map.addSource('places', {
+
+      map.addSource('footprints', {
         type: 'geojson',
-        data: { type: 'FeatureCollection', features: [] },
+        data: EMPTY,
+        promoteId: 'item',
       });
-      // Above the warped sheets, so a dot stays clickable over a town that is
-      // already drawn -- that is how you get from one town to its neighbour.
+      // Above the imagery, so a neighbouring volume stays one click away. The
+      // selected volume has no fill -- its imagery is what should show -- only
+      // a heavier outline around it.
+      map.addLayer({
+        id: 'footprint-fill',
+        type: 'fill',
+        source: 'footprints',
+        minzoom: FOOTPRINT_ZOOM,
+        paint: {
+          'fill-color': '#2563eb',
+          'fill-opacity': [
+            'case',
+            ['==', ['get', 'selected'], 1],
+            0,
+            ['boolean', ['feature-state', 'hover'], false],
+            0.28,
+            FILL_OPACITY,
+          ],
+        },
+      });
+      map.addLayer({
+        id: 'footprint-line',
+        type: 'line',
+        source: 'footprints',
+        minzoom: FOOTPRINT_ZOOM,
+        paint: {
+          'line-color': [
+            'case',
+            ['==', ['get', 'selected'], 1],
+            '#f97316',
+            '#2563eb',
+          ],
+          'line-width': ['case', ['==', ['get', 'selected'], 1], 2.5, 1],
+          'line-opacity': 0.8,
+        },
+      });
+
+      map.addSource('places', { type: 'geojson', data: EMPTY });
       map.addLayer({
         id: 'place-dots',
         type: 'circle',
         source: 'places',
+        maxzoom: FOOTPRINT_ZOOM,
         paint: {
           'circle-color': [
             'case',
@@ -192,34 +274,65 @@ export function AtlasMap(props: AtlasMapProps) {
         },
       });
       setReady(true);
+      reportView();
     });
 
-    // One click handler for both states: a dot if the pointer is on one, else
-    // whichever drawn sheet is under it.
+    map.on('moveend', reportView);
+
+    // Below FOOTPRINT_ZOOM a click can only mean a dot. From it in, a click
+    // inside the selected volume picks a sheet, and anywhere else asks for
+    // the newest volume at that spot.
     map.on('click', (event) => {
-      const hits = map.queryRenderedFeatures(event.point, {
-        layers: ['place-dots'],
-      });
-      const id = hits[0]?.properties?.id as string | undefined;
-      if (id) {
-        const place = placesRef.current.find((entry) => entry.id === id);
-        if (place) {
-          onSelectPlaceRef.current(place);
-          return;
-        }
+      const { lng, lat } = event.lngLat;
+      if (map.getZoom() < FOOTPRINT_ZOOM) {
+        const hit = map.queryRenderedFeatures(event.point, {
+          layers: ['place-dots'],
+        })[0];
+        const id = hit?.properties?.id as string | undefined;
+        const place = id
+          ? latest.current.places.find((entry) => entry.id === id)
+          : undefined;
+        if (place) latest.current.onSelectPlace(place);
+        return;
       }
-      onSelectPageRef.current(
-        pageAt(loadedRef.current, event.lngLat.lng, event.lngLat.lat),
-      );
+      const selected = latest.current.selectedFootprint;
+      if (selected && inMultiPolygon(lng, lat, selected)) {
+        latest.current.onSelectPage(pageAt(latest.current.loaded, lng, lat));
+        return;
+      }
+      latest.current.onPickLocation(lng, lat);
     });
+
+    let hovered: string | number | undefined;
     map.on('mousemove', (event) => {
-      const onDot =
-        map.queryRenderedFeatures(event.point, { layers: ['place-dots'] })
-          .length > 0;
-      const onPage =
-        !onDot &&
-        pageAt(loadedRef.current, event.lngLat.lng, event.lngLat.lat) !== null;
-      map.getCanvas().style.cursor = onDot || onPage ? 'pointer' : '';
+      let pointer = false;
+      if (map.getZoom() < FOOTPRINT_ZOOM) {
+        pointer =
+          map.queryRenderedFeatures(event.point, { layers: ['place-dots'] })
+            .length > 0;
+      } else {
+        const hit = map.queryRenderedFeatures(event.point, {
+          layers: ['footprint-fill'],
+        });
+        const next = hit.find((f) => f.properties?.selected !== 1)?.id;
+        if (next !== hovered) {
+          if (hovered !== undefined) {
+            map.setFeatureState(
+              { source: 'footprints', id: hovered },
+              { hover: false },
+            );
+          }
+          if (next !== undefined) {
+            map.setFeatureState(
+              { source: 'footprints', id: next },
+              { hover: true },
+            );
+          }
+          hovered = next;
+        }
+        pointer = hit.length > 0;
+      }
+      map.getCanvas().style.cursor = pointer ? 'pointer' : '';
     });
 
     return () => {
@@ -231,11 +344,11 @@ export function AtlasMap(props: AtlasMapProps) {
   }, []);
 
   useEffect(() => {
-    placesRef.current = places;
     const map = mapRef.current;
     if (!map || !ready) return;
-    const source = map.getSource('places') as maplibregl.GeoJSONSource | null;
-    source?.setData(placesGeoJson(places));
+    (map.getSource('places') as maplibregl.GeoJSONSource | null)?.setData(
+      placesGeoJson(places),
+    );
   }, [places, ready]);
 
   useEffect(() => {
@@ -248,13 +361,13 @@ export function AtlasMap(props: AtlasMapProps) {
     );
   }, [sizeBy, ready]);
 
-  // Hide the selected town's dot. A filter rather than zero opacity, so the
-  // hidden dot also stops catching clicks meant for the sheets under it.
   useEffect(() => {
     const map = mapRef.current;
     if (!map || !ready) return;
-    map.setFilter('place-dots', dotsFilter(selectedPlace?.id ?? null) as never);
-  }, [selectedPlace, ready]);
+    (map.getSource('footprints') as maplibregl.GeoJSONSource | null)?.setData(
+      footprints,
+    );
+  }, [footprints, ready]);
 
   useEffect(() => {
     const layer = layerRef.current;
@@ -262,42 +375,44 @@ export function AtlasMap(props: AtlasMapProps) {
     layer.setLayerOptions({ opacity }, { animate: false });
   }, [opacity, ready]);
 
-  // Draw the fetched volumes, and frame them. Every volume of a town-year goes
-  // onto one layer, so sheets from different volumes of the same year overlap
-  // as they do on paper.
+  // With a volume selected, its neighbours keep their outlines and only a
+  // trace of fill: shading over its sheets would tint the imagery on show.
+  // They stay clickable, and brighten on hover.
   useEffect(() => {
     const map = mapRef.current;
+    if (!map || !ready) return;
+    map.setPaintProperty('footprint-fill', 'fill-opacity', [
+      'case',
+      ['==', ['get', 'selected'], 1],
+      0,
+      ['boolean', ['feature-state', 'hover'], false],
+      0.28,
+      selectedFootprint ? 0.04 : FILL_OPACITY,
+    ]);
+  }, [selectedFootprint, ready]);
+
+  // Draw the selected volume, and nothing else.
+  useEffect(() => {
     const layer = layerRef.current;
-    if (!map || !layer || !ready) return;
+    if (!layer || !ready) return;
     layer.clear();
-    if (loaded.length === 0) return;
-    for (const entry of loaded) {
-      const results = layer.addGeoreferenceAnnotation(entry.annotation);
-      const failed = results.filter((r) => r instanceof Error).length;
-      if (failed > 0) {
-        console.warn(`${entry.volume.item}: ${failed} page(s) failed to add`);
-      }
-    }
-    const bounds = layer.getBounds();
-    if (bounds) {
-      map.fitBounds(bounds as [number, number, number, number], {
-        padding: 60,
-        duration: 900,
-      });
+    if (!loaded) return;
+    const results = layer.addGeoreferenceAnnotation(loaded.annotation);
+    const failed = results.filter((r) => r instanceof Error).length;
+    if (failed > 0) {
+      console.warn(`${loaded.volume.item}: ${failed} page(s) failed to add`);
     }
   }, [loaded, ready]);
 
-  // Fly to a town as soon as it is picked, without waiting on its annotations:
-  // the movement is the feedback that the click registered.
   useEffect(() => {
     const map = mapRef.current;
-    if (!map || !ready || !selectedPlace) return;
-    map.flyTo({
-      center: [selectedPlace.lon, selectedPlace.lat],
-      zoom: Math.max(map.getZoom(), 13),
-      duration: 900,
-    });
-  }, [selectedPlace, ready]);
+    if (!map || !ready || !target) return;
+    if ('bounds' in target) {
+      map.fitBounds(target.bounds, { padding: 60, duration: 900, maxZoom: 16 });
+    } else {
+      map.flyTo({ center: target.center, zoom: target.zoom, duration: 900 });
+    }
+  }, [target, ready]);
 
   // Bring the selected sheet to the front and unmask it, so a page picked out
   // of a stack can actually be read.
@@ -306,14 +421,19 @@ export function AtlasMap(props: AtlasMapProps) {
     const layer = layerRef.current;
     if (!layer || !ready) return;
     if (frontedRef.current) {
-      layer.resetMapsOptions([frontedRef.current], ['applyMask'], {
-        animate: false,
-      });
+      try {
+        layer.resetMapsOptions([frontedRef.current], ['applyMask'], {
+          animate: false,
+        });
+      } catch {
+        // The map went with its volume.
+      }
       frontedRef.current = null;
     }
-    if (!selectedPage) return;
-    const entry = loaded.find((v) => v.volume.item === selectedPage.item);
-    const mapId = entry?.annotation.items?.[selectedPage.itemIndex]?.id;
+    if (!selectedPage || !loaded || loaded.volume.item !== selectedPage.item) {
+      return;
+    }
+    const mapId = loaded.annotation.items?.[selectedPage.itemIndex]?.id;
     if (typeof mapId !== 'string') return;
     try {
       layer.bringMapsToFront([mapId]);
@@ -328,24 +448,21 @@ export function AtlasMap(props: AtlasMapProps) {
 }
 
 /**
- * The drawn sheet under a point, latest-added first.
+ * The drawn sheet of a volume under a point, latest-added first.
  *
- * Allmaps draws later additions on top, so the last volume added wins an
- * overlap -- which is what the eye sees, and so what a click should pick.
+ * Allmaps draws later additions on top, which is what the eye sees, and so
+ * what a click should pick.
  */
 export function pageAt(
-  loaded: LoadedVolume[],
+  loaded: LoadedVolume | null,
   lng: number,
   lat: number,
 ): PageRef | null {
-  for (let i = loaded.length - 1; i >= 0; i--) {
-    const entry = loaded[i];
-    if (!entry) continue;
-    for (let j = entry.pages.length - 1; j >= 0; j--) {
-      const page = entry.pages[j];
-      if (page && pointInPolygon(lng, lat, page.clipRing)) {
-        return { item: entry.volume.item, itemIndex: page.itemIndex };
-      }
+  if (!loaded) return null;
+  for (let j = loaded.pages.length - 1; j >= 0; j--) {
+    const page = loaded.pages[j];
+    if (page && pointInPolygon(lng, lat, page.clipRing)) {
+      return { item: loaded.volume.item, itemIndex: page.itemIndex };
     }
   }
   return null;

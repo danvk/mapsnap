@@ -1,14 +1,16 @@
 /**
- * What a town has: the years it was surveyed, and the volumes of one of them.
+ * The selected volume: what it is, and the same spot in other years.
  *
- * The year list is the point of the panel. A Sanborn town is not one map but a
- * series of them, and which years exist -- and which of those the run has
- * actually placed -- is the first thing worth knowing about a place.
+ * The year buttons are the point of the panel. A Sanborn town is not one map
+ * but a series of them, and for the spot on screen the question is which
+ * surveys cover it -- those volumes, not the town's whole year list, are what
+ * the buttons offer (see yearOptions).
  */
 
 import { isLoaded, type LoadedVolume, type MissingVolume } from './annotations';
 import type { PageGeo } from '../iiif/pages';
 import type { PageRef } from './AtlasMap';
+import type { YearOption } from './footprints';
 import {
   locItemUrl,
   locSheetUrl,
@@ -21,88 +23,72 @@ import {
 interface VolumePanelProps {
   place: Place;
   /** Every catalogued volume of the town, or null while the state file loads. */
-  volumes: Volume[] | null;
-  year: number | null;
-  onSelectYear: (year: number | null) => void;
-  /** Load results for the selected year, in the order they were requested. */
-  results: (LoadedVolume | MissingVolume)[];
-  loading: boolean;
+  townVolumes: Volume[] | null;
+  /** The selected volume, or null when the town has none to select. */
+  volume: Volume | null;
+  /** The selected volume's annotation, or why there is none; null while loading. */
+  result: LoadedVolume | MissingVolume | null;
+  /** The selected spot's years (see yearOptions). */
+  years: YearOption[];
+  onSelectItem: (item: string) => void;
   selectedPage: PageRef | null;
   onClose: () => void;
 }
 
-/**
- * The page a selection points at, when its volume finished loading, with the
- * image service it is drawn from (which names its LoC sheet).
- */
+/** The page a selection points at, with the service it is drawn from (which names its LoC sheet). */
 function selectedPageGeo(
-  results: (LoadedVolume | MissingVolume)[],
+  result: LoadedVolume | MissingVolume | null,
   selected: PageRef | null,
 ): { page: PageGeo; volume: Volume; serviceUrl: string | undefined } | null {
-  if (!selected) return null;
-  for (const result of results) {
-    if (!isLoaded(result) || result.volume.item !== selected.item) continue;
-    const page = result.pages.find((p) => p.itemIndex === selected.itemIndex);
-    if (page) {
-      const serviceUrl =
-        result.annotation.items?.[page.itemIndex]?.target?.source?.id;
-      return { page, volume: result.volume, serviceUrl };
-    }
-  }
-  return null;
+  if (!selected || !result || !isLoaded(result)) return null;
+  if (result.volume.item !== selected.item) return null;
+  const page = result.pages.find((p) => p.itemIndex === selected.itemIndex);
+  if (!page) return null;
+  const serviceUrl =
+    result.annotation.items?.[page.itemIndex]?.target?.source?.id;
+  return { page, volume: result.volume, serviceUrl };
 }
 
 /**
- * "44/67 images placed from 42 sheets" for the year on screen.
+ * "44/67 images placed from 42 sheets" for one volume.
  *
- * Three different numbers, and the panel used to call two of them "sheets".
- * A run cuts a sheet that holds several maps into panels and georeferences
- * each separately, so Mansfield 1921 is 42 physical sheets, 67 images after
- * the cut, and 44 of those images placed. Sheets come from the catalogue,
- * the other two from the annotation's own report.
+ * Three different numbers: a run cuts a sheet that holds several maps into
+ * panels and georeferences each separately, so Mansfield 1921 is 42 physical
+ * sheets, 67 images after the cut, and 44 of those images placed. Sheets come
+ * from the catalogue, the other two from the annotation's own report.
  */
-function coverageLine(results: (LoadedVolume | MissingVolume)[]): string {
-  if (results.length === 0) return 'no volumes';
-  const loaded = results.filter(isLoaded);
-  const placed = loaded.reduce((sum, result) => sum + result.pages.length, 0);
-  const sheets = results.reduce((sum, result) => sum + result.volume.sheets, 0);
-  // An annotation with no report card cannot say how many images it declined
-  // to place, and inventing a denominator would overstate the coverage.
-  const reported = loaded.every((result) => result.totalImages !== null)
-    ? loaded.reduce((sum, result) => sum + (result.totalImages ?? 0), 0)
-    : null;
+function volumeCoverage(result: LoadedVolume): string {
   const images =
-    reported === null
-      ? `${placed.toLocaleString()} images placed`
-      : `${placed.toLocaleString()}/${reported.toLocaleString()} images placed`;
-  const missing = results.length - loaded.length;
-  const gap =
-    missing > 0
-      ? ` · ${missing} volume${missing === 1 ? '' : 's'} missing`
-      : '';
-  return `${images} from ${sheets.toLocaleString()} sheets${gap}`;
+    result.totalImages === null
+      ? `${result.pages.length} images placed`
+      : `${result.pages.length}/${result.totalImages} images placed`;
+  return `${images} from ${result.volume.sheets.toLocaleString()} sheets`;
 }
 
-/** "44/67 images" for one volume, or just the placed count without a report. */
-function volumeCoverage(result: LoadedVolume): string {
-  return result.totalImages === null
-    ? `${result.pages.length} images`
-    : `${result.pages.length}/${result.totalImages} images`;
+/** A year button's tooltip. */
+function yearTitle(option: YearOption): string {
+  switch (option.status) {
+    case 'placed':
+      return `${option.year ?? 'undated'}: a volume covering this spot`;
+    case 'unplaced':
+      return 'digitized, but none of its sheets could be placed, so where it covers is unknown';
+    case 'not digitized':
+      return `not digitized — ${option.count} volume${option.count === 1 ? '' : 's'} on paper only, covering parts of town not known here`;
+  }
 }
 
 export function VolumePanel(props: VolumePanelProps) {
   const {
     place,
-    volumes,
-    year,
-    onSelectYear,
-    results,
-    loading,
+    townVolumes,
+    volume,
+    result,
+    years,
+    onSelectItem,
     selectedPage,
     onClose,
   } = props;
-  const selected = selectedPageGeo(results, selectedPage);
-  const years = volumes ? yearsOf(volumes) : [];
+  const selected = selectedPageGeo(result, selectedPage);
 
   return (
     <div className="atlas-panel">
@@ -126,71 +112,78 @@ export function VolumePanel(props: VolumePanelProps) {
         )}
       </div>
 
-      {!volumes && <p className="atlas-note">Loading volumes…</p>}
-
-      {volumes && (
+      {volume && (
         <>
+          <div className="atlas-section-label">
+            {volume.date || volume.year || 'Undated'}
+            <span className="atlas-section-note">
+              {!result
+                ? 'loading…'
+                : isLoaded(result)
+                  ? volumeCoverage(result)
+                  : result.reason}
+            </span>
+          </div>
+          <a
+            className="atlas-volume-item"
+            href={locItemUrl(volume.item)}
+            target="_blank"
+            rel="noreferrer"
+            title="This volume at the Library of Congress"
+          >
+            {volume.item}
+          </a>
+
+          <div className="atlas-section-label">This spot in other years</div>
+          <div className="atlas-years">
+            {years.map((option) => (
+              <button
+                key={`${option.year}-${option.item}`}
+                type="button"
+                className={
+                  'atlas-year' +
+                  (option.item === volume.item ? ' is-current' : '') +
+                  (option.status === 'not digitized' ? ' is-empty' : '') +
+                  (option.status === 'unplaced' ? ' is-unplaced' : '')
+                }
+                title={yearTitle(option)}
+                disabled={option.item === null}
+                onClick={() => option.item && onSelectItem(option.item)}
+              >
+                {option.year ?? 'undated'}
+              </button>
+            ))}
+          </div>
+        </>
+      )}
+
+      {!volume && townVolumes && (
+        <>
+          <p className="atlas-note">
+            None of this town&rsquo;s volumes has a placed sheet to show.
+          </p>
           <div className="atlas-section-label">Years</div>
           <div className="atlas-years">
-            {years.map((candidate) => {
-              const ofYear = volumesOfYear(volumes, candidate);
-              const mirrored = ofYear.filter((volume) => volume.state).length;
+            {yearsOf(townVolumes).map((year) => {
+              const ofYear = volumesOfYear(townVolumes, year);
+              const digitized = ofYear.filter((v) => v.state).length;
               return (
                 <button
-                  key={String(candidate)}
+                  key={String(year)}
                   type="button"
-                  className={
-                    'atlas-year' +
-                    (candidate === year ? ' is-current' : '') +
-                    (mirrored === 0 ? ' is-empty' : '')
-                  }
+                  disabled
+                  className={'atlas-year' + (digitized ? '' : ' is-empty')}
                   title={
-                    mirrored === 0
-                      ? // No volume of this year is in the mirror, which for
-                        // all but 0.1% of the catalogue means the Library
-                        // never scanned it: there is no image to place.
-                        `not digitized — ${ofYear.length} volume${ofYear.length === 1 ? '' : 's'} on paper only`
-                      : `${mirrored} of ${ofYear.length} volume${ofYear.length === 1 ? '' : 's'} digitized`
+                    digitized
+                      ? `${digitized} of ${ofYear.length} digitized, none placed`
+                      : `not digitized — ${ofYear.length} volume${ofYear.length === 1 ? '' : 's'} on paper only`
                   }
-                  onClick={() => onSelectYear(candidate)}
                 >
-                  {candidate ?? 'undated'}
-                  {ofYear.length > 1 && (
-                    <span className="atlas-year-count">{ofYear.length}</span>
-                  )}
+                  {year ?? 'undated'}
                 </button>
               );
             })}
           </div>
-
-          <div className="atlas-section-label">
-            {year ?? 'Undated'}
-            <span className="atlas-section-note">
-              {loading ? 'loading…' : coverageLine(results)}
-            </span>
-          </div>
-          <ul className="atlas-volumes">
-            {results.map((result) => (
-              <li key={result.volume.item}>
-                <a
-                  className="atlas-volume-item"
-                  href={locItemUrl(result.volume.item)}
-                  target="_blank"
-                  rel="noreferrer"
-                  title="This volume at the Library of Congress"
-                >
-                  {result.volume.item}
-                </a>
-                <span
-                  className={
-                    'atlas-volume-status' + (isLoaded(result) ? '' : ' is-gap')
-                  }
-                >
-                  {isLoaded(result) ? volumeCoverage(result) : result.reason}
-                </span>
-              </li>
-            ))}
-          </ul>
         </>
       )}
 
@@ -200,8 +193,6 @@ export function VolumePanel(props: VolumePanelProps) {
           <dl className="atlas-page">
             <dt>Page</dt>
             <dd>{selected.page.stem}</dd>
-            <dt>Volume</dt>
-            <dd>{selected.volume.item}</dd>
             <dt>Scale</dt>
             <dd>{selected.page.scalePixelsPerFoot.toFixed(2)} px/ft</dd>
             <dt>Rotation</dt>
