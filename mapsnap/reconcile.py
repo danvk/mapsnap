@@ -1595,13 +1595,20 @@ def main() -> None:
     if args.gate is not None:
         ENTRY_PENALTY = args.gate
 
-    from mapsnap.osm_snap_experiment import load_volume_context, printed_note_ratios
+    from mapsnap.osm_snap_experiment import (
+        HALF_SHEET_SEEDS,
+        load_volume_context,
+        printed_note_ratios,
+    )
 
     volume = args.volume
     sidecar_dir = args.sidecars_from or volume
     if not sidecar_dir.is_absolute() and not sidecar_dir.exists():
         sidecar_dir = volume / sidecar_dir
-    vctx = load_volume_context(volume)
+    # A seeded half is scored against the search its seed defines: on a volume
+    # with no key map it has no other search center, and the arbiter could
+    # not verify any pose for it (Manhattan 1899 vol 5 p96R).
+    vctx = load_volume_context(volume, half_sheet_seeds=HALF_SHEET_SEEDS)
     nodes = build_nodes(volume, sidecar_dir, vctx)
     if args.pages:
         nodes = {stem: node for stem, node in nodes.items() if stem in args.pages}

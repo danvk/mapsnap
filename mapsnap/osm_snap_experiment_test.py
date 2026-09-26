@@ -714,3 +714,171 @@ def test_with_incumbent_scale_adds_a_missing_rung_and_dedupes_an_existing_one():
         [ScalePrior(0.55, 0.05, "volume-median")], np.array(affine())
     )
     assert [p.source for p in same] == ["volume-median"]
+
+
+def rotated_affine(theta_deg: float) -> np.ndarray:
+    """A page->lonlat affine whose x axis turns theta_deg counterclockwise from east."""
+    t = np.radians(theta_deg)
+    east_north = 0.6 * np.array([[np.cos(t), np.sin(t)], [np.sin(t), -np.cos(t)]])
+    return np.array(
+        [
+            [east_north[0, 0] / KX, east_north[0, 1] / KX, -74.0],
+            [east_north[1, 0] / 110_540.0, east_north[1, 1] / 110_540.0, 40.0],
+        ]
+    )
+
+
+def test_pose_cv2_theta_deg_is_the_ground_rotation():
+    """The prior convention is the metric rotation, not atan2 on lon/lat (#526)."""
+    from mapsnap.osm_snap_experiment import pose_cv2_theta_deg
+
+    for theta in (0.0, 30.0, -30.0, 45.0):
+        assert pose_cv2_theta_deg(rotated_affine(theta)) == pytest.approx(theta)
+    # What the raw formula gives instead: the opposite sign, skewed by latitude.
+    a = rotated_affine(30.0)
+    assert np.degrees(np.arctan2(-a[1, 0], a[0, 0])) == pytest.approx(-24.0, abs=0.1)
+
+
+def test_half_sheet_key():
+    from mapsnap.osm_snap_experiment import half_sheet_key
+
+    assert half_sheet_key("p90L") == ("90", "L")
+    assert half_sheet_key("p0005r") == ("5", "R")
+    assert half_sheet_key("p90") is None
+    assert half_sheet_key("p90L__1") is None
+    assert half_sheet_key("p90a") is None
+
+
+def test_half_sheet_seed_abuts_across_the_gutter():
+    from mapsnap.osm_snap_experiment import HALF_SHEET_OVERLAP, half_sheet_seed
+
+    placed = np.array(affine())
+    # A right half starts where the left half's overlap strip begins...
+    right = half_sheet_seed(placed, (1000, 900), "R")
+    np.testing.assert_allclose(
+        right @ [0, 0, 1], placed @ [1000 * (1 - HALF_SHEET_OVERLAP), 0, 1]
+    )
+    # ...and a left half ends where the right half's does, measured in its own width.
+    left = half_sheet_seed(placed, (1000, 900), "L")
+    np.testing.assert_allclose(
+        left @ [900 * (1 - HALF_SHEET_OVERLAP), 0, 1], placed @ [0, 0, 1]
+    )
+    # Scale and rotation are the placed half's.
+    np.testing.assert_allclose(right[:, :2], placed[:, :2])
+
+
+def half_unit(stem: str, fit_state: str, width: int = 1000) -> PageUnit:
+    return dataclasses.replace(
+        make_unit(fit_state), stem=stem, width=width, height=1400
+    )
+
+
+def test_attach_half_sheet_seeds_seeds_only_unfitted_halves(tmp_path):
+    from mapsnap.osm_snap_experiment import attach_half_sheet_seeds, half_sheet_seed
+
+    left, right = half_unit("p7L", "fitted"), half_unit("p7R", "nofit", 1100)
+    lone = half_unit("p8R", "nofit")  # its left half is not in the volume
+    both = [half_unit("p9L", "fitted"), half_unit("p9R", "fitted")]
+    attach_half_sheet_seeds(tmp_path, [left, right, lone, *both], [])
+    assert left.gen_affine is not None and right.sibling_affine is not None
+    np.testing.assert_allclose(
+        right.sibling_affine, half_sheet_seed(left.gen_affine, (1000, 1100), "R")
+    )
+    assert left.sibling_affine is None
+    assert lone.sibling_affine is None
+    assert all(unit.sibling_affine is None for unit in both)
+
+
+def test_attach_half_sheet_seeds_reaches_map_panels_not_insets(tmp_path):
+    """A split half's map panel is seeded through its crop origin; an inset is not."""
+    import json
+
+    from mapsnap.osm_snap_experiment import attach_half_sheet_seeds
+
+    (tmp_path / "p7R.panels.json").write_text(
+        json.dumps(
+            {
+                "width": 1000,
+                "height": 1400,
+                "panels": [
+                    [[0, 300], [1000, 300], [1000, 1400], [0, 1400]],
+                    [[700, 0], [1000, 0], [1000, 250], [700, 250]],
+                ],
+            }
+        )
+    )
+    left = half_unit("p7L", "fitted")
+    right = half_unit("p7R", "split")
+    main = dataclasses.replace(half_unit("p7R__1", "nofit"), height=1100)
+    inset = dataclasses.replace(half_unit("p7R__2", "nofit", 300), height=250)
+    attach_half_sheet_seeds(tmp_path, [left, right], [main, inset])
+    assert right.sibling_affine is None  # the whole sheet is superseded by its panels
+    assert main.sibling_affine is not None and inset.sibling_affine is None
+    # The panel's (0, 0) is its parent's (0, 300).
+    parent_seed = main.sibling_affine.copy()
+    parent_seed[:, 2] = main.sibling_affine @ [0, -300, 1]
+    assert left.gen_affine is not None
+    np.testing.assert_allclose(parent_seed[:, 2], left.gen_affine @ [943, 0, 1])
+
+
+def test_select_argmax_half_sheet_bar():
+    """A seeded rescue faces the relaxed bar and no margin; others are unchanged."""
+    from mapsnap.osm_snap_experiment import (
+        PRODUCTION_GATE_MARGIN,
+        PRODUCTION_GATE_SCORE,
+        select_argmax,
+    )
+
+    def rec(score, seeded, stem="p9R", runner_up=None):
+        candidates = [{"select_score": score, "center": [-74.0, 40.0], "theta_deg": 0}]
+        if runner_up is not None:
+            candidates.append(
+                {"select_score": runner_up, "center": [-74.01, 40.0], "theta_deg": 0}
+            )
+        return {
+            "target": stem,
+            "status": "ok",
+            "fit_state": "nofit",
+            "candidates": candidates,
+            "search": {"half_sheet_seed": True} if seeded else {},
+        }
+
+    def choose(record):
+        (choice,) = select_argmax(
+            [record], PRODUCTION_GATE_SCORE, PRODUCTION_GATE_MARGIN
+        )
+        return choice
+
+    assert choose(rec(0.9, seeded=True))["reason"] == "half-sheet"
+    assert choose(rec(0.9, seeded=False))["chosen"] is None
+    assert choose(rec(0.7, seeded=True))["chosen"] is None
+    # A near-tie that would margin-block an unseeded page does not block a seeded one.
+    assert choose(rec(1.5, seeded=True, runner_up=1.45))["chosen"] == 0
+    assert choose(rec(1.5, seeded=False, runner_up=1.45))["chosen"] is None
+    # A seeded panel with no fitted sibling panel skips the solo bar.
+    assert choose(rec(0.9, seeded=True, stem="p9R__1"))["chosen"] == 0
+
+
+def test_anchor_pose_takes_snaps_verdict(tmp_path):
+    """Snap's replacement wins; a fit snap found indefensible anchors nothing."""
+    import json
+
+    from mapsnap.osm_snap_experiment import anchor_pose
+
+    georef = np.array(affine())
+    assert anchor_pose(tmp_path, "p7L", georef, {}) is georef
+    assert anchor_pose(tmp_path, "p7L", georef, {"p7L": 0.9}) is georef
+    # Denver p64L: its georef fit verified at -0.88 and reconcile overturned it.
+    assert anchor_pose(tmp_path, "p7L", georef, {"p7L": -0.88}) is None
+    # San Jose p9L: snap's first pass replaced the fit, so the seed follows snap.
+    moved = np.array(affine(lon_shift_m=107.0))
+    corners = [
+        list(moved @ [x, y, 1.0])
+        for x, y in ((0, 0), (1000, 0), (1000, 1000), (0, 1000))
+    ]
+    (tmp_path / "p7L.georef-snap.json").write_text(
+        json.dumps({"width": 1000, "height": 1000, "corners": corners})
+    )
+    anchored = anchor_pose(tmp_path, "p7L", georef, {"p7L": 0.9})
+    assert anchored is not None
+    np.testing.assert_allclose(anchored @ [500, 500, 1], moved @ [500, 500, 1])
