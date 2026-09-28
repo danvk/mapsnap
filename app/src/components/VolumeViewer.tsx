@@ -54,7 +54,7 @@ import { VolumeCharts } from './VolumeCharts';
 import { VolumeMap } from './VolumeMap';
 import { panelsUrlFor } from '../iiif/panelsUrl';
 import { passesFilter, type MetricFilter } from '../iiif/metrics';
-import { parseAnnotationPath } from '../iiif/volumePath';
+import { annotationName, parseAnnotationPath } from '../iiif/volumePath';
 
 // Map viewport from the URL's `center=lng,lat` and `zoom=Z` params, or null when absent/invalid.
 function parseViewport(
@@ -616,7 +616,7 @@ export function VolumeViewer() {
             ))}
           </select>
           <select
-            value={selection?.file ?? ''}
+            value={annotationName(selection) ?? ''}
             onChange={(e) =>
               setSelectedPath(`data/${selection?.volume}/${e.target.value}`)
             }
@@ -852,7 +852,7 @@ export function VolumeViewer() {
             pages={pages}
             missingCount={missingPages.length}
             skipped={skipped}
-            annotationName={selection?.file ?? null}
+            annotationName={annotationName(selection)}
             selectedPage={selectedPage}
             selectedMissing={selectedIsMissing}
             selectedGeorefFiles={

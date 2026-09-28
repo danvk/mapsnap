@@ -79,12 +79,14 @@ def main() -> None:
     # osm-snap PR for the calibration story); VOLUME_MODE_GATE and
     # REFINE_VER_MARGIN live there too.
     from mapsnap.osm_snap_experiment import (
+        HALF_SHEET_SEEDS,
         PRODUCTION_ARBITRATE_GATE,
         PRODUCTION_GATE_MARGIN,
         PRODUCTION_GATE_SCORE,
         cmd_candidates,
         cmd_materialize,
         cmd_select,
+        half_sheet_seed_targets,
     )
 
     mode = "union" if args.rescue_only else "arbitrate"
@@ -105,6 +107,30 @@ def main() -> None:
         PRODUCTION_ARBITRATE_GATE,
     )
     cmd_materialize(args.dir, mode)
+    if HALF_SHEET_SEEDS:
+        # Second pass: now that snap has had its say on the fitted pages,
+        # re-rescue each unplaced half of a two-scan sheet from its other half.
+        reseed = half_sheet_seed_targets(args.dir)
+        print(f"half-sheet pass: {len(reseed)} page(s) seeded from the other half")
+        if reseed:
+            cmd_candidates(
+                args.dir,
+                pages=None,
+                all_pages=False,
+                limit=None,
+                recompute=False,
+                vis=False,
+                num_workers=args.num_workers,
+                reseed=reseed,
+            )
+            cmd_select(
+                args.dir,
+                mode,
+                PRODUCTION_GATE_SCORE,
+                PRODUCTION_GATE_MARGIN,
+                PRODUCTION_ARBITRATE_GATE,
+            )
+            cmd_materialize(args.dir, mode)
 
 
 if __name__ == "__main__":

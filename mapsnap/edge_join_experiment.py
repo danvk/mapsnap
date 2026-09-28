@@ -134,6 +134,10 @@ class PageUnit:
     # snap's search, because a demoted pose is measurably a good init (refine
     # fixed richmond p353's 3.06x scale error from one).
     demoted_affine: np.ndarray | None = None
+    # For one half of a sheet scanned as two (pNL/pNR) whose other half is
+    # fitted: that half's pose, shifted across the gutter. Seeds snap's rescue
+    # (see osm_snap_experiment.attach_half_sheet_seeds).
+    sibling_affine: np.ndarray | None = None
     # Clustered candidate-GCP world positions from a FAILED fit (#335):
     # location evidence snap's rescue uses as search centers, recorded in the
     # nofit sidecar. Empty for fitted pages.

@@ -45,6 +45,20 @@ export function parseAnnotationPath(
 }
 
 /**
+ * An annotation's name within its volume, as the volumes API lists it.
+ *
+ * That is the file name for an annotation at the volume root, and
+ * "runs/<tag>/<file>" for a mirror run's, which is what tells the runs of one
+ * volume apart: every run's annotation is named `mapsnap.iiif.json`.
+ */
+export function annotationName(
+  parsed: { file: string; run: string | null } | null,
+): string | null {
+  if (!parsed) return null;
+  return parsed.run ? `${parsed.run}/${parsed.file}` : parsed.file;
+}
+
+/**
  * The page image a debug view should open for a page: its own if it has one,
  * else its sheet's.
  *

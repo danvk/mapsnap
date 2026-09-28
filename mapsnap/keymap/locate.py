@@ -49,6 +49,7 @@ __all__ = [
     "discover_keymaps",
     "page_key",
     "page_number",
+    "plausibly_sized",
     "redundant_keymaps",
     "resolve_keymaps",
     "usable_keymaps",
@@ -136,6 +137,66 @@ def above_megapixel_floor(
     return False
 
 
+MIN_KEYMAP_EXTENT_M = 2500.0
+"""A key-map sheet spanning less ground than this (corner to corner) is mis-scaled.
+
+A key map indexes a town's sheets, and a single Sanborn sheet already spans
+~520 m corner to corner at 50 ft/in (~1 km at 100, ~2 km at 200), so a key map
+this small has been georeferenced at the wrong scale -- typically by fitting a
+handful of intersections that all sit at one road junction. Bronx 1898
+(sanborn06116_018) put its key map 48 x 110 m around the Pelham Parkway / Boston
+Road junction; OCR then gave every page a vocabulary of the three or four streets
+there, and the volume placed 0 of 68 pages (#524).
+
+Measured across corpus-v1's 12,347 volumes with a georeferenced key map, the
+healthy population starts between 2.5 and 3 km: there are ~100 volumes per km of
+key-map diagonal below 3 km and 641 between 3 and 4 km. Below 2.5 km the key maps
+are mostly wrong, not just small. Their volumes placed 12-15% of their pages
+under 1 km and 15-42% in each 250 m band from 1 to 2.5 km, against 45% at
+2.5-3 km and 55-71% beyond. Among volumes with at least three placed pages, the
+placed pages spread over more ground than the key map itself in 27 of 52 between
+1 and 2.5 km, against 2 of 44 at 2.5-3 km and 10 of 620 at 3-4 km. Page count does
+not explain it: 1-2 km volumes placed 10-34% of their pages against 54-70% for
+2-5 km volumes of the same size.
+"""
+
+
+def keymap_extent_m(georef_path: Path) -> float | None:
+    """The longer ground diagonal of a key map's georeferenced corners, in metres.
+
+    None if the sidecar is unreadable or does not hold four corners.
+    """
+    try:
+        corners = json.loads(georef_path.read_text())["corners"]
+        top_left, top_right, bottom_right, bottom_left = (
+            (float(c[0]), float(c[1])) for c in corners
+        )
+    except (OSError, ValueError, KeyError, TypeError):
+        return None
+    return max(
+        meters_between(top_left, bottom_right), meters_between(top_right, bottom_left)
+    )
+
+
+def plausibly_sized(
+    keymap_json: Path, min_extent_m: float = MIN_KEYMAP_EXTENT_M
+) -> bool:
+    """Whether a key map's georeference spans enough ground to index a town.
+
+    A sheet whose extent cannot be read passes: that is not evidence of a bad fit.
+    """
+    extent_m = keymap_extent_m(keymap_georef_path(keymap_json))
+    if extent_m is None or extent_m >= min_extent_m:
+        return True
+    print(
+        f"Ignoring key map {keymap_json.name}: it is georeferenced to a sheet "
+        f"{extent_m:.0f} m across, under the {min_extent_m:g} m a key map "
+        "indexing a town must span.",
+        file=sys.stderr,
+    )
+    return False
+
+
 def usable_keymaps(directory: Path) -> list[Path]:
     """Key-map detections files in one directory that a locator can actually load.
 
@@ -153,12 +214,17 @@ def usable_keymaps(directory: Path) -> list[Path]:
     A key-map sheet that ``split`` has since cut into panels is skipped too: its
     panel carries the live chain and the parent's sidecars are stale (see
     :func:`mapsnap.keymap.records.split_parent`).
+
+    So is a key map georeferenced to implausibly little ground (see
+    :data:`MIN_KEYMAP_EXTENT_M`). Unlike a low-resolution sheet, it misleads every
+    consumer: its rectangle and page locations are both wrong.
     """
     return [
         keymap_json
         for keymap_json in sorted(directory.glob("*.keymap.json"))
         if not split_parent(keymap_json)
         and _georef_accepted(keymap_georef_path(keymap_json))
+        and plausibly_sized(keymap_json)
     ]
 
 
