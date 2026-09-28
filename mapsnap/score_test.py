@@ -236,3 +236,41 @@ def test_sheet_portions_missing_boundaries_split_evenly(tmp_path, capsys):
     portions = sheet_portions(tmp_path / "oim", ["p1__1", "p1__2", "p1__3"])
     assert portions == {"p1__1": 1 / 3, "p1__2": 1 / 3, "p1__3": 1 / 3}
     assert "no panel boundaries" in capsys.readouterr().err
+
+
+def generated_item(page: str, split: int | None) -> dict:
+    """A corpus-style generated annotation for page ``page`` (e.g. "0013")."""
+    service = (
+        f"https://tile.loc.gov/image-services/iiif/service:gmd:x:01778_1915-{page}"
+    )
+    suffix = f"__{split}" if split is not None else ""
+    return {
+        "id": f"{service}{suffix}/georef",
+        "label": f"Champaign p{int(page)}",
+        "target": {"source": {"id": f"{service}/info.json"}},
+    }
+
+
+def test_missing_generated_panels_names_split_pages_without_a_cut(tmp_path):
+    from mapsnap.score import missing_generated_panels
+
+    iiif = tmp_path / "corpus-v1.iiif.json"
+    iiif.write_text(
+        json.dumps(
+            {
+                "items": [
+                    generated_item("0005", None),
+                    generated_item("0013", 1),
+                    generated_item("0013", 2),
+                    generated_item("0020", 1),
+                ]
+            }
+        )
+    )
+    # champaign_ill_1915 scored from a directory holding only the IIIF: 69.9%
+    # (16/33 placed) against 97.6% (27/33) beside its panels.
+    assert missing_generated_panels(iiif) == ["p13", "p20"]
+    (tmp_path / "p13.panels.json").write_text("{}")
+    assert missing_generated_panels(iiif) == ["p20"]
+    (tmp_path / "p20.panels.json").write_text("{}")
+    assert missing_generated_panels(iiif) == []
