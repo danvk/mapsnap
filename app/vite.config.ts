@@ -144,6 +144,7 @@ export default defineConfig({
         keymap: 'keymap.html',
         adjacency: 'adjacency.html',
         regions: 'regions.html',
+        atlas: 'atlas.html',
       },
     },
   },
