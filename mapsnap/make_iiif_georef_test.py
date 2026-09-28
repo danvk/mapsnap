@@ -9,6 +9,7 @@ from mapsnap.make_iiif_georef import (
     GcpPoint,
     _load_oim_index,
     _service_url_to_page_key,
+    annotation_page,
     drop_redundant_skeletons,
     expand_georef_globs,
     fill_missing_source_ids,
@@ -503,9 +504,7 @@ def test_make_annotation_labels_match_their_ids(tmp_path):
         },
     }
     georef = make_georef(width=200, height=200, intersections=[])
-    panel_one = make_annotation(
-        item, georef, "p4__1", tmp_path / "p4__1.jpg", "http://x", "now"
-    )
+    panel_one = make_annotation(item, georef, "p4__1", tmp_path / "p4__1.jpg", "now")
     assert panel_one["id"].endswith("p4__1/georef")
     assert panel_one["label"] == "Test | 1900 p4 [1]"
     whole = make_annotation(
@@ -513,7 +512,6 @@ def test_make_annotation_labels_match_their_ids(tmp_path):
         make_georef(width=200, height=400, intersections=[]),
         "p4",
         tmp_path / "p4.jpg",
-        "http://x",
         "now",
     )
     assert whole["id"].endswith("p4/georef")
@@ -543,7 +541,6 @@ def test_make_annotation_split_uses_panels_json(tmp_path):
         georef,
         "p4__1",
         tmp_path / "p4__1.jpg",
-        creator_url="http://example/me",
         now="2026-01-01T00:00:00Z",
     )
 
@@ -577,9 +574,7 @@ def test_make_annotation_null_source_id_uses_item_id(tmp_path):
         },
     }
     georef = make_georef(width=50, height=100, intersections=[])
-    annotation = make_annotation(
-        item, georef, "p703", tmp_path / "p703.jpg", "http://x", "now"
-    )
+    annotation = make_annotation(item, georef, "p703", tmp_path / "p703.jpg", "now")
     assert annotation["id"] == "https://oldinsurancemaps.net/iiif/resource/54270/georef"
     assert annotation["target"]["source"]["id"] is None
 
@@ -597,9 +592,7 @@ def test_make_annotation_split_missing_panels_raises(tmp_path):
     }
     georef = make_georef(width=50, height=100, intersections=[])
     try:
-        make_annotation(
-            item, georef, "p4__1", tmp_path / "p4__1.jpg", "http://x", "now"
-        )
+        make_annotation(item, georef, "p4__1", tmp_path / "p4__1.jpg", "now")
     except ValueError as exc:
         assert "panels.json" in str(exc)
     else:
@@ -925,3 +918,39 @@ def test_publishing_drops_the_mirrors_zero_padded_skeletons():
     # p0005rs has no p5r and p0319as no p319a: with no full-color sheet to
     # stand in for them, they are published as they are.
     assert kept == ["p5l", "p0005rs", "p7", "p0319as"]
+
+
+def test_annotation_page_credits_mapsnap_and_carries_the_odbl() -> None:
+    page = annotation_page("http://example/generated", "Test | 1900", [], [])
+    assert page["type"] == "AnnotationPage"
+    assert page["creator"] == {
+        "type": "Software",
+        "name": "mapsnap",
+        "homepage": "https://mapsnap.org",
+    }
+    assert page["rights"] == "https://opendatacommons.org/licenses/odbl/1-0/"
+
+
+def test_make_annotation_leaves_creator_and_rights_to_the_page(tmp_path):
+    item = {
+        "label": "Test | 1900 p4",
+        "target": {
+            "source": {
+                "id": "http://example/p4/info.json",
+                "type": "ImageService3",
+                "width": 800,
+                "height": 1600,
+            }
+        },
+    }
+    annotation = make_annotation(
+        item,
+        make_georef(width=200, height=400, intersections=[]),
+        "p4",
+        tmp_path / "p4.jpg",
+        "now",
+    )
+    assert "creator" not in annotation
+    assert "rights" not in annotation
+    for feature in annotation["body"]["features"]:
+        assert "creator" not in feature["properties"]
