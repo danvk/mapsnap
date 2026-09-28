@@ -355,11 +355,44 @@ def add_names(items: dict[str, dict], atlas_dir: Path) -> None:
                     entry["city"] = place["name"]
                     entry["state"] = place["state"]
                     entry["date"] = volume.get("date") or ""
+                    entry["title"] = volume.get("title") or ""
     for entry in items.values():
         entry.setdefault("city", entry["city_slug"].replace("-", " ").title())
         entry.setdefault("state", entry["state_slug"].replace("-", " ").title())
         entry.setdefault("date", "")
+        entry.setdefault("title", "")
         entry["postal"] = STATE_CODES_BY_LOWERCASE.get(entry["state"].lower(), "")
+
+
+def volume_number(notes: list[str]) -> str:
+    """The volume number a catalogue record's notes give ("Vol. 2, 1915; Republished 1939."), or ""."""
+    for note in notes:
+        match = re.search(r"\bvol(?:ume)?\.?\s*(\d+[a-z]?)\b", note, re.IGNORECASE)
+        if match:
+            return match.group(1)
+    return ""
+
+
+def read_volume_numbers(path: Path) -> dict[str, str]:
+    """Item -> its volume number, from the LoC catalogue (metadata.jsonl).
+
+    Catalogue titles never say which volume a record is, so a town-year of
+    several volumes would otherwise list them identically.
+    """
+    numbers: dict[str, str] = {}
+    with path.open() as handle:
+        for line in handle:
+            record = json.loads(line)
+            match = re.search(r"/item/([^/]+)/?$", str(record.get("Id", "")))
+            number = volume_number(record.get("Notes") or [])
+            if match and number:
+                numbers[match.group(1)] = number
+    return numbers
+
+
+def sheets_placed(annotations: list[dict]) -> int:
+    """How many sheets have at least one of these pages; a split sheet's panels count once."""
+    return len({page_key(annotation).split("__")[0] for annotation in annotations})
 
 
 def read_locations(path: Path) -> dict[str, tuple[float, float]]:
@@ -407,12 +440,19 @@ def main() -> None:
         default=Path(__file__).resolve().parents[2] / "app/public/atlas",
         help="build_places.py's output, for towns' names",
     )
+    parser.add_argument(
+        "--metadata",
+        type=Path,
+        default=DOCUMENTS / "metadata.jsonl",
+        help="The LoC catalogue, for volume numbers",
+    )
     parser.add_argument("--limit", type=int, help="Only the first N items")
     parser.add_argument("--only", nargs="*", help="Only these items")
     args = parser.parse_args()
 
     items = read_mapping(args.mapping)
     add_names(items, args.atlas_dir)
+    volume_numbers = read_volume_numbers(args.metadata)
     locations = read_locations(args.locations)
     small_keymaps = {line.strip() for line in args.small_keymaps.open() if line.strip()}
     destination = Destination(args.out, args.base_url)
@@ -466,10 +506,15 @@ def main() -> None:
                 "state": meta.get("postal", ""),
                 "year": meta.get("year", ""),
                 "date": meta.get("date", ""),
+                "volume": volume_numbers.get(item, ""),
+                "title": meta.get("title", ""),
                 "sheets": meta.get("sheets", ""),
                 "images": report.get("pages", ""),
                 "placed": len(annotations),
                 "published": len(pages.kept) if status == "published" else 0,
+                "sheets_placed": (
+                    sheets_placed(pages.kept) if status == "published" else 0
+                ),
                 "dropped_over_6km": pages.too_large,
                 "dropped_over_5km_from_location": pages.too_far,
                 "status": status,
