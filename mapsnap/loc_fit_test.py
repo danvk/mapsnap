@@ -914,3 +914,69 @@ def test_keymap_sheets_returns_nothing_when_raw_is_empty(tmp_path) -> None:
     (tmp_path / "raw").mkdir()
     (tmp_path / "keymaps.json").write_text(json_module.dumps({"keys": ["p1"]}))
     assert keymap_sheets(tmp_path) == []
+
+
+def line(*points: tuple[float, float]) -> dict:
+    """A LineString centerline feature through (lon, lat) points."""
+    return {
+        "type": "Feature",
+        "properties": {"street_name": "Main Street"},
+        "geometry": {"type": "LineString", "coordinates": [list(p) for p in points]},
+    }
+
+
+def test_clip_centerlines_keeps_streets_with_a_vertex_in_range():
+    from mapsnap.loc_fit import clip_centerlines
+
+    gardiner = (41.6851, -74.1543)
+    near = line((-74.155, 41.685), (-74.150, 41.686))
+    crossing = line((-74.40, 41.685), (-74.154, 41.686), (-73.90, 41.687))
+    pine_bush = line((-74.299, 41.608), (-74.297, 41.609))  # 14.5 km away
+    kept = clip_centerlines([near, crossing, pine_bush], gardiner, 5_000.0)
+    assert kept == [near, crossing]
+
+
+def test_read_locations_skips_rows_without_a_coordinate(tmp_path):
+    from mapsnap.loc_fit import read_locations
+
+    tsv = tmp_path / "item-locations.tsv"
+    tsv.write_text(
+        "item\tlat\tlon\nsanborn05939_001\t41.6851\t-74.1543\nsanborn1_1\t\t\n"
+    )
+    assert read_locations([tsv]) == {"sanborn05939_001": (41.6851, -74.1543)}
+
+
+def test_local_centerlines_clips_only_small_located_volumes(tmp_path, monkeypatch):
+    import json
+
+    from mapsnap import loc_fit
+    from mapsnap.loc_fit import CLIPPED_CENTERLINES_NAME, FitWork, local_centerlines
+
+    # A GeoJSON county extract loads through the same entry point as a .pbf.
+    monkeypatch.setattr(loc_fit, "CENTERLINES_NAME", "county.geojson")
+    CENTERLINES_NAME = loc_fit.CENTERLINES_NAME
+
+    county = {
+        "type": "FeatureCollection",
+        "features": [
+            line((-74.155, 41.685), (-74.150, 41.686)),
+            line((-74.299, 41.608), (-74.297, 41.609)),
+        ],
+    }
+    (tmp_path / CENTERLINES_NAME).write_text(json.dumps(county))
+    work = FitWork(None, ["p1.jpg", "p2.jpg"], None, True, False)  # type: ignore[arg-type]
+    assert local_centerlines(tmp_path, work) == tmp_path / CENTERLINES_NAME
+
+    work.location = (41.6851, -74.1543)
+    clipped = local_centerlines(tmp_path, work)
+    assert clipped == tmp_path / CLIPPED_CENTERLINES_NAME
+    assert len(json.loads(clipped.read_text())["features"]) == 1
+
+    work.pages = [f"p{i}.jpg" for i in range(11)]
+    assert local_centerlines(tmp_path, work) == tmp_path / CENTERLINES_NAME
+
+    work.pages, work.location = (
+        ["p1.jpg"],
+        (0.0, 0.0),
+    )  # a coordinate far from any street
+    assert local_centerlines(tmp_path, work) == tmp_path / CENTERLINES_NAME
