@@ -17,6 +17,8 @@ import io
 import json
 import math
 import multiprocessing
+import os
+import re
 import statistics
 import sys
 import time
@@ -77,6 +79,236 @@ RESCUE_STATES = {"nofit", "misscale", "1gcp", "outlier", "none"}
 # enough that the ladder still explores, tight enough that the demoted fit's
 # orientation -- its most trustworthy component -- ranks first.
 DEMOTED_SEED_SIGMA_DEG = 10.0
+
+
+HALF_SHEET_SEEDS = os.environ.get("MAPSNAP_HALF_SHEET_SEEDS") == "1"
+"""Run snap's half-sheet pass: re-rescue one half of a two-scan sheet from its other.
+
+Some volumes scan each sheet as two halves, pNL and pNR, cut at the gutter. The
+labels split with them -- "WEST 32nd" on the left, "STREET" on the right -- so
+one half often fits and the other has nothing to fit with. The two are one rigid
+sheet: across the 1,481 corpus-v1 sheets where both halves were placed, their
+scales agree to 2% and their rotations to about 1 degree (10th-90th percentile).
+"""
+
+HALF_SHEET_OVERLAP = 0.057
+"""How much of a half's width the two scans share at the gutter.
+
+The median over those 1,207 both-placed pairs whose halves sit side by side
+(interquartile range 0.040-0.088); the tops of the two scans line up
+(median offset 0.1% of the height).
+"""
+
+HALF_SHEET_RADIUS_M = 40.0
+"""Search radius around a half-sheet seed: half a Manhattan street block.
+
+The seed lands a median 13 m from where its half was independently placed. A
+wider search only admits the grid's aliases: at 150 m, Manhattan 1899 vol 5's
+right halves found candidates one and two streets away (80 m, 160 m) that
+verified within 0.003 of the seed's, and several won. Refinement may slide a
+candidate at most REFINE_SHIFT_MAX_M further, so the next street is out of reach.
+"""
+
+HALF_SHEET_SIGMA_DEG = 3.0
+"""Rotation-prior sigma for a half-sheet seed: the halves agree to ~1 degree."""
+
+
+HALF_SHEET_MAX_TURN_DEG = 5.0
+"""A seeded candidate turned further than this from its sibling is not the same sheet."""
+
+
+def pose_cv2_theta_deg(affine: np.ndarray) -> float:
+    """The cv2 (raster-frame) rotation of a page->lon/lat affine, as priors use.
+
+    Not atan2 on the lon/lat affine: the raster frame is y-down and metric, so
+    that angle has the opposite sign (and a cos-latitude skew).
+    """
+    frame = frame_around((float(affine[0, 2]), float(affine[1, 2])), half_m=100.0)
+    return affine_theta_deg(affine, frame)
+
+
+HALF_SHEET_MIN_PANEL_SHARE = 0.2
+"""A panel smaller than this share of its half is an inset or a fragment, not the map.
+
+An inset draws somewhere else entirely (Denver p66R__2, a 12% box of a sheet
+outside the volume, was placed on the main grid from its seed), and a sliver
+the splitter cut off along a diagonal street (Buffalo p104R__3, 12%) slid 40 m
+along it. Measured on four volumes' split halves: insets and slivers are
+0.04-0.12 of the half, map panels 0.27 and up.
+"""
+
+
+def half_sheet_key(stem: str) -> tuple[str, str] | None:
+    """(sheet number, "L" or "R") for a half-sheet stem like p90L, else None."""
+    match = re.fullmatch(r"p0*(\d+)([LRlr])", stem)
+    return (match[1], match[2].upper()) if match else None
+
+
+def half_sheet_seed(
+    placed_affine: np.ndarray, widths: tuple[int, int], side: str
+) -> np.ndarray:
+    """The target half's pose if it abuts the placed half across the gutter.
+
+    ``placed_affine`` is the placed half's whole-sheet pose, ``widths`` is
+    (placed width, target width) in working pixels, and ``side`` is the
+    target's side ("L" or "R"). Both halves share the placed half's scale and
+    rotation; only the x origin moves, by the placed half's width less the
+    overlap for a right half, or back by the target's own width less the
+    overlap for a left half.
+    """
+    placed_width, target_width = widths
+    if side == "R":
+        shift = placed_width * (1.0 - HALF_SHEET_OVERLAP)
+    else:
+        shift = -target_width * (1.0 - HALF_SHEET_OVERLAP)
+    return shifted_origin(placed_affine, (shift, 0.0))
+
+
+def shifted_origin(affine: np.ndarray, origin: tuple[float, float]) -> np.ndarray:
+    """The same pose re-expressed for a frame whose (0, 0) sits at ``origin``."""
+    moved = affine.copy()
+    moved[:, 2] = affine @ np.array([origin[0], origin[1], 1.0])
+    return moved
+
+
+def panel_origin(volume: Path, stem: str) -> tuple[int, int] | None:
+    """Where a split panel's crop starts in its parent's pixels, or None."""
+    base = panel_base(stem)
+    index = stem.rpartition("__")[2]
+    path = volume / f"{base}.panels.json"
+    if base is None or not index.isdigit() or not path.exists():
+        return None
+    rings = json.loads(path.read_text()).get("panels", [])
+    if not 1 <= int(index) <= len(rings):
+        return None
+    return panel_ring_origin(rings[int(index) - 1])
+
+
+def half_sheet_pose(
+    volume: Path,
+    unit: PageUnit,
+    panels: list[PageUnit],
+    incumbents: dict[str, float],
+) -> np.ndarray | None:
+    """A half's whole-sheet pose: its own fit, or its best-fitted panel's, shifted back.
+
+    A split half's main panel shares the half's frame up to its crop origin.
+    The panel with the most inlier intersections stands for the half; an inset
+    panel rarely has more than the main map.
+    """
+    if unit.fit_state == "fitted" and unit.gen_affine is not None:
+        return anchor_pose(volume, unit.stem, unit.gen_affine, incumbents)
+    fitted = [
+        panel
+        for panel in panels
+        if panel.fit_state == "fitted" and panel.gen_affine is not None
+    ]
+    if not fitted:
+        return None
+    best = max(fitted, key=lambda panel: panel.inlier_intersections)
+    origin = panel_origin(volume, best.stem)
+    assert best.gen_affine is not None
+    pose = anchor_pose(volume, best.stem, best.gen_affine, incumbents)
+    if origin is None or pose is None:
+        return None
+    return shifted_origin(pose, (-origin[0], -origin[1]))
+
+
+def anchor_pose(
+    volume: Path, stem: str, georef_affine: np.ndarray, incumbents: dict[str, float]
+) -> np.ndarray | None:
+    """A fitted page's pose as snap left it, or None when snap found it indefensible.
+
+    Snap's first pass may replace the georef fit (San Jose p9L's was 107 m
+    off); seeding from the replaced fit put p9R 231 m off. A fit whose
+    verification is below snap's own defensibility bar is not an anchor at
+    all: reconcile went on to overturn exactly those (Denver p64L, p66L and
+    p72L, at -0.88 to 0.03), and their right halves followed them 350-570 m off.
+    ``incumbents`` is stem -> incumbent verification from the first pass.
+    """
+    from mapsnap.road_model import page_world_affine
+
+    path = volume / f"{stem}.georef-snap.json"
+    if path.exists():
+        doc = json.loads(path.read_text())
+        if doc.get("corners"):
+            return page_world_affine(doc)
+    verification = incumbents.get(stem)
+    if verification is not None and verification < INCUMBENT_DEFENSIBLE_VERIFICATION:
+        return None
+    return georef_affine
+
+
+def first_pass_incumbents(volume: Path) -> dict[str, float]:
+    """Stem -> the verification snap's first pass gave each fitted page's own pose."""
+    path = artifacts_dir(volume) / "candidates.jsonl"
+    if not path.exists():
+        return {}
+    incumbents: dict[str, float] = {}
+    for line in path.read_text().splitlines():
+        if not line.strip():
+            continue
+        record = json.loads(line)
+        verification = (record.get("incumbent") or {}).get("verification")
+        if verification is not None:
+            incumbents[record["target"]] = float(verification)
+    return incumbents
+
+
+def half_sheet_seed_targets(volume: Path) -> list[str]:
+    """Stems of the unplaced halves (and panels of them) a sibling can seed."""
+    units = load_page_units(volume)
+    panel_units = load_panel_units(volume)
+    attach_half_sheet_seeds(volume, units, panel_units)
+    return [
+        unit.stem for unit in [*units, *panel_units] if unit.sibling_affine is not None
+    ]
+
+
+def attach_half_sheet_seeds(
+    volume: Path, units: list[PageUnit], panel_units: list[PageUnit]
+) -> None:
+    """Seed each unplaced half (or panel of one) from its placed other half."""
+    incumbents = first_pass_incumbents(volume)
+    panels_by_base: dict[str, list[PageUnit]] = {}
+    for panel in panel_units:
+        base = panel_base(panel.stem)
+        if base is not None:
+            panels_by_base.setdefault(base, []).append(panel)
+    halves = {key: unit for unit in units if (key := half_sheet_key(unit.stem))}
+    for (number, side), unit in halves.items():
+        other = halves.get((number, "L" if side == "R" else "R"))
+        if other is None:
+            continue
+        # Only a half georef could not fit is seeded; its panels likewise.
+        own_panels = panels_by_base.get(unit.stem, [])
+        if unit.fit_state == "fitted" or any(
+            panel.fit_state == "fitted" for panel in own_panels
+        ):
+            continue
+        placed = half_sheet_pose(
+            volume, other, panels_by_base.get(other.stem, []), incumbents
+        )
+        if placed is None:
+            continue
+        seed = half_sheet_seed(placed, (other.width, unit.width), side)
+        if unit.fit_state in RESCUE_STATES:
+            unit.sibling_affine = seed
+        for panel in own_panels:
+            origin = panel_origin(volume, panel.stem)
+            if (
+                panel.fit_state in RESCUE_STATES
+                and origin is not None
+                and panel.width * panel.height
+                >= HALF_SHEET_MIN_PANEL_SHARE * unit.width * unit.height
+            ):
+                panel.sibling_affine = shifted_origin(seed, origin)
+
+
+def affine_center(affine: np.ndarray, width: int, height: int) -> tuple[float, float]:
+    """(lon, lat) of a page's centre under a page->lon/lat affine."""
+    lon, lat = affine @ np.array([width / 2, height / 2, 1.0])
+    return float(lon), float(lat)
 
 
 def artifacts_dir(volume: Path) -> Path:
@@ -491,10 +723,15 @@ def contradiction_hint_mtime(volume: Path, stem: str) -> int | None:
 
 
 def load_volume_context(
-    volume: Path, units: list[PageUnit] | None = None
+    volume: Path,
+    units: list[PageUnit] | None = None,
+    *,
+    half_sheet_seeds: bool = False,
 ) -> VolumeContext:
     units = units if units is not None else load_page_units(volume)
     panel_units = load_panel_units(volume)
+    if half_sheet_seeds:
+        attach_half_sheet_seeds(volume, units, panel_units)
     attach_missing_truth(volume, units)
     centerlines_path = default_centerlines(volume)
     if centerlines_path is None:
@@ -810,6 +1047,10 @@ def build_page_context(
         )
         if all(haversine_m(lat_c, lon_c, b, a) > 50.0 for a, b in centers):
             centers = centers + [(lon_c, lat_c)]
+    if unit.sibling_affine is not None:
+        # The other half of the same sheet pins this one far more tightly
+        # than the key map (which places the whole sheet) or any hint.
+        centers = [affine_center(unit.sibling_affine, unit.width, unit.height)]
     if not centers:
         return None, "no_keymap"
     labels = page_label_features(vctx, unit)
@@ -864,6 +1105,18 @@ def build_page_context(
         # the wrong size and refinement could never reach them (#325 truth
         # row on richmond p365: truth select 2.35 vs best candidate 0.78).
         scales = with_incumbent_scale(scales, unit.gen_affine)
+    if unit.sibling_affine is not None:
+        # The sibling's scale leads the ladder: the halves are one sheet.
+        scale = affine_m_per_px(unit.sibling_affine)
+        scales = [
+            _ScalePrior(scale, 0.05, "half-sheet"),
+            *(
+                prior
+                for prior in scales
+                if abs(math.log(scale / prior.m_per_px)) > SCALE_PRIOR_DEDUPE_LOG
+            ),
+        ]
+        radius = min(radius, HALF_SHEET_RADIUS_M)
     # Overlapping discs are one search; see cluster_search_centers.
     centers = cluster_search_centers(centers, 0.75 * radius)
     ctx = PageContext(
@@ -1021,6 +1274,23 @@ def page_record(vctx: VolumeContext, unit: PageUnit) -> dict:
                     "radius_m": round(ctx.radius_m, 1),
                     "radius_source": "local-challenge",
                 }
+    if unit.fit_state in RESCUE_STATES and unit.sibling_affine is not None:
+        theta = pose_cv2_theta_deg(unit.sibling_affine)
+        ctx.rotation_priors = [
+            RotationPrior(
+                theta_deg=theta, sigma_deg=HALF_SHEET_SIGMA_DEG, source="half-sheet"
+            ),
+            *ctx.rotation_priors,
+        ]
+        record["search"]["half_sheet_seed"] = True
+        record["priors"]["rotation"].insert(
+            0,
+            {
+                "theta_deg": round(theta, 2),
+                "sigma_deg": HALF_SHEET_SIGMA_DEG,
+                "source": "half-sheet",
+            },
+        )
     if unit.fit_state in RESCUE_STATES and unit.demoted_affine is not None:
         # #315: the demoted pose's center joined the search in
         # build_page_context; here its rotation — the pose's most trustworthy
@@ -1087,6 +1357,22 @@ def page_record(vctx: VolumeContext, unit: PageUnit) -> dict:
                     )
                     candidate.verification = -math.inf
             candidates.sort(key=lambda c: -c.select_score())
+    if unit.fit_state in RESCUE_STATES and unit.sibling_affine is not None:
+        # The other half fixes this one's rotation to about a degree, so a
+        # turned candidate -- the ladder's 90/180-degree twins above all -- is
+        # not a rival hypothesis. Without the re-sort an upside-down twin
+        # ranked first and the page abstained with a 1.78 pose at rank 2.
+        seed_theta = pose_cv2_theta_deg(unit.sibling_affine)
+        for candidate in candidates:
+            turn = abs(
+                (pose_cv2_theta_deg(candidate.world_affine) - seed_theta + 180) % 360
+                - 180
+            )
+            if turn > HALF_SHEET_MAX_TURN_DEG and candidate.plausible:
+                candidate.plausible = False
+                candidate.gate_reasons.append(f"half-sheet-turn({turn:.0f}deg)")
+                candidate.verification = -math.inf
+        candidates.sort(key=lambda c: -c.select_score())
     if not candidates:
         record["status"] = "no_candidates"
         return record
@@ -1161,7 +1447,9 @@ def ensure_probs(volume: Path, stems: list[str]) -> None:
 worker_state: dict[str, Any] = {}
 
 
-def init_worker(volume: Path, vctx: VolumeContext | None = None) -> None:
+def init_worker(
+    volume: Path, vctx: VolumeContext | None = None, half_sheet_seeds: bool = False
+) -> None:
     """Give this process the volume context snap_one_page reads.
 
     A pool worker receives only the volume path and rebuilds the context
@@ -1170,7 +1458,11 @@ def init_worker(volume: Path, vctx: VolumeContext | None = None) -> None:
     (~1 s), and the rebuild is deterministic — it reads the same sidecars. The
     sequential path passes the context the caller already built.
     """
-    context = load_volume_context(volume) if vctx is None else vctx
+    context = (
+        load_volume_context(volume, half_sheet_seeds=half_sheet_seeds)
+        if vctx is None
+        else vctx
+    )
     worker_state["vctx"] = context
     worker_state["units"] = {
         unit.stem: unit for unit in list(context.units) + list(context.panel_units)
@@ -1202,8 +1494,13 @@ def cmd_candidates(
     vis: bool,
     *,
     num_workers: int = 1,
+    reseed: list[str] | None = None,
 ) -> None:
-    """Generate candidates.jsonl for the volume's rescue targets."""
+    """Generate candidates.jsonl for the volume's rescue targets.
+
+    ``reseed`` re-matches just those pages with their half-sheet seeds attached
+    (see half_sheet_seed_targets), keeping every other page's record.
+    """
     out_dir = artifacts_dir(volume)
     out_dir.mkdir(parents=True, exist_ok=True)
     out_path = out_dir / "candidates.jsonl"
@@ -1219,7 +1516,8 @@ def cmd_candidates(
         if not out_path.exists():
             out_path.write_text("")
         return
-    vctx = load_volume_context(volume, units)
+    seeding = reseed is not None
+    vctx = load_volume_context(volume, units, half_sheet_seeds=seeding)
     existing: dict[str, dict] = {}
     if out_path.exists():
         for line in out_path.read_text().splitlines():
@@ -1239,6 +1537,8 @@ def cmd_candidates(
     if pages:
         wanted = set(pages)
         targets = [u for u in targets if u.stem in wanted]
+    if reseed is not None:
+        targets = [u for u in targets if u.stem in set(reseed)]
     if limit is not None:
         targets = targets[:limit]
     # Every target needs a P(road) map, whole pages included. (This once
@@ -1268,6 +1568,7 @@ def cmd_candidates(
         for unit in targets
         if recompute
         or pages
+        or reseed is not None
         or (cached := existing.get(unit.stem)) is None
         or not candidates_record_fresh(
             cached,
@@ -1312,7 +1613,9 @@ def cmd_candidates(
         # costs about a second each; results are consumed as they land so the
         # checkpoint file keeps pace with an interrupted run.
         with multiprocessing.Pool(
-            num_workers, initializer=init_worker, initargs=(volume,)
+            num_workers,
+            initializer=init_worker,
+            initargs=(volume, None, seeding),
         ) as pool:
             for stem, record in pool.imap_unordered(
                 snap_one_page, [unit.stem for unit in stale]
@@ -2943,13 +3246,14 @@ def select_argmax(
         stem = record["target"]
         choice: dict = {"target": stem, "chosen": None, "reason": record["status"]}
         if record.get("status") == "ok" and record.get("candidates"):
+            seeded = bool(record.get("search", {}).get("half_sheet_seed"))
             if panel_base(stem) is not None:
                 allowed = panel_allowed.get(stem)
                 if allowed is not None and 0 not in allowed:
                     choice["reason"] = "sheet-agreement"
                     selections.append(choice)
                     continue
-                if allowed is None:
+                if allowed is None and not seeded:
                     top_score = record["candidates"][0].get("select_score")
                     if top_score is None or top_score < PANEL_SOLO_GATE:
                         choice["reason"] = (
@@ -2977,7 +3281,16 @@ def select_argmax(
                 # against rivals the neighbors do NOT vouch for (a corroborated
                 # twin is the same corridor, not a competing hypothesis).
                 margin = uncorroborated_margin(record)
-            effective_gate = STAMP_RESCUE_SCORE if corroborated else gate_score
+            if seeded and record.get("fit_state") in RESCUE_STATES:
+                # The other half of the sheet pins this pose to within the
+                # 40 m search disc and ~1 degree: every candidate is the same
+                # hypothesis, so there is no rival to be ambiguous with.
+                margin = math.inf
+            effective_gate = (
+                STAMP_RESCUE_SCORE
+                if corroborated or (seeded and record.get("fit_state") in RESCUE_STATES)
+                else gate_score
+            )
             if score is None:
                 choice["reason"] = "implausible"
             elif score < effective_gate:
@@ -2988,7 +3301,9 @@ def select_argmax(
                 choice = {
                     "target": stem,
                     "chosen": 0,
-                    "reason": "stamp-corroborated" if corroborated else "accepted",
+                    "reason": "stamp-corroborated"
+                    if corroborated
+                    else ("half-sheet" if seeded else "accepted"),
                     "select_score": score,
                     "margin": None if math.isinf(margin) else round(margin, 4),
                 }
