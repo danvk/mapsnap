@@ -109,3 +109,29 @@ def test_read_record_drops_an_ungeocoded_town_without_a_gazetteer():
         catalogue_record("sanborn06185_002", "Queens", None), places, skipped, lookups
     )
     assert places == {} and skipped["no_coordinates"] == 1
+
+
+def test_volume_key_is_the_catalogue_place_number():
+    from build_places import volume_key
+
+    assert volume_key("sanborn03286_001") == "03286"
+    assert volume_key("not-a-sanborn-id") == "not-a-sanborn-id"
+
+
+def test_volume_states_lists_each_states_place_numbers():
+    from build_places import volume_states
+
+    by_state = {
+        "louisiana": {
+            "louisiana/campti": [
+                {"item": "sanborn03286_001"},
+                {"item": "sanborn03286_002"},
+            ],
+            "louisiana/vinton": [{"item": "sanborn03412_001"}],
+        },
+        "alabama": {"alabama/abbeville": [{"item": "sanborn00001_004"}]},
+    }
+    assert volume_states(by_state) == {
+        "alabama": ["00001"],
+        "louisiana": ["03286", "03412"],
+    }

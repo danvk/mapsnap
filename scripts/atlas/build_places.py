@@ -286,10 +286,40 @@ def read_record(
     )
 
 
+def volume_key(item: str) -> str:
+    """The key a volume is filed under in volume-states.json: its catalogue place number.
+
+    A Sanborn item id is ``sanborn<place>_<volume>``, and every place number
+    in the catalogue belongs to one state (all 9,807 in corpus-v1), so the
+    number alone says which volumes file to fetch. Any other id is its own key.
+    """
+    match = re.fullmatch(r"sanborn(\d+)_\d+", item)
+    return match.group(1) if match else item
+
+
+def volume_states(by_state: dict[str, dict[str, list[dict]]]) -> dict[str, list[str]]:
+    """State slug -> the volume keys its volumes file holds, for direct links.
+
+    A link names only a volume (``?volume=sanborn03286_001``). This small file
+    says which state's volumes file to fetch to find its town, which is all
+    the app needs: the state file lists every volume's town.
+    """
+    return {
+        state_slug: sorted(
+            {
+                volume_key(volume["item"])
+                for volumes in place_volumes.values()
+                for volume in volumes
+            }
+        )
+        for state_slug, place_volumes in sorted(by_state.items())
+    }
+
+
 def write_outputs(
     places: dict[tuple[str, str], Place], out_dir: Path, run_tag: str, bucket: str
 ) -> tuple[int, int]:
-    """Write places.json and one volumes file per state; return their counts."""
+    """Write places.json, one volumes file per state and volume-states.json; return counts."""
     out_dir.mkdir(parents=True, exist_ok=True)
     (out_dir / "volumes").mkdir(exist_ok=True)
 
@@ -355,6 +385,9 @@ def write_outputs(
         (out_dir / "volumes" / f"{state_slug}.json").write_text(
             json.dumps(place_volumes, separators=(",", ":"))
         )
+    (out_dir / "volume-states.json").write_text(
+        json.dumps(volume_states(by_state), separators=(",", ":"))
+    )
     return len(rows), len(by_state)
 
 

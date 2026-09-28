@@ -6,8 +6,11 @@ import {
   locItemUrl,
   locSheetUrl,
   locStemOf,
+  placeOfVolume,
   searchPlaces,
   stateSlug,
+  statesByVolumeKey,
+  volumeKey,
   volumesOfYear,
   yearsOf,
   type Place,
@@ -215,5 +218,39 @@ describe('locSheetUrl', () => {
     expect(locSheetUrl({ ...southBend, loc: undefined }, P28)).toBe(itemPage);
     expect(locSheetUrl(southBend, P28.replace('0028', '0099'))).toBe(itemPage);
     expect(locSheetUrl(southBend, undefined)).toBe(itemPage);
+  });
+});
+
+describe('volumeKey', () => {
+  it('is the catalogue place number, as build_places.py files it', () => {
+    expect(volumeKey('sanborn03286_001')).toBe('03286');
+  });
+
+  it('is the whole id when the id has no place number', () => {
+    expect(volumeKey('sanborn00656_102.5')).toBe('sanborn00656_102.5');
+    expect(volumeKey('sanborn01251a_001')).toBe('sanborn01251a_001');
+  });
+});
+
+describe('statesByVolumeKey', () => {
+  it('inverts state -> keys into key -> states', () => {
+    const byKey = statesByVolumeKey({
+      louisiana: ['03286', '03412'],
+      alabama: ['00001'],
+    });
+    expect(byKey.get('03286')).toEqual(['louisiana']);
+    expect(byKey.get('00001')).toEqual(['alabama']);
+    expect(byKey.get('99999')).toBeUndefined();
+  });
+});
+
+describe('placeOfVolume', () => {
+  it('finds the town whose list holds the volume', () => {
+    const byPlace = {
+      'louisiana/campti': [volume('sanborn03286_001', 1921)],
+      'louisiana/vinton': [volume('sanborn03412_001', 1906)],
+    };
+    expect(placeOfVolume(byPlace, 'sanborn03412_001')).toBe('louisiana/vinton');
+    expect(placeOfVolume(byPlace, 'sanborn99999_001')).toBeNull();
   });
 });

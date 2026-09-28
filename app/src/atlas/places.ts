@@ -95,6 +95,42 @@ export function locSheetUrl(
 }
 
 /** The state slug of a place id, which is also its volumes file's name. */
+/**
+ * The key a volume is filed under in volume-states.json: its catalogue place
+ * number, `03286` for `sanborn03286_001`, or the whole id when it has none.
+ * Mirrors `volume_key` in scripts/atlas/build_places.py.
+ */
+export function volumeKey(item: string): string {
+  const match = /^sanborn(\d+)_\d+$/.exec(item);
+  return match ? match[1] : item;
+}
+
+/** volume-states.json (state slug -> volume keys), inverted to key -> state slugs. */
+export function statesByVolumeKey(
+  volumeStates: Record<string, string[]>,
+): Map<string, string[]> {
+  const byKey = new Map<string, string[]>();
+  for (const [state, keys] of Object.entries(volumeStates)) {
+    for (const key of keys) {
+      const states = byKey.get(key);
+      if (states) states.push(state);
+      else byKey.set(key, [state]);
+    }
+  }
+  return byKey;
+}
+
+/** The town (`state/town` id) whose volume list in a state file holds `item`, if any. */
+export function placeOfVolume(
+  byPlace: Record<string, Volume[]>,
+  item: string,
+): string | null {
+  for (const [placeId, volumes] of Object.entries(byPlace)) {
+    if (volumes.some((volume) => volume.item === item)) return placeId;
+  }
+  return null;
+}
+
 export function stateSlug(placeId: string): string {
   return placeId.split('/')[0] ?? '';
 }

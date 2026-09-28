@@ -50,7 +50,10 @@ import { PlaceSearch } from './PlaceSearch';
 import { VolumePanel } from './VolumePanel';
 import {
   annotationUri,
+  placeOfVolume,
   stateSlug,
+  statesByVolumeKey,
+  volumeKey,
   type Place,
   type PlaceIndex,
   type Volume,
@@ -68,12 +71,12 @@ interface Selection extends VolumeRef {
   point: [number, number];
 }
 
-// The volume a page URL names, if any: ?volume=<item>&place=<state>/<town>.
-function volumeFromUrl(): VolumeRef | null {
+// The volume a page URL names, if any: ?volume=<item>, with the town it is in
+// when an older link also gave &place=<state>/<town>.
+function volumeFromUrl(): { item: string; place: string | null } | null {
   const params = new URLSearchParams(window.location.search);
   const item = params.get('volume');
-  const place = params.get('place');
-  return item && place ? { item, place } : null;
+  return item ? { item, place: params.get('place') } : null;
 }
 
 export function AtlasApp() {
@@ -117,6 +120,15 @@ export function AtlasApp() {
   const townCache = useRef(new Map<string, Promise<TownFootprints | null>>());
   const stateCache = useRef(
     new Map<string, Promise<Record<string, Volume[]> | null>>(),
+  );
+  // Volume key -> the states whose volumes files hold it, for a link that
+  // names only a volume. Fetched once, and only when such a link is opened.
+  const volumeStates = useRef<Promise<Map<string, string[]> | null> | null>(
+    null,
+  );
+  const placeById = useMemo(
+    () => new Map((index?.places ?? []).map((place) => [place.id, place])),
+    [index],
   );
 
   useEffect(() => {
@@ -172,6 +184,28 @@ export function AtlasApp() {
     return pending;
   }, []);
 
+  // The town a volume is in, from its state's volumes file.
+  const resolveVolumePlace = useCallback(
+    async (item: string): Promise<string | null> => {
+      volumeStates.current ??= (async () => {
+        const response = await fetch(`${base}atlas/volume-states.json`);
+        return response.ok
+          ? statesByVolumeKey(
+              (await response.json()) as Record<string, string[]>,
+            )
+          : null;
+      })();
+      const states = (await volumeStates.current)?.get(volumeKey(item)) ?? [];
+      for (const state of states) {
+        const byPlace = await loadStateVolumes(state);
+        const place = byPlace ? placeOfVolume(byPlace, item) : null;
+        if (place) return place;
+      }
+      return null;
+    },
+    [loadStateVolumes],
+  );
+
   const onViewChange = useCallback(
     (bounds: [number, number, number, number], nextZoom: number) => {
       setZoom(nextZoom);
@@ -195,7 +229,13 @@ export function AtlasApp() {
     async (ref: VolumeRef, point: [number, number] | null, fit: boolean) => {
       const town = await loadTown(ref.place);
       const footprint = town?.[ref.item];
-      const spot = point ?? footprint?.anchor ?? null;
+      // A volume with no footprint (never digitized, or no sheet placed) is
+      // still shown, at its town's dot, so a link to it lands somewhere.
+      const dot = placeById.get(ref.place);
+      const spot =
+        point ??
+        footprint?.anchor ??
+        (dot ? ([dot.lon, dot.lat] as [number, number]) : null);
       if (!spot) return;
       setBareTown(null);
       setSelection({ ...ref, point: spot });
@@ -205,14 +245,16 @@ export function AtlasApp() {
           bounds: multiPolygonBounds(footprint.footprint),
           key: Date.now(),
         });
+      } else if (fit) {
+        setTarget({ center: spot, zoom: 13, key: Date.now() });
       }
       window.history.replaceState(
         null,
         '',
-        `?volume=${encodeURIComponent(ref.item)}&place=${encodeURIComponent(ref.place)}`,
+        `?volume=${encodeURIComponent(ref.item)}`,
       );
     },
-    [loadTown],
+    [loadTown, placeById],
   );
 
   // A town picked by name or dot: its newest volume at the town's own point,
@@ -260,8 +302,12 @@ export function AtlasApp() {
     if (openedFromUrl.current || !index || !footprintIndex) return;
     openedFromUrl.current = true;
     const fromUrl = volumeFromUrl();
-    if (fromUrl) void selectVolume(fromUrl, null, true);
-  }, [index, footprintIndex, selectVolume]);
+    if (!fromUrl) return;
+    void (async () => {
+      const place = fromUrl.place ?? (await resolveVolumePlace(fromUrl.item));
+      if (place) await selectVolume({ item: fromUrl.item, place }, null, true);
+    })();
+  }, [index, footprintIndex, selectVolume, resolveVolumePlace]);
 
   const placeId = selection?.place ?? bareTown?.id ?? null;
 
