@@ -57,7 +57,9 @@ from shapely.geometry import Polygon
 from shapely.strtree import STRtree
 
 from mapsnap.compare_iiif_georef import (
+    annotation_split_index,
     annotation_transform_type,
+    annotations_by_source,
     compare_pages,
     extract_gcps,
     fit_transform,
@@ -265,6 +267,24 @@ def sheet_portions(oim_dir: Path, page_keys: list[str]) -> dict[str, float]:
     return portions
 
 
+def missing_generated_panels(generated_iiif: Path) -> list[str]:
+    """Parent pages whose generated split panels lack a ``pN.panels.json`` beside the IIIF.
+
+    ``compare`` places each generated split item (``…-0013__2/georef``) on its
+    sheet through our own cut of that sheet, read from the generated file's
+    directory. Without it the panels cannot be matched, and every one of them
+    scores as unplaced: champaign_ill_1915's corpus-v1 annotation scored 69.9%
+    (16/33 placed) from a directory holding only the IIIF, against 97.6% (27/33)
+    beside its panels.
+    """
+    missing = set()
+    for page_key, items in annotations_by_source(generated_iiif).items():
+        split = any(annotation_split_index(item) is not None for item in items)
+        if split and not (generated_iiif.parent / f"{page_key}.panels.json").exists():
+            missing.add(page_key)
+    return sorted(missing)
+
+
 def volume_page_scores(
     generated_iiif: Path,
     *,
@@ -289,6 +309,15 @@ def volume_page_scores(
     centerlines = default_centerlines(volume)
     if centerlines is None:
         sys.exit(f"{volume} has no centerlines.geojson (needed for land weights).")
+    missing_panels = missing_generated_panels(generated_iiif)
+    if missing_panels:
+        sys.exit(
+            f"{generated_iiif} has split panels for {len(missing_panels)} page(s) "
+            f"({', '.join(missing_panels[:5])}{', ...' if len(missing_panels) > 5 else ''}) "
+            f"but no matching pN.panels.json beside it -- scoring here would count "
+            f"every one of those panels as unplaced. Copy the run's panels.json "
+            f"files next to the IIIF."
+        )
 
     # The panels live with the volume, not with whichever truth file is in use.
     rows, missing = compare_pages(truth_path, generated_iiif, oim_dir=volume / "oim")

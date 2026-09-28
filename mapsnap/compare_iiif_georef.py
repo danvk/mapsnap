@@ -597,7 +597,7 @@ def print_sheet_equal_score(truth_path: Path, generated_path: Path) -> None:
     and centerlines.geojson supply the split weights and land fractions.
     """
     # Imported here because score.py imports compare_pages from this module.
-    from mapsnap.score import summarize, volume_page_scores
+    from mapsnap.score import missing_generated_panels, summarize, volume_page_scores
 
     volume = generated_path.parent
     if default_centerlines(volume) is None:
@@ -620,6 +620,15 @@ def print_sheet_equal_score(truth_path: Path, generated_path: Path) -> None:
                 "has no oim/ panels directory; score the volume-root IIIF"
             )
             return
+    missing_panels = missing_generated_panels(generated_path)
+    if missing_panels:
+        # The same trap from the generated side: its split panels are placed
+        # on their sheets through our own pN.panels.json cuts beside the IIIF.
+        print(
+            f"\nScore: unavailable -- {len(missing_panels)} generated split page(s) "
+            f"({', '.join(missing_panels[:5])}) have no pN.panels.json in {volume}"
+        )
+        return
     summary = summarize(volume_page_scores(generated_path, truth=truth_path))
     print(
         f"\nScore: {summary.net_score:.1%} "
