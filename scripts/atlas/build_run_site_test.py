@@ -137,7 +137,10 @@ def test_run_index_links_states_downloads_and_the_example(tmp_path):
         "viewer.allmaps.org/?url=https%3A%2F%2Fdata.mapsnap.org%2Fruns%2Fv1.3%2Fiiif%2F"
         "chronoscope%2Fsanborn05791_054.main.iiif.json"
     ) in html
-    assert "1 had a key map placed at under 2.5 km across" in html
+    assert 'href="https://chronoscope.io/"' in html
+    assert 'href="https://iiif.io/api/extension/georef/"' in html
+    assert 'href="https://github.com/danvk/mapsnap/issues/541"' in html
+    assert 'href="https://oldinsurancemaps.net/"' in html
 
 
 def test_state_page_lists_every_volume_with_its_files():
@@ -152,6 +155,8 @@ def test_state_page_lists_every_volume_with_its_files():
     assert '<tr class="withheld">' in html
     assert "no page placed" in html
     assert "1 of 2 volumes published" in html
+    assert 'href="https://github.com/danvk/mapsnap/issues/541"' in html
+    assert 'href="https://oldinsurancemaps.net/"' in html
 
 
 def test_write_zip_holds_one_sources_files_with_the_tsv_and_readme(tmp_path):

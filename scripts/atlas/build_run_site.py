@@ -33,6 +33,11 @@ SOURCES = {"loc": "loc.gov", "chronoscope": "Chronoscope"}
 ALLMAPS_VIEWER = "https://viewer.allmaps.org/?url="
 LOC_ITEM = "https://www.loc.gov/item/"
 REPO = "https://github.com/danvk/mapsnap"
+# Where readers report a volume that is misplaced or missing pages.
+PROBLEMS_URL = "https://github.com/danvk/mapsnap/issues/541"
+GEOREF_SPEC = "https://iiif.io/api/extension/georef/"
+CHRONOSCOPE = '<a href="https://chronoscope.io/">Chronoscope</a>'
+OLD_INSURANCE_MAPS = '<a href="https://oldinsurancemaps.net/">OldInsuranceMaps.net</a>'
 STATE_NAMES = {code: name for name, code in STATE_CODES.items()}
 TITLE_PREFIX = "Sanborn Fire Insurance Map from "
 # The example volume on the run page: Brooklyn, 1939, vol. 2.
@@ -48,15 +53,6 @@ LICENSE_TEXT = (
     "(https://www.loc.gov/collections/sanborn-maps/)."
 )
 
-# Why a volume was left out, as the run page says it, by items.tsv status.
-WITHHELD_REASONS = {
-    "no page placed": "had no page placed at all",
-    "withheld: every page filtered": "had every placed page dropped by the filters above",
-    "withheld: key map under 2.5 km": (
-        "had a key map placed at under 2.5 km across, a sign the whole volume was "
-        "placed at the wrong scale"
-    ),
-}
 LICENSE_HTML = (
     "The georeferencing annotations are © "
     '<a href="https://www.openstreetmap.org/copyright">OpenStreetMap contributors</a> '
@@ -244,12 +240,6 @@ def run_index(rows: list[dict[str, str]], site: Site, run_dir: Path) -> str:
     totals = Totals()
     for row in rows:
         totals.add(row)
-    withheld: dict[str, int] = defaultdict(int)
-    for row in rows:
-        if row["status"] != "published":
-            withheld[row["status"]] += 1
-    dropped_large = sum(as_int(row["dropped_over_6km"]) for row in rows)
-    dropped_far = sum(as_int(row["dropped_over_5km_from_location"]) for row in rows)
     years = f"{min(totals.years)}–{max(totals.years)}" if totals.years else "–"
 
     stats = [
@@ -293,7 +283,7 @@ def run_index(rows: list[dict[str, str]], site: Site, run_dir: Path) -> str:
         url = site.file_url("chronoscope", example["main"])
         example_html = f"""<h2>Try one</h2>
 <p><a href="{escape(allmaps_url(url))}">{escape(display_title(example))}, {escape(example["year"])}</a>
-opens in the Allmaps viewer: {example["sheets_placed"]} georeferenced sheets over today's map, drawn from Chronoscope's copies of the scans. The file behind it is
+opens in the Allmaps viewer: {example["sheets_placed"]} georeferenced sheets over today's map, drawn from {CHRONOSCOPE}'s copies of the scans. The file behind it is
 <a href="{escape(url)}"><code>{escape(url)}</code></a>.</p>"""
 
     state_rows = []
@@ -309,17 +299,13 @@ opens in the Allmaps viewer: {example["sheets_placed"]} georeferenced sheets ove
             f'<td class="num">{percent(state.sheets_placed, state.sheets)}</td></tr>'
         )
 
-    withheld_items = "".join(
-        f"<li>{number(count)} {escape(WITHHELD_REASONS.get(status, status))}</li>"
-        for status, count in sorted(withheld.items(), key=lambda item: -item[1])
-    )
     column_rows = "".join(
         f"<tr><td><code>{escape(name)}</code></td><td>{escape(text)}</td></tr>"
         for name, text in COLUMNS
     )
 
     body = f"""<h1>Run {escape(site.version)}</h1>
-<p class="lede">Georeferencing for the Library of Congress's <a href="https://www.loc.gov/collections/sanborn-maps/">Sanborn Maps Collection</a>, made automatically by <a href="{REPO}">mapsnap</a>: each placed sheet is a IIIF georeference annotation you can open in <a href="https://allmaps.org/">Allmaps</a> or any viewer that reads them.</p>
+<p class="lede">Georeferencing for the Library of Congress's <a href="https://www.loc.gov/collections/sanborn-maps/">Sanborn Maps Collection</a>, made automatically by <a href="{REPO}">mapsnap</a>: each placed sheet is a <a href="{GEOREF_SPEC}">IIIF Georeference Annotation</a> you can open in <a href="https://allmaps.org/">Allmaps</a> or any viewer that reads them.</p>
 <div class="stats">
 {stat_html}
 </div>
@@ -335,11 +321,15 @@ opens in the Allmaps viewer: {example["sheets_placed"]} georeferenced sheets ove
 <p>Each published volume has a IIIF AnnotationPage of its main content, <code>&lt;item&gt;.main.iiif.json</code>, and of its key map when one was placed, <code>&lt;item&gt;.keymap.iiif.json</code>. Every file comes in two versions that differ only in where the scans are fetched from:</p>
 <ul>
 <li><code>{data}/iiif/loc/</code> points at the Library of Congress's own image servers, the original scans.</li>
-<li><code>{data}/iiif/chronoscope/</code> points at Chronoscope's copies of the same scans at a quarter of their size, which load much faster and are kinder to loc.gov.</li>
+<li><code>{data}/iiif/chronoscope/</code> points at {CHRONOSCOPE}'s copies of the same scans at a quarter of their size, which load much faster and are kinder to loc.gov.</li>
 </ul>
 <p>Each file's <code>id</code> is its own URL. Every image is a georeference annotation: control points, a transformation, and a clip outline for the part of the sheet that is map.</p>
-<p>Not everything the run placed is here. {number(dropped_large)} images whose sheet would span more than 6 km of ground were dropped, as were {number(dropped_far)} in small volumes (10 sheets or fewer) that sat more than 5 km from the catalogue's location for their town. Volumes left out entirely:</p>
-<ul>{withheld_items}</ul>
+
+<h2>Limitations</h2>
+<p>mapsnap can't place every page, and not every page it places is accurate: a sheet can land on the wrong block, or in the wrong town. If you find a volume that's wrong, please report it on <a href="{PROBLEMS_URL}">GitHub</a>.</p>
+
+<h2>OldInsuranceMaps.net</h2>
+<p>mapsnap was built with data from {OLD_INSURANCE_MAPS}, where volunteers have georeferenced Sanborn maps by hand; their work is what mapsnap was developed and measured against. If a volume you want isn't listed here, or is missing pages, look for it on OldInsuranceMaps.net, or georeference it by hand there.</p>
 
 <h2>States</h2>
 <table class="states">
@@ -383,6 +373,7 @@ def state_page(code: str, rows: list[dict[str, str]], site: Site) -> str:
     body = f"""<p class="crumbs"><a href="{site.page_path()}">Run {escape(site.version)}</a> › {escape(name)}</p>
 <h1>{escape(name)}</h1>
 <p class="lede">{number(totals.published)} of {number(totals.volumes)} volumes published, with {number(totals.sheets_placed)} of {number(totals.sheets)} sheets placed. <b>JSON</b> is the IIIF file; <b>Allmaps</b> opens it over today's map. loc.gov files draw the Library of Congress's scans, Chronoscope files its faster copies of them.</p>
+<p>Not every page is placed, or placed accurately: please <a href="{PROBLEMS_URL}">report problems</a>. Missing a volume, or pages of one? Look for it on {OLD_INSURANCE_MAPS}, or georeference it by hand there.</p>
 <p><input type="search" id="filter" placeholder="Filter by town, year or id" aria-label="Filter volumes"> <span id="count"></span></p>
 <div class="table-scroll">
 <table class="volumes">
