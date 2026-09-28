@@ -20,8 +20,8 @@ panels of a page all share the parent page's full canvas (matching how OIM expre
 split annotations).
 
 Usage:
-    python make_iiif_georef.py <main.iiif.json> <georef_glob> [--output FILE] [--creator URL]
-    python make_iiif_georef.py <loc.iiif.json>  <georef_glob> [--output FILE] [--creator URL]
+    python make_iiif_georef.py <main.iiif.json> <georef_glob> [--output FILE]
+    python make_iiif_georef.py <loc.iiif.json>  <georef_glob> [--output FILE]
 """
 
 import argparse
@@ -45,6 +45,13 @@ from mapsnap.utils import default_centerlines, jpeg_dimensions, label_to_page_ke
 
 # Page images are stored at 25% scale, so the full-resolution canvas is 4× larger.
 FULL_RES_FACTOR = 4
+
+# Who made the annotations: the software, not a person. A W3C Web Annotation
+# agent needs no id; a bare string would be read as one, so this is an object.
+CREATOR = {"type": "Software", "name": "mapsnap", "homepage": "https://mapsnap.org"}
+# The GCPs' coordinates are OpenStreetMap positions, so the annotations are a
+# derivative of OSM and share its license.
+RIGHTS = "https://opendatacommons.org/licenses/odbl/1-0/"
 
 
 def georef_path_to_page_key(path: str) -> str | None:
@@ -460,7 +467,6 @@ def make_annotation(
     georef: dict,
     page_key: str,
     image_path: Path,
-    creator_url: str,
     now: str,
     geo_mask: ShapelyPolygon | None = None,
 ) -> dict:
@@ -488,7 +494,6 @@ def make_annotation(
     source_width: int = source["width"]
     source_height: int = source["height"]
 
-    creator = {"id": creator_url, "type": "Person"}
     georef_width = georef["width"]
     georef_height = georef["height"]
 
@@ -567,7 +572,7 @@ def make_annotation(
             "type": "Feature",
             "properties": {
                 "resourceCoords": rc,
-                "creator": creator,
+                "creator": CREATOR,
                 "type": gcp_type,
             },
             "geometry": {
@@ -589,7 +594,8 @@ def make_annotation(
         "metadata": _georef_metadata(georef, split_canvas),
         "created": now,
         "modified": now,
-        "creator": [creator],
+        "creator": [CREATOR],
+        "rights": RIGHTS,
         "motivation": "georeferencing",
         "target": {
             "id": f"{canvas_id}/selector",
@@ -944,6 +950,25 @@ def _load_volume_items(
     return valid_items, result_id, label
 
 
+def annotation_page(
+    page_id: str, label: str, report: list[dict], annotations: list[dict]
+) -> dict:
+    """The AnnotationPage holding a volume's (or a run's) annotations.
+
+    It carries the license as well as each annotation does, so the file as a
+    whole says what it may be used for.
+    """
+    return {
+        "id": page_id,
+        "type": "AnnotationPage",
+        "@context": ["http://www.w3.org/ns/anno.jsonld"],
+        "label": label,
+        "rights": RIGHTS,
+        "metadata": report,
+        "items": annotations,
+    }
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(
         description=(
@@ -979,12 +1004,6 @@ def main() -> None:
         "--output",
         metavar="FILE",
         help="Write output to this file (default: stdout)",
-    )
-    parser.add_argument(
-        "--creator",
-        metavar="URL",
-        default="https://oldinsurancemaps.net/profile/danvk",
-        help="Creator profile URL (default: %(default)s)",
     )
     parser.add_argument(
         "--image-source-type",
@@ -1198,7 +1217,6 @@ def main() -> None:
                     georef,
                     page_key,
                     image_path,
-                    args.creator,
                     now,
                     geo_mask,
                 )
@@ -1241,14 +1259,7 @@ def main() -> None:
         if len(georef_globs) == 1
         else run_entries(generated, args.run_tag)
     )
-    result = {
-        "id": result_id,
-        "type": "AnnotationPage",
-        "@context": ["http://www.w3.org/ns/anno.jsonld"],
-        "label": page_label,
-        "metadata": report,
-        "items": annotations,
-    }
+    result = annotation_page(result_id, page_label, report, annotations)
 
     out_json = json.dumps(result, indent=2)
     if args.output:
