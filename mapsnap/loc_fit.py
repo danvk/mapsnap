@@ -77,13 +77,28 @@ from mapsnap.loc_craft import (
     resolve_manifest,
     sync,
 )
-from mapsnap.utils import list_pages, source_images
+from mapsnap.utils import haversine_m, list_pages, source_images
 
 # The county extracts, one per FIPS, cut by `mapsnap osm-counties`.
 COUNTY_PREFIX = "osm-by-county"
 # What `default_centerlines` looks for beside the pages; load_centerlines reads
 # the .pbf directly, so the county extract needs no conversion (#408).
 CENTERLINES_NAME = "centerlines.osm.pbf"
+# A small volume's streets, clipped from the county extract to a circle around
+# the catalogue's coordinate (see local_centerlines). The name is the one every
+# stage's default_centerlines prefers, so fit, snap and street-solve follow it.
+CLIPPED_CENTERLINES_NAME = "centerlines.geojson"
+SMALL_VOLUME_MAX_PAGES = 10
+"""A volume this small is a town, and the catalogue's coordinate is the town (#439)."""
+SMALL_VOLUME_RADIUS_M = 5_000.0
+"""How far from the catalogue's coordinate a small volume's streets may lie.
+
+A county names too many towns for a sheet of generic names: Gardiner NY 1913's
+MAIN, NEW, PROSPECT and RAILROAD form a clean grid only in Pine Bush, 14.5 km
+away in the same county, and that is where it was placed. Within 5 km, Pine Bush
+is gone. The catalogue coordinate sat a median 0.39 km (worst 2.85 km) from the
+farthest placed page of the 1-3 sheet volumes in the test-200 sample (#447).
+"""
 # The mirror's key-map record, written by `loc-keymaps` before anything is
 # split. This chain re-derives it after the split instead (see run_chain).
 KEYMAPS_NAME = "keymaps.json"
@@ -242,6 +257,80 @@ class FitWork:
     # Not ready AND never going to be, so the queue must settle it rather than
     # hand it to the next worker (see plan_fit).
     unprocessable: bool = False
+    # The catalogue's (lat, lon) for the item, when --locations supplies one.
+    location: tuple[float, float] | None = None
+
+
+def read_locations(paths: list[Path]) -> dict[str, tuple[float, float]]:
+    """Item -> the catalogue's (lat, lon), from TSVs with ``item``, ``lat`` and ``lon``."""
+    locations: dict[str, tuple[float, float]] = {}
+    for path in paths:
+        with path.open() as handle:
+            for row in csv.DictReader(handle, delimiter="\t"):
+                try:
+                    locations[row["item"]] = (float(row["lat"]), float(row["lon"]))
+                except (KeyError, TypeError, ValueError):
+                    continue
+    return locations
+
+
+def clip_centerlines(
+    features: list[dict], center: tuple[float, float], radius_m: float
+) -> list[dict]:
+    """The features with a vertex within ``radius_m`` of ``center`` (lat, lon)."""
+    lat0, lon0 = center
+    kept = []
+    for feature in features:
+        geometry = feature.get("geometry") or {}
+        lines = (
+            [geometry.get("coordinates") or []]
+            if geometry.get("type") == "LineString"
+            else geometry.get("coordinates") or []
+        )
+        if any(
+            haversine_m(lat0, lon0, lat, lon) <= radius_m
+            for line in lines
+            for lon, lat, *_ in line
+        ):
+            kept.append(feature)
+    return kept
+
+
+def local_centerlines(local: Path, work: FitWork) -> Path:
+    """The streets this item's chain reads: its county, or a small volume's town.
+
+    A volume of at most SMALL_VOLUME_MAX_PAGES pages with a catalogue coordinate
+    gets its county's streets clipped to SMALL_VOLUME_RADIUS_M around it,
+    written as CLIPPED_CENTERLINES_NAME. If that leaves no street at all, the
+    coordinate is not the town, and the county extract is used as before.
+    """
+    county = local / CENTERLINES_NAME
+    if work.location is None or len(work.pages) > SMALL_VOLUME_MAX_PAGES:
+        return county
+    from mapsnap.osm_to_centerlines import load_centerlines
+
+    collection = load_centerlines(county)
+    kept = clip_centerlines(
+        collection.get("features", []), work.location, SMALL_VOLUME_RADIUS_M
+    )
+    if not kept:
+        print(
+            f"{local.name}: no street within {SMALL_VOLUME_RADIUS_M / 1000:g} km of "
+            f"{work.location}; using the whole county",
+            file=sys.stderr,
+            flush=True,
+        )
+        return county
+    clipped = local / CLIPPED_CENTERLINES_NAME
+    clipped.write_text(json.dumps({**collection, "features": kept}))
+    print(
+        f"{local.name}: {len(work.pages)} pages, streets clipped to "
+        f"{SMALL_VOLUME_RADIUS_M / 1000:g} km of {work.location} "
+        f"({len(kept):,} of {len(collection.get('features', [])):,} features)",
+        file=sys.stderr,
+        flush=True,
+    )
+    return clipped
 
 
 def plan_fit(
@@ -489,6 +578,8 @@ def run_chain(local: Path, work: FitWork, run_tag: str | None = None) -> None:
     narrowed to each page's key-map neighbourhood.
     """
     pages = [str(local / name) for name in work.pages]
+    # First, so the key-map stage's default centerlines are the same streets.
+    centerlines = local_centerlines(local, work)
     stage(["mapsnap", "split", *pages], local)
     # Identify the key map HERE, after the split, rather than trusting the
     # keymaps.json the mirror carries. `loc-keymaps` runs before anything is
@@ -530,7 +621,7 @@ def run_chain(local: Path, work: FitWork, run_tag: str | None = None) -> None:
             "ocr",
             "--resume",
             "--centerlines",
-            str(local / CENTERLINES_NAME),
+            str(centerlines),
             *effective,
         ],
         local,
@@ -581,6 +672,8 @@ def upload(local: Path, bucket: str, item: Item, run_tag: str) -> None:
             "--exclude",
             CENTERLINES_NAME,
             "--exclude",
+            CLIPPED_CENTERLINES_NAME,
+            "--exclude",
             DONE_MARKER,
             *excludes,
             "--only-show-errors",
@@ -630,6 +723,7 @@ def prepare_next(
     *,
     counties: dict[str, County],
     tag_for: Callable[[Item], str],
+    locations: dict[str, tuple[float, float]] | None = None,
     fetch: bool = True,
     ocr_from: str | None = None,
 ) -> Prepared:
@@ -640,6 +734,7 @@ def prepare_next(
         try:
             present = list_prefix(bucket, item.prefix)
             work = plan_fit(item, present, counties.get(item.item), tag_for(item))
+            work.location = (locations or {}).get(item.item)
             if work.done:
                 skipped += 1
                 continue
@@ -714,6 +809,14 @@ def build_parser() -> argparse.ArgumentParser:
         required=True,
         help="items.tsv and city-items.tsv, local paths or s3:// URLs: "
         "the item -> county FIPS mapping.",
+    )
+    parser.add_argument(
+        "--locations",
+        nargs="*",
+        default=None,
+        help="TSVs of item, lat, lon (local paths or s3:// URLs): the catalogue's "
+        f"coordinate. A volume of at most {SMALL_VOLUME_MAX_PAGES} pages with one "
+        f"reads only the streets within {SMALL_VOLUME_RADIUS_M / 1000:g} km of it.",
     )
     parser.add_argument("--work-dir", type=Path, default=Path("/tmp/loc-fit"))
     parser.add_argument("--limit", type=int)
@@ -928,6 +1031,13 @@ def main() -> None:
     manifest = resolve_manifest(args.manifest, args.bucket, args.work_dir)
     all_items = read_manifest(manifest)
     counties = read_counties(resolve_counties(args.counties, args.work_dir))
+    locations = (
+        read_locations(resolve_counties(args.locations, args.work_dir))
+        if args.locations
+        else {}
+    )
+    if args.locations:
+        print(f"{len(locations):,} items with a catalogue coordinate", file=sys.stderr)
     print(f"{len(counties):,} items mapped to a county extract", file=sys.stderr)
 
     if args.item and args.items:
@@ -972,6 +1082,7 @@ def main() -> None:
             args.work_dir,
             counties=counties,
             tag_for=tag_for,
+            locations=locations,
             fetch=not args.dry_run,
             ocr_from=args.ocr_from,
         )
@@ -991,6 +1102,7 @@ def main() -> None:
                 args.work_dir,
                 counties=counties,
                 tag_for=tag_for,
+                locations=locations,
                 fetch=not args.dry_run,
                 ocr_from=args.ocr_from,
             )
