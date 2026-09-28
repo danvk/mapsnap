@@ -579,3 +579,23 @@ def test_usable_keymaps_skips_an_implausibly_small_key_map(tmp_path: Path):
     assert discover_keymaps([str(tmp_path / "p5.jpg")]) == [
         tmp_path / "p0b.keymap.json"
     ]
+
+
+def square_corners(side_deg: float) -> list[list[float]]:
+    """TL, TR, BR, BL corners of a lon/lat square with its top-left at (-81, 34.1)."""
+    return [
+        [-81.0, 34.1],
+        [-81.0 + side_deg, 34.1],
+        [-81.0 + side_deg, 34.1 - side_deg],
+        [-81.0, 34.1 - side_deg],
+    ]
+
+
+def test_plausibly_sized_threshold_sits_between_the_populations(tmp_path: Path):
+    """A 1.7 km key map is the mis-scaled tail; a 3 km one is a real town."""
+    tail = write_georef(tmp_path, "tail", square_corners(0.0118))
+    town = write_georef(tmp_path, "town", square_corners(0.0209))
+    assert keymap_extent_m(tmp_path / "tail.georef.json") == pytest.approx(1700, abs=50)
+    assert keymap_extent_m(tmp_path / "town.georef.json") == pytest.approx(3010, abs=50)
+    assert not plausibly_sized(tail)
+    assert plausibly_sized(town)
