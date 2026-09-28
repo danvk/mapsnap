@@ -572,7 +572,6 @@ def make_annotation(
             "type": "Feature",
             "properties": {
                 "resourceCoords": rc,
-                "creator": CREATOR,
                 "type": gcp_type,
             },
             "geometry": {
@@ -594,8 +593,6 @@ def make_annotation(
         "metadata": _georef_metadata(georef, split_canvas),
         "created": now,
         "modified": now,
-        "creator": [CREATOR],
-        "rights": RIGHTS,
         "motivation": "georeferencing",
         "target": {
             "id": f"{canvas_id}/selector",
@@ -955,14 +952,17 @@ def annotation_page(
 ) -> dict:
     """The AnnotationPage holding a volume's (or a run's) annotations.
 
-    It carries the license as well as each annotation does, so the file as a
-    whole says what it may be used for.
+    Who made the annotations and their license are stated here once, for
+    every annotation in the file, rather than repeated on each one and on each
+    of its GCPs: neither the georef extension nor the Web Annotation model
+    requires them anywhere.
     """
     return {
         "id": page_id,
         "type": "AnnotationPage",
         "@context": ["http://www.w3.org/ns/anno.jsonld"],
         "label": label,
+        "creator": CREATOR,
         "rights": RIGHTS,
         "metadata": report,
         "items": annotations,

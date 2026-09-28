@@ -518,36 +518,6 @@ def test_make_annotation_labels_match_their_ids(tmp_path):
     assert whole["label"] == "Test | 1900 p4"
 
 
-def test_make_annotation_credits_mapsnap_and_carries_the_odbl(tmp_path):
-    item = {
-        "label": "Test | 1900 p4",
-        "target": {
-            "source": {
-                "id": "http://example/p4/info.json",
-                "type": "ImageService3",
-                "width": 800,
-                "height": 1600,
-            }
-        },
-    }
-    annotation = make_annotation(
-        item,
-        make_georef(width=200, height=400, intersections=[]),
-        "p4",
-        tmp_path / "p4.jpg",
-        "now",
-    )
-    software = {
-        "type": "Software",
-        "name": "mapsnap",
-        "homepage": "https://mapsnap.org",
-    }
-    assert annotation["creator"] == [software]
-    assert annotation["rights"] == "https://opendatacommons.org/licenses/odbl/1-0/"
-    for feature in annotation["body"]["features"]:
-        assert feature["properties"]["creator"] == software
-
-
 def test_make_annotation_split_uses_panels_json(tmp_path):
     # Parent page is 200×400 at 25%; the full canvas is 4× larger (800×1600).
     write_panels_json(
@@ -950,7 +920,37 @@ def test_publishing_drops_the_mirrors_zero_padded_skeletons():
     assert kept == ["p5l", "p0005rs", "p7", "p0319as"]
 
 
-def test_annotation_page_carries_the_odbl() -> None:
+def test_annotation_page_credits_mapsnap_and_carries_the_odbl() -> None:
     page = annotation_page("http://example/generated", "Test | 1900", [], [])
     assert page["type"] == "AnnotationPage"
+    assert page["creator"] == {
+        "type": "Software",
+        "name": "mapsnap",
+        "homepage": "https://mapsnap.org",
+    }
     assert page["rights"] == "https://opendatacommons.org/licenses/odbl/1-0/"
+
+
+def test_make_annotation_leaves_creator_and_rights_to_the_page(tmp_path):
+    item = {
+        "label": "Test | 1900 p4",
+        "target": {
+            "source": {
+                "id": "http://example/p4/info.json",
+                "type": "ImageService3",
+                "width": 800,
+                "height": 1600,
+            }
+        },
+    }
+    annotation = make_annotation(
+        item,
+        make_georef(width=200, height=400, intersections=[]),
+        "p4",
+        tmp_path / "p4.jpg",
+        "now",
+    )
+    assert "creator" not in annotation
+    assert "rights" not in annotation
+    for feature in annotation["body"]["features"]:
+        assert "creator" not in feature["properties"]
