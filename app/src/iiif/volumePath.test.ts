@@ -1,5 +1,9 @@
 import { describe, expect, it } from 'vitest';
-import { debugImageStem, parseAnnotationPath } from './volumePath';
+import {
+  annotationName,
+  debugImageStem,
+  parseAnnotationPath,
+} from './volumePath';
 
 describe('parseAnnotationPath', () => {
   it('splits a single-directory volume', () => {
@@ -78,5 +82,31 @@ describe('debugImageStem', () => {
   it('keeps the stem for a whole sheet or an unknown image list', () => {
     expect(debugImageStem('p4', new Set(['p4']))).toBe('p4');
     expect(debugImageStem('p2__2', null)).toBe('p2__2');
+  });
+});
+
+describe('annotationName', () => {
+  it('is the file name for an annotation at the volume root', () => {
+    expect(
+      annotationName(
+        parseAnnotationPath('data/woodbury_nj_1886/main.iiif.json'),
+      ),
+    ).toBe('main.iiif.json');
+  });
+
+  it("keeps a run's directory, as the volumes API lists it", () => {
+    expect(
+      annotationName(
+        parseAnnotationPath(
+          'data/woodbury_nj_1886/runs/corpus-v1/mapsnap.iiif.json',
+        ),
+      ),
+    ).toBe('runs/corpus-v1/mapsnap.iiif.json');
+  });
+
+  it('is null for a path that does not parse', () => {
+    expect(
+      annotationName(parseAnnotationPath('s3://bucket/x.iiif.json')),
+    ).toBeNull();
   });
 });
