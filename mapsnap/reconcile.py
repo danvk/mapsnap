@@ -143,8 +143,17 @@ OVERLAP_HARD_DELTA = 0.35
 # left to the unaries: detroit p85 (32%, 368 -> 12 ft) still flips because
 # its alternative is well evidenced; schenectady p9__2 (32% with a correct
 # neighbour, one pose) is the cost.
+#
+# The retrained region model (Columbus dropped, NO-1896's refreshed truth)
+# draws tighter regions, so overlaps shrink: detroit p85's fell from 32% to
+# 24%, under the 15% floor's reach. Re-swept on the new maps over all 20 truth
+# volumes (2026-09-28, 15 settings): 12% / 1.5 is best, mean +0.62 (disasters
+# 64 -> 41, good pages 1473 -> 1464), and it flips p85 again; 15% / 1.5 is +0.60
+# and 20% / 1.5 +0.60. The old maps at 15% / 1.5 score +0.77 on the same
+# volumes, a gap of a few pages (fargo, and columbus, whose truth is still
+# whole-sheet), with 15 of the 20 volumes identical under either model.
 W_REGION = 1.5
-REGION_SOFT = 0.15
+REGION_SOFT = 0.12
 REGION_HARD_DELTA = 0.30
 # NO sibling factor. Split panels are separate maps that happen to share a
 # sheet: no geographic relationship (champaign p4's panels sit 891 m apart at
