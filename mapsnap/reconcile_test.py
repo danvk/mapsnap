@@ -837,6 +837,8 @@ def test_provenance_records_the_rung_verdict(tmp_path):
     # still explains itself rather than dropping the key.
     assert rung["verdict"] == "no volume family"
     assert rung["penalty"] == 0.0
+
+
 def boxed(hypothesis: Hypothesis, west_m: float, width_m: float = 500.0):
     """Give a hypothesis a posed content region: a 500 x 400 m box at west_m."""
     from shapely.geometry import box
