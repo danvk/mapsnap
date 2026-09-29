@@ -882,3 +882,24 @@ def test_anchor_pose_takes_snaps_verdict(tmp_path):
     anchored = anchor_pose(tmp_path, "p7L", georef, {"p7L": 0.9})
     assert anchored is not None
     np.testing.assert_allclose(anchored @ [500, 500, 1], moved @ [500, 500, 1])
+
+
+def test_page_and_panel_units_leave_out_recorded_key_maps(tmp_path):
+    """snap, street-solve and reconcile never see a recorded key map (#542)."""
+    from PIL import Image
+    from shapely.geometry import box
+
+    from mapsnap.osm_snap_experiment import load_page_units, load_panel_units
+    from mapsnap.split import write_panels_json
+
+    for stem in ("p0", "p1", "p2", "p2__1", "p2__2"):
+        Image.new("RGB", (40, 30)).save(tmp_path / f"{stem}.jpg")
+    write_panels_json(
+        tmp_path / "p2.jpg",
+        [box(0, 0, 20, 30), box(20, 0, 40, 30)],
+        width=40,
+        height=30,
+    )
+    (tmp_path / "keymaps.json").write_text('{"keys": ["p0", "p2__1"]}')
+    assert {u.stem for u in load_page_units(tmp_path)} == {"p1", "p2"}
+    assert {u.stem for u in load_panel_units(tmp_path)} == {"p2__2"}

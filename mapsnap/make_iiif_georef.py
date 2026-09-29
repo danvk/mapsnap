@@ -39,6 +39,7 @@ from shapely.geometry import mapping as geom_mapping
 
 from mapsnap.clip_masks import compute_all_clip_masks, geo_polygon_to_svg
 from mapsnap.compare_iiif_georef import redundant_skeleton_keys
+from mapsnap.keymap.records import recorded_keymap_keys
 from mapsnap.osm_to_centerlines import load_centerlines
 from mapsnap.split import panels_json_path, read_panels_json
 from mapsnap.utils import default_centerlines, jpeg_dimensions, label_to_page_key
@@ -188,6 +189,36 @@ def drop_redundant_skeletons(valid_items: list) -> list:
         )
         valid_items = [item for item in valid_items if item[0] not in skipped]
     return valid_items
+
+
+def drop_recorded_keymaps(valid_items: list) -> list:
+    """Drop pages their volume's keymaps.json records as key maps.
+
+    A key map is published in its own annotation, from ``raw/``; the same sheet
+    placed as an ordinary page is placed at street-sheet scale (#542). The record
+    sits beside the page sidecars, so the key-map annotation, built from
+    ``raw/*.georef.json``, never matches.
+    """
+    keymaps_by_dir: dict[Path, set[str]] = {}
+    kept, dropped = [], []
+    for item in valid_items:
+        page_key, *_, georef_path = item
+        directory = Path(georef_path).parent
+        if directory not in keymaps_by_dir:
+            keymaps_by_dir[directory] = {
+                key.lower() for key in recorded_keymap_keys(directory)
+            }
+        if page_key.lower() in keymaps_by_dir[directory]:
+            dropped.append(page_key)
+        else:
+            kept.append(item)
+    if dropped:
+        print(
+            f"Dropping {len(dropped)} key-map page(s), published with the key map: "
+            + ", ".join(sorted(dropped)),
+            file=sys.stderr,
+        )
+    return kept
 
 
 def _service_url_to_page_key(url: str | None) -> str | None:
@@ -683,7 +714,7 @@ def _load_s3_items(
         georef = json.loads(Path(path).read_text())
         valid_items.append((page_key, canvas_item, georef, image_path, Path(path)))
 
-    valid_items = drop_redundant_skeletons(valid_items)
+    valid_items = drop_recorded_keymaps(drop_redundant_skeletons(valid_items))
 
     print(
         f"Loaded {len(valid_items)} pages from {len(georef_paths)} georef files.",
@@ -942,7 +973,7 @@ def _load_volume_items(
     # Drop skeleton pages (key ends in 's') when a full-color counterpart exists
     # within this volume. Scoped per-volume so skeletons in one volume are never
     # dropped because another volume has a matching full-color page.
-    valid_items = drop_redundant_skeletons(valid_items)
+    valid_items = drop_recorded_keymaps(drop_redundant_skeletons(valid_items))
 
     return valid_items, result_id, label
 

@@ -10,6 +10,7 @@ from mapsnap.make_iiif_georef import (
     _load_oim_index,
     _service_url_to_page_key,
     annotation_page,
+    drop_recorded_keymaps,
     drop_redundant_skeletons,
     expand_georef_globs,
     fill_missing_source_ids,
@@ -954,3 +955,16 @@ def test_make_annotation_leaves_creator_and_rights_to_the_page(tmp_path):
     assert "rights" not in annotation
     for feature in annotation["body"]["features"]:
         assert "creator" not in feature["properties"]
+
+
+def test_drop_recorded_keymaps_leaves_the_key_map_to_its_own_annotation(tmp_path):
+    (tmp_path / "keymaps.json").write_text('{"keys": ["p0A"]}')
+    (tmp_path / "raw").mkdir()
+    items = [
+        ("p0a", {}, {}, tmp_path / "p0a.jpg", tmp_path / "p0a.georef-final.json"),
+        ("p1", {}, {}, tmp_path / "p1.jpg", tmp_path / "p1.georef-final.json"),
+    ]
+    assert [item[0] for item in drop_recorded_keymaps(items)] == ["p1"]
+    # The key-map annotation is built from raw/, where nothing is recorded.
+    raw = [("p0a", {}, {}, tmp_path / "raw/p0a.jpg", tmp_path / "raw/p0a.georef.json")]
+    assert drop_recorded_keymaps(raw) == raw

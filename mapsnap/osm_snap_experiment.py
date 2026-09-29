@@ -47,6 +47,7 @@ from mapsnap.keymap.align_page_region import (
     volume_filter_params,
 )
 from mapsnap.keymap.locate import KeymapLocator, usable_keymaps
+from mapsnap.keymap.records import recorded_keymap_keys
 from mapsnap.osm_snap import (
     PageContext,
     RotationPrior,
@@ -534,12 +535,14 @@ def load_panel_units(volume: Path) -> list[PageUnit]:
             if "__" in key:
                 splits_by_parent.setdefault(key.split("__")[0].lower(), []).append(item)
 
+    # A key map split out as a panel is georeferenced by the key-map chain (#542).
+    keymaps = recorded_keymap_keys(volume)
     units: list[PageUnit] = []
     for jpg in sorted(volume.glob("p*__*.jpg")):
         stem = jpg.stem
         base = panel_base(stem)
         index_str = stem.rpartition("__")[2]
-        if base is None or not index_str.isdigit():
+        if base is None or not index_str.isdigit() or stem in keymaps:
             continue
         number = page_number(base)
         panels_path = volume / f"{base}.panels.json"
