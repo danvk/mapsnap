@@ -92,7 +92,17 @@ COLUMNS = [
             "5 km from the catalogue's location for the town."
         ),
     ),
-    ("status", "published, no page placed, or withheld and why."),
+    (
+        "dropped_keymap",
+        (
+            "Images dropped because they are the volume's key map, which is "
+            "published in its own file."
+        ),
+    ),
+    (
+        "status",
+        "published, published: key map only, no page placed, or withheld and why.",
+    ),
     (
         "main, keymap",
         "The volume's IIIF file names, under iiif/loc/ and iiif/chronoscope/; blank if none.",
@@ -149,7 +159,7 @@ class Totals:
         """Count one volume."""
         self.volumes += 1
         self.sheets += as_int(row["sheets"])
-        if row["status"] == "published":
+        if row["status"].startswith("published"):
             self.published += 1
             self.sheets_placed += as_int(row["sheets_placed"])
             self.images_published += as_int(row["published"])
@@ -358,7 +368,7 @@ def state_page(code: str, rows: list[dict[str, str]], site: Site) -> str:
         totals.add(row)
     body_rows = []
     for row in sorted(rows, key=volume_sort_key):
-        published = row["status"] == "published"
+        published = row["status"].startswith("published")
         if published:
             files = f'<td class="files">{site.file_links(row["main"])}</td><td class="files">{site.file_links(row["keymap"])}</td>'
         else:

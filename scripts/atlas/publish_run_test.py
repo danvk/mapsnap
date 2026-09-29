@@ -7,6 +7,7 @@ from publish_run import (
     CDN_BASE,
     Destination,
     add_names,
+    drop_keymap_pages,
     filter_pages,
     for_cdn,
     haversine_m,
@@ -177,6 +178,24 @@ def test_item_status_says_why_an_item_is_withheld():
     assert item_status([page], [page], True) == "withheld: key map under 2.5 km"
     assert item_status([], [], False) == "no page placed"
     assert item_status([page], [], False) == "withheld: every page filtered"
+    # A key map is still worth publishing when no page is left beside it.
+    assert item_status([page], [], has_keymap=True) == "published: key map only"
+    assert item_status([], [], has_keymap=True) == "published: key map only"
+    assert item_status([page], [], True, has_keymap=True) == (
+        "withheld: key map under 2.5 km"
+    )
+
+
+def test_drop_keymap_pages_leaves_the_key_map_to_its_own_file():
+    keymap = [annotation(label="Town | 1888 | sanborn00007_002 p1 [1]")]
+    pages = [
+        annotation(label="Town | 1888 | sanborn00007_002 p1 [1]"),
+        annotation(label="Town | 1888 | sanborn00007_002 p1 [2]"),
+    ]
+    kept, dropped = drop_keymap_pages(pages, keymap)
+    assert kept == [pages[1]]
+    assert dropped == ["p1__1"]
+    assert drop_keymap_pages(pages, []) == (pages, [])
 
 
 def test_strip_creators_removes_every_creator():

@@ -21,7 +21,10 @@ Pages and items are filtered to match what the pipeline does now:
   page centered more than SMALL_VOLUME_RADIUS_M from it is dropped (#531);
 - an item whose key map was georeferenced to under 2.5 km corner to corner is
   withheld (#525), from the list of such items (``--small-keymaps``);
-- an item with no page left is withheld.
+- a page that is also the item's key map is dropped: the key-map file has it,
+  placed as a key map rather than at street-sheet scale (#542);
+- an item with no page left is withheld, unless it has a key map, which is
+  published on its own.
 
 Each file states its creator and license (the ODbL: the control points are
 OpenStreetMap positions) once, at the top, and its ``id`` is its published URL.
@@ -203,15 +206,40 @@ def filter_pages(
     return result
 
 
-def item_status(annotations: list[dict], kept: list[dict], small_keymap: bool) -> str:
-    """Whether an item is published, and if not, why."""
+def drop_keymap_pages(
+    annotations: list[dict], keymap: list[dict]
+) -> tuple[list[dict], list[str]]:
+    """The main-content pages that are not also the item's key map, and the keys of those that are.
+
+    corpus-v1 georeferenced a key-map sheet twice: as a key map, from its
+    full-resolution scan, and as an ordinary page, at street-sheet scale (#542).
+    The key-map annotation is the right one.
+    """
+    keymap_keys = {page_key(annotation).lower() for annotation in keymap}
+    kept = [a for a in annotations if page_key(a).lower() not in keymap_keys]
+    dropped = [page_key(a) for a in annotations if page_key(a).lower() in keymap_keys]
+    return kept, dropped
+
+
+def item_status(
+    annotations: list[dict],
+    kept: list[dict],
+    small_keymap: bool = False,
+    has_keymap: bool = False,
+) -> str:
+    """Whether an item is published, and if not, why.
+
+    An item with no page left but a key map still publishes its key map.
+    """
     if small_keymap:
         return "withheld: key map under 2.5 km"
+    if kept:
+        return "published"
+    if has_keymap:
+        return "published: key map only"
     if not annotations:
         return "no page placed"
-    if not kept:
-        return "withheld: every page filtered"
-    return "published"
+    return "withheld: every page filtered"
 
 
 def strip_creators(annotation: dict) -> None:
@@ -471,33 +499,45 @@ def main() -> None:
         item = item_id(path)
         meta = items.get(item, {})
         page = json.loads(path.read_text())
-        annotations = page.get("items") or []
+        keymap_path = args.keymap_dir / path.name
+        keymap = json.loads(keymap_path.read_text()) if keymap_path.exists() else {}
+        keymap_items = keymap.get("items") or []
+        placed = page.get("items") or []
+        annotations, keymap_pages = drop_keymap_pages(placed, keymap_items)
         report = {
             entry.get("label"): entry.get("value")
             for entry in page.get("metadata") or []
         }
         pages = filter_pages(annotations, meta.get("sheets", 0), locations.get(item))
-        status = item_status(annotations, pages.kept, item in small_keymaps)
+        pages.withheld[:0] = [
+            (key, "the key map, published in the key-map file") for key in keymap_pages
+        ]
+        status = item_status(
+            placed,
+            pages.kept,
+            small_keymap=item in small_keymaps,
+            has_keymap=bool(keymap_items),
+        )
+        published = status.startswith("published")
         tally[status] += 1
         tally["pages dropped: sheet too large"] += pages.too_large
         tally["pages dropped: far from the catalogue location"] += pages.too_far
+        tally["pages dropped: the key map, published as a page"] += len(keymap_pages)
 
         main_name = keymap_name = ""
-        if status == "published":
+        if published and pages.kept:
             for annotation in pages.kept:
                 strip_creators(annotation)
             page["items"] = pages.kept
             update_report(page, len(pages.kept), pages.withheld)
             main_name = f"{item}.main.iiif.json"
             destination.write(main_name, page)
-            keymap_path = args.keymap_dir / path.name
-            keymap = json.loads(keymap_path.read_text()) if keymap_path.exists() else {}
-            if keymap.get("items"):
-                for annotation in keymap["items"]:
-                    strip_creators(annotation)
-                keymap_name = f"{item}.keymap.iiif.json"
-                destination.write(keymap_name, keymap)
-                tally["key maps published"] += 1
+        if published and keymap_items:
+            for annotation in keymap_items:
+                strip_creators(annotation)
+            keymap_name = f"{item}.keymap.iiif.json"
+            destination.write(keymap_name, keymap)
+            tally["key maps published"] += 1
 
         rows.append(
             {
@@ -510,13 +550,12 @@ def main() -> None:
                 "title": meta.get("title", ""),
                 "sheets": meta.get("sheets", ""),
                 "images": report.get("pages", ""),
-                "placed": len(annotations),
-                "published": len(pages.kept) if status == "published" else 0,
-                "sheets_placed": (
-                    sheets_placed(pages.kept) if status == "published" else 0
-                ),
+                "placed": len(placed),
+                "published": len(pages.kept) if published else 0,
+                "sheets_placed": sheets_placed(pages.kept) if published else 0,
                 "dropped_over_6km": pages.too_large,
                 "dropped_over_5km_from_location": pages.too_far,
+                "dropped_keymap": len(keymap_pages),
                 "status": status,
                 "main": main_name,
                 "keymap": keymap_name,
