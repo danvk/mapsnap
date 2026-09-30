@@ -49,6 +49,7 @@ from gazetteer import STATE_CODES_BY_LOWERCASE
 from mapsnap.annotation_transform import Transform, page_transform
 from mapsnap.compare_iiif_georef import redundant_skeleton_keys
 from mapsnap.loc_fit import SMALL_VOLUME_MAX_PAGES, SMALL_VOLUME_RADIUS_M
+from mapsnap.loc_mirror import keep_sheet
 from mapsnap.make_iiif_georef import CREATOR, RIGHTS
 from mapsnap.osm_snap import MAX_PAGE_EXTENT_M
 
@@ -327,8 +328,15 @@ class Destination:
 
 
 def read_mapping(path: Path) -> dict[str, dict]:
-    """Item -> state and city slugs, the mirror's year, and its sheet count, from the mirror mapping TSV."""
+    """Item -> state and city slugs, the mirror's year, and its sheet counts, from the mirror mapping TSV.
+
+    ``scans`` counts every image in the catalogue. ``sheets`` counts the map sheets
+    a reader would: only the pages the pipeline can use (not title or index pages),
+    with a skeleton sheet (pNs) and its full-color sheet (pN) counted once, since at
+    most one of them is ever published.
+    """
     items: dict[str, dict] = {}
+    keys: dict[str, set[str]] = {}
     with path.open() as handle:
         for row in csv.DictReader(handle, delimiter="\t"):
             entry = items.setdefault(
@@ -337,11 +345,20 @@ def read_mapping(path: Path) -> dict[str, dict]:
                     "state_slug": row["state"],
                     "city_slug": row["city"],
                     "year": row["year"],
-                    "sheets": 0,
+                    "scans": 0,
                 },
             )
-            entry["sheets"] += 1
+            entry["scans"] += 1
+            if keep_sheet(row["page_key"]):
+                keys.setdefault(row["item"], set()).add(row["page_key"])
+    for item, entry in items.items():
+        entry["sheets"] = unique_sheets(keys.get(item, set()))
     return items
+
+
+def unique_sheets(keys: set[str]) -> int:
+    """How many sheets these page keys are, a skeleton and its full-color sheet counting once."""
+    return len(keys - redundant_skeleton_keys(keys, keys))
 
 
 def add_names(items: dict[str, dict], atlas_dir: Path) -> None:
@@ -482,7 +499,8 @@ def main() -> None:
             entry.get("label"): entry.get("value")
             for entry in page.get("metadata") or []
         }
-        pages = filter_pages(annotations, meta.get("sheets", 0), locations.get(item))
+        # #531 counted every scan, so the small-volume test does too.
+        pages = filter_pages(annotations, meta.get("scans", 0), locations.get(item))
         pages.kept, skeleton_pages = drop_skeleton_pages(pages.kept)
         pages.withheld[:0] = [
             (key, "the key map, published in the key-map file") for key in keymap_pages
@@ -528,6 +546,7 @@ def main() -> None:
                 "volume": volume_numbers.get(item, ""),
                 "title": meta.get("title", ""),
                 "sheets": meta.get("sheets", ""),
+                "scans": meta.get("scans", ""),
                 "images": report.get("pages", ""),
                 "placed": len(placed),
                 "published": len(pages.kept) if published else 0,

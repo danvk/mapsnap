@@ -125,7 +125,7 @@ def test_site_links_every_source_and_allmaps():
 
 def test_run_index_links_states_downloads_and_the_example(tmp_path):
     rows = [
-        row("sanborn05791_054", volume="2"),
+        row("sanborn06116_046", volume="2"),
         row("b", state="NJ", status="withheld: key map under 2.5 km", main=""),
     ]
     html = run_index(rows, SITE, tmp_path)
@@ -135,8 +135,9 @@ def test_run_index_links_states_downloads_and_the_example(tmp_path):
     assert "https://data.mapsnap.org/runs/v1.3/items.tsv" in html
     assert (
         "viewer.allmaps.org/?url=https%3A%2F%2Fdata.mapsnap.org%2Fruns%2Fv1.3%2Fiiif%2F"
-        "chronoscope%2Fsanborn05791_054.main.iiif.json"
+        "chronoscope%2Fsanborn06116_046.main.iiif.json"
     ) in html
+    assert 'href="mailto:danvdk+mapsnap@gmail.com"' in html
     assert 'href="https://chronoscope.io/"' in html
     assert 'href="https://iiif.io/api/extension/georef/"' in html
     assert 'href="https://github.com/danvk/mapsnap/issues/541"' in html
@@ -152,8 +153,11 @@ def test_state_page_lists_every_volume_with_its_files():
     assert "<h1>New York</h1>" in html
     assert 'href="https://www.loc.gov/item/a/"' in html
     assert "iiif/chronoscope/a.keymap.iiif.json" in html
-    assert '<tr class="withheld">' in html
+    assert '<tr data-item="b" class="withheld">' in html
     assert "no page placed" in html
+    # No id column: the id is only in the row's data, for the filter.
+    assert "<th>ID</th>" not in html and "<code>a</code>" not in html
+    assert "row.dataset.item" in html
     assert "1 of 2 volumes published" in html
     assert 'href="https://github.com/danvk/mapsnap/issues/541"' in html
     assert 'href="https://oldinsurancemaps.net/"' in html
