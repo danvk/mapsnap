@@ -17,9 +17,12 @@ from publish_run import (
     page_transform,
     read_locations,
     read_mapping,
+    read_volume_numbers,
     sheet_extent_m,
+    sheets_placed,
     strip_creators,
     update_report,
+    volume_number,
     with_page_fields,
 )
 
@@ -340,6 +343,7 @@ def test_add_names_takes_the_atlas_names_and_a_postal_code(tmp_path):
         "city": "Woodbury",
         "state": "New Jersey",
         "date": "1886-11",
+        "title": "",
         "postal": "NJ",
     }
     # An item the atlas does not list falls back to its slugs.
@@ -363,3 +367,33 @@ def test_page_transform_does_not_mirror_a_two_point_helmert_page():
     for feature in (corners[1], corners[3]):
         lon, lat = transform(*feature["properties"]["resourceCoords"])
         assert (lon, lat) == pytest.approx(feature["geometry"]["coordinates"])
+
+
+def test_volume_number_reads_the_catalogue_notes():
+    assert volume_number(["Vol.1  1915  Republished 1939.", "115 sheet(s)."]) == "1"
+    assert volume_number(["128 sheet(s).", "Vol. 2, 1915; Republished 1939."]) == "2"
+    assert volume_number(["Volume 3A"]) == "3A"
+    assert volume_number(["47 skeleton maps. Bound."]) == ""
+
+
+def test_read_volume_numbers_keys_by_item(tmp_path):
+    metadata = tmp_path / "metadata.jsonl"
+    records = [
+        {"Id": "http://www.loc.gov/item/sanborn05791_054/", "Notes": ["Vol. 2, 1915"]},
+        {"Id": "http://www.loc.gov/item/sanborn04424_001.5/", "Notes": ["Vol. 1"]},
+        {"Id": "http://www.loc.gov/item/sanborn00001_001/", "Notes": ["2 sheet(s)."]},
+    ]
+    metadata.write_text("\n".join(json.dumps(record) for record in records) + "\n")
+    assert read_volume_numbers(metadata) == {
+        "sanborn05791_054": "2",
+        "sanborn04424_001.5": "1",
+    }
+
+
+def test_sheets_placed_counts_a_split_sheet_once():
+    pages = [
+        annotation(label="Town | 1900 | x p4 [1]"),
+        annotation(label="Town | 1900 | x p4 [2]"),
+        annotation(label="Town | 1900 | x p5"),
+    ]
+    assert sheets_placed(pages) == 2
