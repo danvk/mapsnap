@@ -4,6 +4,7 @@ from mapsnap.keymap.records import (
     detection_record,
     filter_args,
     is_inset,
+    is_recorded_keymap_page,
     live_detections,
     parse_page_spec,
 )
@@ -73,3 +74,14 @@ def test_inset_flag_hides_a_read_from_consumers_without_deleting_it():
     ]
     assert [is_inset(r) for r in reads] == [True, False, False]
     assert [r["text"] for r in live_detections(reads)] == ["310", "5"]
+
+
+def test_is_recorded_keymap_page_matches_the_volumes_record_not_raw(tmp_path):
+    (tmp_path / "keymaps.json").write_text('{"keys": ["p1__1"]}')
+    (tmp_path / "raw").mkdir()
+    assert is_recorded_keymap_page(tmp_path / "p1__1.jpg")
+    assert not is_recorded_keymap_page(tmp_path / "p1__2.jpg")
+    # The key-map chain's own full-resolution copy is never excluded.
+    assert not is_recorded_keymap_page(tmp_path / "raw" / "p1__1.jpg")
+    # No record, no key map.
+    assert not is_recorded_keymap_page(tmp_path / "raw" / "p2.jpg")

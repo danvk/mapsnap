@@ -125,6 +125,19 @@ def recorded_keymap_keys(volume: Path) -> set[str]:
         return set()
 
 
+def is_recorded_keymap_page(image_path: str | Path) -> bool:
+    """Whether a page image is one its volume's ``keymaps.json`` records as a key map.
+
+    The key-map chain georeferences a key map from its full-resolution copy in
+    ``raw/``, so the page itself must stay out of the ordinary page path: read
+    as a street sheet it is placed at street-sheet scale, 9-29x too large, and
+    was published a second time in the main annotation (#542). The record sits
+    beside the pages, so a scan under ``raw/`` never matches.
+    """
+    path = Path(image_path)
+    return image_stem(str(path)) in recorded_keymap_keys(path.parent)
+
+
 def split_parent(keymap_json: Path) -> bool:
     """Whether the sheet behind a ``<stem>.keymap.json`` has been cut into panels.
 

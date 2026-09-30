@@ -179,3 +179,19 @@ def test_readme_states_the_license():
     text = readme(SITE)
     assert "Open Database License" in text
     assert "https://data.mapsnap.org/runs/v1.3" in text
+
+
+def test_a_key_map_only_volume_counts_as_published_and_links_its_key_map():
+    only = row(
+        "k",
+        status="published: key map only",
+        main="",
+        keymap="k.keymap.iiif.json",
+        sheets_placed="0",
+    )
+    totals = Totals()
+    totals.add(only)
+    assert totals.published == 1
+    html = state_page("NY", [only], SITE)
+    assert '<tr class="withheld">' not in html
+    assert "iiif/loc/k.keymap.iiif.json" in html

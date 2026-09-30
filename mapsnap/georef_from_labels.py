@@ -39,6 +39,7 @@ from mapsnap.keymap.locate import (
     region_scale_m_per_px,
     resolve_keymaps,
 )
+from mapsnap.keymap.records import is_recorded_keymap_page
 from mapsnap.osm_to_centerlines import load_centerlines
 from mapsnap.streets import (
     DIRECTION_WORDS,
@@ -3886,6 +3887,32 @@ def process_deferred_image(
     return ProcessResult(success=True, scale_deg_per_px=scale, center=center)
 
 
+def georeferenceable_images(
+    images: list[str], geocode_keymaps: bool = False
+) -> list[str]:
+    """The images to georeference as street sheets: all but the key-map pages.
+
+    A key-map index page has no street-sheet geometry to fit: one with a sibling
+    ``<stem>.keymap.json``, or one its volume's keymaps.json records. The key-map
+    chain writes its sidecars under raw/, so the sibling test alone never fires on
+    a mirrored volume, and those key maps were placed as pages too (#542).
+    ``geocode_keymaps`` keeps them, as the key-map chain asks for its raw/ copies.
+    """
+    kept = []
+    for image_path in images:
+        stem = image_stem(str(image_path))
+        keymap_path = os.path.join(os.path.dirname(image_path), f"{stem}.keymap.json")
+        is_keymap = os.path.exists(keymap_path) or is_recorded_keymap_page(image_path)
+        if is_keymap and not geocode_keymaps:
+            print(
+                f"Skipping {image_path}: key-map page (pass --geocode_keymaps to geocode)",
+                file=sys.stderr,
+            )
+        else:
+            kept.append(image_path)
+    return kept
+
+
 def main() -> None:
     global MAX_CONSENSUS_GCPS
     parser = argparse.ArgumentParser(
@@ -4135,20 +4162,7 @@ def main() -> None:
         args.centerlines = str(centerlines)
         print(f"Using centerlines: {args.centerlines}", file=sys.stderr)
 
-    # A key-map index page (one with a sibling <stem>.keymap.json) has no streets to fit, so
-    # ignore it for georeferencing. Other images still require a <stem>.streets.json downstream.
-    kept_images = []
-    for image_path in args.images:
-        stem = image_stem(str(image_path))
-        keymap_path = os.path.join(os.path.dirname(image_path), f"{stem}.keymap.json")
-        if os.path.exists(keymap_path) and not args.geocode_keymaps:
-            print(
-                f"Skipping {image_path}: key-map page (pass --geocode_keymaps to geocode)",
-                file=sys.stderr,
-            )
-        else:
-            kept_images.append(image_path)
-    args.images = kept_images
+    args.images = georeferenceable_images(args.images, args.geocode_keymaps)
 
     force_intersection: tuple[int, int] | None = None
     if args.force_intersection is not None:

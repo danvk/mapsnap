@@ -19,6 +19,7 @@ from mapsnap.georef_from_labels import (
     confidence_relaxed_threshold,
     correct_square_feature_dirs,
     dominant_axis_near,
+    georeferenceable_images,
     is_rotation_outlier,
     label_features,
     page_diagonal_m,
@@ -2183,3 +2184,16 @@ def test_a_sheet_sized_fit_is_plausible_and_a_town_sized_one_is_not():
     orleans = page_diagonal_m(page_affine(1 / 0.044), width, height)
     assert 15_000 < orleans < 20_000
     assert not page_extent_is_plausible(orleans)
+
+
+def test_georeferenceable_images_skips_recorded_and_sibling_key_maps(tmp_path):
+    (tmp_path / "keymaps.json").write_text('{"keys": ["p0"]}')
+    (tmp_path / "p9.keymap.json").write_text("{}")
+    (tmp_path / "raw").mkdir()
+    images = [str(tmp_path / f"{stem}.jpg") for stem in ("p0", "p1", "p9")]
+    # p0 is recorded, p9 has a sibling key-map sidecar: only p1 is a street sheet.
+    assert georeferenceable_images(images) == [str(tmp_path / "p1.jpg")]
+    assert georeferenceable_images(images, geocode_keymaps=True) == images
+    # The key-map chain's raw/ copy is not recorded beside itself, so it is kept.
+    raw = [str(tmp_path / "raw" / "p0.jpg")]
+    assert georeferenceable_images(raw) == raw

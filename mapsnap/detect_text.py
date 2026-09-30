@@ -19,6 +19,7 @@ from tqdm import tqdm
 
 from mapsnap.ctc_vocab_decode import HINT_STRINGS, generate_vocab_strings
 from mapsnap.keymap.locate import KeymapLocator, page_key, resolve_keymaps
+from mapsnap.keymap.records import is_recorded_keymap_page
 from mapsnap.osm_to_centerlines import load_centerlines
 from mapsnap.streets import build_block_index, polygon_side_lengths
 from mapsnap.utils import default_centerlines, drop_sidecar_images, image_stem
@@ -1114,6 +1115,17 @@ def main() -> None:
         print(
             f"Skipping {len(superseded)} split parent page(s): "
             + ", ".join(Path(p).name for p in superseded),
+            file=sys.stderr,
+        )
+
+    # Nor a page the volume records as its key map: the key-map chain reads its
+    # full-resolution copy under raw/, and the page path would only mis-place it (#542).
+    keymap_pages = [p for p in images if is_recorded_keymap_page(p)]
+    if keymap_pages:
+        images = [p for p in images if p not in keymap_pages]
+        print(
+            f"Skipping {len(keymap_pages)} key-map page(s), read from raw/ instead: "
+            + ", ".join(Path(p).name for p in keymap_pages),
             file=sys.stderr,
         )
 

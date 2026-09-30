@@ -51,6 +51,7 @@ from mapsnap.keymap.align_page_region import (
     load_adjacency,
 )
 from mapsnap.keymap.fit_keymap import page_number, project
+from mapsnap.keymap.records import recorded_keymap_keys
 from mapsnap.osm_to_centerlines import load_centerlines
 from mapsnap.score_adjacency import truth_adjacent_pairs
 from mapsnap.utils import (
@@ -266,10 +267,12 @@ def load_page_units(volume: Path) -> list[PageUnit]:
     from mapsnap.road_model import page_world_affine
 
     truth_by_key, split_truth_parents = load_truth_units(volume)
+    # A recorded key map is georeferenced by the key-map chain, never as a page (#542).
+    keymaps = recorded_keymap_keys(volume)
     units: list[PageUnit] = []
     for jpg in source_images(volume):
         stem = jpg.stem
-        if "__" in stem:
+        if "__" in stem or stem in keymaps:
             continue
         number = page_number(stem)
         if number is None:
