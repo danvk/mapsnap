@@ -47,6 +47,7 @@ import cv2
 import numpy as np
 import shapely
 from scipy import ndimage
+from shapely.errors import GEOSException
 from shapely.geometry import LineString, MultiPoint, MultiPolygon, Polygon
 from shapely.geometry.base import BaseGeometry
 from shapely.ops import nearest_points, split, transform, unary_union
@@ -76,6 +77,10 @@ COVERAGE_SIMPLIFY_M = 4.0
 # Holes smaller than this are filled; bigger ones are slit open to the outside.
 FILL_HOLE_M2 = 2500.0
 MIN_UNIT_M2 = 20.0
+# A page's units are merged on a grid this fine, closing float-noise seams between them.
+UNIT_SNAP_M = 0.01
+# Mask vertices this close to the one before are dropped.
+REPEATED_POINT_M = 0.05
 MAX_CUT_DEPTH = 12
 
 
@@ -483,10 +488,19 @@ def dissolve_pages(
 
     Only a neighbour whose footprint covers most of the stray can take it: a mask
     reaching past its own scan makes Allmaps fail to triangulate the map.
+
+    A page's units are merged on a UNIT_SNAP_M grid. Two units meeting along the
+    same cut, each clipped separately, can miss each other by float noise; a plain
+    union would leave them as two pieces and the smaller one would be dropped as a
+    stray no neighbour can show (Brooklyn 1951 p57 lost 33,126 m^2 this way).
     """
-    shapes: dict[int, BaseGeometry] = {}
+    by_page: dict[int, list[Polygon]] = {}
     for polygon, page in units:
-        shapes[page] = unary_union([shapes.get(page, Polygon()), polygon])
+        by_page.setdefault(page, []).append(polygon)
+    shapes: dict[int, BaseGeometry] = {
+        page: shapely.union_all(polygons, grid_size=UNIT_SNAP_M)
+        for page, polygons in by_page.items()
+    }
     for _ in range(3):
         moved = False
         for page in list(shapes):
@@ -542,6 +556,28 @@ def fill_enclosed_holes(
         if best_page is not None:
             piece = hole.intersection(footprints[best_page])
             shapes[best_page] = unary_union([shapes.get(best_page, Polygon()), piece])
+
+
+def without_near_duplicates(polygon: Polygon) -> Polygon:
+    """The polygon without vertices within REPEATED_POINT_M of the one before.
+
+    Snap-rounding units onto the UNIT_SNAP_M grid leaves pairs of vertices a
+    centimetre apart, and Allmaps fails to triangulate masks with edges that short
+    under some renderings. The polygon comes back unchanged if dropping them would
+    make it invalid (or collapse a ring) or move its area by more than 0.1%.
+    """
+    try:
+        cleaned = shapely.remove_repeated_points(polygon, REPEATED_POINT_M)
+    except GEOSException:  # a ring collapsed below three points
+        return polygon
+    if (
+        not isinstance(cleaned, Polygon)
+        or cleaned.is_empty
+        or not cleaned.is_valid
+        or abs(cleaned.area - polygon.area) > 0.001 * polygon.area
+    ):
+        return polygon
+    return cleaned
 
 
 def owned_cells_hull(
@@ -611,7 +647,9 @@ def compute_region_clip_masks(
         )
         if not parts:
             continue
-        main = _remove_spike_vertices(max(parts, key=lambda p: p.area))
+        main = without_near_duplicates(
+            _remove_spike_vertices(max(parts, key=lambda p: p.area))
+        )
         if main.is_empty or len(main.exterior.coords) < 4:
             continue
         masks[page] = Polygon([grid.to_lonlat(x, y) for x, y in main.exterior.coords])

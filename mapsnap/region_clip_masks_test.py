@@ -26,6 +26,7 @@ from mapsnap.region_clip_masks import (
     region_map_path,
     region_ownership,
     without_holes,
+    without_near_duplicates,
 )
 
 # Near the equator: 1 px = 1e-5 degrees = 1.11 m, the same east and north.
@@ -283,3 +284,15 @@ def test_compute_region_clip_masks_meet_on_the_street_between_the_pages(tmp_path
 
 def test_compute_region_clip_masks_needs_images():
     assert compute_region_clip_masks([georef(0)], {}, raw_paths=None) == [None]
+
+
+def test_without_near_duplicates_drops_centimetre_edges():
+    square = Polygon([(0, 0), (10, 0), (10, 0.01), (10, 10), (0, 10)])
+    cleaned = without_near_duplicates(square)
+    assert len(cleaned.exterior.coords) == 5
+    assert cleaned.area == pytest.approx(square.area, rel=1e-3)
+
+
+def test_without_near_duplicates_keeps_a_polygon_it_would_break():
+    tiny = Polygon([(0, 0), (0.03, 0), (0.03, 0.03), (0, 0.03)])
+    assert without_near_duplicates(tiny).equals(tiny)
