@@ -101,3 +101,37 @@ uv run python -m mapsnap.train_street_recognizer render-review \
     data/ocr_finetune_cache --out review.html   # eyeball before training
 uv run python -m mapsnap.train_street_recognizer train data/ocr_finetune_cache
 ```
+
+## region_unet.pt
+
+The page **content-region** model (#226, PR #355): a whole-page UNet (base 24,
+GroupNorm) that predicts, per pixel of a letterboxed 512² page, whether the
+position holds content exclusive to that page rather than margin, title block,
+or a strip duplicated from a neighbour. Labels are the OIM multimask
+selectors in each truth volume's `main.iiif.json`, rasterized.
+
+Consumed by `mapsnap region data/<vol>` (writes `artifacts/region/<stem>.png`),
+which feeds the volume viewer's Page / Region / P(road) toggle and the
+reconciler's `--region-overlap` factor (#352).
+
+**Current weights (2026-09-08)** were trained on 18 truth volumes (1,518
+pages), Hudson held out: held-out IoU **0.856** (mean; median 0.891). Two
+things differ from the #355 training set. Columbus 1951 vol 3 is excluded:
+its OIM truth has no multimask, so its selectors are whole-sheet rectangles
+that teach the model to paint margins as content. New Orleans 1896 vol 2 is
+included with its truth re-exported after OIM's multimask was saved; the
+#355 weights had learned its stale whole-sheet selectors and predicted 97% of
+each sheet as content there (IoU 0.744 against the real mask; 0.911 now).
+Measured at published poses, that pollution showed as a good-page median
+region overlap of 20–23% on those two volumes against 2–6% elsewhere; after
+this retrain both sit at 2–4%.
+
+Retrain (about 2 h on MPS at 10–11 min per epoch):
+
+```
+uv run python -m mapsnap.region_model train $(ls -d data/*/ | grep -v 'columbus_oh_1951_vol_3\|hudson_co_nj_1950_vol_9') --val data/hudson_co_nj_1950_vol_9
+```
+
+Verify with the corpus overlap measurement in #352 (good-page median overlap
+per volume) and the held-out IoU the trainer prints; #355's ablations
+(longer training, base 32) still hold and are not worth repeating.
