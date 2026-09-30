@@ -16,9 +16,9 @@ panel. Scoring pipeline output against OIM mixes in pose and split errors; see
 Defects (no truth needed), on the ground under each annotation's own transform:
 
 - ``overlap``: the sum of mask areas less their union, as a share of the union;
-- ``gaps``: holes enclosed by the mosaic (gaps between pages are closed by 4 m
-  first), as a share of the union -- including ground no page maps, so compare
-  against the same poses without masks;
+- ``gaps``: ground the masks hide -- holes enclosed by the mosaic (gaps between
+  pages are closed by 4 m first) that some page's scan covers, as a share of the
+  union. Ground no scan covers is left out: no masker could fill it;
 - ``slivers``: mask area narrower than 4 m, as a share of mask area;
 - ``vertices_median`` / ``vertices_max``: selector complexity;
 - ``invalid``: self-intersecting or degenerate selectors;
@@ -230,6 +230,8 @@ class GroundMask:
     index: int
     key: str
     polygon: Polygon
+    # The whole scan the image is drawn on (a split panel's whole sheet).
+    scan: Polygon
 
     @property
     def sheet(self) -> str:
@@ -249,8 +251,12 @@ def ground_masks(items: list[dict]) -> tuple[list[GroundMask], LocalFrame | None
         if frame is None:
             frame = LocalFrame(*lonlat[0])
         polygon = Polygon([frame.to_m(lon, lat) for lon, lat in lonlat]).buffer(0)
+        source = item["target"]["source"]
+        width, height = source["width"], source["height"]
+        corners = [(0, 0), (width, 0), (width, height), (0, height)]
+        scan = Polygon([frame.to_m(*transform(x, y)) for x, y in corners])
         if not polygon.is_empty:
-            masks.append(GroundMask(index, image_key(item), polygon))
+            masks.append(GroundMask(index, image_key(item), polygon, scan))
     return masks, frame
 
 
@@ -299,11 +305,21 @@ def overlap_areas(masks: list[Polygon]) -> list[float]:
     return areas
 
 
-def gap_areas(masks: list[Polygon], union: BaseGeometry) -> list[float]:
-    """Each mask's share of the enclosed gaps, split by the length of gap edge it borders."""
+def enclosed_gaps(masks: list[GroundMask]) -> BaseGeometry:
+    """Ground the masks hide: holes the mosaic encloses that some scan does show.
+
+    A hole no scan covers is ground no sheet maps, which no masker could fill.
+    """
+    union = unary_union([mask.polygon for mask in masks])
+    holes = filled_mosaic(union).difference(union)
+    return holes.intersection(unary_union([mask.scan for mask in masks]))
+
+
+def gap_areas(masks: list[Polygon], gaps: BaseGeometry) -> list[float]:
+    """Each mask's share of the gaps, split by the length of gap edge it borders."""
     tree = STRtree(masks)
     areas = [0.0] * len(masks)
-    for hole in polygons_of(filled_mosaic(union).difference(union)):
+    for hole in polygons_of(gaps):
         edge = hole.boundary
         borders = {
             int(j): edge.intersection(masks[j].buffer(GAP_CLOSE_M)).length
@@ -343,7 +359,7 @@ def image_defect_shares(
     polygons = [mask.polygon for mask in masks]
     union = unary_union(polygons)
     overlaps = overlap_areas(polygons)
-    gaps = gap_areas(polygons, union)
+    gaps = gap_areas(polygons, enclosed_gaps(masks))
     off_street = (
         off_street_seam_lengths(polygons, union, near_streets)
         if near_streets is not None
@@ -412,7 +428,7 @@ def defect_summary(
     polygons = [mask.polygon for mask in masks]
     union = unary_union(polygons)
     total = sum(polygon.area for polygon in polygons)
-    gaps = filled_mosaic(union).difference(union).area
+    gaps = enclosed_gaps(masks).area
     opened = [
         polygon.buffer(-SLIVER_HALF_WIDTH_M, join_style="mitre").buffer(
             SLIVER_HALF_WIDTH_M, join_style="mitre"

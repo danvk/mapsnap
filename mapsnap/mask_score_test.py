@@ -10,6 +10,7 @@ from mapsnap.mask_score import (
     LocalFrame,
     agreement_summary,
     defect_summary,
+    enclosed_gaps,
     gap_areas,
     ground_masks,
     image_agreements,
@@ -157,18 +158,13 @@ def test_defect_summary_measures_overlap_and_enclosed_gaps():
     assert overlapping["overlap"] == pytest.approx(0.1 / 2.0, rel=0.01)
     assert overlapping["gaps"] == pytest.approx(0)
     assert overlapping["invalid"] == 0
-    # A 1000 px ring of masks around an unmasked middle: the middle is a gap.
+    # A ring of masks around an unmasked middle. The middle is a gap only where
+    # a sheet's scan covers it: p2 and p4 are strips masked out of whole sheets.
     ring = [annotation("p1", SHEET, x0=x0) for x0 in (0, 1000, 2000)]
-    ring[1] = annotation(
-        "p2", [(0.0, 0.0), (1000.0, 0.0), (1000.0, 100.0), (0.0, 100.0)], x0=1000
-    )
-    ring.append(
-        annotation(
-            "p4",
-            [(0.0, 900.0), (1000.0, 900.0), (1000.0, 1000.0), (0.0, 1000.0)],
-            x0=1000,
-        )
-    )
+    top = [(0.0, 0.0), (1000.0, 0.0), (1000.0, 100.0), (0.0, 100.0)]
+    bottom = [(0.0, 900.0), (1000.0, 900.0), (1000.0, 1000.0), (0.0, 1000.0)]
+    ring[1] = annotation("p2", top, x0=1000)
+    ring.append(annotation("p4", bottom, x0=1000))
     holed = defect_summary(ring)
     assert holed["gaps"] == pytest.approx(800_000 / 2_200_000, rel=0.01)
 
@@ -205,11 +201,24 @@ def test_gap_areas_go_to_the_masks_bordering_the_gap():
     # A 100 x 100 hole: two tall masks either side, two short ones above and below.
     west, east = box(0, 0, 100, 300), box(200, 0, 300, 300)
     north, south = box(100, 200, 200, 300), box(100, 0, 200, 100)
-    masks = [west, east, north, south]
-    areas = gap_areas(masks, west.union(east).union(north).union(south))
+    areas = gap_areas([west, east, north, south], box(100, 100, 200, 200))
     assert sum(areas) == pytest.approx(10_000, rel=0.01)
     assert areas[0] == pytest.approx(areas[1], rel=0.05)
     assert areas[0] == pytest.approx(2_500, rel=0.1)
+
+
+def test_enclosed_gaps_count_only_ground_a_scan_covers():
+    # Four masks ring a 100 x 100 hole; only the west scan reaches into it.
+    def mask(key: str, polygon, scan=None) -> GroundMask:
+        return GroundMask(0, key, polygon, scan or polygon)
+
+    ring = [
+        mask("p1", box(0, 0, 100, 300), scan=box(0, 0, 150, 300)),
+        mask("p2", box(200, 0, 300, 300)),
+        mask("p3", box(100, 200, 200, 300)),
+        mask("p4", box(100, 0, 200, 100)),
+    ]
+    assert enclosed_gaps(ring).area == pytest.approx(50 * 100)
 
 
 def test_off_street_seam_lengths_skip_seams_on_streets_and_the_outline():
@@ -226,8 +235,8 @@ def test_off_street_seam_lengths_skip_seams_on_streets_and_the_outline():
 
 
 def test_image_defect_shares_charge_overlap_seams_and_failures():
-    left = GroundMask(0, "p1", box(0, 0, 100, 100))
-    right = GroundMask(1, "p2", box(80, 0, 180, 100))
+    left = GroundMask(0, "p1", box(0, 0, 100, 100), box(0, 0, 100, 100))
+    right = GroundMask(1, "p2", box(80, 0, 180, 100), box(80, 0, 180, 100))
     # 2000 m^2 of overlap, 1000 to each 10,000 m^2 page.
     shares = dict(image_defect_shares([left, right], None, {}))
     assert shares == pytest.approx({"p1": 0.1, "p2": 0.1})
@@ -235,7 +244,7 @@ def test_image_defect_shares_charge_overlap_seams_and_failures():
     shares = dict(image_defect_shares([left, right], None, {1: 0.5}))
     assert shares["p2"] == pytest.approx(0.5 + 0.5 * 0.1)
     # A seam off the streets costs a 5 m strip along each side.
-    touching = GroundMask(1, "p2", box(100, 0, 200, 100))
+    touching = GroundMask(1, "p2", box(100, 0, 200, 100), box(100, 0, 200, 100))
     nowhere = LineString([(1000, 0), (1000, 1)]).buffer(10)
     shares = dict(image_defect_shares([left, touching], nowhere, {}))
     assert shares["p1"] == pytest.approx(90 * 5 / 10_000, rel=0.01)
