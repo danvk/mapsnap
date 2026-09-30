@@ -33,6 +33,11 @@ Defects (no truth needed), on the ground under each annotation's own transform:
   quarter size, with and without a sub-pixel jitter) -- slivers and vertices
   grazing a GCP show up here even when the viewer's own rendering happens to pass.
 
+``hidden_interior`` (tracked apart from defect_share): the share of the mosaic's
+area that only one sheet's scan covers, away from its margins, and no mask shows.
+It moves when a masker drops a sheet's own content, but OIM's masks score 2-13% on
+it too (blank paper, water), so compare maskers on it rather than read it alone.
+
 ``defect_share`` combines these into one number: the share of each image's mask
 that is drawn wrong, averaged with one weight per sheet. Wrong ground is the
 image's half of each overlap, its part of the gaps it borders, its slivers, and a
@@ -74,6 +79,9 @@ SLIVER_HALF_WIDTH_M = 2.0
 STREET_TOLERANCE_M = 10.0
 # Mask edges within this distance of the mosaic's outline are outline, not seams.
 OUTLINE_MARGIN_M = 5.0
+# Sheet margins, borders and title strips lie within this share of the sheet's
+# shorter side from its edge; content deeper in is never margin.
+MARGIN_SHARE = 0.05
 # A seam through a block is charged as a strip this wide (half to each side): where
 # a misalignment between neighbouring sheets shows.
 SEAM_BAND_M = 10.0
@@ -232,6 +240,8 @@ class GroundMask:
     polygon: Polygon
     # The whole scan the image is drawn on (a split panel's whole sheet).
     scan: Polygon
+    # The scan less a MARGIN_SHARE band along its edges: where margins can't be.
+    interior: Polygon
 
     @property
     def sheet(self) -> str:
@@ -255,8 +265,16 @@ def ground_masks(items: list[dict]) -> tuple[list[GroundMask], LocalFrame | None
         width, height = source["width"], source["height"]
         corners = [(0, 0), (width, 0), (width, height), (0, height)]
         scan = Polygon([frame.to_m(*transform(x, y)) for x, y in corners])
+        inset = MARGIN_SHARE * min(width, height)
+        inner = [
+            (inset, inset),
+            (width - inset, inset),
+            (width - inset, height - inset),
+            (inset, height - inset),
+        ]
+        interior = Polygon([frame.to_m(*transform(x, y)) for x, y in inner])
         if not polygon.is_empty:
-            masks.append(GroundMask(index, image_key(item), polygon, scan))
+            masks.append(GroundMask(index, image_key(item), polygon, scan, interior))
     return masks, frame
 
 
@@ -341,6 +359,39 @@ def off_street_seam_lengths(
         mask.boundary.difference(outline).difference(near_streets).length
         for mask in masks
     ]
+
+
+def hidden_interior(masks: list[GroundMask]) -> list[tuple[str, float]]:
+    """Ground (m^2) each sheet alone covers, away from its margins, that no mask shows.
+
+    Only one placed sheet's scan covers it, so no other page could show it instead,
+    and it lies more than MARGIN_SHARE of the sheet in from the scan's edge, so it
+    is not margin. It catches a masker dropping a sheet's own content (Brooklyn
+    1951 p57, #552), but legitimate clipping lands here too: blank paper beyond the
+    mapped area, water, the paper around split panels, and an unplaced panel's part
+    of its sheet. OIM's own masks score 2-13% on it, so it is a comparison between
+    maskers on the same poses, not a defect in itself. Sheets are keyed by page, a
+    split sheet's panels together.
+    """
+    sheets: dict[str, GroundMask] = {}
+    for mask in masks:
+        sheets.setdefault(mask.sheet, mask)
+    scans = [mask.scan for mask in sheets.values()]
+    tree = STRtree(scans)
+    shared = unary_union(
+        [
+            scans[i].intersection(scans[j])
+            for i in range(len(scans))
+            for j in tree.query(scans[i])
+            if j > i
+        ]
+    )
+    shown = unary_union([mask.polygon for mask in masks])
+    hidden = []
+    for sheet, mask in sheets.items():
+        area = mask.interior.difference(shared).difference(shown).area
+        hidden.append((sheet, area))
+    return hidden
 
 
 def image_defect_shares(
@@ -464,6 +515,14 @@ def defect_summary(
     summary["worst"] = [
         (key, round(share, 3))
         for key, share in sorted(shares, key=lambda row: -row[1])[:5]
+    ]
+    # Tracked apart from defect_share while its behaviour is checked.
+    hidden = hidden_interior(masks)
+    hidden_total = sum(area for _, area in hidden)
+    summary["hidden_interior"] = hidden_total / union.area
+    summary["hidden_interior_m2"] = hidden_total
+    summary["hidden_interior_worst"] = [
+        (sheet, round(area)) for sheet, area in sorted(hidden, key=lambda r: -r[1])[:5]
     ]
     return summary
 
