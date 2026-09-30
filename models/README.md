@@ -111,8 +111,11 @@ or a strip duplicated from a neighbour. Labels are the OIM multimask
 selectors in each truth volume's `main.iiif.json`, rasterized.
 
 Consumed by `mapsnap region data/<vol>` (writes `artifacts/region/<stem>.png`),
-which feeds the volume viewer's Page / Region / P(road) toggle and the
-reconciler's `--region-overlap` factor (#352).
+which feeds the volume viewer's Page / Region / P(road) toggle, the
+reconciler's `--region-overlap` factor (#352) and the clip masks
+(`mapsnap iiif --masks region`, the default; #544). `mapsnap iiif` predicts any
+maps that are missing. Maps written before #530 retrained this model are stale:
+refresh them with `mapsnap region data/<vol> --force`.
 
 **Current weights (2026-09-08)** were trained on 18 truth volumes (1,518
 pages), Hudson held out: held-out IoU **0.856** (mean; median 0.891). Two

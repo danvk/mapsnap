@@ -13,6 +13,7 @@ from mapsnap.mask_score import (
     enclosed_gaps,
     gap_areas,
     ground_masks,
+    hidden_interior,
     image_agreements,
     image_defect_shares,
     image_key,
@@ -210,7 +211,7 @@ def test_gap_areas_go_to_the_masks_bordering_the_gap():
 def test_enclosed_gaps_count_only_ground_a_scan_covers():
     # Four masks ring a 100 x 100 hole; only the west scan reaches into it.
     def mask(key: str, polygon, scan=None) -> GroundMask:
-        return GroundMask(0, key, polygon, scan or polygon)
+        return GroundMask(0, key, polygon, scan or polygon, scan or polygon)
 
     ring = [
         mask("p1", box(0, 0, 100, 300), scan=box(0, 0, 150, 300)),
@@ -235,8 +236,12 @@ def test_off_street_seam_lengths_skip_seams_on_streets_and_the_outline():
 
 
 def test_image_defect_shares_charge_overlap_seams_and_failures():
-    left = GroundMask(0, "p1", box(0, 0, 100, 100), box(0, 0, 100, 100))
-    right = GroundMask(1, "p2", box(80, 0, 180, 100), box(80, 0, 180, 100))
+    left = GroundMask(
+        0, "p1", box(0, 0, 100, 100), box(0, 0, 100, 100), box(0, 0, 100, 100)
+    )
+    right = GroundMask(
+        1, "p2", box(80, 0, 180, 100), box(80, 0, 180, 100), box(80, 0, 180, 100)
+    )
     # 2000 m^2 of overlap, 1000 to each 10,000 m^2 page.
     shares = dict(image_defect_shares([left, right], None, {}))
     assert shares == pytest.approx({"p1": 0.1, "p2": 0.1})
@@ -244,7 +249,9 @@ def test_image_defect_shares_charge_overlap_seams_and_failures():
     shares = dict(image_defect_shares([left, right], None, {1: 0.5}))
     assert shares["p2"] == pytest.approx(0.5 + 0.5 * 0.1)
     # A seam off the streets costs a 5 m strip along each side.
-    touching = GroundMask(1, "p2", box(100, 0, 200, 100), box(100, 0, 200, 100))
+    touching = GroundMask(
+        1, "p2", box(100, 0, 200, 100), box(100, 0, 200, 100), box(100, 0, 200, 100)
+    )
     nowhere = LineString([(1000, 0), (1000, 1)]).buffer(10)
     shares = dict(image_defect_shares([left, touching], nowhere, {}))
     assert shares["p1"] == pytest.approx(90 * 5 / 10_000, rel=0.01)
@@ -267,3 +274,16 @@ def test_defect_summary_charges_invalid_selectors_in_full():
     summary = defect_summary(items)
     assert summary["defect_share"] == pytest.approx(0.5, abs=0.01)
     assert summary["worst"][0][0] == "p2"
+
+
+def test_hidden_interior_counts_a_sheets_own_ground_no_mask_shows():
+    def sheet(key: str, mask, scan) -> GroundMask:
+        return GroundMask(0, key, mask, scan, scan.buffer(-5, join_style="mitre"))
+
+    # p1 alone covers x 0..100, but masks only x 0..50; p2's scan overlaps p1's.
+    p1 = sheet("p1", box(0, 0, 50, 100), box(0, 0, 100, 100))
+    p2 = sheet("p2", box(100, 0, 200, 100), box(80, 0, 200, 100))
+    hidden = dict(hidden_interior([p1, p2]))
+    # p1's interior x 5..95 less p2's scan (x >= 80) less its own mask (x < 50).
+    assert hidden["p1"] == pytest.approx(30 * 90)
+    assert hidden["p2"] == pytest.approx(0)

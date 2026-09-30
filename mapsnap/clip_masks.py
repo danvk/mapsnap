@@ -30,7 +30,7 @@ import numpy as np
 from PIL import Image, ImageDraw
 from shapely import make_valid
 from shapely.errors import GEOSException
-from shapely.geometry import GeometryCollection, LineString, MultiPolygon, Polygon
+from shapely.geometry import GeometryCollection, LineString, MultiPolygon, Polygon, box
 from shapely.geometry import mapping as geom_mapping
 from shapely.geometry import shape as geom_shape
 from shapely.geometry.base import BaseGeometry, BaseMultipartGeometry
@@ -921,6 +921,34 @@ def compute_all_clip_masks(
     return masks
 
 
+# Masks stay this many canvas pixels inside the image. A mask edge along the image
+# border runs through the corner GCPs a one-GCP fit places on it, and Allmaps fails
+# to triangulate a map whose GCP lies on a mask edge (#544).
+BORDER_INSET_PX = 4.0
+
+
+def inset_from_border(polygon: Polygon, width: float, height: float) -> Polygon:
+    """A canvas-pixel mask kept BORDER_INSET_PX inside a width x height image.
+
+    The largest piece left, or the polygon unchanged if the inset would empty it.
+    """
+    inner = box(
+        BORDER_INSET_PX,
+        BORDER_INSET_PX,
+        width - BORDER_INSET_PX,
+        height - BORDER_INSET_PX,
+    )
+    if inner.covers(polygon):
+        return polygon
+    clipped = polygon.buffer(0).intersection(inner)
+    pieces = [
+        piece
+        for piece in getattr(clipped, "geoms", [clipped])
+        if isinstance(piece, Polygon) and not piece.is_empty and piece.area > 0
+    ]
+    return max(pieces, key=lambda piece: piece.area) if pieces else polygon
+
+
 def geo_polygon_to_svg(
     geo_polygon: Polygon | MultiPolygon | None,
     georef: dict,
@@ -947,6 +975,7 @@ def geo_polygon_to_svg(
     32% of its area), and the maskless fallback used to emit the whole page
     (fargo p72__1). Masks are intersected with the ring; the maskless fallback
     IS the ring. Falls back to the full-page rectangle only for unsplit pages.
+    A mask is kept BORDER_INSET_PX inside the image; the fallbacks are not.
     Raises ValueError for MultiPolygon input.
     """
     georef_width = float(georef["width"])
@@ -1026,6 +1055,7 @@ def geo_polygon_to_svg(
         ]
         if not pieces:
             return ring_svg(ring_polygon)
-        return ring_svg(max(pieces, key=lambda g: g.area))
-    points = " ".join(f"{x},{y}" for x, y in canvas_points)
-    return f'<svg><polygon points="{points}" /></svg>'
+        largest = max(pieces, key=lambda g: g.area)
+        return ring_svg(inset_from_border(largest, source_width, source_height))
+    mask_polygon = Polygon(canvas_points)
+    return ring_svg(inset_from_border(mask_polygon, source_width, source_height))

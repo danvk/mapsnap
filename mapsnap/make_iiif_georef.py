@@ -41,6 +41,7 @@ from mapsnap.clip_masks import compute_all_clip_masks, geo_polygon_to_svg
 from mapsnap.compare_iiif_georef import redundant_skeleton_keys
 from mapsnap.keymap.records import recorded_keymap_keys
 from mapsnap.osm_to_centerlines import load_centerlines
+from mapsnap.region_clip_masks import compute_region_clip_masks
 from mapsnap.split import panels_json_path, read_panels_json
 from mapsnap.utils import default_centerlines, jpeg_dimensions, label_to_page_key
 
@@ -53,6 +54,13 @@ CREATOR = {"type": "Software", "name": "mapsnap", "homepage": "https://mapsnap.o
 # The GCPs' coordinates are OpenStreetMap positions, so the annotations are a
 # derivative of OSM and share its license.
 RIGHTS = "https://opendatacommons.org/licenses/odbl/1-0/"
+
+
+# Clip maskers, by --masks name; each takes compute_all_clip_masks's arguments.
+MASKERS = {
+    "region": compute_region_clip_masks,
+    "blocks": compute_all_clip_masks,
+}
 
 
 def georef_path_to_page_key(path: str) -> str | None:
@@ -1071,6 +1079,16 @@ def main() -> None:
         help="GeoJSON centerlines file for block-based clipping masks",
     )
     parser.add_argument(
+        "--masks",
+        choices=sorted(MASKERS),
+        default="region",
+        help=(
+            "How clip masks divide the ground between pages: 'region' from the "
+            "content-region model, cut along street blocks (#544); 'blocks' by "
+            "each block's ink, the masker before that. Both need --centerlines."
+        ),
+    )
+    parser.add_argument(
         "--no-clip-masks",
         action="store_true",
         help=(
@@ -1205,9 +1223,9 @@ def main() -> None:
     if args.centerlines:
         centerlines_geojson: dict = load_centerlines(args.centerlines)
         all_georefs = [georef for _, _, georef, _, _ in all_valid_items]
-        print("Computing block-based clipping masks...", file=sys.stderr)
+        print(f"Computing {args.masks} clipping masks...", file=sys.stderr)
         debug_blocks: list[dict] | None = [] if args.debug_blocks else None
-        geo_masks = compute_all_clip_masks(
+        geo_masks = MASKERS[args.masks](
             all_georefs,
             centerlines_geojson,
             debug_blocks_out=debug_blocks,
