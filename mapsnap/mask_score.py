@@ -28,7 +28,19 @@ Defects (no truth needed), on the ground under each annotation's own transform:
   that cuts through a block. It means little where masks overlap much, since
   an overlapped mask's edge is then not a seam;
 - ``allmaps_failures`` (with ``--allmaps``): maps Allmaps fails to triangulate,
-  as the viewer draws them (app/scripts/triangulate-masks.ts).
+  as the viewer draws them (app/scripts/triangulate-masks.ts);
+  ``allmaps_fragile``: maps that fail under any of several renderings (full and
+  quarter size, with and without a sub-pixel jitter) -- slivers and vertices
+  grazing a GCP show up here even when the viewer's own rendering happens to pass.
+
+``defect_share`` combines these into one number: the share of each image's mask
+that is drawn wrong, averaged with one weight per sheet. Wrong ground is the
+image's half of each overlap, its part of the gaps it borders, its slivers, and a
+5 m strip along each side of a seam that leaves the streets (with
+``--centerlines``). An image Allmaps fails to draw is wrong in full, so with
+``--allmaps`` it is charged its failure rate across renderings; an invalid
+selector always is. Vertex counts are left out: they matter only through slivers
+and failures, which are counted directly.
 """
 
 import argparse
@@ -42,6 +54,7 @@ from collections import defaultdict
 from dataclasses import dataclass
 from pathlib import Path
 
+from shapely import STRtree
 from shapely.geometry import LineString, Point, Polygon, box, shape
 from shapely.geometry.base import BaseGeometry
 from shapely.ops import unary_union
@@ -55,12 +68,15 @@ M_PER_DEGREE = 111_195.0
 UNCLIPPED_SHARE = 0.95
 # Gaps between neighbouring masks up to about twice this wide count as enclosed.
 GAP_CLOSE_M = 4.0
-# Mask area narrower than twice this is a sliver.
+# Mask area narrower than twice this is a sliver (mitred, so a square corner is not).
 SLIVER_HALF_WIDTH_M = 2.0
 # A seam within this distance of a street centerline follows the street.
 STREET_TOLERANCE_M = 10.0
 # Mask edges within this distance of the mosaic's outline are outline, not seams.
 OUTLINE_MARGIN_M = 5.0
+# A seam through a block is charged as a strip this wide (half to each side): where
+# a misalignment between neighbouring sheets shows.
+SEAM_BAND_M = 10.0
 APP_DIR = Path(__file__).resolve().parent.parent / "app"
 POINTS = re.compile(r'points="([^"]*)"')
 
@@ -206,11 +222,25 @@ class LocalFrame:
         )
 
 
-def ground_masks(items: list[dict]) -> tuple[list[Polygon], LocalFrame | None]:
+@dataclass
+class GroundMask:
+    """One annotation's mask on the ground, in a shared local frame (metres)."""
+
+    # Position of the annotation in the page's items (and in Allmaps' map list).
+    index: int
+    key: str
+    polygon: Polygon
+
+    @property
+    def sheet(self) -> str:
+        return self.key.split("__")[0]
+
+
+def ground_masks(items: list[dict]) -> tuple[list[GroundMask], LocalFrame | None]:
     """Each annotation's mask on the ground (metres), under its own transform."""
     frame: LocalFrame | None = None
-    masks: list[Polygon] = []
-    for item in items:
+    masks: list[GroundMask] = []
+    for index, item in enumerate(items):
         transform = page_transform(item)
         points = selector_points(item)
         if transform is None or len(points) < 3:
@@ -218,9 +248,9 @@ def ground_masks(items: list[dict]) -> tuple[list[Polygon], LocalFrame | None]:
         lonlat = [transform(x, y) for x, y in points]
         if frame is None:
             frame = LocalFrame(*lonlat[0])
-        mask = Polygon([frame.to_m(lon, lat) for lon, lat in lonlat]).buffer(0)
-        if not mask.is_empty:
-            masks.append(mask)
+        polygon = Polygon([frame.to_m(lon, lat) for lon, lat in lonlat]).buffer(0)
+        if not polygon.is_empty:
+            masks.append(GroundMask(index, image_key(item), polygon))
     return masks, frame
 
 
@@ -236,6 +266,11 @@ def filled_mosaic(union: BaseGeometry) -> BaseGeometry:
     return unary_union([Polygon(part.exterior) for part in polygons_of(closed)])
 
 
+def mosaic_outline(union: BaseGeometry) -> BaseGeometry:
+    """A band around the mosaic's outer outline: mask edges inside it are not seams."""
+    return filled_mosaic(union).boundary.buffer(OUTLINE_MARGIN_M)
+
+
 def seam_street_share(
     masks: list[Polygon], union: BaseGeometry, streets: list[LineString]
 ) -> tuple[float, float | None]:
@@ -244,12 +279,97 @@ def seam_street_share(
     Seams are mask edges away from the mosaic's filled outline, so both sides of a
     gap between pages count, and the volume's outer edge does not.
     """
-    outline = filled_mosaic(union).boundary.buffer(OUTLINE_MARGIN_M)
-    seams = unary_union([mask.boundary for mask in masks]).difference(outline)
+    seams = unary_union([mask.boundary for mask in masks]).difference(
+        mosaic_outline(union)
+    )
     if seams.length == 0:
         return 0.0, None
     near = unary_union(streets).buffer(STREET_TOLERANCE_M) if streets else Polygon()
     return seams.length, seams.intersection(near).length / seams.length
+
+
+def overlap_areas(masks: list[Polygon]) -> list[float]:
+    """Each mask's share of the ground it overlaps with others: half of each overlap."""
+    tree = STRtree(masks)
+    areas = [0.0] * len(masks)
+    for i, mask in enumerate(masks):
+        for j in tree.query(mask):
+            if j != i:
+                areas[i] += mask.intersection(masks[j]).area / 2
+    return areas
+
+
+def gap_areas(masks: list[Polygon], union: BaseGeometry) -> list[float]:
+    """Each mask's share of the enclosed gaps, split by the length of gap edge it borders."""
+    tree = STRtree(masks)
+    areas = [0.0] * len(masks)
+    for hole in polygons_of(filled_mosaic(union).difference(union)):
+        edge = hole.boundary
+        borders = {
+            int(j): edge.intersection(masks[j].buffer(GAP_CLOSE_M)).length
+            for j in tree.query(hole.buffer(GAP_CLOSE_M))
+        }
+        total = sum(borders.values())
+        for j, length in borders.items():
+            if total > 0:
+                areas[j] += hole.area * length / total
+    return areas
+
+
+def off_street_seam_lengths(
+    masks: list[Polygon], union: BaseGeometry, near_streets: BaseGeometry
+) -> list[float]:
+    """Length (m) of each mask's seams that run more than STREET_TOLERANCE_M from a street."""
+    outline = mosaic_outline(union)
+    return [
+        mask.boundary.difference(outline).difference(near_streets).length
+        for mask in masks
+    ]
+
+
+def image_defect_shares(
+    masks: list[GroundMask],
+    near_streets: BaseGeometry | None,
+    failure_rates: dict[int, float],
+) -> list[tuple[str, float]]:
+    """The share of each image's mask that is drawn wrong, as (key, share).
+
+    Wrong ground is: the image's half of each overlap, its part of the gaps it
+    borders, its slivers, and a SEAM_BAND_M / 2 strip along each side of a seam
+    that leaves the streets (with ``near_streets``). An image Allmaps fails to draw
+    is wrong in full, so it is charged its failure rate across renderings, and the
+    rest of the time the above.
+    """
+    polygons = [mask.polygon for mask in masks]
+    union = unary_union(polygons)
+    overlaps = overlap_areas(polygons)
+    gaps = gap_areas(polygons, union)
+    off_street = (
+        off_street_seam_lengths(polygons, union, near_streets)
+        if near_streets is not None
+        else [0.0] * len(polygons)
+    )
+    shares: list[tuple[str, float]] = []
+    for mask, overlap, gap, seam in zip(masks, overlaps, gaps, off_street):
+        area = mask.polygon.area
+        opened = mask.polygon.buffer(-SLIVER_HALF_WIDTH_M, join_style="mitre").buffer(
+            SLIVER_HALF_WIDTH_M, join_style="mitre"
+        )
+        sliver = mask.polygon.difference(opened).area
+        wrong = min(area, overlap + gap + sliver + seam * SEAM_BAND_M / 2)
+        rate = failure_rates.get(mask.index, 0.0)
+        shares.append((mask.key, rate + (1 - rate) * wrong / area))
+    return shares
+
+
+def sheet_equal(shares: list[tuple[str, float]]) -> float | None:
+    """Mean of per-image values with one weight per sheet."""
+    by_sheet: dict[str, list[float]] = defaultdict(list)
+    for key, value in shares:
+        by_sheet[key.split("__")[0]].append(value)
+    if not by_sheet:
+        return None
+    return statistics.mean(statistics.mean(values) for values in by_sheet.values())
 
 
 def streets_in_frame(
@@ -270,24 +390,41 @@ def streets_in_frame(
     return lines
 
 
-def defect_summary(items: list[dict], centerlines_path: Path | None = None) -> dict:
-    """Overlap, gaps, slivers, selector complexity and validity, and seams on streets."""
+def is_invalid(item: dict) -> bool:
+    """Whether an annotation's selector is degenerate or self-intersecting."""
+    points = selector_points(item)
+    return len(points) < 4 or not Polygon(points).is_valid
+
+
+def defect_summary(
+    items: list[dict],
+    centerlines_path: Path | None = None,
+    failure_rates: list[float] | None = None,
+) -> dict:
+    """Overlap, gaps, slivers, complexity, validity, seams on streets, and defect_share.
+
+    ``failure_rates`` are Allmaps' per-map failure rates (see allmaps_check); an
+    invalid selector counts as failing always.
+    """
     masks, frame = ground_masks(items)
     if not masks or frame is None:
         return {"images": len(items)}
-    union = unary_union(masks)
-    total = sum(mask.area for mask in masks)
+    polygons = [mask.polygon for mask in masks]
+    union = unary_union(polygons)
+    total = sum(polygon.area for polygon in polygons)
     gaps = filled_mosaic(union).difference(union).area
     opened = [
-        mask.buffer(-SLIVER_HALF_WIDTH_M).buffer(SLIVER_HALF_WIDTH_M) for mask in masks
+        polygon.buffer(-SLIVER_HALF_WIDTH_M, join_style="mitre").buffer(
+            SLIVER_HALF_WIDTH_M, join_style="mitre"
+        )
+        for polygon in polygons
     ]
-    slivers = sum(mask.difference(o).area for mask, o in zip(masks, opened))
+    slivers = sum(polygon.difference(o).area for polygon, o in zip(polygons, opened))
     vertices = sorted(max(len(selector_points(item)) - 1, 0) for item in items)
-    invalid = sum(
-        1
-        for item in items
-        if len(selector_points(item)) < 4 or not Polygon(selector_points(item)).is_valid
-    )
+    rates = dict(enumerate(failure_rates or []))
+    for index, item in enumerate(items):
+        if is_invalid(item):
+            rates[index] = 1.0
     summary: dict = {
         "images": len(items),
         "overlap": (total - union.area) / union.area,
@@ -295,18 +432,32 @@ def defect_summary(items: list[dict], centerlines_path: Path | None = None) -> d
         "slivers": slivers / total,
         "vertices_median": statistics.median(vertices),
         "vertices_max": vertices[-1],
-        "invalid": invalid,
+        "invalid": sum(is_invalid(item) for item in items),
     }
+    near_streets = None
     if centerlines_path is not None:
         streets = streets_in_frame(centerlines_path, frame, union)
         summary["seam_m"], summary["seam_on_street"] = seam_street_share(
-            masks, union, streets
+            polygons, union, streets
         )
+        near_streets = (
+            unary_union(streets).buffer(STREET_TOLERANCE_M) if streets else Polygon()
+        )
+    shares = image_defect_shares(masks, near_streets, rates)
+    summary["defect_share"] = sheet_equal(shares)
+    summary["worst"] = [
+        (key, round(share, 3))
+        for key, share in sorted(shares, key=lambda row: -row[1])[:5]
+    ]
     return summary
 
 
-def allmaps_failures(annotation_path: Path) -> list[dict]:
-    """The maps Allmaps fails to triangulate: [{"index", "message"}], via Node."""
+def allmaps_check(annotation_path: Path) -> dict:
+    """Allmaps' verdict on each map, via Node (app/scripts/triangulate-masks.ts).
+
+    ``failures``: the maps that fail as the viewer draws them, [{"index", "message"}];
+    ``failureRates``: each map's share of the checked renderings that fail.
+    """
     result = subprocess.run(
         ["node", "scripts/triangulate-masks.ts", str(annotation_path.resolve())],
         cwd=APP_DIR,
@@ -314,7 +465,7 @@ def allmaps_failures(annotation_path: Path) -> list[dict]:
         text=True,
         check=True,
     )
-    return json.loads(result.stdout.strip().splitlines()[-1])["failures"]
+    return json.loads(result.stdout.strip().splitlines()[-1])
 
 
 def score_annotation(
@@ -327,9 +478,12 @@ def score_annotation(
 ) -> dict:
     """Every score for one annotation file; agreement only when a truth file is given."""
     items = json.loads(annotation_path.read_text())["items"]
-    scores = defect_summary(items, centerlines_path)
-    if allmaps:
-        scores["allmaps_failures"] = len(allmaps_failures(annotation_path))
+    check = allmaps_check(annotation_path) if allmaps else None
+    rates = check["failureRates"] if check else None
+    scores = defect_summary(items, centerlines_path, rates)
+    if check:
+        scores["allmaps_failures"] = len(check["failures"])
+        scores["allmaps_fragile"] = sum(rate > 0 for rate in check["failureRates"])
     if truth_path is not None:
         truth = json.loads(truth_path.read_text())["items"]
         scores.update(agreement_summary(items, truth, oim_dir))
