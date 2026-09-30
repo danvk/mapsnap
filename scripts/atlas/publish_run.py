@@ -23,6 +23,8 @@ Pages and items are filtered to match what the pipeline does now:
   withheld (#525), from the list of such items (``--small-keymaps``);
 - a page that is also the item's key map is dropped: the key-map file has it,
   placed as a key map rather than at street-sheet scale (#542);
+- a skeleton sheet's pages are dropped when any page of its full-color sheet is
+  kept, even when either one is split into panels (#545);
 - an item with no page left is withheld, unless it has a key map, which is
   published on its own.
 
@@ -45,6 +47,7 @@ import numpy as np
 from gazetteer import STATE_CODES_BY_LOWERCASE
 
 from mapsnap.annotation_transform import Transform, page_transform
+from mapsnap.compare_iiif_georef import redundant_skeleton_keys
 from mapsnap.loc_fit import SMALL_VOLUME_MAX_PAGES, SMALL_VOLUME_RADIUS_M
 from mapsnap.make_iiif_georef import CREATOR, RIGHTS
 from mapsnap.osm_snap import MAX_PAGE_EXTENT_M
@@ -172,6 +175,23 @@ def drop_keymap_pages(
     keymap_keys = {page_key(annotation).lower() for annotation in keymap}
     kept = [a for a in annotations if page_key(a).lower() not in keymap_keys]
     dropped = [page_key(a) for a in annotations if page_key(a).lower() in keymap_keys]
+    return kept, dropped
+
+
+def drop_skeleton_pages(annotations: list[dict]) -> tuple[list[dict], list[str]]:
+    """The pages left once skeletons yield to their full-color sheets, and the keys dropped.
+
+    A skeleton sheet (pNs) maps the same ground as its full-color sheet (pN). The
+    pipeline paired them by exact key until #547, so a pair where either sheet was
+    split into panels (p3__1 beside p3s, or p2 beside p2s__1) was published twice.
+    Pairing is make_iiif_georef's, by sheet.
+    """
+    sheets = {page_key(annotation).split("__")[0] for annotation in annotations}
+    skeletons = redundant_skeleton_keys(sheets, sheets)
+    kept = [a for a in annotations if page_key(a).split("__")[0] not in skeletons]
+    dropped = [
+        page_key(a) for a in annotations if page_key(a).split("__")[0] in skeletons
+    ]
     return kept, dropped
 
 
@@ -463,8 +483,12 @@ def main() -> None:
             for entry in page.get("metadata") or []
         }
         pages = filter_pages(annotations, meta.get("sheets", 0), locations.get(item))
+        pages.kept, skeleton_pages = drop_skeleton_pages(pages.kept)
         pages.withheld[:0] = [
             (key, "the key map, published in the key-map file") for key in keymap_pages
+        ] + [
+            (key, "a skeleton sheet; its full-color sheet is published")
+            for key in skeleton_pages
         ]
         status = item_status(
             placed,
@@ -477,6 +501,7 @@ def main() -> None:
         tally["pages dropped: sheet too large"] += pages.too_large
         tally["pages dropped: far from the catalogue location"] += pages.too_far
         tally["pages dropped: the key map, published as a page"] += len(keymap_pages)
+        tally["pages dropped: skeleton of a published sheet"] += len(skeleton_pages)
 
         main_name = keymap_name = ""
         if published and pages.kept:
@@ -510,6 +535,7 @@ def main() -> None:
                 "dropped_over_6km": pages.too_large,
                 "dropped_over_5km_from_location": pages.too_far,
                 "dropped_keymap": len(keymap_pages),
+                "dropped_skeleton": len(skeleton_pages),
                 "status": status,
                 "main": main_name,
                 "keymap": keymap_name,

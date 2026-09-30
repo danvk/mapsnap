@@ -8,6 +8,7 @@ from publish_run import (
     Destination,
     add_names,
     drop_keymap_pages,
+    drop_skeleton_pages,
     filter_pages,
     for_cdn,
     haversine_m,
@@ -196,6 +197,25 @@ def test_drop_keymap_pages_leaves_the_key_map_to_its_own_file():
     assert kept == [pages[1]]
     assert dropped == ["p1__1"]
     assert drop_keymap_pages(pages, []) == (pages, [])
+
+
+def test_drop_skeleton_pages_pairs_split_sheets():
+    labels = [
+        "p3 [1]",
+        "p3 [2]",
+        "p3s",
+        "p2",
+        "p2s [1]",
+        "p2s [2]",
+        "p9s [1]",
+        "p0005ls",
+        "p5l",
+    ]
+    pages = [annotation(label=f"Town | 1923 | {label}") for label in labels]
+    kept, dropped = drop_skeleton_pages(pages)
+    assert [page_key(a) for a in kept] == ["p3__1", "p3__2", "p2", "p9s__1", "p5l"]
+    assert dropped == ["p3s", "p2s__1", "p2s__2", "p0005ls"]
+    assert drop_skeleton_pages([]) == ([], [])
 
 
 def test_strip_creators_removes_every_creator():
