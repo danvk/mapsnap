@@ -35,13 +35,13 @@ import math
 import re
 import sys
 from collections import Counter
-from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
 
 import numpy as np
 from gazetteer import STATE_CODES_BY_LOWERCASE
 
+from mapsnap.annotation_transform import Transform, page_transform
 from mapsnap.loc_fit import SMALL_VOLUME_MAX_PAGES, SMALL_VOLUME_RADIUS_M
 from mapsnap.make_iiif_georef import CREATOR, RIGHTS
 from mapsnap.osm_snap import MAX_PAGE_EXTENT_M
@@ -59,8 +59,6 @@ LOC_SERVICE = re.compile(
 )
 POINTS = re.compile(r'points="([^"]*)"')
 
-Transform = Callable[[float, float], tuple[float, float]]
-
 
 def haversine_m(a: tuple[float, float], b: tuple[float, float]) -> float:
     """Great-circle distance in metres between two (lon, lat) points."""
@@ -70,50 +68,6 @@ def haversine_m(a: tuple[float, float], b: tuple[float, float]) -> float:
         + math.cos(lat1) * math.cos(lat2) * math.sin(math.radians(b[0] - a[0]) / 2) ** 2
     )
     return 2 * EARTH_RADIUS_M * math.asin(math.sqrt(h))
-
-
-def page_transform(annotation: dict) -> Transform | None:
-    """A pixel -> (lon, lat) function for one annotation, fitted as its transformation says.
-
-    Fitted in a local metric frame (longitude scaled by cos latitude), as Allmaps
-    fits in projected coordinates: a similarity for ``helmert`` (or with only two
-    control points), an affine for a first-order polynomial. None with fewer than two.
-    """
-    pairs = [
-        (feature["properties"]["resourceCoords"], feature["geometry"]["coordinates"])
-        for feature in annotation["body"]["features"]
-        if feature.get("properties", {}).get("resourceCoords")
-        and feature.get("geometry")
-    ]
-    if len(pairs) < 2:
-        return None
-    pixels = np.array([pixel for pixel, _ in pairs], float)
-    geo = np.array([lonlat for _, lonlat in pairs], float)
-    k = math.cos(math.radians(geo[:, 1].mean()))
-    metric = np.c_[geo[:, 0] * k, geo[:, 1]]
-    kind = annotation["body"].get("transformation", {}).get("type")
-    if kind == "helmert" or len(pairs) == 2:
-        # A least-squares similarity is a complex linear map, w = a z + b. Pixel y
-        # runs down and latitude up, so y is flipped first: no similarity can
-        # mirror, and without the flip the fit shrinks and skews the page.
-        z = pixels[:, 0] - 1j * pixels[:, 1]
-        w = metric[:, 0] + 1j * metric[:, 1]
-        (a, b), *_ = np.linalg.lstsq(np.c_[z, np.ones_like(z)], w, rcond=None)
-
-        def similarity(x: float, y: float) -> tuple[float, float]:
-            point = complex(a * complex(x, -y) + b)
-            return (point.real / k, point.imag)
-
-        return similarity
-    coefficients, *_ = np.linalg.lstsq(
-        np.c_[pixels, np.ones(len(pixels))], metric, rcond=None
-    )
-
-    def affine(x: float, y: float) -> tuple[float, float]:
-        mx, my = np.array([x, y, 1.0]) @ coefficients
-        return (float(mx) / k, float(my))
-
-    return affine
 
 
 def sheet_extent_m(annotation: dict, transform: Transform) -> float:
