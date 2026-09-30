@@ -24,6 +24,7 @@ from mapsnap.clip_masks import (
     _score_block_on_page,
     compute_all_clip_masks,
     geo_polygon_to_svg,
+    inset_from_border,
     safe_overlay,
 )
 
@@ -443,13 +444,29 @@ def test_svg_full_page_polygon_gives_corner_coords():
 
 
 def test_svg_known_coords():
-    """For an axis-aligned page, corners map to exact pixel coords."""
+    """For an axis-aligned page, a mask maps to exact pixel coords."""
     georef = _axis_aligned_georef(0.0, 0.0, 1.0, 1.0, w=100, h=100)
-    # A polygon exactly matching the page corners (but using just 4 points).
+    poly = Polygon([(0.2, 0.8), (0.8, 0.8), (0.8, 0.2), (0.2, 0.2)])
+    svg = geo_polygon_to_svg(poly, georef, 100, 100)
+    assert (
+        svg
+        == '<svg><polygon points="20.0,20.0 80.0,20.0 80.0,80.0 20.0,80.0 20.0,20.0" /></svg>'
+    )
+
+
+def test_svg_keeps_a_whole_page_mask_off_the_image_border():
+    """A mask along the border would run through corner GCPs, which Allmaps rejects."""
+    georef = _axis_aligned_georef(0.0, 0.0, 1.0, 1.0, w=100, h=100)
     poly = Polygon([(0.0, 1.0), (1.0, 1.0), (1.0, 0.0), (0.0, 0.0)])
     svg = geo_polygon_to_svg(poly, georef, 100, 100)
-    # Should include corner pixel coords (0,0), (100,0), (100,100), (0,100).
-    assert "0.0,0.0" in svg or "0,0" in svg
+    assert "4.0,4.0" in svg and "96.0,96.0" in svg and "0.0,0.0" not in svg
+
+
+def test_inset_from_border_leaves_an_inner_mask_alone():
+    inner = Polygon([(10, 10), (90, 10), (90, 90), (10, 90)])
+    assert inset_from_border(inner, 100, 100) is inner
+    edge = Polygon([(0, 0), (50, 0), (50, 100), (0, 100)])
+    assert inset_from_border(edge, 100, 100).bounds == (4.0, 4.0, 50.0, 96.0)
 
 
 def test_svg_split_canvas_offset():

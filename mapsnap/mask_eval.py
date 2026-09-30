@@ -1,6 +1,6 @@
 """Score a clip masker in isolation: OIM's poses and splits in, our masks out (#548).
 
-    mapsnap mask-eval data/<volume> [--masker blocks|voronoi|none] [--allmaps]
+    mapsnap mask-eval data/<volume> [--masker region|blocks|voronoi|none] [--allmaps]
 
 Masking is the pipeline's last stage, so scoring a run's masks against OIM mixes in
 every upstream error: a misplaced page or a different split changes what the
@@ -16,8 +16,8 @@ pose and the published one are the same. Split sheets are cut along OIM's own
 panel outlines (``data/<volume>/oim/pN.panels.json``, from ``mapsnap oim-panels``);
 split sheets without them are skipped.
 
-Maskers: ``blocks`` is the pipeline's (clip_masks.compute_all_clip_masks);
-``voronoi`` and ``none`` are controls. ``voronoi`` gives each point to the nearest
+Maskers: ``region`` is the pipeline's (region_clip_masks); ``blocks`` is the one
+before it (clip_masks.compute_all_clip_masks); ``voronoi`` and ``none`` are controls. ``voronoi`` gives each point to the nearest
 page centroid among the pages that show it; ``none`` publishes whole sheets and
 panels.
 """
@@ -47,6 +47,7 @@ from mapsnap.make_iiif_georef import (
 )
 from mapsnap.mask_score import M_PER_DEGREE, score_annotation
 from mapsnap.osm_to_centerlines import load_centerlines
+from mapsnap.region_clip_masks import compute_region_clip_masks
 from mapsnap.split import write_panels
 from mapsnap.utils import default_centerlines, source_id_to_page_key
 
@@ -277,6 +278,7 @@ def no_masks(
 
 
 MASKERS: dict[str, Masker] = {
+    "region": compute_region_clip_masks,
     "blocks": compute_all_clip_masks,
     "voronoi": voronoi_masks,
     "none": no_masks,
@@ -312,7 +314,7 @@ def main() -> None:
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     parser.add_argument("volume", type=Path, help="A volume with main.iiif.json")
-    parser.add_argument("--masker", choices=sorted(MASKERS), default="blocks")
+    parser.add_argument("--masker", choices=sorted(MASKERS), default="region")
     parser.add_argument(
         "--work",
         type=Path,
@@ -332,8 +334,8 @@ def main() -> None:
     volume: Path = args.volume
     work: Path = args.work or volume / "artifacts" / "mask-eval"
     centerlines = args.centerlines or default_centerlines(volume)
-    if centerlines is None and args.masker == "blocks":
-        parser.error("the blocks masker needs --centerlines")
+    if centerlines is None and args.masker in ("region", "blocks"):
+        parser.error(f"the {args.masker} masker needs --centerlines")
     skipped = write_oim_sidecars(volume, work)
     if skipped:
         print(f"Skipped {len(skipped)}: {', '.join(skipped)}", file=sys.stderr)
