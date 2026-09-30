@@ -157,6 +157,14 @@ SUBCOMMANDS: dict[str, tuple[str, str]] = {
         "mapsnap.oim_panels",
         "Build oim/pN.panels.json and cutlines.json from OIM's published region boundaries",
     ),
+    "mask-score": (
+        "mapsnap.mask_score",
+        "Score an annotation's clip masks: IoU against OIM, and truth-free defects",
+    ),
+    "mask-eval": (
+        "mapsnap.mask_eval",
+        "Score a clip masker in isolation, on OIM's own poses and splits",
+    ),
 }
 
 _cmd_width = max(len(cmd) for cmd in SUBCOMMANDS)
