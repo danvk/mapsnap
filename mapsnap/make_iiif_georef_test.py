@@ -920,6 +920,15 @@ def test_publishing_drops_the_mirrors_zero_padded_skeletons():
     assert kept == ["p5l", "p0005rs", "p7", "p0319as"]
 
 
+def test_publishing_pairs_skeletons_with_split_sheets():
+    """A split on either side of the pair must not hide the skeleton (#545)."""
+    keys = ["p3__1", "p3__2", "p3s", "p2", "p2s__1", "p2s__2", "p9s__1"]
+    items = [(key, None, None, None, None) for key in keys]
+    kept = [item[0] for item in drop_redundant_skeletons(items)]
+    # p9s has no p9 placed, so its panel is published.
+    assert kept == ["p3__1", "p3__2", "p2", "p9s__1"]
+
+
 def test_annotation_page_credits_mapsnap_and_carries_the_odbl() -> None:
     page = annotation_page("http://example/generated", "Test | 1900", [], [])
     assert page["type"] == "AnnotationPage"

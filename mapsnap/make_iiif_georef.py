@@ -176,10 +176,18 @@ def drop_redundant_skeletons(valid_items: list) -> list:
 
     Delegates to compare_iiif_georef.redundant_skeleton_keys, which pairs
     'p0005ls' with 'p5l' as well as 'p153s' with 'p153' -- the mirror's compound
-    skeleton keys used to fail fit outright (#512).
+    skeleton keys used to fail fit outright (#512). Pairing is by sheet, so a
+    split on either side ('p3__1' beside 'p3s', 'p2' beside 'p2s__1') still
+    pairs: every image of the skeleton sheet yields to any placed image of its
+    full-color sheet (#545).
     """
-    keys = {page_key for page_key, *_ in valid_items}
-    skipped = redundant_skeleton_keys(keys, keys)
+    sheets = {page_key.split("__")[0] for page_key, *_ in valid_items}
+    skeleton_sheets = redundant_skeleton_keys(sheets, sheets)
+    skipped = {
+        page_key
+        for page_key, *_ in valid_items
+        if page_key.split("__")[0] in skeleton_sheets
+    }
     if skipped:
         print(
             f"Dropping {len(skipped)} skeleton page(s) with full-color "
