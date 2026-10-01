@@ -138,6 +138,8 @@ def test_run_index_links_states_downloads_and_the_example(tmp_path):
         "chronoscope%2Fsanborn06116_046.main.iiif.json"
     ) in html
     assert 'href="mailto:danvdk+mapsnap@gmail.com"' in html
+    assert 'href="/faq"' in html and "OSMUS Slack" in html
+    assert "try the loc.gov link" in html
     assert 'href="https://chronoscope.io/"' in html
     assert 'href="https://iiif.io/api/extension/georef/"' in html
     assert 'href="https://github.com/danvk/mapsnap/issues/541"' in html
@@ -158,6 +160,7 @@ def test_state_page_lists_every_volume_with_its_files():
     # No id column: the id is only in the row's data, for the filter.
     assert "<th>ID</th>" not in html and "<code>a</code>" not in html
     assert "row.dataset.item" in html
+    assert "try the loc.gov link" in html
     assert "1 of 2 volumes published" in html
     assert 'href="https://github.com/danvk/mapsnap/issues/541"' in html
     assert 'href="https://oldinsurancemaps.net/"' in html

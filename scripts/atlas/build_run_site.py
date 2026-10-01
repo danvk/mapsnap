@@ -43,7 +43,21 @@ TITLE_PREFIX = "Sanborn Fire Insurance Map from "
 # The example volume on the run page: New York, 1923 (lower Manhattan).
 EXAMPLE_ITEM = "sanborn06116_046"
 CONTACT_EMAIL = "danvdk+mapsnap@gmail.com"
-CONTACT_HTML = f'<p class="contact">Questions, corrections or ideas? Email <a href="mailto:{CONTACT_EMAIL}">{CONTACT_EMAIL}</a>.</p>'
+FAQ_PATH = "/faq"
+OSMUS_SLACK = "https://slack.openstreetmap.us/"
+CONTACT_HTML = (
+    f'<p class="contact">Report issues on <a href="{REPO}/issues">GitHub</a>. '
+    f'See the <a href="{FAQ_PATH}">FAQ</a>. For other questions, '
+    f'<a href="mailto:{CONTACT_EMAIL}">contact Dan</a> or join the #mapsnap channel on '
+    f'<a href="{OSMUS_SLACK}">OSMUS Slack</a>.</p>'
+)
+# Allmaps sizes its GPU textures by the largest tile an image declares, and the
+# Chronoscope copies declare the whole image as one tile, so a big volume can
+# exhaust a phone's memory where loc.gov's 512 px tiles don't.
+MOBILE_NOTE = (
+    "If a Chronoscope Allmaps link doesn't load on mobile, try the loc.gov link "
+    "or a desktop browser."
+)
 
 LICENSE_TEXT = (
     "The georeferencing annotations are © OpenStreetMap contributors and mapsnap, "
@@ -347,6 +361,7 @@ opens in the Allmaps viewer: {example["sheets_placed"]} georeferenced sheets ove
 
 <h2>Limitations</h2>
 <p>mapsnap can't place every page, and not every page it places is accurate: a sheet can land on the wrong block, or in the wrong town. If you find a volume that's wrong, please report it on <a href="{PROBLEMS_URL}">GitHub</a>.</p>
+<p>{MOBILE_NOTE}</p>
 
 <h2>OldInsuranceMaps.net</h2>
 <p>mapsnap was built with data from {OLD_INSURANCE_MAPS}, where volunteers have georeferenced Sanborn maps by hand; their work is what mapsnap was developed and measured against. If a volume you want isn't listed here, or is missing pages, look for it on OldInsuranceMaps.net, or georeference it by hand there.</p>
@@ -397,7 +412,7 @@ def state_page(code: str, rows: list[dict[str, str]], site: Site) -> str:
     body = f"""<p class="crumbs"><a href="{site.page_path()}">Run {escape(site.version)}</a> › {escape(name)}</p>
 <h1>{escape(name)}</h1>
 <p class="lede">{number(totals.published)} of {number(totals.volumes)} volumes published, with {number(totals.sheets_placed)} of {number(totals.sheets)} sheets placed. <b>JSON</b> is the IIIF file; <b>Allmaps</b> opens it over today's map. loc.gov files draw the Library of Congress's scans, Chronoscope files its faster copies of them.</p>
-<p>Not every page is placed, or placed accurately: please <a href="{PROBLEMS_URL}">report problems</a>. Missing a volume, or pages of one? Look for it on {OLD_INSURANCE_MAPS}, or georeference it by hand there.</p>
+<p>Not every page is placed, or placed accurately: please <a href="{PROBLEMS_URL}">report problems</a>. Missing a volume, or pages of one? Look for it on {OLD_INSURANCE_MAPS}, or georeference it by hand there. {MOBILE_NOTE}</p>
 <p><input type="search" id="filter" placeholder="Filter by town, year or id" aria-label="Filter volumes"> <span id="count"></span></p>
 <div class="table-scroll">
 <table class="volumes">
