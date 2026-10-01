@@ -23,6 +23,7 @@ from publish_run import (
     sheet_extent_m,
     sheets_placed,
     strip_creators,
+    unique_sheets,
     update_report,
     volume_number,
     with_page_fields,
@@ -335,20 +336,38 @@ def test_destination_writes_both_sources_minified_with_their_own_urls(tmp_path):
 
 def test_read_mapping_counts_each_items_sheets(tmp_path):
     mapping = tmp_path / "mapping.tsv"
+    rows = [
+        ("sanborn1_001", "1", "ptitl"),
+        ("sanborn1_001", "2", "p1"),
+        ("sanborn1_001", "3", "p1s"),
+        ("sanborn1_001", "4", "p2"),
+        ("sanborn1_001", "5", "p3s"),
+        ("sanborn1_001.5", "1", "p1"),
+    ]
     mapping.write_text(
-        "item\tstate\tyear\tcity\tseq\n"
-        "sanborn1_001\tnew-jersey\t1886\twoodbury\t1\n"
-        "sanborn1_001\tnew-jersey\t1886\twoodbury\t2\n"
-        "sanborn1_001.5\tnew-jersey\t1890\twoodbury\t1\n"
+        "item\tstate\tyear\tcity\tseq\tpage_key\n"
+        + "".join(
+            f"{item}\tnew-jersey\t1886\twoodbury\t{seq}\t{key}\n"
+            for item, seq, key in rows
+        )
     )
     items = read_mapping(mapping)
-    assert items["sanborn1_001"]["sheets"] == 2
+    # Five scans; the title page is not a sheet, and p1s pairs with p1. p3s has no
+    # full-color sheet, so it counts.
+    assert items["sanborn1_001"]["scans"] == 5
+    assert items["sanborn1_001"]["sheets"] == 3
     assert items["sanborn1_001.5"] == {
         "state_slug": "new-jersey",
         "city_slug": "woodbury",
-        "year": "1890",
+        "year": "1886",
+        "scans": 1,
         "sheets": 1,
     }
+
+
+def test_unique_sheets_counts_a_skeleton_pair_once():
+    assert unique_sheets({"p1", "p1s", "p2", "p0005ls", "p5l", "p9s"}) == 4
+    assert unique_sheets(set()) == 0
 
 
 def test_add_names_takes_the_atlas_names_and_a_postal_code(tmp_path):

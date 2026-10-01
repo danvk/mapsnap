@@ -40,8 +40,24 @@ CHRONOSCOPE = '<a href="https://chronoscope.io/">Chronoscope</a>'
 OLD_INSURANCE_MAPS = '<a href="https://oldinsurancemaps.net/">OldInsuranceMaps.net</a>'
 STATE_NAMES = {code: name for name, code in STATE_CODES.items()}
 TITLE_PREFIX = "Sanborn Fire Insurance Map from "
-# The example volume on the run page: Brooklyn, 1939, vol. 2.
-EXAMPLE_ITEM = "sanborn05791_054"
+# The example volume on the run page: New York, 1923 (lower Manhattan).
+EXAMPLE_ITEM = "sanborn06116_046"
+CONTACT_EMAIL = "danvdk+mapsnap@gmail.com"
+FAQ_PATH = "/faq"
+OSMUS_SLACK = "https://slack.openstreetmap.us/"
+CONTACT_HTML = (
+    f'<p class="contact">Report issues on <a href="{REPO}/issues">GitHub</a>. '
+    f'See the <a href="{FAQ_PATH}">FAQ</a>. For other questions, '
+    f'<a href="mailto:{CONTACT_EMAIL}">contact Dan</a> or join the #mapsnap channel on '
+    f'<a href="{OSMUS_SLACK}">OSMUS Slack</a>.</p>'
+)
+# Allmaps sizes its GPU textures by the largest tile an image declares, and the
+# Chronoscope copies declare the whole image as one tile, so a big volume can
+# exhaust a phone's memory where loc.gov's 512 px tiles don't.
+MOBILE_NOTE = (
+    "If a Chronoscope Allmaps link doesn't load on mobile, try the loc.gov link "
+    "or a desktop browser."
+)
 
 LICENSE_TEXT = (
     "The georeferencing annotations are © OpenStreetMap contributors and mapsnap, "
@@ -76,7 +92,15 @@ COLUMNS = [
     ),
     ("volume", "The volume number, where the catalogue gives one."),
     ("title", "The catalogue title."),
-    ("sheets", "Scanned sheets in the volume."),
+    (
+        "sheets",
+        (
+            "Map sheets in the volume. A skeleton sheet (pNs) and its full-color "
+            "sheet (pN) count once, since at most one of them is published; title "
+            "and index pages are left out."
+        ),
+    ),
+    ("scans", "Every image the Library of Congress catalogues for the volume."),
     ("images", "Images the run split the sheets into (split sheets become several)."),
     ("placed", "Images the run georeferenced."),
     ("published", "Images published: those placed, less the ones dropped below."),
@@ -266,7 +290,7 @@ def run_index(rows: list[dict[str, str]], site: Site, run_dir: Path) -> str:
             "georeferenced images (a split sheet is several)",
         ),
         (number(totals.keymaps), "key maps"),
-        (number(len(totals.towns)), "towns"),
+        (number(len(totals.towns)), "cities and towns"),
         (years, "years"),
     ]
     stat_html = "\n".join(
@@ -337,6 +361,7 @@ opens in the Allmaps viewer: {example["sheets_placed"]} georeferenced sheets ove
 
 <h2>Limitations</h2>
 <p>mapsnap can't place every page, and not every page it places is accurate: a sheet can land on the wrong block, or in the wrong town. If you find a volume that's wrong, please report it on <a href="{PROBLEMS_URL}">GitHub</a>.</p>
+<p>{MOBILE_NOTE}</p>
 
 <h2>OldInsuranceMaps.net</h2>
 <p>mapsnap was built with data from {OLD_INSURANCE_MAPS}, where volunteers have georeferenced Sanborn maps by hand; their work is what mapsnap was developed and measured against. If a volume you want isn't listed here, or is missing pages, look for it on OldInsuranceMaps.net, or georeference it by hand there.</p>
@@ -356,6 +381,8 @@ opens in the Allmaps viewer: {example["sheets_placed"]} georeferenced sheets ove
 
 <h2>License</h2>
 <p>{LICENSE_HTML}</p>
+
+{CONTACT_HTML}
 """
     return page(f"mapsnap run {site.version}", body)
 
@@ -373,21 +400,23 @@ def state_page(code: str, rows: list[dict[str, str]], site: Site) -> str:
             files = f'<td class="files">{site.file_links(row["main"])}</td><td class="files">{site.file_links(row["keymap"])}</td>'
         else:
             files = f'<td class="files status" colspan="2">{escape(row["status"])}</td>'
+        # The item id isn't shown, but the filter still finds it, and the title
+        # links to the volume's page at the Library of Congress.
         body_rows.append(
-            f"<tr{'' if published else ' class="withheld"'}>"
-            f'<td><a href="{LOC_ITEM}{escape(row["item"])}/"><code>{escape(row["item"])}</code></a></td>'
-            f"<td>{escape(display_title(row))}</td><td>{escape(row['year'])}</td><td>{escape(row['city'])}</td>"
+            f'<tr data-item="{escape(row["item"])}"{"" if published else ' class="withheld"'}>'
+            f'<td><a href="{LOC_ITEM}{escape(row["item"])}/">{escape(display_title(row))}</a></td>'
+            f"<td>{escape(row['year'])}</td><td>{escape(row['city'])}</td>"
             f'<td class="num">{escape(row["sheets"])}</td><td class="num">{escape(row["sheets_placed"])}</td>'
             f"{files}</tr>"
         )
     body = f"""<p class="crumbs"><a href="{site.page_path()}">Run {escape(site.version)}</a> › {escape(name)}</p>
 <h1>{escape(name)}</h1>
 <p class="lede">{number(totals.published)} of {number(totals.volumes)} volumes published, with {number(totals.sheets_placed)} of {number(totals.sheets)} sheets placed. <b>JSON</b> is the IIIF file; <b>Allmaps</b> opens it over today's map. loc.gov files draw the Library of Congress's scans, Chronoscope files its faster copies of them.</p>
-<p>Not every page is placed, or placed accurately: please <a href="{PROBLEMS_URL}">report problems</a>. Missing a volume, or pages of one? Look for it on {OLD_INSURANCE_MAPS}, or georeference it by hand there.</p>
+<p>Not every page is placed, or placed accurately: please <a href="{PROBLEMS_URL}">report problems</a>. Missing a volume, or pages of one? Look for it on {OLD_INSURANCE_MAPS}, or georeference it by hand there. {MOBILE_NOTE}</p>
 <p><input type="search" id="filter" placeholder="Filter by town, year or id" aria-label="Filter volumes"> <span id="count"></span></p>
 <div class="table-scroll">
 <table class="volumes">
-<thead><tr><th>ID</th><th>Title</th><th>Year</th><th>Location</th><th class="num">Sheets</th><th class="num">Placed</th><th>Main content</th><th>Key map</th></tr></thead>
+<thead><tr><th>Title</th><th>Year</th><th>Location</th><th class="num">Sheets</th><th class="num">Placed</th><th>Main content</th><th>Key map</th></tr></thead>
 <tbody>
 {chr(10).join(body_rows)}
 </tbody>
@@ -401,7 +430,7 @@ function update() {{
   const terms = input.value.toLowerCase().split(/\\s+/).filter(Boolean);
   let shown = 0;
   for (const row of rows) {{
-    const text = row.textContent.toLowerCase();
+    const text = (row.dataset.item + " " + row.textContent).toLowerCase();
     const visible = terms.every((term) => text.includes(term));
     row.hidden = !visible;
     shown += visible;
