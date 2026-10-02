@@ -11,9 +11,11 @@ from mapsnap.edition_transfer import (
     corner_distance_m,
     decide,
     donors_for,
+    edition_keys,
     edition_votes,
     neighbour_keys,
     read_georef,
+    same_sheet,
     sheet_keys,
     transfer_sheet,
 )
@@ -114,7 +116,31 @@ def test_donors_are_newer_editions_nearest_first_then_older(tmp_path):
 def test_neighbour_keys_are_the_numbers_either_side():
     assert neighbour_keys("p77") == ["p76", "p78"]
     assert neighbour_keys("p1") == ["p2"]
-    assert neighbour_keys("p3A") == []
+    assert neighbour_keys("p5N") == ["p4N", "p6N"]
+    assert neighbour_keys("pind1") == []
+
+
+def test_sheets_match_across_editions_by_number_and_suffix():
+    assert same_sheet("p5", "p5N")  # Chicago vol. 1: 1906 vs 1950's North part
+    assert same_sheet("p0005N", "p5N")
+    assert same_sheet("p10", "p10Sa")
+    assert not same_sheet("p5N", "p5W")
+    assert not same_sheet("p5", "p6")
+    assert same_sheet("pind1", "pind1")
+
+
+def test_edition_keys_prefer_an_exact_key_then_namesakes(tmp_path):
+    placed = {"corners": corners_for(0, 0)}
+    edition = Edition(
+        tmp_path,
+        1950,
+        {"p5N": placed, "p10Sa": placed, "p10Sb": placed},
+        {"p7": placed},
+    )
+    assert edition_keys(edition, "p5") == ["p5N"]
+    assert edition_keys(edition, "p7") == ["p7"]
+    assert edition_keys(edition, "p10") == ["p10Sa", "p10Sb"]
+    assert edition_keys(edition, "p11") == []
 
 
 def test_read_georef_skips_unplaced_pages(tmp_path):
@@ -133,22 +159,20 @@ def test_sheet_keys_are_numbered_sheets_without_panels_or_the_key_map(tmp_path: 
     assert sheet_keys(tmp_path) == ["p1", "p2", "p3", "p10"]
 
 
-def test_decide_fills_gaps_and_keeps_own_fits_unless_osm_says_otherwise():
+def test_decide_fills_gaps_and_replaces_own_fits_only_when_outvoted():
     good, bad = transfer(), transfer(inlier_frac=0.1)
     assert decide(False, good) == "transfer"
     assert decide(False, bad) == "unplaced"
     assert decide(False, None) == "unplaced"
     assert decide(True, None) == "own"
-    assert decide(True, bad, 2000.0, (0.5, 0.9)) == "own"
+    assert decide(True, bad, 2000.0, (0, 3)) == "own"
     assert decide(True, good, 3.0) == "own"
-    # One of two disagreeing fits is wrong: OSM picks, and own wins ties.
-    assert decide(True, good, 2564.0, (0.63, 0.81)) == "replaced"
-    assert decide(True, good, 2564.0, (0.80, 0.82)) == "own"
-    assert decide(True, good, 2564.0, (0.81, 0.63)) == "own"
-    # Other editions' independent fits outvote OSM, which a grid can fool.
-    assert decide(True, good, 2317.0, (0.97, 0.80), votes=(0, 3)) == "replaced"
-    assert decide(True, good, 600.0, (0.80, 0.99), votes=(2, 1)) == "own"
-    assert decide(True, good, 600.0, (0.63, 0.81), votes=(1, 1)) == "replaced"
+    # One of two disagreeing fits is wrong: other editions' fits decide.
+    assert decide(True, good, 2317.0, (0, 3)) == "replaced"
+    assert decide(True, good, 600.0, (2, 1)) == "own"
+    # A tie, as with only two editions, keeps the fit the sheet has.
+    assert decide(True, good, 600.0, (0, 0)) == "own"
+    assert decide(True, good, 600.0, (1, 1)) == "own"
 
 
 def test_edition_votes_count_other_editions_fits_near_a_pose(tmp_path):
@@ -159,6 +183,6 @@ def test_edition_votes_count_other_editions_fits_near_a_pose(tmp_path):
         Edition(tmp_path, 1947, {"p1": {"corners": here}}, {}),
         Edition(tmp_path, 1950, {}, {}),
     ]
-    target = editions[0]
-    assert edition_votes("p1", here, target, editions) == [1936, 1947]
-    assert edition_votes("p1", there, target, editions) == []
+    voters = editions[1:]
+    assert edition_votes("p1", here, voters) == [1936, 1947]
+    assert edition_votes("p1", there, voters) == []

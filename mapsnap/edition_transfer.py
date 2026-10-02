@@ -20,6 +20,7 @@ from __future__ import annotations
 import argparse
 import json
 import math
+import re
 import shutil
 import subprocess
 import sys
@@ -78,12 +79,10 @@ MAX_SHIFT_M = 75.0
 MIN_OVERLAP_FRAC = 0.8
 # A transfer and the target's own fit agree when their corners are this close.
 AGREE_M = 30.0
-# When they disagree, the pose whose road skeleton lies closer to OSM wins:
-# the share within OSM_WITHIN_M, and the margin a transfer must win by. On
-# Queens 1950 p46, the 1947 transfer scored 0.81 against its own fit's 0.63,
-# 2.6 km away; where the two agree they score alike.
+# OSM agreement, logged beside each transfer and conflict: the share of the
+# sheet's road skeleton within OSM_WITHIN_M of an OSM centerline. A
+# diagnostic only (see decide).
 OSM_WITHIN_M = 10.0
-OSM_MARGIN = 0.05
 # Two editions' fits of a sheet vote for the same pose when their centres are
 # this close. Scans of one sheet place within 4-6 m of each other; a sheet
 # redrawn between editions moves ~100 m.
@@ -344,42 +343,74 @@ def donors_for(target: Edition, editions: list[Edition]) -> list[Edition]:
     )
 
 
+def sheet_number(key: str) -> tuple[int, str] | None:
+    """A page key's sheet number and suffix: p77 -> (77, ""), p0005N -> (5, "N")."""
+    match = re.fullmatch(r"p0*(\d+)([A-Za-z]*)", key)
+    return (int(match[1]), match[2]) if match else None
+
+
+def same_sheet(a: str, b: str) -> bool:
+    """Whether two editions' page keys name the same sheet.
+
+    The same number, with the same suffix or with none on one side: Chicago
+    vol. 1 is p5 in 1906 but p5N in 1950, its North part. Lettered subsheets
+    (p10Sa beside p10Sb) are only ever tried; the gates decide.
+    """
+    a_sheet, b_sheet = sheet_number(a), sheet_number(b)
+    if a_sheet is None or b_sheet is None:
+        return a == b
+    return a_sheet[0] == b_sheet[0] and (
+        a_sheet[1] == b_sheet[1] or not a_sheet[1] or not b_sheet[1]
+    )
+
+
+def edition_keys(edition: Edition, key: str) -> list[str]:
+    """The keys an edition places for the sheet ``key`` names: itself, else its namesakes."""
+    placed = edition.final.keys() | edition.corpus.keys()
+    if key in placed:
+        return [key]
+    return sorted(k for k in placed if same_sheet(key, k))
+
+
 def neighbour_keys(key: str) -> list[str]:
-    """The sheet numbers either side of a plain numbered key: p77 -> [p76, p78]."""
-    if not key[1:].isdigit():
+    """The sheet numbers either side of a key, same suffix: p77 -> [p76, p78]."""
+    sheet = sheet_number(key)
+    if sheet is None:
         return []
-    number = int(key[1:])
-    return [f"p{n}" for n in (number - 1, number + 1) if n > 0]
+    number, suffix = sheet
+    return [f"p{n}{suffix}" for n in (number - 1, number + 1) if n > 0]
 
 
 def find_transfer(
-    sheet: Sheet, target: Edition, editions: list[Edition], donor_keys: list[str]
+    sheet: Sheet, target: Edition, editions: list[Edition], wanted: list[str]
 ) -> tuple[Transfer | None, list[str]]:
-    """The first accepted transfer over donor sheets ``donor_keys`` in donor order.
+    """The first accepted transfer from a donor sheet named by ``wanted``, in donor order.
 
-    Returns it with the "year:key" donors tried; when none is accepted, the
-    last attempt at the sheet's own number (for the log) or None.
+    Each wanted key is resolved in each donor edition (see edition_keys).
+    Returns the transfer with the "year:key" donors tried; when none is
+    accepted, the last attempt at the sheet's own number (for the log) or None.
     """
     fallback = None
     tried: list[str] = []
-    for donor_key in donor_keys:
+    for wanted_key in wanted:
         for donor_edition in donors_for(target, editions):
-            georef = donor_edition.final.get(donor_key) or donor_edition.corpus.get(
-                donor_key
-            )
-            if georef is None:
-                continue
-            donor = load_sheet(donor_edition.volume, donor_key, georef)
-            if donor is None:
-                continue
-            transfer = transfer_sheet(sheet, donor, donor_edition.volume.name)
-            tried.append(f"{donor_edition.year}:{donor_key}")
-            if transfer is None:
-                continue
-            if transfer.accepted:
-                return transfer, tried
-            if donor_key == sheet.key:
-                fallback = transfer
+            for donor_key in edition_keys(donor_edition, wanted_key):
+                georef = donor_edition.final.get(donor_key) or (
+                    donor_edition.corpus.get(donor_key)
+                )
+                if georef is None:
+                    continue
+                donor = load_sheet(donor_edition.volume, donor_key, georef)
+                if donor is None:
+                    continue
+                transfer = transfer_sheet(sheet, donor, donor_edition.volume.name)
+                tried.append(f"{donor_edition.year}:{donor_key}")
+                if transfer is None:
+                    continue
+                if transfer.accepted:
+                    return transfer, tried
+                if wanted_key == sheet.key:
+                    fallback = transfer
     return fallback, tried
 
 
@@ -426,20 +457,20 @@ def center_distance_m(a: list, b: list) -> float:
     return float(np.hypot(*((a_center - b_center) * (kx, 110_540.0))))
 
 
-def edition_votes(
-    key: str, corners: list, target: Edition, editions: list[Edition]
-) -> list[int]:
-    """The other editions whose own (corpus) fit of ``key`` lands where ``corners`` does.
+def edition_votes(key: str, corners: list, voters: list[Edition]) -> list[int]:
+    """The ``voters`` whose own (corpus) fit of ``key`` lands where ``corners`` does.
 
     Each edition was fitted independently, so agreement between them is
     evidence that neither OSM nor any one edition can supply on its own.
     """
     return [
         edition.year
-        for edition in editions
-        if edition is not target
-        and (georef := edition.corpus.get(key)) is not None
-        and center_distance_m(georef["corners"], corners) <= VOTE_RADIUS_M
+        for edition in voters
+        if any(
+            (georef := edition.corpus.get(other)) is not None
+            and center_distance_m(georef["corners"], corners) <= VOTE_RADIUS_M
+            for other in edition_keys(edition, key)
+        )
     ]
 
 
@@ -447,27 +478,24 @@ def decide(
     own_placed: bool,
     transfer: Transfer | None,
     disagreement_m: float | None = None,
-    osm: tuple[float, float] | None = None,
     votes: tuple[int, int] | None = None,
 ) -> str:
     """What a sheet publishes: "own", "transfer", "replaced" or "unplaced".
 
     When an accepted transfer disagrees with the sheet's own fit by more
     than AGREE_M, one of the two editions' fits is wrong. ``votes`` is
-    (own, transfer): how many other editions' independent fits back each
-    pose; the majority wins. On a tie ``osm``, (own, transfer) OSM agreement,
-    decides, and the transfer must win by OSM_MARGIN to displace a fit the
-    sheet already has. On a regular grid a wrong pose often scores as well
-    against OSM as the right one, which is why the votes come first.
+    (own, transfer): how many other editions' independent fits, not the
+    donor's, back each pose. The transfer replaces the own fit only when it
+    has more; a tie keeps the own fit. OSM agreement used to break ties, and
+    on Chicago it picked the wrong fit four times in six: on a street grid a
+    pose 100-200 m off agrees with OSM about as well as the right one.
     """
     accepted = transfer is not None and transfer.accepted
     if not own_placed:
         return "transfer" if accepted else "unplaced"
     if not accepted or disagreement_m is None or disagreement_m <= AGREE_M:
         return "own"
-    if votes is not None and votes[0] != votes[1]:
-        return "replaced" if votes[1] > votes[0] else "own"
-    if osm is not None and osm[1] > osm[0] + OSM_MARGIN:
+    if votes is not None and votes[1] > votes[0]:
         return "replaced"
     return "own"
 
@@ -515,14 +543,20 @@ def transfer_edition(
                         entry["transfer_osm"],
                     )
                     entry["own_osm"] = round(osm[0], 3)
-                    own_votes = edition_votes(key, own["corners"], target, editions)
-                    transfer_votes = edition_votes(
-                        key, transfer.corners, target, editions
-                    )
+                    # Neither the target nor the donor is a witness: a
+                    # transfer lands on its donor's fit by construction, so
+                    # with two editions the donor would always outvote.
+                    voters = [
+                        e
+                        for e in editions
+                        if e is not target and e.volume.name != transfer.donor
+                    ]
+                    own_votes = edition_votes(key, own["corners"], voters)
+                    transfer_votes = edition_votes(key, transfer.corners, voters)
                     votes = (len(own_votes), len(transfer_votes))
                     entry["own_votes"] = own_votes
                     entry["transfer_votes"] = transfer_votes
-        status = decide(own is not None, transfer, disagreement, osm, votes)
+        status = decide(own is not None, transfer, disagreement, votes)
         entry["status"] = status
         log.append(entry)
         if status == "own":
