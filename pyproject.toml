@@ -36,6 +36,10 @@ reportPrivateImportUsage = false
 
 [dependency-groups]
 dev = [
+    # scripts/batch/missing-items.py only; the aws CLI cannot do 33,000 HEADs
+    # in reasonable time, and this is not imported by anything the corpus image
+    # runs, so it stays out of the runtime dependencies.
+    "boto3>=1.35",
     "pyright>=1.1.408",
     "pytest>=9.0.2",
     "ruff>=0.16,<0.17",
