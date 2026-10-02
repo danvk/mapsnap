@@ -106,7 +106,6 @@ export async function fetchAdjacency(
   return adjacency;
 }
 
-/** Fetch a volume's key-map sheets (raw/*.keymap.json) and which sidecars each has. */
 /**
  * Where the run that produced `path` kept its own per-page sidecars.
  *
@@ -120,7 +119,18 @@ export async function fetchRunArtifacts(
   return api.get('/iiif-api/run-artifacts')(null, { path });
 }
 
-export async function fetchKeymaps(volume: string): Promise<KeymapInfo[]> {
-  const { keymaps } = await api.get('/iiif-api/keymaps')(null, { volume });
+/**
+ * Fetch a volume's key-map sheets (*.keymap.json) and which sidecars each has.
+ *
+ * With a mirror `run` (`runs/<tag>`), that run's own key-map sidecars come first (#554).
+ */
+export async function fetchKeymaps(
+  volume: string,
+  run: string | null = null,
+): Promise<KeymapInfo[]> {
+  const { keymaps } = await api.get('/iiif-api/keymaps')(
+    null,
+    run ? { volume, run } : { volume },
+  );
   return keymaps;
 }

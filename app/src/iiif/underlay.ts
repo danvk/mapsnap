@@ -44,11 +44,13 @@ export function underlayImageParam(image: KeymapUnderlayImage): string | null {
 /**
  * The underlays to draw for a volume: every key map that has a georeference,
  * or in P(road) mode only those that also have a road-probability map.
+ * `run` is the mirror run on screen, whose key-map sidecars come first.
  */
 export function keymapUnderlays(
   volume: string,
   keymaps: KeymapInfo[],
   image: KeymapUnderlayImage,
+  run: string | null = null,
 ): KeymapUnderlay[] {
   const underlays: KeymapUnderlay[] = [];
   for (const keymap of keymaps) {
@@ -58,6 +60,7 @@ export function keymapUnderlays(
       volume,
       stem: keymap.stem,
       image,
+      ...(run ? { run } : {}),
     });
     underlays.push({
       id: keymap.stem,
