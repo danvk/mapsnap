@@ -1,4 +1,4 @@
-"""Tests for the street-constraint georeferencer (mapsnap.street_solve_experiment)."""
+"""Tests for the street-constraint georeferencer (mapsnap.street_solve_volume)."""
 
 
 def test_load_posed_candidates_distinguishes_missing_from_empty(tmp_path) -> None:
@@ -7,7 +7,7 @@ def test_load_posed_candidates_distinguishes_missing_from_empty(tmp_path) -> Non
 
     import pytest
 
-    from mapsnap.street_solve_experiment import load_posed_candidates
+    from mapsnap.street_solve_volume import load_posed_candidates
 
     path = tmp_path / "candidates.jsonl"
     with pytest.raises(SystemExit):

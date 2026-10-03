@@ -72,7 +72,7 @@ def write_sidecar(tmp_path: Path, stem: str, variant: str, doc: dict) -> Path:
 
 
 def make_unit(stem: str, width: int = 1000, height: int = 800):
-    from mapsnap.edge_join_experiment import PageUnit
+    from mapsnap.page_units import PageUnit
 
     return PageUnit(
         stem=stem,
@@ -778,8 +778,8 @@ def test_provenance_records_the_snap_verdict(tmp_path):
 
 def test_rung_note_band_matches_the_snap_constant():
     """The two modules import each other lazily, so the band is mirrored by hand."""
-    from mapsnap.osm_snap_experiment import RUNG_NOTE_BAND as snap_band
     from mapsnap.reconcile import RUNG_NOTE_BAND
+    from mapsnap.snap_volume import RUNG_NOTE_BAND as snap_band
 
     assert RUNG_NOTE_BAND == snap_band
 

@@ -415,10 +415,10 @@ def test_borrow_reads_takes_only_the_reads(monkeypatch, tmp_path):
     """Poses and provenance are this run's to make, even when the reads are lent."""
     import json as _json
 
-    from mapsnap import experiments, loc_fit
+    from mapsnap import loc_fit, run_archive
 
     (tmp_path / CENTERLINES_NAME).write_bytes(b"same extract")
-    sha = experiments.file_sha256(tmp_path / CENTERLINES_NAME)
+    sha = run_archive.file_sha256(tmp_path / CENTERLINES_NAME)
     monkeypatch.setattr(
         loc_fit,
         "run_aws",
@@ -441,11 +441,11 @@ def test_one_item_touches_s3_in_the_right_order(monkeypatch, tmp_path):
     resume this run, then write the outputs and only then the done marker."""
     import json as _json
 
-    from mapsnap import experiments, loc_fit
+    from mapsnap import loc_fit, run_archive
 
     local = tmp_path / ALPHA.item
     events: list[str] = []
-    extract_sha = experiments.file_sha256
+    extract_sha = run_archive.file_sha256
 
     def tail(url: str) -> str:
         return url.split(ALPHA.item)[-1] or "/"

@@ -685,7 +685,7 @@ def rotation_hypotheses(
     median to be a different regime) gets offered alongside the median, and the
     match score decides on the image evidence.
     """
-    from mapsnap.edge_join_experiment import keymap_region_adjacency
+    from mapsnap.page_units import keymap_region_adjacency
 
     pairs, _ = keymap_region_adjacency(volume)
     neighbours: dict[int, set[int]] = {}
@@ -720,7 +720,7 @@ def snap_volume(
     Writes one georef sidecar per placed page into `output_dir` and returns a
     row per page for reporting.
     """
-    from mapsnap.edge_join_experiment import load_prob
+    from mapsnap.page_units import load_prob
 
     medians = volume_pose_medians(volume)
     if medians is None:

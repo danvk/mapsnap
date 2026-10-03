@@ -1,7 +1,7 @@
 """Geometry-first OSM snap: rescue, arbitrate, and refine a volume's fits.
 
 The production entry point for the osm_snap channel (see osm_snap.py for the
-matcher and osm_snap_experiment.py for the underlying commands). Matches each
+matcher and snap_volume.py for the underlying commands). Matches each
 page's road-UNet P(road) map against OSM centerlines rasterized in a local
 metre frame — no street-name OCR required — and writes pN.georef-snap.json
 sidecars for three kinds of placements:
@@ -78,7 +78,7 @@ def main() -> None:
     # The production gates are frozen alongside the selection code (see the
     # osm-snap PR for the calibration story); VOLUME_MODE_GATE and
     # REFINE_VER_MARGIN live there too.
-    from mapsnap.osm_snap_experiment import (
+    from mapsnap.snap_volume import (
         HALF_SHEET_SEEDS,
         PRODUCTION_ARBITRATE_GATE,
         PRODUCTION_GATE_MARGIN,
