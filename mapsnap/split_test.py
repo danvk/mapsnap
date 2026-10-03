@@ -27,6 +27,7 @@ from mapsnap.split import (
     read_panels_json,
     remove_panel_sidecars,
     remove_split_outputs,
+    replace_panels,
     rings_match,
     seg_angle_deg,
     segment_thickness,
@@ -477,3 +478,33 @@ def test_repair_panel_mends_a_pinched_ring_without_losing_area():
     assert abs(repaired.area - pinched.buffer(0).area) < 1e-9
     valid = Polygon([(0, 0), (1, 0), (1, 1), (0, 1)])
     assert repair_panel(valid) is valid
+
+
+def test_a_resplit_keeps_the_p_road_crops_of_changed_panels(tmp_path):
+    """Invalidation runs before the new panels are written, not after.
+
+    It used to run after, and deleted the P(road) crop write_panels had just cut
+    for every changed panel -- every split panel of a corpus run whose cut had
+    moved since the mirror's, fitted without P(road).
+    """
+    import cv2
+    import numpy as np
+    from shapely.geometry import Polygon
+
+    from mapsnap.roadprob import load_roadprob, roadprob_path, save_roadprob
+
+    image = tmp_path / "p5.jpg"
+    cv2.imwrite(str(image), np.full((40, 60, 3), 200, np.uint8))
+    save_roadprob(roadprob_path(image), np.ones((40, 60), np.float32))
+    stale = [[[0.0, 0.0], [30.0, 0.0], [30.0, 40.0], [0.0, 40.0], [0.0, 0.0]]]
+    (tmp_path / "p5__1.streets.json").touch()  # read from the old cut
+    panels = [
+        Polygon([(0.0, 0.0), (25.0, 0.0), (25.0, 40.0), (0.0, 40.0)]),
+        Polygon([(25.0, 0.0), (60.0, 0.0), (60.0, 40.0), (25.0, 40.0)]),
+    ]
+    written, changed = replace_panels(image, panels, "p5", stale)
+
+    assert changed == [1]
+    assert not (tmp_path / "p5__1.streets.json").exists()
+    for panel_image in written:
+        assert load_roadprob(panel_image) is not None, panel_image.name
