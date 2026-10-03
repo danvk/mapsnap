@@ -6,12 +6,16 @@ from mapsnap.loc_craft import Item
 from mapsnap.loc_fit import (
     ARCHIVE_TAG,
     CENTERLINES_NAME,
+    CHECKPOINT_DIRNAME,
+    CHECKPOINTED_STAGES,
     DONE_MARKER,
     RUNS_DIRNAME,
     UPLOAD_EXCLUDES,
     UPLOAD_GLOBS,
     UPLOAD_INCLUDES,
     County,
+    FitWork,
+    finished_stages,
     plan_fit,
     read_counties,
     upload,
@@ -438,7 +442,8 @@ def test_borrow_reads_takes_only_the_reads(monkeypatch, tmp_path):
 
 def test_one_item_touches_s3_in_the_right_order(monkeypatch, tmp_path):
     """The whole lifecycle, as S3 sees it: read the stable half, borrow reads,
-    resume this run, then write the outputs and only then the done marker."""
+    resume this run, checkpoint a stage (outputs, then its marker), then write
+    the outputs and only then the done marker."""
     import json as _json
 
     from mapsnap import loc_fit, run_archive
@@ -470,7 +475,7 @@ def test_one_item_touches_s3_in_the_right_order(monkeypatch, tmp_path):
 
     monkeypatch.setattr(loc_fit, "sync", fake_sync)
     monkeypatch.setattr(loc_fit, "run_aws", fake_run_aws)
-    monkeypatch.setattr(loc_fit, "run_chain", lambda *a: None)
+    monkeypatch.setattr(loc_fit, "run_chain", lambda *a, checkpoint: checkpoint("ocr"))
 
     work = plan_fit(ALPHA, present(2), County("US01001"), TAG)
     loc_fit.fetch_item(work, "s3://bucket", tmp_path, ocr_from="v1.2")
@@ -482,6 +487,8 @@ def test_one_item_touches_s3_in_the_right_order(monkeypatch, tmp_path):
         f"GET / --exclude {RUNS_DIRNAME}/*",
         f"GET /{RUNS_DIRNAME}/v1.2 {reads}",
         f"GET /{RUNS_DIRNAME}/{TAG}",
+        f"PUT /{RUNS_DIRNAME}/{TAG}",
+        f"CP /{RUNS_DIRNAME}/{TAG}/{CHECKPOINT_DIRNAME}/ocr.json",
         f"PUT /{RUNS_DIRNAME}/{TAG}",
         f"CP /{RUNS_DIRNAME}/{TAG}/{DONE_MARKER}",
     ]
@@ -980,3 +987,125 @@ def test_local_centerlines_clips_only_small_located_volumes(tmp_path, monkeypatc
         (0.0, 0.0),
     )  # a coordinate far from any street
     assert local_centerlines(tmp_path, work) == tmp_path / CENTERLINES_NAME
+
+
+def chain_item(tmp_path: Path) -> FitWork:
+    """A two-page item with a key-map scan, ready for run_chain."""
+    from mapsnap.keymap.records import write_keymaps_record
+
+    for name in ("p1.jpg", "p2.jpg"):
+        (tmp_path / name).write_bytes(b"")
+    (tmp_path / "raw").mkdir()
+    (tmp_path / "raw" / "p0.jpg").write_bytes(b"")
+    write_keymaps_record(tmp_path, ["p0"])
+    return plan_fit(
+        ALPHA,
+        ["p1.jpg", "p2.jpg", "p1.boxes.json", "p2.boxes.json"],
+        County("US01001"),
+        TAG,
+    )
+
+
+def test_run_chain_checkpoints_each_costly_stage_as_it_finishes(
+    tmp_path, monkeypatch
+) -> None:
+    """keymap-detect, adjacency, keymap and ocr are saved; split, craft and fit are not."""
+    from mapsnap import loc_fit
+    from mapsnap.keymap.records import write_keymaps_record
+
+    events: list[str] = []
+
+    def record(command, local, **kw):
+        events.append(command[1])
+        if command[1] == "keymap-detect":
+            write_keymaps_record(tmp_path, ["p0"])
+
+    monkeypatch.setattr(loc_fit, "stage", record)
+    work = chain_item(tmp_path)
+    loc_fit.run_chain(
+        tmp_path, work, TAG, checkpoint=lambda name: events.append(f"saved {name}")
+    )
+
+    assert events == [
+        "split",
+        "keymap-detect",
+        "saved keymap-detect",
+        "craft",
+        "adjacency",
+        "saved adjacency",
+        "keymap",
+        "saved keymap",
+        "ocr",
+        "saved ocr",
+        "fit",
+    ]
+    assert {e.removeprefix("saved ") for e in events if e.startswith("saved")} == set(
+        CHECKPOINTED_STAGES
+    )
+
+
+def test_run_chain_skips_stages_an_earlier_attempt_finished(
+    tmp_path, monkeypatch
+) -> None:
+    """A reclaim in fit costs fit: the key map and OCR are not re-run."""
+    from mapsnap import loc_fit
+
+    work = chain_item(tmp_path)
+    keymaps = (tmp_path / "keymaps.json").read_text()
+    (tmp_path / CHECKPOINT_DIRNAME).mkdir()
+    for name in CHECKPOINTED_STAGES:
+        (tmp_path / CHECKPOINT_DIRNAME / f"{name}.json").write_text("{}")
+    commands: list[str] = []
+    monkeypatch.setattr(
+        loc_fit, "stage", lambda command, local, **kw: commands.append(command[1])
+    )
+    saved: list[str] = []
+    loc_fit.run_chain(tmp_path, work, TAG, checkpoint=saved.append)
+
+    assert commands == ["split", "craft", "fit"]
+    assert saved == []
+    # keymap-detect would have deleted the record; a resumed item keeps this run's.
+    assert (tmp_path / "keymaps.json").read_text() == keymaps
+
+
+def test_checkpoint_uploads_the_outputs_before_its_marker(tmp_path, monkeypatch):
+    """The marker must not land before what it vouches for, as with the done marker."""
+    from mapsnap import loc_fit
+
+    calls: list[list[str]] = []
+    monkeypatch.setattr(loc_fit, "run_aws", lambda command, **kw: calls.append(command))
+    loc_fit.checkpoint(tmp_path, "s3://bucket", ALPHA, TAG, "ocr")
+
+    assert [c[2] for c in calls] == ["sync", "cp"]
+    assert f"{CHECKPOINT_DIRNAME}/*" in calls[0]  # the sync leaves the markers out
+    assert calls[1][-2].endswith(f"{RUNS_DIRNAME}/{TAG}/{CHECKPOINT_DIRNAME}/ocr.json")
+    assert finished_stages(tmp_path) == {"ocr"}
+
+
+def test_a_failed_checkpoint_does_not_fail_the_item(tmp_path, monkeypatch, capsys):
+    """Checkpoints only save a retry work; the final upload still carries everything."""
+    from mapsnap import loc_fit
+
+    def explode(command, **kw):
+        raise OSError("S3 is down")
+
+    monkeypatch.setattr(loc_fit, "run_aws", explode)
+    loc_fit.checkpoint(tmp_path, "s3://bucket", ALPHA, TAG, "keymap")
+    assert "checkpoint after keymap not saved" in capsys.readouterr().err
+
+
+def test_finished_stages_is_empty_for_a_fresh_item(tmp_path) -> None:
+    assert finished_stages(tmp_path) == set()
+
+
+def test_a_checkpoint_never_uploads_the_done_marker(tmp_path, monkeypatch):
+    """Only the end of the chain may retire an item, whatever is lying around locally."""
+    from mapsnap import loc_fit
+
+    (tmp_path / DONE_MARKER).write_text("{}")
+    calls: list[list[str]] = []
+    monkeypatch.setattr(loc_fit, "run_aws", lambda command, **kw: calls.append(command))
+    loc_fit.checkpoint(tmp_path, "s3://bucket", ALPHA, TAG, "adjacency")
+
+    assert DONE_MARKER in calls[0]  # excluded from the sync
+    assert not any(c[2] == "cp" and c[-2].endswith(DONE_MARKER) for c in calls)
