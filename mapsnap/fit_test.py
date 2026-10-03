@@ -80,13 +80,10 @@ def test_channel_writers_and_arbiter_agree_on_names(tmp_path):
     the CLI default passed while production still wrote the old name. This
     calls the writer the way cmd_select does, taking every default.
     """
-    from mapsnap.osm_snap_experiment import osm_variant_path
     from mapsnap.reconcile import CHANNEL_ORDER
-    from mapsnap.street_solve_experiment import (
-        PriorLocation,
-        StreetGates,
-        write_georef_streets,
-    )
+    from mapsnap.snap_volume import osm_variant_path
+    from mapsnap.street_solve import PriorLocation, StreetGates
+    from mapsnap.street_solve_volume import write_georef_streets
 
     assert osm_variant_path(tmp_path, "p1").name == "p1.georef-snap.json"
 

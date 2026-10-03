@@ -14,7 +14,7 @@ rotation math below uses that identity: for directed vectors,
 ``theta = page_angle - raster_angle`` (both y-down atan2 angles, and theta is
 the cv2.getRotationMatrix2D angle that match_at_rotation consumes).
 
-The harness (osm_snap_experiment.py) loads volumes, composes PageContext
+The volume engine (snap_volume.py) loads volumes, composes PageContext
 objects, and evaluates against truth; nothing in this module reads truth data.
 """
 

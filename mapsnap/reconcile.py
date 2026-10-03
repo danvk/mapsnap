@@ -51,10 +51,6 @@ from mapsnap.adjacency_gate import (
     edge_scale_factor,
     stamp_worlds,
 )
-from mapsnap.edge_join_experiment import (
-    PageUnit,
-    grid_rmse_ft_between,
-)
 from mapsnap.osm_snap import (
     W_CONTAIN,
     W_NAME,
@@ -62,6 +58,7 @@ from mapsnap.osm_snap import (
     name_evidence_of,
     region_containment_frac,
 )
+from mapsnap.page_units import PageUnit, grid_rmse_ft_between
 from mapsnap.road_model import effective_gcp_count, page_world_affine
 from mapsnap.utils import haversine_m
 
@@ -104,7 +101,7 @@ KEYMAP_CLAMP = 3.0
 W_RUNG_OFF = 0.15
 W_NOTE_MISMATCH = 0.30
 # How close (in log2) a pose must sit to a rung, or to its printed note, to
-# claim it. Mirrors osm_snap_experiment.RUNG_NOTE_BAND, which cannot be
+# claim it. Mirrors snap_volume.RUNG_NOTE_BAND, which cannot be
 # imported at module level (the two modules import each other lazily);
 # reconcile_test asserts the two stay equal.
 RUNG_NOTE_BAND = (0.80, 1.25)
@@ -335,7 +332,7 @@ def collect_hypotheses(
         and street_record.get("corners")
         and page_size is not None
     ):
-        from mapsnap.street_solve_experiment import corners_to_affine
+        from mapsnap.street_solve_volume import corners_to_affine
 
         hypotheses.append(
             Hypothesis(
@@ -994,7 +991,7 @@ def build_nodes(volume: Path, sidecar_dir: Path, vctx) -> dict[str, PageNode]:
 
 def score_nodes(vctx, nodes: dict[str, PageNode], note_ratios: dict) -> None:
     """Uniformly score every pose hypothesis and fill in unary energies."""
-    from mapsnap.osm_snap_experiment import build_page_context, page_keymap_data
+    from mapsnap.snap_volume import build_page_context, page_keymap_data
 
     fitted_log2 = [
         pose_scale_log2(affine)
@@ -1842,7 +1839,7 @@ def main() -> None:
     if args.gate is not None:
         ENTRY_PENALTY = args.gate
 
-    from mapsnap.osm_snap_experiment import (
+    from mapsnap.snap_volume import (
         HALF_SHEET_SEEDS,
         load_volume_context,
         printed_note_ratios,

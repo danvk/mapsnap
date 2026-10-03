@@ -225,7 +225,7 @@ files currently outlive the run; #258.)
 
 ---
 
-## Stage 3: snap (`osm_snap_experiment.py`)
+## Stage 3: snap (`snap_volume.py`)
 
 One pass per page matches its road-probability map against rasterized OSM
 geometry over a rotation ladder and the volume's scale rungs, producing scored

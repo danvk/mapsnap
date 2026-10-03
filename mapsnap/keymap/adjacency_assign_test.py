@@ -554,7 +554,7 @@ def test_dry_run_writes_nothing(tmp_path):
 def test_keymap_sidecar_mtime_tracks_the_newest_sidecar(tmp_path):
     import os
 
-    from mapsnap.osm_snap_experiment import keymap_sidecar_mtime
+    from mapsnap.snap_volume import keymap_sidecar_mtime
 
     assert keymap_sidecar_mtime(tmp_path) is None  # no raw/ at all
     raw = tmp_path / "raw"

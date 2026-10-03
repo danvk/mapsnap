@@ -65,7 +65,7 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
 
-from mapsnap import experiments
+from mapsnap import run_archive
 from mapsnap.aws_cli import run_aws
 from mapsnap.keymap.records import recorded_keymap_keys
 from mapsnap.loc_craft import (
@@ -457,7 +457,7 @@ def reused_reads_are_valid(local: Path, bucket: str, item: Item, source: str) ->
         )
         return False
     recorded = (json.loads(manifest).get("inputs") or {}).get("centerlines_sha")
-    current = experiments.file_sha256(local / CENTERLINES_NAME)
+    current = run_archive.file_sha256(local / CENTERLINES_NAME)
     if recorded != current:
         print(
             f"{item.item}: run {source} read against {recorded}, this run has "

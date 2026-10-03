@@ -8,7 +8,7 @@ import sys
 import time
 from pathlib import Path
 
-from mapsnap import experiments
+from mapsnap import run_archive
 from mapsnap.utils import list_pages, require_centerlines, run_cmd
 
 
@@ -79,8 +79,8 @@ def resolve_run_id(
             "Working tree has uncommitted changes to tracked files. Commit them (even a "
             "throwaway commit) so the run id pins a real revision, or pass --tag."
         )
-    return experiments.auto_run_id(
-        git["sha"], experiments.compute_config_hash(flag_tokens, inputs)
+    return run_archive.auto_run_id(
+        git["sha"], run_archive.compute_config_hash(flag_tokens, inputs)
     )
 
 
@@ -204,12 +204,12 @@ def main() -> None:
     # The repo, not the volume: a corpus worker fits a scratch directory that is
     # not inside a git checkout, and asking there recorded "sha": null on every
     # item -- the one field that says which code produced the run.
-    git = experiments.git_head_info(Path(__file__).resolve().parent)
-    models = experiments.model_hashes()
+    git = run_archive.git_head_info(Path(__file__).resolve().parent)
+    models = run_archive.model_hashes()
     # An explicit tag wins; otherwise the checkout names itself, so a fleet
     # launched at a release records that release without being told.
     run_tag = args.run_tag or git.get("describe")
-    inputs = experiments.gather_inputs(
+    inputs = run_archive.gather_inputs(
         dir_path, centerlines, truth if truth.exists() else None
     )
     # The config hash must see the snap setting: identical georef flags with
@@ -219,13 +219,13 @@ def main() -> None:
     id_tokens = [*georef_extra, *(["--no-snap"] if args.no_snap else [])]
     run_id = resolve_run_id(dir_path, args.tag, id_tokens, inputs, git)
 
-    archive_dir = dir_path / experiments.ARTIFACTS_DIRNAME / run_id
+    archive_dir = dir_path / run_archive.ARTIFACTS_DIRNAME / run_id
     # The manifest is written last, so it -- not the directory -- is what says a
     # previous run finished. archive_run creates the directory before copying
     # into it, so an interrupted run leaves an empty one; treating that as done
     # would skip this run's computation for good and leave the tag permanently
     # empty.
-    if experiments.is_complete(archive_dir):
+    if run_archive.is_complete(archive_dir):
         # Skipping is only honest when the archived run would produce the same
         # thing. An auto run id encodes (commit, flags, inputs) so a collision
         # implies a match, but an explicit --tag is just a name: re-using one
@@ -233,7 +233,7 @@ def main() -> None:
         # reports it as this one. That happened -- an A/B arm was "re-run" under
         # a tag the previous experiment had already archived, and its stale
         # numbers were reported as new until the archives were purged by hand.
-        stale = experiments.archive_differs(archive_dir, inputs, git, georef_extra)
+        stale = run_archive.archive_differs(archive_dir, inputs, git, georef_extra)
         if stale:
             sys.exit(
                 f"Run {run_id} is already archived at {archive_dir}, but it was "
@@ -396,7 +396,7 @@ def main() -> None:
         print(f"\nNo main.iiif.json in {dir_path}, skipping comparison step.\n")
 
     command = [*sys.argv[0].split(), *sys.argv[1:]]
-    archived = experiments.archive_fit_run(
+    archived = run_archive.archive_fit_run(
         dir_path,
         run_id,
         georef_extra,

@@ -3422,7 +3422,7 @@ def process_image(
     # rule spares wholesale (#127/#278). Absent, the filter behaves exactly as before.
     road_prob = None
     if not (keep_labels_on_fill or is_keymap_page):
-        from mapsnap.edge_join_experiment import load_prob
+        from mapsnap.page_units import load_prob
 
         road_prob = load_prob(Path(os.path.dirname(image_path)), image_stem(image_path))
 

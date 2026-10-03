@@ -1,15 +1,11 @@
-"""Tests for mapsnap.edge_join_experiment's volume-level helpers."""
+"""Tests for mapsnap.page_units' volume-level helpers."""
 
 import math
 
 import numpy as np
 import pytest
 
-from mapsnap.edge_join_experiment import (
-    FALLBACK_M_PER_PX,
-    PageUnit,
-    volume_median_scale,
-)
+from mapsnap.page_units import FALLBACK_M_PER_PX, PageUnit, volume_median_scale
 
 
 def _unit(stem: str, fit_state: str, m_per_px: float | None) -> PageUnit:
