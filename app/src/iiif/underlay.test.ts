@@ -14,16 +14,30 @@ const corners: [number, number][] = [
 ];
 
 const keymaps: KeymapInfo[] = [
-  { stem: 'p0', hasRegions: true, hasGeoref: true, hasRoadprob: true, corners },
+  {
+    stem: 'p0',
+    sidecarDir: 'raw',
+    hasRegions: true,
+    hasGeoref: true,
+    hasRoadprob: true,
+    corners,
+  },
   {
     stem: 'pb',
+    sidecarDir: 'raw',
     hasRegions: false,
     hasGeoref: true,
     hasRoadprob: false,
     corners,
   },
   // No georef: nothing to warp it by, in either mode.
-  { stem: 'pz', hasRegions: false, hasGeoref: false, hasRoadprob: true },
+  {
+    stem: 'pz',
+    sidecarDir: 'raw',
+    hasRegions: false,
+    hasGeoref: false,
+    hasRoadprob: true,
+  },
 ];
 
 describe('keymapUnderlays', () => {
@@ -44,6 +58,20 @@ describe('keymapUnderlays', () => {
     expect(underlays.map((u) => u.id)).toEqual(['p0']);
     expect(underlays[0].annotationUrl).toBe(
       '/iiif-api/keymap-annotation?volume=queens_1950%2Fvol2&stem=p0&image=roadprob',
+    );
+  });
+});
+
+describe('keymapUnderlays with a mirror run', () => {
+  it("asks for the run's key map (#554)", () => {
+    const underlays = keymapUnderlays(
+      'queens_ny_1950_vol_1',
+      keymaps,
+      'sheet',
+      'runs/corpus-v1',
+    );
+    expect(underlays[0].annotationUrl).toBe(
+      '/iiif-api/keymap-annotation?volume=queens_ny_1950_vol_1&stem=p0&image=sheet&run=runs%2Fcorpus-v1',
     );
   });
 });
