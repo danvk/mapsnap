@@ -17,6 +17,7 @@ import argparse
 import json
 import re
 import sys
+from dataclasses import dataclass, field
 from itertools import pairwise
 from pathlib import Path
 from typing import TypedDict
@@ -1092,20 +1093,29 @@ def compute_panels(
     border: int = BORDER_PX,
     min_panel_frac: float | None = None,
     small_face_policy: str = "glue",
+    *,
+    page_key: str | None = None,
+    volume_has_page_zero: bool | None = None,
 ) -> list:
     """Detect panels for one image as polygons in the full (uncropped) scaled-image frame.
 
-    The I/O-free pipeline used by the scoring harness; process_image mirrors it while also
-    writing per-stage debug images. ``min_panel_frac`` and ``small_face_policy`` are the
-    #83 small-inset experiment knobs (see assemble_panels); production defaults are
+    The I/O-free pipeline used by the scoring harness: process_image's decision,
+    key-map rules included, without writing anything. A sheet left whole is one
+    full-frame panel. ``min_panel_frac`` and ``small_face_policy`` are the #83
+    small-inset experiment knobs (see assemble_panels); production defaults are
     unchanged.
+
+    The key-map rules judge the sheet by its page key and whether its volume has
+    a page 0. Both default to what the image's path says (its stem, and p0*.jpg
+    beside it); a benchmark whose images are named otherwise passes them in.
     """
     rgb = crop_border(load_rgb(image_path), border)
     gray = crop_border(load_gray(image_path), border)
     h, w = gray.shape
     binary = binarize(rgb, gray)
     thick = compute_thick_mask(binary) if small_face_policy == "verified" else None
-    connected = connected_dividers(detect_lines(binary), h, w, binary)
+    lines = detect_lines(binary)
+    connected = connected_dividers(lines, h, w, binary)
     panels, _ = finalize_panels(
         connected,
         h,
@@ -1115,7 +1125,20 @@ def compute_panels(
         small_face_policy=small_face_policy,
         thick_mask=thick,
     )
-    return panels
+    panels = [repair_panel(panel) for panel in panels]
+    stem = page_key or panel_basename(image_path)
+    if volume_has_page_zero is None:
+        volume_has_page_zero = any(image_path.parent.glob("p0*.jpg"))
+    verdict = keymap_verdict(
+        panels,
+        lines,
+        binary,
+        stem=stem,
+        box_sheet=keymap_box_stem(stem, volume_has_page_zero),
+    )
+    if not verdict.panels:
+        return [box(0, 0, w + 2 * border, h + 2 * border)]
+    return verdict.panels
 
 
 def order_panels(panels: list, height: float | None = None) -> list:
@@ -1316,7 +1339,7 @@ def is_keymap_sheet(stem: str) -> bool:
     return match is not None and int(match.group(1)) in (0, 1)
 
 
-def keymap_box_sheet(image_path: Path) -> bool:
+def keymap_box_stem(stem: str, volume_has_page_zero: bool) -> bool:
     """Whether a key-map candidate sheet is one the corner-box detector may cut.
 
     The page-0 family and letter sheets are the key map in every volume censused
@@ -1324,12 +1347,18 @@ def keymap_box_sheet(image_path: Path) -> bool:
     volume has no page 0, and is otherwise an ordinary map page whose corner a
     diagonal street or a fold could carve into a box-shaped panel.
     """
-    stem = panel_basename(image_path)
     if not is_keymap_sheet(stem):
         return False
     if re.fullmatch(r"p1[A-Za-z]{0,2}", stem):
-        return not any(image_path.parent.glob("p0*.jpg"))
+        return not volume_has_page_zero
     return True
+
+
+def keymap_box_sheet(image_path: Path) -> bool:
+    """keymap_box_stem for a page image, judging page 0 by the images beside it."""
+    return keymap_box_stem(
+        panel_basename(image_path), any(image_path.parent.glob("p0*.jpg"))
+    )
 
 
 def box_candidates(
@@ -1404,6 +1433,51 @@ def keymap_split_rejection(panels: list, width: float, height: float) -> str | N
                 "not a boxed corner or edge region"
             )
     return None
+
+
+@dataclass
+class KeymapVerdict:
+    """What a sheet keeps once the key-map rules have judged its divider cut."""
+
+    panels: list  # the panels the sheet is cut into; [] when it stands whole
+    rejection: str | None = None  # why a key-map sheet's cut was refused
+    boxes_cut: bool = False  # the corner-box detector supplied the panels
+    box_lines: list[str] = field(default_factory=list)  # that detector's log
+
+
+def keymap_verdict(
+    panels: list,
+    lines: np.ndarray,
+    binary: np.ndarray,
+    *,
+    stem: str,
+    box_sheet: bool,
+) -> KeymapVerdict:
+    """Apply the key-map rules (#276) to the divider pipeline's full-frame panels.
+
+    A key-map candidate sheet (is_keymap_sheet) only gives up boxed edge
+    regions; any other cut is refused and the sheet stands whole. Where that
+    leaves a box sheet (keymap_box_stem) whole, the corner-box detector looks
+    for the boxed corners the divider pipeline's gates hide. ``binary`` is the
+    cropped ink mask the panels were detected on.
+    """
+    h, w = binary.shape
+    full_h, full_w = h + 2 * BORDER_PX, w + 2 * BORDER_PX
+    # A single panel covering the whole page means no split was found.
+    whole = len(panels) == 1 and panels[0].area >= 0.99 * full_h * full_w
+    rejection = (
+        keymap_split_rejection(panels, full_w, full_h)
+        if is_keymap_sheet(stem) and not whole
+        else None
+    )
+    box_lines: list[str] = []
+    if (whole or rejection) and box_sheet:
+        box_panels, box_lines = keymap_corner_box_panels(lines, h, w, binary)
+        if box_panels:
+            return KeymapVerdict(box_panels, boxes_cut=True, box_lines=box_lines)
+    if whole or rejection:
+        return KeymapVerdict([], rejection=rejection, box_lines=box_lines)
+    return KeymapVerdict(panels, box_lines=box_lines)
 
 
 def panel_summary_lines(panels: list, width: float, height: float) -> list[str]:
@@ -1483,25 +1557,17 @@ def process_image(image_path: Path, debug: bool = False) -> None:
     if raw_path.exists():
         remove_split_outputs(raw_path)
 
-    # A single panel covering the whole page means no split was found.
-    is_single_full = len(panels) == 1 and panels[0].area >= 0.99 * full_h * full_w
     # A key-map sheet only gives up boxed edge regions; anything else is a bad
-    # cut and the sheet stands whole (#276).
-    rejection = (
-        keymap_split_rejection(panels, full_w, full_h)
-        if is_keymap_sheet(base) and not is_single_full
-        else None
+    # cut and the sheet stands whole (#276). Where that leaves it whole, look
+    # for the boxed corners the safety gates hide: a second key map, an index
+    # inset, a legend (mapsnap.corner_boxes).
+    verdict = keymap_verdict(
+        panels, lines, binary, stem=base, box_sheet=keymap_box_sheet(image_path)
     )
-    # Where the divider pipeline leaves a key-map sheet whole, look for the
-    # boxed corners its safety gates hide: a second key map, an index inset, a
-    # legend (mapsnap.corner_boxes).
-    box_lines: list[str] = []
-    if (is_single_full or rejection) and keymap_box_sheet(image_path):
-        box_panels, box_lines = keymap_corner_box_panels(lines, h, w, binary)
-        if box_panels:
-            panels, is_single_full, rejection = box_panels, False, None
-            print(f"{image_path.name}: key-map sheet, corner box(es) cut away")
-    if is_single_full:
+    rejection, box_lines = verdict.rejection, verdict.box_lines
+    if verdict.boxes_cut:
+        print(f"{image_path.name}: key-map sheet, corner box(es) cut away")
+    if not verdict.panels and not rejection:
         print(f"{image_path.name}: single panel — not split")
         for index in range(1, len(previous_rings) + 1):
             remove_panel_sidecars(image_path, index)
@@ -1530,6 +1596,7 @@ def process_image(image_path: Path, debug: bool = False) -> None:
             ],
         )
         return
+    panels = verdict.panels
     ordered = order_panels(panels, full_h)  # panels are in the uncropped frame
     out_paths = write_panels(image_path, ordered, base)
     print(
