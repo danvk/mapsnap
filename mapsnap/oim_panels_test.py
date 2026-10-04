@@ -4,8 +4,10 @@ import json
 
 from mapsnap.oim_panels import (
     embedded_json,
+    parse_document_regions,
     region_division,
     region_ring,
+    volume_region_counts,
     write_page_files,
 )
 
@@ -78,3 +80,34 @@ def test_title_page_key_handles_plain_and_sb_formats():
     assert title_page_key("Washington, D.C. | 1916 | Vol. 2 psb002600") == "p260"
     assert title_page_key("Washington, D.C. | 1916 | Vol. 2 psb00103w") == "p103w"
     assert title_page_key("Washington, D.C. | 1916 | Vol. 2") is None
+
+
+def document_page(doc_id: int) -> str:
+    """A document page as OIM renders it: its own regions, then the volume's, then its cutlines."""
+    volume_regions = [
+        {"id": 1, "document_id": 7, "division_number": "1"},
+        {"id": 2, "document_id": 7, "division_number": "2"},
+        {"id": 3, "document_id": 8, "division_number": "1"},
+        {"id": 4, "document_id": 9, "division_number": "1"},
+        {"id": 5, "document_id": 9, "division_number": "2"},
+        {"id": 6, "document_id": 9, "division_number": "3"},
+        {"id": None, "document_id": 8},  # a malformed entry counts for nothing
+    ]
+    own = [r for r in volume_regions if r["document_id"] == doc_id]
+    return (
+        f'<div data-x=\'{{"id": {doc_id}, "image_size": [100, 200]}}\'></div>'
+        f'"regions": {json.dumps(own)} ... "regions": {json.dumps(volume_regions)}'
+        ' ... "cutlines": [[[0, 50], [100, 50]]]'
+    )
+
+
+def test_volume_region_counts_reads_every_documents_regions_from_one_page():
+    """Any document page lists the whole volume's regions, so one fetch finds the splits."""
+    assert volume_region_counts(document_page(8)) == {7: 2, 8: 1, 9: 3}
+
+
+def test_parse_document_regions_keeps_only_this_documents_regions():
+    regions, cutlines, canvas = parse_document_regions(document_page(9), 9)
+    assert [r["id"] for r in regions] == [4, 5, 6]
+    assert cutlines == [[[0, 50], [100, 50]]]
+    assert canvas == [100, 200]

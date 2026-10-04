@@ -120,7 +120,37 @@ def document_regions(doc_id: int) -> tuple[list[dict], list, list | None]:
     division_number) when present, else left None for the caller to fill from
     the local raw scan.
     """
-    html = fetch(f"{OIM_BASE}/document/{doc_id}")
+    return parse_document_regions(fetch(f"{OIM_BASE}/document/{doc_id}"), doc_id)
+
+
+def volume_region_counts(html: str) -> dict[int, int]:
+    """Regions per document id, for the whole volume, from any one document page.
+
+    One component embedded in every document page lists every region in the
+    VOLUME, each with its document_id, so a single page says which documents
+    are split -- the rest need not be fetched.
+    """
+    counts: dict[int, set[int]] = {}
+    for match in re.finditer(r'"regions": ', html):
+        try:
+            value, _ = json.JSONDecoder().raw_decode(html[match.end() :])
+        except json.JSONDecodeError:
+            continue
+        if isinstance(value, list):
+            for region in value:
+                if (
+                    isinstance(region, dict)
+                    and region.get("document_id") is not None
+                    and region.get("id") is not None
+                ):
+                    counts.setdefault(region["document_id"], set()).add(region["id"])
+    return {doc_id: len(ids) for doc_id, ids in counts.items()}
+
+
+def parse_document_regions(
+    html: str, doc_id: int
+) -> tuple[list[dict], list, list | None]:
+    """(regions, cutlines, canvas [w, h]) from a fetched document page; see document_regions."""
     regions: dict[int, dict] = {}
     for match in re.finditer(r'"regions": ', html):
         try:
