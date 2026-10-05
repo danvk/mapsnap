@@ -31,6 +31,7 @@ from shapely.ops import polygonize, unary_union
 from skimage.morphology import medial_axis
 
 from mapsnap.corner_boxes import BOX_MIN_THICK_PX, corner_boxes, panels_with_boxes
+from mapsnap.cutline_model import enabled_model_path
 from mapsnap.keymap.log import append_keymap_log
 from mapsnap.roadprob import derive_panel_roadprob
 from mapsnap.utils import image_stem, jpeg_dimensions
@@ -1038,6 +1039,29 @@ def connected_dividers(
     return keep_connectors(merged, long_segs, h, w)
 
 
+def dividers(
+    image_path: Path, lines: np.ndarray, binary: np.ndarray, border: int = BORDER_PX
+) -> list[tuple[float, float, float, float]]:
+    """The divider segments finalize_panels closes into panels.
+
+    The cutline model's lines (mapsnap.cutline_model) when MAPSNAP_CUTLINE_MODEL
+    enables it, else the classical detector's connected_dividers. ``binary`` is
+    the cropped ink mask ``lines`` were detected on.
+    """
+    h, w = binary.shape
+    model = enabled_model_path()
+    if model is None:
+        return connected_dividers(lines, h, w, binary)
+    from mapsnap.cutline_model import cutline_probability, cutline_segments
+
+    segments = cutline_segments(
+        cutline_probability(load_rgb(image_path), model), border
+    )
+    if len(segments) == 0:
+        return []
+    return merge_collinear(segments, MERGE_GAP_FRAC * min(h, w))
+
+
 def expand_to_full_frame(
     panels: list, cropped_h: int, cropped_w: int, border: int
 ) -> list:
@@ -1169,7 +1193,7 @@ def compute_panels(
     binary = binarize(rgb, gray)
     thick = compute_thick_mask(binary) if small_face_policy == "verified" else None
     lines = detect_lines(binary)
-    connected = connected_dividers(lines, h, w, binary)
+    connected = dividers(image_path, lines, binary, border)
     panels, _ = finalize_panels(
         connected,
         h,
@@ -1603,7 +1627,7 @@ def process_image(image_path: Path, debug: bool = False) -> None:
     else:
         lines = detect_lines(binary)
 
-    connected = connected_dividers(lines, h, w, binary)
+    connected = dividers(image_path, lines, binary)
     panels, bridged = finalize_panels(connected, h, w)
     panels = [repair_panel(panel) for panel in panels]
     full_h, full_w = h + 2 * BORDER_PX, w + 2 * BORDER_PX
