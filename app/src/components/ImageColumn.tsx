@@ -13,6 +13,7 @@ import { BoxesOverlay } from './BoxesOverlay';
 import { DetectionsOverlay } from './DetectionsOverlay';
 import { GeorefOverlay } from './GeorefOverlay';
 import { PanelsOverlay } from './PanelsOverlay';
+import { toggledSelection } from '../selection';
 
 const RELAXATION_HELP =
   'georef trades confidence for size: a detection at the confidence floor must meet the full ' +
@@ -52,6 +53,9 @@ interface ImageColumnProps {
   onToggleAngle: (angle: number) => void;
   selectedIndices: Set<number>;
   onSelectIndices: (indices: Set<number>) => void;
+  /** Panels-mode overlay opacity, 0..100. */
+  panelOpacity: number;
+  setPanelOpacity: (value: number) => void;
   showStreetsOnImage: boolean;
   setShowStreetsOnImage: (value: boolean) => void;
   showIntersectionsOnImage: boolean;
@@ -96,6 +100,8 @@ export function ImageColumn(props: ImageColumnProps) {
     onToggleAngle,
     selectedIndices,
     onSelectIndices,
+    panelOpacity,
+    setPanelOpacity,
     showStreetsOnImage,
     setShowStreetsOnImage,
     showIntersectionsOnImage,
@@ -143,7 +149,11 @@ export function ImageColumn(props: ImageColumnProps) {
         : filteredDetections
             .filter(({ det }) => pointInPolygon(imgX, imgY, det.polygon))
             .map(({ i }) => i);
-    onSelectIndices(new Set(hit));
+    // Panels tile the sheet, so a click always lands in one: clicking the
+    // selected panel again deselects it.
+    onSelectIndices(
+      panelsMode ? toggledSelection(selectedIndices, hit) : new Set(hit),
+    );
   }
 
   function handleDrop(e: React.DragEvent): void {
@@ -196,6 +206,7 @@ export function ImageColumn(props: ImageColumnProps) {
               panels={panels}
               labels={panelLabels}
               selectedIndices={selectedIndices}
+              opacity={panelOpacity / 100}
               displayWidth={imgSize.width}
               displayHeight={imgSize.height}
               jsonWidth={jsonWidth}
@@ -241,6 +252,25 @@ export function ImageColumn(props: ImageColumnProps) {
             onChange={(e) => setShowRoadMap(e.target.checked)}
           />
           <label htmlFor="show-road-map">Show P(road) map</label>
+        </div>
+      )}
+
+      {panelsMode && (
+        <div
+          className="image-controls"
+          title="Panel overlay opacity. Press p to cycle 0/50/100%; click the selected panel or press Esc to deselect it."
+        >
+          <input
+            type="range"
+            id="panel-opacity-slider"
+            min={0}
+            max={100}
+            value={panelOpacity}
+            onChange={(e) => setPanelOpacity(Number(e.target.value))}
+          />
+          <label htmlFor="panel-opacity-slider">
+            Panels opacity (p): {panelOpacity}%
+          </label>
         </div>
       )}
 

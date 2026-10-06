@@ -5,6 +5,8 @@ interface PanelsOverlayProps {
   /** Optional per-panel display label (e.g. page number); defaults to the 1-based index. */
   labels?: string[];
   selectedIndices: Set<number>;
+  /** Opacity of the whole overlay, 0..1, so the sheet's own lines can show through. */
+  opacity?: number;
   /** Rendered image size in CSS pixels. */
   displayWidth: number;
   displayHeight: number;
@@ -27,6 +29,7 @@ export function PanelsOverlay(props: PanelsOverlayProps) {
     panels,
     labels,
     selectedIndices,
+    opacity = 1,
     displayWidth,
     displayHeight,
     jsonWidth,
@@ -47,6 +50,7 @@ export function PanelsOverlay(props: PanelsOverlayProps) {
         top: 0,
         left: 0,
         pointerEvents: 'none',
+        opacity,
       }}
     >
       {panels.map((panel, i) => {
