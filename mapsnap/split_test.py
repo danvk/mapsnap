@@ -12,11 +12,14 @@ from mapsnap.split import (
     BORDER_PX,
     assemble_panels,
     box_candidates,
+    compute_panels,
     crop_border,
     invalidate_changed_panels,
     is_keymap_sheet,
     keymap_box_sheet,
+    keymap_box_stem,
     keymap_split_rejection,
+    keymap_verdict,
     merge_collinear,
     order_panels,
     panel_basename,
@@ -374,6 +377,28 @@ def test_keymap_box_sheet_is_the_volume_key_map_only(tmp_path):
     assert keymap_box_sheet(alone / "p1.jpg")
 
 
+def test_keymap_box_stem_takes_page_zero_as_given():
+    assert keymap_box_stem("p0", volume_has_page_zero=True)
+    assert keymap_box_stem("p1", volume_has_page_zero=False)
+    assert not keymap_box_stem("p1", volume_has_page_zero=True)
+    assert not keymap_box_stem("p45", volume_has_page_zero=False)
+
+
+def test_keymap_verdict_refuses_a_key_map_notch_but_not_an_ordinary_page():
+    # Panels in the full frame of a 1000 x 2000 sheet; binary is the cropped mask.
+    binary = np.zeros((2000 - 2 * BORDER_PX, 1000 - 2 * BORDER_PX), dtype=np.uint8)
+    sheet = box(0, 0, 1000, 2000)
+    notch = box(140, 0, 320, 580)  # hangs off the top edge only
+    panels = [sheet.difference(notch), notch]
+    lines = np.zeros((0, 4))
+    refused = keymap_verdict(panels, lines, binary, stem="p1", box_sheet=False)
+    assert refused.panels == [] and refused.rejection is not None
+    kept = keymap_verdict(panels, lines, binary, stem="p7", box_sheet=False)
+    assert kept.panels == panels and kept.rejection is None
+    whole = keymap_verdict([sheet], lines, binary, stem="p7", box_sheet=False)
+    assert whole.panels == [] and whole.rejection is None
+
+
 def test_box_candidates_keep_box_thick_lines_uncapped():
     h = w = 1000
     binary = np.zeros((h, w), dtype=np.uint8)
@@ -412,6 +437,24 @@ def test_process_image_cuts_a_corner_box_the_divider_gate_hid(tmp_path):
     log = (tmp_path / "raw" / "p0.keymap.txt").read_text()
     assert "corner boxes: 1 found" in log
     assert "bottom-left box" in log
+
+
+def test_compute_panels_applies_the_key_map_rules_like_process_image(tmp_path):
+    # The corner-box sheet of the test above, under a benchmark-style name that
+    # hides its page key: only the explicit key turns the key-map rules on.
+    w, h = 1200, 1600
+    sheet = np.full((h, w, 3), 255, dtype=np.uint8)
+    for i in range(14):
+        x = 300 + 50 * i
+        sheet[250:1000, x : x + 7] = 0
+    sheet[1150:1157, 0:500] = 0
+    sheet[1150:1600, 500:507] = 0
+    image_path = tmp_path / "sanborn00001_001__p0.jpg"
+    Image.fromarray(sheet).save(image_path, quality=95)
+    as_page = compute_panels(image_path, page_key="p0", volume_has_page_zero=True)
+    assert len(as_page) == 2
+    as_named = compute_panels(image_path)
+    assert len(as_named) == 1 and as_named[0].area == pytest.approx(w * h)
 
 
 def test_an_orphan_face_never_disconnects_a_panel():
