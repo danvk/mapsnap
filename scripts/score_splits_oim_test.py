@@ -18,6 +18,8 @@ from score_splits_oim import (
 )
 from shapely.geometry import box
 
+from mapsnap.split import SheetContext
+
 HALVES = {
     "width": 200,
     "height": 100,
@@ -37,9 +39,9 @@ def write_benchmark(root: Path) -> Path:
     (root / "labels" / "a__p1.panels.json").write_text(json.dumps(HALVES))
     manifest = root / "manifest.tsv"
     manifest.write_text(
-        "image\titem\tpage\tlabel\tweight\tfold\tsize_band\tvolume_has_p0\n"
-        "images/a__p1.jpg\ta\tp1\tsplit\t1\ttrain\t1-5\tfalse\n"
-        "images/b__p2.jpg\tb\tp2\tunsplit\t1\ttest\t41+\ttrue\n"
+        "image\titem\tpage\tlabel\tweight\tfold\tsize_band\tvolume_has_p0\tvolume_sheets\n"
+        "images/a__p1.jpg\ta\tp1\tsplit\t1\ttrain\t1-5\tfalse\t4\n"
+        "images/b__p2.jpg\tb\tp2\tunsplit\t1\ttest\t41+\ttrue\t90\n"
     )
     return manifest
 
@@ -51,7 +53,10 @@ def test_manifest_cases_pairs_split_pages_with_their_labels(tmp_path: Path):
         ("b__p2", False, "test", "41+"),
     ]
     assert cases[0].truth == tmp_path / "labels" / "a__p1.panels.json"
-    assert [c.volume_has_page_zero for c in cases] == [False, True]
+    assert [c.sheet() for c in cases] == [
+        SheetContext("p1", 4, False),
+        SheetContext("p2", 90, True),
+    ]
 
 
 def test_panels_in_frame_scales_truth_to_the_image():
