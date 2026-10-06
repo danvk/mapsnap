@@ -1457,6 +1457,29 @@ def snap_one_page(stem: str) -> tuple[str, dict]:
     return stem, record
 
 
+def snap_targets(
+    units: list[PageUnit], panel_units: list[PageUnit], *, all_pages: bool = False
+) -> list[PageUnit]:
+    """The pages snap searches: every unplaced page, and with all_pages every placed one.
+
+    Split panels get the same treatment as whole pages -- rescue, and with
+    all_pages refinement, arbitration and rung flips. They used to be
+    rescue-only, on the grounds that fitted panels are the least reliable fits
+    in a volume and not worth the compute to challenge; but an unreliable fit
+    is exactly what a challenge is for. thibodaux_la_1898 p1__1, 89% of its
+    sheet, kept a 3-GCP RANSAC fit that snap refines when the sheet is whole,
+    so cutting the sheet correctly made its placement worse.
+
+    A sheet that was split (fit_state "split") is never a target itself: its
+    panels are.
+    """
+    return [
+        unit
+        for unit in [*units, *panel_units]
+        if (all_pages and unit.fit_state != "split") or unit.fit_state in RESCUE_STATES
+    ]
+
+
 def cmd_candidates(
     volume: Path,
     pages: list[str] | None,
@@ -1497,15 +1520,7 @@ def cmd_candidates(
                 record = json.loads(line)
                 existing[record["target"]] = record
 
-    targets = [
-        u
-        for u in vctx.units
-        if (all_pages and u.fit_state != "split") or u.fit_state in RESCUE_STATES
-    ]
-    # Panels are rescue-only even under --all-pages: arbitration challenges
-    # base fitted pages, and fitted panels are the least reliable fits in the
-    # volume — not worth the compute to challenge.
-    targets += [u for u in vctx.panel_units if u.fit_state in RESCUE_STATES]
+    targets = snap_targets(vctx.units, vctx.panel_units, all_pages=all_pages)
     if pages:
         wanted = set(pages)
         targets = [u for u in targets if u.stem in wanted]

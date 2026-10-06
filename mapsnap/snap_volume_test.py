@@ -27,6 +27,7 @@ from mapsnap.snap_volume import (
     refine_adoption,
     rung_flip,
     snap_one_page,
+    snap_targets,
     with_incumbent_scale,
 )
 
@@ -804,3 +805,21 @@ def test_page_and_panel_units_leave_out_recorded_key_maps(tmp_path):
     (tmp_path / "keymaps.json").write_text('{"keys": ["p0", "p2__1"]}')
     assert {u.stem for u in load_page_units(tmp_path)} == {"p1", "p2"}
     assert {u.stem for u in load_panel_units(tmp_path)} == {"p2__2"}
+
+
+def test_snap_targets_treat_split_panels_like_whole_pages():
+    def unit(stem: str, fit_state: str) -> PageUnit:
+        return dataclasses.replace(make_unit(fit_state), stem=stem)
+
+    units = [unit("p1", "split"), unit("p2", "fitted"), unit("p3", "nofit")]
+    panels = [unit("p1__1", "fitted"), unit("p1__2", "nofit")]
+    # Rescue only: the unplaced page and panel.
+    assert [u.stem for u in snap_targets(units, panels)] == ["p3", "p1__2"]
+    # Every placed page and panel too -- a fitted panel is challenged and
+    # refined like a fitted page. The split sheet itself never is.
+    assert [u.stem for u in snap_targets(units, panels, all_pages=True)] == [
+        "p2",
+        "p3",
+        "p1__1",
+        "p1__2",
+    ]
