@@ -28,11 +28,21 @@ MODEL_ENV_VAR = "MAPSNAP_CUTLINE_MODEL"
 INPUT_SIZE = 768  # letterbox side the model was trained at
 LINE_THRESHOLD = 0.3  # P(cutline) at or above this is line
 # Hough on the predicted centerlines: the model's lines have small breaks
-# (a compass rose, a gap at a junction) that a 90 px bridge closes; 15 px
-# left a quarter of split pages uncut on the benchmark.
+# (a compass rose, a gap at a junction) that a 120 px bridge closes; 15 px
+# left a quarter of split pages uncut on the benchmark (#568).
 HOUGH_THRESHOLD = 15
-HOUGH_MAX_GAP_PX = 90
+HOUGH_MAX_GAP_PX = 120
 HOUGH_MIN_LEN_FRAC = 0.03  # of the shorter side of the cropped page
+# Line closing (split.finalize_panels) for the model's lines, tuned on the
+# benchmark's held-out training volumes (#568): overshoot junctions by this
+# share of the short side, then dissolve any panel boundary that predicted
+# lines (P >= LINE_THRESHOLD, within MERGE_SUPPORT_RADIUS_PX) cover less than
+# MERGE_MIN_SUPPORT of. The overshoot closes near-misses; the support check
+# undoes the closures the network never drew -- Covington 1909 p1's 3% sliver
+# between two cutlines, which the key-map rules then refused the whole cut for.
+OVERSHOOT_FRAC = 0.14
+MERGE_MIN_SUPPORT = 0.3
+MERGE_SUPPORT_RADIUS_PX = 5
 
 
 def enabled_model_path() -> Path | None:
@@ -123,3 +133,61 @@ def cutline_segments(prob: np.ndarray, border: int) -> np.ndarray:
     if found is None:
         return np.zeros((0, 4))
     return found[:, 0, :].astype(float)
+
+
+def boundary_support(shared, near_line: np.ndarray, step: float = 4.0) -> float:
+    """Share of a (multi)line's length that lies on True pixels of ``near_line``."""
+    length = shared.length
+    if length <= 0:
+        return 1.0
+    height, width = near_line.shape
+    hits = samples = 0
+    for k in range(int(length // step) + 1):
+        point = shared.interpolate(min(k * step, length))
+        x, y = round(point.x), round(point.y)
+        if 0 <= x < width and 0 <= y < height:
+            samples += 1
+            hits += bool(near_line[y, x])
+    return hits / samples if samples else 1.0
+
+
+def merge_unsupported(panels: list, prob: np.ndarray) -> list:
+    """Merge neighbouring panels whose shared boundary the predicted lines do not cover.
+
+    ``panels`` are full-frame polygons and ``prob`` is cutline_probability's
+    map. The weakest-supported boundary under MERGE_MIN_SUPPORT is dissolved
+    first, repeatedly, until every boundary left is drawn.
+    """
+    if len(panels) < 2:
+        return panels
+    r = MERGE_SUPPORT_RADIUS_PX
+    near_line = (
+        cv2.dilate(
+            (prob >= LINE_THRESHOLD * 255).astype(np.uint8),
+            np.ones((2 * r + 1, 2 * r + 1), np.uint8),
+        )
+        > 0
+    )
+    panels = list(panels)
+    while len(panels) > 1:
+        weakest: tuple[float, int, int] | None = None
+        for i in range(len(panels)):
+            for j in range(i + 1, len(panels)):
+                shared = panels[i].boundary.intersection(panels[j].boundary)
+                if shared.length < 20:  # touching at a point, or barely
+                    continue
+                support = boundary_support(shared, near_line)
+                if support < MERGE_MIN_SUPPORT and (
+                    weakest is None or support < weakest[0]
+                ):
+                    weakest = (support, i, j)
+        if weakest is None:
+            break
+        _, i, j = weakest
+        merged = panels[i].union(panels[j])
+        if merged.geom_type != "Polygon":
+            merged = merged.buffer(0)
+        if merged.geom_type != "Polygon":
+            break
+        panels = [p for k, p in enumerate(panels) if k not in (i, j)] + [merged]
+    return panels

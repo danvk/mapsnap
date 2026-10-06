@@ -14,6 +14,7 @@ from mapsnap.split import (
     SheetContext,
     assemble_panels,
     box_candidates,
+    bridge_junctions,
     compute_panels,
     connected_dividers,
     crop_border,
@@ -584,3 +585,14 @@ def test_a_resplit_keeps_the_p_road_crops_of_changed_panels(tmp_path):
     assert not (tmp_path / "p5__1.streets.json").exists()
     for panel_image in written:
         assert load_roadprob(panel_image) is not None, panel_image.name
+
+
+def test_bridge_junctions_overshoot_can_be_overridden():
+    # A free end in mid-page is overshot along its own direction by a share of
+    # the short side: the default JUNCTION_OVERSHOOT_FRAC, or the caller's.
+    segment = [(100.0, 500.0), (400.0, 500.0)]
+    flat = [(segment[0][0], segment[0][1], segment[1][0], segment[1][1])]
+    default = bridge_junctions(flat, 1000, 1000)
+    short = bridge_junctions(flat, 1000, 1000, overshoot_frac=0.01)
+    assert short[0][2] - 400.0 == pytest.approx(10.0)
+    assert default[0][2] > short[0][2]

@@ -20,7 +20,7 @@ import sys
 from dataclasses import dataclass, field
 from itertools import pairwise
 from pathlib import Path
-from typing import TypedDict
+from typing import Any, TypedDict
 
 import cv2
 import numpy as np
@@ -585,6 +585,8 @@ def bridge_junctions(
     segments: list[tuple[float, float, float, float]],
     h: int,
     w: int,
+    *,
+    overshoot_frac: float | None = None,
 ) -> list[tuple[float, float, float, float]]:
     """Extend interior segment endpoints so near-miss junctions become real crossings.
 
@@ -594,7 +596,9 @@ def bridge_junctions(
     segment its ray crosses, and otherwise overshooting a fixed distance. The resulting tiny
     stub faces are removed by the area filter.
     """
-    overshoot = JUNCTION_OVERSHOOT_FRAC * min(h, w)
+    overshoot = (
+        JUNCTION_OVERSHOOT_FRAC if overshoot_frac is None else overshoot_frac
+    ) * min(h, w)
     geoms = [LineString([(s[0], s[1]), (s[2], s[3])]) for s in segments]
     result = []
     for i, (x0, y0, x1, y1) in enumerate(segments):
@@ -1039,27 +1043,44 @@ def connected_dividers(
     return keep_connectors(merged, long_segs, h, w)
 
 
-def dividers(
-    image_path: Path, lines: np.ndarray, binary: np.ndarray, border: int = BORDER_PX
-) -> list[tuple[float, float, float, float]]:
-    """The divider segments finalize_panels closes into panels.
+def detect_panels(
+    image_path: Path,
+    lines: np.ndarray,
+    binary: np.ndarray,
+    border: int = BORDER_PX,
+    **finalize: Any,
+) -> tuple[list, list[tuple[float, float, float, float]]]:
+    """(full-frame panels, closed divider segments) for a page, before the key-map rules.
 
     The cutline model's lines (mapsnap.cutline_model) when MAPSNAP_CUTLINE_MODEL
-    enables it, else the classical detector's connected_dividers. ``binary`` is
-    the cropped ink mask ``lines`` were detected on.
+    enables it, else the classical detector's connected_dividers; either way
+    finalize_panels closes them into panels (``finalize`` is passed through).
+    The model's lines close with their own junction overshoot, and any panel
+    boundary the model never drew is dissolved afterwards. ``binary`` is the
+    cropped ink mask ``lines`` were detected on.
     """
     h, w = binary.shape
     model = enabled_model_path()
     if model is None:
-        return connected_dividers(lines, h, w, binary)
-    from mapsnap.cutline_model import cutline_probability, cutline_segments
-
-    segments = cutline_segments(
-        cutline_probability(load_rgb(image_path), model), border
+        connected = connected_dividers(lines, h, w, binary)
+        panels, bridged = finalize_panels(connected, h, w, border, **finalize)
+        return [repair_panel(panel) for panel in panels], bridged
+    from mapsnap.cutline_model import (
+        OVERSHOOT_FRAC,
+        cutline_probability,
+        cutline_segments,
+        merge_unsupported,
     )
-    if len(segments) == 0:
-        return []
-    return merge_collinear(segments, MERGE_GAP_FRAC * min(h, w))
+
+    prob = cutline_probability(load_rgb(image_path), model)
+    segments = cutline_segments(prob, border)
+    connected = (
+        merge_collinear(segments, MERGE_GAP_FRAC * min(h, w)) if len(segments) else []
+    )
+    panels, bridged = finalize_panels(
+        connected, h, w, border, overshoot_frac=OVERSHOOT_FRAC, **finalize
+    )
+    return merge_unsupported([repair_panel(panel) for panel in panels], prob), bridged
 
 
 def expand_to_full_frame(
@@ -1100,6 +1121,8 @@ def finalize_panels(
     min_panel_frac: float | None = None,
     small_face_policy: str = "glue",
     thick_mask: np.ndarray | None = None,
+    *,
+    overshoot_frac: float | None = None,
 ) -> tuple[list, list[tuple[float, float, float, float]]]:
     """Close the divider graph in the cropped frame, then expand panels to the full frame.
 
@@ -1109,7 +1132,9 @@ def finalize_panels(
     """
     extended = extend_long_segments(connected, cropped_h, cropped_w)
     snapped = snap_to_boundary(extended, cropped_h, cropped_w)
-    bridged = bridge_junctions(snapped, cropped_h, cropped_w)
+    bridged = bridge_junctions(
+        snapped, cropped_h, cropped_w, overshoot_frac=overshoot_frac
+    )
     faces = build_and_polygonize(bridged, cropped_h, cropped_w)
     panels = assemble_panels(
         faces,
@@ -1193,17 +1218,15 @@ def compute_panels(
     binary = binarize(rgb, gray)
     thick = compute_thick_mask(binary) if small_face_policy == "verified" else None
     lines = detect_lines(binary)
-    connected = dividers(image_path, lines, binary, border)
-    panels, _ = finalize_panels(
-        connected,
-        h,
-        w,
+    panels, _ = detect_panels(
+        image_path,
+        lines,
+        binary,
         border,
         min_panel_frac=min_panel_frac,
         small_face_policy=small_face_policy,
         thick_mask=thick,
     )
-    panels = [repair_panel(panel) for panel in panels]
     verdict = keymap_verdict(
         panels, lines, binary, sheet or SheetContext.beside(image_path)
     )
@@ -1627,9 +1650,7 @@ def process_image(image_path: Path, debug: bool = False) -> None:
     else:
         lines = detect_lines(binary)
 
-    connected = dividers(image_path, lines, binary)
-    panels, bridged = finalize_panels(connected, h, w)
-    panels = [repair_panel(panel) for panel in panels]
+    panels, bridged = detect_panels(image_path, lines, binary)
     full_h, full_w = h + 2 * BORDER_PX, w + 2 * BORDER_PX
 
     if debug:
