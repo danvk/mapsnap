@@ -1,0 +1,158 @@
+/* Split review: page list on the left, arm A and arm B side by side. */
+
+body {
+  margin: 0;
+}
+
+.sr-app {
+  display: flex;
+  height: 100vh;
+  font:
+    13px/1.4 system-ui,
+    sans-serif;
+  overflow: hidden;
+}
+
+.sr-message {
+  font:
+    14px/1.4 system-ui,
+    sans-serif;
+  padding: 16px;
+}
+
+.sr-sidebar {
+  width: 340px;
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  border-right: 1px solid #ddd;
+  min-height: 0;
+}
+
+.sr-sidebar h2 {
+  font-size: 14px;
+  margin: 10px 10px 6px;
+}
+
+.sr-summary {
+  margin: 0 10px 8px;
+  border-collapse: collapse;
+  color: #444;
+}
+.sr-summary th,
+.sr-summary td {
+  padding: 1px 8px 1px 0;
+  text-align: left;
+  white-space: nowrap;
+}
+
+.sr-list {
+  list-style: none;
+  margin: 0;
+  padding: 0 6px 10px;
+  overflow-y: auto;
+  border-top: 1px solid #eee;
+}
+
+.sr-list li {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 6px;
+  border-radius: 6px;
+  cursor: pointer;
+}
+.sr-list li:hover {
+  background: #f0f0f0;
+}
+.sr-list li.selected {
+  background: #fff3e0;
+  font-weight: bold;
+}
+
+.sr-name {
+  overflow-wrap: anywhere;
+}
+
+.sr-marks {
+  display: flex;
+  gap: 6px;
+  flex-shrink: 0;
+  font-variant-numeric: tabular-nums;
+}
+
+.sr-delta {
+  width: 3.2em;
+  text-align: right;
+}
+
+.sr-ok {
+  color: #1b7f3b;
+}
+.sr-bad {
+  color: #c0392b;
+}
+.sr-muted {
+  color: #666;
+}
+
+.sr-main {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.sr-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 6px 10px;
+  border-bottom: 1px solid #ddd;
+  flex-wrap: wrap;
+}
+.sr-toolbar label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  white-space: nowrap;
+}
+
+.sr-title {
+  font-weight: 600;
+}
+
+.sr-panes {
+  flex: 1;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  min-height: 0;
+}
+
+.sr-pane {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  min-width: 0;
+  border-right: 1px solid #eee;
+}
+
+.sr-pane-head {
+  display: flex;
+  gap: 14px;
+  padding: 4px 10px;
+  border-bottom: 1px solid #eee;
+  font-variant-numeric: tabular-nums;
+}
+
+.sr-arm {
+  font-weight: 600;
+}
+
+.sr-figure {
+  flex: 1;
+  min-height: 0;
+  width: 100%;
+  background: #f4f4f4;
+}
