@@ -6,6 +6,9 @@ panel partition and, when the page actually splits, writes each panel to <base>_
 the same directory (the panel cropped to its bounding box, with any out-of-panel area masked
 white). Pages that are a single panel are left alone.
 
+The dividing lines come from the cutline model (mapsnap.cutline_model) by default;
+MAPSNAP_SPLITTER=classical uses the classical detector below instead.
+
 With --debug, the per-stage images are also written next to each input (binary mask, detected
 segments, panel overlay, and front-end-specific stages).
 
@@ -31,7 +34,7 @@ from shapely.ops import polygonize, unary_union
 from skimage.morphology import medial_axis
 
 from mapsnap.corner_boxes import BOX_MIN_THICK_PX, corner_boxes, panels_with_boxes
-from mapsnap.cutline_model import enabled_model_path
+from mapsnap.cutline_model import cutline_model_path
 from mapsnap.keymap.log import append_keymap_log
 from mapsnap.roadprob import derive_panel_roadprob
 from mapsnap.utils import image_stem, jpeg_dimensions
@@ -1052,15 +1055,16 @@ def detect_panels(
 ) -> tuple[list, list[tuple[float, float, float, float]]]:
     """(full-frame panels, closed divider segments) for a page, before the key-map rules.
 
-    The cutline model's lines (mapsnap.cutline_model) when MAPSNAP_CUTLINE_MODEL
-    enables it, else the classical detector's connected_dividers; either way
-    finalize_panels closes them into panels (``finalize`` is passed through).
+    The cutline model's lines (mapsnap.cutline_model) by default, or the
+    classical detector's connected_dividers when MAPSNAP_SPLITTER=classical
+    selects it; either way finalize_panels closes them into panels
+    (``finalize`` is passed through).
     The model's lines close with their own junction overshoot, and any panel
     boundary the model never drew is dissolved afterwards. ``binary`` is the
     cropped ink mask ``lines`` were detected on.
     """
     h, w = binary.shape
-    model = enabled_model_path()
+    model = cutline_model_path()
     if model is None:
         connected = connected_dividers(lines, h, w, binary)
         panels, bridged = finalize_panels(connected, h, w, border, **finalize)

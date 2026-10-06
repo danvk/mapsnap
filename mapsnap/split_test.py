@@ -40,6 +40,13 @@ from mapsnap.split import (
     write_panels_json,
 )
 
+
+@pytest.fixture(autouse=True)
+def classical_splitter(monkeypatch):
+    """These tests exercise the classical detector on synthetic sheets."""
+    monkeypatch.setenv("MAPSNAP_SPLITTER", "classical")
+
+
 # --- panel_basename ---
 
 

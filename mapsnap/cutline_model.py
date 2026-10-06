@@ -1,19 +1,21 @@
 """Learned dividing lines for the splitter (#83): a whole-page UNet that draws cutlines.
 
-The model is trained on OldInsuranceMaps volunteers' cutlines (8.5k split pages
-whose cuts follow printed ink) and draws P(cutline) per pixel over a page
-letterboxed to INPUT_SIZE. The splitter uses it in place of its own line
-detection and divider filtering: the predicted lines are thinned to centerlines,
-cut into straight segments, and handed to split.finalize_panels, which closes
-near-miss ends, polygonizes and assembles panels exactly as it does for the
-classical detector's dividers.
+The splitter's default way of finding the lines that divide a sheet into
+panels. The model is trained on OldInsuranceMaps volunteers' cutlines (split
+pages whose cuts follow printed ink; mapsnap.train_cutline_unet) and draws
+P(cutline) per pixel over a page letterboxed to INPUT_SIZE. The splitter uses
+it in place of the classical line detection and divider filtering: the
+predicted lines are thinned to centerlines, cut into straight segments, and
+handed to split.finalize_panels, which closes near-miss ends, polygonizes and
+assembles panels as it does for the classical detector's dividers; panel
+boundaries the network never drew are then dissolved (merge_unsupported).
 
 On the cutline benchmark's test fold (760 pages from held-out volumes) this
-gets the right panel count on 85.5% of split pages (tuned classical: 76.3%) and
-leaves 99.5% of unsplit pages whole (98.5%).
+gets the right panel count on 87.4% of split pages (tuned classical: 76.3%)
+and leaves 99.2% of unsplit pages whole (98.5%).
 
-Enabled by MODEL_ENV_VAR (the weights' path, or "default" for MODEL_PATH), so a
-corpus A/B runs one build with and without it.
+``MAPSNAP_SPLITTER=classical`` selects the classical detector instead, so an
+A/B runs one build both ways; ``MAPSNAP_CUTLINE_WEIGHTS`` points at other weights.
 """
 
 import os
@@ -24,7 +26,8 @@ import cv2
 import numpy as np
 
 MODEL_PATH = Path(__file__).resolve().parent.parent / "models" / "cutline_unet.pt"
-MODEL_ENV_VAR = "MAPSNAP_CUTLINE_MODEL"
+SPLITTER_ENV_VAR = "MAPSNAP_SPLITTER"  # "classical" for the classical detector
+WEIGHTS_ENV_VAR = "MAPSNAP_CUTLINE_WEIGHTS"  # other weights than MODEL_PATH
 INPUT_SIZE = 768  # letterbox side the model was trained at
 LINE_THRESHOLD = 0.3  # P(cutline) at or above this is line
 # Hough on the predicted centerlines: the model's lines have small breaks
@@ -45,21 +48,22 @@ MERGE_MIN_SUPPORT = 0.3
 MERGE_SUPPORT_RADIUS_PX = 5
 
 
-def enabled_model_path() -> Path | None:
-    """The cutline model's weights if MODEL_ENV_VAR turns it on, else None."""
-    value = os.environ.get(MODEL_ENV_VAR, "")
-    if not value:
+def cutline_model_path() -> Path | None:
+    """The cutline model's weights, or None when MAPSNAP_SPLITTER selects the classical detector."""
+    splitter = os.environ.get(SPLITTER_ENV_VAR, "")
+    if splitter == "classical":
         return None
-    return MODEL_PATH if value == "default" else Path(value)
+    if splitter not in ("", "cutline"):
+        raise ValueError(
+            f"{SPLITTER_ENV_VAR}={splitter!r}: expected 'cutline' (default) or 'classical'"
+        )
+    weights = os.environ.get(WEIGHTS_ENV_VAR, "")
+    return Path(weights) if weights else MODEL_PATH
 
 
 @cache
 def load_cutline_model(path: Path):
-    """(model, device): the UNet with these weights, on the best available device.
-
-    Checkpoints from the first training run carry a retired page-level head
-    (``page.*``); its weights are dropped.
-    """
+    """(model, device): the UNet with these weights, on the best available device."""
     import torch
 
     from mapsnap.keymap.number_model import select_device
@@ -69,7 +73,7 @@ def load_cutline_model(path: Path):
     state = torch.load(path, map_location=device)
     base = state["enc1.block.0.weight"].shape[0]
     model = UNet(base=base, in_channels=3, norm="group").to(device)
-    model.load_state_dict({k: v for k, v in state.items() if not k.startswith("page.")})
+    model.load_state_dict(state)
     model.eval()
     return model, device
 
