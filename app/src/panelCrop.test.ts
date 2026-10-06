@@ -3,6 +3,7 @@ import {
   panelCrop,
   panelIndexFromStem,
   parentStem,
+  deepLinkJson,
   siblingPanelsPaths,
 } from './panelCrop';
 
@@ -109,5 +110,43 @@ describe('siblingPanelsPaths', () => {
     expect(
       siblingPanelsPaths('data/v/p3.jpg', 'data/v/p2__2.streets.json'),
     ).toEqual([]);
+  });
+});
+
+describe('deepLinkJson', () => {
+  const sheet = 'data/covington_la_1909/p1.jpg';
+  const panels = 'data/covington_la_1909/runs/corpus-v1/p1.panels.json';
+
+  it('shows a panels.json that is the only JSON: the panels view', () => {
+    expect(deepLinkJson([sheet, panels], sheet)).toEqual({
+      jsonFile: panels,
+      panelsFiles: [],
+    });
+  });
+
+  it("re-cuts the sheet with a named panels.json beside a panel's reads", () => {
+    const reads = 'data/covington_la_1909/runs/corpus-v1/p1__2.streets.json';
+    expect(deepLinkJson([sheet, reads, panels], sheet)).toEqual({
+      jsonFile: reads,
+      panelsFiles: [panels],
+    });
+  });
+
+  it("guesses the panels.json for a panel's reads when none is named", () => {
+    const reads = 'data/covington_la_1909/runs/corpus-v1/p1__2.streets.json';
+    expect(deepLinkJson([sheet, reads], sheet)).toEqual({
+      jsonFile: reads,
+      panelsFiles: siblingPanelsPaths(sheet, reads),
+    });
+  });
+
+  it('leaves an unsplit page alone', () => {
+    const reads = 'data/covington_la_1909/p2.streets.json';
+    expect(
+      deepLinkJson(['data/covington_la_1909/p2.jpg', reads], undefined),
+    ).toEqual({
+      jsonFile: reads,
+      panelsFiles: [],
+    });
   });
 });
