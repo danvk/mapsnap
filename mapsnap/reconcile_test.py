@@ -9,6 +9,8 @@ import pytest
 
 from mapsnap.reconcile import (
     KEEP_PRIOR,
+    PANEL_KEEP_PRIOR,
+    PANEL_VERIFIED_FLOOR,
     UNPLACED,
     W_NOTE_MISMATCH,
     W_RUNG_OFF,
@@ -17,6 +19,7 @@ from mapsnap.reconcile import (
     build_edges,
     collect_hypotheses,
     dedupe_hypotheses,
+    keep_prior,
     normalize_name_penalty,
     pairwise_energy,
     pose_scale_log2,
@@ -97,11 +100,12 @@ def scored(
     gcps: int = 2,
     published=False,
     page_placed=True,
+    panel=False,
 ):
     h = Hypothesis(source=source, affine=a, effective_gcps=gcps)
     if a is not None:
         h.scores["verification"] = verification
-    unary_energy(h, published, 600.0, None, None, page_placed=page_placed)
+    unary_energy(h, published, 600.0, None, None, page_placed=page_placed, panel=panel)
     return h
 
 
@@ -158,6 +162,35 @@ def test_keep_prior_defends_by_measured_support():
     assert strong.unary < unplaced.unary  # kept on its prior
     assert weak.unary > unplaced.unary  # no evidence, no prior, no keep
     assert KEEP_PRIOR[("4+", False)] > KEEP_PRIOR[("0-1", False)]
+
+
+def test_weakly_scored_one_gcp_panel_is_not_kept():
+    # Covington 1909 p6__2: a one-GCP panel fit 125,772 ft off, which snap
+    # scored a weak 0.32. As a page that score bought the 0.69 verified prior;
+    # as a panel it is below the measured range and buys nothing.
+    unplaced = scored(UNPLACED, None, 0.0)
+    weak_panel = scored("georef", affine(0), 0.32, gcps=1, published=True, panel=True)
+    weak_page = scored("georef", affine(0), 0.32, gcps=1, published=True)
+    assert weak_panel.unary > unplaced.unary
+    assert weak_panel.unary_terms["evidence"] == 0.0
+    assert weak_page.unary < unplaced.unary  # pages are unchanged
+    strong_panel = scored("georef", affine(0), 1.4, gcps=1, published=True, panel=True)
+    assert strong_panel.unary < unplaced.unary
+
+
+def test_panel_keep_prior_reads_the_panel_table():
+    assert keep_prior(1, 0.5, panel=True) == PANEL_KEEP_PRIOR[("0-1", False)]
+    assert (
+        keep_prior(1, PANEL_VERIFIED_FLOOR, panel=True)
+        == PANEL_KEEP_PRIOR[("0-1", True)]
+    )
+    assert keep_prior(3, 0.1, panel=True) == PANEL_KEEP_PRIOR[("2-3", True)]
+    assert keep_prior(1, 0.5) == KEEP_PRIOR[("0-1", True)]
+
+
+def test_a_contradicting_score_still_counts_against_a_panel():
+    weak = scored("georef", affine(0), -0.4, gcps=1, published=True, panel=True)
+    assert weak.unary_terms["evidence"] == pytest.approx(0.4)
 
 
 def test_pose_scale_log2_tracks_scale():

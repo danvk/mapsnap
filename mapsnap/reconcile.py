@@ -89,6 +89,28 @@ KEEP_PRIOR = {
     ("4+", False): 0.57,
     ("4+", True): 0.94,
 }
+# The same measurement for split panels, which the table above never saw:
+# until panels were snapped they were never scored, so every one sat in the
+# ("0-1", False) row. Measured on corpus-v1 over the 415 OIM-scored volumes
+# (2026-10-06, sheet-share weighted, E[keep] = good share - disaster share).
+# Pages re-measured the same way agree with KEEP_PRIOR except ("0-1", True),
+# which fell to 0.33; that row is left alone here. Two cells had too few
+# panels to measure (2 and 3) and take the page value.
+PANEL_KEEP_PRIOR = {
+    ("0-1", False): -0.15,  # 293 panels: 19% good, 34% disaster
+    ("0-1", True): 0.46,  # 120 panels, 110 of them scoring >= 1.0
+    ("2-3", False): 0.31,  # 613 panels
+    ("2-3", True): 0.68,  # page value
+    ("4+", False): 0.72,  # 1,411 panels
+    ("4+", True): 0.94,  # page value
+}
+# A panel resting on 0-1 GCPs counts as verified only from this score up: the
+# range its ("0-1", True) value was measured on. Below it a score says nothing
+# -- on whole pages, one-GCP fits scoring 0-0.5 measure +0.12, the same as
+# unscored ones (+0.11) -- so a published one-GCP panel's own weak score is
+# neither evidence nor protection. Covington 1909 p6__2 (a one-GCP fit 125,772
+# ft off) scored 0.32 and was published on exactly that.
+PANEL_VERIFIED_FLOOR = 1.0
 # Hypotheses closer than this are the same pose; keep one, merge provenance.
 DEDUPE_FT = 10.0
 # Robust keymap-distance term: (distance/radius)^2 clamped — SOFT prior, per
@@ -378,10 +400,31 @@ def dedupe_hypotheses(hypotheses: list[Hypothesis]) -> list[Hypothesis]:
     return kept
 
 
-def keep_prior(effective_gcps: int, verification: float | None) -> float:
-    """Measured expected value of publishing a pose with these features."""
+def keep_prior(
+    effective_gcps: int, verification: float | None, *, panel: bool = False
+) -> float:
+    """Measured expected value of publishing a pose with these features.
+
+    A split panel reads PANEL_KEEP_PRIOR, and at 0-1 GCPs needs
+    PANEL_VERIFIED_FLOOR, not just a non-negative score, to count as verified.
+    """
     tier = "0-1" if effective_gcps <= 1 else ("2-3" if effective_gcps <= 3 else "4+")
-    return KEEP_PRIOR[(tier, verification is not None and verification >= 0)]
+    if not panel:
+        return KEEP_PRIOR[(tier, verification is not None and verification >= 0)]
+    floor = PANEL_VERIFIED_FLOOR if tier == "0-1" else 0.0
+    return PANEL_KEEP_PRIOR[(tier, verification is not None and verification >= floor)]
+
+
+def weak_panel_score(
+    hypothesis: "Hypothesis", is_published: bool, verification: float, panel: bool
+) -> bool:
+    """Whether this is a published 0-1 GCP panel whose own score is too weak to count."""
+    return (
+        panel
+        and is_published
+        and hypothesis.effective_gcps <= 1
+        and 0 <= verification < PANEL_VERIFIED_FLOOR
+    )
 
 
 def carries_gcp_evidence(source: str) -> bool:
@@ -573,8 +616,12 @@ def unary_energy(
     family_log2: float | None,
     note_ratio: float | None,
     page_placed: bool = True,
+    panel: bool = False,
 ) -> float:
     """Energy of one hypothesis in isolation; UNPLACED is exactly 0.
+
+    ``panel`` marks a split panel, whose published pose is weighed with
+    PANEL_KEEP_PRIOR (see PANEL_VERIFIED_FLOOR).
 
     Deliberately absent: the incumbent-defensibility veto, margin gates, and
     select_score (which double-counts the name evidence) — those are the stage
@@ -595,6 +642,8 @@ def unary_energy(
         hypothesis.scores["unverified"] = True
     if verification is None:
         verification = 0.0
+    if weak_panel_score(hypothesis, is_published, verification, panel):
+        verification = 0.0
     terms["evidence"] = -(verification + W_NAME * name + W_CONTAIN * containment)
     if not page_placed:
         terms["entry"] = ENTRY_PENALTY
@@ -603,7 +652,9 @@ def unary_energy(
         # much support is worth, against E[unplaced] = 0. Replaces both the
         # invented incumbent epsilon and the flat keep bar.
         terms["keep_prior"] = -keep_prior(
-            hypothesis.effective_gcps, hypothesis.scores.get("verification")
+            hypothesis.effective_gcps,
+            hypothesis.scores.get("verification"),
+            panel=panel,
         )
     keymap_dist = hypothesis.scores.get("keymap_dist_m")
     if keymap_dist is not None and keymap_radius_m > 0:
@@ -1047,6 +1098,7 @@ def score_nodes(vctx, nodes: dict[str, PageNode], note_ratios: dict) -> None:
                 family_log2,
                 note_ratios.get(stem),
                 page_placed=node.published_index is not None,
+                panel=node.is_panel,
             )
 
 
