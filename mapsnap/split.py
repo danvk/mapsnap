@@ -904,6 +904,14 @@ def read_panels_json(path: Path) -> PanelsJson:
     return json.loads(path.read_text())
 
 
+def panel_rings(ordered_panels: list[Polygon]) -> list[list[list[float]]]:
+    """Panel polygons as panels.json records them: exterior rings, rounded to 0.1 px."""
+    return [
+        [[round(x, 1), round(y, 1)] for x, y in panel.exterior.coords]
+        for panel in ordered_panels
+    ]
+
+
 def write_panels_json(
     image_path: Path, ordered_panels: list[Polygon], width: int, height: int
 ) -> Path:
@@ -913,10 +921,7 @@ def write_panels_json(
     match the __i.jpg numbering: ordered_panels[i-1] corresponds to <base>__i.jpg.
     Returns the written path.
     """
-    rings = [
-        [[round(x, 1), round(y, 1)] for x, y in panel.exterior.coords]
-        for panel in ordered_panels
-    ]
+    rings = panel_rings(ordered_panels)
     data: PanelsJson = {
         "image": image_path.name,
         "width": width,
@@ -1240,6 +1245,27 @@ def repair_panel(panel: Polygon) -> Polygon:
     )
 
 
+def replace_panels(
+    image_path: Path,
+    ordered: list[Polygon],
+    base: str,
+    previous_rings: list[list[list[float]]],
+) -> tuple[list[Path], list[int]]:
+    """Drop the sidecars of panels whose ring changed, then write the new panels.
+
+    In that order: write_panels derives each panel's P(road) crop from the
+    parent's, and invalidating afterwards deleted the fresh crop of every
+    changed panel along with the stale reads -- so a corpus run, re-splitting
+    over the mirror's older cut, fitted those panels with no P(road) at all
+    (georef's fill check ran without it; snap inferred one on CPU). Returns the
+    panel images written and the changed panel indices.
+    """
+    changed = invalidate_changed_panels(
+        image_path, previous_rings, panel_rings(ordered)
+    )
+    return write_panels(image_path, ordered, base), changed
+
+
 def write_panels(image_path: Path, panels: list, base: str) -> list[Path]:
     """Write each panel to <base>__N.jpg next to image_path; return the written paths.
 
@@ -1531,7 +1557,7 @@ def process_image(image_path: Path, debug: bool = False) -> None:
         )
         return
     ordered = order_panels(panels, full_h)  # panels are in the uncropped frame
-    out_paths = write_panels(image_path, ordered, base)
+    out_paths, changed = replace_panels(image_path, ordered, base, previous_rings)
     print(
         f"{image_path.name}: {len(panels)} panels → {', '.join(p.name for p in out_paths)}"
     )
@@ -1546,11 +1572,6 @@ def process_image(image_path: Path, debug: bool = False) -> None:
                 *box_lines,
             ],
         )
-    changed = invalidate_changed_panels(
-        image_path,
-        previous_rings,
-        read_panels_json(panels_json_path(image_path))["panels"],
-    )
     if changed:
         print(
             f"  panels {changed} changed since the last split; their reads and "
