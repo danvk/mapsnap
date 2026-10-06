@@ -3,7 +3,7 @@ import type { KeymapInfo } from '../../server/api';
 import type { SkippedItem } from '../../server/iiifAnnotations';
 import type { PageCompareStats } from '../iiif/compare';
 import { hasFootprint, type PageGeo } from '../iiif/pages';
-import { debugImageStem } from '../iiif/volumePath';
+import { debugImageStem, panelsViewFiles } from '../iiif/volumePath';
 
 /**
  * One page view, offered both inline and as a standalone tab.
@@ -274,12 +274,15 @@ export function InfoPanel(props: InfoPanelProps) {
       label: `${file.slice(selectedPage.stem.length + 1, -'.json'.length)} view`,
       files: [`${imageBase}.jpg`, `${sidecarDir}/${file}`],
     }));
+    // A split panel opens on its whole sheet, cut by the run on screen.
+    const panelsFiles = panelsViewFiles(volume, run ?? null, selectedPage.stem);
     const debugViews: { label: string; files: string[] }[] = [
       {
         label: 'streets view',
         files: [`${imageBase}.jpg`, `${sidecarBase}.streets.json`],
       },
       ...georefViews,
+      ...(panelsFiles ? [{ label: 'panels view', files: panelsFiles }] : []),
       ...(hasAdjacency
         ? [
             {
