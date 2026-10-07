@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   annotationName,
   debugImageStem,
+  panelsViewFiles,
   parseAnnotationPath,
 } from './volumePath';
 
@@ -108,5 +109,27 @@ describe('annotationName', () => {
     expect(
       annotationName(parseAnnotationPath('s3://bucket/x.iiif.json')),
     ).toBeNull();
+  });
+});
+
+describe('panelsViewFiles', () => {
+  it("opens a mirror run's panel on its sheet with that run's panels.json", () => {
+    expect(
+      panelsViewFiles('welsh_la_1903', 'runs/split-ab-model', 'p2__3'),
+    ).toEqual([
+      'data/welsh_la_1903/p2.jpg',
+      'data/welsh_la_1903/runs/split-ab-model/p2.panels.json',
+    ]);
+  });
+
+  it("reads the volume root's panels.json for a root annotation", () => {
+    expect(panelsViewFiles('fargo_nd_1958', null, 'p9j__1')).toEqual([
+      'data/fargo_nd_1958/p9j.jpg',
+      'data/fargo_nd_1958/p9j.panels.json',
+    ]);
+  });
+
+  it('is null for an unsplit page', () => {
+    expect(panelsViewFiles('fargo_nd_1958', null, 'p12')).toBeNull();
   });
 });

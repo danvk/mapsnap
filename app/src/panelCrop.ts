@@ -115,3 +115,29 @@ export function siblingPanelsPaths(
   };
   return [...new Set([beside(jsonFile), beside(imageFile)])];
 }
+
+/**
+ * What a `?files=` deep link displays: the JSON to show, and the panels.json
+ * files to re-cut its image with first.
+ *
+ * A panels.json is the data to show when it is the only JSON: a sheet plus its
+ * panels.json is the panels view, as when the two are dropped together. Beside
+ * another JSON (a panel's reads or georef) it only says where that panel sits
+ * on its sheet, so the sheet can be re-cut to match the reads; with no
+ * panels.json named, siblingPanelsPaths guesses where it is.
+ */
+export function deepLinkJson(
+  files: string[],
+  imageFile: string | undefined,
+): { jsonFile: string | undefined; panelsFiles: string[] } {
+  const panels = files.find((f) => f.endsWith('.panels.json'));
+  const other = files.find(
+    (f) => f.endsWith('.json') && !f.endsWith('.panels.json'),
+  );
+  if (!other) return { jsonFile: panels, panelsFiles: [] };
+  if (panels) return { jsonFile: other, panelsFiles: [panels] };
+  return {
+    jsonFile: other,
+    panelsFiles: imageFile ? siblingPanelsPaths(imageFile, other) : [],
+  };
+}

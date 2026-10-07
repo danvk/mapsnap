@@ -145,6 +145,7 @@ export default defineConfig({
         adjacency: 'adjacency.html',
         regions: 'regions.html',
         atlas: 'atlas.html',
+        splitReview: 'split-review.html',
       },
     },
   },

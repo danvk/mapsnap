@@ -76,3 +76,24 @@ export function debugImageStem(
   const sheet = stem.replace(/__\d+$/, '');
   return pageImages.has(sheet) ? sheet : stem;
 }
+
+/**
+ * The files for a split panel's "panels view": its whole sheet and the
+ * sheet's panels.json, as the run on screen cut it. Null for an unsplit page.
+ *
+ * A mirror run (`runs/<tag>`) keeps its own panels.json, since each run may cut
+ * the sheet differently; an annotation at the volume root reads the root's.
+ */
+export function panelsViewFiles(
+  volume: string,
+  run: string | null,
+  stem: string,
+): string[] | null {
+  const match = stem.match(/^(.+)__\d+$/);
+  if (!match) return null;
+  const sheet = match[1];
+  return [
+    `data/${volume}/${sheet}.jpg`,
+    `data/${volume}/${run ? `${run}/` : ''}${sheet}.panels.json`,
+  ];
+}

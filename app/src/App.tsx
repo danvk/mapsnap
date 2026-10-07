@@ -31,7 +31,7 @@ import {
   cutPanel,
   panelCrop,
   panelIndexFromStem,
-  siblingPanelsPaths,
+  deepLinkJson,
 } from './panelCrop';
 import { ImageColumn, type Mode } from './components/ImageColumn';
 import { MapView } from './components/MapView';
@@ -43,7 +43,8 @@ import { BoxesTable } from './components/BoxesTable';
 import { VolumeViewer } from './components/VolumeViewer';
 import { NoteButton } from './components/NoteButton';
 import { noteContextFromFiles, type NoteContext } from './notes/api';
-import { isTypingTarget } from './keyboard';
+import { isTypingTarget, nextOpacityStep } from './keyboard';
+import { toggledSelection } from './selection';
 import { firstImage, roadProbCandidates } from './roadProb';
 import { loadImage } from './loadImage';
 
@@ -297,6 +298,7 @@ export function DebugView({ files: filesProp, onClose }: DebugViewProps = {}) {
 
   // Display toggles.
   const [opacity, setOpacity] = useState(85); // 0..100
+  const [panelOpacity, setPanelOpacity] = useState(100); // 0..100
   const [showStreetsOnImage, setShowStreetsOnImage] = useState(true);
   const [showIntersectionsOnImage, setShowIntersectionsOnImage] =
     useState(true);
@@ -641,20 +643,13 @@ export function DebugView({ files: filesProp, onClose }: DebugViewProps = {}) {
   // Mirrors handleFiles, but fetches served files instead of reading File blobs.
   async function loadFromUrls(files: string[]): Promise<void> {
     const imageFile = files.find(isImageUrl);
-    const jsonFile = files.find(
-      (f) => f.endsWith('.json') && !f.endsWith('.panels.json'),
-    );
     // A corpus run keeps the parent page and each panel's reads, but not the
     // panel images -- those are re-cut on the worker and never uploaded. So
     // `p20.jpg` + `p20__3.streets.json` is the only pair on disk, and the reads
     // are in the panel's frame while the image is in the parent's. Given the
     // parent's panels.json we can re-cut the panel here and make them agree.
-    const explicitPanels = files.find((f) => f.endsWith('.panels.json'));
-    const panelsFiles = explicitPanels
-      ? [explicitPanels]
-      : imageFile && jsonFile
-        ? siblingPanelsPaths(imageFile, jsonFile)
-        : [];
+    // A panels.json with no other JSON is instead the panels view itself.
+    const { jsonFile, panelsFiles } = deepLinkJson(files, imageFile);
 
     let fallbackWidth = jsonWidth;
     let fallbackHeight = jsonHeight;
@@ -739,17 +734,17 @@ export function DebugView({ files: filesProp, onClose }: DebugViewProps = {}) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Cycle warped-image opacity through 0/50/100% on the 'p' key (georef mode),
-  // unless the user is typing (e.g. in the note editor).
+  // Cycle an opacity through 0/50/100% on the 'p' key, unless the user is
+  // typing (e.g. in the note editor): the warped image's in georef mode, the
+  // panel overlay's in panels mode. Esc deselects in panels mode, where every
+  // click on the sheet lands in some panel.
   useEffect(() => {
     function onKeydown(e: KeyboardEvent): void {
-      if (e.key !== 'p' || mode !== 'georef' || isTypingTarget(e.target))
-        return;
-      const steps = [0, 50, 100];
-      setOpacity((prev) => {
-        const nextIdx = (steps.indexOf(prev) + 1) % steps.length;
-        return steps[nextIdx] ?? steps[0];
-      });
+      if (isTypingTarget(e.target)) return;
+      if (e.key === 'p' && mode === 'georef') setOpacity(nextOpacityStep);
+      if (e.key === 'p' && mode === 'panels') setPanelOpacity(nextOpacityStep);
+      if (e.key === 'Escape' && mode === 'panels')
+        setSelectedIndices(new Set());
     }
     window.addEventListener('keydown', onKeydown);
     return () => window.removeEventListener('keydown', onKeydown);
@@ -810,6 +805,8 @@ export function DebugView({ files: filesProp, onClose }: DebugViewProps = {}) {
         onToggleAngle={toggleAngle}
         selectedIndices={selectedIndices}
         onSelectIndices={setSelectedIndices}
+        panelOpacity={panelOpacity}
+        setPanelOpacity={setPanelOpacity}
         showStreetsOnImage={showStreetsOnImage}
         setShowStreetsOnImage={setShowStreetsOnImage}
         showIntersectionsOnImage={showIntersectionsOnImage}
@@ -935,7 +932,9 @@ export function DebugView({ files: filesProp, onClose }: DebugViewProps = {}) {
             panels={panels}
             panelLabels={panelLabels}
             selectedIndices={selectedIndices}
-            onSelect={(index) => setSelectedIndices(new Set([index]))}
+            onSelect={(index) =>
+              setSelectedIndices((prev) => toggledSelection(prev, [index]))
+            }
             jsonWidth={jsonWidth}
             jsonHeight={jsonHeight}
           />

@@ -26,6 +26,16 @@ is one ``aws s3 rm --recursive`` rather than an unpickable mixture.
 ``--run-tag`` names the run: the prefix the outputs land in and the run
 recorded inside them are the same string.
 
+Resuming
+--------
+
+An item is done when its run holds the done marker, and done items are
+skipped. Within an item, the stages that cost real time -- keymap-detect,
+adjacency, keymap and ocr -- upload their outputs as each finishes, followed
+by a marker in ``runs/<tag>/checkpoints/``. A later attempt syncs the run's
+outputs down with the markers and skips the finished stages, so an item
+reclaimed in fit re-runs fit, not its key map and OCR as well.
+
 What is uploaded, and what is not
 ---------------------------------
 
@@ -116,6 +126,16 @@ RUNS_DIRNAME = "runs"
 # where it sorts before `p*.streets.json` and so landed first: an interrupted
 # upload left a done marker over a partial item, which is then skipped forever.
 DONE_MARKER = f"{ARCHIVE_TAG}.iiif.json"
+# Per-stage markers under the run prefix, one per finished stage. A spot
+# reclaim used to cost the whole item: outputs went up only after fit, so an
+# item killed in fit re-ran its key map and OCR too -- 913 of the 990 job-hours
+# corpus-v1 spent on items that died mid-chain went to stages that had already
+# finished once. The stages that cost real time, and whose outputs are all
+# uploaded, are checkpointed. split and craft are not: they re-cut panel
+# files that are never uploaded, in under a second a page. fit is not either:
+# its output is the item, and the done marker already records it.
+CHECKPOINT_DIRNAME = "checkpoints"
+CHECKPOINTED_STAGES = ("keymap-detect", "adjacency", "keymap", "ocr")
 # The reads `--ocr-from` brings forward from an earlier run. `ocr --resume`
 # decides what to keep: it re-reads any page whose recognizer weights differ,
 # and any page the previous run never had (a new panel, say).
@@ -570,17 +590,38 @@ def keymap_sheets(local: Path) -> list[str]:
     return scans
 
 
-def run_chain(local: Path, work: FitWork, run_tag: str | None = None) -> None:
+def run_chain(
+    local: Path,
+    work: FitWork,
+    run_tag: str | None = None,
+    checkpoint: Callable[[str], None] | None = None,
+) -> None:
     """split, adjacency, keymap, ocr, fit -- the order `run-loc` uses.
 
     adjacency runs before keymap so its mutual edges can repair the key map's
     page-number assignments; both run before ocr so the vocabulary can be
     narrowed to each page's key-map neighbourhood.
+
+    A stage in CHECKPOINTED_STAGES that an earlier attempt finished (its marker
+    is in ``local``) is skipped, its outputs having come down with the run; one
+    that runs here is followed by ``checkpoint(name)``, which uploads it.
     """
+    finished = finished_stages(local)
+
+    def resumable(name: str, run: Callable[[], None]) -> None:
+        """Run a checkpointed stage unless an earlier attempt already did."""
+        if name in finished:
+            print(f"[{name}: finished in an earlier attempt]", file=sys.stderr)
+            return
+        run()
+        if checkpoint is not None:
+            checkpoint(name)
+
     pages = [str(local / name) for name in work.pages]
     # First, so the key-map stage's default centerlines are the same streets.
     centerlines = local_centerlines(local, work)
     stage(["mapsnap", "split", *pages], local)
+
     # Identify the key map HERE, after the split, rather than trusting the
     # keymaps.json the mirror carries. `loc-keymaps` runs before anything is
     # split, so it names the whole sheet -- p0a -- while a local run, splitting
@@ -595,13 +636,17 @@ def run_chain(local: Path, work: FitWork, run_tag: str | None = None) -> None:
     # vCPU-hours for the corpus: about 1%.
     # Drop the mirror's copy first. keymap-detect writes a record either way,
     # but an item whose identification fails partway would otherwise fall back
-    # to the stale whole-sheet answer, which is the bug being fixed.
-    (local / KEYMAPS_NAME).unlink(missing_ok=True)
-    stage(
-        ["mapsnap", "keymap-detect", str(local)],
-        local,
-        ok_if=lambda: (local / KEYMAPS_NAME).exists(),
-    )
+    # to the stale whole-sheet answer, which is the bug being fixed. A resumed
+    # item keeps this run's record, which came down over the mirror's.
+    def detect_keymap() -> None:
+        (local / KEYMAPS_NAME).unlink(missing_ok=True)
+        stage(
+            ["mapsnap", "keymap-detect", str(local)],
+            local,
+            ok_if=lambda: (local / KEYMAPS_NAME).exists(),
+        )
+
+    resumable("keymap-detect", detect_keymap)
     # The *effective* pages: a panel supersedes its parent, so a split sheet is
     # read panel by panel and the whole sheet is not read at all.
     effective = [str(path) for path in list_pages(local)]
@@ -611,20 +656,27 @@ def run_chain(local: Path, work: FitWork, run_tag: str | None = None) -> None:
     # (the reader is built lazily, inside detect); it only writes each
     # <parent>__N.boxes.json, raw key-map panels included.
     stage(["mapsnap", "craft", "--resume", *effective, *raw_images(local)], local)
-    stage(["mapsnap", "adjacency", str(local)], local)
-    sheets = keymap_sheets(local)
-    if sheets:
-        stage(["mapsnap", "keymap", *sheets], local)
-    stage(
-        [
-            "mapsnap",
-            "ocr",
-            "--resume",
-            "--centerlines",
-            str(centerlines),
-            *effective,
-        ],
-        local,
+    resumable("adjacency", lambda: stage(["mapsnap", "adjacency", str(local)], local))
+
+    def keymap() -> None:
+        sheets = keymap_sheets(local)
+        if sheets:
+            stage(["mapsnap", "keymap", *sheets], local)
+
+    resumable("keymap", keymap)
+    resumable(
+        "ocr",
+        lambda: stage(
+            [
+                "mapsnap",
+                "ocr",
+                "--resume",
+                "--centerlines",
+                str(centerlines),
+                *effective,
+            ],
+            local,
+        ),
     )
     # The previous run's archive comes down with the sync, and `fit` refuses to
     # overwrite one: re-fitting an item after a code change failed outright
@@ -648,14 +700,8 @@ def run_chain(local: Path, work: FitWork, run_tag: str | None = None) -> None:
     )
 
 
-def upload(local: Path, bucket: str, item: Item, run_tag: str) -> None:
-    """Sync this run's sidecars up, then the done marker, in that order.
-
-    Two calls, not one: the marker is what `plan_fit` reads to decide an item is
-    finished, so it must not exist until everything it vouches for does. In a
-    single sync it sorts before `p*.streets.json` and landed first, and a spot
-    interruption in between retired a half-uploaded item for good.
-    """
+def sync_outputs(local: Path, bucket: str, item: Item, run_tag: str) -> None:
+    """Sync this run's sidecars up: everything but the stable half and the markers."""
     excludes: list[str] = []
     for pattern in UPLOAD_EXCLUDES:
         excludes += ["--exclude", pattern]
@@ -675,10 +721,24 @@ def upload(local: Path, bucket: str, item: Item, run_tag: str) -> None:
             CLIPPED_CENTERLINES_NAME,
             "--exclude",
             DONE_MARKER,
+            "--exclude",
+            f"{CHECKPOINT_DIRNAME}/*",
             *excludes,
             "--only-show-errors",
         ]
     )
+
+
+def upload(local: Path, bucket: str, item: Item, run_tag: str) -> None:
+    """Sync this run's sidecars up, then the done marker, in that order.
+
+    Two calls, not one: the marker is what `plan_fit` reads to decide an item is
+    finished, so it must not exist until everything it vouches for does. In a
+    single sync it sorts before `p*.streets.json` and landed first, and a spot
+    interruption in between retired a half-uploaded item for good.
+    """
+    sync_outputs(local, bucket, item, run_tag)
+    destination = run_prefix(bucket, item, run_tag)
     marker = local / DONE_MARKER
     if marker.exists():
         run_aws(
@@ -693,10 +753,68 @@ def upload(local: Path, bucket: str, item: Item, run_tag: str) -> None:
         )
 
 
-def process_item(work: FitWork, local: Path, bucket: str) -> int:
-    """Run the chain over a downloaded item and sync its sidecars up."""
+def finished_stages(local: Path) -> set[str]:
+    """The stages an earlier attempt at this item finished: their checkpoint markers.
+
+    The markers come down with the run prefix (see fetch_item), beside the
+    outputs they vouch for.
+    """
+    return {path.stem for path in (local / CHECKPOINT_DIRNAME).glob("*.json")}
+
+
+def checkpoint(local: Path, bucket: str, item: Item, run_tag: str, name: str) -> None:
+    """Upload what the chain has produced so far, then record that ``name`` finished.
+
+    The marker goes up after the sync, never in it, for the done marker's
+    reason: a marker that lands before its outputs, followed by a reclaim,
+    would make the next attempt skip a stage whose outputs are not there.
+
+    A failed checkpoint upload is not a failed item. Checkpoints only save a
+    retry some work, so the chain carries on, and the final upload still
+    carries everything.
+    """
+    marker = local / CHECKPOINT_DIRNAME / f"{name}.json"
+    marker.parent.mkdir(exist_ok=True)
+    marker.write_text(
+        json.dumps({"stage": name, "finished": datetime.now(UTC).isoformat()})
+    )
     try:
-        run_chain(local, work, work.run_tag)
+        # Never the done marker: only the end of the chain may retire an item.
+        sync_outputs(local, bucket, item, run_tag)
+        run_aws(
+            [
+                "aws",
+                "s3",
+                "cp",
+                str(marker),
+                f"{run_prefix(bucket, item, run_tag)}/{CHECKPOINT_DIRNAME}/{name}.json",
+                "--only-show-errors",
+            ]
+        )
+    except OSError as error:
+        print(
+            f"{item.item}: checkpoint after {name} not saved: {error}",
+            file=sys.stderr,
+            flush=True,
+        )
+
+
+def process_item(work: FitWork, local: Path, bucket: str) -> int:
+    """Run the chain over a downloaded item and sync its sidecars up.
+
+    Each checkpointed stage's outputs are uploaded as it finishes (see
+    CHECKPOINTED_STAGES), so a retry after a reclaim resumes at the stage it
+    died in rather than at the start of the item.
+    """
+    try:
+        run_chain(
+            local,
+            work,
+            work.run_tag,
+            checkpoint=lambda name: checkpoint(
+                local, bucket, work.item, work.run_tag, name
+            ),
+        )
         upload(local, bucket, work.item, work.run_tag)
         return len(work.pages)
     finally:
