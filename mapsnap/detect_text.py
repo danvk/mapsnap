@@ -466,17 +466,33 @@ model landed, purely because a re-OCR had been run without the flag.
 """
 
 
+# The attribute load_recognizer_weights stamps on a reader, naming the weights
+# it now carries; a reader without it runs EasyOCR's stock model.
+RECOGNIZER_ATTR = "mapsnap_recognizer"
+
+
+def reader_recognizer(reader: easyocr.Reader) -> str | None:
+    """The weights filename a reader recognizes with, or None for the stock model."""
+    return getattr(reader, RECOGNIZER_ATTR, None)
+
+
 def cached_recognizer(streets_path: Path) -> str | None:
     """Which recognizer produced a cached read, by weights filename, or None.
 
-    ``streets.json`` records the command that wrote it, so the weights are
-    recoverable. None means EasyOCR's stock model -- either no flag was passed
-    or the file predates the flag.
+    A read records it in its ``recognizer`` field (None: EasyOCR's stock
+    model). Older reads only have the command that wrote them, whose
+    ``--recognizer-weights`` token names the weights; but since the fine-tuned
+    model became the default (#313) a default run has no such token, so those
+    reads come back as stock and are re-read once, after which they carry the
+    field (#398).
     """
     try:
-        command = json.loads(streets_path.read_text()).get("command") or []
+        doc = json.loads(streets_path.read_text())
     except (OSError, ValueError):
         return None
+    if "recognizer" in doc:
+        return doc["recognizer"]
+    command = doc.get("command") or []
     for i, token in enumerate(command):
         if token == "--recognizer-weights" and i + 1 < len(command):
             return Path(command[i + 1]).name
@@ -523,6 +539,7 @@ def load_recognizer_weights(reader: easyocr.Reader, weights_path: str) -> None:
     model = reader.recognizer
     inner = model.module if hasattr(model, "module") else model
     inner.load_state_dict(state)
+    setattr(reader, RECOGNIZER_ATTR, Path(weights_path).name)
     print(f"Recognizer weights: {weights_path}", file=sys.stderr)
 
 
@@ -773,6 +790,7 @@ def detect_text(
         "height": orig_height,
         "timestamp": datetime.now(UTC).isoformat(),
         "command": filter_args(sys.argv[:], image_path),
+        "recognizer": reader_recognizer(reader),
         "paper": paper,
         "streets": all_detections,
     }
@@ -1129,6 +1147,16 @@ def main() -> None:
             file=sys.stderr,
         )
 
+    # Before --resume: it must compare cached reads against the recognizer this
+    # run will actually use, and --stock-recognizer overrides the default weights.
+    if args.stock_recognizer:
+        args.recognizer_weights = None
+    elif args.recognizer_weights and not Path(args.recognizer_weights).exists():
+        sys.exit(
+            f"Recognizer weights not found: {args.recognizer_weights}\n"
+            "Pass --stock-recognizer to use EasyOCR's model instead."
+        )
+
     if args.resume:
         images = [
             p
@@ -1142,6 +1170,8 @@ def main() -> None:
             f"Resuming: {len(images)}/{len(args.images)} remaining images to process.",
             file=sys.stderr,
         )
+        if not images:
+            return  # nothing to read: don't load EasyOCR just to exit
 
     require_boxes(images)
 
@@ -1153,14 +1183,6 @@ def main() -> None:
             file=sys.stderr,
         )
         args.num_workers = 1
-
-    if args.stock_recognizer:
-        args.recognizer_weights = None
-    elif args.recognizer_weights and not Path(args.recognizer_weights).exists():
-        sys.exit(
-            f"Recognizer weights not found: {args.recognizer_weights}\n"
-            "Pass --stock-recognizer to use EasyOCR's model instead."
-        )
 
     if args.num_workers > 1:
         initargs = (
