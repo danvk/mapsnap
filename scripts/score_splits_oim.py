@@ -237,6 +237,18 @@ def run_panels(panels_dir: Path, case: Case, size: tuple[int, int]) -> list[Poly
     return panels_in_frame(json.loads(path.read_text()), size)
 
 
+def write_panels(
+    out_dir: Path, image: Path, panels: list[Polygon], size: tuple[int, int]
+) -> None:
+    """An image's panels as <out_dir>/<stem>.panels.json, the frame run_panels reads."""
+    rings = [
+        [[round(x, 1), round(y, 1)] for x, y in panel.exterior.coords]
+        for panel in panels
+    ]
+    data = {"image": image.name, "width": size[0], "height": size[1], "panels": rings}
+    (out_dir / f"{image.stem}.panels.json").write_text(json.dumps(data))
+
+
 def unfinished_names(panels_dir: Path) -> set[str]:
     """Image stems whose item the run never finished (fetch_run_panels.py's list)."""
     path = panels_dir / "unfinished.json"
@@ -380,6 +392,17 @@ def main() -> None:
         help="Small-face policy: glue (PR #70 default) or divider-verified keep.",
     )
     parser.add_argument("--out", type=Path, default=None, help="Write per-case JSON.")
+    parser.add_argument(
+        "--fold", default=None, help="Only score a manifest's pages of this fold."
+    )
+    parser.add_argument(
+        "--write-panels",
+        type=Path,
+        default=None,
+        metavar="DIR",
+        help="Write each page's panels to DIR/<image stem>.panels.json "
+        "(an arm for split_review.py).",
+    )
     args = parser.parse_args()
 
     cases = (
@@ -388,7 +411,14 @@ def main() -> None:
         else gather_cases(args.data_dir, args.negatives, args.seed)
     )
     skipped = unfinished_names(args.panels_dir) if args.panels_dir else set()
-    cases = [case for case in cases if case.image.stem not in skipped]
+    cases = [
+        case
+        for case in cases
+        if case.image.stem not in skipped
+        and (args.fold is None or case.fold == args.fold)
+    ]
+    if args.write_panels:
+        args.write_panels.mkdir(parents=True, exist_ok=True)
     print(
         f"{sum(c.truth is not None for c in cases)} positive sheets, "
         f"{sum(c.truth is None for c in cases)} negatives"
@@ -413,6 +443,8 @@ def main() -> None:
                 )
             ]
         records.append(score_record(case, gen, size))
+        if args.write_panels:
+            write_panels(args.write_panels, case.image, gen, size)
 
     if not args.manifest:
         by_volume: dict[str, list[float]] = defaultdict(list)

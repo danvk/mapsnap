@@ -15,6 +15,7 @@ from score_splits_oim import (
     score_record,
     summarize,
     unfinished_names,
+    write_panels,
 )
 from shapely.geometry import box
 
@@ -147,3 +148,14 @@ def test_summarize_reports_folds_bands_and_outcomes():
     text = "\n".join(lines)
     assert "by fold:" in text and "by size_band:" in text
     assert "     2      1  1.000      0.0%      0.0%    100.0%      0.0%" in text
+
+
+def test_write_panels_round_trips_through_run_panels(tmp_path: Path):
+    image = tmp_path / "images" / "a__p1.jpg"
+    halves = [box(0, 0, 100, 100), box(100, 0, 200, 100)]
+    write_panels(tmp_path, image, halves, (200, 100))
+    data = json.loads((tmp_path / "a__p1.panels.json").read_text())
+    assert (data["image"], data["width"], data["height"]) == ("a__p1.jpg", 200, 100)
+    case = Case("a__p1", "a", "p1", image)
+    panels = run_panels(tmp_path, case, (200, 100))
+    assert [p.area for p in panels] == [10000, 10000]
