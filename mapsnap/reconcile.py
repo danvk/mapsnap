@@ -609,6 +609,32 @@ NO_FAMILY_RUNG = {
 }
 
 
+def holds_its_place(node: "PageNode") -> bool:
+    """Whether the page's published pose spares its challengers the entry bar.
+
+    ENTRY_PENALTY is what a pose must overcome to place a page that has no
+    published pose. Any published whole page waives it, but a published panel
+    only does if publishing it is worth more than leaving the panel unplaced
+    (keep prior > 0). Without that, a weakly scored one-GCP panel fit, which
+    PANEL_KEEP_PRIOR rates below unplaced, still let any snap candidate in for
+    free. On the 28-volume OIM A/B, 0-GCP snap poses scoring ~1.2 then replaced
+    those fits with aliases (sanborn06253_001 p5__3 and p6__2: 47 and 75 ft ->
+    255 and 256 ft). Such a panel is treated as unplaced, so a challenger must
+    clear the bar a rescue does.
+    """
+    if node.published_index is None:
+        return False
+    if not node.is_panel:
+        return True
+    published = node.hypotheses[node.published_index]
+    return (
+        keep_prior(
+            published.effective_gcps, published.scores.get("verification"), panel=True
+        )
+        > 0
+    )
+
+
 def unary_energy(
     hypothesis: Hypothesis,
     is_published: bool,
@@ -1097,7 +1123,7 @@ def score_nodes(vctx, nodes: dict[str, PageNode], note_ratios: dict) -> None:
                 node.unit.keymap_radius_m or vctx.radius_m,
                 family_log2,
                 note_ratios.get(stem),
-                page_placed=node.published_index is not None,
+                page_placed=holds_its_place(node),
                 panel=node.is_panel,
             )
 

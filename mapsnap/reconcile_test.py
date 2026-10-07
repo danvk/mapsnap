@@ -19,6 +19,7 @@ from mapsnap.reconcile import (
     build_edges,
     collect_hypotheses,
     dedupe_hypotheses,
+    holds_its_place,
     keep_prior,
     normalize_name_penalty,
     pairwise_energy,
@@ -191,6 +192,35 @@ def test_panel_keep_prior_reads_the_panel_table():
 def test_a_contradicting_score_still_counts_against_a_panel():
     weak = scored("georef", affine(0), -0.4, gcps=1, published=True, panel=True)
     assert weak.unary_terms["evidence"] == pytest.approx(0.4)
+
+
+def test_a_worthless_panel_fit_does_not_waive_the_entry_bar():
+    # sanborn06253_001 p5__3: a one-GCP panel fit scoring 0.15 is worth less
+    # than unplaced, so it must not let a 0-GCP snap alias (1.24, ambiguous)
+    # in without paying the entry bar.
+    fit = Hypothesis(source="georef", affine=affine(0), effective_gcps=1)
+    fit.scores["verification"] = 0.15
+    challenger = Hypothesis(source="snap:0", affine=affine(400), effective_gcps=0)
+    challenger.scores.update(verification=1.24, ambiguous=True)
+    unplaced = Hypothesis(source=UNPLACED, affine=None)
+    panel = make_node("p5__3", [fit, challenger, unplaced], base="p5")
+    assert not holds_its_place(panel)
+    unary_energy(challenger, False, 600.0, None, None, page_placed=False, panel=True)
+    unary_energy(unplaced, False, 600.0, None, None, page_placed=False, panel=True)
+    assert challenger.unary > unplaced.unary
+
+
+def test_a_supported_fit_holds_its_place():
+    strong = Hypothesis(source="georef", affine=affine(0), effective_gcps=5)
+    strong.scores["verification"] = 1.3
+    verified = Hypothesis(source="georef", affine=affine(0), effective_gcps=1)
+    verified.scores["verification"] = PANEL_VERIFIED_FLOOR
+    weak = Hypothesis(source="georef", affine=affine(0), effective_gcps=1)
+    weak.scores["verification"] = 0.15
+    assert holds_its_place(make_node("p2__1", [strong], base="p2"))
+    assert holds_its_place(make_node("p2__1", [verified], base="p2"))
+    assert holds_its_place(make_node("p2", [weak]))  # whole pages are unchanged
+    assert not holds_its_place(make_node("p2__1", [weak], published=None, base="p2"))
 
 
 def test_pose_scale_log2_tracks_scale():
