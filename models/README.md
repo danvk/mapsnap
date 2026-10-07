@@ -138,3 +138,42 @@ uv run python -m mapsnap.region_model train $(ls -d data/*/ | grep -v 'columbus_
 Verify with the corpus overlap measurement in #352 (good-page median overlap
 per volume) and the held-out IoU the trainer prints; #355's ablations
 (longer training, base 32) still hold and are not worth repeating.
+
+## cutline_unet.pt
+
+The splitter's **cutline** model (#83): a whole-page UNet (base 16, GroupNorm,
+2.0M parameters) that draws, per pixel of the page letterboxed to 768², the
+dividing lines that cut a sheet into panels. `mapsnap split` uses it by default
+(`mapsnap.cutline_model`); `MAPSNAP_SPLITTER=classical` falls back to the
+classical line detector, and `MAPSNAP_CUTLINE_WEIGHTS` loads other weights.
+About 1 s per page on one CPU thread.
+
+Labels are the cutlines OldInsuranceMaps volunteers traced, rasterized as
+3 px strokes; pages volunteers marked unsplit (OIM's `prepared` flag with one
+region) are empty masks. The benchmark lives outside the repo in
+`~/Documents/mapsnap/cutline-training`: 2,000 split pages whose cuts follow
+printed ink (weighted toward pages with many panels) and 2,000 unsplit pages
+matched to them by volume size, from complete and unfinished volumes, San
+Francisco excluded. One volume in five is the test fold, which training never
+sees; one train-fold volume in eight picks the best epoch.
+
+**Current weights (2026-10-05)** trained 15 epochs on an M2 (~5 h), best epoch
+11 by held-out Dice (0.742). On the test fold (760 pages), through the
+production splitter: right panel count on **87.4%** of split pages (tuned
+classical: 76.3%), unsplit pages left whole **99.2%** (98.5%). They were
+trained with an extra page-level "split?" head, since dropped because it changed
+nothing; `mapsnap.train_cutline_unet` trains the plain UNet.
+
+Retrain:
+
+```
+uv run python -m mapsnap.train_cutline_unet prep ~/Documents/mapsnap/cutline-training
+uv run python -m mapsnap.train_cutline_unet train ~/Documents/mapsnap/cutline-training
+```
+
+Verify with the benchmark, through the production path:
+
+```
+uv run python scripts/score_splits_oim.py --manifest ~/Documents/mapsnap/cutline-training/manifest.tsv
+MAPSNAP_SPLITTER=classical uv run python scripts/score_splits_oim.py --manifest ...   # the comparison
+```
