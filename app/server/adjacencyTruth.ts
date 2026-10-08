@@ -69,6 +69,55 @@ export function panelParent(stem: string): string {
   return separator === -1 ? stem : stem.slice(0, separator);
 }
 
+/**
+ * Where one page of a sampled pseudo-volume came from: a `sources.json` entry,
+ * as scripts/sample_pages.py writes it.
+ */
+export interface PageSource {
+  item: string;
+  page: string;
+  city: string;
+  state: string;
+  year: string;
+  loc_url?: string;
+  loc_iiif?: string | null;
+  mirror?: string;
+}
+
+/**
+ * The per-page sources of a pseudo-volume (`<volume>/sources.json`), keyed by
+ * its synthetic page stem; empty for an ordinary volume.
+ *
+ * A sample draws pages from many volumes and renumbers them p1…pN so they
+ * cannot collide; this is what ties each back to its LoC item and page.
+ */
+export async function readSources(
+  dataDir: string,
+  volume: string,
+): Promise<Record<string, PageSource>> {
+  try {
+    const doc = JSON.parse(
+      await readFile(join(dataDir, volume, 'sources.json'), 'utf8'),
+    );
+    return doc.pages ?? {};
+  } catch {
+    return {};
+  }
+}
+
+/** Title-case a mirror slug: "new-york" -> "New York". */
+function titleCase(slug: string): string {
+  return slug
+    .split(/[-\s]+/)
+    .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
+    .join(' ');
+}
+
+/** A one-line caption for a sampled page: "Covington, Louisiana 1909 · p3". */
+export function sourceCaption(source: PageSource): string {
+  return `${titleCase(source.city)}, ${titleCase(source.state)} ${source.year} · ${source.page}`;
+}
+
 /** Path of a volume's adjacency truth file. */
 export function truthPath(dataDir: string, volume: string): string {
   return join(dataDir, volume, 'adjacency-truth.json');
