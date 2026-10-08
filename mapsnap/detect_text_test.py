@@ -1,6 +1,7 @@
 """Unit tests for street-name helpers (now in streets.py)."""
 
 import json
+from typing import Any
 
 import numpy as np
 
@@ -565,6 +566,75 @@ def test_resume_skips_only_reads_from_the_same_recognizer(tmp_path):
     assert not reads_are_current(tuned, None)
     # A page with no read at all is always due.
     assert not reads_are_current(tmp_path / "missing.streets.json", None)
+
+
+def test_cached_recognizer_prefers_the_recorded_recognizer(tmp_path):
+    from mapsnap.detect_text import cached_recognizer
+
+    p = tmp_path / "p1.streets.json"
+    p.write_text(
+        json.dumps(
+            {
+                "command": ["mapsnap ocr", "x.jpg"],
+                "recognizer": "street_recognizer.pt",
+                "streets": [],
+            }
+        )
+    )
+    assert cached_recognizer(p) == "street_recognizer.pt"
+    # An explicit None (stock) wins over a stale command token.
+    p.write_text(
+        json.dumps(
+            {
+                "command": ["mapsnap ocr", "--recognizer-weights", "w.pt", "x.jpg"],
+                "recognizer": None,
+                "streets": [],
+            }
+        )
+    )
+    assert cached_recognizer(p) is None
+
+
+def test_resume_keeps_a_read_made_with_the_default_weights(tmp_path):
+    """#398: a run on the default weights has no --recognizer-weights token in
+    its command, so every such read looked stock and --resume re-read them all.
+    The recorded recognizer makes a default read current for a default run."""
+    from mapsnap.detect_text import DEFAULT_RECOGNIZER_WEIGHTS, reads_are_current
+
+    default_run = str(DEFAULT_RECOGNIZER_WEIGHTS)
+    read = tmp_path / "p1.streets.json"
+    read.write_text(
+        json.dumps(
+            {
+                "command": ["mapsnap ocr", "--resume", "x.jpg"],
+                "recognizer": DEFAULT_RECOGNIZER_WEIGHTS.name,
+                "streets": [],
+            }
+        )
+    )
+    assert reads_are_current(read, default_run)
+    assert not reads_are_current(read, None)  # a --stock-recognizer run re-reads it
+    # A default read written before the field existed is re-read once.
+    legacy = tmp_path / "p2.streets.json"
+    write_streets(legacy, ["mapsnap ocr", "--resume", "x.jpg"])
+    assert not reads_are_current(legacy, default_run)
+
+
+def test_load_recognizer_weights_names_the_reader_it_loads(tmp_path):
+    import types
+
+    import torch
+
+    from mapsnap.detect_text import load_recognizer_weights, reader_recognizer
+
+    model = torch.nn.Linear(2, 2)
+    weights = tmp_path / "street_recognizer.pt"
+    torch.save(model.state_dict(), weights)
+    # A stand-in for easyocr.Reader: only .recognizer is touched.
+    reader: Any = types.SimpleNamespace(recognizer=torch.nn.Linear(2, 2))
+    assert reader_recognizer(reader) is None  # stock until weights are loaded
+    load_recognizer_weights(reader, str(weights))
+    assert reader_recognizer(reader) == "street_recognizer.pt"
 
 
 def test_build_reader_keeps_the_recognizer_float(monkeypatch) -> None:
