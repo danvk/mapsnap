@@ -59,7 +59,7 @@ from collections import defaultdict
 from dataclasses import dataclass
 from pathlib import Path
 
-from shapely import STRtree
+from shapely import STRtree, set_precision
 from shapely.geometry import LineString, Point, Polygon, box, shape
 from shapely.geometry.base import BaseGeometry
 from shapely.ops import unary_union
@@ -75,6 +75,8 @@ UNCLIPPED_SHARE = 0.95
 GAP_CLOSE_M = 4.0
 # Mask area narrower than twice this is a sliver (mitred, so a square corner is not).
 SLIVER_HALF_WIDTH_M = 2.0
+# Grid each scored mask is snapped to, in metres.
+SNAP_M = 0.01
 # A seam within this distance of a street centerline follows the street.
 STREET_TOLERANCE_M = 10.0
 # Mask edges within this distance of the mosaic's outline are outline, not seams.
@@ -260,7 +262,12 @@ def ground_masks(items: list[dict]) -> tuple[list[GroundMask], LocalFrame | None
         lonlat = [transform(x, y) for x, y in points]
         if frame is None:
             frame = LocalFrame(*lonlat[0])
-        polygon = Polygon([frame.to_m(lon, lat) for lon, lat in lonlat]).buffer(0)
+        # Snapped to SNAP_M: a mask with a near-zero-length edge (seen on a #571
+        # free-margins mask, Kansas City 1951) makes later overlays throw GEOS
+        # TopologyExceptions; snapping at 1 cm changes no score measurably.
+        polygon = set_precision(
+            Polygon([frame.to_m(lon, lat) for lon, lat in lonlat]).buffer(0), SNAP_M
+        )
         source = item["target"]["source"]
         width, height = source["width"], source["height"]
         corners = [(0, 0), (width, 0), (width, height), (0, height)]

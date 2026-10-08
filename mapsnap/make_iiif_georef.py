@@ -25,6 +25,7 @@ Usage:
 """
 
 import argparse
+import functools
 import glob
 import json
 import re
@@ -59,6 +60,8 @@ RIGHTS = "https://opendatacommons.org/licenses/odbl/1-0/"
 # Clip maskers, by --masks name; each takes compute_all_clip_masks's arguments.
 MASKERS = {
     "region": compute_region_clip_masks,
+    # Region masks that also show margins no other page reaches (#571).
+    "region-free": functools.partial(compute_region_clip_masks, free_margins=True),
     "blocks": compute_all_clip_masks,
 }
 
@@ -1084,8 +1087,10 @@ def main() -> None:
         default="region",
         help=(
             "How clip masks divide the ground between pages: 'region' from the "
-            "content-region model, cut along street blocks (#544); 'blocks' by "
-            "each block's ink, the masker before that. Both need --centerlines."
+            "content-region model, cut along street blocks and kept off any dark "
+            "border around the sheet (#544, #571); 'region-free' also shows "
+            "margins no other page reaches; 'blocks' by each block's ink, the "
+            "masker before 'region'. All need --centerlines."
         ),
     )
     parser.add_argument(
