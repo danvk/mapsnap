@@ -177,3 +177,29 @@ Verify with the benchmark, through the production path:
 uv run python scripts/score_splits_oim.py --manifest ~/Documents/mapsnap/cutline-training/manifest.tsv
 MAPSNAP_SPLITTER=classical uv run python scripts/score_splits_oim.py --manifest ...   # the comparison
 ```
+
+## confidence.json
+
+Not weights for a network: the coefficients of a logistic model that estimates,
+for every pose reconcile publishes, the probability that it lies within 25 ft of
+the truth (`mapsnap.confidence`, #579). Reconcile writes it as `confidence` in
+each placed page's `pN.provenance.json` and `georef-final.json`. The IIIF carries
+it as `confidence` metadata, plus `confidence_provisional` for panels.
+
+Each column has a fill value for a missing input, a mean and scale to
+standardize by, a coefficient, and a missing-input coefficient where an input
+can be absent. `mapsnap.confidence.p_good` applies them without any ML
+dependency.
+
+Trained on corpus-v1 in the 400 OIM-truth volumes (23,371 placed poses), with
+every pose labelled by its RMSE against OIM truth:
+
+    uv run python scripts/train_confidence.py <volume dirs> \
+        --iiif corpus-v1.iiif.json --version corpus-v1 --out models/confidence.json
+
+Each volume directory holds the run's `pN.provenance.json` and `pN.panels.json`,
+its published annotation page, and the OIM truth (`main.iiif.json`, `oim/`).
+Grouped 5-fold AUC (whole volumes held out): 0.886 overall, 0.888 for pages,
+0.771 for panels. **Retrain after each corpus run:** any change to reconcile or
+snap can shift what the inputs mean, and panel scores need a current-code run
+before they stop being provisional.

@@ -44,7 +44,7 @@ from pathlib import Path
 
 import numpy as np
 
-from mapsnap import sidecar
+from mapsnap import confidence, sidecar
 from mapsnap.adjacency_gate import (
     GATE_STAMP_M,
     FittedPage,
@@ -1743,6 +1743,22 @@ def publish(
         volume.glob("p*.provenance.json")
     ):
         stale.unlink()
+    # Every record first: a page's confidence depends on volume-level rates.
+    records = {
+        stem: provenance_record(
+            stem,
+            nodes,
+            assignment,
+            adjacency,
+            edges or [],
+            region_centroids,
+            locator,
+            keymap,
+            snap_records,
+        )
+        for stem in sorted(nodes)
+    }
+    confidence.annotate(list(records.values()), volume)
     for stem in sorted(nodes):
         node = nodes[stem]
         hypothesis = node.hypotheses[assignment[stem]]
@@ -1777,26 +1793,14 @@ def publish(
                         "terms": {
                             k: round(v, 4) for k, v in hypothesis.unary_terms.items()
                         },
+                        "confidence": records[stem].get("confidence"),
                     },
                 },
                 indent=1,
             )
         )
         (volume / f"{stem}.provenance.json").write_text(
-            json.dumps(
-                provenance_record(
-                    stem,
-                    nodes,
-                    assignment,
-                    adjacency,
-                    edges or [],
-                    region_centroids,
-                    locator,
-                    keymap,
-                    snap_records,
-                ),
-                indent=1,
-            )
+            json.dumps(records[stem], indent=1)
         )
         if corners is None:
             unplaced += 1

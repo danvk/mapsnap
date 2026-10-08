@@ -422,7 +422,7 @@ def _georef_metadata(
     georef: dict,
     split_canvas: tuple[float, float, float, float] | None = None,
 ) -> list[dict]:
-    """Build IIIF metadata entries for streets, intersections, and split canvas bounds.
+    """Build IIIF metadata entries: streets, intersections, confidence, split canvas bounds.
 
     split_canvas, when present, gives the sub-image region within the full canvas as
     (x, y, w, h) in canvas pixel coordinates, derived from the panel polygon.
@@ -433,6 +433,12 @@ def _georef_metadata(
         {"label": "streets", "value": str(n_streets)},
         {"label": "intersections", "value": str(n_intersections)},
     ]
+    # Reconcile's estimate that the pose is within 25 ft (mapsnap.confidence).
+    confidence = (georef.get("reconcile") or {}).get("confidence")
+    if confidence:
+        entries.append({"label": "confidence", "value": f"{confidence['p_good']:.2f}"})
+        if confidence.get("provisional"):
+            entries.append({"label": "confidence_provisional", "value": "true"})
     if split_canvas is not None:
         x, y, w, h = split_canvas
         entries += [
