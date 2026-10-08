@@ -624,6 +624,12 @@ def test_publish_writes_a_provenance_record_for_every_page(tmp_path):
     assert first["hypotheses"][0]["chosen"] is True
     assert second["decision"] == "abstained"
     assert second["source"] == UNPLACED
+    # A placed page carries reconcile's confidence; an abstention doesn't (#579).
+    assert 0 < first["confidence"]["p_good"] < 1
+    assert first["confidence"]["provisional"] is False
+    assert "confidence" not in second
+    final = json.loads((tmp_path / "p1.georef-final.json").read_text())
+    assert final["reconcile"]["confidence"] == first["confidence"]
     assert [h["chosen"] for h in second["hypotheses"]] == [False, True]
     assert second["evidence"]["fit_state"] == "fitted"
 
