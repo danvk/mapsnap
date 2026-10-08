@@ -60,6 +60,10 @@ SUBCOMMANDS: dict[str, tuple[str, str]] = {
         "mapsnap.snap",
         "Geometry-first OSM snap: rescue unplaced pages, arbitrate and refine fits",
     ),
+    "edition-transfer": (
+        "mapsnap.edition_transfer",
+        "Place sheets from other editions' fits of the same sheet (#34)",
+    ),
     "keymap-snap": (
         "mapsnap.keymap.snap",
         "Place pages by matching their P(road) map against the key map's",
