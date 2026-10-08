@@ -104,13 +104,19 @@ PANEL_KEEP_PRIOR = {
     ("4+", False): 0.72,  # 1,411 panels
     ("4+", True): 0.94,  # page value
 }
-# A panel resting on 0-1 GCPs counts as verified only from this score up: the
-# range its ("0-1", True) value was measured on. Below it a score says nothing
-# -- on whole pages, one-GCP fits scoring 0-0.5 measure +0.12, the same as
-# unscored ones (+0.11) -- so a published one-GCP panel's own weak score is
-# neither evidence nor protection. Covington 1909 p6__2 (a one-GCP fit 125,772
-# ft off) scored 0.32 and was published on exactly that.
-PANEL_VERIFIED_FLOOR = 1.0
+# A panel resting on 0-1 GCPs counts as verified only from this score up.
+# Below it a published one-GCP panel's own score is neither evidence nor
+# protection. On whole pages a weak score on a one-GCP fit predicts nothing
+# (0-0.5 measures +0.12, the same as unscored ones, +0.11). Covington 1909
+# p6__2 (a one-GCP fit 125,772 ft off) scored 0.32 and was published on it.
+# 0.8, not 1.0: across both #570 A/Bs (48 volumes), published one-GCP panels
+# scoring 0.8-1.0 were 6 good / 2 disaster of 10, like those >= 1.0 (10 / 5 of
+# 30), while 0.5-0.8 was 2 / 6 of 20 and < 0.5 was 3 / 10 of 26. A 1.0 floor
+# unplaced DC p125__2 (6 ft, scored 0.89) and three other good panels.
+PANEL_VERIFIED_FLOOR = 0.8
+# What a snap challenger pays on a panel whose published fit holds its place
+# when snap itself voted to keep that fit: as decisive as entry_barred.
+W_SNAP_KEPT = 10.0
 # Hypotheses closer than this are the same pose; keep one, merge provenance.
 DEDUPE_FT = 10.0
 # Robust keymap-distance term: (distance/radius)^2 clamped — SOFT prior, per
@@ -236,6 +242,8 @@ class PageNode:
     hypotheses: list[Hypothesis]
     published_index: int | None  # index of the published pose, None if unplaced
     region_px: object | None = None  # predicted content region in page pixels
+    # Snap's own page verdict ("keep", "refine", "challenge", "abstain"), if it ran.
+    snap_verdict: str | None = None
 
 
 def sidecar_pose(doc: dict) -> np.ndarray | None:
@@ -632,6 +640,26 @@ def holds_its_place(node: "PageNode") -> bool:
             published.effective_gcps, published.scores.get("verification"), panel=True
         )
         > 0
+    )
+
+
+def overrules_snap(node: "PageNode", hypothesis: "Hypothesis") -> bool:
+    """Whether choosing this snap candidate would overrule snap's own "keep" verdict on a panel.
+
+    Snap judges its candidates against the incumbent with the margin and
+    solo-panel bars; reconcile only sees their scores. On a panel whose
+    published fit holds its place, reconcile used to pick a snap candidate
+    snap had declined: on the 20-volume #570 A/B, detroit_mich_1929_vol_11
+    p73__1 (a 3-GCP fit at 12 ft) went to an ambiguous alias at 897 ft, and
+    two 2-GCP panels in schenectady and kansas_city went 1,698 and 1,978 ft
+    off -- every new disaster on a fitted panel. Snap's refinements arrive as
+    the incumbent's own variants, not as snap:N, so they are untouched.
+    """
+    return (
+        node.is_panel
+        and node.snap_verdict == "keep"
+        and hypothesis.source.startswith("snap:")
+        and holds_its_place(node)
     )
 
 
@@ -1062,6 +1090,9 @@ def build_nodes(volume: Path, sidecar_dir: Path, vctx) -> dict[str, PageNode]:
             base=base,
             hypotheses=hypotheses,
             published_index=published,
+            snap_verdict=(
+                (snap_records.get(unit.stem) or {}).get("decision") or {}
+            ).get("page_verdict"),
         )
     return nodes
 
@@ -1126,6 +1157,9 @@ def score_nodes(vctx, nodes: dict[str, PageNode], note_ratios: dict) -> None:
                 page_placed=holds_its_place(node),
                 panel=node.is_panel,
             )
+            if overrules_snap(node, hypothesis):
+                hypothesis.unary_terms["snap_kept"] = W_SNAP_KEPT
+                hypothesis.unary += W_SNAP_KEPT
 
 
 def build_edges(

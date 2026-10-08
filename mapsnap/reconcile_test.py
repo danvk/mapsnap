@@ -22,6 +22,7 @@ from mapsnap.reconcile import (
     holds_its_place,
     keep_prior,
     normalize_name_penalty,
+    overrules_snap,
     pairwise_energy,
     pose_scale_log2,
     published_channel,
@@ -221,6 +222,45 @@ def test_a_supported_fit_holds_its_place():
     assert holds_its_place(make_node("p2__1", [verified], base="p2"))
     assert holds_its_place(make_node("p2", [weak]))  # whole pages are unchanged
     assert not holds_its_place(make_node("p2__1", [weak], published=None, base="p2"))
+
+
+def test_a_good_one_gcp_panel_scoring_above_the_floor_is_kept():
+    # washington_dc_1916_vol_2 p125__2: a one-GCP panel fit 6 ft from truth,
+    # scored 0.89 -- verified under the 0.8 floor, so it holds its place.
+    fit = scored("georef", affine(0), 0.89, gcps=1, published=True, panel=True)
+    assert PANEL_VERIFIED_FLOOR <= 0.89
+    assert fit.unary < scored(UNPLACED, None, 0.0).unary
+    assert holds_its_place(make_node("p125__2", [fit], base="p125"))
+
+
+def test_reconcile_does_not_overrule_snaps_keep_on_a_panel():
+    # detroit_mich_1929_vol_11 p73__1: a 3-GCP fit at 12 ft scored 0.05; snap
+    # kept it, but its ambiguous top candidate (1.52) scored lower energy and
+    # was published 897 ft off.
+    fit = Hypothesis(source="georef", affine=affine(0), effective_gcps=3)
+    fit.scores["verification"] = 0.05
+    alias = Hypothesis(source="snap:0", affine=affine(900), effective_gcps=0)
+    alias.scores.update(verification=1.52, ambiguous=True)
+    refined = Hypothesis(source="georef-snap", affine=affine(5), effective_gcps=3)
+    panel = make_node("p73__1", [fit, alias, refined], base="p73")
+    panel.snap_verdict = "keep"
+    assert overrules_snap(panel, alias)
+    assert not overrules_snap(
+        panel, refined
+    )  # snap's own refinement is not a challenger
+    panel.snap_verdict = "challenge"
+    assert not overrules_snap(panel, alias)  # snap asked for the challenge
+    panel.snap_verdict = "keep"
+    page = make_node("p73", [fit, alias])
+    page.snap_verdict = "keep"
+    assert not overrules_snap(page, alias)  # whole pages are unchanged
+    weak = Hypothesis(source="georef", affine=affine(0), effective_gcps=1)
+    weak.scores["verification"] = 0.15
+    rescue = make_node("p5__3", [weak, alias], base="p5")
+    rescue.snap_verdict = "keep"
+    assert not overrules_snap(
+        rescue, alias
+    )  # a fit that doesn't hold its place: the entry bar decides
 
 
 def test_pose_scale_log2_tracks_scale():
