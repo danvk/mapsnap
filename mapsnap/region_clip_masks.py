@@ -592,12 +592,95 @@ def owned_cells_hull(
     return max(parts, key=lambda p: p.area) if parts else None
 
 
+# A page pixel darker than this (0-255) is not paper: the scanner bed around
+# New York 1923's sheets reads ~20-40, paper ~200+ (#571). Ink inside the sheet
+# is dark too, but it is enclosed by paper, so filling holes keeps it.
+DARK_LUMINANCE = 90
+# Paper outlines are traced at this fraction of the page image, then simplified.
+PAPER_TRACE_SCALE = 0.25
+PAPER_SIMPLIFY_PX = 2.0
+
+
+def paper_outline(image_path: Path, georef: dict, grid: GroundGrid) -> Polygon | None:
+    """The sheet's paper, in metres: the image less any dark border around it.
+
+    The largest light region of the image, with its holes filled so printed
+    ink counts as paper; a dark scanner bed touching the image edge stays
+    outside. None when the image can't be read.
+    """
+    gray = cv2.imread(str(image_path), cv2.IMREAD_GRAYSCALE)
+    if gray is None:
+        return None
+    small = cv2.resize(
+        gray,
+        None,
+        fx=PAPER_TRACE_SCALE,
+        fy=PAPER_TRACE_SCALE,
+        interpolation=cv2.INTER_AREA,
+    )
+    light = np.asarray(ndimage.binary_fill_holes(small >= DARK_LUMINANCE), np.uint8)
+    count, labels, stats, _ = cv2.connectedComponentsWithStats(light, connectivity=4)
+    if count <= 1:
+        return None
+    largest = 1 + int(np.argmax(stats[1:, cv2.CC_STAT_AREA]))
+    paper = (labels == largest).astype(np.uint8)
+    contours, _ = cv2.findContours(paper, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+    contour = cv2.approxPolyDP(
+        max(contours, key=cv2.contourArea), PAPER_SIMPLIFY_PX, True
+    )
+    if len(contour) < 3:
+        return None
+    # Back to the georef's pixel frame (the image may not be the size it records).
+    sx = georef["width"] / small.shape[1]
+    sy = georef["height"] / small.shape[0]
+    a_fwd, _ = _fit_affine(georef)
+    points = [
+        grid.to_m(*(a_fwd @ np.array([x * sx, y * sy, 1.0])))
+        for x, y in contour[:, 0, :]
+    ]
+    outline = Polygon(points).buffer(0)
+    return outline if not outline.is_empty else None
+
+
+def extend_into_free_margins(
+    shapes: dict[int, BaseGeometry],
+    footprints: list[Polygon],
+    papers: list[Polygon | None],
+) -> dict[int, float]:
+    """Give each page the part of its paper no other page's scan reaches (#571).
+
+    Ownership trims every page to its content region, which is right where
+    sheets overlap but needlessly hides margins nothing else could show (Hot
+    Wells 1919's lone sheet lost its title and borders). Ground inside a page's
+    paper and outside every other page's footprint can't conflict, so it joins
+    the page's mask; a dark border (``paper_outline``) never does. Returns the
+    area added per page, in m^2.
+    """
+    added: dict[int, float] = {}
+    for page, footprint in enumerate(footprints):
+        paper = papers[page]
+        if paper is None:
+            continue
+        others = unary_union([f for i, f in enumerate(footprints) if i != page])
+        free = footprint.intersection(paper).difference(others)
+        current = shapes.get(page, Polygon())
+        gain = free.difference(current)
+        if gain.area < 1.0:
+            continue
+        merged = unary_union([current, free])
+        shapes[page] = max(polygons_of(merged), key=lambda part: part.area)
+        added[page] = shapes[page].area - current.area
+    return added
+
+
 def compute_region_clip_masks(
     georefs: list[dict],
     centerlines_geojson: dict,
     simplify_tolerance: float = 0.00005,
     debug_blocks_out: list[dict] | None = None,
     raw_paths: list[Path] | None = None,
+    *,
+    free_margins: bool = False,
 ) -> list[Polygon | None]:
     """One clip polygon (lon, lat) per page, or None where the page gets none.
 
@@ -623,6 +706,13 @@ def compute_region_clip_masks(
     units = clip_units_to_scans(units, footprints, ownership)
     shapes = dissolve_pages(units, footprints)
     fill_enclosed_holes(shapes, footprints, ownership)
+    if free_margins:
+        papers = [paper_outline(path, g, grid) for g, path in zip(georefs, image_paths)]
+        added = extend_into_free_margins(shapes, footprints, papers)
+        print(
+            f"Free margins: {len(added)} page(s) gained {sum(added.values()):,.0f} m^2",
+            file=sys.stderr,
+        )
 
     pages = sorted(shapes)
     polygons = []

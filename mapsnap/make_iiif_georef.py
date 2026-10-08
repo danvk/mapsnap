@@ -25,6 +25,7 @@ Usage:
 """
 
 import argparse
+import functools
 import glob
 import json
 import re
@@ -59,6 +60,8 @@ RIGHTS = "https://opendatacommons.org/licenses/odbl/1-0/"
 # Clip maskers, by --masks name; each takes compute_all_clip_masks's arguments.
 MASKERS = {
     "region": compute_region_clip_masks,
+    # #571 prototype: region masks plus each page's margins no other page reaches.
+    "region-free": functools.partial(compute_region_clip_masks, free_margins=True),
     "blocks": compute_all_clip_masks,
 }
 
