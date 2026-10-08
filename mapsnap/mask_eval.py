@@ -280,9 +280,7 @@ def no_masks(
 
 MASKERS: dict[str, Masker] = {
     "region": compute_region_clip_masks,
-    # #571 prototype: region masks kept on each sheet's paper (no dark borders),
-    # and with margins no other page reaches.
-    "region-paper": functools.partial(compute_region_clip_masks, paper_clip=True),
+    # Region masks that also show margins no other page reaches (#571).
     "region-free": functools.partial(compute_region_clip_masks, free_margins=True),
     "blocks": compute_all_clip_masks,
     "voronoi": voronoi_masks,
@@ -339,7 +337,7 @@ def main() -> None:
     volume: Path = args.volume
     work: Path = args.work or volume / "artifacts" / "mask-eval"
     centerlines = args.centerlines or default_centerlines(volume)
-    if centerlines is None and args.masker in ("region", "blocks"):
+    if centerlines is None and args.masker in ("region", "region-free", "blocks"):
         parser.error(f"the {args.masker} masker needs --centerlines")
     skipped = write_oim_sidecars(volume, work)
     if skipped:

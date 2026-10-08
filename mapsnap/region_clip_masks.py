@@ -694,7 +694,6 @@ def compute_region_clip_masks(
     debug_blocks_out: list[dict] | None = None,
     raw_paths: list[Path] | None = None,
     *,
-    paper_clip: bool = False,
     free_margins: bool = False,
 ) -> list[Polygon | None]:
     """One clip polygon (lon, lat) per page, or None where the page gets none.
@@ -704,11 +703,11 @@ def compute_region_clip_masks(
     ``simplify_tolerance`` and ``debug_blocks_out`` are accepted for that
     compatibility and unused.
 
-    ``paper_clip`` keeps every mask on its sheet's paper (``paper_outline``), so
-    no page shows a dark scanner bed: seam and hole filling can otherwise hand a
-    page ground its image only shows as black (New York 1923 p19-p21, #571).
+    Every mask stays on its sheet's paper (``paper_outline``), so no page shows a
+    dark scanner bed: seam and hole filling can otherwise hand a page ground its
+    image only shows as black (New York 1923 p19-p21, #571).
     ``free_margins`` also gives each page the paper no other page's scan reaches
-    (``extend_into_free_margins``), and implies ``paper_clip``.
+    (``extend_into_free_margins``).
     """
     if not georefs or raw_paths is None:
         return [None] * len(georefs)
@@ -727,22 +726,18 @@ def compute_region_clip_masks(
     units = clip_units_to_scans(units, footprints, ownership)
     shapes = dissolve_pages(units, footprints)
     fill_enclosed_holes(shapes, footprints, ownership)
-    # What each page may show: its scan (or panel outline), and with paper_clip
-    # only the paper on it.
-    visible: list[BaseGeometry] = list(footprints)
-    if paper_clip or free_margins:
-        papers = [paper_outline(path, g, grid) for g, path in zip(georefs, image_paths)]
-        visible = [
-            footprint if paper is None else footprint.intersection(paper)
-            for footprint, paper in zip(footprints, papers)
-        ]
-        if free_margins:
-            added = extend_into_free_margins(shapes, footprints, papers)
-            print(
-                f"Free margins: {len(added)} page(s) gained "
-                f"{sum(added.values()):,.0f} m^2",
-                file=sys.stderr,
-            )
+    # What each page may show: the paper on its scan (or panel outline).
+    papers = [paper_outline(path, g, grid) for g, path in zip(georefs, image_paths)]
+    visible: list[BaseGeometry] = [
+        footprint if paper is None else footprint.intersection(paper)
+        for footprint, paper in zip(footprints, papers)
+    ]
+    if free_margins:
+        added = extend_into_free_margins(shapes, footprints, papers)
+        print(
+            f"Free margins: {len(added)} page(s) gained {sum(added.values()):,.0f} m^2",
+            file=sys.stderr,
+        )
 
     pages = sorted(shapes)
     polygons = []
