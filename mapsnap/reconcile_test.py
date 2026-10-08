@@ -219,7 +219,15 @@ def test_a_supported_fit_holds_its_place():
     weak.scores["verification"] = 0.15
     assert holds_its_place(make_node("p2__1", [strong], base="p2"))
     assert holds_its_place(make_node("p2__1", [verified], base="p2"))
-    assert holds_its_place(make_node("p2", [weak]))  # whole pages are unchanged
+    # A whole page's weak fit holds its place only with a non-negative score
+    # (#576): KEEP_PRIOR ("0-1", True) = 0.69, ("0-1", False) = 0.00.
+    assert holds_its_place(make_node("p2", [weak]))
+    contradicted = Hypothesis(source="georef", affine=affine(0), effective_gcps=1)
+    contradicted.scores["verification"] = -0.43
+    assert not holds_its_place(make_node("p2", [contradicted]))
+    strong_page = Hypothesis(source="georef", affine=affine(0), effective_gcps=5)
+    strong_page.scores["verification"] = -0.4
+    assert holds_its_place(make_node("p2", [strong_page]))  # ("4+", False) = 0.57
     assert not holds_its_place(make_node("p2__1", [weak], published=None, base="p2"))
 
 
@@ -230,6 +238,21 @@ def test_a_good_one_gcp_panel_scoring_above_the_floor_is_kept():
     assert PANEL_VERIFIED_FLOOR <= 0.89
     assert fit.unary < scored(UNPLACED, None, 0.0).unary
     assert holds_its_place(make_node("p125__2", [fit], base="p125"))
+
+
+def test_a_contradicted_one_gcp_page_makes_snap_pay_the_entry_bar():
+    # chicago_il_1950_vol_1 p1N (#576): a one-GCP fit scoring -0.43 is worth no
+    # more than unplaced, so snap's candidate (406 ft off) must clear the entry
+    # bar instead of walking in.
+    fit = Hypothesis(source="georef", affine=affine(0), effective_gcps=1)
+    fit.scores["verification"] = -0.43
+    alias = Hypothesis(source="snap:0", affine=affine(400), effective_gcps=0)
+    alias.scores["verification"] = 1.1
+    page = make_node("p1N", [fit, alias, Hypothesis(source=UNPLACED, affine=None)])
+    placed = holds_its_place(page)
+    assert not placed
+    unary_energy(alias, False, 600.0, None, None, page_placed=placed)
+    assert alias.unary > 0  # unplaced (0) wins
 
 
 def test_pose_scale_log2_tracks_scale():

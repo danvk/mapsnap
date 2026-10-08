@@ -616,23 +616,26 @@ def holds_its_place(node: "PageNode") -> bool:
     """Whether the page's published pose spares its challengers the entry bar.
 
     ENTRY_PENALTY is what a pose must overcome to place a page that has no
-    published pose. Any published whole page waives it, but a published panel
-    only does if publishing it is worth more than leaving the panel unplaced
-    (keep prior > 0). Without that, a weakly scored one-GCP panel fit, which
-    PANEL_KEEP_PRIOR rates below unplaced, still let any snap candidate in for
-    free. On the 28-volume OIM A/B, 0-GCP snap poses scoring ~1.2 then replaced
-    those fits with aliases (sanborn06253_001 p5__3 and p6__2: 47 and 75 ft ->
-    255 and 256 ft). Such a panel is treated as unplaced, so a challenger must
-    clear the bar a rescue does.
+    published pose. A published pose waives it only if publishing it is worth
+    more than leaving the page unplaced (keep prior > 0); otherwise the page
+    counts as unplaced and a challenger must clear the bar a rescue does.
+
+    Panels first (#570): a weakly scored one-GCP panel fit, which
+    PANEL_KEEP_PRIOR rates below unplaced, let 0-GCP snap aliases in for free
+    (sanborn06253_001 p5__3 and p6__2: 47 and 75 ft -> 255 and 256 ft). Whole
+    pages likewise (#576): KEEP_PRIOR is positive in every cell but ("0-1",
+    False), and on the 20-volume #570 A/B the one-GCP pages with a negative
+    score let snap candidates in on 11 pages, every one a disaster (1,139 to
+    23,596 ft off).
     """
     if node.published_index is None:
         return False
-    if not node.is_panel:
-        return True
     published = node.hypotheses[node.published_index]
     return (
         keep_prior(
-            published.effective_gcps, published.scores.get("verification"), panel=True
+            published.effective_gcps,
+            published.scores.get("verification"),
+            panel=node.is_panel,
         )
         > 0
     )
