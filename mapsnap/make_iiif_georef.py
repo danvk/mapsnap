@@ -60,7 +60,9 @@ RIGHTS = "https://opendatacommons.org/licenses/odbl/1-0/"
 # Clip maskers, by --masks name; each takes compute_all_clip_masks's arguments.
 MASKERS = {
     "region": compute_region_clip_masks,
-    # #571 prototype: region masks plus each page's margins no other page reaches.
+    # #571 prototype: region masks kept on each sheet's paper (no dark borders),
+    # and with margins no other page reaches.
+    "region-paper": functools.partial(compute_region_clip_masks, paper_clip=True),
     "region-free": functools.partial(compute_region_clip_masks, free_margins=True),
     "blocks": compute_all_clip_masks,
 }

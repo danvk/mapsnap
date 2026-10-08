@@ -581,9 +581,9 @@ def without_near_duplicates(polygon: Polygon) -> Polygon:
 
 
 def owned_cells_hull(
-    page: int, ownership: Ownership, footprint: Polygon
+    page: int, ownership: Ownership, footprint: BaseGeometry
 ) -> Polygon | None:
-    """The hull of the cells a page owns, within its footprint: for a page no unit went to."""
+    """The hull of the cells a page owns, within what it can show: for a page no unit went to."""
     cells = ownership.owner == page
     if cells.sum() < 3:
         return None
@@ -592,47 +592,59 @@ def owned_cells_hull(
     return max(parts, key=lambda p: p.area) if parts else None
 
 
-# A page pixel darker than this (0-255) is not paper: the scanner bed around
-# New York 1923's sheets reads ~20-40, paper ~200+ (#571). Ink inside the sheet
-# is dark too, but it is enclosed by paper, so filling holes keeps it.
-DARK_LUMINANCE = 90
-# Paper outlines are traced at this fraction of the page image, then simplified.
-PAPER_TRACE_SCALE = 0.25
-PAPER_SIMPLIFY_PX = 2.0
+# The scanner bed around a sheet (New York 1923, #571) reads ~20-40 on 0-255;
+# paper ~200+. It is told apart from ink, which is dark too, by being thick:
+# an opening BED_MIN_WIDTH_PX wide erases ink lines (1-6 px at 25% scale) and
+# keeps the bed's band. Only thick dark regions touching the image edge count,
+# so a sheet's content running off a cropped edge (split panels) stays paper.
+# (A first version took the largest light region as the paper; ink lines that
+# reach the edge cut that into pieces, and Kansas City 1951 p527__2 kept 48%.)
+BED_LUMINANCE = 60
+BED_MIN_WIDTH_PX = 9
+# The paper is inset by PAPER_INSET_PX so the outline's simplification can't
+# reach back into the bed, then simplified by PAPER_SIMPLIFY_PX. Both are in the
+# stored image's pixels: tracing a reduced copy blended a thin dark edge into
+# the paper beside it.
+PAPER_INSET_PX = 4
+PAPER_SIMPLIFY_PX = 3.0
+
+
+def scanner_bed(gray: np.ndarray) -> np.ndarray:
+    """Pixels of a dark border around the sheet: thick dark regions touching the image edge."""
+    dark = (gray < BED_LUMINANCE).astype(np.uint8)
+    kernel = cv2.getStructuringElement(
+        cv2.MORPH_RECT, (BED_MIN_WIDTH_PX, BED_MIN_WIDTH_PX)
+    )
+    thick = cv2.morphologyEx(dark, cv2.MORPH_OPEN, kernel)
+    _, labels = cv2.connectedComponents(thick, connectivity=8)
+    edge = np.unique(
+        np.concatenate([labels[0], labels[-1], labels[:, 0], labels[:, -1]])
+    )
+    return np.isin(labels, edge[edge > 0])
 
 
 def paper_outline(image_path: Path, georef: dict, grid: GroundGrid) -> Polygon | None:
-    """The sheet's paper, in metres: the image less any dark border around it.
+    """The sheet's paper, in metres: the image less any dark border around it (``scanner_bed``).
 
-    The largest light region of the image, with its holes filled so printed
-    ink counts as paper; a dark scanner bed touching the image edge stays
-    outside. None when the image can't be read.
+    None when the image can't be read.
     """
     gray = cv2.imread(str(image_path), cv2.IMREAD_GRAYSCALE)
     if gray is None:
         return None
-    small = cv2.resize(
-        gray,
-        None,
-        fx=PAPER_TRACE_SCALE,
-        fy=PAPER_TRACE_SCALE,
-        interpolation=cv2.INTER_AREA,
-    )
-    light = np.asarray(ndimage.binary_fill_holes(small >= DARK_LUMINANCE), np.uint8)
-    count, labels, stats, _ = cv2.connectedComponentsWithStats(light, connectivity=4)
-    if count <= 1:
-        return None
-    largest = 1 + int(np.argmax(stats[1:, cv2.CC_STAT_AREA]))
-    paper = (labels == largest).astype(np.uint8)
+    paper = (~scanner_bed(gray)).astype(np.uint8)
+    kernel = np.ones((2 * PAPER_INSET_PX + 1, 2 * PAPER_INSET_PX + 1), np.uint8)
+    paper = cv2.erode(paper, kernel)
     contours, _ = cv2.findContours(paper, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+    if not contours:
+        return None
     contour = cv2.approxPolyDP(
         max(contours, key=cv2.contourArea), PAPER_SIMPLIFY_PX, True
     )
     if len(contour) < 3:
         return None
     # Back to the georef's pixel frame (the image may not be the size it records).
-    sx = georef["width"] / small.shape[1]
-    sy = georef["height"] / small.shape[0]
+    sx = georef["width"] / gray.shape[1]
+    sy = georef["height"] / gray.shape[0]
     a_fwd, _ = _fit_affine(georef)
     points = [
         grid.to_m(*(a_fwd @ np.array([x * sx, y * sy, 1.0])))
@@ -667,7 +679,9 @@ def extend_into_free_margins(
         gain = free.difference(current)
         if gain.area < 1.0:
             continue
-        merged = unary_union([current, free])
+        # On dissolve_pages' snapping grid: a plain union left near-duplicate
+        # vertices that GEOS later failed on (Kansas City 1951, #571).
+        merged = shapely.union_all([current, free], grid_size=UNIT_SNAP_M)
         shapes[page] = max(polygons_of(merged), key=lambda part: part.area)
         added[page] = shapes[page].area - current.area
     return added
@@ -680,6 +694,7 @@ def compute_region_clip_masks(
     debug_blocks_out: list[dict] | None = None,
     raw_paths: list[Path] | None = None,
     *,
+    paper_clip: bool = False,
     free_margins: bool = False,
 ) -> list[Polygon | None]:
     """One clip polygon (lon, lat) per page, or None where the page gets none.
@@ -688,6 +703,12 @@ def compute_region_clip_masks(
     georeferenced images) are required, since P(region) is predicted per image.
     ``simplify_tolerance`` and ``debug_blocks_out`` are accepted for that
     compatibility and unused.
+
+    ``paper_clip`` keeps every mask on its sheet's paper (``paper_outline``), so
+    no page shows a dark scanner bed: seam and hole filling can otherwise hand a
+    page ground its image only shows as black (New York 1923 p19-p21, #571).
+    ``free_margins`` also gives each page the paper no other page's scan reaches
+    (``extend_into_free_margins``), and implies ``paper_clip``.
     """
     if not georefs or raw_paths is None:
         return [None] * len(georefs)
@@ -706,13 +727,22 @@ def compute_region_clip_masks(
     units = clip_units_to_scans(units, footprints, ownership)
     shapes = dissolve_pages(units, footprints)
     fill_enclosed_holes(shapes, footprints, ownership)
-    if free_margins:
+    # What each page may show: its scan (or panel outline), and with paper_clip
+    # only the paper on it.
+    visible: list[BaseGeometry] = list(footprints)
+    if paper_clip or free_margins:
         papers = [paper_outline(path, g, grid) for g, path in zip(georefs, image_paths)]
-        added = extend_into_free_margins(shapes, footprints, papers)
-        print(
-            f"Free margins: {len(added)} page(s) gained {sum(added.values()):,.0f} m^2",
-            file=sys.stderr,
-        )
+        visible = [
+            footprint if paper is None else footprint.intersection(paper)
+            for footprint, paper in zip(footprints, papers)
+        ]
+        if free_margins:
+            added = extend_into_free_margins(shapes, footprints, papers)
+            print(
+                f"Free margins: {len(added)} page(s) gained "
+                f"{sum(added.values()):,.0f} m^2",
+                file=sys.stderr,
+            )
 
     pages = sorted(shapes)
     polygons = []
@@ -733,7 +763,7 @@ def compute_region_clip_masks(
         # Simplification, strays and filled holes must never carry a mask past
         # what its page can show.
         parts = polygons_of(
-            max(parts, key=lambda p: p.area).intersection(footprints[page])
+            max(parts, key=lambda p: p.area).intersection(visible[page])
         )
         if not parts:
             continue
@@ -747,7 +777,7 @@ def compute_region_clip_masks(
     # the cells it owns instead.
     for page, mask in enumerate(masks):
         if mask is None:
-            hull_m = owned_cells_hull(page, ownership, footprints[page])
+            hull_m = owned_cells_hull(page, ownership, visible[page])
             if hull_m is not None:
                 masks[page] = Polygon(
                     [grid.to_lonlat(x, y) for x, y in hull_m.exterior.coords]

@@ -23,6 +23,7 @@ panels.
 """
 
 import argparse
+import functools
 import json
 import math
 import re
@@ -279,6 +280,10 @@ def no_masks(
 
 MASKERS: dict[str, Masker] = {
     "region": compute_region_clip_masks,
+    # #571 prototype: region masks kept on each sheet's paper (no dark borders),
+    # and with margins no other page reaches.
+    "region-paper": functools.partial(compute_region_clip_masks, paper_clip=True),
+    "region-free": functools.partial(compute_region_clip_masks, free_margins=True),
     "blocks": compute_all_clip_masks,
     "voronoi": voronoi_masks,
     "none": no_masks,
