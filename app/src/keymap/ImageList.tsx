@@ -41,6 +41,9 @@ export function ImageList(props: ImageListProps) {
               }
             >
               {info.name}
+              {info.caption && (
+                <span className="image-caption">{info.caption}</span>
+              )}
             </span>
             {info.withText > 0 && (
               <span className="label-count" title="labels with text">

@@ -34,4 +34,9 @@ export interface ImageInfo {
   /** Whether this sheet has been split into panels and is listed only because
    * it still carries labels of its own (adjacency pages). */
   supersededBySplit?: boolean;
+  /** For a sampled pseudo-volume's page: where it came from, e.g.
+   * "Covington, Louisiana 1909 · p3" (scripts/sample_pages.py's sources.json). */
+  caption?: string;
+  /** The source item's LoC page, for a sampled page. */
+  sourceUrl?: string;
 }

@@ -253,6 +253,9 @@ export function AdjacencyApp() {
     });
   }
 
+  // A sampled pseudo-volume's page carries its source (sources.json).
+  const selectedInfo = pages.find((p) => p.name === selectedPage);
+
   const statusText: Record<SaveStatus, string> = {
     idle: '',
     saving: 'Saving…',
@@ -287,6 +290,23 @@ export function AdjacencyApp() {
       </div>
 
       <div className="keymap-center">
+        {selectedInfo?.caption && (
+          <p className="page-source">
+            {selectedPage}: {selectedInfo.caption}
+            {selectedInfo.sourceUrl && (
+              <>
+                {' · '}
+                <a
+                  href={selectedInfo.sourceUrl}
+                  target="_blank"
+                  rel="noreferrer"
+                >
+                  Library of Congress
+                </a>
+              </>
+            )}
+          </p>
+        )}
         {volume && selectedPage ? (
           <div
             className="image-wrapper"
