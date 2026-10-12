@@ -25,6 +25,7 @@ from mapsnap.region_clip_masks import (
     polygons_of,
     region_map_path,
     region_ownership,
+    scanner_bed,
     without_holes,
     without_near_duplicates,
 )
@@ -280,6 +281,39 @@ def test_compute_region_clip_masks_meet_on_the_street_between_the_pages(tmp_path
     assert west.intersection(east).area < 0.01 * west.area
     # Each mask stays on its own scan.
     assert west.bounds[0] >= -1e-9 and east.bounds[2] <= 350 * DEG_PER_PX + 1e-9
+
+
+def test_compute_region_clip_masks_stay_off_a_dark_border(tmp_path: Path):
+    georefs, paths = two_page_volume(tmp_path)
+    west = np.full((200, 200), 220, np.uint8)
+    west[:, :30] = 20  # the scanner bed down the west sheet's left side
+    cv2.imwrite(str(paths[0]), west)
+    cv2.imwrite(str(paths[1]), np.full((200, 200), 220, np.uint8))
+    streets = [
+        street([(175, -50), (175, 250)]),
+        street([(-50, -10), (400, -10)]),
+        street([(-50, 210), (400, 210)]),
+        street([(-10, -50), (-10, 250)]),
+        street([(360, -50), (360, 250)]),
+    ]
+    masks = compute_region_clip_masks(
+        georefs, {"type": "FeatureCollection", "features": streets}, raw_paths=paths
+    )
+    west_mask, east_mask = masks
+    assert west_mask is not None and east_mask is not None
+    assert west_mask.bounds[0] >= 30 * DEG_PER_PX
+    assert west_mask.bounds[2] == pytest.approx(175 * DEG_PER_PX, abs=5 * DEG_PER_PX)
+
+
+def test_scanner_bed_is_thick_dark_ground_touching_the_edge():
+    gray = np.full((100, 100), 220, np.uint8)
+    gray[:, :15] = 20  # bed down the left edge
+    gray[50, :] = 0  # a thin ink line running off both edges
+    gray[40:60, 40:60] = 0  # a thick dark block inside the sheet
+    bed = scanner_bed(gray)
+    assert bed[:, :15].all()
+    assert not bed[50, 20:].any()
+    assert not bed[40:60, 40:60].any()
 
 
 def test_compute_region_clip_masks_needs_images():

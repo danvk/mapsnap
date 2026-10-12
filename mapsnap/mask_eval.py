@@ -23,6 +23,7 @@ panels.
 """
 
 import argparse
+import functools
 import json
 import math
 import re
@@ -279,6 +280,8 @@ def no_masks(
 
 MASKERS: dict[str, Masker] = {
     "region": compute_region_clip_masks,
+    # Region masks that also show margins no other page reaches (#571).
+    "region-free": functools.partial(compute_region_clip_masks, free_margins=True),
     "blocks": compute_all_clip_masks,
     "voronoi": voronoi_masks,
     "none": no_masks,
@@ -334,7 +337,7 @@ def main() -> None:
     volume: Path = args.volume
     work: Path = args.work or volume / "artifacts" / "mask-eval"
     centerlines = args.centerlines or default_centerlines(volume)
-    if centerlines is None and args.masker in ("region", "blocks"):
+    if centerlines is None and args.masker in ("region", "region-free", "blocks"):
         parser.error(f"the {args.masker} masker needs --centerlines")
     skipped = write_oim_sidecars(volume, work)
     if skipped:
