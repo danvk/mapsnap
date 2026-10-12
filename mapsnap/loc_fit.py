@@ -188,6 +188,10 @@ UPLOAD_EXCLUDES = (
     "*.boxes.json",
     "metadata.json",
     "artifacts/reconcile/*",
+    # P(region) maps: 0.4-0.5 MB a page as PNG (about 200 GB over the corpus)
+    # against 0.6 CPU-seconds to predict one again. Nothing reads them from the
+    # bucket; the viewer's Region toggle reads a local volume's.
+    "artifacts/region/*",
     # `fit` archives the whole run, which is a second copy of every sidecar in
     # the item. Its manifest is the part worth keeping -- the git SHA, the
     # model hashes, the stage timings and the fit-state counts -- so that is

@@ -179,6 +179,14 @@ def main() -> None:
         ),
     )
     parser.add_argument(
+        "--no-region-overlap",
+        action="store_true",
+        help=(
+            "Leave out reconcile's content-region overlap factor (#352), and "
+            "the P(region) maps it needs before reconcile runs."
+        ),
+    )
+    parser.add_argument(
         "--image-base-url",
         help=(
             "Publish canvases from the page images rather than a reference "
@@ -216,7 +224,11 @@ def main() -> None:
     # snap on vs off produce different outputs and need different run ids
     # (an id collision would silently SKIP the second variant as already
     # archived).
-    id_tokens = [*georef_extra, *(["--no-snap"] if args.no_snap else [])]
+    id_tokens = [
+        *georef_extra,
+        *(["--no-snap"] if args.no_snap else []),
+        *(["--no-region-overlap"] if args.no_region_overlap else []),
+    ]
     run_id = resolve_run_id(dir_path, args.tag, id_tokens, inputs, git)
 
     archive_dir = dir_path / run_archive.ARTIFACTS_DIRNAME / run_id
@@ -288,11 +300,27 @@ def main() -> None:
         # --no-snap for the same reason.
         timed("street-solve", ["mapsnap", "street-solve", str(dir_path)])
 
+    # Every page's P(region) map, for reconcile's region-overlap factor (#352).
+    # Publication's region masks need the same maps for the pages it places,
+    # so this mostly moves that work earlier; it adds only the pages reconcile
+    # leaves unplaced.
+    if not args.no_region_overlap:
+        timed("region", ["mapsnap", "region", str(dir_path)])
+
     # The arbiter (#270) weighs every pose the channels produced -- including
     # the ones they rejected -- against each other and against not publishing
     # at all, jointly across the volume, and writes the answer for EVERY page
     # as pN.georef-final.json (poseless when it declines to place the page).
-    timed("reconcile", ["mapsnap", "reconcile", str(dir_path), "--publish"])
+    timed(
+        "reconcile",
+        [
+            "mapsnap",
+            "reconcile",
+            str(dir_path),
+            "--publish",
+            *([] if args.no_region_overlap else ["--region-overlap"]),
+        ],
+    )
 
     output_iiif = dir_path / f"{run_id}.iiif.json"
     # One glob, one channel. Publication used to be first-glob-wins over three

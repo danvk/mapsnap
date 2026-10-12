@@ -1021,6 +1021,17 @@ def test_region_energy_is_zero_without_regions_and_free_below_soft():
     assert region_energy(a, bare, soft=0.10) == 0.0
 
 
+def test_volume_sheets_counts_panels_and_skeletons_with_their_sheet():
+    from mapsnap.reconcile import REGION_MIN_SHEETS, volume_sheets
+
+    stems = ["p1__1", "p1__2", "p2", "p2s", "p3", "p4"]
+    assert volume_sheets(stems) == 4
+    assert volume_sheets(stems) < REGION_MIN_SHEETS
+    assert volume_sheets([*stems, "p5", "p6"]) == REGION_MIN_SHEETS
+    # A lettered sheet ending in "s" is its own sheet without a twin.
+    assert volume_sheets(["ps", "p1"]) == 2
+
+
 def test_collect_ignores_the_arbiters_own_final(tmp_path):
     # A previous publish left pN.georef-final.json behind; it is the answer,
     # not a channel, and must not re-enter as a hypothesis.
