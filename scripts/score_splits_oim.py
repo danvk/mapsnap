@@ -11,9 +11,8 @@ Cases come from one of two places:
 * ``--manifest``: a benchmark like ``~/Documents/mapsnap/cutline-training``,
   whose manifest.tsv lists images (relative to it), a ``label`` of split or
   unsplit, and optionally ``fold``, ``size_band``, a sampling ``weight`` and
-  ``volume_has_p0`` (true/false) and ``volume_sheets`` for the splitter's key-map
-  rules;
-  split pages' truth is ``labels/<image stem>.panels.json``.
+  ``volume_sheets`` for the splitter's key-map rules (a ``volume_has_p0``
+  column is ignored); split pages' truth is ``labels/<image stem>.panels.json``.
 
 Cases:
 
@@ -91,14 +90,13 @@ class Case:
     size_band: str = ""
     weight: float = 1.0  # sampling weight; the corrected mean divides it out
     # For the splitter's key-map rules; None: judge by the images beside it.
-    volume_has_page_zero: bool | None = None
     volume_sheets: int | None = None
 
     def sheet(self) -> SheetContext | None:
         """The SheetContext a manifest gives, or None to read the image's directory."""
-        if self.volume_has_page_zero is None or self.volume_sheets is None:
+        if self.volume_sheets is None:
             return None
-        return SheetContext(self.page, self.volume_sheets, self.volume_has_page_zero)
+        return SheetContext(self.page, self.volume_sheets)
 
 
 def make_valid(polygon: Polygon) -> Polygon:
@@ -193,11 +191,6 @@ def gather_cases(data_dir: Path, negatives: int, seed: int) -> list[Case]:
     return positives + sorted(negative_pool, key=lambda case: case.name)
 
 
-def page_zero_flag(value: str | None) -> bool | None:
-    """A manifest's volume_has_p0 cell as a flag; None when the column is absent."""
-    return None if value in (None, "") else value == "true"
-
-
 def manifest_cases(manifest: Path) -> list[Case]:
     """Cases from a benchmark manifest.tsv (see the module docstring)."""
     root = manifest.parent
@@ -220,7 +213,6 @@ def manifest_cases(manifest: Path) -> list[Case]:
                     fold=row.get("fold") or "",
                     size_band=row.get("size_band") or "",
                     weight=float(row.get("weight") or 1),
-                    volume_has_page_zero=page_zero_flag(row.get("volume_has_p0")),
                     volume_sheets=int(row["volume_sheets"])
                     if row.get("volume_sheets")
                     else None,

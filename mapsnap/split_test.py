@@ -20,7 +20,7 @@ from mapsnap.split import (
     crop_border,
     invalidate_changed_panels,
     is_keymap_sheet,
-    keymap_box_stem,
+    is_page_one_sheet,
     keymap_split_rejection,
     keymap_verdict,
     merge_collinear,
@@ -372,34 +372,33 @@ def test_assemble_panels_glues_an_edge_strip_in_the_small_band():
 # --- corner boxes on key-map sheets (#276, step 5) ---
 
 
-def test_sheet_context_beside_counts_page_images_and_page_zero(tmp_path):
+def test_sheet_context_beside_counts_page_images(tmp_path):
     for name in ("p0.jpg", "p1.jpg", "p2.jpg", "p2__1.jpg", "p1.roadprob.jpg"):
         (tmp_path / name).touch()
-    assert SheetContext.beside(tmp_path / "p1.jpg") == SheetContext("p1", 3, True)
+    assert SheetContext.beside(tmp_path / "p1.jpg") == SheetContext("p1", 3)
     alone = tmp_path / "alone"
     alone.mkdir()
     (alone / "p1.jpg").touch()
-    assert SheetContext.beside(alone / "p1.jpg") == SheetContext("p1", 1, False)
+    assert SheetContext.beside(alone / "p1.jpg") == SheetContext("p1", 1)
 
 
-def test_keymap_rules_judge_key_map_candidates_in_volumes_with_a_key_map():
-    assert SheetContext("p1", 6, False).keymap_rules_apply()
-    # Too few sheets for a key map: p1 is the town's first map sheet.
-    assert not SheetContext("p1", 5, False).keymap_rules_apply()
-    assert not SheetContext("p7", 40, True).keymap_rules_apply()
-    assert SheetContext("p0", 40, True).box_sheet()
-    assert SheetContext("pa", 40, True).box_sheet()
-    # Page 1 is an ordinary map page when the volume has a page 0.
-    assert not SheetContext("p1", 40, True).box_sheet()
-    assert SheetContext("p1", 40, False).box_sheet()
-    assert not SheetContext("p0", 3, True).box_sheet()
+def test_keymap_rules_judge_page_zero_and_letter_sheets_in_volumes_with_a_key_map():
+    assert SheetContext("p0", 40).keymap_rules_apply()
+    assert SheetContext("p0b", 40).keymap_rules_apply()
+    assert SheetContext("pa", 40).keymap_rules_apply()
+    # Too few sheets for a key map.
+    assert not SheetContext("p0", 3).keymap_rules_apply()
+    assert not SheetContext("p7", 40).keymap_rules_apply()
+    # Page 1 is left to the splitter, key map or not (#574).
+    assert not SheetContext("p1", 6).keymap_rules_apply()
+    assert not SheetContext("p1L", 40).keymap_rules_apply()
 
 
-def test_keymap_box_stem_takes_page_zero_as_given():
-    assert keymap_box_stem("p0", volume_has_page_zero=True)
-    assert keymap_box_stem("p1", volume_has_page_zero=False)
-    assert not keymap_box_stem("p1", volume_has_page_zero=True)
-    assert not keymap_box_stem("p45", volume_has_page_zero=False)
+def test_is_page_one_sheet_covers_the_page_one_family():
+    for stem in ("p1", "p1a", "p1L", "p1N"):
+        assert is_page_one_sheet(stem), stem
+    for stem in ("p0", "p10", "p12", "pa"):
+        assert not is_page_one_sheet(stem), stem
 
 
 def test_keymap_verdict_refuses_a_key_map_notch_but_not_an_ordinary_sheet():
@@ -409,13 +408,14 @@ def test_keymap_verdict_refuses_a_key_map_notch_but_not_an_ordinary_sheet():
     notch = box(140, 0, 320, 580)  # hangs off the top edge only
     panels = [sheet.difference(notch), notch]
     lines = np.zeros((0, 4))
-    key_map = SheetContext("p1", 40, True)
+    key_map = SheetContext("p0", 40)
     refused = keymap_verdict(panels, lines, binary, key_map)
     assert refused.panels == [] and refused.rejection is not None
-    for ordinary in (SheetContext("p7", 40, True), SheetContext("p1", 4, False)):
+    # Page 1 is judged like any map sheet now (#574), key map or not.
+    for ordinary in (SheetContext("p7", 40), SheetContext("p1", 40)):
         kept = keymap_verdict(panels, lines, binary, ordinary)
         assert kept.panels == panels and kept.rejection is None
-    whole = keymap_verdict([sheet], lines, binary, SheetContext("p7", 40, True))
+    whole = keymap_verdict([sheet], lines, binary, SheetContext("p7", 40))
     assert whole.panels == [] and whole.rejection is None
 
 
@@ -492,7 +492,7 @@ def test_compute_panels_applies_the_key_map_rules_like_process_image(tmp_path):
     sheet[1150:1600, 500:507] = 0
     image_path = tmp_path / "sanborn00001_001__p0.jpg"
     Image.fromarray(sheet).save(image_path, quality=95)
-    as_page = compute_panels(image_path, sheet=SheetContext("p0", 40, True))
+    as_page = compute_panels(image_path, sheet=SheetContext("p0", 40))
     assert len(as_page) == 2
     as_named = compute_panels(image_path)
     assert len(as_named) == 1 and as_named[0].area == pytest.approx(w * h)

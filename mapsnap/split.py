@@ -1166,33 +1166,33 @@ class SheetContext:
 
     page_key: str
     volume_sheets: int
-    volume_has_page_zero: bool
 
     @classmethod
     def beside(cls, image_path: Path) -> "SheetContext":
         """The context a page image's own directory gives: its stem and its siblings."""
-        return cls(
-            panel_basename(image_path),
-            volume_sheet_count(image_path.parent),
-            any(image_path.parent.glob("p0*.jpg")),
-        )
+        return cls(panel_basename(image_path), volume_sheet_count(image_path.parent))
 
     def keymap_rules_apply(self) -> bool:
-        """Whether the key-map rules judge this sheet's cut.
+        """Whether the key-map rules judge this sheet's cut (and the corner-box detector may cut it).
 
-        Only a key-map candidate (is_keymap_sheet) in a volume big enough to
-        have a key map: below KEYMAP_MIN_SHEETS sheets none is detectable
-        (#405), and there p1 is the town's first, most-split map sheet -- 77%
-        of them are split (#565), and the rules refused most of those cuts.
+        Only a page-0-family or letter sheet (is_keymap_sheet, less the page-1
+        family) in a volume big enough to have a key map: below
+        KEYMAP_MIN_SHEETS sheets none is detectable (#405).
+
+        Page-1 sheets are left to the splitter (#574). A page 1 that holds the
+        key map usually holds street panels too, and OIM splits it; the rules
+        refused those cuts. On 90 held-out page-1 sheets of 6+ sheet volumes
+        (OIM's cutline harvest, no item from the cutline model's training
+        fold), dropping the rules for them raised mean matched IoU from 0.836
+        to 0.926 and the right panel count from 58% to 83%, and left whole
+        96.3% of the sheets OIM left whole, against 94.4% with the rules.
+        Judging page 1 only when keymaps.json names it gained far less (0.845):
+        the record names the composite sheets the rules cut wrongly.
         """
         return (
-            is_keymap_sheet(self.page_key) and self.volume_sheets >= KEYMAP_MIN_SHEETS
-        )
-
-    def box_sheet(self) -> bool:
-        """Whether the corner-box detector may cut this sheet (keymap_box_stem)."""
-        return self.keymap_rules_apply() and keymap_box_stem(
-            self.page_key, self.volume_has_page_zero
+            is_keymap_sheet(self.page_key)
+            and not is_page_one_sheet(self.page_key)
+            and self.volume_sheets >= KEYMAP_MIN_SHEETS
         )
 
 
@@ -1423,7 +1423,7 @@ def write_panels(image_path: Path, panels: list, base: str) -> list[Path]:
 # A panel edge within this fraction of the sheet's size counts as flush with it.
 # The key-map rules only judge volumes with at least this many sheets: key-map
 # detection needs six distinct page numbers (#405), so a smaller volume has no
-# key map to protect, and its p1 is an ordinary, usually split, map sheet.
+# key map to protect.
 KEYMAP_MIN_SHEETS = 6
 FLUSH_EDGE_TOLERANCE = 0.02
 # A panel covering at least this fraction of the sheet is the sheet itself, not
@@ -1462,19 +1462,9 @@ def is_keymap_sheet(stem: str) -> bool:
     return match is not None and int(match.group(1)) in (0, 1)
 
 
-def keymap_box_stem(stem: str, volume_has_page_zero: bool) -> bool:
-    """Whether a key-map candidate sheet is one the corner-box detector may cut.
-
-    The page-0 family and letter sheets are the key map in every volume censused
-    (mapsnap.keymap.identify.detection_plan); a page-1 sheet is only when the
-    volume has no page 0, and is otherwise an ordinary map page whose corner a
-    diagonal street or a fold could carve into a box-shaped panel.
-    """
-    if not is_keymap_sheet(stem):
-        return False
-    if re.fullmatch(r"p1[A-Za-z]{0,2}", stem):
-        return not volume_has_page_zero
-    return True
+def is_page_one_sheet(stem: str) -> bool:
+    """Whether a page stem is in the page-1 family: p1, p1a, p1L, p1N ..."""
+    return re.fullmatch(r"p1[A-Za-z]{0,2}", stem) is not None
 
 
 def box_candidates(
@@ -1571,8 +1561,8 @@ def keymap_verdict(
 
     A sheet the rules judge (SheetContext.keymap_rules_apply) only gives up
     boxed edge regions; any other cut is refused and the sheet stands whole.
-    Where that leaves a box sheet (SheetContext.box_sheet) whole, the corner-box
-    detector looks for the boxed corners the divider pipeline's gates hide.
+    Where that leaves a judged sheet whole, the corner-box detector looks for
+    the boxed corners the divider pipeline's gates hide.
     ``binary`` is the cropped ink mask the panels were detected on.
     """
     h, w = binary.shape
@@ -1585,7 +1575,7 @@ def keymap_verdict(
         else None
     )
     box_lines: list[str] = []
-    if (whole or rejection) and sheet.box_sheet():
+    if (whole or rejection) and sheet.keymap_rules_apply():
         box_panels, box_lines = keymap_corner_box_panels(lines, h, w, binary)
         if box_panels:
             return KeymapVerdict(box_panels, boxes_cut=True, box_lines=box_lines)

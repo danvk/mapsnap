@@ -55,8 +55,8 @@ def test_manifest_cases_pairs_split_pages_with_their_labels(tmp_path: Path):
     ]
     assert cases[0].truth == tmp_path / "labels" / "a__p1.panels.json"
     assert [c.sheet() for c in cases] == [
-        SheetContext("p1", 4, False),
-        SheetContext("p2", 90, True),
+        SheetContext("p1", 4),
+        SheetContext("p2", 90),
     ]
 
 
