@@ -38,6 +38,7 @@ import json
 import math
 import shutil
 import subprocess
+from collections.abc import Iterable
 from dataclasses import dataclass, field
 from itertools import product
 from pathlib import Path
@@ -177,6 +178,15 @@ OVERLAP_HARD_DELTA = 0.35
 W_REGION = 1.5
 REGION_SOFT = 0.12
 REGION_HARD_DELTA = 0.30
+# The factor sits out volumes of fewer than REGION_MIN_SHEETS sheets. Over 155
+# held-out OIM-truth volumes (corpus-v1 sidecars, 2026-10-10) it was worth
+# +0.4 pts on volumes of 51+ sheets and +0.2 on 11-50, but -0.7 on 1-10: a
+# small town's sheets often draw the same ground (Winnsboro 1924 and Vivian
+# 1923 each lost a correct p1__1 to a 90%+ overlap with another correct sheet),
+# and with a handful of adjacent pairs the self-calibrated soft threshold
+# (0.85 on Winnsboro) cannot tell that from an alias. Gating at 6 sheets kept
+# every gain but one and removed both of those losses.
+REGION_MIN_SHEETS = 6
 # NO sibling factor. Split panels are separate maps that happen to share a
 # sheet: no geographic relationship (champaign p4's panels sit 891 m apart at
 # +0.2 and +48.9 degrees) and they may legitimately depict OVERLAPPING ground,
@@ -1176,6 +1186,12 @@ def attach_regions(volume: Path, nodes: dict[str, PageNode], origin) -> int:
     return attached
 
 
+def volume_sheets(stems: Iterable[str]) -> int:
+    """How many map sheets ``stems`` come from: panels and skeleton twins count with their sheet."""
+    sheets = {stem.split("__")[0] for stem in stems}
+    return len({s for s in sheets if not (s.endswith("s") and s[:-1] in sheets)})
+
+
 def skeleton_twins(a: str, b: str) -> bool:
     """True for a skeleton sheet and its full-colour twin (p102s / p102).
 
@@ -1973,7 +1989,14 @@ def main() -> None:
         f"overlap soft threshold (p90 of published adjacent pairs): {overlap_soft:.3f}"
     )
     region_soft = REGION_SOFT
-    if args.region_overlap:
+    use_regions = args.region_overlap
+    if use_regions and (sheets := volume_sheets(nodes)) < REGION_MIN_SHEETS:
+        print(
+            f"region overlap: off for a {sheets}-sheet volume "
+            f"(needs {REGION_MIN_SHEETS}+)"
+        )
+        use_regions = False
+    if use_regions:
         attached = attach_regions(volume, nodes, origin or (0.0, 0.0))
         region_edges = build_region_edges(nodes)
         region_soft = calibrate_region_soft(nodes, adjacency)
@@ -2001,9 +2024,7 @@ def main() -> None:
     ):
         out_dir = volume / out_dir
     region_overlaps = (
-        region_overlap_summary(nodes, edges, assignment)
-        if args.region_overlap
-        else None
+        region_overlap_summary(nodes, edges, assignment) if use_regions else None
     )
     flips, _ = write_outputs(volume, nodes, assignment, out_dir, region_overlaps)
     print(f"{flips} decisions flipped -> {out_dir / 'report.md'}")

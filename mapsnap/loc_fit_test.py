@@ -179,6 +179,16 @@ def test_upload_still_drops_the_reconcile_report() -> None:
         assert any(fnmatch.fnmatch(name, pattern) for pattern in UPLOAD_EXCLUDES), name
 
 
+def test_upload_drops_region_maps() -> None:
+    """P(region) PNGs are cheap to predict again and too big to keep per run."""
+    import fnmatch
+
+    assert any(
+        fnmatch.fnmatch("artifacts/region/p12__2.png", pattern)
+        for pattern in UPLOAD_EXCLUDES
+    )
+
+
 def test_upload_globs_and_excludes_do_not_contradict() -> None:
     """The globs document intent; the filters enforce it. They must agree.
 
