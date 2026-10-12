@@ -14,7 +14,9 @@ import {
   isSafePage,
   isSafeVolume,
   isSupersededSheet,
+  readSources,
   readTruth,
+  sourceCaption,
   volumePages,
   writePageTruth,
 } from './adjacencyTruth.ts';
@@ -53,15 +55,19 @@ export function registerAdjacencyTruthApi(
       throw new HTTPError(400, `invalid volume: ${volume}`);
     }
     const truth = await readTruth(dataDir, volume);
+    const sources = await readSources(dataDir, volume);
     const stems = await volumePages(dataDir, volume, labeledStems(truth));
     const pages: ImageInfo[] = stems.map((stem) => {
       const labels = truth[stem]?.labels ?? [];
       const withText = labels.filter((l) => l.text.trim()).length;
+      const source = sources[stem];
       return {
         name: stem,
         withText,
         withoutText: labels.length - withText,
         supersededBySplit: isSupersededSheet(stem, stems) || undefined,
+        caption: source ? sourceCaption(source) : undefined,
+        sourceUrl: source?.loc_url,
       };
     });
     return { pages };
