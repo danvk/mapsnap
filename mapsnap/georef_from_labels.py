@@ -394,6 +394,40 @@ def broadened_scale_plausible(fitted_px_per_ft: float, prior_px_per_ft: float) -
     return BROADENED_SCALE_MIN_RATIO <= ratio <= BROADENED_SCALE_MAX_RATIO
 
 
+def gating_prior(prior_px_per_ft: float, median_prior_px_per_ft: float | None) -> float:
+    """The region prior a broadened or relaxed fit's scale is gated against.
+
+    The page's own prior, unless its region is a *fragment*: a prior more than
+    1 / HALF_SCALE_MIN_RATIO (~2.83x, a region under 1/8 the typical area) above the
+    volume median, the point past which ``region_relative_scale`` distrusts a region
+    entirely. A fragment then gates against the volume median instead. Miami's p34 and
+    p5 (and p7s at the baseline) lost correct fits at the volume's typical scale to a
+    wrong key-map read whose region was a 1,133 m^2 sliver: 0.09x a 16 px/ft prior that
+    was 8x the median (#478). The spurious rectangle-tier fits the gate exists for sit
+    against normal priors (0.76-1.21x the median), so they are judged exactly as before.
+    """
+    if (
+        median_prior_px_per_ft is not None
+        and prior_px_per_ft / median_prior_px_per_ft > 1 / HALF_SCALE_MIN_RATIO
+    ):
+        return median_prior_px_per_ft
+    return prior_px_per_ft
+
+
+def logged_gating_prior(
+    prior_px_per_ft: float, median_prior_px_per_ft: float | None
+) -> float:
+    """:func:`gating_prior`, noting in the page log when a fragment's prior is replaced."""
+    gated = gating_prior(prior_px_per_ft, median_prior_px_per_ft)
+    if gated != prior_px_per_ft:
+        print(
+            f"  key-map region prior {prior_px_per_ft:.3f} px/ft is a fragment "
+            f"({prior_px_per_ft / gated:.1f}x the volume median); gating against the "
+            f"median {gated:.3f} px/ft"
+        )
+    return gated
+
+
 def region_relative_scale(
     prior_px_per_ft: float, median_prior_px_per_ft: float
 ) -> float:
@@ -2741,9 +2775,11 @@ def _init_worker(
     keep_labels_on_fill: bool = False,
     collinear_perp_tolerance_px: float = COLLINEAR_PERP_TOLERANCE_PX,
     embed_locator: KeymapLocator | None = None,
+    median_region_prior: float | None = None,
 ) -> None:
     """Populate _worker_state once per worker process (or once in the main process)."""
     _worker_state.update(
+        median_region_prior=median_region_prior,
         keep_labels_on_fill=keep_labels_on_fill,
         collinear_perp_tolerance_px=collinear_perp_tolerance_px,
         block_index=block_index,
@@ -2870,6 +2906,10 @@ def _process_one_image(image_path: str) -> tuple[str, ProcessResult]:
                             split_page=is_split_page(image_stem(image_path)),
                         )
                         fitted = deg_per_px_to_px_per_ft(relaxed.scale_deg_per_px)
+                        if prior is not None:
+                            prior = logged_gating_prior(
+                                prior, _worker_state.get("median_region_prior")
+                            )
                         if prior is not None and not broadened_scale_plausible(
                             fitted, prior
                         ):
@@ -2916,6 +2956,10 @@ def _process_one_image(image_path: str) -> tuple[str, ProcessResult]:
                             if broadened.scale_deg_per_px is not None
                             else None
                         )
+                        if prior is not None:
+                            prior = logged_gating_prior(
+                                prior, _worker_state.get("median_region_prior")
+                            )
                         if (
                             fitted is not None
                             and prior is not None
@@ -4357,6 +4401,7 @@ def main() -> None:
         args.keep_labels_on_fill,
         args.collinear_perp_tolerance,
         embed_locator,
+        median_region_prior,
     )
     if args.num_workers > 1:
         with multiprocessing.Pool(
