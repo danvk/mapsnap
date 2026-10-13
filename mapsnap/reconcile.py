@@ -1784,21 +1784,42 @@ def seed_pair(intersections: list[dict]) -> list[dict]:
     return [first, second]
 
 
+def is_snap_refine(sidecar_dir: Path, stem: str, source: str) -> bool:
+    """Whether a published pose is snap *refining* the page's RANSAC fit.
+
+    Snap refines when its top candidate verifies better than the incumbent fit
+    and lies within ARBITRATE_MIN_DISAGREE_FT of it (``snap_volume``); its
+    sidecar records ``osm_snap.refine``. Snap's other modes -- a challenger
+    that moved the page, a rescue of an unfit page -- and snap candidates or
+    street-solve poses replace the RANSAC fit rather than adjust it.
+    """
+    if source != "georef-snap":
+        return False
+    path = sidecar_dir / f"{stem}.georef-snap.json"
+    try:
+        doc = json.loads(path.read_text())
+    except (OSError, json.JSONDecodeError):
+        return False
+    return bool((doc.get("osm_snap") or {}).get("refine"))
+
+
 def projected_seed_pair(
     sidecar_dir: Path, stem: str, affine: np.ndarray, size: tuple[int, int]
 ) -> list[dict]:
-    """The page's RANSAC seed pair, re-placed to express the published pose (#585).
+    """The page's RANSAC seed pair, re-placed to express a snap refinement of it (#585).
 
-    A pose with no seed pair of its own -- snap's, street-solve's -- would
-    otherwise reach the IIIF annotation as four synthetic corner points and a
-    polynomial. The two intersections RANSAC seeded from are the control points
-    the page's fit started from; keeping their *pixels* and giving them the
-    (lon, lat) of the published pose's closest Web Mercator similarity
-    (:func:`mercator_helmert`) lets the annotation's Helmert express the pose
-    with them. They are marked ``projected``, ``initial`` (so the annotation
-    uses them as its Helmert pair) and not ``inlier``: the pose put them where
-    they are, so they are not street evidence for it. Empty when the page has
-    no RANSAC seed pair in the same pixel frame.
+    A snap refinement (:func:`is_snap_refine`) adjusts the RANSAC fit it
+    started from, but its sidecar carries no control points, so it would reach
+    the IIIF annotation as four synthetic corner points and a polynomial. The
+    two intersections RANSAC seeded the fit from are the GCPs the refined fit
+    still rests on; keeping their *pixels* and giving them the (lon, lat) of
+    the published pose's closest Web Mercator similarity
+    (:func:`mercator_helmert`) lets the annotation's Helmert express the
+    refined pose with them. They are marked ``projected``, ``initial`` (so the
+    annotation uses them as its Helmert pair) and not ``inlier``: the pose put
+    them where they are, so they are not street evidence for it. Empty when
+    the page has no RANSAC seed pair in the same pixel frame, or its RANSAC
+    pose is not within refinement distance of the published one.
     """
     path = sidecar_dir / f"{stem}.georef.json"
     if not path.exists():
@@ -1810,7 +1831,12 @@ def projected_seed_pair(
     if (doc.get("width"), doc.get("height")) != size:
         return []
     pair = seed_pair(doc.get("intersections") or [])
-    if not pair:
+    if not pair or not doc.get("corners"):
+        return []
+    from mapsnap.snap_volume import ARBITRATE_MIN_DISAGREE_FT
+
+    ransac = page_world_affine(doc)
+    if grid_rmse_ft_between(ransac, affine, *size) >= ARBITRATE_MIN_DISAGREE_FT:
         return []
     a, b = mercator_helmert(affine, size)
     projected = []
@@ -1891,7 +1917,11 @@ def publish(
         )
         w, h = node.unit.width, node.unit.height
         a = hypothesis.affine
-        if a is not None and not seed_pair(intersections):
+        if (
+            a is not None
+            and not seed_pair(intersections)
+            and is_snap_refine(sidecar_dir, stem, hypothesis.source)
+        ):
             intersections = intersections + projected_seed_pair(
                 sidecar_dir, stem, a, (w, h)
             )

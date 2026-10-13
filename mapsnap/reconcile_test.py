@@ -1111,19 +1111,34 @@ def test_mercator_helmert_reproduces_a_mercator_similarity_exactly():
         assert ground_m(fitted, pose(x, y)) < 0.05  # the fixture is linear to ~1e-5
 
 
-def test_publish_gives_a_snapped_pose_the_ransac_seed_pair(tmp_path):
-    """#585: a snapped pose reaches the IIIF as its two seed GCPs, not four corners."""
+def snap_sidecar(a: np.ndarray, *, refine: bool) -> dict:
+    """A georef-snap sidecar: snap's pose, no control points, and its mode."""
+    doc = georef_doc(a, n_inliers=0)
+    doc["osm_snap"] = {"mode": "arbitrate", "refine": refine, "challenge": not refine}
+    return doc
+
+
+def publish_snapped(
+    tmp_path, snapped: np.ndarray, source: str, *, refine: bool
+) -> dict:
+    """Publish one page whose chosen pose is ``snapped``; the final sidecar."""
     import json
 
-    from mapsnap.make_iiif_georef import georef_gcp_points
     from mapsnap.reconcile import publish
 
     write_sidecar(tmp_path, "p1", "georef", ransac_sidecar(affine(0)))
-    snapped = affine(37.0, -12.0)  # snap moved the page 37 m east, 12 m south
-    node = make_node("p1", [scored("snap:0", snapped, 0.9)])
+    write_sidecar(tmp_path, "p1", "georef-snap", snap_sidecar(snapped, refine=refine))
+    node = make_node("p1", [scored(source, snapped, 0.9)])
     publish(tmp_path, {"p1": node}, {"p1": 0})
-    final = json.loads((tmp_path / "p1.georef-final.json").read_text())
+    return json.loads((tmp_path / "p1.georef-final.json").read_text())
 
+
+def test_publish_gives_a_snap_refinement_the_ransac_seed_pair(tmp_path):
+    """#585: a refined fit reaches the IIIF as its two seed GCPs, not four corners."""
+    from mapsnap.make_iiif_georef import georef_gcp_points
+
+    snapped = affine(7.0, -4.0)  # snap nudged the RANSAC fit 7 m east, 4 m south
+    final = publish_snapped(tmp_path, snapped, "georef-snap", refine=True)
     points = final["intersections"]
     assert [(p["x"], p["y"]) for p in points] == [(100, 100), (700, 500)]
     for p in points:
@@ -1140,6 +1155,27 @@ def test_publish_gives_a_snapped_pose_the_ransac_seed_pair(tmp_path):
     ]
 
 
+def test_publish_keeps_corners_when_snap_replaced_the_fit(tmp_path):
+    """A challenger, a raw snap candidate or a far move is not built on RANSAC's seeds."""
+    assert (
+        publish_snapped(tmp_path, affine(7.0), "georef-snap", refine=False)[
+            "intersections"
+        ]
+        == []
+    )
+    assert (
+        publish_snapped(tmp_path, affine(7.0), "snap:0", refine=True)["intersections"]
+        == []
+    )
+    # Marked a refinement, but 200 m from the RANSAC pose: not this seed pair's fit.
+    assert (
+        publish_snapped(tmp_path, affine(200.0), "georef-snap", refine=True)[
+            "intersections"
+        ]
+        == []
+    )
+
+
 def test_publish_keeps_corner_points_without_a_seed_pair(tmp_path):
     import json
 
@@ -1148,7 +1184,8 @@ def test_publish_keeps_corner_points_without_a_seed_pair(tmp_path):
     doc = ransac_sidecar(affine(0))
     doc["intersections"][1]["initial"] = False
     write_sidecar(tmp_path, "p1", "georef", doc)
-    node = make_node("p1", [scored("snap:0", affine(5.0), 0.9)])
+    write_sidecar(tmp_path, "p1", "georef-snap", snap_sidecar(affine(5.0), refine=True))
+    node = make_node("p1", [scored("georef-snap", affine(5.0), 0.9)])
     publish(tmp_path, {"p1": node}, {"p1": 0})
     final = json.loads((tmp_path / "p1.georef-final.json").read_text())
     assert final["intersections"] == []
