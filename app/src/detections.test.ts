@@ -300,6 +300,11 @@ describe('isOffPaper', () => {
     expect(isOffPaper(color(194, 4.1), color(97, 8))).toBe(true);
   });
 
+  it('treats a grey scan tint as paper (Nashville p41__2 "2ND")', () => {
+    expect(isOffPaper(color(123.7, 3.6), color(8.1, 9.0))).toBe(false);
+    expect(isOffPaper(color(198.4, 3.2), color(0, 1))).toBe(true);
+  });
+
   it('ignores the hue of a nearly neutral box', () => {
     expect(isOffPaper(color(270, 2.9), color(90, 2))).toBe(false);
   });

@@ -4,6 +4,7 @@ from mapsnap.paper_color import (
     BACKGROUND_CHROMA_MARGIN,
     BACKGROUND_HUE_MARGIN,
     BACKGROUND_HUE_MIN_CHROMA,
+    BACKGROUND_HUE_TINT_BAND,
     hue_difference,
     is_off_paper,
 )
@@ -39,6 +40,18 @@ def test_a_nearly_neutral_box_has_no_meaningful_hue():
     paper = color(90, 2)
     assert not is_off_paper(color(270, BACKGROUND_HUE_MIN_CHROMA - 0.1), paper)
     assert is_off_paper(color(270, BACKGROUND_HUE_MIN_CHROMA), paper)
+
+
+def test_a_grey_scan_tint_is_not_a_fill():
+    # Nashville p41__2's street label "2ND" on grey, against a page whose paper measures
+    # pink; and Fargo's grey margin on white paper. Both are olive-grey, not a fill colour.
+    assert not is_off_paper(color(123.7, 3.6), color(8.1, 9.0))
+    assert not is_off_paper(color(116.6, 4.5), color(0.0, 1.0))
+    # A pale blue water fill on the same white paper still is.
+    assert is_off_paper(color(198.4, 3.2), color(0.0, 1.0))
+    # The chroma rule still applies inside the band.
+    low, high = BACKGROUND_HUE_TINT_BAND
+    assert is_off_paper(color((low + high) / 2, 20.0), color(90.0, 3.0))
 
 
 def test_without_a_paper_a_recorded_background_is_off_it():

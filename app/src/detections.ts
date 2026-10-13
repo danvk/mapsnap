@@ -98,6 +98,11 @@ export const BACKGROUND_CHROMA_MARGIN = 4.0;
 export const BACKGROUND_HUE_MARGIN = 60.0;
 /** Mirrors `BACKGROUND_HUE_MIN_CHROMA` in mapsnap/paper_color.py. */
 export const BACKGROUND_HUE_MIN_CHROMA = 3.0;
+/**
+ * Mirrors `BACKGROUND_HUE_TINT_BAND` in mapsnap/paper_color.py: olive to grey-green, the tint
+ * of a grey or aged scan rather than a Sanborn fill colour, which the hue rule ignores.
+ */
+export const BACKGROUND_HUE_TINT_BAND: [number, number] = [100, 150];
 
 /** The angle between two hues in degrees, going the short way round (0-180). */
 export function hueDifference(first: number, second: number): number {
@@ -110,7 +115,7 @@ export function hueDifference(first: number, second: number): number {
  *
  * Mirrors `is_off_paper` in mapsnap/paper_color.py: more saturated than the paper by the
  * chroma margin, or far round the hue circle from it at a modest chroma (a pale blue fill on
- * yellowed paper). With no `paper` (files written before it was recorded) a background was
+ * yellowed paper) and outside the grey scan-tint band. With no `paper` (files written before it was recorded) a background was
  * only recorded when off the paper, so its presence is the answer.
  */
 export function isOffPaper(
@@ -119,9 +124,11 @@ export function isOffPaper(
 ): boolean {
   if (!paper) return true;
   if (background.chroma > paper.chroma + BACKGROUND_CHROMA_MARGIN) return true;
+  const [low, high] = BACKGROUND_HUE_TINT_BAND;
   return (
     background.chroma >= BACKGROUND_HUE_MIN_CHROMA &&
-    hueDifference(background.hue, paper.hue) >= BACKGROUND_HUE_MARGIN
+    hueDifference(background.hue, paper.hue) >= BACKGROUND_HUE_MARGIN &&
+    !(background.hue >= low && background.hue <= high)
   );
 }
 
