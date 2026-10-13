@@ -155,11 +155,11 @@ def legitimate_keymap_split(volume: Path, parent: str) -> bool:
     split key-map sheet in the corpus (9 panels): key-map panels are flush
     with four edges, legitimate cut-aways with two, the one bad cut with one.
 
-    The splitter itself now refuses such a cut on a key-map sheet
-    (split.keymap_split_rejection), so this is the backstop for volumes split
-    by older code: it routes the key-map pipeline around the bad panels until
-    the next re-split removes them. Without a panels.json there is nothing to
-    judge, so the split stands.
+    This is the only guard: the splitter has no key-map rules of its own any
+    more (with the learned cutline model they no longer changed which page
+    numbers key-map detection read), so a split that fails this test sends
+    the key-map pipeline to the whole sheet. Without a panels.json there is
+    nothing to judge, so the split stands.
     """
     path = panels_json_path(volume / f"{parent}.jpg")
     if not path.exists():

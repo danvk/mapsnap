@@ -55,8 +55,9 @@ of them silently corrupts the comparison.
    its to touch and must be deleted by hand, or the key-map chain keeps
    finding the dead panel. Check with `ls data/$VOL/raw/ | grep __`.
 
-   A re-split can also cut a *key-map* sheet for the first time (the corner-box
-   detector, #389: Schenectady's KEY legend, Los Angeles pa's Vol-13 box). The
+   A re-split can also cut a *key-map* sheet for the first time (as the
+   corner-box detector, since removed, did to Schenectady's KEY legend and Los
+   Angeles pa's Vol-13 box, #389). The
    chain then re-runs on the nominated panel (`raw/p0__1.*`) and the parent's
    `raw/p0.keymap.json` / `.georef.json` / `.regions.panels.json` go stale. The
    locator and the adjacency repair skip a split parent (its

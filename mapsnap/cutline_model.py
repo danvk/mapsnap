@@ -42,7 +42,8 @@ HOUGH_MIN_LEN_FRAC = 0.03  # of the shorter side of the cropped page
 # lines (P >= LINE_THRESHOLD, within MERGE_SUPPORT_RADIUS_PX) cover less than
 # MERGE_MIN_SUPPORT of. The overshoot closes near-misses; the support check
 # undoes the closures the network never drew -- Covington 1909 p1's 3% sliver
-# between two cutlines, which the key-map rules then refused the whole cut for.
+# between two cutlines, which the (since removed) key-map rules refused the
+# whole cut for.
 OVERSHOOT_FRAC = 0.14
 MERGE_MIN_SUPPORT = 0.3
 MERGE_SUPPORT_RADIUS_PX = 5
