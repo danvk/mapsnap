@@ -17,7 +17,10 @@ import re
 import statistics
 from pathlib import Path
 
-NOTE_PATTERN = re.compile(r"\b([0-9IO]{2,3})\s*FT\.?\s*TO\s*ONE\s*INCH", re.IGNORECASE)
+# "Scale 50 Ft. to One Inch", and Fargo's "Scale 300 Ft. to an Inch" (#592).
+NOTE_PATTERN = re.compile(
+    r"\b([0-9IO]{2,3})\s*FT\.?\s*TO\s*(?:ONE|AN)\s*INCH", re.IGNORECASE
+)
 MIN_NOTE_CONFIDENCE = 0.2
 """Reads below this are the decoder emitting a vocab string over noise. The
 corpus sweep found full-phrase reads at >=0.2 were correct 173/173 times while
