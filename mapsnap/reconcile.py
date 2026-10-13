@@ -1723,6 +1723,140 @@ def source_control_points(
     return doc.get("streets") or [], doc.get("intersections") or []
 
 
+# Earth radius of the Web Mercator projection Allmaps fits its Helmert in.
+MERCATOR_RADIUS_M = 6_378_137.0
+# Grid of page points (per side) the best-fit Helmert is fitted over.
+HELMERT_GRID = 9
+
+
+def to_mercator(lon: float, lat: float) -> complex:
+    """Web Mercator (x, y) metres as a complex number."""
+    x = math.radians(lon) * MERCATOR_RADIUS_M
+    y = math.log(math.tan(math.pi / 4 + math.radians(lat) / 2)) * MERCATOR_RADIUS_M
+    return complex(x, y)
+
+
+def from_mercator(point: complex) -> tuple[float, float]:
+    """(lon, lat) of a Web Mercator point."""
+    lon = math.degrees(point.real / MERCATOR_RADIUS_M)
+    lat = math.degrees(
+        2 * math.atan(math.exp(point.imag / MERCATOR_RADIUS_M)) - math.pi / 2
+    )
+    return lon, lat
+
+
+def mercator_helmert(
+    affine: np.ndarray, size: tuple[int, int]
+) -> tuple[complex, complex]:
+    """The Web Mercator similarity closest to a page px -> (lon, lat) affine.
+
+    Returned as (a, b) with mercator = a * conj-free page point + b, where the
+    page point is ``complex(x, -y)`` (pixel y runs down). Fitted by least
+    squares over a grid spanning the page. A pose that is already a Mercator
+    similarity (RANSAC's) is reproduced exactly; snap's, which are
+    similarities in local metres with unequal degree lengths (110,540 vs
+    111,320 m), are 0.7% from one and come back within a few feet.
+    """
+    width, height = size
+    xs, ys = np.meshgrid(
+        np.linspace(0, width, HELMERT_GRID), np.linspace(0, height, HELMERT_GRID)
+    )
+    page = xs.ravel() - 1j * ys.ravel()
+    world = np.array(
+        [
+            to_mercator(*(affine @ np.array([x, y, 1.0])))
+            for x, y in zip(xs.ravel(), ys.ravel())
+        ]
+    )
+    design = np.vstack([page, np.ones_like(page)]).T
+    (a, b), *_ = np.linalg.lstsq(design, world, rcond=None)
+    return complex(a), complex(b)
+
+
+def seed_pair(intersections: list[dict]) -> list[dict]:
+    """The first two non-coincident RANSAC seed (``initial``) intersections, or []."""
+    initials = [i for i in intersections if i.get("initial")]
+    if len(initials) < 2:
+        return []
+    first, second = initials[0], initials[1]
+    if math.hypot(first["x"] - second["x"], first["y"] - second["y"]) < 1.0:
+        return []
+    return [first, second]
+
+
+def is_snap_refine(sidecar_dir: Path, stem: str, source: str) -> bool:
+    """Whether a published pose is snap *refining* the page's RANSAC fit.
+
+    Snap refines when its top candidate verifies better than the incumbent fit
+    and lies within ARBITRATE_MIN_DISAGREE_FT of it (``snap_volume``); its
+    sidecar records ``osm_snap.refine``. Snap's other modes -- a challenger
+    that moved the page, a rescue of an unfit page -- and snap candidates or
+    street-solve poses replace the RANSAC fit rather than adjust it.
+    """
+    if source != "georef-snap":
+        return False
+    path = sidecar_dir / f"{stem}.georef-snap.json"
+    try:
+        doc = json.loads(path.read_text())
+    except (OSError, json.JSONDecodeError):
+        return False
+    return bool((doc.get("osm_snap") or {}).get("refine"))
+
+
+def projected_seed_pair(
+    sidecar_dir: Path, stem: str, affine: np.ndarray, size: tuple[int, int]
+) -> list[dict]:
+    """The page's RANSAC seed pair, re-placed to express a snap refinement of it (#585).
+
+    A snap refinement (:func:`is_snap_refine`) adjusts the RANSAC fit it
+    started from, but its sidecar carries no control points, so it would reach
+    the IIIF annotation as four synthetic corner points and a polynomial. The
+    two intersections RANSAC seeded the fit from are the GCPs the refined fit
+    still rests on; keeping their *pixels* and giving them the (lon, lat) of
+    the published pose's closest Web Mercator similarity
+    (:func:`mercator_helmert`) lets the annotation's Helmert express the
+    refined pose with them. They are marked ``projected``, ``initial`` (so the
+    annotation uses them as its Helmert pair) and not ``inlier``: the pose put
+    them where they are, so they are not street evidence for it. Empty when
+    the page has no RANSAC seed pair in the same pixel frame, or its RANSAC
+    pose is not within refinement distance of the published one.
+    """
+    path = sidecar_dir / f"{stem}.georef.json"
+    if not path.exists():
+        return []
+    try:
+        doc = json.loads(path.read_text())
+    except (OSError, json.JSONDecodeError):
+        return []
+    if (doc.get("width"), doc.get("height")) != size:
+        return []
+    pair = seed_pair(doc.get("intersections") or [])
+    if not pair or not doc.get("corners"):
+        return []
+    from mapsnap.snap_volume import ARBITRATE_MIN_DISAGREE_FT
+
+    ransac = page_world_affine(doc)
+    if grid_rmse_ft_between(ransac, affine, *size) >= ARBITRATE_MIN_DISAGREE_FT:
+        return []
+    a, b = mercator_helmert(affine, size)
+    projected = []
+    for point in pair:
+        x, y = float(point["x"]), float(point["y"])
+        lon, lat = from_mercator(a * complex(x, -y) + b)
+        projected.append(
+            {
+                "x": x,
+                "y": y,
+                "lon": lon,
+                "lat": lat,
+                "initial": True,
+                "inlier": False,
+                "projected": True,
+            }
+        )
+    return projected
+
+
 def publish(
     volume: Path,
     nodes: dict[str, PageNode],
@@ -1783,6 +1917,14 @@ def publish(
         )
         w, h = node.unit.width, node.unit.height
         a = hypothesis.affine
+        if (
+            a is not None
+            and not seed_pair(intersections)
+            and is_snap_refine(sidecar_dir, stem, hypothesis.source)
+        ):
+            intersections = intersections + projected_seed_pair(
+                sidecar_dir, stem, a, (w, h)
+            )
         corners = (
             None
             if a is None

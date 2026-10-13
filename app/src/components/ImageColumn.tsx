@@ -6,7 +6,12 @@ import type {
   IndexedDetection,
 } from '../detections';
 import { pointInPolygon } from '../geometry';
-import type { IntersectionPoint, PanelPolygon, Street } from '../types';
+import type {
+  IntersectionPoint,
+  LabColor,
+  PanelPolygon,
+  Street,
+} from '../types';
 import { useElementSize } from '../hooks/useElementSize';
 import { BoxControls } from './BoxControls';
 import { BoxesOverlay } from './BoxesOverlay';
@@ -43,6 +48,8 @@ interface ImageColumnProps {
   streets: Street[];
   intersections: IntersectionPoint[];
   filteredDetections: IndexedDetection[];
+  /** The page's paper colour from streets.json, for judging which reads sit on a fill. */
+  paper: LabColor | null;
   /** Detections before any filtering, for the "showing N of M" readout. */
   detectionCount: number;
   panels: PanelPolygon[];
@@ -91,6 +98,7 @@ export function ImageColumn(props: ImageColumnProps) {
     streets,
     intersections,
     filteredDetections,
+    paper,
     detectionCount,
     panels,
     panelLabels,
@@ -194,6 +202,7 @@ export function ImageColumn(props: ImageColumnProps) {
           {detectionsMode && (
             <DetectionsOverlay
               detections={filteredDetections}
+              paper={paper}
               selectedIndices={selectedIndices}
               displayWidth={imgSize.width}
               displayHeight={imgSize.height}

@@ -41,6 +41,7 @@ from mapsnap.keymap.locate import (
 )
 from mapsnap.keymap.records import is_recorded_keymap_page
 from mapsnap.osm_to_centerlines import load_centerlines
+from mapsnap.paper_color import is_off_paper
 from mapsnap.streets import (
     DIRECTION_WORDS,
     HINT_STRINGS,
@@ -1995,6 +1996,21 @@ def page_diagonal_m(A: np.ndarray, width: float, height: float) -> float:
     )
 
 
+# A key map draws a whole city, not a sheet, so the sheet ceiling
+# (osm_snap.MAX_PAGE_EXTENT_M, 6 km) rejected real key maps: San Jose 1884's at
+# 6.0 km, Detroit 1884 vol. 2's at 7.5 and 7.9 km, and about half of the 459
+# key-map fits on disk, Queens 1950 vol. 2's the largest at 35.4 km. A key-map
+# fit still has to fit on a city.
+MAX_KEYMAP_EXTENT_M = 50_000.0
+
+
+def fit_extent_is_plausible(diagonal_m: float, keymap_page: bool = False) -> bool:
+    """Whether a fit's page diagonal is a plausible size: a sheet's, or a key map's."""
+    if keymap_page:
+        return diagonal_m <= MAX_KEYMAP_EXTENT_M
+    return page_extent_is_plausible(diagonal_m)
+
+
 def page_extent_is_plausible(diagonal_m: float) -> bool:
     """Whether a page this big on the ground could be a Sanborn sheet.
 
@@ -2596,6 +2612,12 @@ def derive_paths(image_path: str) -> tuple[str, str, str]:
     )
 
 
+def load_paper(labels_path: str) -> dict | None:
+    """The page's paper color recorded in a <stem>.streets.json, or None for older files."""
+    labels_raw = json.loads(Path(labels_path).read_text())
+    return labels_raw.get("paper") if isinstance(labels_raw, dict) else None
+
+
 def load_detections(labels_path: str) -> list[dict]:
     """Load cached label detections from a <stem>.streets.json file."""
     labels_raw = json.loads(Path(labels_path).read_text())
@@ -2977,14 +2999,18 @@ def drop_labels_on_fill(
     detections: list[dict],
     yellow_band: tuple[float, float] = FILL_YELLOW_HUE_BAND,
     road_prob: np.ndarray | None = None,
+    *,
+    paper: dict | None = None,
 ) -> tuple[list[dict], list[dict]]:
     """Split detections into (kept, on-fill) by the ``background`` colour OCR recorded for each.
 
     Sanborn sheets print street names on the paper background; text inside a coloured block is a
     *building* label, which can still prefix-match a street name and fabricate GCPs (Nashville's
-    "REP" -> "REP JOHN LEWIS WAY", "SEARS", "SERVICE" -> "SERVICE ROAD"). ``detect_text`` records a
-    ``background`` on exactly the detections that sit on something more saturated than the page's
-    own paper; this decides which of those colours actually disqualify a label.
+    "REP" -> "REP JOHN LEWIS WAY", "SEARS", "SERVICE" -> "SERVICE ROAD"). ``detect_text`` records
+    every detection's ``background``; :func:`paper_color.is_off_paper` decides, against the page's
+    ``paper``, which of them are off the paper at all, and this decides which of *those* colors
+    actually disqualify a label. Without ``paper`` (files written before it was recorded), a
+    recorded background is taken to be off the paper, as those files only recorded such.
 
     Only hue outside ``yellow_band`` does. Being on *some* colour is not enough, because on a
     yellowed scan an ordinary street label is more saturated than the paper: Chicago's and New
@@ -3010,7 +3036,7 @@ def drop_labels_on_fill(
     on_fill: list[dict] = []
     for det in detections:
         background = det.get("background")
-        if background is None:
+        if background is None or not is_off_paper(background, paper):
             kept.append(det)
             continue
         # Outside the spared band the colour alone disqualifies; inside it, P(road)
@@ -3202,6 +3228,7 @@ def prepare_label_features(
     """
     img_w, img_h = image_size
     all_detections = load_detections(labels_path)
+    paper = load_paper(labels_path)
 
     print(f"All detections: {len(all_detections)}")
     all_detections = [d for d in all_detections if not d.get("ignore")]
@@ -3247,7 +3274,7 @@ def prepare_label_features(
     # that can still prefix-match a street name and fabricate GCPs.
     if not keep_labels_on_fill:
         all_detections, on_fill = drop_labels_on_fill(
-            all_detections, road_prob=road_prob
+            all_detections, road_prob=road_prob, paper=paper
         )
         if on_fill:
             named = sorted(
@@ -3561,15 +3588,21 @@ def process_image(
         f"RANSAC: {len(inlier_feat_indices)} / {len(features)} inlier labels",
         file=sys.stderr,
     )
+    keymap_json = os.path.join(
+        os.path.dirname(image_path), f"{image_stem(image_path)}.keymap.json"
+    )
+    is_keymap_page = os.path.exists(keymap_json)
     diagonal_m = page_diagonal_m(A, img_w, img_h)
-    if not page_extent_is_plausible(diagonal_m):
+    if not fit_extent_is_plausible(diagonal_m, is_keymap_page):
         # A fit whose page would span kilometers beyond any drawn sheet is wrong
         # by orders of magnitude, however many labels agree with it. Accepted, it
         # became the volume's reference scale, snap's scale prior and a
         # published pose: Orleans 1929's p1 fitted at 0.044 px/ft -- a 17.3 km
         # sheet -- and went out as the volume's only page (#517).
+        what = "key map" if is_keymap_page else "page"
         print(
-            f"RANSAC fit rejected: a {diagonal_m / 1000:.1f} km page is not a sheet.",
+            f"RANSAC fit rejected: a {diagonal_m / 1000:.1f} km {what} is not "
+            f"{'a city' if is_keymap_page else 'a sheet'}.",
             file=sys.stderr,
         )
         return ProcessResult(success=False, gcp_hints=cluster_gcp_hints(gcps))
@@ -3580,10 +3613,7 @@ def process_image(
     # affine on its own inlier GCPs, so the georef.json corners capture the scale anisotropy and
     # skew a 4-parameter similarity cannot — read straight off by the key-map locator, with no
     # separate refit downstream.
-    keymap_json = os.path.join(
-        os.path.dirname(image_path), f"{image_stem(image_path)}.keymap.json"
-    )
-    if os.path.exists(keymap_json):
+    if is_keymap_page:
         affine = fit_keymap_affine(A, gcps, cos_phi)
         if affine is not None:
             # Report what the extra two degrees of freedom actually bought. A similarity is

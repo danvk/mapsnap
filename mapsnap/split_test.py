@@ -11,18 +11,13 @@ from shapely.geometry import Polygon, box
 from mapsnap.split import (
     BORDER_PX,
     MAX_DIVIDER_CANDIDATES,
-    SheetContext,
     assemble_panels,
-    box_candidates,
     bridge_junctions,
     compute_panels,
     connected_dividers,
     crop_border,
     invalidate_changed_panels,
     is_keymap_sheet,
-    is_page_one_sheet,
-    keymap_split_rejection,
-    keymap_verdict,
     merge_collinear,
     order_panels,
     panel_basename,
@@ -37,6 +32,7 @@ from mapsnap.split import (
     rings_match,
     seg_angle_deg,
     segment_thickness,
+    splits_sheet,
     write_panels_json,
 )
 
@@ -206,21 +202,26 @@ def test_is_keymap_sheet_mirrors_the_key_map_candidates():
     assert is_letter_page("pa") and is_keymap_sheet("pa")
 
 
-def test_keymap_split_rejection_accepts_edge_boxes_and_refuses_notches():
-    sheet = box(0, 0, 1000, 2000)
-    key_box = box(770, 1640, 1000, 2000)  # bottom-right corner: two edges
-    inset = box(0, 1360, 320, 2000)  # bottom-left corner: two edges
-    notch = box(140, 0, 320, 580)  # hangs off the top edge only
-    assert (
-        keymap_split_rejection([sheet.difference(key_box), key_box], 1000, 2000) is None
-    )
-    assert keymap_split_rejection([sheet.difference(inset), inset], 1000, 2000) is None
-    reason = keymap_split_rejection(
-        [sheet.difference(notch).difference(key_box), notch, key_box], 1000, 2000
-    )
-    assert reason is not None and "panel 2" in reason and "1 sheet edge" in reason
-    # A panel the size of the sheet is never a cut-away, whatever its edges say.
-    assert keymap_split_rejection([sheet], 1000, 2000) is None
+def test_splits_sheet_is_false_only_for_one_whole_page_panel():
+    assert not splits_sheet([box(0, 0, 100, 200)], 100, 200)
+    assert not splits_sheet([box(0, 0, 100, 199.5)], 100, 200)
+    assert splits_sheet([box(0, 0, 50, 200), box(50, 0, 100, 200)], 100, 200)
+    assert splits_sheet([box(0, 0, 100, 150)], 100, 200)
+
+
+def test_compute_panels_leaves_a_blank_sheet_whole(tmp_path):
+    image_path = tmp_path / "p0.jpg"
+    Image.fromarray(np.full((800, 600, 3), 255, dtype=np.uint8)).save(image_path)
+    panels = compute_panels(image_path)
+    assert len(panels) == 1 and panels[0].area == pytest.approx(600 * 800)
+
+
+def test_process_image_writes_no_panels_for_a_blank_key_map_sheet(tmp_path):
+    image_path = tmp_path / "p0.jpg"
+    Image.fromarray(np.full((800, 600, 3), 255, dtype=np.uint8)).save(image_path)
+    process_image(image_path)
+    assert not (tmp_path / "p0.panels.json").exists()
+    assert "single panel" in (tmp_path / "raw" / "p0.keymap.txt").read_text()
 
 
 def test_panel_summary_lines_report_share_and_flush_edges():
@@ -369,56 +370,6 @@ def test_assemble_panels_glues_an_edge_strip_in_the_small_band():
     assert panels[0].area == pytest.approx(100 * 100)
 
 
-# --- corner boxes on key-map sheets (#276, step 5) ---
-
-
-def test_sheet_context_beside_counts_page_images(tmp_path):
-    for name in ("p0.jpg", "p1.jpg", "p2.jpg", "p2__1.jpg", "p1.roadprob.jpg"):
-        (tmp_path / name).touch()
-    assert SheetContext.beside(tmp_path / "p1.jpg") == SheetContext("p1", 3)
-    alone = tmp_path / "alone"
-    alone.mkdir()
-    (alone / "p1.jpg").touch()
-    assert SheetContext.beside(alone / "p1.jpg") == SheetContext("p1", 1)
-
-
-def test_keymap_rules_judge_page_zero_and_letter_sheets_in_volumes_with_a_key_map():
-    assert SheetContext("p0", 40).keymap_rules_apply()
-    assert SheetContext("p0b", 40).keymap_rules_apply()
-    assert SheetContext("pa", 40).keymap_rules_apply()
-    # Too few sheets for a key map.
-    assert not SheetContext("p0", 3).keymap_rules_apply()
-    assert not SheetContext("p7", 40).keymap_rules_apply()
-    # Page 1 is left to the splitter, key map or not (#574).
-    assert not SheetContext("p1", 6).keymap_rules_apply()
-    assert not SheetContext("p1L", 40).keymap_rules_apply()
-
-
-def test_is_page_one_sheet_covers_the_page_one_family():
-    for stem in ("p1", "p1a", "p1L", "p1N"):
-        assert is_page_one_sheet(stem), stem
-    for stem in ("p0", "p10", "p12", "pa"):
-        assert not is_page_one_sheet(stem), stem
-
-
-def test_keymap_verdict_refuses_a_key_map_notch_but_not_an_ordinary_sheet():
-    # Panels in the full frame of a 1000 x 2000 sheet; binary is the cropped mask.
-    binary = np.zeros((2000 - 2 * BORDER_PX, 1000 - 2 * BORDER_PX), dtype=np.uint8)
-    sheet = box(0, 0, 1000, 2000)
-    notch = box(140, 0, 320, 580)  # hangs off the top edge only
-    panels = [sheet.difference(notch), notch]
-    lines = np.zeros((0, 4))
-    key_map = SheetContext("p0", 40)
-    refused = keymap_verdict(panels, lines, binary, key_map)
-    assert refused.panels == [] and refused.rejection is not None
-    # Page 1 is judged like any map sheet now (#574), key map or not.
-    for ordinary in (SheetContext("p7", 40), SheetContext("p1", 40)):
-        kept = keymap_verdict(panels, lines, binary, ordinary)
-        assert kept.panels == panels and kept.rejection is None
-    whole = keymap_verdict([sheet], lines, binary, SheetContext("p7", 40))
-    assert whole.panels == [] and whole.rejection is None
-
-
 def test_the_candidate_cap_counts_only_divider_thick_lines():
     # One heavy divider among more thin long map lines than the cap: the thin
     # ones fail the thickness filter, so they no longer make the page give up.
@@ -438,73 +389,13 @@ def test_the_candidate_cap_counts_only_divider_thick_lines():
     assert connected_dividers(np.array(lines, dtype=float), h, w, binary) == []
 
 
-def test_box_candidates_keep_box_thick_lines_uncapped():
-    h = w = 1000
-    binary = np.zeros((h, w), dtype=np.uint8)
-    binary[600:604, 0:400] = 255  # a 4 px box side: below the divider floor
-    binary[100:102, 500:900] = 255  # a 2 px map line
-    lines = [[0, 602, 400, 602], [500, 101, 900, 101]]
-    # More long lines than MAX_DIVIDER_CANDIDATES: the divider gate would give up.
-    for i in range(14):
-        y = 200 + 25 * i
-        binary[y : y + 6, 500:900] = 255
-        lines.append([500, y + 3, 900, y + 3])
-    kept = box_candidates(np.array(lines, dtype=float), h, w, binary)
-    assert len(kept) == 15
-    assert not any(seg[1] == 101 and seg[3] == 101 for seg in kept)
-
-
-def test_process_image_cuts_a_corner_box_the_divider_gate_hid(tmp_path):
-    # A key-map sheet: a dense grid of heavy interior rules (more than the
-    # divider pipeline's candidate cap, so it stands whole) and a boxed region
-    # in the bottom-left corner, flush with the left and bottom edges.
-    w, h = 1200, 1600
-    sheet = np.full((h, w, 3), 255, dtype=np.uint8)
-    for i in range(14):
-        x = 300 + 50 * i
-        sheet[250:1000, x : x + 7] = 0
-    sheet[1150:1157, 0:500] = 0  # box top
-    sheet[1150:1600, 500:507] = 0  # box right side
-    image_path = tmp_path / "p0.jpg"
-    Image.fromarray(sheet).save(image_path, quality=95)
-    for page in range(1, 6):  # a volume big enough to have a key map
-        (tmp_path / f"p{page}.jpg").touch()
-    process_image(image_path)
-    panels = read_panels_json(tmp_path / "p0.panels.json")["panels"]
-    assert len(panels) == 2
-    assert (tmp_path / "p0__1.jpg").exists() and (tmp_path / "p0__2.jpg").exists()
-    areas = sorted(Polygon(ring).area / (w * h) for ring in panels)
-    assert areas[0] == pytest.approx(500 * 450 / (w * h), abs=0.01)
-    log = (tmp_path / "raw" / "p0.keymap.txt").read_text()
-    assert "corner boxes: 1 found" in log
-    assert "bottom-left box" in log
-
-
-def test_compute_panels_applies_the_key_map_rules_like_process_image(tmp_path):
-    # The corner-box sheet of the test above, under a benchmark-style name that
-    # hides its page key: only the explicit key turns the key-map rules on.
-    w, h = 1200, 1600
-    sheet = np.full((h, w, 3), 255, dtype=np.uint8)
-    for i in range(14):
-        x = 300 + 50 * i
-        sheet[250:1000, x : x + 7] = 0
-    sheet[1150:1157, 0:500] = 0
-    sheet[1150:1600, 500:507] = 0
-    image_path = tmp_path / "sanborn00001_001__p0.jpg"
-    Image.fromarray(sheet).save(image_path, quality=95)
-    as_page = compute_panels(image_path, sheet=SheetContext("p0", 40))
-    assert len(as_page) == 2
-    as_named = compute_panels(image_path)
-    assert len(as_named) == 1 and as_named[0].area == pytest.approx(w * h)
-
-
 def test_an_orphan_face_never_disconnects_a_panel():
     """sanborn00519_002 (Long Beach CA 1914) crashed the corpus run: a leftover
     face touching its neighbours only at a corner point is adjacent to nothing
     (the test wants a shared boundary of positive LENGTH), and gluing it onto
     the nearest panel left that panel in two pieces -- a MultiPolygon, which
     has no ``.exterior`` for expand_to_full_frame to read."""
-    from shapely.geometry import Polygon, box
+    from shapely.geometry import box
 
     from mapsnap.split import assemble_panels, expand_to_full_frame
 
@@ -548,7 +439,6 @@ def test_order_panels_drops_an_empty_polygon() -> None:
 
 def test_repair_panel_mends_a_pinched_ring_without_losing_area():
     """Chicago 1950 p96: a panel ring touching itself at one point (#516)."""
-    from shapely.geometry import Polygon
 
     from mapsnap.split import repair_panel
 
@@ -573,7 +463,6 @@ def test_a_resplit_keeps_the_p_road_crops_of_changed_panels(tmp_path):
     """
     import cv2
     import numpy as np
-    from shapely.geometry import Polygon
 
     from mapsnap.roadprob import load_roadprob, roadprob_path, save_roadprob
 

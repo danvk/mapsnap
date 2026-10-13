@@ -2197,3 +2197,56 @@ def test_georeferenceable_images_skips_recorded_and_sibling_key_maps(tmp_path):
     # The key-map chain's raw/ copy is not recorded beside itself, so it is kept.
     raw = [str(tmp_path / "raw" / "p0.jpg")]
     assert georeferenceable_images(raw) == raw
+
+
+def test_drop_labels_on_fill_asks_whether_a_background_is_off_the_paper():
+    # Every detection now records its colour (#510), so with the page's paper known a label
+    # on paper is kept even though it has a background, and a pale blue fill is dropped even
+    # though it is no more saturated than the paper (#500).
+    from mapsnap.georef_from_labels import drop_labels_on_fill
+
+    paper = {"color": "#aaa597", "hue": 97.1, "chroma": 8.1}
+    on_paper = {
+        "text": "FLAGLER",
+        "background": {"color": "#aaa597", "hue": 99.0, "chroma": 7.5},
+    }
+    on_blue = {
+        "text": "2 ND",
+        "background": {"color": "#8a9396", "hue": 194.0, "chroma": 4.1},
+    }
+    kept, fill = drop_labels_on_fill([on_paper, on_blue], paper=paper)
+    assert [d["text"] for d in kept] == ["FLAGLER"]
+    assert [d["text"] for d in fill] == ["2 ND"]
+
+
+def test_drop_labels_on_fill_without_paper_treats_a_background_as_off_it():
+    # Older streets.json files recorded a background only when it was off the paper.
+    from mapsnap.georef_from_labels import drop_labels_on_fill
+
+    kept, fill = drop_labels_on_fill([_on("REP", hue=3.0)])
+    assert kept == [] and [d["text"] for d in fill] == ["REP"]
+
+
+def test_load_paper_reads_the_page_colour_or_none(tmp_path):
+    from mapsnap.georef_from_labels import load_paper
+
+    new = tmp_path / "new.streets.json"
+    new.write_text(json.dumps({"streets": [], "paper": {"hue": 90.0, "chroma": 3.0}}))
+    old = tmp_path / "old.streets.json"
+    old.write_text(json.dumps([]))
+    assert load_paper(str(new)) == {"hue": 90.0, "chroma": 3.0}
+    assert load_paper(str(old)) is None
+
+
+def test_fit_extent_is_plausible_lets_a_key_map_span_a_city():
+    from mapsnap.georef_from_labels import MAX_KEYMAP_EXTENT_M, fit_extent_is_plausible
+
+    # Detroit 1884 vol. 2's key map spans 7.9 km: too big for a sheet, right for a city.
+    assert not fit_extent_is_plausible(7_900.0)
+    assert fit_extent_is_plausible(7_900.0, keymap_page=True)
+    # Queens 1950 vol. 2's, the largest on disk, at 35.4 km.
+    assert fit_extent_is_plausible(35_400.0, keymap_page=True)
+    # A key-map fit wrong by an order of magnitude is still refused.
+    assert not fit_extent_is_plausible(2 * MAX_KEYMAP_EXTENT_M, keymap_page=True)
+    # Ordinary sheets keep the sheet ceiling.
+    assert fit_extent_is_plausible(1_500.0)

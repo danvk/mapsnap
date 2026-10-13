@@ -8,6 +8,7 @@ import type {
   GeorefData,
   IntersectionPoint,
   KeymapLocation,
+  LabColor,
   PanelPolygon,
   PanelsJsonData,
   Street,
@@ -270,6 +271,8 @@ export function DebugView({ files: filesProp, onClose }: DebugViewProps = {}) {
   const [roadMapSrc, setRoadMapSrc] = useState<string | null>(null);
   const [showRoadMap, setShowRoadMap] = useState(false);
   const [detections, setDetections] = useState<Detection[]>([]);
+  // The loaded streets.json's paper colour: what each detection's background is judged against.
+  const [paper, setPaper] = useState<LabColor | null>(null);
   const [panels, setPanels] = useState<PanelPolygon[]>([]);
   const [panelLabels, setPanelLabels] = useState<string[] | undefined>(
     undefined,
@@ -548,6 +551,7 @@ export function DebugView({ files: filesProp, onClose }: DebugViewProps = {}) {
       setMode('streets');
       setSelectedIndices(new Set());
       setDetections(result.detections);
+      setPaper(result.paper);
       setPanels([]);
       setPanelLabels(undefined);
       setBoxes([]);
@@ -794,6 +798,7 @@ export function DebugView({ files: filesProp, onClose }: DebugViewProps = {}) {
         filteredDetections={
           mode === 'adjacency' ? adjacencyDetections : filteredDetections
         }
+        paper={paper}
         detectionCount={
           mode === 'adjacency' ? adjacencyDetections.length : detections.length
         }
@@ -920,6 +925,7 @@ export function DebugView({ files: filesProp, onClose }: DebugViewProps = {}) {
         {mode === 'streets' && (
           <DetectionsTable
             detections={shownDetections}
+            paper={paper}
             selectedIndices={selectedIndices}
             onSelect={(index) => setSelectedIndices(new Set([index]))}
             image={imageEl}

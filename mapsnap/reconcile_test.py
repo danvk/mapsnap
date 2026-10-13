@@ -1047,3 +1047,163 @@ def test_collect_ignores_the_arbiters_own_final(tmp_path):
         tmp_path, "p7", None, None, page_size=(1000, 800)
     )
     assert [h.source for h in hypotheses] == ["georef", UNPLACED]
+
+
+def ransac_sidecar(a: np.ndarray) -> dict:
+    """A RANSAC sidecar whose seed pair sits at (100, 100) and (700, 500)."""
+    doc = georef_doc(a)
+    doc["intersections"] = [
+        {
+            "x": 100,
+            "y": 100,
+            "lon": -74.0,
+            "lat": 40.7,
+            "inlier": True,
+            "initial": True,
+        },
+        {
+            "x": 700,
+            "y": 500,
+            "lon": -74.1,
+            "lat": 40.8,
+            "inlier": True,
+            "initial": True,
+        },
+        {"x": 150, "y": 600, "lon": -74.2, "lat": 40.9, "inlier": True},
+    ]
+    return doc
+
+
+def ground_m(a: tuple[float, float], b: tuple[float, float]) -> float:
+    """Metres between two (lon, lat) points."""
+    kx = 111_320.0 * math.cos(math.radians(b[1]))
+    return math.hypot((a[0] - b[0]) * kx, (a[1] - b[1]) * 110_540.0)
+
+
+def test_mercator_helmert_reproduces_a_mercator_similarity_exactly():
+    from mapsnap.reconcile import from_mercator, mercator_helmert, to_mercator
+
+    # A pose built as a similarity in Web Mercator, rotated 20 degrees.
+    a0 = 0.9 * complex(math.cos(0.35), math.sin(0.35))
+    b0 = to_mercator(-74.0, 40.7)
+
+    def pose(x: float, y: float) -> tuple[float, float]:
+        return from_mercator(a0 * complex(x, -y) + b0)
+
+    corners = [pose(0, 0), pose(1000, 0), pose(0, 800)]
+    affine = np.array(
+        [
+            [
+                (corners[1][0] - corners[0][0]) / 1000,
+                (corners[2][0] - corners[0][0]) / 800,
+                corners[0][0],
+            ],
+            [
+                (corners[1][1] - corners[0][1]) / 1000,
+                (corners[2][1] - corners[0][1]) / 800,
+                corners[0][1],
+            ],
+        ]
+    )
+    a, b = mercator_helmert(affine, (1000, 800))
+    for x, y in [(0, 0), (1000, 800), (500, 400)]:
+        fitted = from_mercator(a * complex(x, -y) + b)
+        assert ground_m(fitted, pose(x, y)) < 0.05  # the fixture is linear to ~1e-5
+
+
+def snap_sidecar(a: np.ndarray, *, refine: bool) -> dict:
+    """A georef-snap sidecar: snap's pose, no control points, and its mode."""
+    doc = georef_doc(a, n_inliers=0)
+    doc["osm_snap"] = {"mode": "arbitrate", "refine": refine, "challenge": not refine}
+    return doc
+
+
+def publish_snapped(
+    tmp_path, snapped: np.ndarray, source: str, *, refine: bool
+) -> dict:
+    """Publish one page whose chosen pose is ``snapped``; the final sidecar."""
+    import json
+
+    from mapsnap.reconcile import publish
+
+    write_sidecar(tmp_path, "p1", "georef", ransac_sidecar(affine(0)))
+    write_sidecar(tmp_path, "p1", "georef-snap", snap_sidecar(snapped, refine=refine))
+    node = make_node("p1", [scored(source, snapped, 0.9)])
+    publish(tmp_path, {"p1": node}, {"p1": 0})
+    return json.loads((tmp_path / "p1.georef-final.json").read_text())
+
+
+def test_publish_gives_a_snap_refinement_the_ransac_seed_pair(tmp_path):
+    """#585: a refined fit reaches the IIIF as its two seed GCPs, not four corners."""
+    from mapsnap.make_iiif_georef import georef_gcp_points
+
+    snapped = affine(7.0, -4.0)  # snap nudged the RANSAC fit 7 m east, 4 m south
+    final = publish_snapped(tmp_path, snapped, "georef-snap", refine=True)
+    points = final["intersections"]
+    assert [(p["x"], p["y"]) for p in points] == [(100, 100), (700, 500)]
+    for p in points:
+        assert p["projected"] and p["initial"] and not p["inlier"]
+        # On the published pose, to within its 0.7% distance from a Mercator
+        # similarity (about 2 m across this 600 m page).
+        assert (
+            ground_m((p["lon"], p["lat"]), tuple(snapped @ [p["x"], p["y"], 1.0])) < 2.0
+        )
+    gcps = georef_gcp_points(final)
+    assert [(px, kind) for px, _, kind in gcps] == [
+        ((100.0, 100.0), "gcp"),
+        ((700.0, 500.0), "gcp"),
+    ]
+
+
+def test_publish_keeps_corners_when_snap_replaced_the_fit(tmp_path):
+    """A challenger, a raw snap candidate or a far move is not built on RANSAC's seeds."""
+    assert (
+        publish_snapped(tmp_path, affine(7.0), "georef-snap", refine=False)[
+            "intersections"
+        ]
+        == []
+    )
+    assert (
+        publish_snapped(tmp_path, affine(7.0), "snap:0", refine=True)["intersections"]
+        == []
+    )
+    # Marked a refinement, but 200 m from the RANSAC pose: not this seed pair's fit.
+    assert (
+        publish_snapped(tmp_path, affine(200.0), "georef-snap", refine=True)[
+            "intersections"
+        ]
+        == []
+    )
+
+
+def test_publish_keeps_corner_points_without_a_seed_pair(tmp_path):
+    import json
+
+    from mapsnap.reconcile import publish
+
+    doc = ransac_sidecar(affine(0))
+    doc["intersections"][1]["initial"] = False
+    write_sidecar(tmp_path, "p1", "georef", doc)
+    write_sidecar(tmp_path, "p1", "georef-snap", snap_sidecar(affine(5.0), refine=True))
+    node = make_node("p1", [scored("georef-snap", affine(5.0), 0.9)])
+    publish(tmp_path, {"p1": node}, {"p1": 0})
+    final = json.loads((tmp_path / "p1.georef-final.json").read_text())
+    assert final["intersections"] == []
+
+
+def test_projected_seed_pair_needs_the_same_pixel_frame(tmp_path):
+    from mapsnap.reconcile import projected_seed_pair
+
+    write_sidecar(tmp_path, "p1", "georef", ransac_sidecar(affine(0)))
+    assert len(projected_seed_pair(tmp_path, "p1", affine(0), (1000, 800))) == 2
+    assert projected_seed_pair(tmp_path, "p1", affine(0), (500, 400)) == []
+    assert projected_seed_pair(tmp_path, "p2", affine(0), (1000, 800)) == []
+
+
+def test_seed_pair_skips_coincident_seeds():
+    from mapsnap.reconcile import seed_pair
+
+    same = {"x": 5.0, "y": 5.0, "initial": True}
+    assert seed_pair([same, dict(same)]) == []
+    other = {"x": 50.0, "y": 5.0, "initial": True}
+    assert seed_pair([same, {"x": 9, "y": 9}, other]) == [same, other]
