@@ -10,9 +10,10 @@ Cases come from one of two places:
   a negative.
 * ``--manifest``: a benchmark like ``~/Documents/mapsnap/cutline-training``,
   whose manifest.tsv lists images (relative to it), a ``label`` of split or
-  unsplit, and optionally ``fold``, ``size_band``, a sampling ``weight`` and
-  ``volume_sheets`` for the splitter's key-map rules (a ``volume_has_p0``
-  column is ignored); split pages' truth is ``labels/<image stem>.panels.json``.
+  unsplit, and optionally ``fold``, ``size_band`` and a sampling ``weight``
+  (``volume_sheets`` and ``volume_has_p0`` columns, which fed the splitter's
+  old key-map rules, are ignored); split pages' truth is
+  ``labels/<image stem>.panels.json``.
 
 Cases:
 
@@ -68,7 +69,7 @@ from scipy.optimize import linear_sum_assignment
 from shapely.geometry import Polygon
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-from mapsnap.split import SheetContext, compute_panels
+from mapsnap.split import compute_panels
 
 EXCLUDED_VOLUMES = ("san_francisco",)
 SMALL_PANEL_FRAC = 0.05  # a truth panel below this fraction of the page is "small"
@@ -89,14 +90,6 @@ class Case:
     fold: str = ""
     size_band: str = ""
     weight: float = 1.0  # sampling weight; the corrected mean divides it out
-    # For the splitter's key-map rules; None: judge by the images beside it.
-    volume_sheets: int | None = None
-
-    def sheet(self) -> SheetContext | None:
-        """The SheetContext a manifest gives, or None to read the image's directory."""
-        if self.volume_sheets is None:
-            return None
-        return SheetContext(self.page, self.volume_sheets)
 
 
 def make_valid(polygon: Polygon) -> Polygon:
@@ -213,9 +206,6 @@ def manifest_cases(manifest: Path) -> list[Case]:
                     fold=row.get("fold") or "",
                     size_band=row.get("size_band") or "",
                     weight=float(row.get("weight") or 1),
-                    volume_sheets=int(row["volume_sheets"])
-                    if row.get("volume_sheets")
-                    else None,
                 )
             )
     return cases
@@ -431,7 +421,6 @@ def main() -> None:
                     case.image,
                     min_panel_frac=args.min_panel_frac,
                     small_face_policy=args.small_face,
-                    sheet=case.sheet(),
                 )
             ]
         records.append(score_record(case, gen, size))

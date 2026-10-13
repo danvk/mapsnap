@@ -19,8 +19,6 @@ from score_splits_oim import (
 )
 from shapely.geometry import box
 
-from mapsnap.split import SheetContext
-
 HALVES = {
     "width": 200,
     "height": 100,
@@ -54,10 +52,6 @@ def test_manifest_cases_pairs_split_pages_with_their_labels(tmp_path: Path):
         ("b__p2", False, "test", "41+"),
     ]
     assert cases[0].truth == tmp_path / "labels" / "a__p1.panels.json"
-    assert [c.sheet() for c in cases] == [
-        SheetContext("p1", 4),
-        SheetContext("p2", 90),
-    ]
 
 
 def test_panels_in_frame_scales_truth_to_the_image():

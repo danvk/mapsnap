@@ -171,10 +171,12 @@ the parent's P(road) map ([#354](https://github.com/danvk/mapsnap/issues/354)). 
 bottom-left corner first, matching OldInsuranceMaps ([#382](https://github.com/danvk/mapsnap/pull/382)), so truth and output
 name the same panel.
 
-Key-map sheets get a second, stricter look: a split must cut away a box flush
-with two sheet edges, or the parent stands whole ([#383](https://github.com/danvk/mapsnap/pull/383)), and a corner-box
-detector finds the lightly ruled legends and volume indexes the general
-splitter's safety gate hides ([#389](https://github.com/danvk/mapsnap/pull/389)). Sidecars of any panel whose outline
+Key-map sheets are split like any other. The classical splitter needed
+key-map rules (a cut had to remove a box flush with two sheet edges,
+[#383](https://github.com/danvk/mapsnap/pull/383), plus a corner-box detector, [#389](https://github.com/danvk/mapsnap/pull/389)); with the cutline model they no
+longer changed which page numbers key-map detection read, and were removed.
+Key-map detection still reads the whole sheet when a split's cut-aways are not
+all boxes flush with two edges. Sidecars of any panel whose outline
 changed are deleted so nothing stale survives a re-split ([#382](https://github.com/danvk/mapsnap/pull/382)).
 
 On the cutline benchmark ([#566](https://github.com/danvk/mapsnap/pull/566): 4,000 OIM pages from 995 volumes,
@@ -258,7 +260,7 @@ six-parameter affine because key maps are drawn with real anisotropy ([#94](http
 Three things on a key-map sheet are _not_ pages and had to be taught: the
 "graphic map of volumes" inset, whose numerals are volume numbers ([#386](https://github.com/danvk/mapsnap/pull/386)–[#388](https://github.com/danvk/mapsnap/pull/388);
 Richmond's p311 was published 14,713 ft away because the inset's "1" became a
-search center), the KEY legend and any second key map cut away as corner boxes
+search center), the KEY legend and any second key map cut away by the splitter
 ([#389](https://github.com/danvk/mapsnap/pull/389)), and the sheet's own cartouche words ([#384](https://github.com/danvk/mapsnap/pull/384)). The printed adjacency
 graph of step 5 can propose repairs to page numbers the CRNN misread ([#217](https://github.com/danvk/mapsnap/pull/217)),
 but the chain only reports them: applying them was a net negative across the

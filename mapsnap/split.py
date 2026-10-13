@@ -20,7 +20,6 @@ import argparse
 import json
 import re
 import sys
-from dataclasses import dataclass, field
 from itertools import pairwise
 from pathlib import Path
 from typing import Any, TypedDict
@@ -33,7 +32,6 @@ from shapely.geometry import LineString, Point, Polygon, box
 from shapely.ops import polygonize, unary_union
 from skimage.morphology import medial_axis
 
-from mapsnap.corner_boxes import BOX_MIN_THICK_PX, corner_boxes, panels_with_boxes
 from mapsnap.cutline_model import cutline_model_path
 from mapsnap.keymap.log import append_keymap_log
 from mapsnap.roadprob import derive_panel_roadprob
@@ -1053,7 +1051,7 @@ def detect_panels(
     border: int = BORDER_PX,
     **finalize: Any,
 ) -> tuple[list, list[tuple[float, float, float, float]]]:
-    """(full-frame panels, closed divider segments) for a page, before the key-map rules.
+    """(full-frame panels, closed divider segments) for a page.
 
     The cutline model's lines (mapsnap.cutline_model) by default, or the
     classical detector's connected_dividers when MAPSNAP_SPLITTER=classical
@@ -1151,70 +1149,18 @@ def finalize_panels(
     return expand_to_full_frame(panels, cropped_h, cropped_w, border), bridged
 
 
-def volume_sheet_count(image_dir: Path) -> int:
-    """Sheets in a volume directory: its pN*.jpg page images, not panels or sidecars."""
-    return sum(
-        1
-        for path in image_dir.glob("p*.jpg")
-        if "__" not in path.stem and "." not in path.stem
-    )
-
-
-@dataclass(frozen=True)
-class SheetContext:
-    """What the key-map rules need to know about a sheet besides its pixels."""
-
-    page_key: str
-    volume_sheets: int
-
-    @classmethod
-    def beside(cls, image_path: Path) -> "SheetContext":
-        """The context a page image's own directory gives: its stem and its siblings."""
-        return cls(panel_basename(image_path), volume_sheet_count(image_path.parent))
-
-    def keymap_rules_apply(self) -> bool:
-        """Whether the key-map rules judge this sheet's cut (and the corner-box detector may cut it).
-
-        Only a page-0-family or letter sheet (is_keymap_sheet, less the page-1
-        family) in a volume big enough to have a key map: below
-        KEYMAP_MIN_SHEETS sheets none is detectable (#405).
-
-        Page-1 sheets are left to the splitter (#574). A page 1 that holds the
-        key map usually holds street panels too, and OIM splits it; the rules
-        refused those cuts. On 90 held-out page-1 sheets of 6+ sheet volumes
-        (OIM's cutline harvest, no item from the cutline model's training
-        fold), dropping the rules for them raised mean matched IoU from 0.836
-        to 0.926 and the right panel count from 58% to 83%, and left whole
-        96.3% of the sheets OIM left whole, against 94.4% with the rules.
-        Judging page 1 only when keymaps.json names it gained far less (0.845):
-        the record names the composite sheets the rules cut wrongly.
-        """
-        return (
-            is_keymap_sheet(self.page_key)
-            and not is_page_one_sheet(self.page_key)
-            and self.volume_sheets >= KEYMAP_MIN_SHEETS
-        )
-
-
 def compute_panels(
     image_path: Path,
     border: int = BORDER_PX,
     min_panel_frac: float | None = None,
     small_face_policy: str = "glue",
-    *,
-    sheet: SheetContext | None = None,
 ) -> list:
     """Detect panels for one image as polygons in the full (uncropped) scaled-image frame.
 
-    The I/O-free pipeline used by the scoring harness: process_image's decision,
-    key-map rules included, without writing anything. A sheet left whole is one
-    full-frame panel. ``min_panel_frac`` and ``small_face_policy`` are the #83
-    small-inset experiment knobs (see assemble_panels); production defaults are
-    unchanged.
-
-    The key-map rules judge the sheet by its SheetContext, by default the one
-    its directory gives (SheetContext.beside); a benchmark whose images are
-    named otherwise passes its own.
+    The I/O-free pipeline used by the scoring harness: process_image's decision
+    without writing anything. A sheet left whole is one full-frame panel.
+    ``min_panel_frac`` and ``small_face_policy`` are the #83 small-inset
+    experiment knobs (see assemble_panels); production defaults are unchanged.
     """
     rgb = crop_border(load_rgb(image_path), border)
     gray = crop_border(load_gray(image_path), border)
@@ -1231,12 +1177,14 @@ def compute_panels(
         small_face_policy=small_face_policy,
         thick_mask=thick,
     )
-    verdict = keymap_verdict(
-        panels, lines, binary, sheet or SheetContext.beside(image_path)
-    )
-    if not verdict.panels:
+    if not splits_sheet(panels, w + 2 * border, h + 2 * border):
         return [box(0, 0, w + 2 * border, h + 2 * border)]
-    return verdict.panels
+    return panels
+
+
+def splits_sheet(panels: list, full_w: float, full_h: float) -> bool:
+    """Whether the panels cut the sheet: anything but one panel covering the whole page."""
+    return not (len(panels) == 1 and panels[0].area >= 0.99 * full_h * full_w)
 
 
 def order_panels(panels: list, height: float | None = None) -> list:
@@ -1421,10 +1369,6 @@ def write_panels(image_path: Path, panels: list, base: str) -> list[Path]:
 
 
 # A panel edge within this fraction of the sheet's size counts as flush with it.
-# The key-map rules only judge volumes with at least this many sheets: key-map
-# detection needs six distinct page numbers (#405), so a smaller volume has no
-# key map to protect.
-KEYMAP_MIN_SHEETS = 6
 FLUSH_EDGE_TOLERANCE = 0.02
 # A panel covering at least this fraction of the sheet is the sheet itself, not
 # something cut away from it.
@@ -1460,128 +1404,6 @@ def is_keymap_sheet(stem: str) -> bool:
         return True
     match = re.fullmatch(r"p(\d+)[A-Za-z]{0,2}", stem)
     return match is not None and int(match.group(1)) in (0, 1)
-
-
-def is_page_one_sheet(stem: str) -> bool:
-    """Whether a page stem is in the page-1 family: p1, p1a, p1L, p1N ..."""
-    return re.fullmatch(r"p1[A-Za-z]{0,2}", stem) is not None
-
-
-def box_candidates(
-    lines: np.ndarray, h: int, w: int, binary: np.ndarray
-) -> list[tuple[float, float, float, float]]:
-    """Long segments at least BOX_MIN_THICK_PX thick, uncapped.
-
-    The corner-box detector's input (mapsnap.corner_boxes): the divider
-    pipeline's MAX_DIVIDER_CANDIDATES gate and its 5 px thickness floor are what
-    hide a key map's boxed regions, so this is the same merge and length filter
-    without them.
-    """
-    merged = merge_collinear(filter_segments(lines, h, w), MERGE_GAP_FRAC * min(h, w))
-    dist = cv2.distanceTransform((binary > 0).astype(np.uint8), cv2.DIST_L2, 5)
-    return [
-        seg
-        for seg in keep_long_segments(merged, h, w)
-        if segment_thickness(dist, seg) >= BOX_MIN_THICK_PX
-    ]
-
-
-def keymap_corner_box_panels(
-    lines: np.ndarray, h: int, w: int, binary: np.ndarray
-) -> tuple[list, list[str]]:
-    """Panels cut by the corner-box detector, in the full frame, with log lines.
-
-    No panels when no box is found, or when the boxes do not leave one clean
-    remainder; the log lines say what was found either way.
-    """
-    candidates = box_candidates(lines, h, w, binary)
-    boxes = corner_boxes(candidates, binary, h, w)
-    log_lines = [
-        (
-            f"corner boxes: {len(boxes)} found among {len(candidates)} "
-            "box-thick candidate segment(s)"
-        )
-    ]
-    for candidate in boxes:
-        share = candidate.area / (h * w)
-        log_lines.append(
-            f"  {'-'.join(candidate.corner)} box, {share:.1%} of the sheet: "
-            f"{candidate.detail}"
-        )
-    panels = panels_with_boxes([candidate.polygon for candidate in boxes], h, w)
-    if boxes and not panels:
-        log_lines.append("  boxes do not leave one clean remainder; sheet stands whole")
-    return expand_to_full_frame(panels, h, w, BORDER_PX), log_lines
-
-
-def keymap_split_rejection(panels: list, width: float, height: float) -> str | None:
-    """Why a key-map sheet's split must be refused, or None when it may stand.
-
-    What a key-map sheet legitimately loses to a split is a boxed region in a
-    corner or along an edge -- a KEY legend, a "graphic map of volumes" inset
-    -- and every one of those is flush with at least two sheet edges. A cut-
-    away flush with fewer is the splitter latching onto the key map's own
-    linework: Chicago's 4% notch hanging off the top edge carried ten page
-    numbers that the key-map panel then never read. Measured over every split
-    key-map sheet in the corpus (9 panels): key-map panels are flush with four
-    edges, legitimate cut-aways with two, the one bad cut with one. Regular
-    map pages are not judged here: their panels are insets and composites of
-    every shape.
-    """
-    for index, panel in enumerate(panels, start=1):
-        x0, y0, x1, y1 = panel.bounds
-        if (x1 - x0) * (y1 - y0) >= CUT_AWAY_MAX_AREA * width * height:
-            continue  # the sheet itself, whatever was cut from it
-        flush = panel_flush_edges(list(panel.exterior.coords), width, height)
-        if flush < 2:
-            return (
-                f"panel {index} is flush with {flush} sheet edge(s), "
-                "not a boxed corner or edge region"
-            )
-    return None
-
-
-@dataclass
-class KeymapVerdict:
-    """What a sheet keeps once the key-map rules have judged its divider cut."""
-
-    panels: list  # the panels the sheet is cut into; [] when it stands whole
-    rejection: str | None = None  # why a key-map sheet's cut was refused
-    boxes_cut: bool = False  # the corner-box detector supplied the panels
-    box_lines: list[str] = field(default_factory=list)  # that detector's log
-
-
-def keymap_verdict(
-    panels: list,
-    lines: np.ndarray,
-    binary: np.ndarray,
-    sheet: SheetContext,
-) -> KeymapVerdict:
-    """Apply the key-map rules (#276) to the divider pipeline's full-frame panels.
-
-    A sheet the rules judge (SheetContext.keymap_rules_apply) only gives up
-    boxed edge regions; any other cut is refused and the sheet stands whole.
-    Where that leaves a judged sheet whole, the corner-box detector looks for
-    the boxed corners the divider pipeline's gates hide.
-    ``binary`` is the cropped ink mask the panels were detected on.
-    """
-    h, w = binary.shape
-    full_h, full_w = h + 2 * BORDER_PX, w + 2 * BORDER_PX
-    # A single panel covering the whole page means no split was found.
-    whole = len(panels) == 1 and panels[0].area >= 0.99 * full_h * full_w
-    rejection = (
-        keymap_split_rejection(panels, full_w, full_h)
-        if sheet.keymap_rules_apply() and not whole
-        else None
-    )
-    box_lines: list[str] = []
-    if (whole or rejection) and sheet.keymap_rules_apply():
-        box_panels, box_lines = keymap_corner_box_panels(lines, h, w, binary)
-        if box_panels:
-            return KeymapVerdict(box_panels, boxes_cut=True, box_lines=box_lines)
-    if whole or rejection:
-        return KeymapVerdict([], rejection=rejection, box_lines=box_lines)
-    return KeymapVerdict(panels, box_lines=box_lines)
 
 
 def panel_summary_lines(panels: list, width: float, height: float) -> list[str]:
@@ -1659,44 +1481,13 @@ def process_image(image_path: Path, debug: bool = False) -> None:
     if raw_path.exists():
         remove_split_outputs(raw_path)
 
-    # A key-map sheet only gives up boxed edge regions; anything else is a bad
-    # cut and the sheet stands whole (#276). Where that leaves it whole, look
-    # for the boxed corners the safety gates hide: a second key map, an index
-    # inset, a legend (mapsnap.corner_boxes).
-    verdict = keymap_verdict(panels, lines, binary, SheetContext.beside(image_path))
-    rejection, box_lines = verdict.rejection, verdict.box_lines
-    if verdict.boxes_cut:
-        print(f"{image_path.name}: key-map sheet, corner box(es) cut away")
-    if not verdict.panels and not rejection:
+    if not splits_sheet(panels, full_w, full_h):
         print(f"{image_path.name}: single panel — not split")
         for index in range(1, len(previous_rings) + 1):
             remove_panel_sidecars(image_path, index)
         if is_keymap_sheet(base):
-            append_keymap_log(
-                image_path, "split", ["single panel — not split", *box_lines]
-            )
+            append_keymap_log(image_path, "split", ["single panel — not split"])
         return
-    if rejection:
-        # The stale panels were removed above; drop their sidecars too so
-        # nothing downstream keeps reading them.
-        print(f"{image_path.name}: key-map sheet, split rejected — {rejection}")
-        removed = []
-        for index in range(1, len(previous_rings) + 1):
-            removed += remove_panel_sidecars(image_path, index)
-        if raw_path.exists():
-            remove_split_outputs(raw_path)
-        append_keymap_log(
-            image_path,
-            "split",
-            [
-                f"split rejected — {rejection}",
-                *panel_summary_lines(panels, full_w, full_h),
-                *box_lines,
-                f"removed {len(removed)} stale panel sidecar(s) from an earlier split",
-            ],
-        )
-        return
-    panels = verdict.panels
     ordered = order_panels(panels, full_h)  # panels are in the uncropped frame
     out_paths, changed = replace_panels(image_path, ordered, base, previous_rings)
     print(
@@ -1710,7 +1501,6 @@ def process_image(image_path: Path, debug: bool = False) -> None:
                 f"split accepted: {len(ordered)} panels → "
                 + ", ".join(path.name for path in out_paths),
                 *panel_summary_lines(ordered, full_w, full_h),
-                *box_lines,
             ],
         )
     if changed:
