@@ -42,6 +42,11 @@ from mapsnap.keymap.locate import (
 from mapsnap.keymap.records import is_recorded_keymap_page
 from mapsnap.osm_to_centerlines import load_centerlines
 from mapsnap.paper_color import is_off_paper
+from mapsnap.scale_bounds import (
+    MIN_M_PER_PX,
+    corpus_px_per_ft,
+    px_per_ft_is_plausible,
+)
 from mapsnap.streets import (
     DIRECTION_WORDS,
     HINT_STRINGS,
@@ -527,6 +532,44 @@ def folded_log2_distance(a: float, b: float) -> float:
     """Circular distance between two log2-mod-1 positions (period 1)."""
     d = abs(a - b) % 1.0
     return min(d, 1.0 - d)
+
+
+def is_keymap_image(image_path: str) -> bool:
+    """Whether an image is a key map: it has a sibling ``<stem>.keymap.json``."""
+    return os.path.exists(
+        os.path.join(
+            os.path.dirname(image_path), f"{image_stem(image_path)}.keymap.json"
+        )
+    )
+
+
+def reference_scale(scale_records: list[tuple[str, float]]) -> float:
+    """The volume's reference scale (px/ft) from its fitted pages' (image, scale).
+
+    :func:`family_scale` over the plausibly-scaled fits (``scale_bounds``, #498);
+    key maps always count, as they draw a city rather than a sheet. A volume of
+    one or two fitted pages otherwise took a fit wrong by orders of magnitude as
+    its reference and dropped its *plausible* pages as outliers: sanborn09046_002's
+    reference was 0.0080 px/ft (38 m/px), and its 1.43 px/ft p2 went out "179x"
+    off it. With no plausible fit at all, the corpus-median scale is the
+    reference, so the implausible ones are what the outlier filter drops.
+    ``scale_records`` must be non-empty.
+    """
+    plausible = [
+        scale
+        for image_path, scale in scale_records
+        if is_keymap_image(image_path) or px_per_ft_is_plausible(scale)
+    ]
+    for image_path, scale in scale_records:
+        if not (is_keymap_image(image_path) or px_per_ft_is_plausible(scale)):
+            print(
+                f"Implausible scale {scale:.4f} px/ft for {Path(image_path).name}; "
+                "it does not set the reference scale.",
+                file=sys.stderr,
+            )
+    if not plausible:
+        return corpus_px_per_ft()
+    return family_scale(plausible)
 
 
 def family_scale(scales: list[float]) -> float:
@@ -2002,6 +2045,11 @@ def page_diagonal_m(A: np.ndarray, width: float, height: float) -> float:
 # key-map fits on disk, Queens 1950 vol. 2's the largest at 35.4 km. A key-map
 # fit still has to fit on a city.
 MAX_KEYMAP_EXTENT_M = 50_000.0
+
+
+def fit_is_too_fine(m_per_px: float, keymap_page: bool = False) -> bool:
+    """Whether a fit is finer than any sheet is drawn (``scale_bounds``); key maps exempt."""
+    return not keymap_page and m_per_px < MIN_M_PER_PX
 
 
 def fit_extent_is_plausible(diagonal_m: float, keymap_page: bool = False) -> bool:
@@ -3593,6 +3641,17 @@ def process_image(
     )
     is_keymap_page = os.path.exists(keymap_json)
     diagonal_m = page_diagonal_m(A, img_w, img_h)
+    m_per_px = diagonal_m / math.hypot(img_w, img_h)
+    if fit_is_too_fine(m_per_px, keymap_page=is_keymap_page):
+        # The fine-side counterpart of the extent ceiling below (#498): a sheet fitted
+        # finer than any drawn has its labels matched across a few blocks.
+        # sanborn05857_001's one sheet published at 0.0117 m/px, ~30 m across.
+        print(
+            f"RANSAC fit rejected: {m_per_px:.4f} m/px is finer than any sheet "
+            f"(minimum {MIN_M_PER_PX} m/px).",
+            file=sys.stderr,
+        )
+        return ProcessResult(success=False, gcp_hints=cluster_gcp_hints(gcps))
     if not fit_extent_is_plausible(diagonal_m, is_keymap_page):
         # A fit whose page would span kilometers beyond any drawn sheet is wrong
         # by orders of magnitude, however many labels agree with it. Accepted, it
@@ -4423,7 +4482,7 @@ def main() -> None:
     if args.scale is not None:
         ref_scale_px_per_ft: float | None = args.scale
     elif scales:
-        ref_scale_px_per_ft = family_scale(scales)
+        ref_scale_px_per_ft = reference_scale(scale_records)
     else:
         ref_scale_px_per_ft = None
 

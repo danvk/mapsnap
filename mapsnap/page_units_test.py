@@ -57,7 +57,7 @@ def test_volume_median_scale_survives_a_volume_that_fits_nothing(capsys) -> None
         [_unit("p1", "nofit", None)], [_unit("p1__1", "nofit", None)]
     )
     assert got == FALLBACK_M_PER_PX
-    assert "No fitted page" in capsys.readouterr().err
+    assert "No plausibly-scaled fitted page" in capsys.readouterr().err
     assert volume_median_scale([]) == FALLBACK_M_PER_PX
 
 
@@ -69,3 +69,19 @@ def test_volume_median_scale_ignores_unfitted_units() -> None:
         _unit("p3", "outlier", 5.0),
     ]
     assert volume_median_scale(units) == pytest.approx(0.20, abs=1e-3)
+
+
+def test_volume_median_scale_ignores_an_implausible_fit(capsys) -> None:
+    """#498: sanborn09046_002's 38 m/px page must not drag the median off its 0.21 page."""
+    got = volume_median_scale(
+        [_unit("p1", "fitted", 38.1), _unit("p2", "fitted", 0.21)]
+    )
+    assert got == pytest.approx(0.21, abs=1e-3)
+    assert (
+        "Ignoring 1 fitted page(s) at an implausible scale" in capsys.readouterr().err
+    )
+
+
+def test_volume_median_scale_falls_back_when_no_fit_is_plausible() -> None:
+    """sanborn01711_002: its only sheet fitted at 14.2 m/px."""
+    assert volume_median_scale([_unit("p1", "fitted", 14.15)]) == FALLBACK_M_PER_PX

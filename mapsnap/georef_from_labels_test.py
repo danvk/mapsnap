@@ -4,6 +4,7 @@ import json
 import math
 
 import numpy as np
+import pytest
 
 from mapsnap.georef_from_labels import (
     _FT_PER_DEG_LAT,
@@ -2250,3 +2251,31 @@ def test_fit_extent_is_plausible_lets_a_key_map_span_a_city():
     assert not fit_extent_is_plausible(2 * MAX_KEYMAP_EXTENT_M, keymap_page=True)
     # Ordinary sheets keep the sheet ceiling.
     assert fit_extent_is_plausible(1_500.0)
+
+
+def test_reference_scale_ignores_implausible_fits(tmp_path):
+    """#498: a lone wild fit must not become the reference that drops the good pages."""
+    from mapsnap.georef_from_labels import reference_scale
+    from mapsnap.scale_bounds import corpus_px_per_ft
+
+    # sanborn09046_002: p1 at 0.0080 px/ft (38 m/px), p2 at 1.4259 px/ft.
+    records = [(str(tmp_path / "p1.jpg"), 0.0080), (str(tmp_path / "p2.jpg"), 1.4259)]
+    assert reference_scale(records) == pytest.approx(1.4259)
+    # Nothing plausible: the corpus median is the reference.
+    assert reference_scale(records[:1]) == pytest.approx(corpus_px_per_ft())
+
+
+def test_reference_scale_always_counts_a_key_map(tmp_path):
+    """Key maps draw a city: their scale is out of any sheet's band and still counts."""
+    from mapsnap.georef_from_labels import reference_scale
+
+    (tmp_path / "p0.keymap.json").write_text("{}")
+    assert reference_scale([(str(tmp_path / "p0.jpg"), 0.05)]) == pytest.approx(0.05)
+
+
+def test_fit_is_too_fine_spares_key_maps():
+    from mapsnap.georef_from_labels import fit_is_too_fine
+
+    assert fit_is_too_fine(0.0117)  # sanborn05857_001
+    assert not fit_is_too_fine(0.0375)  # Champaign 1915 p4's detail inset
+    assert not fit_is_too_fine(0.0117, keymap_page=True)
