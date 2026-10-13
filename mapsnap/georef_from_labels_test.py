@@ -2236,3 +2236,17 @@ def test_load_paper_reads_the_page_colour_or_none(tmp_path):
     old.write_text(json.dumps([]))
     assert load_paper(str(new)) == {"hue": 90.0, "chroma": 3.0}
     assert load_paper(str(old)) is None
+
+
+def test_fit_extent_is_plausible_lets_a_key_map_span_a_city():
+    from mapsnap.georef_from_labels import MAX_KEYMAP_EXTENT_M, fit_extent_is_plausible
+
+    # Detroit 1884 vol. 2's key map spans 7.9 km: too big for a sheet, right for a city.
+    assert not fit_extent_is_plausible(7_900.0)
+    assert fit_extent_is_plausible(7_900.0, keymap_page=True)
+    # Queens 1950 vol. 2's, the largest on disk, at 35.4 km.
+    assert fit_extent_is_plausible(35_400.0, keymap_page=True)
+    # A key-map fit wrong by an order of magnitude is still refused.
+    assert not fit_extent_is_plausible(2 * MAX_KEYMAP_EXTENT_M, keymap_page=True)
+    # Ordinary sheets keep the sheet ceiling.
+    assert fit_extent_is_plausible(1_500.0)

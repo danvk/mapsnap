@@ -1996,6 +1996,21 @@ def page_diagonal_m(A: np.ndarray, width: float, height: float) -> float:
     )
 
 
+# A key map draws a whole city, not a sheet, so the sheet ceiling
+# (osm_snap.MAX_PAGE_EXTENT_M, 6 km) rejected real key maps: San Jose 1884's at
+# 6.0 km, Detroit 1884 vol. 2's at 7.5 and 7.9 km, and about half of the 459
+# key-map fits on disk, Queens 1950 vol. 2's the largest at 35.4 km. A key-map
+# fit still has to fit on a city.
+MAX_KEYMAP_EXTENT_M = 50_000.0
+
+
+def fit_extent_is_plausible(diagonal_m: float, keymap_page: bool = False) -> bool:
+    """Whether a fit's page diagonal is a plausible size: a sheet's, or a key map's."""
+    if keymap_page:
+        return diagonal_m <= MAX_KEYMAP_EXTENT_M
+    return page_extent_is_plausible(diagonal_m)
+
+
 def page_extent_is_plausible(diagonal_m: float) -> bool:
     """Whether a page this big on the ground could be a Sanborn sheet.
 
@@ -3573,15 +3588,21 @@ def process_image(
         f"RANSAC: {len(inlier_feat_indices)} / {len(features)} inlier labels",
         file=sys.stderr,
     )
+    keymap_json = os.path.join(
+        os.path.dirname(image_path), f"{image_stem(image_path)}.keymap.json"
+    )
+    is_keymap_page = os.path.exists(keymap_json)
     diagonal_m = page_diagonal_m(A, img_w, img_h)
-    if not page_extent_is_plausible(diagonal_m):
+    if not fit_extent_is_plausible(diagonal_m, is_keymap_page):
         # A fit whose page would span kilometers beyond any drawn sheet is wrong
         # by orders of magnitude, however many labels agree with it. Accepted, it
         # became the volume's reference scale, snap's scale prior and a
         # published pose: Orleans 1929's p1 fitted at 0.044 px/ft -- a 17.3 km
         # sheet -- and went out as the volume's only page (#517).
+        what = "key map" if is_keymap_page else "page"
         print(
-            f"RANSAC fit rejected: a {diagonal_m / 1000:.1f} km page is not a sheet.",
+            f"RANSAC fit rejected: a {diagonal_m / 1000:.1f} km {what} is not "
+            f"{'a city' if is_keymap_page else 'a sheet'}.",
             file=sys.stderr,
         )
         return ProcessResult(success=False, gcp_hints=cluster_gcp_hints(gcps))
@@ -3592,10 +3613,7 @@ def process_image(
     # affine on its own inlier GCPs, so the georef.json corners capture the scale anisotropy and
     # skew a 4-parameter similarity cannot — read straight off by the key-map locator, with no
     # separate refit downstream.
-    keymap_json = os.path.join(
-        os.path.dirname(image_path), f"{image_stem(image_path)}.keymap.json"
-    )
-    if os.path.exists(keymap_json):
+    if is_keymap_page:
         affine = fit_keymap_affine(A, gcps, cos_phi)
         if affine is not None:
             # Report what the extra two degrees of freedom actually bought. A similarity is
