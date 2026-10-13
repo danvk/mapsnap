@@ -1723,13 +1723,54 @@ def source_control_points(
     return doc.get("streets") or [], doc.get("intersections") or []
 
 
-# Projected control points must span the page well enough to pin an affine:
-# at least this many distinct pixels (a first-order polynomial needs three),
-# whose spread's smaller axis is at least MIN_PROJECTED_SPREAD_PX.
-MIN_PROJECTED_POINTS = 3
-MIN_PROJECTED_SPREAD_PX = 50.0
-# Intersections closer than this in pixels are one crossing.
-SAME_PIXEL_PX = 5.0
+# Earth radius of the Web Mercator projection Allmaps fits its Helmert in.
+MERCATOR_RADIUS_M = 6_378_137.0
+# Grid of page points (per side) the best-fit Helmert is fitted over.
+HELMERT_GRID = 9
+
+
+def to_mercator(lon: float, lat: float) -> complex:
+    """Web Mercator (x, y) metres as a complex number."""
+    x = math.radians(lon) * MERCATOR_RADIUS_M
+    y = math.log(math.tan(math.pi / 4 + math.radians(lat) / 2)) * MERCATOR_RADIUS_M
+    return complex(x, y)
+
+
+def from_mercator(point: complex) -> tuple[float, float]:
+    """(lon, lat) of a Web Mercator point."""
+    lon = math.degrees(point.real / MERCATOR_RADIUS_M)
+    lat = math.degrees(
+        2 * math.atan(math.exp(point.imag / MERCATOR_RADIUS_M)) - math.pi / 2
+    )
+    return lon, lat
+
+
+def mercator_helmert(
+    affine: np.ndarray, size: tuple[int, int]
+) -> tuple[complex, complex]:
+    """The Web Mercator similarity closest to a page px -> (lon, lat) affine.
+
+    Returned as (a, b) with mercator = a * conj-free page point + b, where the
+    page point is ``complex(x, -y)`` (pixel y runs down). Fitted by least
+    squares over a grid spanning the page. A pose that is already a Mercator
+    similarity (RANSAC's) is reproduced exactly; snap's, which are
+    similarities in local metres with unequal degree lengths (110,540 vs
+    111,320 m), are 0.7% from one and come back within a few feet.
+    """
+    width, height = size
+    xs, ys = np.meshgrid(
+        np.linspace(0, width, HELMERT_GRID), np.linspace(0, height, HELMERT_GRID)
+    )
+    page = xs.ravel() - 1j * ys.ravel()
+    world = np.array(
+        [
+            to_mercator(*(affine @ np.array([x, y, 1.0])))
+            for x, y in zip(xs.ravel(), ys.ravel())
+        ]
+    )
+    design = np.vstack([page, np.ones_like(page)]).T
+    (a, b), *_ = np.linalg.lstsq(design, world, rcond=None)
+    return complex(a), complex(b)
 
 
 def seed_pair(intersections: list[dict]) -> list[dict]:
@@ -1743,43 +1784,21 @@ def seed_pair(intersections: list[dict]) -> list[dict]:
     return [first, second]
 
 
-def distinct_pixels(intersections: list[dict]) -> list[tuple[float, float]]:
-    """The intersections' pixel positions, one per crossing (within SAME_PIXEL_PX)."""
-    pixels: list[tuple[float, float]] = []
-    for point in intersections:
-        x, y = float(point["x"]), float(point["y"])
-        if all(math.hypot(x - px, y - py) >= SAME_PIXEL_PX for px, py in pixels):
-            pixels.append((x, y))
-    return pixels
-
-
-def spans_page(pixels: list[tuple[float, float]]) -> bool:
-    """Whether pixels are numerous and spread enough to pin an affine (not near a line)."""
-    if len(pixels) < MIN_PROJECTED_POINTS:
-        return False
-    centred = np.array(pixels) - np.mean(pixels, axis=0)
-    smaller_axis = np.linalg.svd(centred, compute_uv=False)[-1] / math.sqrt(len(pixels))
-    return float(smaller_axis) >= MIN_PROJECTED_SPREAD_PX
-
-
-def projected_intersections(
+def projected_seed_pair(
     sidecar_dir: Path, stem: str, affine: np.ndarray, size: tuple[int, int]
 ) -> list[dict]:
-    """The page's RANSAC intersections, placed on the map by ``affine`` (#585).
+    """The page's RANSAC seed pair, re-placed to express the published pose (#585).
 
     A pose with no seed pair of its own -- snap's, street-solve's -- would
-    otherwise reach the IIIF annotation as four synthetic corner points. The
-    intersections RANSAC found are real street crossings printed on the page;
-    mapping their *pixels* through the published pose gives control points on
-    real features that reproduce the pose exactly under the annotation's
-    first-order polynomial. (A two-point Helmert through them would not: snap's
-    poses are similarities in local metres, which Allmaps' Web Mercator Helmert
-    misses by a median 6 ft and up to 18 ft at the page corners.)
-
-    Inliers are used when they span the page, else every intersection. Marked
-    ``projected`` and neither ``inlier`` nor ``initial``: the pose put them
-    where they are, so they are not evidence for it. Empty when the page has no
-    RANSAC sidecar in the same pixel frame, or too few spread-out crossings.
+    otherwise reach the IIIF annotation as four synthetic corner points and a
+    polynomial. The two intersections RANSAC seeded from are the control points
+    the page's fit started from; keeping their *pixels* and giving them the
+    (lon, lat) of the published pose's closest Web Mercator similarity
+    (:func:`mercator_helmert`) lets the annotation's Helmert express the pose
+    with them. They are marked ``projected``, ``initial`` (so the annotation
+    uses them as its Helmert pair) and not ``inlier``: the pose put them where
+    they are, so they are not street evidence for it. Empty when the page has
+    no RANSAC seed pair in the same pixel frame.
     """
     path = sidecar_dir / f"{stem}.georef.json"
     if not path.exists():
@@ -1790,21 +1809,21 @@ def projected_intersections(
         return []
     if (doc.get("width"), doc.get("height")) != size:
         return []
-    intersections = doc.get("intersections") or []
-    pixels = distinct_pixels([i for i in intersections if i.get("inlier")])
-    if not spans_page(pixels):
-        pixels = distinct_pixels(intersections)
-    if not spans_page(pixels):
+    pair = seed_pair(doc.get("intersections") or [])
+    if not pair:
         return []
+    a, b = mercator_helmert(affine, size)
     projected = []
-    for x, y in pixels:
-        lon, lat = affine @ np.array([x, y, 1.0])
+    for point in pair:
+        x, y = float(point["x"]), float(point["y"])
+        lon, lat = from_mercator(a * complex(x, -y) + b)
         projected.append(
             {
                 "x": x,
                 "y": y,
-                "lon": float(lon),
-                "lat": float(lat),
+                "lon": lon,
+                "lat": lat,
+                "initial": True,
                 "inlier": False,
                 "projected": True,
             }
@@ -1873,7 +1892,7 @@ def publish(
         w, h = node.unit.width, node.unit.height
         a = hypothesis.affine
         if a is not None and not seed_pair(intersections):
-            intersections = intersections + projected_intersections(
+            intersections = intersections + projected_seed_pair(
                 sidecar_dir, stem, a, (w, h)
             )
         corners = (

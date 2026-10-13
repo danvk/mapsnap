@@ -488,16 +488,10 @@ def georef_gcp_points(georef: dict) -> list[GcpPoint]:
     exactly those two points with type "gcp". The caller uses a Helmert transformation,
     which only requires two points.
 
-    A pose that had no seed pair of its own (snap, street-solve) may instead carry
-    ``projected`` intersections: real street crossings on the page, placed by the
-    published pose (``reconcile.projected_intersections``). Three or more of them
-    are returned as the GCPs (type "gcp"); they lie exactly on the pose, so the
-    caller's polynomial transformation reproduces it.
-
-    Otherwise falls back to 4 image corners (type "corner") plus any inlier
-    intersections (type "gcp") when fewer than 2 non-coincident initial
-    intersections exist (e.g. georefs produced by deferred single-GCP processing).
-    The caller uses a polynomial transformation for these.
+    Falls back to 4 image corners (type "corner") plus any inlier intersections
+    (type "gcp") when fewer than 2 non-coincident initial intersections exist
+    (e.g. georefs produced by deferred single-GCP processing). The caller uses a
+    polynomial transformation for these.
     """
     corners: list = georef["corners"]
     width: int = georef["width"]
@@ -506,12 +500,6 @@ def georef_gcp_points(georef: dict) -> list[GcpPoint]:
     all_intersections: list[dict] = georef.get("intersections", [])
     inlier_intersections = [i for i in all_intersections if i.get("inlier")]
     initials = [i for i in all_intersections if i.get("initial")]
-    projected = [i for i in all_intersections if i.get("projected")]
-    if len(initials) < 2 and len(projected) >= 3:
-        return [
-            ((float(i["x"]), float(i["y"])), (float(i["lon"]), float(i["lat"])), "gcp")
-            for i in projected
-        ]
     if len(initials) < 2:
         return _corner_fallback(corners, width, height, inlier_intersections)
 

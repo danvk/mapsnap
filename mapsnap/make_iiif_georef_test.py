@@ -990,32 +990,3 @@ def test_metadata_carries_reconciles_confidence():
     assert by_label["confidence_provisional"] == "true"
     plain = {e["label"] for e in _georef_metadata({"streets": [], "intersections": []})}
     assert "confidence" not in plain
-
-
-def test_georef_gcp_points_uses_projected_crossings_instead_of_corners():
-    """#585: a snapped pose's projected real crossings replace the synthetic corners."""
-    from mapsnap.make_iiif_georef import georef_gcp_points
-
-    corners = [[-74.0, 40.8], [-73.9, 40.8], [-73.9, 40.7], [-74.0, 40.7]]
-    projected = [
-        {
-            "x": x,
-            "y": y,
-            "lon": -74.0 + x / 1e4,
-            "lat": 40.8 - y / 1e4,
-            "projected": True,
-        }
-        for x, y in [(100, 100), (700, 500), (150, 600)]
-    ]
-    georef = {
-        "width": 1000,
-        "height": 800,
-        "corners": corners,
-        "intersections": projected,
-    }
-    points = georef_gcp_points(georef)
-    assert [p[0] for p in points] == [(100.0, 100.0), (700.0, 500.0), (150.0, 600.0)]
-    assert {kind for _, _, kind in points} == {"gcp"}
-    # Fewer than three projected crossings: the corners stay.
-    georef["intersections"] = projected[:2]
-    assert [kind for _, _, kind in georef_gcp_points(georef)].count("corner") == 4
