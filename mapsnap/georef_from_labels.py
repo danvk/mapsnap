@@ -395,7 +395,7 @@ def broadened_scale_plausible(fitted_px_per_ft: float, prior_px_per_ft: float) -
 
 
 def gating_prior(prior_px_per_ft: float, median_prior_px_per_ft: float | None) -> float:
-    """The region prior a broadened or relaxed fit's scale is gated against.
+    """The region prior a broadened (key-map rectangle) fit's scale is gated against.
 
     The page's own prior, unless its region is a *fragment*: a prior more than
     1 / HALF_SCALE_MIN_RATIO (~2.83x, a region under 1/8 the typical area) above the
@@ -2906,10 +2906,6 @@ def _process_one_image(image_path: str) -> tuple[str, ProcessResult]:
                             split_page=is_split_page(image_stem(image_path)),
                         )
                         fitted = deg_per_px_to_px_per_ft(relaxed.scale_deg_per_px)
-                        if prior is not None:
-                            prior = logged_gating_prior(
-                                prior, _worker_state.get("median_region_prior")
-                            )
                         if prior is not None and not broadened_scale_plausible(
                             fitted, prior
                         ):
@@ -2956,6 +2952,11 @@ def _process_one_image(image_path: str) -> tuple[str, ProcessResult]:
                             if broadened.scale_deg_per_px is not None
                             else None
                         )
+                        # The neighborhood came from the same key-map read as the
+                        # region; when that region is a fragment (often a wrong read),
+                        # it starved the fit and must not veto the rectangle fit that
+                        # replaced it (#478). The relaxed retry above keeps the page's
+                        # own prior: its fit used that same neighborhood vocabulary.
                         if prior is not None:
                             prior = logged_gating_prior(
                                 prior, _worker_state.get("median_region_prior")
