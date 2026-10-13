@@ -203,3 +203,27 @@ Grouped 5-fold AUC (whole volumes held out): 0.886 overall, 0.888 for pages,
 0.771 for panels. **Retrain after each corpus run:** any change to reconcile or
 snap can shift what the inputs mean, and panel scores need a current-code run
 before they stop being provisional.
+
+## Adjacency-number detector — `adjacency_unet.pt`
+
+A UNet (`mapsnap.road_model.UNet`, base 16, grayscale) that marks the printed
+adjacent-sheet numbers on the mirror's 25% page images, so `mapsnap adjacency`
+can read numbers CRAFT never boxes (big thin numerals, the hollow outline font).
+Inference helpers are in `mapsnap.adjacency_detector`; it is not wired into the
+pipeline yet.
+
+Trained by `mapsnap.train_adjacency_detector` with no hand labels: OIM's
+georeferencing predicts each sheet's neighbours and the stretch of outline
+each borders (`mapsnap.oim_neighbours`), and corpus-v1's digit reads that
+match a predicted neighbour near its stretch are the positive boxes.
+`adjacency_unet.pages.json.gz` is the training manifest: 1,889 pages from 206
+OIM volumes (1867–1961, no city series that has adjacency truth), 4,281 positive
+boxes, plus 1,257 boxes adopted by one round of self-training (`adopted`; the
+shipped weights do not use them). 12,000 steps take about five hours on an M2.
+
+    gunzip -c models/adjacency_unet.pages.json.gz > WORK/manifest.json
+    uv run python -m mapsnap.train_adjacency_detector fetch WORK
+    uv run python -m mapsnap.train_adjacency_detector labels WORK
+    uv run python -m mapsnap.train_adjacency_detector train WORK
+
+Scored against `testdata/adjacency_truth/` by `scripts/score_adjacency_detector.py`.
