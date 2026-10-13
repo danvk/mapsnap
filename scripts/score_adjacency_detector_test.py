@@ -130,6 +130,8 @@ def test_comparison_labels_marks_every_outcome():
         "",
     ]
     assert (marked[-1]["x"], marked[-1]["y"]) == (50.0, 900.0)
+    hidden = comparison_labels(labels, reads, unread, hide_leftover_unread=True)
+    assert [m["text"] for m in hidden] == [m["text"] for m in marked][:-1]
 
 
 def test_write_volume_links_images_and_writes_truth(tmp_path: Path):

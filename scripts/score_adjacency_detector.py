@@ -16,12 +16,15 @@ and CRAFT boxes are read from data/<volume>/.
     labeler    The corpus sample as two adjacency-labeler volumes beside it:
                <sample>-detector (the detector's reads; pink = a component with
                no valid read) and <sample>-compare (each hand label marked
-               ✓ / ✗ read N / ✗ unread / ✗ missed, plus ✗ extra reads).
+               ✓ / ✗ read N / ✗ unread / ✗ missed, plus ✗ extra reads). With
+               --boxes craft, the same for the current step's CRAFT boxes:
+               <sample>-craft and <sample>-craft-compare (unread boxes away
+               from any label are not drawn: ~20 a page, mostly street names).
 
     uv run python scripts/score_adjacency_detector.py reads
     uv run python scripts/score_adjacency_detector.py adjacency --out /tmp/adjacency-ab
     uv run python scripts/score_adjacency_detector.py adoption
-    uv run python scripts/score_adjacency_detector.py labeler
+    uv run python scripts/score_adjacency_detector.py labeler [--boxes craft]
 """
 
 import argparse
@@ -33,6 +36,7 @@ from pathlib import Path
 
 import cv2
 import torch
+from PIL import Image
 
 from mapsnap import page_adjacency
 from mapsnap.adjacency_detector import (
@@ -128,14 +132,19 @@ def nearest_within(
 
 
 def comparison_labels(
-    labels: list[dict], reads: list[dict], unread: list[tuple[float, float]]
+    labels: list[dict],
+    reads: list[dict],
+    unread: list[tuple[float, float]],
+    *,
+    hide_leftover_unread: bool = False,
 ) -> list[dict]:
     """Hand labels annotated with what the detector did, for viewing in the labeler.
 
     Each hand label becomes '12 ✓' (read), '12 ✗ read 128' (another number read
     within RADIUS), '12 ✗ unread' (a component with no valid read within RADIUS)
     or '12 ✗ missed'. Reads left over are '51 ✗ extra' at their own position;
-    leftover unread components are text-less points, which the labeler draws pink.
+    leftover unread components are text-less points, which the labeler draws pink
+    (unless ``hide_leftover_unread``: CRAFT has ~20 such boxes a page, mostly text).
     """
     matches = label_matches(labels, reads)
     centres = [detection_centre(d) for d in reads]
@@ -160,7 +169,7 @@ def comparison_labels(
         if j not in used_reads:
             out.append({"x": x, "y": y, "text": f"{read_text(reads[j])} ✗ extra"})
     for j, (x, y) in enumerate(unread):
-        if j not in used_unread:
+        if j not in used_unread and not hide_leftover_unread:
             out.append({"x": x, "y": y, "text": ""})
     return out
 
@@ -504,64 +513,103 @@ def cmd_adoption(args: argparse.Namespace) -> None:
     )
 
 
+def detector_reads(
+    page: dict, model, device, reader
+) -> tuple[list[dict], list[tuple[float, float]]]:
+    """(best-of-three reads, centres of components with no valid read) on one page."""
+    gray = cv2.imread(str(page["image"]), cv2.IMREAD_GRAYSCALE)
+    if gray is None:
+        raise FileNotFoundError(f"cannot read image {page['image']}")
+    height, width = gray.shape
+    components = number_components(predict_page(model, gray, device))
+    reads_by_size = [
+        digit_detections(
+            page["image"],
+            reader,
+            page["valid_keys"],
+            ([resized_box(c, factor, (width, height)) for c in components], []),
+        )
+        for factor in READ_SIZES
+    ]
+    reads, unread = [], []
+    for component in components:
+        best = best_reads([component], reads_by_size)
+        if best:
+            reads.append(best[0])
+        else:
+            x0, y0, x1, y1 = component
+            unread.append(((x0 + x1) / 2, (y0 + y1) / 2))
+    return reads, unread
+
+
+def craft_reads(page: dict, reader) -> tuple[list[dict], list[tuple[float, float]]]:
+    """(reads, centres of readable-size boxes with no valid read) from CRAFT's boxes,
+    as the current adjacency step reads them."""
+    with Image.open(page["image"]) as image:
+        width, height = image.size
+    boxes = [
+        b
+        for b in craft_boxes(page["boxes"])
+        if could_be_claim(horizontal_polygon(b), width, height)
+    ]
+    reads = digit_detections(page["image"], reader, page["valid_keys"], (boxes, []))
+    centres = [detection_centre(d) for d in reads]
+    unread = [
+        ((b[0] + b[1]) / 2, (b[2] + b[3]) / 2)
+        for b in boxes
+        if not any(b[0] <= x <= b[1] and b[2] <= y <= b[3] for x, y in centres)
+    ]
+    return reads, unread
+
+
 def cmd_labeler(args: argparse.Namespace) -> None:
-    """Write the corpus sample's detector reads, and a comparison, as labeler volumes."""
+    """Write the corpus sample's reads (detector or CRAFT), and a comparison, as labeler volumes."""
     import easyocr
 
     device = select_device()
-    model = load_detector(args.weights, device)
+    model = load_detector(args.weights, device) if args.boxes == "detector" else None
     reader = easyocr.Reader(["en"], gpu=True, verbose=False)
-    detector_pages: dict[str, dict] = {}
+    read_pages: dict[str, dict] = {}
     compare_pages: dict[str, dict] = {}
     for page in test_pages(args.sample_dir, sample_only=True, with_unlabelled=True):
-        gray = cv2.imread(str(page["image"]), cv2.IMREAD_GRAYSCALE)
-        if gray is None:
-            continue
-        height, width = gray.shape
-        components = number_components(predict_page(model, gray, device))
-        reads_by_size = [
-            digit_detections(
-                page["image"],
-                reader,
-                page["valid_keys"],
-                ([resized_box(c, factor, (width, height)) for c in components], []),
-            )
-            for factor in READ_SIZES
-        ]
-        reads, unread = [], []
-        for component in components:
-            best = best_reads([component], reads_by_size)
-            if best:
-                reads.append(best[0])
-            else:
-                x0, y0, x1, y1 = component
-                unread.append(((x0 + x1) / 2, (y0 + y1) / 2))
-        size = {"width": width, "height": height}
-        detector_pages[page["name"]] = size | {
+        with Image.open(page["image"]) as image:
+            width, height = image.size
+        if model is None:
+            reads, unread = craft_reads(page, reader)
+        else:
+            reads, unread = detector_reads(page, model, device, reader)
+        shown_unread = [] if model is None else unread
+        read_pages[page["name"]] = {
+            "width": width,
+            "height": height,
             "labels": [
                 {"x": x, "y": y, "text": read_text(d)}
                 for d in reads
                 for x, y in [detection_centre(d)]
             ]
-            + [{"x": x, "y": y, "text": ""} for x, y in unread]
+            + [{"x": x, "y": y, "text": ""} for x, y in shown_unread],
         }
-        compare_pages[page["name"]] = size | {
-            "labels": comparison_labels(page["labels"], reads, unread)
+        compare_pages[page["name"]] = {
+            "width": width,
+            "height": height,
+            "labels": comparison_labels(
+                page["labels"], reads, unread, hide_leftover_unread=model is None
+            ),
         }
         print(page["name"], len(reads), "reads,", len(unread), "unread", flush=True)
     base = args.sample_dir.name
-    write_volume(
-        args.sample_dir.parent / f"{base}-detector", args.sample_dir, detector_pages
+    reads_name = f"{base}-{args.boxes}"
+    compare_name = (
+        f"{base}-compare" if args.boxes == "detector" else f"{base}-craft-compare"
     )
-    write_volume(
-        args.sample_dir.parent / f"{base}-compare", args.sample_dir, compare_pages
-    )
+    write_volume(args.sample_dir.parent / reads_name, args.sample_dir, read_pages)
+    write_volume(args.sample_dir.parent / compare_name, args.sample_dir, compare_pages)
     verdicts = Counter(
         verdict(label["text"])
         for page in compare_pages.values()
         for label in page["labels"]
     )
-    print(f"wrote {base}-detector and {base}-compare; {dict(verdicts)}")
+    print(f"wrote {reads_name} and {compare_name}; {dict(verdicts)}")
 
 
 def main() -> None:
@@ -575,6 +623,12 @@ def main() -> None:
         type=Path,
         default=REPO / "data" / "samples" / "adjacency-corpus-100",
         help="Where the corpus sample's images and CRAFT boxes live (fetched if missing)",
+    )
+    parser.add_argument(
+        "--boxes",
+        choices=["detector", "craft"],
+        default="detector",
+        help="labeler: whose boxes to read (craft = the current adjacency step)",
     )
     parser.add_argument("--out", type=Path, default=Path("/tmp/adjacency-detector-ab"))
     args = parser.parse_args()
