@@ -4,11 +4,14 @@ import json
 from pathlib import Path
 
 from score_adjacency_detector import (
+    comparison_labels,
     craft_boxes,
     era,
     located_labels,
     matched_labels,
     score_adjacency,
+    verdict,
+    write_volume,
 )
 
 
@@ -102,3 +105,50 @@ def test_score_adjacency_counts_claims_and_edge_ends():
     assert t["mutual edges"] == 1
     assert (t["adjacency"], t["adjacency correct"]) == (2, 2)
     assert (t["one_sided"], t["one_sided correct"]) == (1, 0)
+
+
+def test_comparison_labels_marks_every_outcome():
+    labels = [
+        {"x": 100, "y": 100, "text": "12"},  # read
+        {"x": 400, "y": 100, "text": "7"},  # misread nearby
+        {"x": 700, "y": 100, "text": "9"},  # a component, but no valid read
+        {"x": 900, "y": 900, "text": "0"},  # nothing there
+    ]
+    reads = [
+        detection("12", (105, 100)),
+        detection("71", (410, 100)),
+        detection("33", (500, 600)),
+    ]
+    unread = [(705.0, 95.0), (50.0, 900.0)]
+    marked = comparison_labels(labels, reads, unread)
+    assert [m["text"] for m in marked] == [
+        "12 ✓",
+        "7 ✗ read 71",
+        "9 ✗ unread",
+        "0 ✗ missed",
+        "33 ✗ extra",
+        "",
+    ]
+    assert (marked[-1]["x"], marked[-1]["y"]) == (50.0, 900.0)
+
+
+def test_write_volume_links_images_and_writes_truth(tmp_path: Path):
+    sample = tmp_path / "sample"
+    sample.mkdir()
+    (sample / "p1.jpg").write_bytes(b"jpeg")
+    (sample / "sources.json").write_text('{"pages": {}}')
+    pages = {"p1": {"width": 10, "height": 20, "labels": []}}
+    write_volume(tmp_path / "out", sample, pages)
+    assert (tmp_path / "out" / "p1.jpg").read_bytes() == b"jpeg"
+    assert (tmp_path / "out" / "p1.jpg").is_file()
+    assert json.loads((tmp_path / "out" / "adjacency-truth.json").read_text()) == {
+        "pages": pages
+    }
+    assert (tmp_path / "out" / "sources.json").exists()
+
+
+def test_verdict():
+    assert verdict("12 ✓") == "✓"
+    assert verdict("7 ✗ read 71") == "✗ read"
+    assert verdict("0 ✗ missed") == "✗ missed"
+    assert verdict("") == "unread box"

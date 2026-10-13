@@ -13,10 +13,15 @@ and CRAFT boxes are read from data/<volume>/.
                and with the detector's reads swapped in, scored by claims and edges.
     adoption   How often self-training adoption (train_adjacency_detector adopt)
                picks a real printed reference, on the dev volumes.
+    labeler    The corpus sample as two adjacency-labeler volumes beside it:
+               <sample>-detector (the detector's reads; pink = a component with
+               no valid read) and <sample>-compare (each hand label marked
+               ✓ / ✗ read N / ✗ unread / ✗ missed, plus ✗ extra reads).
 
     uv run python scripts/score_adjacency_detector.py reads
     uv run python scripts/score_adjacency_detector.py adjacency --out /tmp/adjacency-ab
     uv run python scripts/score_adjacency_detector.py adoption
+    uv run python scripts/score_adjacency_detector.py labeler
 """
 
 import argparse
@@ -73,28 +78,115 @@ def era(year: int) -> str:
     return "1900-1929" if year < 1930 else "1930-1961"
 
 
-def matched_labels(labels: list[dict], detections: list[dict]) -> set[int]:
-    """Indices of labels read: a detection of the label's number within RADIUS, matched greedily."""
+def read_text(detection: dict) -> str:
+    """The page number a detection resolved to ('0' for an explicit zero)."""
+    return detection.get("key") or ("0" if detection.get("via") == "zero" else "")
+
+
+def label_matches(labels: list[dict], detections: list[dict]) -> dict[int, int]:
+    """Label index -> detection index for labels read: a detection of the label's
+    number within RADIUS, matched greedily by distance."""
     pairs = []
     for i, label in enumerate(labels):
         text = norm(label["text"])
         for j, detection in enumerate(detections):
-            key = detection.get("key") or (
-                "0" if detection.get("via") == "zero" else ""
-            )
-            if text not in (norm(detection.get("text") or ""), norm(key)):
+            if text not in (
+                norm(detection.get("text") or ""),
+                norm(read_text(detection)),
+            ):
                 continue
             x, y = detection_centre(detection)
             distance = ((x - label["x"]) ** 2 + (y - label["y"]) ** 2) ** 0.5
             if distance <= RADIUS:
                 pairs.append((distance, i, j))
-    used_labels: set[int] = set()
-    used_detections: set[int] = set()
+    matches: dict[int, int] = {}
     for _, i, j in sorted(pairs):
-        if i not in used_labels and j not in used_detections:
-            used_labels.add(i)
-            used_detections.add(j)
-    return used_labels
+        if i not in matches and j not in matches.values():
+            matches[i] = j
+    return matches
+
+
+def matched_labels(labels: list[dict], detections: list[dict]) -> set[int]:
+    """Indices of labels read (see label_matches)."""
+    return set(label_matches(labels, detections))
+
+
+def nearest_within(
+    point: tuple[float, float], candidates: list[tuple[float, float]], taken: set[int]
+) -> int | None:
+    """Index of the nearest untaken candidate within RADIUS of point, or None."""
+    best = None
+    for j, (x, y) in enumerate(candidates):
+        distance = ((x - point[0]) ** 2 + (y - point[1]) ** 2) ** 0.5
+        if (
+            j not in taken
+            and distance <= RADIUS
+            and (best is None or distance < best[0])
+        ):
+            best = (distance, j)
+    return best[1] if best else None
+
+
+def comparison_labels(
+    labels: list[dict], reads: list[dict], unread: list[tuple[float, float]]
+) -> list[dict]:
+    """Hand labels annotated with what the detector did, for viewing in the labeler.
+
+    Each hand label becomes '12 ✓' (read), '12 ✗ read 128' (another number read
+    within RADIUS), '12 ✗ unread' (a component with no valid read within RADIUS)
+    or '12 ✗ missed'. Reads left over are '51 ✗ extra' at their own position;
+    leftover unread components are text-less points, which the labeler draws pink.
+    """
+    matches = label_matches(labels, reads)
+    centres = [detection_centre(d) for d in reads]
+    used_reads = set(matches.values())
+    used_unread: set[int] = set()
+    out = []
+    for i, label in enumerate(labels):
+        text = label["text"].strip()
+        point = (label["x"], label["y"])
+        if i in matches:
+            verdict = f"{text} ✓"
+        elif (j := nearest_within(point, centres, used_reads)) is not None:
+            used_reads.add(j)
+            verdict = f"{text} ✗ read {read_text(reads[j])}"
+        elif (j := nearest_within(point, unread, used_unread)) is not None:
+            used_unread.add(j)
+            verdict = f"{text} ✗ unread"
+        else:
+            verdict = f"{text} ✗ missed"
+        out.append({"x": label["x"], "y": label["y"], "text": verdict})
+    for j, (x, y) in enumerate(centres):
+        if j not in used_reads:
+            out.append({"x": x, "y": y, "text": f"{read_text(reads[j])} ✗ extra"})
+    for j, (x, y) in enumerate(unread):
+        if j not in used_unread:
+            out.append({"x": x, "y": y, "text": ""})
+    return out
+
+
+def verdict(text: str) -> str:
+    """The outcome a comparison label records: '✓', '✗ read', '✗ unread', '✗ missed',
+    '✗ extra', or 'unread box' for a text-less component."""
+    if not text:
+        return "unread box"
+    outcome = text.split(" ", 1)[1]
+    return "✗ read" if outcome.startswith("✗ read") else outcome
+
+
+def write_volume(directory: Path, sample_dir: Path, pages: dict[str, dict]) -> None:
+    """A labeler pseudo-volume: the sample's images (hard links), sources and these labels."""
+    directory.mkdir(parents=True, exist_ok=True)
+    for name in pages:
+        target = directory / f"{name}.jpg"
+        if not target.exists():
+            target.hardlink_to(sample_dir / f"{name}.jpg")
+    sources = sample_dir / "sources.json"
+    if sources.exists():
+        (directory / "sources.json").write_text(sources.read_text())
+    (directory / "adjacency-truth.json").write_text(
+        json.dumps({"pages": pages}, indent=1)
+    )
 
 
 def located_labels(
@@ -167,12 +259,20 @@ def fetch_sample_page(
     return image, boxes, {k for s in stems if (k := page_key(s)) is not None}
 
 
-def test_pages(sample_dir: Path) -> list[dict]:
-    """Every labelled test page: set, era, image, CRAFT boxes, labels and valid keys."""
+def test_pages(
+    sample_dir: Path, sample_only: bool = False, with_unlabelled: bool = False
+) -> list[dict]:
+    """Every labelled test page: set, era, image, CRAFT boxes, labels and valid keys.
+
+    ``with_unlabelled`` adds the sample sheets the labeler never recorded (no
+    printed references), with no labels.
+    """
     pages = []
     truth = json.loads((TRUTH / "corpus-100.json").read_text())["pages"]
     sources = json.loads((TRUTH / "corpus-100.sources.json").read_text())["pages"]
-    for name, entry in truth.items():
+    names = sources if with_unlabelled else truth
+    for name in names:
+        entry = truth.get(name, {})
         source = sources[name]
         image, boxes, valid = fetch_sample_page(source, name, sample_dir)
         pages.append(
@@ -186,7 +286,7 @@ def test_pages(sample_dir: Path) -> list[dict]:
                 "valid_keys": valid,
             }
         )
-    for volume in DEV_VOLUMES:
+    for volume in [] if sample_only else DEV_VOLUMES:
         directory = REPO / "data" / volume
         truth = json.loads((TRUTH / f"{volume}.json").read_text())["pages"]
         stems = [p.stem for p in directory.glob("p*.jpg") if "roadprob" not in p.stem]
@@ -404,9 +504,71 @@ def cmd_adoption(args: argparse.Namespace) -> None:
     )
 
 
+def cmd_labeler(args: argparse.Namespace) -> None:
+    """Write the corpus sample's detector reads, and a comparison, as labeler volumes."""
+    import easyocr
+
+    device = select_device()
+    model = load_detector(args.weights, device)
+    reader = easyocr.Reader(["en"], gpu=True, verbose=False)
+    detector_pages: dict[str, dict] = {}
+    compare_pages: dict[str, dict] = {}
+    for page in test_pages(args.sample_dir, sample_only=True, with_unlabelled=True):
+        gray = cv2.imread(str(page["image"]), cv2.IMREAD_GRAYSCALE)
+        if gray is None:
+            continue
+        height, width = gray.shape
+        components = number_components(predict_page(model, gray, device))
+        reads_by_size = [
+            digit_detections(
+                page["image"],
+                reader,
+                page["valid_keys"],
+                ([resized_box(c, factor, (width, height)) for c in components], []),
+            )
+            for factor in READ_SIZES
+        ]
+        reads, unread = [], []
+        for component in components:
+            best = best_reads([component], reads_by_size)
+            if best:
+                reads.append(best[0])
+            else:
+                x0, y0, x1, y1 = component
+                unread.append(((x0 + x1) / 2, (y0 + y1) / 2))
+        size = {"width": width, "height": height}
+        detector_pages[page["name"]] = size | {
+            "labels": [
+                {"x": x, "y": y, "text": read_text(d)}
+                for d in reads
+                for x, y in [detection_centre(d)]
+            ]
+            + [{"x": x, "y": y, "text": ""} for x, y in unread]
+        }
+        compare_pages[page["name"]] = size | {
+            "labels": comparison_labels(page["labels"], reads, unread)
+        }
+        print(page["name"], len(reads), "reads,", len(unread), "unread", flush=True)
+    base = args.sample_dir.name
+    write_volume(
+        args.sample_dir.parent / f"{base}-detector", args.sample_dir, detector_pages
+    )
+    write_volume(
+        args.sample_dir.parent / f"{base}-compare", args.sample_dir, compare_pages
+    )
+    verdicts = Counter(
+        verdict(label["text"])
+        for page in compare_pages.values()
+        for label in page["labels"]
+    )
+    print(f"wrote {base}-detector and {base}-compare; {dict(verdicts)}")
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=(__doc__ or "").split("\n")[0])
-    parser.add_argument("command", choices=["reads", "adjacency", "adoption"])
+    parser.add_argument(
+        "command", choices=["reads", "adjacency", "adoption", "labeler"]
+    )
     parser.add_argument("--weights", type=Path, default=MODEL_PATH)
     parser.add_argument(
         "--sample-dir",
@@ -417,9 +579,13 @@ def main() -> None:
     parser.add_argument("--out", type=Path, default=Path("/tmp/adjacency-detector-ab"))
     args = parser.parse_args()
     torch.set_grad_enabled(False)
-    {"reads": cmd_reads, "adjacency": cmd_adjacency, "adoption": cmd_adoption}[
-        args.command
-    ](args)
+    commands = {
+        "reads": cmd_reads,
+        "adjacency": cmd_adjacency,
+        "adoption": cmd_adoption,
+        "labeler": cmd_labeler,
+    }
+    commands[args.command](args)
 
 
 if __name__ == "__main__":
