@@ -4,6 +4,8 @@ import {
   detectionFromAdjacency,
   FILL_YELLOW_HUE_BAND,
   filterDetections,
+  hueDifference,
+  isOffPaper,
   isOnBuildingFill,
   matchesTextQuery,
   relaxedShortSide,
@@ -273,6 +275,60 @@ describe('isOnBuildingFill', () => {
     expect(isOnBuildingFill(withBackground(low))).toBe(false);
     expect(isOnBuildingFill(withBackground(high))).toBe(false);
     expect(isOnBuildingFill(withBackground(low - 0.1))).toBe(true);
+  });
+});
+
+describe('isOffPaper', () => {
+  const color = (hue: number, chroma: number) => ({
+    color: '#000000',
+    hue,
+    chroma,
+  });
+
+  it('measures hue differences the short way round', () => {
+    expect(hueDifference(10, 350)).toBe(20);
+    expect(hueDifference(97, 194)).toBe(97);
+  });
+
+  it('is off the paper when more saturated than it, whatever the hue', () => {
+    const paper = color(95, 15);
+    expect(isOffPaper(color(95, 19.1), paper)).toBe(true);
+    expect(isOffPaper(color(95, 19), paper)).toBe(false);
+  });
+
+  it('is off the paper at a far hue even when paler (Miami p25 "2 ND", #500)', () => {
+    expect(isOffPaper(color(194, 4.1), color(97, 8))).toBe(true);
+  });
+
+  it('treats a grey scan tint as paper (Nashville p41__2 "2ND")', () => {
+    expect(isOffPaper(color(123.7, 3.6), color(8.1, 9.0))).toBe(false);
+    expect(isOffPaper(color(198.4, 3.2), color(0, 1))).toBe(true);
+  });
+
+  it('ignores the hue of a nearly neutral box', () => {
+    expect(isOffPaper(color(270, 2.9), color(90, 2))).toBe(false);
+  });
+
+  it('takes a recorded background as off the paper when no paper is known', () => {
+    expect(isOffPaper(color(95, 2), null)).toBe(true);
+  });
+});
+
+describe('isOnBuildingFill with the page paper', () => {
+  const at = (hue: number, chroma: number): Detection => ({
+    polygon: rect(10, 5),
+    text: '2 ND',
+    confidence: 1,
+    angle: 0,
+    long_side: 10,
+    short_side: 5,
+    background: { color: '#8a9396', hue, chroma },
+  });
+  const paper = { color: '#aaa597', hue: 97.1, chroma: 8.1 };
+
+  it('drops a pale blue fill and keeps a label on the paper', () => {
+    expect(isOnBuildingFill(at(194, 4.1), paper)).toBe(true);
+    expect(isOnBuildingFill(at(99, 7.5), paper)).toBe(false);
   });
 });
 

@@ -41,6 +41,7 @@ from mapsnap.keymap.locate import (
 )
 from mapsnap.keymap.records import is_recorded_keymap_page
 from mapsnap.osm_to_centerlines import load_centerlines
+from mapsnap.paper_color import is_off_paper
 from mapsnap.streets import (
     DIRECTION_WORDS,
     HINT_STRINGS,
@@ -2596,6 +2597,12 @@ def derive_paths(image_path: str) -> tuple[str, str, str]:
     )
 
 
+def load_paper(labels_path: str) -> dict | None:
+    """The page's paper color recorded in a <stem>.streets.json, or None for older files."""
+    labels_raw = json.loads(Path(labels_path).read_text())
+    return labels_raw.get("paper") if isinstance(labels_raw, dict) else None
+
+
 def load_detections(labels_path: str) -> list[dict]:
     """Load cached label detections from a <stem>.streets.json file."""
     labels_raw = json.loads(Path(labels_path).read_text())
@@ -2977,14 +2984,18 @@ def drop_labels_on_fill(
     detections: list[dict],
     yellow_band: tuple[float, float] = FILL_YELLOW_HUE_BAND,
     road_prob: np.ndarray | None = None,
+    *,
+    paper: dict | None = None,
 ) -> tuple[list[dict], list[dict]]:
     """Split detections into (kept, on-fill) by the ``background`` colour OCR recorded for each.
 
     Sanborn sheets print street names on the paper background; text inside a coloured block is a
     *building* label, which can still prefix-match a street name and fabricate GCPs (Nashville's
-    "REP" -> "REP JOHN LEWIS WAY", "SEARS", "SERVICE" -> "SERVICE ROAD"). ``detect_text`` records a
-    ``background`` on exactly the detections that sit on something more saturated than the page's
-    own paper; this decides which of those colours actually disqualify a label.
+    "REP" -> "REP JOHN LEWIS WAY", "SEARS", "SERVICE" -> "SERVICE ROAD"). ``detect_text`` records
+    every detection's ``background``; :func:`paper_color.is_off_paper` decides, against the page's
+    ``paper``, which of them are off the paper at all, and this decides which of *those* colors
+    actually disqualify a label. Without ``paper`` (files written before it was recorded), a
+    recorded background is taken to be off the paper, as those files only recorded such.
 
     Only hue outside ``yellow_band`` does. Being on *some* colour is not enough, because on a
     yellowed scan an ordinary street label is more saturated than the paper: Chicago's and New
@@ -3010,7 +3021,7 @@ def drop_labels_on_fill(
     on_fill: list[dict] = []
     for det in detections:
         background = det.get("background")
-        if background is None:
+        if background is None or not is_off_paper(background, paper):
             kept.append(det)
             continue
         # Outside the spared band the colour alone disqualifies; inside it, P(road)
@@ -3202,6 +3213,7 @@ def prepare_label_features(
     """
     img_w, img_h = image_size
     all_detections = load_detections(labels_path)
+    paper = load_paper(labels_path)
 
     print(f"All detections: {len(all_detections)}")
     all_detections = [d for d in all_detections if not d.get("ignore")]
@@ -3247,7 +3259,7 @@ def prepare_label_features(
     # that can still prefix-match a street name and fabricate GCPs.
     if not keep_labels_on_fill:
         all_detections, on_fill = drop_labels_on_fill(
-            all_detections, road_prob=road_prob
+            all_detections, road_prob=road_prob, paper=paper
         )
         if on_fill:
             named = sorted(

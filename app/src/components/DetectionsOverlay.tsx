@@ -3,9 +3,12 @@ import {
   isOnBuildingFill,
   type IndexedDetection,
 } from '../detections';
+import type { LabColor } from '../types';
 
 interface DetectionsOverlayProps {
   detections: IndexedDetection[];
+  /** The page's paper colour, for judging which reads sit on a fill. */
+  paper: LabColor | null;
   selectedIndices: Set<number>;
   /** Rendered image size in CSS pixels. */
   displayWidth: number;
@@ -22,6 +25,7 @@ interface DetectionsOverlayProps {
 export function DetectionsOverlay(props: DetectionsOverlayProps) {
   const {
     detections,
+    paper,
     selectedIndices,
     displayWidth,
     displayHeight,
@@ -54,7 +58,7 @@ export function DetectionsOverlay(props: DetectionsOverlayProps) {
         const isInset = det.inset === true;
         // A label on a red/blue building fill is dropped before georeferencing, so draw it
         // like the other discarded reads rather than by its confidence.
-        const isOnFill = isOnBuildingFill(det);
+        const isOnFill = isOnBuildingFill(det, paper);
         // Adjacency claims carry `mutual`: reciprocated neighbors render blue, the
         // rest of the claims amber; other modes never set the field.
         const color = isSelected
