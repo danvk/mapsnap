@@ -4,6 +4,7 @@ import type {
   Box,
   BoxesJsonData,
   Detection,
+  LabColor,
   PanelPolygon,
   PanelsJsonData,
   StreetsJsonData,
@@ -19,6 +20,8 @@ export type ParsedJson =
       detections: Detection[];
       width: number;
       height: number;
+      /** The page's paper colour, when the file records one. */
+      paper: LabColor | null;
     }
   | {
       kind: 'panels';
@@ -181,7 +184,10 @@ export function parseDroppedJson(
     const height = isNewFormat
       ? (parsed as StreetsJsonData).height
       : fallback.height || 1;
-    return { kind: 'streets', text, detections, width, height };
+    const paper = isNewFormat
+      ? ((parsed as StreetsJsonData).paper ?? null)
+      : null;
+    return { kind: 'streets', text, detections, width, height, paper };
   }
 
   return { kind: 'georef', text };

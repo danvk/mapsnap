@@ -4,6 +4,7 @@ import json
 from typing import Any
 
 import numpy as np
+from PIL import Image
 
 from mapsnap.detect_text import (
     NON_STREET_TEXT,
@@ -13,6 +14,7 @@ from mapsnap.detect_text import (
     _merge_vocab_passes,
     _nms_bboxes,
     annotate_backgrounds,
+    backfill_backgrounds,
     build_reader,
     filter_args,
     has_split_panels,
@@ -23,6 +25,7 @@ from mapsnap.detect_text import (
     threads_per_worker,
 )
 from mapsnap.keymap.locate import KeymapLocator
+from mapsnap.paper_color import is_off_paper
 from mapsnap.streets import (
     canonical_street_match,
     matches_any_street,
@@ -480,30 +483,51 @@ def test_region_color_reports_the_box_background_not_the_ink():
     assert background["chroma"] > 40
 
 
-def test_annotate_backgrounds_marks_only_labels_off_the_paper():
+def test_annotate_backgrounds_records_every_detection_and_the_paper():
     page = _rgb_page()
     page[50:70, 50:70] = (200, 40, 40)  # a red brick building
     on_paper = {"text": "MAIN", "polygon": _box(10, 10, 30, 20)}
     on_fill = {"text": "REP", "polygon": _box(55, 55, 65, 65)}
     paper = annotate_backgrounds([on_paper, on_fill], page)
 
-    assert "background" not in on_paper  # street names sit on paper: nothing to record
-    assert on_fill["background"]["chroma"] > paper["chroma"] + 4.0
+    # Every detection carries its colour (#510); is_off_paper tells them apart.
+    assert not is_off_paper(on_paper["background"], paper)
+    assert is_off_paper(on_fill["background"], paper)
     assert on_fill["background"]["color"].startswith("#")
     assert 340 <= on_fill["background"]["hue"] or on_fill["background"]["hue"] <= 40
 
 
 def test_annotate_backgrounds_uses_the_pages_own_paper_as_the_reference():
-    # A heavily yellowed page (Chicago, New Orleans): an ordinary label on that paper must not
-    # be marked, even though the paper itself is far from neutral in absolute terms.
+    # A heavily yellowed page (Chicago, New Orleans): an ordinary label on that paper is not
+    # off the paper, even though the paper itself is far from neutral in absolute terms.
     page = np.full((100, 100, 3), 210, dtype=np.uint8)
     page[:, :, 2] = 150  # strongly yellow paper
     det = {"text": "HALSTED", "polygon": _box(10, 10, 30, 20)}
     paper = annotate_backgrounds([det], page)
     assert paper["chroma"] > 10  # the paper really is saturated...
-    assert (
-        "background" not in det
-    )  # ...but the label matches it, so nothing is recorded
+    assert not is_off_paper(det["background"], paper)  # ...but the label matches it
+
+
+def test_backfill_backgrounds_rewrites_every_colour_and_counts_off_paper(tmp_path):
+    page = _rgb_page()
+    page[50:70, 50:70] = (200, 40, 40)
+    image = tmp_path / "p1.jpg"
+    Image.fromarray(page).save(image, quality=95)
+    streets = tmp_path / "p1.streets.json"
+    streets.write_text(
+        json.dumps(
+            {
+                "streets": [
+                    {"text": "MAIN", "polygon": _box(10, 10, 30, 20)},
+                    {"text": "REP", "polygon": _box(55, 55, 65, 65), "background": {}},
+                ]
+            }
+        )
+    )
+    assert backfill_backgrounds(str(image)) == 1
+    doc = json.loads(streets.read_text())
+    assert "paper" in doc
+    assert all("chroma" in d["background"] for d in doc["streets"])
 
 
 def test_lab_to_hex_renders_a_swatch_of_the_lab_colour():

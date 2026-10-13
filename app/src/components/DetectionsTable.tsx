@@ -1,11 +1,13 @@
 import type { ReactNode } from 'react';
 import type { IndexedDetection } from '../detections';
-import { isOnBuildingFill } from '../detections';
-import type { Detection } from '../types';
+import { isOffPaper, isOnBuildingFill } from '../detections';
+import type { Detection, LabColor } from '../types';
 import { DetectionCanvas } from './DetectionCanvas';
 
 interface DetectionsTableProps {
   detections: IndexedDetection[];
+  /** The page's paper colour, for judging which reads sit on a fill. */
+  paper: LabColor | null;
   selectedIndices: Set<number>;
   onSelect: (index: number) => void;
   image: HTMLImageElement | null;
@@ -33,6 +35,7 @@ const MAX_ROWS_WITH_METADATA = 5;
 export function DetectionsTable(props: DetectionsTableProps) {
   const {
     detections,
+    paper,
     selectedIndices,
     onSelect,
     image,
@@ -64,7 +67,7 @@ export function DetectionsTable(props: DetectionsTableProps) {
         </thead>
         <tbody>
           {visible.map(({ det, i, relaxed }, rowIdx) => {
-            const onFill = isOnBuildingFill(det);
+            const onFill = isOnBuildingFill(det, paper);
             const classes = [
               selectedIndices.has(i) ? 'selected' : '',
               det.ignore ? 'ignored' : '',
@@ -121,7 +124,7 @@ export function DetectionsTable(props: DetectionsTableProps) {
                       inset
                     </span>
                   )}
-                  {det.background && (
+                  {det.background && isOffPaper(det.background, paper) && (
                     <span
                       className={
                         onFill ? 'fill-badge dropped' : 'fill-badge spared'
