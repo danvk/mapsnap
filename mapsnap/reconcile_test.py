@@ -1047,3 +1047,112 @@ def test_collect_ignores_the_arbiters_own_final(tmp_path):
         tmp_path, "p7", None, None, page_size=(1000, 800)
     )
     assert [h.source for h in hypotheses] == ["georef", UNPLACED]
+
+
+def ransac_sidecar(a: np.ndarray) -> dict:
+    """A RANSAC sidecar with a seed pair and two more inliers spread over the page."""
+    doc = georef_doc(a)
+    doc["intersections"] = [
+        {
+            "x": 100,
+            "y": 100,
+            "lon": -74.0,
+            "lat": 40.7,
+            "inlier": True,
+            "initial": True,
+        },
+        {
+            "x": 700,
+            "y": 500,
+            "lon": -74.1,
+            "lat": 40.8,
+            "inlier": True,
+            "initial": True,
+        },
+        {"x": 150, "y": 600, "lon": -74.2, "lat": 40.9, "inlier": True},
+        {
+            "x": 152,
+            "y": 601,
+            "lon": -74.2,
+            "lat": 40.9,
+            "inlier": True,
+        },  # same crossing
+        {"x": 800, "y": 120, "lon": -74.3, "lat": 41.0, "inlier": False},
+    ]
+    return doc
+
+
+def test_publish_projects_real_intersections_through_a_snapped_pose(tmp_path):
+    """#585: a snapped pose reaches the IIIF as real crossings, not four corners."""
+    import json
+
+    from mapsnap.make_iiif_georef import georef_gcp_points
+    from mapsnap.reconcile import publish
+
+    write_sidecar(tmp_path, "p1", "georef", ransac_sidecar(affine(0)))
+    snapped = affine(37.0, -12.0)  # snap moved the page 37 m east, 12 m south
+    node = make_node("p1", [scored("snap:0", snapped, 0.9)])
+    publish(tmp_path, {"p1": node}, {"p1": 0})
+    final = json.loads((tmp_path / "p1.georef-final.json").read_text())
+
+    points = final["intersections"]
+    # The three distinct inlier crossings; the outlier is not needed.
+    assert [(p["x"], p["y"]) for p in points] == [(100, 100), (700, 500), (150, 600)]
+    for p in points:
+        assert p["projected"] and not p["inlier"] and not p.get("initial")
+        assert np.allclose([p["lon"], p["lat"]], snapped @ [p["x"], p["y"], 1.0])
+    gcps = georef_gcp_points(final)
+    assert [kind for _, _, kind in gcps] == ["gcp"] * 3
+
+
+def test_publish_keeps_corner_points_without_enough_crossings(tmp_path):
+    import json
+
+    from mapsnap.reconcile import publish
+
+    doc = ransac_sidecar(affine(0))
+    doc["intersections"] = doc["intersections"][:2]
+    write_sidecar(tmp_path, "p1", "georef", doc)
+    node = make_node("p1", [scored("snap:0", affine(5.0), 0.9)])
+    publish(tmp_path, {"p1": node}, {"p1": 0})
+    final = json.loads((tmp_path / "p1.georef-final.json").read_text())
+    assert final["intersections"] == []
+
+
+def test_projected_intersections_fall_back_to_all_crossings_and_need_the_frame(
+    tmp_path,
+):
+    from mapsnap.reconcile import projected_intersections
+
+    doc = ransac_sidecar(affine(0))
+    for point in doc["intersections"][2:4]:
+        point["inlier"] = False  # only two inliers left: use every crossing
+    write_sidecar(tmp_path, "p1", "georef", doc)
+    points = projected_intersections(tmp_path, "p1", affine(0), (1000, 800))
+    assert len(points) == 4
+    assert projected_intersections(tmp_path, "p1", affine(0), (500, 400)) == []
+    assert projected_intersections(tmp_path, "p2", affine(0), (1000, 800)) == []
+
+
+def test_spans_page_rejects_too_few_or_collinear_points():
+    from mapsnap.reconcile import spans_page
+
+    assert not spans_page([(0, 0), (500, 500)])
+    assert not spans_page([(0, 0), (250, 251), (500, 500)])
+    assert spans_page([(0, 0), (500, 0), (0, 500)])
+
+
+def test_distinct_pixels_merges_one_crossing():
+    from mapsnap.reconcile import distinct_pixels
+
+    points = [{"x": 10, "y": 10}, {"x": 12, "y": 11}, {"x": 40, "y": 10}]
+    assert distinct_pixels(points) == [(10.0, 10.0), (40.0, 10.0)]
+
+
+def test_seed_pair_skips_coincident_seeds():
+    from mapsnap.reconcile import seed_pair
+
+    same = {"x": 5.0, "y": 5.0, "initial": True}
+    assert seed_pair([same, dict(same)]) == []
+    other = {"x": 50.0, "y": 5.0, "initial": True}
+    assert seed_pair([same, {"x": 9, "y": 9}, other]) == [same, other]

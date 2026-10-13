@@ -1723,6 +1723,95 @@ def source_control_points(
     return doc.get("streets") or [], doc.get("intersections") or []
 
 
+# Projected control points must span the page well enough to pin an affine:
+# at least this many distinct pixels (a first-order polynomial needs three),
+# whose spread's smaller axis is at least MIN_PROJECTED_SPREAD_PX.
+MIN_PROJECTED_POINTS = 3
+MIN_PROJECTED_SPREAD_PX = 50.0
+# Intersections closer than this in pixels are one crossing.
+SAME_PIXEL_PX = 5.0
+
+
+def seed_pair(intersections: list[dict]) -> list[dict]:
+    """The first two non-coincident RANSAC seed (``initial``) intersections, or []."""
+    initials = [i for i in intersections if i.get("initial")]
+    if len(initials) < 2:
+        return []
+    first, second = initials[0], initials[1]
+    if math.hypot(first["x"] - second["x"], first["y"] - second["y"]) < 1.0:
+        return []
+    return [first, second]
+
+
+def distinct_pixels(intersections: list[dict]) -> list[tuple[float, float]]:
+    """The intersections' pixel positions, one per crossing (within SAME_PIXEL_PX)."""
+    pixels: list[tuple[float, float]] = []
+    for point in intersections:
+        x, y = float(point["x"]), float(point["y"])
+        if all(math.hypot(x - px, y - py) >= SAME_PIXEL_PX for px, py in pixels):
+            pixels.append((x, y))
+    return pixels
+
+
+def spans_page(pixels: list[tuple[float, float]]) -> bool:
+    """Whether pixels are numerous and spread enough to pin an affine (not near a line)."""
+    if len(pixels) < MIN_PROJECTED_POINTS:
+        return False
+    centred = np.array(pixels) - np.mean(pixels, axis=0)
+    smaller_axis = np.linalg.svd(centred, compute_uv=False)[-1] / math.sqrt(len(pixels))
+    return float(smaller_axis) >= MIN_PROJECTED_SPREAD_PX
+
+
+def projected_intersections(
+    sidecar_dir: Path, stem: str, affine: np.ndarray, size: tuple[int, int]
+) -> list[dict]:
+    """The page's RANSAC intersections, placed on the map by ``affine`` (#585).
+
+    A pose with no seed pair of its own -- snap's, street-solve's -- would
+    otherwise reach the IIIF annotation as four synthetic corner points. The
+    intersections RANSAC found are real street crossings printed on the page;
+    mapping their *pixels* through the published pose gives control points on
+    real features that reproduce the pose exactly under the annotation's
+    first-order polynomial. (A two-point Helmert through them would not: snap's
+    poses are similarities in local metres, which Allmaps' Web Mercator Helmert
+    misses by a median 6 ft and up to 18 ft at the page corners.)
+
+    Inliers are used when they span the page, else every intersection. Marked
+    ``projected`` and neither ``inlier`` nor ``initial``: the pose put them
+    where they are, so they are not evidence for it. Empty when the page has no
+    RANSAC sidecar in the same pixel frame, or too few spread-out crossings.
+    """
+    path = sidecar_dir / f"{stem}.georef.json"
+    if not path.exists():
+        return []
+    try:
+        doc = json.loads(path.read_text())
+    except (OSError, json.JSONDecodeError):
+        return []
+    if (doc.get("width"), doc.get("height")) != size:
+        return []
+    intersections = doc.get("intersections") or []
+    pixels = distinct_pixels([i for i in intersections if i.get("inlier")])
+    if not spans_page(pixels):
+        pixels = distinct_pixels(intersections)
+    if not spans_page(pixels):
+        return []
+    projected = []
+    for x, y in pixels:
+        lon, lat = affine @ np.array([x, y, 1.0])
+        projected.append(
+            {
+                "x": x,
+                "y": y,
+                "lon": float(lon),
+                "lat": float(lat),
+                "inlier": False,
+                "projected": True,
+            }
+        )
+    return projected
+
+
 def publish(
     volume: Path,
     nodes: dict[str, PageNode],
@@ -1783,6 +1872,10 @@ def publish(
         )
         w, h = node.unit.width, node.unit.height
         a = hypothesis.affine
+        if a is not None and not seed_pair(intersections):
+            intersections = intersections + projected_intersections(
+                sidecar_dir, stem, a, (w, h)
+            )
         corners = (
             None
             if a is None
