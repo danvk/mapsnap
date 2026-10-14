@@ -24,7 +24,7 @@ import re
 import shutil
 import subprocess
 import sys
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, field
 from pathlib import Path
 
 import cv2
@@ -87,6 +87,22 @@ OSM_WITHIN_M = 10.0
 # this close. Scans of one sheet place within 4-6 m of each other; a sheet
 # redrawn between editions moves ~100 m.
 VOTE_RADIUS_M = 50.0
+# Donor confidence, from the #580 model's P(good) in each pose's reconcile
+# record. A transferred pose copies its donor's error as faithfully as its
+# pose, so it inherits the donor's P(good). In the A/B against OIM truth (#558:
+# 42 edition groups, 49 targets), ungated transfers were 16% disasters (6 of
+# 37 graded); requiring DONOR_MIN_P_GOOD left 13 transfers, 10 good and none
+# disasters.
+DONOR_MIN_P_GOOD = 0.5
+# A transfer replaces a disagreeing own fit without other editions' votes when
+# the own fit is this unlikely and the donor this likely to be good (#558
+# arm D: 4 replacements, the 3 that truth grades all good).
+REPLACE_OWN_MAX_P_GOOD = 0.3
+REPLACE_DONOR_MIN_P_GOOD = 0.7
+# A donor sheet whose fitted scale is this far (either way) from its own
+# edition's median scale is a misscaled fit, not a donor: matching against one
+# ran for over an hour on Albuquerque and Little Rock (#558).
+MAX_DONOR_SCALE_RATIO = 1.5
 
 
 @dataclass
@@ -117,6 +133,9 @@ class Transfer:
     scale_ratio: float
     shift_m: float  # target centre from the donor's, on the ground
     overlap_frac: float  # of the target's footprint inside the donor's
+    donor_p_good: float | None = (
+        None  # the donor pose's P(good), which this one inherits
+    )
 
     @property
     def accepted(self) -> bool:
@@ -164,6 +183,36 @@ def sheet_keys(volume: Path) -> list[str]:
         ),
         key=lambda k: (int("".join(c for c in k if c.isdigit()) or 0), k),
     )
+
+
+def pose_p_good(georef: dict) -> float | None:
+    """A pose's P(good): its reconcile confidence, or its donor's for a transfer.
+
+    None when the pose records neither, as runs from before #580 do.
+    """
+    transferred = georef.get("edition_transfer")
+    if transferred is not None:
+        return transferred.get("donor_p_good")
+    reconcile = georef.get("reconcile")
+    if not isinstance(reconcile, dict):
+        return None
+    return (reconcile.get("confidence") or {}).get("p_good")
+
+
+def m_per_px(georef: dict) -> float:
+    """A pose's ground metres per page pixel, along its top edge."""
+    (x0, y0), (x1, y1) = georef["corners"][0], georef["corners"][1]
+    kx = 111_320.0 * math.cos(math.radians((y0 + y1) / 2))
+    return math.hypot((x1 - x0) * kx, (y1 - y0) * 110_540.0) / georef["width"]
+
+
+def placed_panel_parents(run_dir: Path) -> set[str]:
+    """Split sheets with at least one placed panel in a run."""
+    return {
+        path.name.split("__")[0]
+        for path in run_dir.glob("*__*.georef-final.json")
+        if json.loads(path.read_text()).get("corners")
+    }
 
 
 def load_sheet(volume: Path, key: str, georef: dict | None) -> Sheet | None:
@@ -315,6 +364,25 @@ class Edition:
     year: int
     corpus: dict[str, dict]  # key -> georef from the corpus run
     final: dict[str, dict]  # key -> georef after transfers (filled in as we go)
+    # Split sheets whose panels the corpus run placed: a whole-sheet transfer
+    # never replaces them (#558 arm C).
+    split_placed: set[str] = field(default_factory=set)
+    # Whether the corpus run records P(good); without it, donors go ungated.
+    confidence_known: bool = False
+    # The corpus run's median ground scale, for the donor scale guard.
+    median_m_per_px: float | None = None
+
+    def donor_refusal(self, georef: dict) -> str | None:
+        """Why this edition's ``georef`` may not donate, or None when it may."""
+        if self.confidence_known:
+            p_good = pose_p_good(georef)
+            if p_good is None or p_good < DONOR_MIN_P_GOOD:
+                return f"p_good {p_good}"
+        if self.median_m_per_px and georef.get("width"):
+            ratio = m_per_px(georef) / self.median_m_per_px
+            if not 1 / MAX_DONOR_SCALE_RATIO <= ratio <= MAX_DONOR_SCALE_RATIO:
+                return f"scale {ratio:.2f}x the edition median"
+        return None
 
 
 def load_edition(volume: Path, corpus_run: str) -> Edition:
@@ -326,7 +394,16 @@ def load_edition(volume: Path, corpus_run: str) -> Edition:
         for key in sheet_keys(volume)
         if (georef := read_georef(run_dir, key)) is not None
     }
-    return Edition(volume=volume, year=int(metadata["year"]), corpus=corpus, final={})
+    scales = [m_per_px(g) for g in corpus.values() if g.get("width")]
+    return Edition(
+        volume=volume,
+        year=int(metadata["year"]),
+        corpus=corpus,
+        final={},
+        split_placed=placed_panel_parents(run_dir),
+        confidence_known=any(pose_p_good(g) is not None for g in corpus.values()),
+        median_m_per_px=float(np.median(scales)) if scales else None,
+    )
 
 
 def donors_for(target: Edition, editions: list[Edition]) -> list[Edition]:
@@ -386,9 +463,11 @@ def find_transfer(
 ) -> tuple[Transfer | None, list[str]]:
     """The first accepted transfer from a donor sheet named by ``wanted``, in donor order.
 
-    Each wanted key is resolved in each donor edition (see edition_keys).
-    Returns the transfer with the "year:key" donors tried; when none is
-    accepted, the last attempt at the sheet's own number (for the log) or None.
+    Each wanted key is resolved in each donor edition (see edition_keys). A
+    donor pose its edition refuses (Edition.donor_refusal: low P(good), or a
+    misscaled fit) is not tried. Returns the transfer with the "year:key"
+    donors tried, refusals noted; when none is accepted, the last attempt at
+    the sheet's own number (for the log) or None.
     """
     fallback = None
     tried: list[str] = []
@@ -400,6 +479,12 @@ def find_transfer(
                 )
                 if georef is None:
                     continue
+                refusal = donor_edition.donor_refusal(georef)
+                if refusal is not None:
+                    tried.append(
+                        f"{donor_edition.year}:{donor_key} refused ({refusal})"
+                    )
+                    continue
                 donor = load_sheet(donor_edition.volume, donor_key, georef)
                 if donor is None:
                     continue
@@ -407,6 +492,7 @@ def find_transfer(
                 tried.append(f"{donor_edition.year}:{donor_key}")
                 if transfer is None:
                     continue
+                transfer.donor_p_good = pose_p_good(georef)
                 if transfer.accepted:
                     return transfer, tried
                 if wanted_key == sheet.key:
@@ -479,6 +565,8 @@ def decide(
     transfer: Transfer | None,
     disagreement_m: float | None = None,
     votes: tuple[int, int] | None = None,
+    *,
+    own_p_good: float | None = None,
 ) -> str:
     """What a sheet publishes: "own", "transfer", "replaced" or "unplaced".
 
@@ -489,6 +577,10 @@ def decide(
     has more; a tie keeps the own fit. OSM agreement used to break ties, and
     on Chicago it picked the wrong fit four times in six: on a street grid a
     pose 100-200 m off agrees with OSM about as well as the right one.
+
+    Confidence also replaces without votes: an own fit with P(good) under
+    REPLACE_OWN_MAX_P_GOOD gives way to a transfer whose donor has at least
+    REPLACE_DONOR_MIN_P_GOOD.
     """
     accepted = transfer is not None and transfer.accepted
     if not own_placed:
@@ -496,6 +588,14 @@ def decide(
     if not accepted or disagreement_m is None or disagreement_m <= AGREE_M:
         return "own"
     if votes is not None and votes[1] > votes[0]:
+        return "replaced"
+    assert transfer is not None
+    if (
+        own_p_good is not None
+        and transfer.donor_p_good is not None
+        and own_p_good < REPLACE_OWN_MAX_P_GOOD
+        and transfer.donor_p_good >= REPLACE_DONOR_MIN_P_GOOD
+    ):
         return "replaced"
     return "own"
 
@@ -507,10 +607,14 @@ def transfer_edition(
 
     Each sheet is matched against the nearest edition that places it (that
     edition's final pose when already settled, its corpus pose otherwise).
-    See ``decide`` for which pose a sheet keeps.
+    See ``decide`` for which pose a sheet keeps. A split sheet whose panels the
+    corpus run placed keeps them: it is not matched at all.
     """
     final: dict[str, dict] = {}
     for key in sheet_keys(target.volume):
+        if key in target.split_placed:
+            log.append({"edition": target.year, "key": key, "status": "panels"})
+            continue
         own = target.corpus.get(key)
         sheet = load_sheet(target.volume, key, own)
         if sheet is None:
@@ -556,7 +660,11 @@ def transfer_edition(
                     votes = (len(own_votes), len(transfer_votes))
                     entry["own_votes"] = own_votes
                     entry["transfer_votes"] = transfer_votes
-        status = decide(own is not None, transfer, disagreement, votes)
+        own_p_good = pose_p_good(own) if own is not None else None
+        entry["own_p_good"] = own_p_good
+        status = decide(
+            own is not None, transfer, disagreement, votes, own_p_good=own_p_good
+        )
         entry["status"] = status
         log.append(entry)
         if status == "own":
@@ -701,6 +809,12 @@ def main() -> None:
     features_by_path: dict[Path, FeatureIndex] = {}
     for edition in editions:
         print(f"{edition.volume.name}: {len(edition.corpus)} sheets placed", flush=True)
+        if not edition.confidence_known:
+            print(
+                f"  warning: {edition.volume.name}'s {args.corpus_run} records no P(good) "
+                "(a run before #580); its fits donate ungated",
+                file=sys.stderr,
+            )
         centerlines = (edition.volume / "centerlines.osm.pbf").resolve()
         if centerlines not in features_by_path:
             collection = load_centerlines(centerlines)
