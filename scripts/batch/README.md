@@ -106,6 +106,55 @@ Outputs land under `<item>/runs/<run-tag>/` exactly as a fleet run's do, and
 `mapsnap loc-fit` skips an item already finished under that tag, so
 resubmitting the same list after failures re-runs only what is left.
 
+## Graviton (ARM): the #563 pilot
+
+Graviton spot was cheaper per instance-hour than the x86 shapes corpus-v1 ran
+on (us-west-2 medians, 2026-10-07..14: m8g.2xlarge $0.128, m5 $0.153, r5
+$0.163, m6a $0.182; m6i had come down to $0.121), and a Graviton vCPU is a full
+core rather than a hyperthread. Whether that makes a page cheaper is what the
+pilot measures, together with new crashes and accuracy against corpus-v1.
+
+**The sample** (`arm-pilot.txt`, reasons in `arm-pilot.tsv`): 135 items, 6,439
+pages, smallest first. 45 small (1-10 pages), 39 mid (11-50), 51 large (51+);
+101 have OIM truth scored against corpus-v1 (`oim-score/`). It holds every
+runnable item the PRs merged since v1.3.2 name, the volumes this week's A/Bs
+ran on, up to two truth volumes for each volume a PR names by city and year,
+and a size-stratified fill from the truth set.
+
+**Setup** (admin identity, once): `scripts/batch/setup.sh` creates the
+Graviton compute environment `mapsnap-cpu-spot-arm` (m7g/m8g/r7g.2xlarge, idle
+at 0 vCPUs) and its queue `mapsnap-fit-arm`. The job definitions are shared:
+
+```
+scripts/batch/push-multiarch.sh                      # amd64 + arm64 under one tag
+IMAGE=213478311378.dkr.ecr.us-west-2.amazonaws.com/mapsnap:<sha> \
+  scripts/batch/setup.sh --job-definitions-only
+```
+
+**The run**: the same items, image and code on both architectures, one item
+per child so each item's time and peak memory stand alone.
+
+```
+export AWS_PROFILE=mapsnap
+QUEUE=mapsnap-fit     scripts/batch/submit.sh arm-pilot-x86 scripts/batch/arm-pilot.txt
+QUEUE=mapsnap-fit-arm scripts/batch/submit.sh arm-pilot-arm scripts/batch/arm-pilot.txt
+X86=$(cat /tmp/mapsnap-batch-arm-pilot-x86.jobid) ARM=$(cat /tmp/mapsnap-batch-arm-pilot-arm.jobid)
+scripts/batch/snapshot-instances.sh "$X86" x86-instances.tsv &
+scripts/batch/snapshot-instances.sh "$ARM" arm-instances.tsv &
+scripts/batch/status.sh "$ARM" --watch
+```
+
+**Then compare**, within 24 hours of finishing (Batch forgets attempts after that):
+- **cost per page**: `collect-run.py` on each job, with its instances file;
+- **peak RSS per item**, which decides how many jobs an m8g.2xlarge packs;
+- **crashes**: failed children by exit code (`status.sh`), against the x86 arm;
+- **accuracy**: sheet-equal net against OIM truth on the 101 truth items, each
+  arm against corpus-v1 (code changes since v1.3.2) and against the other
+  (architecture alone; floating point is not bit-identical across them, so
+  expect a few close decisions to flip, not a shift in the scores).
+
+At corpus-v1's ~$0.0009 a page, each arm should cost roughly $6-10.
+
 ## How a job maps to `loc-fit`
 
 Child N of the array runs `mapsnap loc-fit --items <s3 list> --run-tag <tag> …`

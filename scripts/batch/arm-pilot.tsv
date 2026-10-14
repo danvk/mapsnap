@@ -1,0 +1,136 @@
+item	pages	size	truth	corpus_v1_net	place	why
+sanborn00138_001	1	small (1-10)	no		casa grande 1890	PR #503
+sanborn00659_001	1	small (1-10)	yes	0.0	los gatos 1884	truth, by size
+sanborn01711_002	1	small (1-10)	no		ashmore 1910	PR #503,#599
+sanborn03284_001	1	small (1-10)	yes	0.0	breaux bridge 1899	truth, by size
+sanborn03286_001	1	small (1-10)	yes	0.0	campti 1921	PR #507
+sanborn03311_001	1	small (1-10)	yes	0.0	fordoche 1919	truth, by size
+sanborn03327_001	1	small (1-10)	yes	0.0	hornbeck 1921	truth, by size
+sanborn03329_002	1	small (1-10)	yes	0.0	hot wells 1919	named in a PR (Hot Wells 1919)
+sanborn03354_001	1	small (1-10)	yes	0.0	mandeville 1904	truth, by size
+sanborn03367_001	1	small (1-10)	yes	0.0	mira 1921	truth, by size
+sanborn03371_001	1	small (1-10)	yes	0.0	morgan city 1885	truth, by size
+sanborn03373_001	1	small (1-10)	yes	1.0	napoleonville 1885	truth, by size
+sanborn03390_002	1	small (1-10)	yes	-1.0	provencal 1922	A/B this week
+sanborn03408_002	1	small (1-10)	yes	0.0	thibodaux 1892	truth, by size
+sanborn05857_001	1	small (1-10)	no		constableville 1884	PR #599
+sanborn06421_002	1	small (1-10)	yes	1.0	greenville 1891	truth, by size
+sanborn00680_002	2	small (1-10)	yes	0.0	menlo park 1891	truth, by size
+sanborn03408_003	2	small (1-10)	yes	0.5	thibodaux 1898	named in a PR (Thibodaux 1898)
+sanborn03415_001	2	small (1-10)	yes	0.0	welsh 1903	PR #583
+sanborn09029_001	2	small (1-10)	yes	0.0	harrisonburg 1886	truth, by size
+sanborn09046_002	2	small (1-10)	no		mount jackson 1904	PR #503,#599
+sanborn00813_004	3	small (1-10)	no		san francisco 1887	PR #528
+sanborn03290_001	3	small (1-10)	yes	0.3419	church point 1935	truth, by size
+sanborn03335_004	3	small (1-10)	yes	0.3333	jeannerette 1898	truth, by size
+sanborn03396_003	3	small (1-10)	yes	0.0	saint martinville 1903	truth, by size
+sanborn08974_001	3	small (1-10)	yes	0.0	ashland 1908	truth, by size
+sanborn09511_002	3	small (1-10)	no		cadott 1900	PR #518
+sanborn03298_002	4	small (1-10)	yes	0.0	crowley 1898	truth, by size
+sanborn03342_001	4	small (1-10)	yes	0.0	kenner 1926	truth, by size
+sanborn03412_001	4	small (1-10)	yes	0.5008	vivian 1923	PR #583
+sanborn03420_001	4	small (1-10)	yes	0.4985	winnsboro 1924	PR #583
+sanborn09030_001	4	small (1-10)	yes	0.5031	highland springs 1921	truth, by size
+sanborn09379_002	4	small (1-10)	yes	0.7478	woodland 1919	truth, by size
+sanborn01345_005	5	small (1-10)	no		sanford 1901	PR #509
+sanborn01182_003	6	small (1-10)	no		stonington 1901	PR #509
+sanborn03297_002	6	small (1-10)	yes	0.3395	covington 1909	PR #580,#581
+sanborn08035_001	6	small (1-10)	no		wernersville 1914	PR #521
+sanborn00226_003	7	small (1-10)	no		crossett 1921	PR #509
+sanborn06253_001	7	small (1-10)	yes	0.5819	scotia 1914	PR #570
+sanborn08415_001	8	small (1-10)	yes	-0.125	austin 1885	A/B this week; PR #605
+sanborn00002_001	9	small (1-10)	no		alabama city 1926	PR #562
+sanborn08974_003	9	small (1-10)	yes	0.332	ashland 1921	truth, by size
+sanborn09295_005	9	small (1-10)	no		puyallup 1900	PR #520
+sanborn05289_001	10	small (1-10)	yes	0.4598	las vegas 1923	truth, by size
+sanborn05636_004	10	small (1-10)	yes	0.411	swedesboro 1920	truth, by size
+sanborn03307_001	11	mid (11-50)	yes	0.7252	eunice 1950	named in a PR (Eunice 1950)
+sanborn06797_006	11	mid (11-50)	yes	0.4426	miamisburg 1911	truth, by size
+sanborn09091_002	11	mid (11-50)	yes	0.0	westhampton 1931	truth, by size
+sanborn00682_003	12	mid (11-50)	no		merced 1891	PR #509
+sanborn08779_006	12	mid (11-50)	yes	0.4232	temple 1905	truth, by size
+sanborn09032_001	12	mid (11-50)	yes	0.4029	hopewell 1921	truth, by size
+sanborn06158_006	13	mid (11-50)	yes	0.6256	palmyra 1912	truth, by size
+sanborn06797_007	13	mid (11-50)	yes	0.5433	miamisburg 1919	truth, by size
+sanborn02194_006	14	mid (11-50)	yes	0.3732	urbana 1915	truth, by size
+sanborn05487_005	14	mid (11-50)	yes	0.2438	glassboro 1923	truth, by size
+sanborn00659_005	15	mid (11-50)	yes	0.7405	los gatos 1904	truth, by size
+sanborn03401_002	15	mid (11-50)	yes	0.7319	shreveport 1890	PR #583
+sanborn08387_006	16	mid (11-50)	yes	0.5997	tullahoma 1913	truth, by size
+sanborn09042_002	17	mid (11-50)	yes	0.0	manchester 1905	truth, by size
+sanborn06585_008	18	mid (11-50)	yes	0.5132	ashland 1930	truth, by size
+sanborn06421_009	19	mid (11-50)	yes	0.8866	greenville 1923	truth, by size
+sanborn09032_002	21	mid (11-50)	yes	0.6121	hopewell 1927	PR #583
+sanborn01778_006	24	mid (11-50)	yes	0.6989	champaign 1915	named in a PR (Champaign 1915)
+sanborn00793_006	26	mid (11-50)	yes	0.6335	riverside 1895	truth, by size
+sanborn09042_003	26	mid (11-50)	yes	0.0	manchester 1910	truth, by size
+sanborn00071_012	32	mid (11-50)	yes	0.342	mobile 1956	truth, by size
+sanborn09065_013	35	mid (11-50)	yes	0.5047	roanoke 1955	truth, by size
+sanborn08891_014	37	mid (11-50)	yes	0.6216	salt lake city 1950	truth, by size
+sanborn09315_002	38	mid (11-50)	yes	0.4928	seattle 1888	PR #583
+sanborn06645_032	39	mid (11-50)	yes	0.7447	cincinnati 1950	truth, by size
+sanborn06116_006	41	mid (11-50)	no		new york 1899	PR #527
+sanborn08099_019	43	mid (11-50)	yes	0.7219	providence 1950	truth, by size
+sanborn08580_030	44	mid (11-50)	no		houston 1955	PR #519
+sanborn01407_012	46	mid (11-50)	yes	0.1968	columbus 1958	truth, by size
+sanborn08331_007	46	mid (11-50)	yes	0.4808	knoxville 1950	truth, by size
+sanborn08492_029	46	mid (11-50)	yes	0.4886	dallas 1952	truth, by size
+sanborn00169_009	47	mid (11-50)	yes	0.5361	phoenix 1949	truth, by size
+sanborn06648_071	47	mid (11-50)	yes	0.5008	cleveland 1952	truth, by size
+sanborn08415_008	47	mid (11-50)	yes	0.7413	austin 1962	truth, by size
+sanborn00071_011	48	mid (11-50)	yes	0.0	mobile 1956	truth, by size
+sanborn06648_073	48	mid (11-50)	yes	0.7394	cleveland 1952	truth, by size
+sanborn07202_020	48	mid (11-50)	yes	0.405	oklahoma city 1955	truth, by size
+sanborn06648_068	50	mid (11-50)	yes	0.5539	cleveland 1952	truth, by size
+sanborn06911_023	50	mid (11-50)	yes	0.4601	toledo 1950	truth, by size
+sanborn02629_016	60	large (51+)	no		des moines 1957	PR #587
+sanborn06645_001	69	large (51+)	yes	0.5446	cincinnati 1887	A/B this week; PR #603
+sanborn06116_018	71	large (51+)	no		new york 1898	PR #525
+sanborn00817_001	72	large (51+)	yes	0.4288	san jose 1884	PR #598,#600
+sanborn08356_019	73	large (51+)	yes	0.6711	nashville 1957	A/B this week
+sanborn03985_001	76	large (51+)	yes	0.0603	detroit 1884	named in a PR (Detroit 1884)
+sanborn03985_002	76	large (51+)	yes	0.1269	detroit 1884	PR #600
+sanborn05511_029	77	large (51+)	yes	0.5787	hudson co. 1950	PR #583
+sanborn06116_046	78	large (51+)	no		new york 1923	PR #547,#553
+sanborn08356_020	78	large (51+)	yes	0.6047	nashville 1957	named in a PR (Nashville 1957)
+sanborn00799_007	83	large (51+)	yes	0.2735	sacramento 1952	named in a PR (Sacramento 1952)
+sanborn00817_002	83	large (51+)	no		san jose 1891	PR #527
+sanborn01790_087	84	large (51+)	yes	0.9459	chicago 1950	named in a PR (Chicago 1950)
+sanborn03376_026	84	large (51+)	yes	0.9653	new orleans 1950	named in a PR (New Orleans 1951)
+sanborn04858_015	85	large (51+)	no		saint louis 1916	PR #507
+sanborn00985_003	87	large (51+)	no		denver 1890	PR #527
+sanborn06536_012	90	large (51+)	yes	0.699	fargo 1958	named in a PR (Fargo 1958)
+sanborn09064_009	91	large (51+)	yes	0.7643	richmond 1925	A/B this week
+sanborn04720_022	92	large (51+)	yes	0.8936	kansas city 1951	named in a PR (Kansas City 1951)
+sanborn09064_008	92	large (51+)	yes	0.832	richmond 1925	A/B this week
+sanborn00799_006	96	large (51+)	yes	-0.0485	sacramento 1952	named in a PR (Sacramento 1952)
+sanborn05511_036	97	large (51+)	yes	0.7399	hudson co. 1950	A/B this week
+sanborn07905_034	97	large (51+)	yes	0.9329	philadelphia 1950	named in a PR (Philadelphia 1950)
+sanborn05793_003	98	large (51+)	no		buffalo 1889	PR #527
+sanborn06116_001	98	large (51+)	no		new york 1894	A/B this week
+sanborn03376_030	100	large (51+)	no		new orleans 1951	PR #587
+sanborn01790_111	102	large (51+)	yes	0.95	chicago 1951	named in a PR (Chicago 1951)
+sanborn06656_014	102	large (51+)	no		columbus 1951	A/B this week
+sanborn03985_041	104	large (51+)	yes	0.7719	detroit 1929	named in a PR (Detroit 1929)
+sanborn00813_032	105	large (51+)	no		san francisco 1950	PR #528
+sanborn03376_028	105	large (51+)	yes	0.8893	new orleans 1950	named in a PR (New Orleans 1951)
+sanborn00817_006	107	large (51+)	no		san jose 1950	PR #587
+sanborn03985_005	107	large (51+)	yes	0.7907	detroit 1897	A/B this week
+sanborn03376_005	108	large (51+)	yes	0.868	new orleans 1896	named in a PR (New Orleans 1896)
+sanborn05791_013	109	large (51+)	no		brooklyn 1904	PR #553
+sanborn06116_048	109	large (51+)	no		new york 1920	PR #547
+sanborn00015_020	112	large (51+)	yes	0.5387	birmingham 1950	PR #583
+sanborn00813_038	115	large (51+)	yes	0.811	san francisco 1950	named in a PR (San Francisco 1950)
+sanborn00813_031	119	large (51+)	yes	0.2785	san francisco 1950	named in a PR (San Francisco 1950)
+sanborn04720_020	119	large (51+)	yes	0.8269	kansas city 1951	named in a PR (Kansas City 1951)
+sanborn01790_085	120	large (51+)	no		chicago 1950	PR #507,#521
+sanborn01790_109	120	large (51+)	yes	0.7413	chicago 1951	named in a PR (Chicago 1951)
+sanborn00656_065	121	large (51+)	yes	0.5808	los angeles 1949	named in a PR (Los Angeles 1949)
+sanborn02502_005	123	large (51+)	no		south bend 1917	PR #507
+sanborn00656_064	124	large (51+)	no		los angeles 1949	A/B this week
+sanborn07905_031	124	large (51+)	yes	0.8854	philadelphia 1950	PR #547
+sanborn05791_062	125	large (51+)	no		brooklyn 1951	PR #547
+sanborn06246_005	126	large (51+)	yes	0.7065	schenectady 1914	A/B this week; PR #608
+sanborn00656_054	127	large (51+)	yes	0.8717	los angeles 1950	PR #528
+sanborn01790_094	133	large (51+)	yes	0.7521	chicago 1950	named in a PR (Chicago 1950)
+sanborn06900_010	174	large (51+)	no		springfield 1955	PR #507

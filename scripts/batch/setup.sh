@@ -18,6 +18,7 @@
 #          mapsnap-craft copied over) and ecsInstanceRole + instance profile
 #   Batch  compute environment mapsnap-cpu-spot  (SPOT_CAPACITY_OPTIMIZED, 0-256 vCPU)
 #          job queue           mapsnap-fit
+#          Graviton            compute environment mapsnap-cpu-spot-arm, job queue mapsnap-fit-arm (#563)
 #          job definitions     mapsnap-loc-fit (2 vCPU / 7.5 GB), mapsnap-loc-fit-large
 #                              (2 vCPU / 16 GB); ATTEMPTS, ATTEMPT_SECONDS and IMAGE
 #                              override the retry count, per-attempt timeout and image
@@ -232,6 +233,54 @@ if ! aws batch describe-job-queues --region "$REGION" --job-queues mapsnap-fit \
     --compute-environment-order order=1,computeEnvironment=mapsnap-cpu-spot > /dev/null
   echo "Batch: $(did "job queue mapsnap-fit")"
 else echo "Batch: job queue exists"; fi
+
+# --- Batch: Graviton (ARM) compute environment and queue (#563) -----------------
+# The same jobs on Graviton spot, for the multi-arch image (amd64 + arm64 under
+# one tag; see the README): Batch pulls the arm64 variant on these hosts, so the
+# job definitions are shared and a run picks its architecture by queue
+# (QUEUE=mapsnap-fit-arm scripts/batch/submit.sh ...). The same 32 GiB / 64 GiB
+# shapes as the x86 environment, for the same packing (four 7.5 GB jobs on an
+# 8-vCPU box; r7g for the 16 GB -large jobs). A Graviton vCPU is a full core
+# rather than a hyperthread, and m8g spot ran $0.128/h against $0.153 (m5),
+# $0.163 (r5) and $0.182 (m6a) over 2026-10-07..14 -- whether that is cheaper per
+# page is what the pilot measures. Idle at 0 vCPUs, it costs nothing.
+ARM_TYPES='["m7g.2xlarge", "m8g.2xlarge", "r7g.2xlarge"]'
+if ! aws batch describe-compute-environments --region "$REGION" --compute-environments mapsnap-cpu-spot-arm \
+     --query 'computeEnvironments[0].computeEnvironmentName' --output text 2>/dev/null | grep -q mapsnap-cpu-spot-arm; then
+  run aws batch create-compute-environment --region "$REGION" --cli-input-json "$(cat <<JSON
+{
+  "computeEnvironmentName": "mapsnap-cpu-spot-arm",
+  "type": "MANAGED",
+  "state": "ENABLED",
+  "computeResources": {
+    "type": "SPOT",
+    "allocationStrategy": "SPOT_CAPACITY_OPTIMIZED",
+    "minvCpus": 0,
+    "maxvCpus": 256,
+    "instanceTypes": $ARM_TYPES,
+    "subnets": $SUBNETS,
+    "securityGroupIds": ["$SG"],
+    "instanceRole": "ecsInstanceRole",
+    "tags": {"project": "mapsnap-craft"}
+  }
+}
+JSON
+)" > /dev/null
+  echo "Batch: $(did "compute environment mapsnap-cpu-spot-arm")"
+else
+  run aws batch update-compute-environment --region "$REGION" \
+    --compute-environment mapsnap-cpu-spot-arm \
+    --compute-resources "{\"instanceTypes\":$ARM_TYPES,\"maxvCpus\":256,\"minvCpus\":0}" > /dev/null
+  echo "Batch: Graviton compute environment exists (instance types refreshed)"
+fi
+if [ "$DRY_RUN" = 1 ]; then echo "+ wait for compute environment mapsnap-cpu-spot-arm to be VALID"
+else wait_for_compute_environment mapsnap-cpu-spot-arm; fi
+if ! aws batch describe-job-queues --region "$REGION" --job-queues mapsnap-fit-arm \
+     --query 'jobQueues[0].jobQueueName' --output text 2>/dev/null | grep -q mapsnap-fit-arm; then
+  run aws batch create-job-queue --region "$REGION" --job-queue-name mapsnap-fit-arm --priority 1 --state ENABLED \
+    --compute-environment-order order=1,computeEnvironment=mapsnap-cpu-spot-arm > /dev/null
+  echo "Batch: $(did "job queue mapsnap-fit-arm")"
+else echo "Batch: Graviton job queue exists"; fi
 fi
 
 # --- Batch: the loc-fit job definitions ----------------------------------------
