@@ -33,6 +33,7 @@ each page's number detections and the mutual-edge adjacency graph.
 import argparse
 import json
 import math
+import os
 import re
 import sys
 from collections import defaultdict
@@ -535,6 +536,24 @@ def digit_detections(
     return detections
 
 
+def digit_reader() -> Callable[..., list[dict]]:
+    """How this run reads page-number digits: the trained detector's boxes, or CRAFT's.
+
+    By default each page's numbers are found by the adjacency-number detector and
+    read at three sizes (``adjacency_detector.detector_digit_detections``, #589).
+    On six volumes it claimed more labelled numbers (67% -> 75%) at higher
+    precision (84% -> 92%) and made 23% more mutual edges.
+    ``MAPSNAP_NO_ADJACENCY_DETECTOR=1`` reads digits in CRAFT's boxes instead.
+    """
+    if os.environ.get("MAPSNAP_NO_ADJACENCY_DETECTOR") == "1":
+        return digit_detections
+    from mapsnap.adjacency_detector import detector_digit_detections, load_detector
+    from mapsnap.keymap.number_model import select_device
+
+    device = select_device()
+    return detector_digit_detections(load_detector(device=device), device)
+
+
 def polygon_rotation_deg(polygon: list[list[float]]) -> float:
     """Rotation of a detection quad off the image axes, in degrees folded to [0, 45].
 
@@ -949,6 +968,7 @@ def main() -> None:
     import easyocr
 
     reader = easyocr.Reader(["en"], gpu=not args.no_gpu, verbose=False)
+    read_digits = digit_reader()
 
     pages: dict[str, dict] = {}
     for image in tqdm(images, smoothing=0):
@@ -966,9 +986,7 @@ def main() -> None:
         # attributed and gated per panel, because each panel has its own pose and
         # its own printed margin references. Unsplit pages are one unit.
         units = page_panels(args.volume, stem, width, height)
-        detections = digit_detections(
-            image, reader, valid_keys, craft_boxes, units=units
-        )
+        detections = read_digits(image, reader, valid_keys, craft_boxes, units=units)
         for unit_stem, _polygon, unit_bbox in units:
             unit_detections = [
                 d for d in detections if d.get("panel", unit_stem) == unit_stem
