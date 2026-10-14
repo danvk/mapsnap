@@ -411,14 +411,15 @@ def score_adjacency(adjacency: dict, truth: dict) -> Counter:
 
 def cmd_adjacency(args: argparse.Namespace) -> None:
     args.out.mkdir(parents=True, exist_ok=True)
-    original = page_adjacency.digit_detections
+    original = page_adjacency.digit_reader
     device = select_device()
     for arm in ("craft", "detector"):
-        page_adjacency.digit_detections = (
-            original
+        read_digits = (
+            digit_detections
             if arm == "craft"
             else detector_digit_detections(load_detector(args.weights, device), device)
         )
+        page_adjacency.digit_reader = lambda read_digits=read_digits: read_digits
         for volume in DEV_VOLUMES:
             output = args.out / f"{volume}.{arm}.json"
             if not output.exists():
@@ -429,7 +430,7 @@ def cmd_adjacency(args: argparse.Namespace) -> None:
                     str(output),
                 ]
                 page_adjacency.main()
-    page_adjacency.digit_detections = original
+    page_adjacency.digit_reader = original
     for arm in ("craft", "detector"):
         t = Counter()
         for volume in DEV_VOLUMES:

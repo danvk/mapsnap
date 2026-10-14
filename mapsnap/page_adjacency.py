@@ -537,19 +537,20 @@ def digit_detections(
 
 
 def digit_reader() -> Callable[..., list[dict]]:
-    """How this run reads page-number digits: CRAFT's boxes, or the trained detector's.
+    """How this run reads page-number digits: the trained detector's boxes, or CRAFT's.
 
-    ``MAPSNAP_ADJACENCY_DETECTOR=1`` reads the adjacency-number detector's boxes at
-    three sizes (``adjacency_detector.detector_digit_detections``, #589) instead of
-    CRAFT's. An A/B switch until the detector is the default; off, nothing changes.
+    By default each page's numbers are found by the adjacency-number detector and
+    read at three sizes (``adjacency_detector.detector_digit_detections``, #589).
+    On six volumes it claimed more labelled numbers (67% -> 75%) at higher
+    precision (84% -> 92%) and made 23% more mutual edges.
+    ``MAPSNAP_NO_ADJACENCY_DETECTOR=1`` reads digits in CRAFT's boxes instead.
     """
-    if os.environ.get("MAPSNAP_ADJACENCY_DETECTOR") != "1":
+    if os.environ.get("MAPSNAP_NO_ADJACENCY_DETECTOR") == "1":
         return digit_detections
     from mapsnap.adjacency_detector import detector_digit_detections, load_detector
     from mapsnap.keymap.number_model import select_device
 
     device = select_device()
-    print("Reading digits from the adjacency-number detector (#589).", file=sys.stderr)
     return detector_digit_detections(load_detector(device=device), device)
 
 

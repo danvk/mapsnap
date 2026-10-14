@@ -527,11 +527,11 @@ def test_same_box_ignores_a_sub_pixel_difference() -> None:
     assert not same_box(a, [[10, 100], [50, 100], [50, 180], [10, 180]])
 
 
-def test_digit_reader_is_craft_unless_the_detector_flag_is_set(monkeypatch):
+def test_digit_reader_is_the_detector_unless_opted_out(monkeypatch):
     from mapsnap import page_adjacency
 
-    monkeypatch.delenv("MAPSNAP_ADJACENCY_DETECTOR", raising=False)
-    assert page_adjacency.digit_reader() is page_adjacency.digit_detections
-    monkeypatch.setenv("MAPSNAP_ADJACENCY_DETECTOR", "1")
+    monkeypatch.delenv("MAPSNAP_NO_ADJACENCY_DETECTOR", raising=False)
     detector = page_adjacency.digit_reader()
     assert detector is not page_adjacency.digit_detections and callable(detector)
+    monkeypatch.setenv("MAPSNAP_NO_ADJACENCY_DETECTOR", "1")
+    assert page_adjacency.digit_reader() is page_adjacency.digit_detections
