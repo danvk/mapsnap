@@ -5,6 +5,11 @@ property set to the OSM name (e.g. "Hooper Street"). georef_from_labels.py calls
 normalize_street on this value, which uppercases and expands abbreviations, so
 "HOOPER ST" in a detected label matches "Hooper Street" from OSM.
 
+A way that OSM records a former name for (its ``old_name`` tag) also carries
+an ``old_names`` property, and build_block_index indexes each one as another
+name for the same blocks (#534). A Sanborn sheet prints the name as of its
+survey: Austin's West 6th Street was Pecan Street in 1885.
+
 Two sources produce the same FeatureCollection: an Overpass JSON dump
 (``download-osm``, the per-volume path) through ``osm_to_centerlines``, and an
 OSM file (a county's ``.osm.pbf`` extract, or ``.osm`` XML) through
@@ -22,6 +27,7 @@ import argparse
 import csv
 import json
 import math
+import re
 import sys
 from pathlib import Path
 
@@ -53,6 +59,39 @@ EXCLUDE_HIGHWAY = {
 # few cases where it is. highway=service without service=* is a tagging
 # error, but we let it slide.
 OK_SERVICE = {"alley", None}
+
+# "19th Street (Old Magnolia Avenue)": a parenthetical in old_name names another
+# former name, often introduced by "old".
+OLD_NAME_PARENTHETICAL = re.compile(r"\(\s*(?:old\s+)?([^)]*?)\s*\)", re.IGNORECASE)
+
+
+def former_names(name: str, old_name: str | None) -> list[str]:
+    """A way's former names from its ``old_name`` tag, minus its current ``name``.
+
+    OSM separates several values with ";", and some Austin ways name a second
+    former name in parentheses ("Bois de Arc Street (old Bois d'Arc Street)"),
+    so both become names of their own.
+    """
+    if not old_name:
+        return []
+    names: list[str] = []
+    for value in old_name.split(";"):
+        names.extend(m.group(1) for m in OLD_NAME_PARENTHETICAL.finditer(value))
+        names.append(OLD_NAME_PARENTHETICAL.sub("", value))
+    kept: list[str] = []
+    for former in (" ".join(n.split()) for n in names):
+        if former and former != name and former not in kept:
+            kept.append(former)
+    return kept
+
+
+def street_properties(name: str, old_name: str | None) -> dict:
+    """A centerline feature's properties: its name, and its former names if any."""
+    properties: dict = {"street_name": name}
+    if old := former_names(name, old_name):
+        properties["old_names"] = old
+    return properties
+
 
 _FT_PER_DEG_LAT: float = math.pi * 20_925_524.0 / 180.0
 _INTERSECTION_CLUSTER_FT: float = 60.0
@@ -104,7 +143,7 @@ def osm_to_centerlines(osm_json: str) -> dict:
         features.append(
             {
                 "type": "Feature",
-                "properties": {"street_name": name},
+                "properties": street_properties(name, tags.get("old_name")),
                 "geometry": {"type": "LineString", "coordinates": coords},
             }
         )
@@ -152,7 +191,7 @@ def centerlines_from_osm(osm_path: Path) -> dict:
         features.append(
             {
                 "type": "Feature",
-                "properties": {"street_name": tags["name"]},
+                "properties": street_properties(tags["name"], tags.get("old_name")),
                 "geometry": geometry,
             }
         )

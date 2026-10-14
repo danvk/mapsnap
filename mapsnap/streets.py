@@ -589,6 +589,25 @@ class Block:
 
     street_name: str
     coords: np.ndarray = dataclass_field(repr=False)  # shape (N, 2), columns [lon, lat]
+    # For a block filed under a former name (OSM old_name, #534): the street's
+    # current name. None for a block filed under the name the street has now.
+    current_name: str | None = None
+
+
+def former_name_streets(index: dict[str, list[Block]]) -> dict[str, list[str]]:
+    """Index names reached through an OSM old_name, each with its streets' current names.
+
+    A name whose blocks include a former name's (Austin's "WALNUT STREET", and its
+    alias "WALNUT") maps to the sorted current names of those streets ("EAST
+    FOURTEENTH STREET", "WEST FOURTEENTH STREET"). Names reached only through
+    current names are absent.
+    """
+    former: dict[str, list[str]] = {}
+    for name, blocks in index.items():
+        current = sorted({b.current_name for b in blocks if b.current_name})
+        if current:
+            former[name] = current
+    return former
 
 
 def build_block_index(geojson: dict) -> dict[str, list[Block]]:
@@ -599,6 +618,13 @@ def build_block_index(geojson: dict) -> dict[str, list[Block]]:
     (e.g. "LIBERTY" for "SOUTH LIBERTY STREET"), and leading-type-stripped aliases
     (e.g. "X" for "AVENUE X"). Each alias is only added when unambiguous (exactly
     one full name maps to that stripped form).
+
+    A feature's ``old_names`` (OSM ``old_name``, #534) index its geometry under
+    each former name too, merged into any street that already has that name. The
+    aliases above then apply to them as to any name: Austin's West 10th Street,
+    formerly "Mulberry Street", is also found as "MULBERRY". Those blocks carry
+    the street's ``current_name``, so a match through a former name can be told
+    apart (see former_name_streets).
     """
     index: dict[str, list[Block]] = {}
     for feature in geojson["features"]:
@@ -612,11 +638,19 @@ def build_block_index(geojson: dict) -> dict[str, list[Block]]:
             if geom["type"] == "MultiLineString"
             else [geom["coordinates"]]
         )
+        former = [
+            normalize_street(n) for n in feature["properties"].get("old_names") or []
+        ]
         for line in lines:
             if len(line) < 2:
                 continue
             coords = np.array([[c[0], c[1]] for c in line], dtype=float)
             index.setdefault(name, []).append(Block(street_name=name, coords=coords))
+            for old in former:
+                if old and old != name:
+                    index.setdefault(old, []).append(
+                        Block(street_name=old, coords=coords, current_name=name)
+                    )
 
     # Build aliases from bare name → full name for unambiguous cases.
     # e.g. "MAGAZINE STREET" → also index under "MAGAZINE".

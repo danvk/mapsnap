@@ -1212,6 +1212,71 @@ def test_finalize_georef_nofit_has_marker_and_no_initial_pair(tmp_path):
     assert "corners" in data
 
 
+def test_finalize_georef_records_matches_through_an_old_name(tmp_path):
+    # Austin p8__1 (#534): WALNUT is West 14th Street's old name, COLORADO a current one.
+    from PIL import Image
+
+    from mapsnap.georef_from_labels import _finalize_georef
+
+    image_path = tmp_path / "p8__1.jpg"
+    Image.new("RGB", (400, 300)).save(image_path)
+    A = np.array([[1e-5, 0.0, -90.0], [0.0, -1e-5, 30.0]])
+    walnut = _rh_feat("WALNUT", (100.0, 100.0), 0.0)
+    colorado = _rh_feat("COLORADO STREET", (200.0, 100.0), np.pi / 2)
+    gcps = [
+        IntersectionGCP(
+            "COLORADO STREET",
+            "WALNUT STREET",
+            (200.0, 100.0),
+            (-89.998, 29.999),
+            0.0,
+            colorado,
+            walnut,
+        )
+    ]
+    former = {
+        "WALNUT": ["WEST FOURTEENTH STREET"],
+        "WALNUT STREET": ["WEST FOURTEENTH STREET"],
+    }
+
+    def finalize(inliers: list[int]) -> dict:
+        out_path = tmp_path / "p8__1.georef.json"
+        _finalize_georef(
+            A,
+            [walnut, colorado],
+            gcps,
+            inliers,
+            [1e-5],
+            str(image_path),
+            str(out_path),
+            "labels.json",
+            "centerlines.geojson",
+            former_names=former,
+        )
+        return json.loads(out_path.read_text())
+
+    data = finalize([0, 1])
+    walnut_out, colorado_out = data["streets"]
+    assert walnut_out["old_name_of"] == ["WEST FOURTEENTH STREET"]
+    assert "old_name_of" not in colorado_out
+    assert data["intersections"][0]["old_name_of"] == {
+        "WALNUT STREET": ["WEST FOURTEENTH STREET"]
+    }
+    assert data["used_old_name"] is True
+    # The intersection is an inlier by construction; with WALNUT's constraint and
+    # the intersection both outliers, nothing old_name-derived shaped the fit.
+    gcps[0] = IntersectionGCP(
+        "COLORADO STREET",
+        "WALNUT STREET",
+        (200.0, 100.0),
+        (-89.9, 29.9),
+        0.0,
+        colorado,
+        walnut,
+    )
+    assert finalize([1])["used_old_name"] is False
+
+
 # is_rotation_outlier ------------------------------------------------------
 
 # Axis-aligned similarity: pixel (x, y) -> (lon, lat) = (-90 + 1e-5·x, 30 - 1e-5·y). A

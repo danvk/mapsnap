@@ -12,6 +12,7 @@ from mapsnap.osm_to_centerlines import (
     _cluster_coords,
     centerlines_from_osm,
     compute_street_intersections,
+    former_names,
     load_centerlines,
 )
 from mapsnap.utils import default_centerlines, require_centerlines
@@ -161,6 +162,7 @@ def test_centerlines_from_osm_keeps_named_drivable_ways_with_geometry(tmp_path: 
         # footway dropped, driveway dropped, alley kept, unnamed dropped,
         # the way with a node the file has no location for dropped
         assert names == ["Hooper Street", "Back Alley"]
+        assert "old_names" not in collection["features"][0]["properties"]
         hooper = collection["features"][0]["geometry"]
         assert hooper["type"] == "LineString"
         assert hooper["coordinates"] == [[-73.0, 40.0], [-73.0, 40.001]]
@@ -217,3 +219,42 @@ def test_cli_converts_an_osm_file_and_can_skip_the_debug_files(
     assert out.exists()
     assert not (out.parent / "streets.txt").exists()
     assert not (out.parent / "intersections.csv").exists()
+
+
+def test_former_names_split_values_and_parentheticals():
+    assert former_names("West 6th Street", None) == []
+    assert former_names("West 6th Street", "Pecan Street") == ["Pecan Street"]
+    assert former_names("A Street", "B Street;C Street") == ["B Street", "C Street"]
+    # Austin: a parenthetical names a second former name, often after "old".
+    assert former_names(
+        "West MLK Jr Boulevard", "19th Street (Old Magnolia Avenue)"
+    ) == [
+        "Magnolia Avenue",
+        "19th Street",
+    ]
+    assert former_names(
+        "East 7th Street", "Bois de Arc Street (old Bois d'Arc Street)"
+    ) == [
+        "Bois d'Arc Street",
+        "Bois de Arc Street",
+    ]
+    # A former name equal to the current one adds nothing.
+    assert former_names("Main Street", "Main Street") == []
+
+
+def test_centerlines_from_osm_carries_a_ways_old_name(tmp_path: Path):
+    xml = tmp_path / "renamed.osm"
+    xml.write_text(
+        """<?xml version='1.0' encoding='UTF-8'?>
+<osm version="0.6" generator="test">
+  <node id="1" lat="30.2700000" lon="-97.7500000"/>
+  <node id="2" lat="30.2700000" lon="-97.7490000"/>
+  <way id="10"><nd ref="1"/><nd ref="2"/><tag k="highway" v="residential"/><tag k="name" v="West 6th Street"/><tag k="old_name" v="Pecan Street"/></way>
+</osm>
+"""
+    )
+    (feature,) = centerlines_from_osm(xml)["features"]
+    assert feature["properties"] == {
+        "street_name": "West 6th Street",
+        "old_names": ["Pecan Street"],
+    }

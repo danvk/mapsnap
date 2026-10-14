@@ -910,6 +910,48 @@ def test_from_snap_counts_merged_snap_sources():
     assert not from_snap(Hypothesis("georef", affine(0), merged_sources=["streets"]))
 
 
+def test_from_georef_follows_the_ransac_fit_through_snap_refinement():
+    from mapsnap.reconcile import Hypothesis, from_georef
+
+    assert from_georef(Hypothesis("georef", affine(0)), False)
+    assert from_georef(
+        Hypothesis("snap:0", affine(0), merged_sources=["georef"]), False
+    )
+    # Snap's own sidecar descends from the fit only when it refined it.
+    assert from_georef(Hypothesis("georef-snap", affine(0)), True)
+    assert not from_georef(Hypothesis("georef-snap", affine(0)), False)
+    assert not from_georef(Hypothesis("georef-street", affine(0)), True)
+
+
+def test_provenance_records_a_published_old_name_fit(tmp_path):
+    """used_old_name: an old_name shaped a georef fit that made it to the final pose (#534)."""
+    import json
+
+    from mapsnap.reconcile import publish
+
+    (tmp_path / "p1.georef.json").write_text(json.dumps({"used_old_name": True}))
+    (tmp_path / "p2.georef.json").write_text(json.dumps({"used_old_name": True}))
+    (tmp_path / "p2.georef-snap.json").write_text(
+        json.dumps({"osm_snap": {"refine": False}})
+    )
+    (tmp_path / "p3.georef.json").write_text(json.dumps({"used_old_name": False}))
+    nodes = {
+        "p1": make_node("p1", [scored("georef", affine(0), 0.9)]),
+        "p2": make_node("p2", [scored("georef-snap", affine(0), 0.9)]),
+        "p3": make_node("p3", [scored("georef", affine(0), 0.9)]),
+    }
+    publish(tmp_path, nodes, {"p1": 0, "p2": 0, "p3": 0})
+
+    def used(stem: str) -> bool:
+        return json.loads((tmp_path / f"{stem}.provenance.json").read_text())[
+            "used_old_name"
+        ]
+
+    assert used("p1")
+    assert not used("p2")  # snap's challenger replaced the old-name fit
+    assert not used("p3")
+
+
 def test_rung_note_band_matches_the_snap_constant():
     """The two modules import each other lazily, so the band is mirrored by hand."""
     from mapsnap.reconcile import RUNG_NOTE_BAND
