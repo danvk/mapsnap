@@ -25,6 +25,7 @@ Usage:
 """
 
 import argparse
+import functools
 import glob
 import json
 import re
@@ -59,6 +60,8 @@ RIGHTS = "https://opendatacommons.org/licenses/odbl/1-0/"
 # Clip maskers, by --masks name; each takes compute_all_clip_masks's arguments.
 MASKERS = {
     "region": compute_region_clip_masks,
+    # Region masks that also show margins no other page reaches (#571).
+    "region-free": functools.partial(compute_region_clip_masks, free_margins=True),
     "blocks": compute_all_clip_masks,
 }
 
@@ -422,7 +425,7 @@ def _georef_metadata(
     georef: dict,
     split_canvas: tuple[float, float, float, float] | None = None,
 ) -> list[dict]:
-    """Build IIIF metadata entries for streets, intersections, and split canvas bounds.
+    """Build IIIF metadata entries: streets, intersections, confidence, split canvas bounds.
 
     split_canvas, when present, gives the sub-image region within the full canvas as
     (x, y, w, h) in canvas pixel coordinates, derived from the panel polygon.
@@ -433,6 +436,12 @@ def _georef_metadata(
         {"label": "streets", "value": str(n_streets)},
         {"label": "intersections", "value": str(n_intersections)},
     ]
+    # Reconcile's estimate that the pose is within 25 ft (mapsnap.confidence).
+    confidence = (georef.get("reconcile") or {}).get("confidence")
+    if confidence:
+        entries.append({"label": "confidence", "value": f"{confidence['p_good']:.2f}"})
+        if confidence.get("provisional"):
+            entries.append({"label": "confidence_provisional", "value": "true"})
     if split_canvas is not None:
         x, y, w, h = split_canvas
         entries += [
@@ -1084,8 +1093,10 @@ def main() -> None:
         default="region",
         help=(
             "How clip masks divide the ground between pages: 'region' from the "
-            "content-region model, cut along street blocks (#544); 'blocks' by "
-            "each block's ink, the masker before that. Both need --centerlines."
+            "content-region model, cut along street blocks and kept off any dark "
+            "border around the sheet (#544, #571); 'region-free' also shows "
+            "margins no other page reaches; 'blocks' by each block's ink, the "
+            "masker before 'region'. All need --centerlines."
         ),
     )
     parser.add_argument(

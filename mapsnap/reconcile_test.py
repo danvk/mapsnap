@@ -9,6 +9,8 @@ import pytest
 
 from mapsnap.reconcile import (
     KEEP_PRIOR,
+    PANEL_KEEP_PRIOR,
+    PANEL_VERIFIED_FLOOR,
     UNPLACED,
     W_NOTE_MISMATCH,
     W_RUNG_OFF,
@@ -17,6 +19,8 @@ from mapsnap.reconcile import (
     build_edges,
     collect_hypotheses,
     dedupe_hypotheses,
+    holds_its_place,
+    keep_prior,
     normalize_name_penalty,
     pairwise_energy,
     pose_scale_log2,
@@ -72,7 +76,7 @@ def write_sidecar(tmp_path: Path, stem: str, variant: str, doc: dict) -> Path:
 
 
 def make_unit(stem: str, width: int = 1000, height: int = 800):
-    from mapsnap.edge_join_experiment import PageUnit
+    from mapsnap.page_units import PageUnit
 
     return PageUnit(
         stem=stem,
@@ -97,11 +101,12 @@ def scored(
     gcps: int = 2,
     published=False,
     page_placed=True,
+    panel=False,
 ):
     h = Hypothesis(source=source, affine=a, effective_gcps=gcps)
     if a is not None:
         h.scores["verification"] = verification
-    unary_energy(h, published, 600.0, None, None, page_placed=page_placed)
+    unary_energy(h, published, 600.0, None, None, page_placed=page_placed, panel=panel)
     return h
 
 
@@ -158,6 +163,96 @@ def test_keep_prior_defends_by_measured_support():
     assert strong.unary < unplaced.unary  # kept on its prior
     assert weak.unary > unplaced.unary  # no evidence, no prior, no keep
     assert KEEP_PRIOR[("4+", False)] > KEEP_PRIOR[("0-1", False)]
+
+
+def test_weakly_scored_one_gcp_panel_is_not_kept():
+    # Covington 1909 p6__2: a one-GCP panel fit 125,772 ft off, which snap
+    # scored a weak 0.32. As a page that score bought the 0.69 verified prior;
+    # as a panel it is below the measured range and buys nothing.
+    unplaced = scored(UNPLACED, None, 0.0)
+    weak_panel = scored("georef", affine(0), 0.32, gcps=1, published=True, panel=True)
+    weak_page = scored("georef", affine(0), 0.32, gcps=1, published=True)
+    assert weak_panel.unary > unplaced.unary
+    assert weak_panel.unary_terms["evidence"] == 0.0
+    assert weak_page.unary < unplaced.unary  # pages are unchanged
+    strong_panel = scored("georef", affine(0), 1.4, gcps=1, published=True, panel=True)
+    assert strong_panel.unary < unplaced.unary
+
+
+def test_panel_keep_prior_reads_the_panel_table():
+    assert keep_prior(1, 0.5, panel=True) == PANEL_KEEP_PRIOR[("0-1", False)]
+    assert (
+        keep_prior(1, PANEL_VERIFIED_FLOOR, panel=True)
+        == PANEL_KEEP_PRIOR[("0-1", True)]
+    )
+    assert keep_prior(3, 0.1, panel=True) == PANEL_KEEP_PRIOR[("2-3", True)]
+    assert keep_prior(1, 0.5) == KEEP_PRIOR[("0-1", True)]
+
+
+def test_a_contradicting_score_still_counts_against_a_panel():
+    weak = scored("georef", affine(0), -0.4, gcps=1, published=True, panel=True)
+    assert weak.unary_terms["evidence"] == pytest.approx(0.4)
+
+
+def test_a_worthless_panel_fit_does_not_waive_the_entry_bar():
+    # sanborn06253_001 p5__3: a one-GCP panel fit scoring 0.15 is worth less
+    # than unplaced, so it must not let a 0-GCP snap alias (1.24, ambiguous)
+    # in without paying the entry bar.
+    fit = Hypothesis(source="georef", affine=affine(0), effective_gcps=1)
+    fit.scores["verification"] = 0.15
+    challenger = Hypothesis(source="snap:0", affine=affine(400), effective_gcps=0)
+    challenger.scores.update(verification=1.24, ambiguous=True)
+    unplaced = Hypothesis(source=UNPLACED, affine=None)
+    panel = make_node("p5__3", [fit, challenger, unplaced], base="p5")
+    assert not holds_its_place(panel)
+    unary_energy(challenger, False, 600.0, None, None, page_placed=False, panel=True)
+    unary_energy(unplaced, False, 600.0, None, None, page_placed=False, panel=True)
+    assert challenger.unary > unplaced.unary
+
+
+def test_a_supported_fit_holds_its_place():
+    strong = Hypothesis(source="georef", affine=affine(0), effective_gcps=5)
+    strong.scores["verification"] = 1.3
+    verified = Hypothesis(source="georef", affine=affine(0), effective_gcps=1)
+    verified.scores["verification"] = PANEL_VERIFIED_FLOOR
+    weak = Hypothesis(source="georef", affine=affine(0), effective_gcps=1)
+    weak.scores["verification"] = 0.15
+    assert holds_its_place(make_node("p2__1", [strong], base="p2"))
+    assert holds_its_place(make_node("p2__1", [verified], base="p2"))
+    # A whole page's weak fit holds its place only with a non-negative score
+    # (#576): KEEP_PRIOR ("0-1", True) = 0.69, ("0-1", False) = 0.00.
+    assert holds_its_place(make_node("p2", [weak]))
+    contradicted = Hypothesis(source="georef", affine=affine(0), effective_gcps=1)
+    contradicted.scores["verification"] = -0.43
+    assert not holds_its_place(make_node("p2", [contradicted]))
+    strong_page = Hypothesis(source="georef", affine=affine(0), effective_gcps=5)
+    strong_page.scores["verification"] = -0.4
+    assert holds_its_place(make_node("p2", [strong_page]))  # ("4+", False) = 0.57
+    assert not holds_its_place(make_node("p2__1", [weak], published=None, base="p2"))
+
+
+def test_a_good_one_gcp_panel_scoring_above_the_floor_is_kept():
+    # washington_dc_1916_vol_2 p125__2: a one-GCP panel fit 6 ft from truth,
+    # scored 0.89 -- verified under the 0.8 floor, so it holds its place.
+    fit = scored("georef", affine(0), 0.89, gcps=1, published=True, panel=True)
+    assert PANEL_VERIFIED_FLOOR <= 0.89
+    assert fit.unary < scored(UNPLACED, None, 0.0).unary
+    assert holds_its_place(make_node("p125__2", [fit], base="p125"))
+
+
+def test_a_contradicted_one_gcp_page_makes_snap_pay_the_entry_bar():
+    # chicago_il_1950_vol_1 p1N (#576): a one-GCP fit scoring -0.43 is worth no
+    # more than unplaced, so snap's candidate (406 ft off) must clear the entry
+    # bar instead of walking in.
+    fit = Hypothesis(source="georef", affine=affine(0), effective_gcps=1)
+    fit.scores["verification"] = -0.43
+    alias = Hypothesis(source="snap:0", affine=affine(400), effective_gcps=0)
+    alias.scores["verification"] = 1.1
+    page = make_node("p1N", [fit, alias, Hypothesis(source=UNPLACED, affine=None)])
+    placed = holds_its_place(page)
+    assert not placed
+    unary_energy(alias, False, 600.0, None, None, page_placed=placed)
+    assert alias.unary > 0  # unplaced (0) wins
 
 
 def test_pose_scale_log2_tracks_scale():
@@ -529,6 +624,12 @@ def test_publish_writes_a_provenance_record_for_every_page(tmp_path):
     assert first["hypotheses"][0]["chosen"] is True
     assert second["decision"] == "abstained"
     assert second["source"] == UNPLACED
+    # A placed page carries reconcile's confidence; an abstention doesn't (#579).
+    assert 0 < first["confidence"]["p_good"] < 1
+    assert first["confidence"]["provisional"] is False
+    assert "confidence" not in second
+    final = json.loads((tmp_path / "p1.georef-final.json").read_text())
+    assert final["reconcile"]["confidence"] == first["confidence"]
     assert [h["chosen"] for h in second["hypotheses"]] == [False, True]
     assert second["evidence"]["fit_state"] == "fitted"
 
@@ -776,10 +877,43 @@ def test_provenance_records_the_snap_verdict(tmp_path):
     )
 
 
+def test_provenance_records_a_half_sheet_seed(tmp_path):
+    """A seeded search, and which hypotheses it produced, count from one file per page."""
+    import json
+
+    from mapsnap.reconcile import publish
+
+    node = make_node(
+        "p9R", [scored("georef-snap", affine(0), 0.9), scored("georef", affine(1), 0.5)]
+    )
+    publish(
+        tmp_path,
+        {"p9R": node},
+        {"p9R": 0},
+        snap_records={"p9R": {"search": {"half_sheet_seed": True}}},
+    )
+    record = json.loads((tmp_path / "p9R.provenance.json").read_text())
+    assert record["snap_seed"] == "half-sheet"
+    assert [h["seed"] for h in record["hypotheses"]] == ["half-sheet", None]
+
+    publish(tmp_path, {"p9R": node}, {"p9R": 0})
+    record = json.loads((tmp_path / "p9R.provenance.json").read_text())
+    assert record["snap_seed"] is None
+    assert [h["seed"] for h in record["hypotheses"]] == [None, None]
+
+
+def test_from_snap_counts_merged_snap_sources():
+    from mapsnap.reconcile import Hypothesis, from_snap
+
+    assert from_snap(Hypothesis("snap:2", affine(0)))
+    assert from_snap(Hypothesis("georef", affine(0), merged_sources=["snap:0"]))
+    assert not from_snap(Hypothesis("georef", affine(0), merged_sources=["streets"]))
+
+
 def test_rung_note_band_matches_the_snap_constant():
     """The two modules import each other lazily, so the band is mirrored by hand."""
-    from mapsnap.osm_snap_experiment import RUNG_NOTE_BAND as snap_band
     from mapsnap.reconcile import RUNG_NOTE_BAND
+    from mapsnap.snap_volume import RUNG_NOTE_BAND as snap_band
 
     assert RUNG_NOTE_BAND == snap_band
 
@@ -926,6 +1060,17 @@ def test_region_energy_is_zero_without_regions_and_free_below_soft():
     assert region_energy(a, bare, soft=0.10) == 0.0
 
 
+def test_volume_sheets_counts_panels_and_skeletons_with_their_sheet():
+    from mapsnap.reconcile import REGION_MIN_SHEETS, volume_sheets
+
+    stems = ["p1__1", "p1__2", "p2", "p2s", "p3", "p4"]
+    assert volume_sheets(stems) == 4
+    assert volume_sheets(stems) < REGION_MIN_SHEETS
+    assert volume_sheets([*stems, "p5", "p6"]) == REGION_MIN_SHEETS
+    # A lettered sheet ending in "s" is its own sheet without a twin.
+    assert volume_sheets(["ps", "p1"]) == 2
+
+
 def test_collect_ignores_the_arbiters_own_final(tmp_path):
     # A previous publish left pN.georef-final.json behind; it is the answer,
     # not a channel, and must not re-enter as a hypothesis.
@@ -935,3 +1080,163 @@ def test_collect_ignores_the_arbiters_own_final(tmp_path):
         tmp_path, "p7", None, None, page_size=(1000, 800)
     )
     assert [h.source for h in hypotheses] == ["georef", UNPLACED]
+
+
+def ransac_sidecar(a: np.ndarray) -> dict:
+    """A RANSAC sidecar whose seed pair sits at (100, 100) and (700, 500)."""
+    doc = georef_doc(a)
+    doc["intersections"] = [
+        {
+            "x": 100,
+            "y": 100,
+            "lon": -74.0,
+            "lat": 40.7,
+            "inlier": True,
+            "initial": True,
+        },
+        {
+            "x": 700,
+            "y": 500,
+            "lon": -74.1,
+            "lat": 40.8,
+            "inlier": True,
+            "initial": True,
+        },
+        {"x": 150, "y": 600, "lon": -74.2, "lat": 40.9, "inlier": True},
+    ]
+    return doc
+
+
+def ground_m(a: tuple[float, float], b: tuple[float, float]) -> float:
+    """Metres between two (lon, lat) points."""
+    kx = 111_320.0 * math.cos(math.radians(b[1]))
+    return math.hypot((a[0] - b[0]) * kx, (a[1] - b[1]) * 110_540.0)
+
+
+def test_mercator_helmert_reproduces_a_mercator_similarity_exactly():
+    from mapsnap.reconcile import from_mercator, mercator_helmert, to_mercator
+
+    # A pose built as a similarity in Web Mercator, rotated 20 degrees.
+    a0 = 0.9 * complex(math.cos(0.35), math.sin(0.35))
+    b0 = to_mercator(-74.0, 40.7)
+
+    def pose(x: float, y: float) -> tuple[float, float]:
+        return from_mercator(a0 * complex(x, -y) + b0)
+
+    corners = [pose(0, 0), pose(1000, 0), pose(0, 800)]
+    affine = np.array(
+        [
+            [
+                (corners[1][0] - corners[0][0]) / 1000,
+                (corners[2][0] - corners[0][0]) / 800,
+                corners[0][0],
+            ],
+            [
+                (corners[1][1] - corners[0][1]) / 1000,
+                (corners[2][1] - corners[0][1]) / 800,
+                corners[0][1],
+            ],
+        ]
+    )
+    a, b = mercator_helmert(affine, (1000, 800))
+    for x, y in [(0, 0), (1000, 800), (500, 400)]:
+        fitted = from_mercator(a * complex(x, -y) + b)
+        assert ground_m(fitted, pose(x, y)) < 0.05  # the fixture is linear to ~1e-5
+
+
+def snap_sidecar(a: np.ndarray, *, refine: bool) -> dict:
+    """A georef-snap sidecar: snap's pose, no control points, and its mode."""
+    doc = georef_doc(a, n_inliers=0)
+    doc["osm_snap"] = {"mode": "arbitrate", "refine": refine, "challenge": not refine}
+    return doc
+
+
+def publish_snapped(
+    tmp_path, snapped: np.ndarray, source: str, *, refine: bool
+) -> dict:
+    """Publish one page whose chosen pose is ``snapped``; the final sidecar."""
+    import json
+
+    from mapsnap.reconcile import publish
+
+    write_sidecar(tmp_path, "p1", "georef", ransac_sidecar(affine(0)))
+    write_sidecar(tmp_path, "p1", "georef-snap", snap_sidecar(snapped, refine=refine))
+    node = make_node("p1", [scored(source, snapped, 0.9)])
+    publish(tmp_path, {"p1": node}, {"p1": 0})
+    return json.loads((tmp_path / "p1.georef-final.json").read_text())
+
+
+def test_publish_gives_a_snap_refinement_the_ransac_seed_pair(tmp_path):
+    """#585: a refined fit reaches the IIIF as its two seed GCPs, not four corners."""
+    from mapsnap.make_iiif_georef import georef_gcp_points
+
+    snapped = affine(7.0, -4.0)  # snap nudged the RANSAC fit 7 m east, 4 m south
+    final = publish_snapped(tmp_path, snapped, "georef-snap", refine=True)
+    points = final["intersections"]
+    assert [(p["x"], p["y"]) for p in points] == [(100, 100), (700, 500)]
+    for p in points:
+        assert p["projected"] and p["initial"] and not p["inlier"]
+        # On the published pose, to within its 0.7% distance from a Mercator
+        # similarity (about 2 m across this 600 m page).
+        assert (
+            ground_m((p["lon"], p["lat"]), tuple(snapped @ [p["x"], p["y"], 1.0])) < 2.0
+        )
+    gcps = georef_gcp_points(final)
+    assert [(px, kind) for px, _, kind in gcps] == [
+        ((100.0, 100.0), "gcp"),
+        ((700.0, 500.0), "gcp"),
+    ]
+
+
+def test_publish_keeps_corners_when_snap_replaced_the_fit(tmp_path):
+    """A challenger, a raw snap candidate or a far move is not built on RANSAC's seeds."""
+    assert (
+        publish_snapped(tmp_path, affine(7.0), "georef-snap", refine=False)[
+            "intersections"
+        ]
+        == []
+    )
+    assert (
+        publish_snapped(tmp_path, affine(7.0), "snap:0", refine=True)["intersections"]
+        == []
+    )
+    # Marked a refinement, but 200 m from the RANSAC pose: not this seed pair's fit.
+    assert (
+        publish_snapped(tmp_path, affine(200.0), "georef-snap", refine=True)[
+            "intersections"
+        ]
+        == []
+    )
+
+
+def test_publish_keeps_corner_points_without_a_seed_pair(tmp_path):
+    import json
+
+    from mapsnap.reconcile import publish
+
+    doc = ransac_sidecar(affine(0))
+    doc["intersections"][1]["initial"] = False
+    write_sidecar(tmp_path, "p1", "georef", doc)
+    write_sidecar(tmp_path, "p1", "georef-snap", snap_sidecar(affine(5.0), refine=True))
+    node = make_node("p1", [scored("georef-snap", affine(5.0), 0.9)])
+    publish(tmp_path, {"p1": node}, {"p1": 0})
+    final = json.loads((tmp_path / "p1.georef-final.json").read_text())
+    assert final["intersections"] == []
+
+
+def test_projected_seed_pair_needs_the_same_pixel_frame(tmp_path):
+    from mapsnap.reconcile import projected_seed_pair
+
+    write_sidecar(tmp_path, "p1", "georef", ransac_sidecar(affine(0)))
+    assert len(projected_seed_pair(tmp_path, "p1", affine(0), (1000, 800))) == 2
+    assert projected_seed_pair(tmp_path, "p1", affine(0), (500, 400)) == []
+    assert projected_seed_pair(tmp_path, "p2", affine(0), (1000, 800)) == []
+
+
+def test_seed_pair_skips_coincident_seeds():
+    from mapsnap.reconcile import seed_pair
+
+    same = {"x": 5.0, "y": 5.0, "initial": True}
+    assert seed_pair([same, dict(same)]) == []
+    other = {"x": 50.0, "y": 5.0, "initial": True}
+    assert seed_pair([same, {"x": 9, "y": 9}, other]) == [same, other]

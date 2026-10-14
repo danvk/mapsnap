@@ -19,6 +19,7 @@
 - Use American English:
   - "Color" not "colour"
   - "Penalize" not "penalise"
+  - "Neighbor" not "neighbour"
 
 ### Python
 

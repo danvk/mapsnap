@@ -138,3 +138,92 @@ uv run python -m mapsnap.region_model train $(ls -d data/*/ | grep -v 'columbus_
 Verify with the corpus overlap measurement in #352 (good-page median overlap
 per volume) and the held-out IoU the trainer prints; #355's ablations
 (longer training, base 32) still hold and are not worth repeating.
+
+## cutline_unet.pt
+
+The splitter's **cutline** model (#83): a whole-page UNet (base 16, GroupNorm,
+2.0M parameters) that draws, per pixel of the page letterboxed to 768², the
+dividing lines that cut a sheet into panels. `mapsnap split` uses it by default
+(`mapsnap.cutline_model`); `MAPSNAP_SPLITTER=classical` falls back to the
+classical line detector, and `MAPSNAP_CUTLINE_WEIGHTS` loads other weights.
+About 1 s per page on one CPU thread.
+
+Labels are the cutlines OldInsuranceMaps volunteers traced, rasterized as
+3 px strokes; pages volunteers marked unsplit (OIM's `prepared` flag with one
+region) are empty masks. The benchmark lives outside the repo in
+`~/Documents/mapsnap/cutline-training`: 2,000 split pages whose cuts follow
+printed ink (weighted toward pages with many panels) and 2,000 unsplit pages
+matched to them by volume size, from complete and unfinished volumes, San
+Francisco excluded. One volume in five is the test fold, which training never
+sees; one train-fold volume in eight picks the best epoch.
+
+**Current weights (2026-10-05)** trained 15 epochs on an M2 (~5 h), best epoch
+11 by held-out Dice (0.742). On the test fold (760 pages), through the
+production splitter: right panel count on **87.4%** of split pages (tuned
+classical: 76.3%), unsplit pages left whole **99.2%** (98.5%). They were
+trained with an extra page-level "split?" head, since dropped because it changed
+nothing; `mapsnap.train_cutline_unet` trains the plain UNet.
+
+Retrain:
+
+```
+uv run python -m mapsnap.train_cutline_unet prep ~/Documents/mapsnap/cutline-training
+uv run python -m mapsnap.train_cutline_unet train ~/Documents/mapsnap/cutline-training
+```
+
+Verify with the benchmark, through the production path:
+
+```
+uv run python scripts/score_splits_oim.py --manifest ~/Documents/mapsnap/cutline-training/manifest.tsv
+MAPSNAP_SPLITTER=classical uv run python scripts/score_splits_oim.py --manifest ...   # the comparison
+```
+
+## confidence.json
+
+Not weights for a network: the coefficients of a logistic model that estimates,
+for every pose reconcile publishes, the probability that it lies within 25 ft of
+the truth (`mapsnap.confidence`, #579). Reconcile writes it as `confidence` in
+each placed page's `pN.provenance.json` and `georef-final.json`. The IIIF carries
+it as `confidence` metadata, plus `confidence_provisional` for panels.
+
+Each column has a fill value for a missing input, a mean and scale to
+standardize by, a coefficient, and a missing-input coefficient where an input
+can be absent. `mapsnap.confidence.p_good` applies them without any ML
+dependency.
+
+Trained on corpus-v1 in the 400 OIM-truth volumes (23,371 placed poses), with
+every pose labelled by its RMSE against OIM truth:
+
+    uv run python scripts/train_confidence.py <volume dirs> \
+        --iiif corpus-v1.iiif.json --version corpus-v1 --out models/confidence.json
+
+Each volume directory holds the run's `pN.provenance.json` and `pN.panels.json`,
+its published annotation page, and the OIM truth (`main.iiif.json`, `oim/`).
+Grouped 5-fold AUC (whole volumes held out): 0.886 overall, 0.888 for pages,
+0.771 for panels. **Retrain after each corpus run:** any change to reconcile or
+snap can shift what the inputs mean, and panel scores need a current-code run
+before they stop being provisional.
+
+## Adjacency-number detector — `adjacency_unet.pt`
+
+A UNet (`mapsnap.road_model.UNet`, base 16, grayscale) that marks the printed
+adjacent-sheet numbers on the mirror's 25% page images, so `mapsnap adjacency`
+can read numbers CRAFT never boxes (big thin numerals, the hollow outline font).
+Inference helpers are in `mapsnap.adjacency_detector`; it is not wired into the
+pipeline yet.
+
+Trained by `mapsnap.train_adjacency_detector` with no hand labels: OIM's
+georeferencing predicts each sheet's neighbours and the stretch of outline
+each borders (`mapsnap.oim_neighbours`), and corpus-v1's digit reads that
+match a predicted neighbour near its stretch are the positive boxes.
+`adjacency_unet.pages.json.gz` is the training manifest: 1,889 pages from 206
+OIM volumes (1867–1961, no city series that has adjacency truth), 4,281 positive
+boxes, plus 1,257 boxes adopted by one round of self-training (`adopted`; the
+shipped weights do not use them). 12,000 steps take about five hours on an M2.
+
+    gunzip -c models/adjacency_unet.pages.json.gz > WORK/manifest.json
+    uv run python -m mapsnap.train_adjacency_detector fetch WORK
+    uv run python -m mapsnap.train_adjacency_detector labels WORK
+    uv run python -m mapsnap.train_adjacency_detector train WORK
+
+Scored against `testdata/adjacency_truth/` by `scripts/score_adjacency_detector.py`.

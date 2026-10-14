@@ -41,6 +41,12 @@ from mapsnap.keymap.locate import (
 )
 from mapsnap.keymap.records import is_recorded_keymap_page
 from mapsnap.osm_to_centerlines import load_centerlines
+from mapsnap.paper_color import is_off_paper
+from mapsnap.scale_bounds import (
+    MIN_M_PER_PX,
+    corpus_px_per_ft,
+    px_per_ft_is_plausible,
+)
 from mapsnap.streets import (
     DIRECTION_WORDS,
     HINT_STRINGS,
@@ -393,6 +399,40 @@ def broadened_scale_plausible(fitted_px_per_ft: float, prior_px_per_ft: float) -
     return BROADENED_SCALE_MIN_RATIO <= ratio <= BROADENED_SCALE_MAX_RATIO
 
 
+def gating_prior(prior_px_per_ft: float, median_prior_px_per_ft: float | None) -> float:
+    """The region prior a broadened (key-map rectangle) fit's scale is gated against.
+
+    The page's own prior, unless its region is a *fragment*: a prior more than
+    1 / HALF_SCALE_MIN_RATIO (~2.83x, a region under 1/8 the typical area) above the
+    volume median, the point past which ``region_relative_scale`` distrusts a region
+    entirely. A fragment then gates against the volume median instead. Miami's p34 and
+    p5 (and p7s at the baseline) lost correct fits at the volume's typical scale to a
+    wrong key-map read whose region was a 1,133 m^2 sliver: 0.09x a 16 px/ft prior that
+    was 8x the median (#478). The spurious rectangle-tier fits the gate exists for sit
+    against normal priors (0.76-1.21x the median), so they are judged exactly as before.
+    """
+    if (
+        median_prior_px_per_ft is not None
+        and prior_px_per_ft / median_prior_px_per_ft > 1 / HALF_SCALE_MIN_RATIO
+    ):
+        return median_prior_px_per_ft
+    return prior_px_per_ft
+
+
+def logged_gating_prior(
+    prior_px_per_ft: float, median_prior_px_per_ft: float | None
+) -> float:
+    """:func:`gating_prior`, noting in the page log when a fragment's prior is replaced."""
+    gated = gating_prior(prior_px_per_ft, median_prior_px_per_ft)
+    if gated != prior_px_per_ft:
+        print(
+            f"  key-map region prior {prior_px_per_ft:.3f} px/ft is a fragment "
+            f"({prior_px_per_ft / gated:.1f}x the volume median); gating against the "
+            f"median {gated:.3f} px/ft"
+        )
+    return gated
+
+
 def region_relative_scale(
     prior_px_per_ft: float, median_prior_px_per_ft: float
 ) -> float:
@@ -526,6 +566,44 @@ def folded_log2_distance(a: float, b: float) -> float:
     """Circular distance between two log2-mod-1 positions (period 1)."""
     d = abs(a - b) % 1.0
     return min(d, 1.0 - d)
+
+
+def is_keymap_image(image_path: str) -> bool:
+    """Whether an image is a key map: it has a sibling ``<stem>.keymap.json``."""
+    return os.path.exists(
+        os.path.join(
+            os.path.dirname(image_path), f"{image_stem(image_path)}.keymap.json"
+        )
+    )
+
+
+def reference_scale(scale_records: list[tuple[str, float]]) -> float:
+    """The volume's reference scale (px/ft) from its fitted pages' (image, scale).
+
+    :func:`family_scale` over the plausibly-scaled fits (``scale_bounds``, #498);
+    key maps always count, as they draw a city rather than a sheet. A volume of
+    one or two fitted pages otherwise took a fit wrong by orders of magnitude as
+    its reference and dropped its *plausible* pages as outliers: sanborn09046_002's
+    reference was 0.0080 px/ft (38 m/px), and its 1.43 px/ft p2 went out "179x"
+    off it. With no plausible fit at all, the corpus-median scale is the
+    reference, so the implausible ones are what the outlier filter drops.
+    ``scale_records`` must be non-empty.
+    """
+    plausible = [
+        scale
+        for image_path, scale in scale_records
+        if is_keymap_image(image_path) or px_per_ft_is_plausible(scale)
+    ]
+    for image_path, scale in scale_records:
+        if not (is_keymap_image(image_path) or px_per_ft_is_plausible(scale)):
+            print(
+                f"Implausible scale {scale:.4f} px/ft for {Path(image_path).name}; "
+                "it does not set the reference scale.",
+                file=sys.stderr,
+            )
+    if not plausible:
+        return corpus_px_per_ft()
+    return family_scale(plausible)
 
 
 def family_scale(scales: list[float]) -> float:
@@ -1995,6 +2073,26 @@ def page_diagonal_m(A: np.ndarray, width: float, height: float) -> float:
     )
 
 
+# A key map draws a whole city, not a sheet, so the sheet ceiling
+# (osm_snap.MAX_PAGE_EXTENT_M, 6 km) rejected real key maps: San Jose 1884's at
+# 6.0 km, Detroit 1884 vol. 2's at 7.5 and 7.9 km, and about half of the 459
+# key-map fits on disk, Queens 1950 vol. 2's the largest at 35.4 km. A key-map
+# fit still has to fit on a city.
+MAX_KEYMAP_EXTENT_M = 50_000.0
+
+
+def fit_is_too_fine(m_per_px: float, keymap_page: bool = False) -> bool:
+    """Whether a fit is finer than any sheet is drawn (``scale_bounds``); key maps exempt."""
+    return not keymap_page and m_per_px < MIN_M_PER_PX
+
+
+def fit_extent_is_plausible(diagonal_m: float, keymap_page: bool = False) -> bool:
+    """Whether a fit's page diagonal is a plausible size: a sheet's, or a key map's."""
+    if keymap_page:
+        return diagonal_m <= MAX_KEYMAP_EXTENT_M
+    return page_extent_is_plausible(diagonal_m)
+
+
 def page_extent_is_plausible(diagonal_m: float) -> bool:
     """Whether a page this big on the ground could be a Sanborn sheet.
 
@@ -2596,6 +2694,12 @@ def derive_paths(image_path: str) -> tuple[str, str, str]:
     )
 
 
+def load_paper(labels_path: str) -> dict | None:
+    """The page's paper color recorded in a <stem>.streets.json, or None for older files."""
+    labels_raw = json.loads(Path(labels_path).read_text())
+    return labels_raw.get("paper") if isinstance(labels_raw, dict) else None
+
+
 def load_detections(labels_path: str) -> list[dict]:
     """Load cached label detections from a <stem>.streets.json file."""
     labels_raw = json.loads(Path(labels_path).read_text())
@@ -2734,9 +2838,11 @@ def _init_worker(
     keep_labels_on_fill: bool = False,
     collinear_perp_tolerance_px: float = COLLINEAR_PERP_TOLERANCE_PX,
     embed_locator: KeymapLocator | None = None,
+    median_region_prior: float | None = None,
 ) -> None:
     """Populate _worker_state once per worker process (or once in the main process)."""
     _worker_state.update(
+        median_region_prior=median_region_prior,
         keep_labels_on_fill=keep_labels_on_fill,
         collinear_perp_tolerance_px=collinear_perp_tolerance_px,
         block_index=block_index,
@@ -2909,6 +3015,15 @@ def _process_one_image(image_path: str) -> tuple[str, ProcessResult]:
                             if broadened.scale_deg_per_px is not None
                             else None
                         )
+                        # The neighborhood came from the same key-map read as the
+                        # region; when that region is a fragment (often a wrong read),
+                        # it starved the fit and must not veto the rectangle fit that
+                        # replaced it (#478). The relaxed retry above keeps the page's
+                        # own prior: its fit used that same neighborhood vocabulary.
+                        if prior is not None:
+                            prior = logged_gating_prior(
+                                prior, _worker_state.get("median_region_prior")
+                            )
                         if (
                             fitted is not None
                             and prior is not None
@@ -2977,14 +3092,18 @@ def drop_labels_on_fill(
     detections: list[dict],
     yellow_band: tuple[float, float] = FILL_YELLOW_HUE_BAND,
     road_prob: np.ndarray | None = None,
+    *,
+    paper: dict | None = None,
 ) -> tuple[list[dict], list[dict]]:
     """Split detections into (kept, on-fill) by the ``background`` colour OCR recorded for each.
 
     Sanborn sheets print street names on the paper background; text inside a coloured block is a
     *building* label, which can still prefix-match a street name and fabricate GCPs (Nashville's
-    "REP" -> "REP JOHN LEWIS WAY", "SEARS", "SERVICE" -> "SERVICE ROAD"). ``detect_text`` records a
-    ``background`` on exactly the detections that sit on something more saturated than the page's
-    own paper; this decides which of those colours actually disqualify a label.
+    "REP" -> "REP JOHN LEWIS WAY", "SEARS", "SERVICE" -> "SERVICE ROAD"). ``detect_text`` records
+    every detection's ``background``; :func:`paper_color.is_off_paper` decides, against the page's
+    ``paper``, which of them are off the paper at all, and this decides which of *those* colors
+    actually disqualify a label. Without ``paper`` (files written before it was recorded), a
+    recorded background is taken to be off the paper, as those files only recorded such.
 
     Only hue outside ``yellow_band`` does. Being on *some* colour is not enough, because on a
     yellowed scan an ordinary street label is more saturated than the paper: Chicago's and New
@@ -3010,7 +3129,7 @@ def drop_labels_on_fill(
     on_fill: list[dict] = []
     for det in detections:
         background = det.get("background")
-        if background is None:
+        if background is None or not is_off_paper(background, paper):
             kept.append(det)
             continue
         # Outside the spared band the colour alone disqualifies; inside it, P(road)
@@ -3202,6 +3321,7 @@ def prepare_label_features(
     """
     img_w, img_h = image_size
     all_detections = load_detections(labels_path)
+    paper = load_paper(labels_path)
 
     print(f"All detections: {len(all_detections)}")
     all_detections = [d for d in all_detections if not d.get("ignore")]
@@ -3247,7 +3367,7 @@ def prepare_label_features(
     # that can still prefix-match a street name and fabricate GCPs.
     if not keep_labels_on_fill:
         all_detections, on_fill = drop_labels_on_fill(
-            all_detections, road_prob=road_prob
+            all_detections, road_prob=road_prob, paper=paper
         )
         if on_fill:
             named = sorted(
@@ -3422,7 +3542,7 @@ def process_image(
     # rule spares wholesale (#127/#278). Absent, the filter behaves exactly as before.
     road_prob = None
     if not (keep_labels_on_fill or is_keymap_page):
-        from mapsnap.edge_join_experiment import load_prob
+        from mapsnap.page_units import load_prob
 
         road_prob = load_prob(Path(os.path.dirname(image_path)), image_stem(image_path))
 
@@ -3561,15 +3681,32 @@ def process_image(
         f"RANSAC: {len(inlier_feat_indices)} / {len(features)} inlier labels",
         file=sys.stderr,
     )
+    keymap_json = os.path.join(
+        os.path.dirname(image_path), f"{image_stem(image_path)}.keymap.json"
+    )
+    is_keymap_page = os.path.exists(keymap_json)
     diagonal_m = page_diagonal_m(A, img_w, img_h)
-    if not page_extent_is_plausible(diagonal_m):
+    m_per_px = diagonal_m / math.hypot(img_w, img_h)
+    if fit_is_too_fine(m_per_px, keymap_page=is_keymap_page):
+        # The fine-side counterpart of the extent ceiling below (#498): a sheet fitted
+        # finer than any drawn has its labels matched across a few blocks.
+        # sanborn05857_001's one sheet published at 0.0117 m/px, ~30 m across.
+        print(
+            f"RANSAC fit rejected: {m_per_px:.4f} m/px is finer than any sheet "
+            f"(minimum {MIN_M_PER_PX} m/px).",
+            file=sys.stderr,
+        )
+        return ProcessResult(success=False, gcp_hints=cluster_gcp_hints(gcps))
+    if not fit_extent_is_plausible(diagonal_m, is_keymap_page):
         # A fit whose page would span kilometers beyond any drawn sheet is wrong
         # by orders of magnitude, however many labels agree with it. Accepted, it
         # became the volume's reference scale, snap's scale prior and a
         # published pose: Orleans 1929's p1 fitted at 0.044 px/ft -- a 17.3 km
         # sheet -- and went out as the volume's only page (#517).
+        what = "key map" if is_keymap_page else "page"
         print(
-            f"RANSAC fit rejected: a {diagonal_m / 1000:.1f} km page is not a sheet.",
+            f"RANSAC fit rejected: a {diagonal_m / 1000:.1f} km {what} is not "
+            f"{'a city' if is_keymap_page else 'a sheet'}.",
             file=sys.stderr,
         )
         return ProcessResult(success=False, gcp_hints=cluster_gcp_hints(gcps))
@@ -3580,10 +3717,7 @@ def process_image(
     # affine on its own inlier GCPs, so the georef.json corners capture the scale anisotropy and
     # skew a 4-parameter similarity cannot — read straight off by the key-map locator, with no
     # separate refit downstream.
-    keymap_json = os.path.join(
-        os.path.dirname(image_path), f"{image_stem(image_path)}.keymap.json"
-    )
-    if os.path.exists(keymap_json):
+    if is_keymap_page:
         affine = fit_keymap_affine(A, gcps, cos_phi)
         if affine is not None:
             # Report what the extra two degrees of freedom actually bought. A similarity is
@@ -4345,6 +4479,7 @@ def main() -> None:
         args.keep_labels_on_fill,
         args.collinear_perp_tolerance,
         embed_locator,
+        median_region_prior,
     )
     if args.num_workers > 1:
         with multiprocessing.Pool(
@@ -4393,7 +4528,7 @@ def main() -> None:
     if args.scale is not None:
         ref_scale_px_per_ft: float | None = args.scale
     elif scales:
-        ref_scale_px_per_ft = family_scale(scales)
+        ref_scale_px_per_ft = reference_scale(scale_records)
     else:
         ref_scale_px_per_ft = None
 

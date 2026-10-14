@@ -38,22 +38,19 @@ import json
 import math
 import shutil
 import subprocess
+from collections.abc import Iterable
 from dataclasses import dataclass, field
 from itertools import product
 from pathlib import Path
 
 import numpy as np
 
-from mapsnap import sidecar
+from mapsnap import confidence, sidecar
 from mapsnap.adjacency_gate import (
     GATE_STAMP_M,
     FittedPage,
     edge_scale_factor,
     stamp_worlds,
-)
-from mapsnap.edge_join_experiment import (
-    PageUnit,
-    grid_rmse_ft_between,
 )
 from mapsnap.osm_snap import (
     W_CONTAIN,
@@ -62,6 +59,7 @@ from mapsnap.osm_snap import (
     name_evidence_of,
     region_containment_frac,
 )
+from mapsnap.page_units import PageUnit, grid_rmse_ft_between
 from mapsnap.road_model import effective_gcp_count, page_world_affine
 from mapsnap.utils import haversine_m
 
@@ -92,6 +90,31 @@ KEEP_PRIOR = {
     ("4+", False): 0.57,
     ("4+", True): 0.94,
 }
+# The same measurement for split panels, which the table above never saw:
+# until panels were snapped they were never scored, so every one sat in the
+# ("0-1", False) row. Measured on corpus-v1 over the 415 OIM-scored volumes
+# (2026-10-06, sheet-share weighted, E[keep] = good share - disaster share).
+# Pages re-measured the same way agree with KEEP_PRIOR except ("0-1", True),
+# which fell to 0.33; that row is left alone here. Two cells had too few
+# panels to measure (2 and 3) and take the page value.
+PANEL_KEEP_PRIOR = {
+    ("0-1", False): -0.15,  # 293 panels: 19% good, 34% disaster
+    ("0-1", True): 0.46,  # 120 panels, 110 of them scoring >= 1.0
+    ("2-3", False): 0.31,  # 613 panels
+    ("2-3", True): 0.68,  # page value
+    ("4+", False): 0.72,  # 1,411 panels
+    ("4+", True): 0.94,  # page value
+}
+# A panel resting on 0-1 GCPs counts as verified only from this score up.
+# Below it a published one-GCP panel's own score is neither evidence nor
+# protection. On whole pages a weak score on a one-GCP fit predicts nothing
+# (0-0.5 measures +0.12, the same as unscored ones, +0.11). Covington 1909
+# p6__2 (a one-GCP fit 125,772 ft off) scored 0.32 and was published on it.
+# 0.8, not 1.0: across both #570 A/Bs (48 volumes), published one-GCP panels
+# scoring 0.8-1.0 were 6 good / 2 disaster of 10, like those >= 1.0 (10 / 5 of
+# 30), while 0.5-0.8 was 2 / 6 of 20 and < 0.5 was 3 / 10 of 26. A 1.0 floor
+# unplaced DC p125__2 (6 ft, scored 0.89) and three other good panels.
+PANEL_VERIFIED_FLOOR = 0.8
 # Hypotheses closer than this are the same pose; keep one, merge provenance.
 DEDUPE_FT = 10.0
 # Robust keymap-distance term: (distance/radius)^2 clamped — SOFT prior, per
@@ -104,7 +127,7 @@ KEYMAP_CLAMP = 3.0
 W_RUNG_OFF = 0.15
 W_NOTE_MISMATCH = 0.30
 # How close (in log2) a pose must sit to a rung, or to its printed note, to
-# claim it. Mirrors osm_snap_experiment.RUNG_NOTE_BAND, which cannot be
+# claim it. Mirrors snap_volume.RUNG_NOTE_BAND, which cannot be
 # imported at module level (the two modules import each other lazily);
 # reconcile_test asserts the two stay equal.
 RUNG_NOTE_BAND = (0.80, 1.25)
@@ -155,6 +178,15 @@ OVERLAP_HARD_DELTA = 0.35
 W_REGION = 1.5
 REGION_SOFT = 0.12
 REGION_HARD_DELTA = 0.30
+# The factor sits out volumes of fewer than REGION_MIN_SHEETS sheets. Over 155
+# held-out OIM-truth volumes (corpus-v1 sidecars, 2026-10-10) it was worth
+# +0.4 pts on volumes of 51+ sheets and +0.2 on 11-50, but -0.7 on 1-10: a
+# small town's sheets often draw the same ground (Winnsboro 1924 and Vivian
+# 1923 each lost a correct p1__1 to a 90%+ overlap with another correct sheet),
+# and with a handful of adjacent pairs the self-calibrated soft threshold
+# (0.85 on Winnsboro) cannot tell that from an alias. Gating at 6 sheets kept
+# every gain but one and removed both of those losses.
+REGION_MIN_SHEETS = 6
 # NO sibling factor. Split panels are separate maps that happen to share a
 # sheet: no geographic relationship (champaign p4's panels sit 891 m apart at
 # +0.2 and +48.9 degrees) and they may legitimately depict OVERLAPPING ground,
@@ -335,7 +367,7 @@ def collect_hypotheses(
         and street_record.get("corners")
         and page_size is not None
     ):
-        from mapsnap.street_solve_experiment import corners_to_affine
+        from mapsnap.street_solve_volume import corners_to_affine
 
         hypotheses.append(
             Hypothesis(
@@ -381,10 +413,31 @@ def dedupe_hypotheses(hypotheses: list[Hypothesis]) -> list[Hypothesis]:
     return kept
 
 
-def keep_prior(effective_gcps: int, verification: float | None) -> float:
-    """Measured expected value of publishing a pose with these features."""
+def keep_prior(
+    effective_gcps: int, verification: float | None, *, panel: bool = False
+) -> float:
+    """Measured expected value of publishing a pose with these features.
+
+    A split panel reads PANEL_KEEP_PRIOR, and at 0-1 GCPs needs
+    PANEL_VERIFIED_FLOOR, not just a non-negative score, to count as verified.
+    """
     tier = "0-1" if effective_gcps <= 1 else ("2-3" if effective_gcps <= 3 else "4+")
-    return KEEP_PRIOR[(tier, verification is not None and verification >= 0)]
+    if not panel:
+        return KEEP_PRIOR[(tier, verification is not None and verification >= 0)]
+    floor = PANEL_VERIFIED_FLOOR if tier == "0-1" else 0.0
+    return PANEL_KEEP_PRIOR[(tier, verification is not None and verification >= floor)]
+
+
+def weak_panel_score(
+    hypothesis: "Hypothesis", is_published: bool, verification: float, panel: bool
+) -> bool:
+    """Whether this is a published 0-1 GCP panel whose own score is too weak to count."""
+    return (
+        panel
+        and is_published
+        and hypothesis.effective_gcps <= 1
+        and 0 <= verification < PANEL_VERIFIED_FLOOR
+    )
 
 
 def carries_gcp_evidence(source: str) -> bool:
@@ -569,6 +622,35 @@ NO_FAMILY_RUNG = {
 }
 
 
+def holds_its_place(node: "PageNode") -> bool:
+    """Whether the page's published pose spares its challengers the entry bar.
+
+    ENTRY_PENALTY is what a pose must overcome to place a page that has no
+    published pose. A published pose waives it only if publishing it is worth
+    more than leaving the page unplaced (keep prior > 0); otherwise the page
+    counts as unplaced and a challenger must clear the bar a rescue does.
+
+    Panels first (#570): a weakly scored one-GCP panel fit, which
+    PANEL_KEEP_PRIOR rates below unplaced, let 0-GCP snap aliases in for free
+    (sanborn06253_001 p5__3 and p6__2: 47 and 75 ft -> 255 and 256 ft). Whole
+    pages likewise (#576): KEEP_PRIOR is positive in every cell but ("0-1",
+    False), and on the 20-volume #570 A/B the one-GCP pages with a negative
+    score let snap candidates in on 11 pages, every one a disaster (1,139 to
+    23,596 ft off).
+    """
+    if node.published_index is None:
+        return False
+    published = node.hypotheses[node.published_index]
+    return (
+        keep_prior(
+            published.effective_gcps,
+            published.scores.get("verification"),
+            panel=node.is_panel,
+        )
+        > 0
+    )
+
+
 def unary_energy(
     hypothesis: Hypothesis,
     is_published: bool,
@@ -576,8 +658,12 @@ def unary_energy(
     family_log2: float | None,
     note_ratio: float | None,
     page_placed: bool = True,
+    panel: bool = False,
 ) -> float:
     """Energy of one hypothesis in isolation; UNPLACED is exactly 0.
+
+    ``panel`` marks a split panel, whose published pose is weighed with
+    PANEL_KEEP_PRIOR (see PANEL_VERIFIED_FLOOR).
 
     Deliberately absent: the incumbent-defensibility veto, margin gates, and
     select_score (which double-counts the name evidence) — those are the stage
@@ -598,6 +684,8 @@ def unary_energy(
         hypothesis.scores["unverified"] = True
     if verification is None:
         verification = 0.0
+    if weak_panel_score(hypothesis, is_published, verification, panel):
+        verification = 0.0
     terms["evidence"] = -(verification + W_NAME * name + W_CONTAIN * containment)
     if not page_placed:
         terms["entry"] = ENTRY_PENALTY
@@ -606,7 +694,9 @@ def unary_energy(
         # much support is worth, against E[unplaced] = 0. Replaces both the
         # invented incumbent epsilon and the flat keep bar.
         terms["keep_prior"] = -keep_prior(
-            hypothesis.effective_gcps, hypothesis.scores.get("verification")
+            hypothesis.effective_gcps,
+            hypothesis.scores.get("verification"),
+            panel=panel,
         )
     keymap_dist = hypothesis.scores.get("keymap_dist_m")
     if keymap_dist is not None and keymap_radius_m > 0:
@@ -994,7 +1084,7 @@ def build_nodes(volume: Path, sidecar_dir: Path, vctx) -> dict[str, PageNode]:
 
 def score_nodes(vctx, nodes: dict[str, PageNode], note_ratios: dict) -> None:
     """Uniformly score every pose hypothesis and fill in unary energies."""
-    from mapsnap.osm_snap_experiment import build_page_context, page_keymap_data
+    from mapsnap.snap_volume import build_page_context, page_keymap_data
 
     fitted_log2 = [
         pose_scale_log2(affine)
@@ -1049,7 +1139,8 @@ def score_nodes(vctx, nodes: dict[str, PageNode], note_ratios: dict) -> None:
                 node.unit.keymap_radius_m or vctx.radius_m,
                 family_log2,
                 note_ratios.get(stem),
-                page_placed=node.published_index is not None,
+                page_placed=holds_its_place(node),
+                panel=node.is_panel,
             )
 
 
@@ -1093,6 +1184,12 @@ def attach_regions(volume: Path, nodes: dict[str, PageNode], origin) -> int:
                     origin,
                 )
     return attached
+
+
+def volume_sheets(stems: Iterable[str]) -> int:
+    """How many map sheets ``stems`` come from: panels and skeleton twins count with their sheet."""
+    sheets = {stem.split("__")[0] for stem in stems}
+    return len({s for s in sheets if not (s.endswith("s") and s[:-1] in sheets)})
 
 
 def skeleton_twins(a: str, b: str) -> bool:
@@ -1514,6 +1611,21 @@ def stamp_agreement(
     }
 
 
+def snap_seed(snap_record: dict) -> str | None:
+    """What seeded snap's search for a page: "half-sheet" (its sibling half's pose), or None."""
+    return (
+        "half-sheet"
+        if (snap_record.get("search") or {}).get("half_sheet_seed")
+        else None
+    )
+
+
+def from_snap(hypothesis: Hypothesis) -> bool:
+    """Whether a hypothesis's pose came out of snap's search, directly or merged."""
+    sources = [hypothesis.source, *hypothesis.merged_sources]
+    return any(s.startswith("snap:") or s == "georef-snap" for s in sources)
+
+
 def provenance_record(
     stem: str,
     nodes: dict[str, PageNode],
@@ -1538,6 +1650,8 @@ def provenance_record(
     # A split parent is not abstained, it is answered by its panels; its own
     # final sidecar exists only to claim the page key.
     superseded = any(other.startswith(f"{stem}__") for other in nodes)
+    snap = (snap_records or {}).get(stem) or {}
+    seed = snap_seed(snap)
     hypotheses = []
     for index, hyp in enumerate(node.hypotheses):
         hypotheses.append(
@@ -1545,6 +1659,7 @@ def provenance_record(
                 "source": hyp.source,
                 "status": hyp.status,
                 "chosen": index == chosen_index,
+                "seed": seed if from_snap(hyp) else None,
                 "unary": round(float(hyp.unary), 4),
                 "terms": {k: round(float(v), 4) for k, v in hyp.unary_terms.items()},
                 "effective_gcps": int(hyp.effective_gcps),
@@ -1566,12 +1681,12 @@ def provenance_record(
         decision = "placed"
     else:
         decision = "abstained"
-    snap = (snap_records or {}).get(stem) or {}
     verdict = (snap.get("decision") or {}).get("page_verdict")
     return {
         "stem": stem,
         "decision": decision,
         "snap_verdict": verdict,
+        "snap_seed": seed,
         "panels": sorted(other for other in nodes if other.startswith(f"{stem}__"))
         if superseded
         else None,
@@ -1626,6 +1741,140 @@ def source_control_points(
     return doc.get("streets") or [], doc.get("intersections") or []
 
 
+# Earth radius of the Web Mercator projection Allmaps fits its Helmert in.
+MERCATOR_RADIUS_M = 6_378_137.0
+# Grid of page points (per side) the best-fit Helmert is fitted over.
+HELMERT_GRID = 9
+
+
+def to_mercator(lon: float, lat: float) -> complex:
+    """Web Mercator (x, y) metres as a complex number."""
+    x = math.radians(lon) * MERCATOR_RADIUS_M
+    y = math.log(math.tan(math.pi / 4 + math.radians(lat) / 2)) * MERCATOR_RADIUS_M
+    return complex(x, y)
+
+
+def from_mercator(point: complex) -> tuple[float, float]:
+    """(lon, lat) of a Web Mercator point."""
+    lon = math.degrees(point.real / MERCATOR_RADIUS_M)
+    lat = math.degrees(
+        2 * math.atan(math.exp(point.imag / MERCATOR_RADIUS_M)) - math.pi / 2
+    )
+    return lon, lat
+
+
+def mercator_helmert(
+    affine: np.ndarray, size: tuple[int, int]
+) -> tuple[complex, complex]:
+    """The Web Mercator similarity closest to a page px -> (lon, lat) affine.
+
+    Returned as (a, b) with mercator = a * conj-free page point + b, where the
+    page point is ``complex(x, -y)`` (pixel y runs down). Fitted by least
+    squares over a grid spanning the page. A pose that is already a Mercator
+    similarity (RANSAC's) is reproduced exactly; snap's, which are
+    similarities in local metres with unequal degree lengths (110,540 vs
+    111,320 m), are 0.7% from one and come back within a few feet.
+    """
+    width, height = size
+    xs, ys = np.meshgrid(
+        np.linspace(0, width, HELMERT_GRID), np.linspace(0, height, HELMERT_GRID)
+    )
+    page = xs.ravel() - 1j * ys.ravel()
+    world = np.array(
+        [
+            to_mercator(*(affine @ np.array([x, y, 1.0])))
+            for x, y in zip(xs.ravel(), ys.ravel())
+        ]
+    )
+    design = np.vstack([page, np.ones_like(page)]).T
+    (a, b), *_ = np.linalg.lstsq(design, world, rcond=None)
+    return complex(a), complex(b)
+
+
+def seed_pair(intersections: list[dict]) -> list[dict]:
+    """The first two non-coincident RANSAC seed (``initial``) intersections, or []."""
+    initials = [i for i in intersections if i.get("initial")]
+    if len(initials) < 2:
+        return []
+    first, second = initials[0], initials[1]
+    if math.hypot(first["x"] - second["x"], first["y"] - second["y"]) < 1.0:
+        return []
+    return [first, second]
+
+
+def is_snap_refine(sidecar_dir: Path, stem: str, source: str) -> bool:
+    """Whether a published pose is snap *refining* the page's RANSAC fit.
+
+    Snap refines when its top candidate verifies better than the incumbent fit
+    and lies within ARBITRATE_MIN_DISAGREE_FT of it (``snap_volume``); its
+    sidecar records ``osm_snap.refine``. Snap's other modes -- a challenger
+    that moved the page, a rescue of an unfit page -- and snap candidates or
+    street-solve poses replace the RANSAC fit rather than adjust it.
+    """
+    if source != "georef-snap":
+        return False
+    path = sidecar_dir / f"{stem}.georef-snap.json"
+    try:
+        doc = json.loads(path.read_text())
+    except (OSError, json.JSONDecodeError):
+        return False
+    return bool((doc.get("osm_snap") or {}).get("refine"))
+
+
+def projected_seed_pair(
+    sidecar_dir: Path, stem: str, affine: np.ndarray, size: tuple[int, int]
+) -> list[dict]:
+    """The page's RANSAC seed pair, re-placed to express a snap refinement of it (#585).
+
+    A snap refinement (:func:`is_snap_refine`) adjusts the RANSAC fit it
+    started from, but its sidecar carries no control points, so it would reach
+    the IIIF annotation as four synthetic corner points and a polynomial. The
+    two intersections RANSAC seeded the fit from are the GCPs the refined fit
+    still rests on; keeping their *pixels* and giving them the (lon, lat) of
+    the published pose's closest Web Mercator similarity
+    (:func:`mercator_helmert`) lets the annotation's Helmert express the
+    refined pose with them. They are marked ``projected``, ``initial`` (so the
+    annotation uses them as its Helmert pair) and not ``inlier``: the pose put
+    them where they are, so they are not street evidence for it. Empty when
+    the page has no RANSAC seed pair in the same pixel frame, or its RANSAC
+    pose is not within refinement distance of the published one.
+    """
+    path = sidecar_dir / f"{stem}.georef.json"
+    if not path.exists():
+        return []
+    try:
+        doc = json.loads(path.read_text())
+    except (OSError, json.JSONDecodeError):
+        return []
+    if (doc.get("width"), doc.get("height")) != size:
+        return []
+    pair = seed_pair(doc.get("intersections") or [])
+    if not pair or not doc.get("corners"):
+        return []
+    from mapsnap.snap_volume import ARBITRATE_MIN_DISAGREE_FT
+
+    ransac = page_world_affine(doc)
+    if grid_rmse_ft_between(ransac, affine, *size) >= ARBITRATE_MIN_DISAGREE_FT:
+        return []
+    a, b = mercator_helmert(affine, size)
+    projected = []
+    for point in pair:
+        x, y = float(point["x"]), float(point["y"])
+        lon, lat = from_mercator(a * complex(x, -y) + b)
+        projected.append(
+            {
+                "x": x,
+                "y": y,
+                "lon": lon,
+                "lat": lat,
+                "initial": True,
+                "inlier": False,
+                "projected": True,
+            }
+        )
+    return projected
+
+
 def publish(
     volume: Path,
     nodes: dict[str, PageNode],
@@ -1662,6 +1911,22 @@ def publish(
         volume.glob("p*.provenance.json")
     ):
         stale.unlink()
+    # Every record first: a page's confidence depends on volume-level rates.
+    records = {
+        stem: provenance_record(
+            stem,
+            nodes,
+            assignment,
+            adjacency,
+            edges or [],
+            region_centroids,
+            locator,
+            keymap,
+            snap_records,
+        )
+        for stem in sorted(nodes)
+    }
+    confidence.annotate(list(records.values()), volume)
     for stem in sorted(nodes):
         node = nodes[stem]
         hypothesis = node.hypotheses[assignment[stem]]
@@ -1670,6 +1935,14 @@ def publish(
         )
         w, h = node.unit.width, node.unit.height
         a = hypothesis.affine
+        if (
+            a is not None
+            and not seed_pair(intersections)
+            and is_snap_refine(sidecar_dir, stem, hypothesis.source)
+        ):
+            intersections = intersections + projected_seed_pair(
+                sidecar_dir, stem, a, (w, h)
+            )
         corners = (
             None
             if a is None
@@ -1696,26 +1969,14 @@ def publish(
                         "terms": {
                             k: round(v, 4) for k, v in hypothesis.unary_terms.items()
                         },
+                        "confidence": records[stem].get("confidence"),
                     },
                 },
                 indent=1,
             )
         )
         (volume / f"{stem}.provenance.json").write_text(
-            json.dumps(
-                provenance_record(
-                    stem,
-                    nodes,
-                    assignment,
-                    adjacency,
-                    edges or [],
-                    region_centroids,
-                    locator,
-                    keymap,
-                    snap_records,
-                ),
-                indent=1,
-            )
+            json.dumps(records[stem], indent=1)
         )
         if corners is None:
             unplaced += 1
@@ -1842,7 +2103,7 @@ def main() -> None:
     if args.gate is not None:
         ENTRY_PENALTY = args.gate
 
-    from mapsnap.osm_snap_experiment import (
+    from mapsnap.snap_volume import (
         HALF_SHEET_SEEDS,
         load_volume_context,
         printed_note_ratios,
@@ -1888,7 +2149,14 @@ def main() -> None:
         f"overlap soft threshold (p90 of published adjacent pairs): {overlap_soft:.3f}"
     )
     region_soft = REGION_SOFT
-    if args.region_overlap:
+    use_regions = args.region_overlap
+    if use_regions and (sheets := volume_sheets(nodes)) < REGION_MIN_SHEETS:
+        print(
+            f"region overlap: off for a {sheets}-sheet volume "
+            f"(needs {REGION_MIN_SHEETS}+)"
+        )
+        use_regions = False
+    if use_regions:
         attached = attach_regions(volume, nodes, origin or (0.0, 0.0))
         region_edges = build_region_edges(nodes)
         region_soft = calibrate_region_soft(nodes, adjacency)
@@ -1916,9 +2184,7 @@ def main() -> None:
     ):
         out_dir = volume / out_dir
     region_overlaps = (
-        region_overlap_summary(nodes, edges, assignment)
-        if args.region_overlap
-        else None
+        region_overlap_summary(nodes, edges, assignment) if use_regions else None
     )
     flips, _ = write_outputs(volume, nodes, assignment, out_dir, region_overlaps)
     print(f"{flips} decisions flipped -> {out_dir / 'report.md'}")

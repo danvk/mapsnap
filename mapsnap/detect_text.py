@@ -21,6 +21,7 @@ from mapsnap.ctc_vocab_decode import HINT_STRINGS, generate_vocab_strings
 from mapsnap.keymap.locate import KeymapLocator, page_key, resolve_keymaps
 from mapsnap.keymap.records import is_recorded_keymap_page
 from mapsnap.osm_to_centerlines import load_centerlines
+from mapsnap.paper_color import is_off_paper
 from mapsnap.streets import build_block_index, polygon_side_lengths
 from mapsnap.utils import default_centerlines, drop_sidecar_images, image_stem
 
@@ -77,11 +78,6 @@ SCALE_NOTE_TEXT: frozenset[str] = frozenset(
     | {f"{n} FT. TO ONE INCH" for n in ("50", "100", "200", "300")}
 )
 
-# How much a detection's box must exceed the page's own paper chroma (CIELAB) before its
-# background colour is recorded rather than treated as paper. 4.0 separates Nashville's building
-# labels (p51 "REP" at 9-14 chroma over 2.2 paper) from its street labels (1.0-3.6).
-BACKGROUND_CHROMA_MARGIN = 4.0
-
 
 def page_lab(rgb: np.ndarray) -> np.ndarray:
     """CIELAB image from an RGB array, with a/b re-centered on 0.
@@ -128,24 +124,17 @@ def region_color(lab: np.ndarray, polygon: list) -> dict:
     }
 
 
-def annotate_backgrounds(
-    detections: list[dict],
-    rgb: np.ndarray,
-    margin: float = BACKGROUND_CHROMA_MARGIN,
-) -> dict:
-    """Record each detection's background colour when it differs from the page's paper.
+def annotate_backgrounds(detections: list[dict], rgb: np.ndarray) -> dict:
+    """Record every detection's background color, and return the page's paper color.
 
     Sanborn sheets print street names on the paper background, so text sitting inside a coloured
-    block is a *building* label. Sets ``background`` ({color, hue, chroma}) on every detection
-    whose box is more saturated than the paper by more than ``margin``, and leaves it unset
-    otherwise — the property's presence alone means "this label is not on paper". Deciding which
-    of those colours disqualify a label is left to the reader of the file (see
-    ``georef_from_labels.drop_labels_on_fill``), so re-OCR is not needed to change that policy.
+    block is a *building* label. Sets ``background`` ({color, hue, chroma}) on every detection,
+    on paper or not (#510). Deciding which backgrounds are off the paper (:func:`is_off_paper`)
+    and which of those disqualify a label (``georef_from_labels.drop_labels_on_fill``) is left
+    to the reader of the file, so changing either policy needs no pass over the scans.
 
-    The chroma reference is the page's own because paper varies enormously between volumes:
-    near-white in Nashville (chroma 1-5), heavily yellowed in Chicago and New Orleans (13-20).
-
-    Returns the paper colour itself, for the caller to record alongside the detections.
+    The paper is the page's own because it varies enormously between volumes: near-white in
+    Nashville (chroma 1-5), heavily yellowed in Chicago and New Orleans (13-20).
     """
     lab = page_lab(rgb)
     lab_a, lab_b = lab[:, :, 1], lab[:, :, 2]
@@ -154,9 +143,7 @@ def annotate_backgrounds(
     paper_chroma = float(np.median(np.hypot(lab_a, lab_b)))
     paper_a, paper_b = float(np.median(lab_a)), float(np.median(lab_b))
     for det in detections:
-        background = region_color(lab, det["polygon"])
-        if background["chroma"] > paper_chroma + margin:
-            det["background"] = background
+        det["background"] = region_color(lab, det["polygon"])
     return {
         "color": lab_to_hex(float(np.median(lab[:, :, 0])), paper_a, paper_b),
         "hue": round(math.degrees(math.atan2(paper_b, paper_a)) % 360.0, 1),
@@ -168,8 +155,8 @@ def backfill_backgrounds(image_path: str) -> int:
     """Add ``background`` to an existing <stem>.streets.json in place, without re-running OCR.
 
     Background colour is a pure function of the image and the detection boxes, so a file OCR'd
-    before the property existed can be brought up to date far more cheaply than by re-reading the
-    page. Returns the number of detections found to be on a coloured fill.
+    before every detection's color was recorded can be brought up to date far more cheaply than
+    by re-reading the page. Returns the number of detections whose background is off the paper.
     """
     path = _streets_path(image_path)
     with open(path) as f:
@@ -183,7 +170,8 @@ def backfill_backgrounds(image_path: str) -> int:
         )
     with open(path, "w") as f:
         json.dump(streets_doc, f, indent=2)
-    return sum(1 for det in detections if "background" in det)
+    paper = streets_doc["paper"]
+    return sum(1 for det in detections if is_off_paper(det["background"], paper))
 
 
 def boxes_path(image_path: str) -> str:
@@ -466,17 +454,33 @@ model landed, purely because a re-OCR had been run without the flag.
 """
 
 
+# The attribute load_recognizer_weights stamps on a reader, naming the weights
+# it now carries; a reader without it runs EasyOCR's stock model.
+RECOGNIZER_ATTR = "mapsnap_recognizer"
+
+
+def reader_recognizer(reader: easyocr.Reader) -> str | None:
+    """The weights filename a reader recognizes with, or None for the stock model."""
+    return getattr(reader, RECOGNIZER_ATTR, None)
+
+
 def cached_recognizer(streets_path: Path) -> str | None:
     """Which recognizer produced a cached read, by weights filename, or None.
 
-    ``streets.json`` records the command that wrote it, so the weights are
-    recoverable. None means EasyOCR's stock model -- either no flag was passed
-    or the file predates the flag.
+    A read records it in its ``recognizer`` field (None: EasyOCR's stock
+    model). Older reads only have the command that wrote them, whose
+    ``--recognizer-weights`` token names the weights; but since the fine-tuned
+    model became the default (#313) a default run has no such token, so those
+    reads come back as stock and are re-read once, after which they carry the
+    field (#398).
     """
     try:
-        command = json.loads(streets_path.read_text()).get("command") or []
+        doc = json.loads(streets_path.read_text())
     except (OSError, ValueError):
         return None
+    if "recognizer" in doc:
+        return doc["recognizer"]
+    command = doc.get("command") or []
     for i, token in enumerate(command):
         if token == "--recognizer-weights" and i + 1 < len(command):
             return Path(command[i + 1]).name
@@ -523,6 +527,7 @@ def load_recognizer_weights(reader: easyocr.Reader, weights_path: str) -> None:
     model = reader.recognizer
     inner = model.module if hasattr(model, "module") else model
     inner.load_state_dict(state)
+    setattr(reader, RECOGNIZER_ATTR, Path(weights_path).name)
     print(f"Recognizer weights: {weights_path}", file=sys.stderr)
 
 
@@ -716,9 +721,8 @@ def detect_text(
       - short_side: length of the shorter pair of polygon sides (pixels)
       - ignore: True if the text matches a NON_STREET_TEXT pattern (absent otherwise)
       - fallback: True if the read came from fallback_vocab, not vocab_strings (absent otherwise)
-      - background: {color, hue, chroma} of the box's background when it is more saturated than
-        the page's paper, i.e. the label is printed on a coloured building fill (absent when the
-        label sits on paper, which is where street names belong)
+      - background: {color, hue, chroma} of the box's background -- the paper for a street
+        label, the fill color for one printed on a building (see ``is_off_paper``)
 
     The written <stem>.streets.json also records the page's own ``paper`` colour in the same
     {color, hue, chroma} form, which is the reference the ``background`` property is relative to.
@@ -773,6 +777,7 @@ def detect_text(
         "height": orig_height,
         "timestamp": datetime.now(UTC).isoformat(),
         "command": filter_args(sys.argv[:], image_path),
+        "recognizer": reader_recognizer(reader),
         "paper": paper,
         "streets": all_detections,
     }
@@ -968,9 +973,9 @@ def main() -> None:
         "--backfill-background",
         action="store_true",
         help=(
-            "Do not run OCR. Instead, add the 'background' colour property to the detections in "
-            "each image's existing <stem>.streets.json, which is all that pages OCR'd before that "
-            "property existed need. Images with no .streets.json are skipped."
+            "Do not run OCR. Instead, (re)compute the 'background' color of every detection in "
+            "each image's existing <stem>.streets.json, which is all that pages OCR'd before "
+            "every color was recorded need. Images with no .streets.json are skipped."
         ),
     )
     parser.add_argument(
@@ -1054,7 +1059,7 @@ def main() -> None:
         for image_path in tqdm(pending, smoothing=0):
             on_fill += backfill_backgrounds(image_path)
         print(
-            f"Marked {on_fill} detection(s) as sitting on a coloured fill.",
+            f"{on_fill} detection(s) sit on a background off the paper.",
             file=sys.stderr,
         )
         return
@@ -1129,6 +1134,16 @@ def main() -> None:
             file=sys.stderr,
         )
 
+    # Before --resume: it must compare cached reads against the recognizer this
+    # run will actually use, and --stock-recognizer overrides the default weights.
+    if args.stock_recognizer:
+        args.recognizer_weights = None
+    elif args.recognizer_weights and not Path(args.recognizer_weights).exists():
+        sys.exit(
+            f"Recognizer weights not found: {args.recognizer_weights}\n"
+            "Pass --stock-recognizer to use EasyOCR's model instead."
+        )
+
     if args.resume:
         images = [
             p
@@ -1142,6 +1157,8 @@ def main() -> None:
             f"Resuming: {len(images)}/{len(args.images)} remaining images to process.",
             file=sys.stderr,
         )
+        if not images:
+            return  # nothing to read: don't load EasyOCR just to exit
 
     require_boxes(images)
 
@@ -1153,14 +1170,6 @@ def main() -> None:
             file=sys.stderr,
         )
         args.num_workers = 1
-
-    if args.stock_recognizer:
-        args.recognizer_weights = None
-    elif args.recognizer_weights and not Path(args.recognizer_weights).exists():
-        sys.exit(
-            f"Recognizer weights not found: {args.recognizer_weights}\n"
-            "Pass --stock-recognizer to use EasyOCR's model instead."
-        )
 
     if args.num_workers > 1:
         initargs = (

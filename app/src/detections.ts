@@ -1,4 +1,4 @@
-import type { AdjacencyDetection, Detection } from './types';
+import type { AdjacencyDetection, Detection, LabColor } from './types';
 
 /** Filter sliders/toggles that control which detections are shown. */
 export interface DetectionFilters {
@@ -92,15 +92,57 @@ export function confidenceColor(confidence: number): string {
  */
 export const FILL_YELLOW_HUE_BAND: [number, number] = [40, 110];
 
+/** Mirrors `BACKGROUND_CHROMA_MARGIN` in mapsnap/paper_color.py — keep the two in step. */
+export const BACKGROUND_CHROMA_MARGIN = 4.0;
+/** Mirrors `BACKGROUND_HUE_MARGIN` in mapsnap/paper_color.py. */
+export const BACKGROUND_HUE_MARGIN = 60.0;
+/** Mirrors `BACKGROUND_HUE_MIN_CHROMA` in mapsnap/paper_color.py. */
+export const BACKGROUND_HUE_MIN_CHROMA = 3.0;
+/**
+ * Mirrors `BACKGROUND_HUE_TINT_BAND` in mapsnap/paper_color.py: olive to grey-green, the tint
+ * of a grey or aged scan rather than a Sanborn fill colour, which the hue rule ignores.
+ */
+export const BACKGROUND_HUE_TINT_BAND: [number, number] = [100, 150];
+
+/** The angle between two hues in degrees, going the short way round (0-180). */
+export function hueDifference(first: number, second: number): number {
+  const difference = Math.abs(first - second) % 360;
+  return Math.min(difference, 360 - difference);
+}
+
+/**
+ * Whether a detection's background differs from the page's paper (#500/#510).
+ *
+ * Mirrors `is_off_paper` in mapsnap/paper_color.py: more saturated than the paper by the
+ * chroma margin, or far round the hue circle from it at a modest chroma (a pale blue fill on
+ * yellowed paper) and outside the grey scan-tint band. With no `paper` (files written before it was recorded) a background was
+ * only recorded when off the paper, so its presence is the answer.
+ */
+export function isOffPaper(
+  background: LabColor,
+  paper: LabColor | null | undefined,
+): boolean {
+  if (!paper) return true;
+  if (background.chroma > paper.chroma + BACKGROUND_CHROMA_MARGIN) return true;
+  const [low, high] = BACKGROUND_HUE_TINT_BAND;
+  return (
+    background.chroma >= BACKGROUND_HUE_MIN_CHROMA &&
+    hueDifference(background.hue, paper.hue) >= BACKGROUND_HUE_MARGIN &&
+    !(background.hue >= low && background.hue <= high)
+  );
+}
+
 /**
  * True if georeferencing will discard this detection as a building label.
  *
- * A detection carries a `background` when it sits on something more saturated than the page's
- * paper, but only one outside the yellow/brown band — the red brick and blue stone of the
- * Sanborn colour code — is treated as a building.
+ * A background off the page's paper (`isOffPaper`) outside the yellow/brown band — the red
+ * brick and blue stone of the Sanborn colour code — is treated as a building.
  */
-export function isOnBuildingFill(det: Detection): boolean {
-  if (!det.background) return false;
+export function isOnBuildingFill(
+  det: Detection,
+  paper: LabColor | null = null,
+): boolean {
+  if (!det.background || !isOffPaper(det.background, paper)) return false;
   const [low, high] = FILL_YELLOW_HUE_BAND;
   return det.background.hue < low || det.background.hue > high;
 }

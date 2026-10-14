@@ -306,7 +306,7 @@ export function VolumeViewer() {
     // Drop the previous volume's key maps now, or the underlay briefly asks
     // for the new volume's key map by the old volume's stem.
     setKeymaps([]);
-    fetchKeymaps(volumeName)
+    fetchKeymaps(volumeName, volumeRun)
       .then((list) => {
         if (!cancelled) setKeymaps(list);
       })
@@ -526,9 +526,9 @@ export function VolumeViewer() {
   const underlays = useMemo(
     () =>
       volumeName && armedVolume === volumeName
-        ? keymapUnderlays(volumeName, keymaps, underlayImage)
+        ? keymapUnderlays(volumeName, keymaps, underlayImage, volumeRun)
         : [],
-    [volumeName, keymaps, underlayImage, armedVolume],
+    [volumeName, volumeRun, keymaps, underlayImage, armedVolume],
   );
   const selectedIsMissing =
     selectedPage !== null &&

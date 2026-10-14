@@ -8,7 +8,7 @@ import sys
 import time
 from pathlib import Path
 
-from mapsnap import experiments
+from mapsnap import run_archive
 from mapsnap.utils import list_pages, require_centerlines, run_cmd
 
 
@@ -79,8 +79,8 @@ def resolve_run_id(
             "Working tree has uncommitted changes to tracked files. Commit them (even a "
             "throwaway commit) so the run id pins a real revision, or pass --tag."
         )
-    return experiments.auto_run_id(
-        git["sha"], experiments.compute_config_hash(flag_tokens, inputs)
+    return run_archive.auto_run_id(
+        git["sha"], run_archive.compute_config_hash(flag_tokens, inputs)
     )
 
 
@@ -179,6 +179,14 @@ def main() -> None:
         ),
     )
     parser.add_argument(
+        "--no-region-overlap",
+        action="store_true",
+        help=(
+            "Leave out reconcile's content-region overlap factor (#352), and "
+            "the P(region) maps it needs before reconcile runs."
+        ),
+    )
+    parser.add_argument(
         "--image-base-url",
         help=(
             "Publish canvases from the page images rather than a reference "
@@ -204,28 +212,32 @@ def main() -> None:
     # The repo, not the volume: a corpus worker fits a scratch directory that is
     # not inside a git checkout, and asking there recorded "sha": null on every
     # item -- the one field that says which code produced the run.
-    git = experiments.git_head_info(Path(__file__).resolve().parent)
-    models = experiments.model_hashes()
+    git = run_archive.git_head_info(Path(__file__).resolve().parent)
+    models = run_archive.model_hashes()
     # An explicit tag wins; otherwise the checkout names itself, so a fleet
     # launched at a release records that release without being told.
     run_tag = args.run_tag or git.get("describe")
-    inputs = experiments.gather_inputs(
+    inputs = run_archive.gather_inputs(
         dir_path, centerlines, truth if truth.exists() else None
     )
     # The config hash must see the snap setting: identical georef flags with
     # snap on vs off produce different outputs and need different run ids
     # (an id collision would silently SKIP the second variant as already
     # archived).
-    id_tokens = [*georef_extra, *(["--no-snap"] if args.no_snap else [])]
+    id_tokens = [
+        *georef_extra,
+        *(["--no-snap"] if args.no_snap else []),
+        *(["--no-region-overlap"] if args.no_region_overlap else []),
+    ]
     run_id = resolve_run_id(dir_path, args.tag, id_tokens, inputs, git)
 
-    archive_dir = dir_path / experiments.ARTIFACTS_DIRNAME / run_id
+    archive_dir = dir_path / run_archive.ARTIFACTS_DIRNAME / run_id
     # The manifest is written last, so it -- not the directory -- is what says a
     # previous run finished. archive_run creates the directory before copying
     # into it, so an interrupted run leaves an empty one; treating that as done
     # would skip this run's computation for good and leave the tag permanently
     # empty.
-    if experiments.is_complete(archive_dir):
+    if run_archive.is_complete(archive_dir):
         # Skipping is only honest when the archived run would produce the same
         # thing. An auto run id encodes (commit, flags, inputs) so a collision
         # implies a match, but an explicit --tag is just a name: re-using one
@@ -233,7 +245,7 @@ def main() -> None:
         # reports it as this one. That happened -- an A/B arm was "re-run" under
         # a tag the previous experiment had already archived, and its stale
         # numbers were reported as new until the archives were purged by hand.
-        stale = experiments.archive_differs(archive_dir, inputs, git, georef_extra)
+        stale = run_archive.archive_differs(archive_dir, inputs, git, georef_extra)
         if stale:
             sys.exit(
                 f"Run {run_id} is already archived at {archive_dir}, but it was "
@@ -288,11 +300,27 @@ def main() -> None:
         # --no-snap for the same reason.
         timed("street-solve", ["mapsnap", "street-solve", str(dir_path)])
 
+    # Every page's P(region) map, for reconcile's region-overlap factor (#352).
+    # Publication's region masks need the same maps for the pages it places,
+    # so this mostly moves that work earlier; it adds only the pages reconcile
+    # leaves unplaced.
+    if not args.no_region_overlap:
+        timed("region", ["mapsnap", "region", str(dir_path)])
+
     # The arbiter (#270) weighs every pose the channels produced -- including
     # the ones they rejected -- against each other and against not publishing
     # at all, jointly across the volume, and writes the answer for EVERY page
     # as pN.georef-final.json (poseless when it declines to place the page).
-    timed("reconcile", ["mapsnap", "reconcile", str(dir_path), "--publish"])
+    timed(
+        "reconcile",
+        [
+            "mapsnap",
+            "reconcile",
+            str(dir_path),
+            "--publish",
+            *([] if args.no_region_overlap else ["--region-overlap"]),
+        ],
+    )
 
     output_iiif = dir_path / f"{run_id}.iiif.json"
     # One glob, one channel. Publication used to be first-glob-wins over three
@@ -396,7 +424,7 @@ def main() -> None:
         print(f"\nNo main.iiif.json in {dir_path}, skipping comparison step.\n")
 
     command = [*sys.argv[0].split(), *sys.argv[1:]]
-    archived = experiments.archive_fit_run(
+    archived = run_archive.archive_fit_run(
         dir_path,
         run_id,
         georef_extra,

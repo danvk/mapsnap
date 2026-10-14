@@ -1,9 +1,9 @@
-"""Tests for mapsnap.experiments."""
+"""Tests for mapsnap.run_archive."""
 
 import json
 from pathlib import Path
 
-from mapsnap.experiments import (
+from mapsnap.run_archive import (
     archive_differs,
     archive_run,
     auto_run_id,
@@ -315,7 +315,7 @@ def _georef_item(label: str, source_id: str) -> dict:
 
 
 def test_truth_metrics_includes_score(tmp_path):
-    from mapsnap.experiments import truth_metrics
+    from mapsnap.run_archive import truth_metrics
 
     item = _georef_item("p1", "https://example.com/x-1950-0001/info.json")
     truth = tmp_path / "main.iiif.json"
@@ -354,7 +354,7 @@ def test_truth_metrics_includes_score(tmp_path):
 
 
 def test_truth_metrics_score_absent_without_centerlines(tmp_path):
-    from mapsnap.experiments import truth_metrics
+    from mapsnap.run_archive import truth_metrics
 
     item = _georef_item("p1", "https://example.com/x-1950-0001/info.json")
     truth = tmp_path / "main.iiif.json"
@@ -461,7 +461,7 @@ def test_git_head_info_describes_a_tagged_checkout(tmp_path) -> None:
     """
     import subprocess
 
-    from mapsnap import experiments
+    from mapsnap import run_archive
 
     def git(*args: str) -> None:
         subprocess.run(
@@ -477,19 +477,19 @@ def test_git_head_info_describes_a_tagged_checkout(tmp_path) -> None:
     git("add", "f.txt")
     git("commit", "-qm", "first")
     git("tag", "v9.9")
-    assert experiments.git_head_info(tmp_path)["describe"] == "v9.9"
+    assert run_archive.git_head_info(tmp_path)["describe"] == "v9.9"
 
     # One commit past the release still points back at it.
     (tmp_path / "f.txt").write_text("y")
     git("commit", "-qam", "second")
-    assert experiments.git_head_info(tmp_path)["describe"].startswith("v9.9-1-g")
+    assert run_archive.git_head_info(tmp_path)["describe"].startswith("v9.9-1-g")
 
 
 def test_git_head_info_outside_a_repo_has_every_key(tmp_path) -> None:
     """Callers read `describe` unconditionally; it must never be missing."""
-    from mapsnap import experiments
+    from mapsnap import run_archive
 
-    info = experiments.git_head_info(tmp_path)
+    info = run_archive.git_head_info(tmp_path)
     assert set(info) == {"sha", "branch", "subject", "clean", "describe"}
 
 
@@ -497,7 +497,7 @@ def test_git_head_info_reads_the_baked_sha_outside_a_checkout(monkeypatch, tmp_p
     """The corpus image has neither .git nor a git binary; the commit it was
     built from arrives as MAPSNAP_GIT_SHA (--build-arg GIT_SHA). Without the
     fallback every item the image fits records sha: null."""
-    from mapsnap.experiments import git_head_info
+    from mapsnap.run_archive import git_head_info
 
     monkeypatch.setenv("MAPSNAP_GIT_SHA", "5e4b87c0a1b2c3d4e5f60718293a4b5c6d7e8f90")
     info = git_head_info(tmp_path)  # a tmp dir is not inside any repository
@@ -510,7 +510,7 @@ def test_git_head_info_reads_the_baked_sha_outside_a_checkout(monkeypatch, tmp_p
 
 
 def test_manifest_carries_the_batch_job_identity_when_present(monkeypatch, tmp_path):
-    from mapsnap.experiments import batch_job_identity, build_manifest
+    from mapsnap.run_archive import batch_job_identity, build_manifest
 
     monkeypatch.delenv("AWS_BATCH_JOB_ID", raising=False)
     assert batch_job_identity() is None

@@ -60,9 +60,9 @@ export interface Detection {
    */
   underline_removed?: boolean;
   /**
-   * The background under this detection, set only when it is more saturated than the page's
-   * paper — i.e. the label is printed on a coloured building fill rather than on the paper
-   * where street names belong. Absent for the ordinary on-paper case.
+   * The background under this detection: the paper for a street label, the fill for one
+   * printed on a building. Newer OCR records it on every detection and the page's `paper`
+   * beside them (see `isOffPaper`); older files recorded it only when it was off the paper.
    */
   background?: LabColor;
   /**
@@ -147,6 +147,8 @@ export interface StreetsJsonData {
   height: number;
   timestamp: string;
   command: string[];
+  /** The page's own paper colour, the reference every `background` is judged against. */
+  paper?: LabColor;
   streets: Detection[];
 }
 

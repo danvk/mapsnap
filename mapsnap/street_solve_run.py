@@ -1,7 +1,7 @@
 """Street-constraint georeferencing: solve, then adopt where the referee prefers it.
 
 The production entry point for the street_solve channel (see street_solve.py for
-the solver and street_solve_experiment.py for the underlying commands). Every
+the solver and street_solve_volume.py for the underlying commands). Every
 page with a key-map location prior gets a pose fitted from its street labels as
 position+angle constraints against named OSM polylines — no intersections
 required. On its own the channel is a coin flip against the incumbent, so a pose
@@ -42,7 +42,7 @@ def main() -> None:
     parser.add_argument("dir", metavar="DIR", type=Path, help="Volume directory")
     args = parser.parse_args()
 
-    from mapsnap.street_solve_experiment import ADOPT_GAP, cmd_candidates, cmd_select
+    from mapsnap.street_solve_volume import ADOPT_GAP, cmd_candidates, cmd_select
 
     common = {"volume": str(args.dir), "gates": None}
     cmd_candidates(argparse.Namespace(**common, pages=None, truth_prior=False))

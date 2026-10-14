@@ -6,7 +6,6 @@
  * (`/iiif-api/*`) on the shared crosswalk router.
  */
 
-import { existsSync } from 'fs';
 import { readdir, readFile, stat } from 'fs/promises';
 import { createRequire } from 'module';
 import { join } from 'path';
@@ -42,7 +41,7 @@ import {
   withRunPanels,
 } from './adjacencyTruth.ts';
 import { keymapAnnotation } from './keymapAnnotation.ts';
-import { keymapInfos } from './keymapInfos.ts';
+import { keymapFileDir, keymapInfos, keymapSidecarDir } from './keymapInfos.ts';
 import {
   isRunDir,
   runArtifactDir,
@@ -601,34 +600,42 @@ export function registerIiifApi(
   });
 
   // A volume's key-map sheets and which visualization sidecars each has, so the viewer can link
-  // to them and draw the key-map underlay (see keymapInfos). ?volume=<dir> → { keymaps: [...] }.
+  // to them and draw the key-map underlay (see keymapInfos). ?volume=<dir>[&run=runs/<tag>]
+  // → { keymaps: [...] }. With a `run`, that run's own key-map sidecars come first.
   router.get('/iiif-api/keymaps', async (_params, request) => {
     const { volume } = request.query;
+    const run = runOf(request.query.run);
     if (!isSafeVolume(volume)) {
       throw new HTTPError(400, `invalid volume: ${volume}`);
     }
-    const serviceBaseUrl = `${request.protocol}://${request.get('host')}/iiif/${volume}/raw`;
+    const serviceRoot = `${request.protocol}://${request.get('host')}/iiif/${volume}`;
     return {
-      keymaps: await keymapInfos(join(dataDir, volume, 'raw'), serviceBaseUrl),
+      keymaps: await keymapInfos(join(dataDir, volume), serviceRoot, run),
     };
   });
 
   // One key map as a georeference annotation, for the underlay: the sheet or
   // its P(road) map, warped by a thin-plate spline through the sheet's own
   // GCPs -- the model keymap-snap places pages in (see keymapAnnotation).
+  // With a `run`, the key map's sidecars are looked up as /iiif-api/keymaps does.
   router.get('/iiif-api/keymap-annotation', async (_params, request) => {
     const { volume, stem, image } = request.query;
+    const run = runOf(request.query.run);
     if (!isSafeVolume(volume) || !isSafeSegment(stem)) {
       throw new HTTPError(400, `invalid key map: ${volume}/${stem}`);
     }
     if (image !== 'sheet' && image !== 'roadprob') {
       throw new HTTPError(400, `invalid image: ${image}`);
     }
-    const rawDir = join(dataDir, volume, 'raw');
+    const volumeDir = join(dataDir, volume);
+    const sidecarDir = await keymapSidecarDir(volumeDir, run);
     let georef: unknown;
     try {
       georef = JSON.parse(
-        await readFile(join(rawDir, `${stem}.georef.json`), 'utf8'),
+        await readFile(
+          join(volumeDir, sidecarDir ?? 'raw', `${stem}.georef.json`),
+          'utf8',
+        ),
       );
     } catch {
       throw new HTTPError(404, `no georef for key map ${volume}/${stem}`);
@@ -639,14 +646,21 @@ export function registerIiifApi(
       image === 'roadprob'
         ? [`${stem}.roadprob.png`]
         : [`${stem}.jpg`, `${stem}.png`];
-    const file = candidates.find((name) => existsSync(join(rawDir, name)));
-    if (!file) {
+    let found: string | null = null;
+    for (const name of candidates) {
+      const dir = await keymapFileDir(volumeDir, sidecarDir ?? 'raw', name);
+      if (dir !== null) {
+        found = `${dir}/${name}`;
+        break;
+      }
+    }
+    if (!found) {
       throw new HTTPError(
         404,
         `no ${image} image for key map ${volume}/${stem}`,
       );
     }
-    const serviceUrl = `${request.protocol}://${request.get('host')}/iiif/${volume}/raw/${file}`;
+    const serviceUrl = `${request.protocol}://${request.get('host')}/iiif/${volume}/${found}`;
     const page = keymapAnnotation(
       georef,
       serviceUrl,

@@ -156,20 +156,33 @@ of the cost.
 ![p209 split into two panels](../images/how-it-works/02-split.jpg)
 
 Many sheets carry two to four separate map panels divided by heavy black rules,
-often L-shaped or stepped. `mapsnap split` vectorizes the rules, cuts the sheet
+often L-shaped or stepped. `mapsnap split` finds the rules, cuts the sheet
 into panels and writes each as its own page (`p209__1`, `p209__2`) with the
 out-of-panel area masked white ([#70](https://github.com/danvk/mapsnap/pull/70); the OIM-truth harness and shape guard of
-[#272](https://github.com/danvk/mapsnap/pull/272)). Each panel then inherits what the two model passes already produced
+[#272](https://github.com/danvk/mapsnap/pull/272)). The rules come from a whole-page UNet trained on the cutlines
+OldInsuranceMaps volunteers traced (`mapsnap.cutline_model`, [#83](https://github.com/danvk/mapsnap/issues/83)): it draws
+P(cutline), whose thinned lines are cut into segments and closed into panels
+by the same graph closure the classical detector feeds, and any panel boundary
+the network never drew is dissolved again ([#568](https://github.com/danvk/mapsnap/issues/568)).
+`MAPSNAP_SPLITTER=classical` uses the classical detector instead, which
+vectorizes heavy black ink with LSD and a skeleton Hough transform. Each panel then inherits what the two model passes already produced
 for its parent: CRAFT's boxes, remapped into the panel's frame, and a crop of
 the parent's P(road) map ([#354](https://github.com/danvk/mapsnap/issues/354)). Two-panel sheets number the panel holding the
 bottom-left corner first, matching OldInsuranceMaps ([#382](https://github.com/danvk/mapsnap/pull/382)), so truth and output
 name the same panel.
 
-Key-map sheets get a second, stricter look: a split must cut away a box flush
-with two sheet edges, or the parent stands whole ([#383](https://github.com/danvk/mapsnap/pull/383)), and a corner-box
-detector finds the lightly ruled legends and volume indexes the general
-splitter's safety gate hides ([#389](https://github.com/danvk/mapsnap/pull/389)). Sidecars of any panel whose outline
+Key-map sheets are split like any other. The classical splitter needed
+key-map rules (a cut had to remove a box flush with two sheet edges,
+[#383](https://github.com/danvk/mapsnap/pull/383), plus a corner-box detector, [#389](https://github.com/danvk/mapsnap/pull/389)); with the cutline model they no
+longer changed which page numbers key-map detection read, and were removed.
+Key-map detection still reads the whole sheet when a split's cut-aways are not
+all boxes flush with two edges. Sidecars of any panel whose outline
 changed are deleted so nothing stale survives a re-split ([#382](https://github.com/danvk/mapsnap/pull/382)).
+
+On the cutline benchmark ([#566](https://github.com/danvk/mapsnap/pull/566): 4,000 OIM pages from 995 volumes,
+scored on the 760 from held-out volumes) the model gets the right panel count on
+87% of split pages and leaves 99% of unsplit pages whole; the tuned classical
+detector gets 76% and 98.5% ([#567](https://github.com/danvk/mapsnap/pull/567)). The corpus numbers below predate both.
 
 Splits are scored against the panel polygons OldInsuranceMaps volunteers drew
 (`scripts/score_splits_oim.py`, [#272](https://github.com/danvk/mapsnap/pull/272)): every sheet OIM split is a positive,
@@ -247,7 +260,7 @@ six-parameter affine because key maps are drawn with real anisotropy ([#94](http
 Three things on a key-map sheet are _not_ pages and had to be taught: the
 "graphic map of volumes" inset, whose numerals are volume numbers ([#386](https://github.com/danvk/mapsnap/pull/386)–[#388](https://github.com/danvk/mapsnap/pull/388);
 Richmond's p311 was published 14,713 ft away because the inset's "1" became a
-search center), the KEY legend and any second key map cut away as corner boxes
+search center), the KEY legend and any second key map cut away by the splitter
 ([#389](https://github.com/danvk/mapsnap/pull/389)), and the sheet's own cartouche words ([#384](https://github.com/danvk/mapsnap/pull/384)). The printed adjacency
 graph of step 5 can propose repairs to page numbers the CRNN misread ([#217](https://github.com/danvk/mapsnap/pull/217)),
 but the chain only reports them: applying them was a net negative across the

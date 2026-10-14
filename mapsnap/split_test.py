@@ -10,13 +10,14 @@ from shapely.geometry import Polygon, box
 
 from mapsnap.split import (
     BORDER_PX,
+    MAX_DIVIDER_CANDIDATES,
     assemble_panels,
-    box_candidates,
+    bridge_junctions,
+    compute_panels,
+    connected_dividers,
     crop_border,
     invalidate_changed_panels,
     is_keymap_sheet,
-    keymap_box_sheet,
-    keymap_split_rejection,
     merge_collinear,
     order_panels,
     panel_basename,
@@ -27,11 +28,20 @@ from mapsnap.split import (
     read_panels_json,
     remove_panel_sidecars,
     remove_split_outputs,
+    replace_panels,
     rings_match,
     seg_angle_deg,
     segment_thickness,
+    splits_sheet,
     write_panels_json,
 )
+
+
+@pytest.fixture(autouse=True)
+def classical_splitter(monkeypatch):
+    """These tests exercise the classical detector on synthetic sheets."""
+    monkeypatch.setenv("MAPSNAP_SPLITTER", "classical")
+
 
 # --- panel_basename ---
 
@@ -192,21 +202,26 @@ def test_is_keymap_sheet_mirrors_the_key_map_candidates():
     assert is_letter_page("pa") and is_keymap_sheet("pa")
 
 
-def test_keymap_split_rejection_accepts_edge_boxes_and_refuses_notches():
-    sheet = box(0, 0, 1000, 2000)
-    key_box = box(770, 1640, 1000, 2000)  # bottom-right corner: two edges
-    inset = box(0, 1360, 320, 2000)  # bottom-left corner: two edges
-    notch = box(140, 0, 320, 580)  # hangs off the top edge only
-    assert (
-        keymap_split_rejection([sheet.difference(key_box), key_box], 1000, 2000) is None
-    )
-    assert keymap_split_rejection([sheet.difference(inset), inset], 1000, 2000) is None
-    reason = keymap_split_rejection(
-        [sheet.difference(notch).difference(key_box), notch, key_box], 1000, 2000
-    )
-    assert reason is not None and "panel 2" in reason and "1 sheet edge" in reason
-    # A panel the size of the sheet is never a cut-away, whatever its edges say.
-    assert keymap_split_rejection([sheet], 1000, 2000) is None
+def test_splits_sheet_is_false_only_for_one_whole_page_panel():
+    assert not splits_sheet([box(0, 0, 100, 200)], 100, 200)
+    assert not splits_sheet([box(0, 0, 100, 199.5)], 100, 200)
+    assert splits_sheet([box(0, 0, 50, 200), box(50, 0, 100, 200)], 100, 200)
+    assert splits_sheet([box(0, 0, 100, 150)], 100, 200)
+
+
+def test_compute_panels_leaves_a_blank_sheet_whole(tmp_path):
+    image_path = tmp_path / "p0.jpg"
+    Image.fromarray(np.full((800, 600, 3), 255, dtype=np.uint8)).save(image_path)
+    panels = compute_panels(image_path)
+    assert len(panels) == 1 and panels[0].area == pytest.approx(600 * 800)
+
+
+def test_process_image_writes_no_panels_for_a_blank_key_map_sheet(tmp_path):
+    image_path = tmp_path / "p0.jpg"
+    Image.fromarray(np.full((800, 600, 3), 255, dtype=np.uint8)).save(image_path)
+    process_image(image_path)
+    assert not (tmp_path / "p0.panels.json").exists()
+    assert "single panel" in (tmp_path / "raw" / "p0.keymap.txt").read_text()
 
 
 def test_panel_summary_lines_report_share_and_flush_edges():
@@ -355,62 +370,23 @@ def test_assemble_panels_glues_an_edge_strip_in_the_small_band():
     assert panels[0].area == pytest.approx(100 * 100)
 
 
-# --- corner boxes on key-map sheets (#276, step 5) ---
-
-
-def test_keymap_box_sheet_is_the_volume_key_map_only(tmp_path):
-    for name in ("p0.jpg", "pa.jpg", "p1.jpg", "p45.jpg"):
-        (tmp_path / name).touch()
-    assert keymap_box_sheet(tmp_path / "p0.jpg")
-    assert keymap_box_sheet(tmp_path / "pa.jpg")
-    # Page 1 is an ordinary map page when the volume has a page 0.
-    assert not keymap_box_sheet(tmp_path / "p1.jpg")
-    assert not keymap_box_sheet(tmp_path / "p45.jpg")
-    assert not keymap_box_sheet(tmp_path / "p0__1.jpg")
-    alone = tmp_path / "alone"
-    alone.mkdir()
-    (alone / "p1.jpg").touch()
-    assert keymap_box_sheet(alone / "p1.jpg")
-
-
-def test_box_candidates_keep_box_thick_lines_uncapped():
+def test_the_candidate_cap_counts_only_divider_thick_lines():
+    # One heavy divider among more thin long map lines than the cap: the thin
+    # ones fail the thickness filter, so they no longer make the page give up.
     h = w = 1000
     binary = np.zeros((h, w), dtype=np.uint8)
-    binary[600:604, 0:400] = 255  # a 4 px box side: below the divider floor
-    binary[100:102, 500:900] = 255  # a 2 px map line
-    lines = [[0, 602, 400, 602], [500, 101, 900, 101]]
-    # More long lines than MAX_DIVIDER_CANDIDATES: the divider gate would give up.
-    for i in range(14):
-        y = 200 + 25 * i
-        binary[y : y + 6, 500:900] = 255
-        lines.append([500, y + 3, 900, y + 3])
-    kept = box_candidates(np.array(lines, dtype=float), h, w, binary)
-    assert len(kept) == 15
-    assert not any(seg[1] == 101 and seg[3] == 101 for seg in kept)
-
-
-def test_process_image_cuts_a_corner_box_the_divider_gate_hid(tmp_path):
-    # A key-map sheet: a dense grid of heavy interior rules (more than the
-    # divider pipeline's candidate cap, so it stands whole) and a boxed region
-    # in the bottom-left corner, flush with the left and bottom edges.
-    w, h = 1200, 1600
-    sheet = np.full((h, w, 3), 255, dtype=np.uint8)
-    for i in range(14):
-        x = 300 + 50 * i
-        sheet[250:1000, x : x + 7] = 0
-    sheet[1150:1157, 0:500] = 0  # box top
-    sheet[1150:1600, 500:507] = 0  # box right side
-    image_path = tmp_path / "p0.jpg"
-    Image.fromarray(sheet).save(image_path, quality=95)
-    process_image(image_path)
-    panels = read_panels_json(tmp_path / "p0.panels.json")["panels"]
-    assert len(panels) == 2
-    assert (tmp_path / "p0__1.jpg").exists() and (tmp_path / "p0__2.jpg").exists()
-    areas = sorted(Polygon(ring).area / (w * h) for ring in panels)
-    assert areas[0] == pytest.approx(500 * 450 / (w * h), abs=0.01)
-    log = (tmp_path / "raw" / "p0.keymap.txt").read_text()
-    assert "corner boxes: 1 found" in log
-    assert "bottom-left box" in log
+    binary[:, 498:506] = 255  # an 8 px vertical divider
+    lines = [[502, 0, 502, 999]]
+    for i in range(MAX_DIVIDER_CANDIDATES + 2):
+        y = 100 + 50 * i
+        binary[y : y + 2, 0:400] = 255  # 2 px street lines
+        lines.append([0, y + 1, 400, y + 1])
+    kept = connected_dividers(np.array(lines, dtype=float), h, w, binary)
+    assert len(kept) == 1 and kept[0][0] == pytest.approx(502)
+    # Too many divider-thick lines is still a dense grid: give up.
+    for i in range(MAX_DIVIDER_CANDIDATES + 2):
+        binary[100 + 50 * i : 108 + 50 * i, 0:400] = 255
+    assert connected_dividers(np.array(lines, dtype=float), h, w, binary) == []
 
 
 def test_an_orphan_face_never_disconnects_a_panel():
@@ -419,7 +395,7 @@ def test_an_orphan_face_never_disconnects_a_panel():
     (the test wants a shared boundary of positive LENGTH), and gluing it onto
     the nearest panel left that panel in two pieces -- a MultiPolygon, which
     has no ``.exterior`` for expand_to_full_frame to read."""
-    from shapely.geometry import Polygon, box
+    from shapely.geometry import box
 
     from mapsnap.split import assemble_panels, expand_to_full_frame
 
@@ -463,7 +439,6 @@ def test_order_panels_drops_an_empty_polygon() -> None:
 
 def test_repair_panel_mends_a_pinched_ring_without_losing_area():
     """Chicago 1950 p96: a panel ring touching itself at one point (#516)."""
-    from shapely.geometry import Polygon
 
     from mapsnap.split import repair_panel
 
@@ -477,3 +452,43 @@ def test_repair_panel_mends_a_pinched_ring_without_losing_area():
     assert abs(repaired.area - pinched.buffer(0).area) < 1e-9
     valid = Polygon([(0, 0), (1, 0), (1, 1), (0, 1)])
     assert repair_panel(valid) is valid
+
+
+def test_a_resplit_keeps_the_p_road_crops_of_changed_panels(tmp_path):
+    """Invalidation runs before the new panels are written, not after.
+
+    It used to run after, and deleted the P(road) crop write_panels had just cut
+    for every changed panel -- every split panel of a corpus run whose cut had
+    moved since the mirror's, fitted without P(road).
+    """
+    import cv2
+    import numpy as np
+
+    from mapsnap.roadprob import load_roadprob, roadprob_path, save_roadprob
+
+    image = tmp_path / "p5.jpg"
+    cv2.imwrite(str(image), np.full((40, 60, 3), 200, np.uint8))
+    save_roadprob(roadprob_path(image), np.ones((40, 60), np.float32))
+    stale = [[[0.0, 0.0], [30.0, 0.0], [30.0, 40.0], [0.0, 40.0], [0.0, 0.0]]]
+    (tmp_path / "p5__1.streets.json").touch()  # read from the old cut
+    panels = [
+        Polygon([(0.0, 0.0), (25.0, 0.0), (25.0, 40.0), (0.0, 40.0)]),
+        Polygon([(25.0, 0.0), (60.0, 0.0), (60.0, 40.0), (25.0, 40.0)]),
+    ]
+    written, changed = replace_panels(image, panels, "p5", stale)
+
+    assert changed == [1]
+    assert not (tmp_path / "p5__1.streets.json").exists()
+    for panel_image in written:
+        assert load_roadprob(panel_image) is not None, panel_image.name
+
+
+def test_bridge_junctions_overshoot_can_be_overridden():
+    # A free end in mid-page is overshot along its own direction by a share of
+    # the short side: the default JUNCTION_OVERSHOOT_FRAC, or the caller's.
+    segment = [(100.0, 500.0), (400.0, 500.0)]
+    flat = [(segment[0][0], segment[0][1], segment[1][0], segment[1][1])]
+    default = bridge_junctions(flat, 1000, 1000)
+    short = bridge_junctions(flat, 1000, 1000, overshoot_frac=0.01)
+    assert short[0][2] - 400.0 == pytest.approx(10.0)
+    assert default[0][2] > short[0][2]

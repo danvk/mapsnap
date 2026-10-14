@@ -9,7 +9,9 @@ import {
   isSafeVolume,
   isSupersededSheet,
   panelParent,
+  readSources,
   readTruth,
+  sourceCaption,
   truthPath,
   pageImageStems,
   volumePages,
@@ -193,5 +195,47 @@ describe('pageImageStems', () => {
         'metadata.json',
       ]),
     ).toEqual(['p2', 'p2__1', 'p10']);
+  });
+});
+
+describe('readSources', () => {
+  it("reads a sampled pseudo-volume's sources, keyed by synthetic stem", async () => {
+    const volume = 'samples/corpus-10';
+    await mkdir(join(dataDir, volume), { recursive: true });
+    await writeFile(
+      join(dataDir, volume, 'sources.json'),
+      JSON.stringify({
+        seed: 0,
+        pages: {
+          p1: {
+            item: 'sanborn03297_002',
+            page: 'p3',
+            city: 'covington',
+            state: 'louisiana',
+            year: '1909',
+            loc_url: 'https://www.loc.gov/item/sanborn03297_002/',
+          },
+        },
+      }),
+    );
+    const sources = await readSources(dataDir, volume);
+    expect(sources.p1?.item).toBe('sanborn03297_002');
+    expect(sourceCaption(sources.p1!)).toBe('Covington, Louisiana 1909 · p3');
+  });
+
+  it('is empty for an ordinary volume', async () => {
+    expect(await readSources(dataDir, 'no-such-volume')).toEqual({});
+  });
+
+  it('title-cases multi-word places', () => {
+    expect(
+      sourceCaption({
+        item: 'sanborn05791_028',
+        page: 'p15',
+        city: 'brooklyn',
+        state: 'new-york',
+        year: '1907',
+      }),
+    ).toBe('Brooklyn, New York 1907 · p15');
   });
 });

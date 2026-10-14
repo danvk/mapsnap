@@ -3,7 +3,7 @@ import type { KeymapInfo } from '../../server/api';
 import type { SkippedItem } from '../../server/iiifAnnotations';
 import type { PageCompareStats } from '../iiif/compare';
 import { hasFootprint, type PageGeo } from '../iiif/pages';
-import { debugImageStem } from '../iiif/volumePath';
+import { debugImageStem, panelsViewFiles } from '../iiif/volumePath';
 
 /**
  * One page view, offered both inline and as a standalone tab.
@@ -125,6 +125,8 @@ function median(values: number[]): number {
 
 // One key map's visualization links, e.g. "p0 (regions, georef)". The stem links to the
 // key-map detection view; each present sidecar links to its own view via the `?files=` deep link.
+// The sheet and its sidecars may be in different directories: a mirror run keeps its
+// sidecars under runs/<tag>/raw/ but the sheet in the volume's raw/ (#554).
 function KeymapLinks({
   keymap,
   volume,
@@ -132,25 +134,31 @@ function KeymapLinks({
   keymap: KeymapInfo;
   volume: string;
 }): ReactElement {
-  const base = `data/${volume}/raw/${keymap.stem}`;
+  if (!keymap.image) {
+    // A mirror run's split key-map panel (p0__1): its image stayed on the
+    // worker, and every view of the sidecars needs it.
+    return <span title="No image for this key map">{keymap.stem}</span>;
+  }
+  const sheet = `data/${volume}/${keymap.image}`;
+  const base = `data/${volume}/${keymap.sidecarDir}/${keymap.stem}`;
   const extras: ReactElement[] = [];
   if (keymap.hasRegions) {
     extras.push(
-      <a key="regions" href={`?files=${base}.jpg,${base}.regions.panels.json`}>
+      <a key="regions" href={`?files=${sheet},${base}.regions.panels.json`}>
         regions
       </a>,
     );
   }
   if (keymap.hasGeoref) {
     extras.push(
-      <a key="georef" href={`?files=${base}.jpg,${base}.georef.json`}>
+      <a key="georef" href={`?files=${sheet},${base}.georef.json`}>
         georef
       </a>,
     );
   }
   return (
     <span>
-      <a href={`?files=${base}.jpg,${base}.keymap.json`}>{keymap.stem}</a>
+      <a href={`?files=${sheet},${base}.keymap.json`}>{keymap.stem}</a>
       {extras.length > 0 && (
         <>
           {' ('}
@@ -266,12 +274,15 @@ export function InfoPanel(props: InfoPanelProps) {
       label: `${file.slice(selectedPage.stem.length + 1, -'.json'.length)} view`,
       files: [`${imageBase}.jpg`, `${sidecarDir}/${file}`],
     }));
+    // A split panel opens on its whole sheet, cut by the run on screen.
+    const panelsFiles = panelsViewFiles(volume, run ?? null, selectedPage.stem);
     const debugViews: { label: string; files: string[] }[] = [
       {
         label: 'streets view',
         files: [`${imageBase}.jpg`, `${sidecarBase}.streets.json`],
       },
       ...georefViews,
+      ...(panelsFiles ? [{ label: 'panels view', files: panelsFiles }] : []),
       ...(hasAdjacency
         ? [
             {

@@ -977,3 +977,16 @@ def test_drop_recorded_keymaps_leaves_the_key_map_to_its_own_annotation(tmp_path
     # The key-map annotation is built from raw/, where nothing is recorded.
     raw = [("p0a", {}, {}, tmp_path / "raw/p0a.jpg", tmp_path / "raw/p0a.georef.json")]
     assert drop_recorded_keymaps(raw) == raw
+
+
+def test_metadata_carries_reconciles_confidence():
+    from mapsnap.make_iiif_georef import _georef_metadata
+
+    entries = _georef_metadata(
+        {"reconcile": {"confidence": {"p_good": 0.934, "provisional": True}}}
+    )
+    by_label = {e["label"]: e["value"] for e in entries}
+    assert by_label["confidence"] == "0.93"
+    assert by_label["confidence_provisional"] == "true"
+    plain = {e["label"] for e in _georef_metadata({"streets": [], "intersections": []})}
+    assert "confidence" not in plain

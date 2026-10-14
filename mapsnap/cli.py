@@ -23,7 +23,7 @@ SUBCOMMANDS: dict[str, tuple[str, str]] = {
         "Re-run split/keymap/ocr/adjacency/fit on downloaded volumes, reusing CRAFT boxes",
     ),
     "experiments": (
-        "mapsnap.experiments",
+        "mapsnap.run_archive",
         "Compare archived fit runs (experiments diff <id-a> <id-b>)",
     ),
     # Individual commands

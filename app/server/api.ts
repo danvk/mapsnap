@@ -111,6 +111,8 @@ export interface KeymapAnnotationQuery {
   volume: string;
   stem: string;
   image: 'sheet' | 'roadprob';
+  /** The mirror run on screen (`runs/<tag>`), whose key-map sidecars come first. */
+  run?: string;
 }
 
 /** Response of GET /api/adjacency-volumes. */
@@ -168,13 +170,20 @@ export interface FailedGeorefsResponse {
 
 /** One key-map sheet in a volume's `raw/` directory and which sidecars it has. */
 export interface KeymapInfo {
-  /** Key-map image stem, e.g. "p0" (has a `raw/<stem>.keymap.json`). */
+  /** Key-map image stem, e.g. "p0" (has a `<sidecarDir>/<stem>.keymap.json`). */
   stem: string;
-  /** Whether a `raw/<stem>.regions.panels.json` region-segmentation sidecar exists. */
+  /**
+   * Volume-relative directory of the key map's sidecars: `raw`, or a mirror
+   * run's `runs/<tag>/raw` (#554).
+   */
+  sidecarDir: string;
+  /** Volume-relative path of the sheet image (`raw/p0.jpg`), when there is one. */
+  image?: string;
+  /** Whether a `<stem>.regions.panels.json` region-segmentation sidecar exists. */
   hasRegions: boolean;
-  /** Whether a `raw/<stem>.georef.json` sidecar exists. */
+  /** Whether a `<stem>.georef.json` sidecar exists. */
   hasGeoref: boolean;
-  /** Whether a `raw/<stem>.roadprob.png` key-map P(road) map exists (#211). */
+  /** Whether a `<stem>.roadprob.png` key-map P(road) map exists (#211). */
   hasRoadprob: boolean;
   /**
    * The georef's four (lon, lat) corners of the raw sheet -- top-left,
@@ -182,7 +191,7 @@ export interface KeymapInfo {
    * place the key-map underlay.
    */
   corners?: [number, number][];
-  /** Absolute IIIF image service URL of the raw sheet (`.../raw/<stem>.jpg`), when present. */
+  /** Absolute IIIF image service URL of the sheet (`.../raw/<stem>.jpg`), when present. */
   imageService?: string;
   /** Absolute IIIF image service URL of the key map's P(road) PNG, when present. */
   roadprobService?: string;
@@ -270,7 +279,7 @@ export interface API {
     get: GetEndpoint<RunArtifactsResponse, AnnotationQuery>;
   };
   '/iiif-api/keymaps': {
-    get: GetEndpoint<KeymapsResponse, VolumeQuery>;
+    get: GetEndpoint<KeymapsResponse, VolumeRunQuery>;
   };
   '/iiif-api/keymap-annotation': {
     get: GetEndpoint<GeorefAnnotationPage, KeymapAnnotationQuery>;

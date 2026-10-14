@@ -4,6 +4,7 @@ import json
 import math
 
 import numpy as np
+import pytest
 
 from mapsnap.georef_from_labels import (
     _FT_PER_DEG_LAT,
@@ -2197,3 +2198,127 @@ def test_georeferenceable_images_skips_recorded_and_sibling_key_maps(tmp_path):
     # The key-map chain's raw/ copy is not recorded beside itself, so it is kept.
     raw = [str(tmp_path / "raw" / "p0.jpg")]
     assert georeferenceable_images(raw) == raw
+
+
+def test_drop_labels_on_fill_asks_whether_a_background_is_off_the_paper():
+    # Every detection now records its colour (#510), so with the page's paper known a label
+    # on paper is kept even though it has a background, and a pale blue fill is dropped even
+    # though it is no more saturated than the paper (#500).
+    from mapsnap.georef_from_labels import drop_labels_on_fill
+
+    paper = {"color": "#aaa597", "hue": 97.1, "chroma": 8.1}
+    on_paper = {
+        "text": "FLAGLER",
+        "background": {"color": "#aaa597", "hue": 99.0, "chroma": 7.5},
+    }
+    on_blue = {
+        "text": "2 ND",
+        "background": {"color": "#8a9396", "hue": 194.0, "chroma": 4.1},
+    }
+    kept, fill = drop_labels_on_fill([on_paper, on_blue], paper=paper)
+    assert [d["text"] for d in kept] == ["FLAGLER"]
+    assert [d["text"] for d in fill] == ["2 ND"]
+
+
+def test_drop_labels_on_fill_without_paper_treats_a_background_as_off_it():
+    # Older streets.json files recorded a background only when it was off the paper.
+    from mapsnap.georef_from_labels import drop_labels_on_fill
+
+    kept, fill = drop_labels_on_fill([_on("REP", hue=3.0)])
+    assert kept == [] and [d["text"] for d in fill] == ["REP"]
+
+
+def test_load_paper_reads_the_page_colour_or_none(tmp_path):
+    from mapsnap.georef_from_labels import load_paper
+
+    new = tmp_path / "new.streets.json"
+    new.write_text(json.dumps({"streets": [], "paper": {"hue": 90.0, "chroma": 3.0}}))
+    old = tmp_path / "old.streets.json"
+    old.write_text(json.dumps([]))
+    assert load_paper(str(new)) == {"hue": 90.0, "chroma": 3.0}
+    assert load_paper(str(old)) is None
+
+
+def test_gating_prior_swaps_a_fragment_prior_for_the_volume_median():
+    from mapsnap.georef_from_labels import (
+        HALF_SCALE_MIN_RATIO,
+        broadened_scale_plausible,
+        gating_prior,
+    )
+
+    median = 1.955
+    # Miami p34 (#478): a 16.09 px/ft prior from a 1,133 m^2 sliver, 8.2x the median.
+    assert gating_prior(16.09, median) == median
+    assert broadened_scale_plausible(1.478, gating_prior(16.09, median))
+    # A normal prior, even one at the half-scale band's edge, is kept.
+    assert gating_prior(1.2 * median, median) == 1.2 * median
+    edge = median / HALF_SCALE_MIN_RATIO
+    assert gating_prior(edge, median) == edge
+    # Without a volume median (fewer than five regions), the page's own prior stands.
+    assert gating_prior(16.09, None) == 16.09
+
+
+def test_gating_prior_still_rejects_the_spurious_rectangle_fits():
+    # #478's spurious rejections had normal priors (0.76-1.21x the median); the gate
+    # sees exactly the same prior for them, so they stay rejected.
+    from mapsnap.georef_from_labels import broadened_scale_plausible, gating_prior
+
+    for fitted, prior, prior_over_median in [
+        (0.071, 2.56, 0.76),  # chicago p61w
+        (0.154, 1.63, 0.90),  # washington_dc p175
+        (0.040, 2.18, 1.21),  # washington_dc p208
+    ]:
+        median = prior / prior_over_median
+        assert gating_prior(prior, median) == prior
+        assert not broadened_scale_plausible(fitted, gating_prior(prior, median))
+
+
+def test_logged_gating_prior_notes_a_swap(capsys):
+    from mapsnap.georef_from_labels import logged_gating_prior
+
+    assert logged_gating_prior(1.0, 1.0) == 1.0
+    assert capsys.readouterr().out == ""
+    assert logged_gating_prior(16.0, 2.0) == 2.0
+    assert "is a fragment (8.0x the volume median)" in capsys.readouterr().out
+
+
+def test_fit_extent_is_plausible_lets_a_key_map_span_a_city():
+    from mapsnap.georef_from_labels import MAX_KEYMAP_EXTENT_M, fit_extent_is_plausible
+
+    # Detroit 1884 vol. 2's key map spans 7.9 km: too big for a sheet, right for a city.
+    assert not fit_extent_is_plausible(7_900.0)
+    assert fit_extent_is_plausible(7_900.0, keymap_page=True)
+    # Queens 1950 vol. 2's, the largest on disk, at 35.4 km.
+    assert fit_extent_is_plausible(35_400.0, keymap_page=True)
+    # A key-map fit wrong by an order of magnitude is still refused.
+    assert not fit_extent_is_plausible(2 * MAX_KEYMAP_EXTENT_M, keymap_page=True)
+    # Ordinary sheets keep the sheet ceiling.
+    assert fit_extent_is_plausible(1_500.0)
+
+
+def test_reference_scale_ignores_implausible_fits(tmp_path):
+    """#498: a lone wild fit must not become the reference that drops the good pages."""
+    from mapsnap.georef_from_labels import reference_scale
+    from mapsnap.scale_bounds import corpus_px_per_ft
+
+    # sanborn09046_002: p1 at 0.0080 px/ft (38 m/px), p2 at 1.4259 px/ft.
+    records = [(str(tmp_path / "p1.jpg"), 0.0080), (str(tmp_path / "p2.jpg"), 1.4259)]
+    assert reference_scale(records) == pytest.approx(1.4259)
+    # Nothing plausible: the corpus median is the reference.
+    assert reference_scale(records[:1]) == pytest.approx(corpus_px_per_ft())
+
+
+def test_reference_scale_always_counts_a_key_map(tmp_path):
+    """Key maps draw a city: their scale is out of any sheet's band and still counts."""
+    from mapsnap.georef_from_labels import reference_scale
+
+    (tmp_path / "p0.keymap.json").write_text("{}")
+    assert reference_scale([(str(tmp_path / "p0.jpg"), 0.05)]) == pytest.approx(0.05)
+
+
+def test_fit_is_too_fine_spares_key_maps():
+    from mapsnap.georef_from_labels import fit_is_too_fine
+
+    assert fit_is_too_fine(0.0117)  # sanborn05857_001
+    assert not fit_is_too_fine(0.0375)  # Champaign 1915 p4's detail inset
+    assert not fit_is_too_fine(0.0117, keymap_page=True)

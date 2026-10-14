@@ -1,8 +1,10 @@
 """Unit tests for street-name helpers (now in streets.py)."""
 
 import json
+from typing import Any
 
 import numpy as np
+from PIL import Image
 
 from mapsnap.detect_text import (
     NON_STREET_TEXT,
@@ -12,6 +14,7 @@ from mapsnap.detect_text import (
     _merge_vocab_passes,
     _nms_bboxes,
     annotate_backgrounds,
+    backfill_backgrounds,
     build_reader,
     filter_args,
     has_split_panels,
@@ -22,6 +25,7 @@ from mapsnap.detect_text import (
     threads_per_worker,
 )
 from mapsnap.keymap.locate import KeymapLocator
+from mapsnap.paper_color import is_off_paper
 from mapsnap.streets import (
     canonical_street_match,
     matches_any_street,
@@ -479,30 +483,51 @@ def test_region_color_reports_the_box_background_not_the_ink():
     assert background["chroma"] > 40
 
 
-def test_annotate_backgrounds_marks_only_labels_off_the_paper():
+def test_annotate_backgrounds_records_every_detection_and_the_paper():
     page = _rgb_page()
     page[50:70, 50:70] = (200, 40, 40)  # a red brick building
     on_paper = {"text": "MAIN", "polygon": _box(10, 10, 30, 20)}
     on_fill = {"text": "REP", "polygon": _box(55, 55, 65, 65)}
     paper = annotate_backgrounds([on_paper, on_fill], page)
 
-    assert "background" not in on_paper  # street names sit on paper: nothing to record
-    assert on_fill["background"]["chroma"] > paper["chroma"] + 4.0
+    # Every detection carries its colour (#510); is_off_paper tells them apart.
+    assert not is_off_paper(on_paper["background"], paper)
+    assert is_off_paper(on_fill["background"], paper)
     assert on_fill["background"]["color"].startswith("#")
     assert 340 <= on_fill["background"]["hue"] or on_fill["background"]["hue"] <= 40
 
 
 def test_annotate_backgrounds_uses_the_pages_own_paper_as_the_reference():
-    # A heavily yellowed page (Chicago, New Orleans): an ordinary label on that paper must not
-    # be marked, even though the paper itself is far from neutral in absolute terms.
+    # A heavily yellowed page (Chicago, New Orleans): an ordinary label on that paper is not
+    # off the paper, even though the paper itself is far from neutral in absolute terms.
     page = np.full((100, 100, 3), 210, dtype=np.uint8)
     page[:, :, 2] = 150  # strongly yellow paper
     det = {"text": "HALSTED", "polygon": _box(10, 10, 30, 20)}
     paper = annotate_backgrounds([det], page)
     assert paper["chroma"] > 10  # the paper really is saturated...
-    assert (
-        "background" not in det
-    )  # ...but the label matches it, so nothing is recorded
+    assert not is_off_paper(det["background"], paper)  # ...but the label matches it
+
+
+def test_backfill_backgrounds_rewrites_every_colour_and_counts_off_paper(tmp_path):
+    page = _rgb_page()
+    page[50:70, 50:70] = (200, 40, 40)
+    image = tmp_path / "p1.jpg"
+    Image.fromarray(page).save(image, quality=95)
+    streets = tmp_path / "p1.streets.json"
+    streets.write_text(
+        json.dumps(
+            {
+                "streets": [
+                    {"text": "MAIN", "polygon": _box(10, 10, 30, 20)},
+                    {"text": "REP", "polygon": _box(55, 55, 65, 65), "background": {}},
+                ]
+            }
+        )
+    )
+    assert backfill_backgrounds(str(image)) == 1
+    doc = json.loads(streets.read_text())
+    assert "paper" in doc
+    assert all("chroma" in d["background"] for d in doc["streets"])
 
 
 def test_lab_to_hex_renders_a_swatch_of_the_lab_colour():
@@ -565,6 +590,75 @@ def test_resume_skips_only_reads_from_the_same_recognizer(tmp_path):
     assert not reads_are_current(tuned, None)
     # A page with no read at all is always due.
     assert not reads_are_current(tmp_path / "missing.streets.json", None)
+
+
+def test_cached_recognizer_prefers_the_recorded_recognizer(tmp_path):
+    from mapsnap.detect_text import cached_recognizer
+
+    p = tmp_path / "p1.streets.json"
+    p.write_text(
+        json.dumps(
+            {
+                "command": ["mapsnap ocr", "x.jpg"],
+                "recognizer": "street_recognizer.pt",
+                "streets": [],
+            }
+        )
+    )
+    assert cached_recognizer(p) == "street_recognizer.pt"
+    # An explicit None (stock) wins over a stale command token.
+    p.write_text(
+        json.dumps(
+            {
+                "command": ["mapsnap ocr", "--recognizer-weights", "w.pt", "x.jpg"],
+                "recognizer": None,
+                "streets": [],
+            }
+        )
+    )
+    assert cached_recognizer(p) is None
+
+
+def test_resume_keeps_a_read_made_with_the_default_weights(tmp_path):
+    """#398: a run on the default weights has no --recognizer-weights token in
+    its command, so every such read looked stock and --resume re-read them all.
+    The recorded recognizer makes a default read current for a default run."""
+    from mapsnap.detect_text import DEFAULT_RECOGNIZER_WEIGHTS, reads_are_current
+
+    default_run = str(DEFAULT_RECOGNIZER_WEIGHTS)
+    read = tmp_path / "p1.streets.json"
+    read.write_text(
+        json.dumps(
+            {
+                "command": ["mapsnap ocr", "--resume", "x.jpg"],
+                "recognizer": DEFAULT_RECOGNIZER_WEIGHTS.name,
+                "streets": [],
+            }
+        )
+    )
+    assert reads_are_current(read, default_run)
+    assert not reads_are_current(read, None)  # a --stock-recognizer run re-reads it
+    # A default read written before the field existed is re-read once.
+    legacy = tmp_path / "p2.streets.json"
+    write_streets(legacy, ["mapsnap ocr", "--resume", "x.jpg"])
+    assert not reads_are_current(legacy, default_run)
+
+
+def test_load_recognizer_weights_names_the_reader_it_loads(tmp_path):
+    import types
+
+    import torch
+
+    from mapsnap.detect_text import load_recognizer_weights, reader_recognizer
+
+    model = torch.nn.Linear(2, 2)
+    weights = tmp_path / "street_recognizer.pt"
+    torch.save(model.state_dict(), weights)
+    # A stand-in for easyocr.Reader: only .recognizer is touched.
+    reader: Any = types.SimpleNamespace(recognizer=torch.nn.Linear(2, 2))
+    assert reader_recognizer(reader) is None  # stock until weights are loaded
+    load_recognizer_weights(reader, str(weights))
+    assert reader_recognizer(reader) == "street_recognizer.pt"
 
 
 def test_build_reader_keeps_the_recognizer_float(monkeypatch) -> None:

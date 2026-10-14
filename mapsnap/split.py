@@ -6,6 +6,9 @@ panel partition and, when the page actually splits, writes each panel to <base>_
 the same directory (the panel cropped to its bounding box, with any out-of-panel area masked
 white). Pages that are a single panel are left alone.
 
+The dividing lines come from the cutline model (mapsnap.cutline_model) by default;
+MAPSNAP_SPLITTER=classical uses the classical detector below instead.
+
 With --debug, the per-stage images are also written next to each input (binary mask, detected
 segments, panel overlay, and front-end-specific stages).
 
@@ -19,7 +22,7 @@ import re
 import sys
 from itertools import pairwise
 from pathlib import Path
-from typing import TypedDict
+from typing import Any, TypedDict
 
 import cv2
 import numpy as np
@@ -29,7 +32,7 @@ from shapely.geometry import LineString, Point, Polygon, box
 from shapely.ops import polygonize, unary_union
 from skimage.morphology import medial_axis
 
-from mapsnap.corner_boxes import BOX_MIN_THICK_PX, corner_boxes, panels_with_boxes
+from mapsnap.cutline_model import cutline_model_path
 from mapsnap.keymap.log import append_keymap_log
 from mapsnap.roadprob import derive_panel_roadprob
 from mapsnap.utils import image_stem, jpeg_dimensions
@@ -66,8 +69,10 @@ EDGE_SNAP_PX = (
 COLOR_SPREAD_MAX = 40  # max RGB channel spread (max−min) to count a pixel as black ink;
 # colored pixels (brick, vegetation, water tints) are never part of a divider
 EROSION_KERNEL_PX = (
-    5  # thins map linework; the pre-LSD downscale suppresses the rest, so a light
-    # kernel here preserves thinner black dividers (e.g. on color scans)
+    4  # thins map linework; the pre-LSD downscale suppresses the rest, so a light
+    # kernel here preserves thinner black dividers (e.g. on color scans). 4 beat 5
+    # on the cutline benchmark (#83): right panel count +3.7 pts with no more false
+    # cuts; 3 was close, 2 and below let the linework through.
 )
 CLOSE_KERNEL_PX = (
     3  # light close to fuse a divider's broken/stepped core into one solid
@@ -79,11 +84,13 @@ MIN_DIVIDER_THICK_PX = 5.0  # drop candidate dividers whose median thickness on 
 # binary is below this: real dividers are heavy (6-8px); dense-grid block/street lines that
 # the close fattened are thin (3-4px) on the raw binary, so this rejects them
 MAX_DIVIDER_CANDIDATES = (
-    12  # safety gate: a page with more long candidates than this is a
+    12  # safety gate: a page with more divider-thick long candidates than this is a
 )
 # dense street/block grid (15-32), not a real split (≤8), so treat it as a single panel.
 # Backstop for editions whose grid lines are heavy enough to pass the thickness filter
-# (e.g. Brooklyn 1904-1908), where thickness alone can't tell a street from a divider
+# (e.g. Brooklyn 1904-1908), where thickness alone can't tell a street from a divider.
+# Counted after the thickness filter: counting thin map lines too gave up on 5.8% of
+# split pages, as often as on unsplit ones (#83)
 SKELETON_MIN_THICK_PX = 6.0  # keep medial-axis centerlines of features at least this
 # thick; well above the ~2px map-linework median but low enough to retain thin dividers
 # (9px dropped too many; 6px is the sweet spot across the test set)
@@ -100,9 +107,11 @@ MERGE_ANGLE_DEG = 5.0  # max angle difference (°) to merge collinear segments
 MERGE_PERP_PX = (
     20.0  # max perpendicular offset (px) to merge the two edges of a thick bar
 )
-MERGE_GAP_FRAC = 0.15  # max endpoint gap as fraction of shorter page dimension
+MERGE_GAP_FRAC = 0.25  # max endpoint gap as fraction of shorter page dimension
 DIVIDER_MIN_FRAC = (
-    0.15  # after merging, only segments longer than this go into the graph
+    0.10  # after merging, only segments longer than this go into the graph; at
+    # 0.15, 17% of the dividers the splitter missed were found in pieces all
+    # shorter than this (#83)
 )
 CONNECTOR_TOL_PX = (
     40.0  # max gap for treating endpoints as joined when re-admitting and
@@ -113,7 +122,7 @@ EXTEND_FRAC = (
     0.20  # segments longer than this fraction of page get extended to boundary
 )
 EXTEND_MAX_PX = 200.0  # maximum distance to extend a segment toward boundary
-JUNCTION_OVERSHOOT_FRAC = 0.06  # overshoot interior endpoints by this fraction of the
+JUNCTION_OVERSHOOT_FRAC = 0.10  # overshoot interior endpoints by this fraction of the
 # shorter page dimension so near-miss corners/T-junctions become real crossings
 JUNCTION_MAX_PX = 250.0  # max distance to extend an endpoint to reach another segment
 NODE_OVERSHOOT_PX = (
@@ -577,6 +586,8 @@ def bridge_junctions(
     segments: list[tuple[float, float, float, float]],
     h: int,
     w: int,
+    *,
+    overshoot_frac: float | None = None,
 ) -> list[tuple[float, float, float, float]]:
     """Extend interior segment endpoints so near-miss junctions become real crossings.
 
@@ -586,7 +597,9 @@ def bridge_junctions(
     segment its ray crosses, and otherwise overshooting a fixed distance. The resulting tiny
     stub faces are removed by the area filter.
     """
-    overshoot = JUNCTION_OVERSHOOT_FRAC * min(h, w)
+    overshoot = (
+        JUNCTION_OVERSHOOT_FRAC if overshoot_frac is None else overshoot_frac
+    ) * min(h, w)
     geoms = [LineString([(s[0], s[1]), (s[2], s[3])]) for s in segments]
     result = []
     for i, (x0, y0, x1, y1) in enumerate(segments):
@@ -904,6 +917,14 @@ def read_panels_json(path: Path) -> PanelsJson:
     return json.loads(path.read_text())
 
 
+def panel_rings(ordered_panels: list[Polygon]) -> list[list[list[float]]]:
+    """Panel polygons as panels.json records them: exterior rings, rounded to 0.1 px."""
+    return [
+        [[round(x, 1), round(y, 1)] for x, y in panel.exterior.coords]
+        for panel in ordered_panels
+    ]
+
+
 def write_panels_json(
     image_path: Path, ordered_panels: list[Polygon], width: int, height: int
 ) -> Path:
@@ -913,10 +934,7 @@ def write_panels_json(
     match the __i.jpg numbering: ordered_panels[i-1] corresponds to <base>__i.jpg.
     Returns the written path.
     """
-    rings = [
-        [[round(x, 1), round(y, 1)] for x, y in panel.exterior.coords]
-        for panel in ordered_panels
-    ]
+    rings = panel_rings(ordered_panels)
     data: PanelsJson = {
         "image": image_path.name,
         "width": width,
@@ -1014,17 +1032,57 @@ def connected_dividers(
     lines that the morphological close fattened are still rejected as too thin.
     """
     merged = merge_collinear(filter_segments(lines, h, w), MERGE_GAP_FRAC * min(h, w))
-    long_candidates = keep_long_segments(merged, h, w)
-    if len(long_candidates) > MAX_DIVIDER_CANDIDATES:
-        # Too many long candidates → dense street/block grid, not a split → single panel.
-        return []
     dist = cv2.distanceTransform((binary > 0).astype(np.uint8), cv2.DIST_L2, 5)
     long_segs = [
         seg
-        for seg in long_candidates
+        for seg in keep_long_segments(merged, h, w)
         if segment_thickness(dist, seg) >= MIN_DIVIDER_THICK_PX
     ]
+    if len(long_segs) > MAX_DIVIDER_CANDIDATES:
+        # Too many divider-thick lines → dense street/block grid, not a split → single panel.
+        return []
     return keep_connectors(merged, long_segs, h, w)
+
+
+def detect_panels(
+    image_path: Path,
+    lines: np.ndarray,
+    binary: np.ndarray,
+    border: int = BORDER_PX,
+    **finalize: Any,
+) -> tuple[list, list[tuple[float, float, float, float]]]:
+    """(full-frame panels, closed divider segments) for a page.
+
+    The cutline model's lines (mapsnap.cutline_model) by default, or the
+    classical detector's connected_dividers when MAPSNAP_SPLITTER=classical
+    selects it; either way finalize_panels closes them into panels
+    (``finalize`` is passed through).
+    The model's lines close with their own junction overshoot, and any panel
+    boundary the model never drew is dissolved afterwards. ``binary`` is the
+    cropped ink mask ``lines`` were detected on.
+    """
+    h, w = binary.shape
+    model = cutline_model_path()
+    if model is None:
+        connected = connected_dividers(lines, h, w, binary)
+        panels, bridged = finalize_panels(connected, h, w, border, **finalize)
+        return [repair_panel(panel) for panel in panels], bridged
+    from mapsnap.cutline_model import (
+        OVERSHOOT_FRAC,
+        cutline_probability,
+        cutline_segments,
+        merge_unsupported,
+    )
+
+    prob = cutline_probability(load_rgb(image_path), model)
+    segments = cutline_segments(prob, border)
+    connected = (
+        merge_collinear(segments, MERGE_GAP_FRAC * min(h, w)) if len(segments) else []
+    )
+    panels, bridged = finalize_panels(
+        connected, h, w, border, overshoot_frac=OVERSHOOT_FRAC, **finalize
+    )
+    return merge_unsupported([repair_panel(panel) for panel in panels], prob), bridged
 
 
 def expand_to_full_frame(
@@ -1065,6 +1123,8 @@ def finalize_panels(
     min_panel_frac: float | None = None,
     small_face_policy: str = "glue",
     thick_mask: np.ndarray | None = None,
+    *,
+    overshoot_frac: float | None = None,
 ) -> tuple[list, list[tuple[float, float, float, float]]]:
     """Close the divider graph in the cropped frame, then expand panels to the full frame.
 
@@ -1074,7 +1134,9 @@ def finalize_panels(
     """
     extended = extend_long_segments(connected, cropped_h, cropped_w)
     snapped = snap_to_boundary(extended, cropped_h, cropped_w)
-    bridged = bridge_junctions(snapped, cropped_h, cropped_w)
+    bridged = bridge_junctions(
+        snapped, cropped_h, cropped_w, overshoot_frac=overshoot_frac
+    )
     faces = build_and_polygonize(bridged, cropped_h, cropped_w)
     panels = assemble_panels(
         faces,
@@ -1095,27 +1157,34 @@ def compute_panels(
 ) -> list:
     """Detect panels for one image as polygons in the full (uncropped) scaled-image frame.
 
-    The I/O-free pipeline used by the scoring harness; process_image mirrors it while also
-    writing per-stage debug images. ``min_panel_frac`` and ``small_face_policy`` are the
-    #83 small-inset experiment knobs (see assemble_panels); production defaults are
-    unchanged.
+    The I/O-free pipeline used by the scoring harness: process_image's decision
+    without writing anything. A sheet left whole is one full-frame panel.
+    ``min_panel_frac`` and ``small_face_policy`` are the #83 small-inset
+    experiment knobs (see assemble_panels); production defaults are unchanged.
     """
     rgb = crop_border(load_rgb(image_path), border)
     gray = crop_border(load_gray(image_path), border)
     h, w = gray.shape
     binary = binarize(rgb, gray)
     thick = compute_thick_mask(binary) if small_face_policy == "verified" else None
-    connected = connected_dividers(detect_lines(binary), h, w, binary)
-    panels, _ = finalize_panels(
-        connected,
-        h,
-        w,
+    lines = detect_lines(binary)
+    panels, _ = detect_panels(
+        image_path,
+        lines,
+        binary,
         border,
         min_panel_frac=min_panel_frac,
         small_face_policy=small_face_policy,
         thick_mask=thick,
     )
+    if not splits_sheet(panels, w + 2 * border, h + 2 * border):
+        return [box(0, 0, w + 2 * border, h + 2 * border)]
     return panels
+
+
+def splits_sheet(panels: list, full_w: float, full_h: float) -> bool:
+    """Whether the panels cut the sheet: anything but one panel covering the whole page."""
+    return not (len(panels) == 1 and panels[0].area >= 0.99 * full_h * full_w)
 
 
 def order_panels(panels: list, height: float | None = None) -> list:
@@ -1240,6 +1309,27 @@ def repair_panel(panel: Polygon) -> Polygon:
     )
 
 
+def replace_panels(
+    image_path: Path,
+    ordered: list[Polygon],
+    base: str,
+    previous_rings: list[list[list[float]]],
+) -> tuple[list[Path], list[int]]:
+    """Drop the sidecars of panels whose ring changed, then write the new panels.
+
+    In that order: write_panels derives each panel's P(road) crop from the
+    parent's, and invalidating afterwards deleted the fresh crop of every
+    changed panel along with the stale reads -- so a corpus run, re-splitting
+    over the mirror's older cut, fitted those panels with no P(road) at all
+    (georef's fill check ran without it; snap inferred one on CPU). Returns the
+    panel images written and the changed panel indices.
+    """
+    changed = invalidate_changed_panels(
+        image_path, previous_rings, panel_rings(ordered)
+    )
+    return write_panels(image_path, ordered, base), changed
+
+
 def write_panels(image_path: Path, panels: list, base: str) -> list[Path]:
     """Write each panel to <base>__N.jpg next to image_path; return the written paths.
 
@@ -1316,96 +1406,6 @@ def is_keymap_sheet(stem: str) -> bool:
     return match is not None and int(match.group(1)) in (0, 1)
 
 
-def keymap_box_sheet(image_path: Path) -> bool:
-    """Whether a key-map candidate sheet is one the corner-box detector may cut.
-
-    The page-0 family and letter sheets are the key map in every volume censused
-    (mapsnap.keymap.identify.detection_plan); a page-1 sheet is only when the
-    volume has no page 0, and is otherwise an ordinary map page whose corner a
-    diagonal street or a fold could carve into a box-shaped panel.
-    """
-    stem = panel_basename(image_path)
-    if not is_keymap_sheet(stem):
-        return False
-    if re.fullmatch(r"p1[A-Za-z]{0,2}", stem):
-        return not any(image_path.parent.glob("p0*.jpg"))
-    return True
-
-
-def box_candidates(
-    lines: np.ndarray, h: int, w: int, binary: np.ndarray
-) -> list[tuple[float, float, float, float]]:
-    """Long segments at least BOX_MIN_THICK_PX thick, uncapped.
-
-    The corner-box detector's input (mapsnap.corner_boxes): the divider
-    pipeline's MAX_DIVIDER_CANDIDATES gate and its 5 px thickness floor are what
-    hide a key map's boxed regions, so this is the same merge and length filter
-    without them.
-    """
-    merged = merge_collinear(filter_segments(lines, h, w), MERGE_GAP_FRAC * min(h, w))
-    dist = cv2.distanceTransform((binary > 0).astype(np.uint8), cv2.DIST_L2, 5)
-    return [
-        seg
-        for seg in keep_long_segments(merged, h, w)
-        if segment_thickness(dist, seg) >= BOX_MIN_THICK_PX
-    ]
-
-
-def keymap_corner_box_panels(
-    lines: np.ndarray, h: int, w: int, binary: np.ndarray
-) -> tuple[list, list[str]]:
-    """Panels cut by the corner-box detector, in the full frame, with log lines.
-
-    No panels when no box is found, or when the boxes do not leave one clean
-    remainder; the log lines say what was found either way.
-    """
-    candidates = box_candidates(lines, h, w, binary)
-    boxes = corner_boxes(candidates, binary, h, w)
-    log_lines = [
-        (
-            f"corner boxes: {len(boxes)} found among {len(candidates)} "
-            "box-thick candidate segment(s)"
-        )
-    ]
-    for candidate in boxes:
-        share = candidate.area / (h * w)
-        log_lines.append(
-            f"  {'-'.join(candidate.corner)} box, {share:.1%} of the sheet: "
-            f"{candidate.detail}"
-        )
-    panels = panels_with_boxes([candidate.polygon for candidate in boxes], h, w)
-    if boxes and not panels:
-        log_lines.append("  boxes do not leave one clean remainder; sheet stands whole")
-    return expand_to_full_frame(panels, h, w, BORDER_PX), log_lines
-
-
-def keymap_split_rejection(panels: list, width: float, height: float) -> str | None:
-    """Why a key-map sheet's split must be refused, or None when it may stand.
-
-    What a key-map sheet legitimately loses to a split is a boxed region in a
-    corner or along an edge -- a KEY legend, a "graphic map of volumes" inset
-    -- and every one of those is flush with at least two sheet edges. A cut-
-    away flush with fewer is the splitter latching onto the key map's own
-    linework: Chicago's 4% notch hanging off the top edge carried ten page
-    numbers that the key-map panel then never read. Measured over every split
-    key-map sheet in the corpus (9 panels): key-map panels are flush with four
-    edges, legitimate cut-aways with two, the one bad cut with one. Regular
-    map pages are not judged here: their panels are insets and composites of
-    every shape.
-    """
-    for index, panel in enumerate(panels, start=1):
-        x0, y0, x1, y1 = panel.bounds
-        if (x1 - x0) * (y1 - y0) >= CUT_AWAY_MAX_AREA * width * height:
-            continue  # the sheet itself, whatever was cut from it
-        flush = panel_flush_edges(list(panel.exterior.coords), width, height)
-        if flush < 2:
-            return (
-                f"panel {index} is flush with {flush} sheet edge(s), "
-                "not a boxed corner or edge region"
-            )
-    return None
-
-
 def panel_summary_lines(panels: list, width: float, height: float) -> list[str]:
     """One line per panel: its share of the sheet and how many edges it is flush with."""
     lines = []
@@ -1466,9 +1466,7 @@ def process_image(image_path: Path, debug: bool = False) -> None:
     else:
         lines = detect_lines(binary)
 
-    connected = connected_dividers(lines, h, w, binary)
-    panels, bridged = finalize_panels(connected, h, w)
-    panels = [repair_panel(panel) for panel in panels]
+    panels, bridged = detect_panels(image_path, lines, binary)
     full_h, full_w = h + 2 * BORDER_PX, w + 2 * BORDER_PX
 
     if debug:
@@ -1483,55 +1481,15 @@ def process_image(image_path: Path, debug: bool = False) -> None:
     if raw_path.exists():
         remove_split_outputs(raw_path)
 
-    # A single panel covering the whole page means no split was found.
-    is_single_full = len(panels) == 1 and panels[0].area >= 0.99 * full_h * full_w
-    # A key-map sheet only gives up boxed edge regions; anything else is a bad
-    # cut and the sheet stands whole (#276).
-    rejection = (
-        keymap_split_rejection(panels, full_w, full_h)
-        if is_keymap_sheet(base) and not is_single_full
-        else None
-    )
-    # Where the divider pipeline leaves a key-map sheet whole, look for the
-    # boxed corners its safety gates hide: a second key map, an index inset, a
-    # legend (mapsnap.corner_boxes).
-    box_lines: list[str] = []
-    if (is_single_full or rejection) and keymap_box_sheet(image_path):
-        box_panels, box_lines = keymap_corner_box_panels(lines, h, w, binary)
-        if box_panels:
-            panels, is_single_full, rejection = box_panels, False, None
-            print(f"{image_path.name}: key-map sheet, corner box(es) cut away")
-    if is_single_full:
+    if not splits_sheet(panels, full_w, full_h):
         print(f"{image_path.name}: single panel — not split")
         for index in range(1, len(previous_rings) + 1):
             remove_panel_sidecars(image_path, index)
         if is_keymap_sheet(base):
-            append_keymap_log(
-                image_path, "split", ["single panel — not split", *box_lines]
-            )
-        return
-    if rejection:
-        # The stale panels were removed above; drop their sidecars too so
-        # nothing downstream keeps reading them.
-        print(f"{image_path.name}: key-map sheet, split rejected — {rejection}")
-        removed = []
-        for index in range(1, len(previous_rings) + 1):
-            removed += remove_panel_sidecars(image_path, index)
-        if raw_path.exists():
-            remove_split_outputs(raw_path)
-        append_keymap_log(
-            image_path,
-            "split",
-            [
-                f"split rejected — {rejection}",
-                *panel_summary_lines(panels, full_w, full_h),
-                *box_lines,
-                f"removed {len(removed)} stale panel sidecar(s) from an earlier split",
-            ],
-        )
+            append_keymap_log(image_path, "split", ["single panel — not split"])
         return
     ordered = order_panels(panels, full_h)  # panels are in the uncropped frame
-    out_paths = write_panels(image_path, ordered, base)
+    out_paths, changed = replace_panels(image_path, ordered, base, previous_rings)
     print(
         f"{image_path.name}: {len(panels)} panels → {', '.join(p.name for p in out_paths)}"
     )
@@ -1543,14 +1501,8 @@ def process_image(image_path: Path, debug: bool = False) -> None:
                 f"split accepted: {len(ordered)} panels → "
                 + ", ".join(path.name for path in out_paths),
                 *panel_summary_lines(ordered, full_w, full_h),
-                *box_lines,
             ],
         )
-    changed = invalidate_changed_panels(
-        image_path,
-        previous_rings,
-        read_panels_json(panels_json_path(image_path))["panels"],
-    )
     if changed:
         print(
             f"  panels {changed} changed since the last split; their reads and "

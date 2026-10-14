@@ -25,9 +25,9 @@ import argparse
 import sys
 from pathlib import Path
 
-from mapsnap import experiments
-from mapsnap.experiments import is_complete
+from mapsnap import run_archive
 from mapsnap.fit import find_centerlines, find_ref_iiif
+from mapsnap.run_archive import is_complete
 
 
 def run_outputs(dir_path: Path, tag: str) -> tuple[Path | None, Path | None]:
@@ -105,7 +105,7 @@ def main() -> None:
             "that has already been produced; it does not compute one."
         )
 
-    run_dir = dir_path / experiments.ARTIFACTS_DIRNAME / args.tag
+    run_dir = dir_path / run_archive.ARTIFACTS_DIRNAME / args.tag
     sidecars = sorted(dir_path.glob("p*.georef*.json"))
     # --check reports the state rather than acting on it, including the state
     # that would otherwise stop the run: being told "already archived" and
@@ -143,13 +143,13 @@ def main() -> None:
     if find_ref_iiif(dir_path) is None:
         sys.exit(f"No reference IIIF found in {dir_path}")
     truth = dir_path / "main.iiif.json"
-    git = experiments.git_head_info(dir_path)
-    inputs = experiments.gather_inputs(
+    git = run_archive.git_head_info(dir_path)
+    inputs = run_archive.gather_inputs(
         dir_path, centerlines, truth if truth.exists() else None
     )
     command = [*sys.argv[0].split(), *sys.argv[1:]]
 
-    manifest = experiments.build_manifest(
+    manifest = run_archive.build_manifest(
         dir_path,
         args.tag,
         [],
@@ -166,7 +166,7 @@ def main() -> None:
     if args.note:
         manifest["note"] = args.note
 
-    archived = experiments.archive_run(
+    archived = run_archive.archive_run(
         dir_path, args.tag, manifest, iiif_path, compare_txt
     )
     stems = archived_stems(archived)
