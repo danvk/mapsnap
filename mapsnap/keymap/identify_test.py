@@ -4,6 +4,7 @@ from pathlib import Path
 from mapsnap.keymap.identify import (
     MIN_DISTINCT,
     candidate_keys,
+    collapse_half_sheet_keys,
     detection_plan,
     is_keymap,
     legitimate_keymap_split,
@@ -225,6 +226,28 @@ def test_detection_plan_letter_page_splits_tested_as_panels(tmp_path: Path):
     assumed, confirm = detection_plan(volume)
     assert assumed == []
     assert confirm == ["pa__1", "pa__2", "pb"]
+
+
+def test_collapse_half_sheet_keys_folds_only_the_exact_pair():
+    keys = {"12L", "12R", "13L", "14", "14L", "14R", "15A", "15L", "15R"}
+    assert collapse_half_sheet_keys(keys) == {
+        "12",
+        "13L",
+        "14",
+        "14L",
+        "14R",
+        "15A",
+        "15L",
+        "15R",
+    }
+
+
+def test_volume_valid_pages_names_half_sheets_by_their_printed_number(tmp_path: Path):
+    # Cincinnati 1887: each sheet scanned as two halves; its key map prints "12", not "12L".
+    volume = make_volume(
+        tmp_path, ["p0l.jpg", "p0r.jpg", "p1l.jpg", "p1r.jpg", "p2l.jpg", "p2r.jpg"]
+    )
+    assert volume_valid_pages(volume) == ["1", "2"]
 
 
 def test_letter_page_panels_do_not_pollute_valid_pages(tmp_path: Path):

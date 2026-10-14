@@ -47,6 +47,7 @@ from mapsnap.keymap.detect_numbers_cnn import (
 from mapsnap.keymap.detect_numbers_crnn import read_candidates, snap_to_pages
 from mapsnap.keymap.fit_keymap import (
     collapse_skeleton_keys,
+    key_stem,
     page_number,
     volume_page_keys,
 )
@@ -86,14 +87,40 @@ def is_letter_page(stem: str) -> bool:
     return re.fullmatch(r"p[a-z]{1,2}", stem) is not None
 
 
+def collapse_half_sheet_keys(keys: set[str]) -> set[str]:
+    """Fold a sheet scanned as two halves, ``NL`` + ``NR``, back into the ``N`` it was printed as.
+
+    Volumes like Cincinnati 1887 (LOC sanborn06645_001) were scanned one half
+    sheet per image, so their page keys are ``12L``/``12R`` while the key map
+    prints a plain ``12``. snap_to_pages won't choose a letter for a bare read
+    when two exist, so every read of such a key map stayed raw and a real key
+    map covered 0/66 of its volume. Like collapse_skeleton_keys, this keeps a
+    coverage denominator to what a key map can name.
+
+    Only the exact pair collapses: a family of just ``NL`` and ``NR``. A lone
+    half, or a family with other letters (``N``, ``NA``, ...), is kept as it is.
+    """
+    families: defaultdict[str, set[str]] = defaultdict(set)
+    for key in keys:
+        families[key_stem(key)].add(key)
+    collapsed: set[str] = set()
+    for stem, family in families.items():
+        if family == {f"{stem}L", f"{stem}R"}:
+            collapsed.add(stem)
+        else:
+            collapsed |= family
+    return collapsed
+
+
 def volume_valid_pages(volume: Path) -> list[str]:
-    """The volume's real page keys (positive, letters included, from its ``p*.jpg`` images)."""
+    """The volume's real page keys (positive, letters included, from its ``p*.jpg`` images).
+
+    These are the keys a printed key map can name: skeleton twins and half-sheet
+    pairs collapse into the one number the sheet carries.
+    """
+    keys = collapse_half_sheet_keys(collapse_skeleton_keys(volume_page_keys(volume)))
     return sorted(
-        (
-            key
-            for key in collapse_skeleton_keys(volume_page_keys(volume))
-            if page_key_sort(key)[0] >= 1
-        ),
+        (key for key in keys if page_key_sort(key)[0] >= 1),
         key=page_key_sort,
     )
 
