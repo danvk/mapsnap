@@ -1611,6 +1611,21 @@ def stamp_agreement(
     }
 
 
+def snap_seed(snap_record: dict) -> str | None:
+    """What seeded snap's search for a page: "half-sheet" (its sibling half's pose), or None."""
+    return (
+        "half-sheet"
+        if (snap_record.get("search") or {}).get("half_sheet_seed")
+        else None
+    )
+
+
+def from_snap(hypothesis: Hypothesis) -> bool:
+    """Whether a hypothesis's pose came out of snap's search, directly or merged."""
+    sources = [hypothesis.source, *hypothesis.merged_sources]
+    return any(s.startswith("snap:") or s == "georef-snap" for s in sources)
+
+
 def provenance_record(
     stem: str,
     nodes: dict[str, PageNode],
@@ -1635,6 +1650,8 @@ def provenance_record(
     # A split parent is not abstained, it is answered by its panels; its own
     # final sidecar exists only to claim the page key.
     superseded = any(other.startswith(f"{stem}__") for other in nodes)
+    snap = (snap_records or {}).get(stem) or {}
+    seed = snap_seed(snap)
     hypotheses = []
     for index, hyp in enumerate(node.hypotheses):
         hypotheses.append(
@@ -1642,6 +1659,7 @@ def provenance_record(
                 "source": hyp.source,
                 "status": hyp.status,
                 "chosen": index == chosen_index,
+                "seed": seed if from_snap(hyp) else None,
                 "unary": round(float(hyp.unary), 4),
                 "terms": {k: round(float(v), 4) for k, v in hyp.unary_terms.items()},
                 "effective_gcps": int(hyp.effective_gcps),
@@ -1663,12 +1681,12 @@ def provenance_record(
         decision = "placed"
     else:
         decision = "abstained"
-    snap = (snap_records or {}).get(stem) or {}
     verdict = (snap.get("decision") or {}).get("page_verdict")
     return {
         "stem": stem,
         "decision": decision,
         "snap_verdict": verdict,
+        "snap_seed": seed,
         "panels": sorted(other for other in nodes if other.startswith(f"{stem}__"))
         if superseded
         else None,
