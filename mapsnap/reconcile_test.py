@@ -877,6 +877,39 @@ def test_provenance_records_the_snap_verdict(tmp_path):
     )
 
 
+def test_provenance_records_a_half_sheet_seed(tmp_path):
+    """A seeded search, and which hypotheses it produced, count from one file per page."""
+    import json
+
+    from mapsnap.reconcile import publish
+
+    node = make_node(
+        "p9R", [scored("georef-snap", affine(0), 0.9), scored("georef", affine(1), 0.5)]
+    )
+    publish(
+        tmp_path,
+        {"p9R": node},
+        {"p9R": 0},
+        snap_records={"p9R": {"search": {"half_sheet_seed": True}}},
+    )
+    record = json.loads((tmp_path / "p9R.provenance.json").read_text())
+    assert record["snap_seed"] == "half-sheet"
+    assert [h["seed"] for h in record["hypotheses"]] == ["half-sheet", None]
+
+    publish(tmp_path, {"p9R": node}, {"p9R": 0})
+    record = json.loads((tmp_path / "p9R.provenance.json").read_text())
+    assert record["snap_seed"] is None
+    assert [h["seed"] for h in record["hypotheses"]] == [None, None]
+
+
+def test_from_snap_counts_merged_snap_sources():
+    from mapsnap.reconcile import Hypothesis, from_snap
+
+    assert from_snap(Hypothesis("snap:2", affine(0)))
+    assert from_snap(Hypothesis("georef", affine(0), merged_sources=["snap:0"]))
+    assert not from_snap(Hypothesis("georef", affine(0), merged_sources=["streets"]))
+
+
 def test_rung_note_band_matches_the_snap_constant():
     """The two modules import each other lazily, so the band is mirrored by hand."""
     from mapsnap.reconcile import RUNG_NOTE_BAND

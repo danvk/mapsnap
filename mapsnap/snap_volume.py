@@ -84,7 +84,13 @@ RESCUE_STATES = {"nofit", "misscale", "1gcp", "outlier", "none"}
 DEMOTED_SEED_SIGMA_DEG = 10.0
 
 
-HALF_SHEET_SEEDS = os.environ.get("MAPSNAP_HALF_SHEET_SEEDS") == "1"
+# Seed an unplaced half of a two-scan sheet (pNL/pNR) from its placed other half
+# (#522). On by default since #593's A/B; MAPSNAP_NO_HALF_SHEET_SEEDS=1 turns it
+# off. With key maps restored (#598) it lifted San Jose 1884 0.462 -> 0.564 and
+# Detroit 1884 vol. 2 0.182 -> 0.224 against OIM truth; of the two seeded
+# disasters, San Jose p7R's truth is wrong and p29R is snap moving a close seed to
+# an alias where the street grid broke.
+HALF_SHEET_SEEDS = os.environ.get("MAPSNAP_NO_HALF_SHEET_SEEDS") != "1"
 
 
 HALF_SHEET_OVERLAP = 0.057

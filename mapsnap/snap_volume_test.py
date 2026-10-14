@@ -823,3 +823,16 @@ def test_snap_targets_treat_split_panels_like_whole_pages():
         "p1__1",
         "p1__2",
     ]
+
+
+def test_half_sheet_seeds_are_on_unless_opted_out(monkeypatch):
+    import importlib
+
+    from mapsnap import snap_volume
+
+    monkeypatch.delenv("MAPSNAP_NO_HALF_SHEET_SEEDS", raising=False)
+    assert importlib.reload(snap_volume).HALF_SHEET_SEEDS
+    monkeypatch.setenv("MAPSNAP_NO_HALF_SHEET_SEEDS", "1")
+    assert not importlib.reload(snap_volume).HALF_SHEET_SEEDS
+    monkeypatch.delenv("MAPSNAP_NO_HALF_SHEET_SEEDS")
+    importlib.reload(snap_volume)
