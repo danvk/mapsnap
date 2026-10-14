@@ -128,6 +128,32 @@ def best_reads(components: list[Component], reads: list[list[dict]]) -> list[dic
     return kept
 
 
+def component_of(detection: dict, components: list[Component]) -> int | None:
+    """Index of the first component whose box, grown by the largest read size, holds a read's centre."""
+    margin = max(READ_SIZES)
+    x, y = detection_centre(detection)
+    for index, (x0, y0, x1, y1) in enumerate(components):
+        pad = margin * (y1 - y0)
+        if x0 - pad <= x <= x1 + pad and y0 - pad <= y <= y1 + pad:
+            return index
+    return None
+
+
+def best_unresolved(
+    components: list[Component], kept: list[dict], unresolved: list[dict]
+) -> list[dict]:
+    """Per component with no resolved read, its most confident unresolved read (#556)."""
+    resolved = {component_of(d, components) for d in kept}
+    best: dict[int, dict] = {}
+    for read in unresolved:
+        index = component_of(read, components)
+        if index is None or index in resolved:
+            continue
+        if index not in best or read["confidence"] > best[index]["confidence"]:
+            best[index] = read
+    return [best[index] for index in sorted(best)]
+
+
 def detector_digit_detections(
     model: UNet, device: torch.device | str = "cpu"
 ) -> Callable[..., list[dict]]:
@@ -136,7 +162,8 @@ def detector_digit_detections(
     The returned function takes digit_detections' arguments and ignores
     ``craft_boxes``: it predicts the page's number components, reads each at
     READ_SIZES through the existing reader, and keeps each component's most
-    confident valid read.
+    confident valid read. A component with no valid read at any size gives its
+    most confident unresolved read to ``unresolved``, when that is given.
     """
 
     def detections(
@@ -145,12 +172,15 @@ def detector_digit_detections(
         valid_keys: set[str],
         craft_boxes: tuple[list, list] | None = None,
         units: list | None = None,
+        *,
+        unresolved: list[dict] | None = None,
     ) -> list[dict]:
         gray = cv2.imread(str(image_path), cv2.IMREAD_GRAYSCALE)
         if gray is None:
             raise FileNotFoundError(f"cannot read image {image_path}")
         height, width = gray.shape
         components = number_components(predict_page(model, gray, device))
+        failed: list[dict] = []
         reads = [
             page_adjacency.digit_detections(
                 image_path,
@@ -165,9 +195,13 @@ def detector_digit_detections(
                     [],
                 ),
                 units=units,
+                unresolved=failed,
             )
             for factor in READ_SIZES
         ]
-        return best_reads(components, reads)
+        kept = best_reads(components, reads)
+        if unresolved is not None:
+            unresolved.extend(best_unresolved(components, kept, failed))
+        return kept
 
     return detections

@@ -389,6 +389,56 @@ def cached_craft_boxes(image_path: Path) -> tuple[list, list] | None:
     return None
 
 
+def read_record(
+    bbox: list,
+    read: tuple[str, float],
+    *,
+    image_size: tuple[int, int],
+    units: list | None,
+    neighbour_boxes: list,
+) -> dict:
+    """A digit read's text, box, size, position and isolation, as adjacency.json records it.
+
+    ``read`` is the digits pass's (text, confidence). The fields every recorded
+    read shares, resolved or not (see digit_detections).
+    """
+    text, confidence = read
+    width, height = image_size
+    cx, cy = box_center(bbox)
+    x_frac = sum(p[0] for p in bbox) / 4 / width
+    y_frac = sum(p[1] for p in bbox) / 4 / height
+    # Attribute the read to its panel; the edge classification is
+    # panel-relative (a number on an interior cut line is at ITS PANEL's
+    # edge even though it is nowhere near the page's).
+    panel_stem: str | None = None
+    panel_x_frac, panel_y_frac = x_frac, y_frac
+    if units is not None:
+        panel_stem, (bx0, by0, bx1, by1) = assign_panel((cx, cy), units)
+        if bx1 > bx0 and by1 > by0:
+            panel_x_frac = (cx - bx0) / (bx1 - bx0)
+            panel_y_frac = (cy - by0) / (by1 - by0)
+    glyph_height = float(max(p[1] for p in bbox) - min(p[1] for p in bbox))
+    nearest_box = min(
+        (
+            gap
+            for other_bbox in neighbour_boxes
+            if (gap := bbox_gap(bbox, other_bbox)) > 0 or not same_box(bbox, other_bbox)
+        ),
+        default=math.inf,
+    )
+    return {
+        "text": text,
+        "confidence": round(float(confidence), 4),
+        "polygon": [[int(p[0]), int(p[1])] for p in bbox],
+        "height": round(glyph_height, 1),
+        "x_frac": round(x_frac, 4),
+        "y_frac": round(y_frac, 4),
+        "edge": classify_edge(panel_x_frac, panel_y_frac),
+        "nearest_box": round(nearest_box, 1) if nearest_box != math.inf else None,
+        **({"panel": panel_stem} if panel_stem is not None else {}),
+    }
+
+
 def digit_detections(
     image_path: Path,
     reader,
@@ -396,6 +446,8 @@ def digit_detections(
     craft_boxes: tuple[list, list] | None = None,
     units: list[tuple[str, list[list[float]], tuple[float, float, float, float]]]
     | None = None,
+    *,
+    unresolved: list[dict] | None = None,
 ) -> list[dict]:
     """All digit reads on one page that resolve to a valid volume page key.
 
@@ -416,6 +468,12 @@ def digit_detections(
     whitespace while a junk single digit is usually a fragment of a larger number with
     sibling text right beside it. Filtering into claims is left to the caller so the
     JSON keeps the full picture.
+
+    A read that passes every gate but resolves to no valid key is appended to
+    ``unresolved`` when that list is given (#556): the same fields minus ``key``,
+    ``via`` and ``number``, plus ``letter_text`` where the letters pass read it
+    differently. A sheet's printed number outside the volume's keys (LoC labels
+    off by an offset, #555) is otherwise lost here.
     """
     from easyocr.utils import reformat_input
 
@@ -491,46 +549,31 @@ def digit_detections(
             if text.strip() == "0" and not letter_text.strip().strip("0Oo"):
                 resolved = (None, "zero")
             else:
+                if unresolved is not None:
+                    read = read_record(
+                        bbox,
+                        (text, float(confidence)),
+                        image_size=(width, height),
+                        units=units,
+                        neighbour_boxes=neighbour_boxes,
+                    )
+                    if letter_text and letter_text != text:
+                        read["letter_text"] = letter_text
+                    unresolved.append(read)
                 continue
         key, via = resolved
-        x_frac = sum(p[0] for p in bbox) / 4 / width
-        y_frac = sum(p[1] for p in bbox) / 4 / height
-        # Attribute the detection to its panel; the edge classification is
-        # panel-relative (a number on an interior cut line is at ITS PANEL's
-        # edge even though it is nowhere near the page's).
-        panel_stem: str | None = None
-        panel_x_frac, panel_y_frac = x_frac, y_frac
-        if units is not None:
-            panel_stem, (bx0, by0, bx1, by1) = assign_panel((cx, cy), units)
-            if bx1 > bx0 and by1 > by0:
-                panel_x_frac = (cx - bx0) / (bx1 - bx0)
-                panel_y_frac = (cy - by0) / (by1 - by0)
-        glyph_height = float(max(p[1] for p in bbox) - min(p[1] for p in bbox))
-        nearest_box = min(
-            (
-                gap
-                for other_bbox in neighbour_boxes
-                if (gap := bbox_gap(bbox, other_bbox)) > 0
-                or not same_box(bbox, other_bbox)
-            ),
-            default=math.inf,
-        )
         detections.append(
             {
                 "key": key,
                 "via": via,
                 "number": int("".join(c for c in key if c.isdigit())) if key else 0,
-                "text": text,
-                "confidence": round(float(confidence), 4),
-                "polygon": [[int(p[0]), int(p[1])] for p in bbox],
-                "height": round(glyph_height, 1),
-                "x_frac": round(x_frac, 4),
-                "y_frac": round(y_frac, 4),
-                "edge": classify_edge(panel_x_frac, panel_y_frac),
-                "nearest_box": round(nearest_box, 1)
-                if nearest_box != math.inf
-                else None,
-                **({"panel": panel_stem} if panel_stem is not None else {}),
+                **read_record(
+                    bbox,
+                    (text, float(confidence)),
+                    image_size=(width, height),
+                    units=units,
+                    neighbour_boxes=neighbour_boxes,
+                ),
             }
         )
     return detections
@@ -986,7 +1029,10 @@ def main() -> None:
         # attributed and gated per panel, because each panel has its own pose and
         # its own printed margin references. Unsplit pages are one unit.
         units = page_panels(args.volume, stem, width, height)
-        detections = read_digits(image, reader, valid_keys, craft_boxes, units=units)
+        unresolved: list[dict] = []
+        detections = read_digits(
+            image, reader, valid_keys, craft_boxes, units=units, unresolved=unresolved
+        )
         for unit_stem, _polygon, unit_bbox in units:
             unit_detections = [
                 d for d in detections if d.get("panel", unit_stem) == unit_stem
@@ -1002,6 +1048,10 @@ def main() -> None:
                     else {}
                 ),
                 "detections": unit_detections,
+                # Reads that resolved to no page key of this volume (#556).
+                "unresolved": [
+                    d for d in unresolved if d.get("panel", unit_stem) == unit_stem
+                ],
             }
 
     def compute_claims(

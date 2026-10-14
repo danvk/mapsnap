@@ -535,3 +535,49 @@ def test_digit_reader_is_the_detector_unless_opted_out(monkeypatch):
     assert detector is not page_adjacency.digit_detections and callable(detector)
     monkeypatch.setenv("MAPSNAP_NO_ADJACENCY_DETECTOR", "1")
     assert page_adjacency.digit_reader() is page_adjacency.digit_detections
+
+
+class FakeReader:
+    """An EasyOCR stand-in: each pass reads every box as its text for that pass."""
+
+    def __init__(self, digits: str, letters: str, confidence: float = 0.99) -> None:
+        self.texts = {"0123456789": digits}
+        self.letters = letters
+        self.confidence = confidence
+
+    def recognize(self, image, horizontal, free, allowlist):
+        text = self.texts.get(allowlist, self.letters)
+        return [
+            ([[x1, y1], [x2, y1], [x2, y2], [x1, y2]], text, self.confidence)
+            for x1, x2, y1, y2 in horizontal
+        ]
+
+
+def test_digit_detections_records_reads_that_resolve_to_no_key(tmp_path):
+    """#556: Kennewick 1909's p6 prints "2"; its keys are p5-p9, so the read resolves to none."""
+    from PIL import Image
+
+    from mapsnap.page_adjacency import digit_detections
+
+    image = tmp_path / "p6.jpg"
+    Image.new("RGB", (400, 600), "white").save(image)
+    corner = ([[340, 380, 10, 50]], [])  # a tall box in the top-right corner
+    unresolved: list[dict] = []
+    detections = digit_detections(
+        image, FakeReader("2", "2"), {"5", "6"}, corner, unresolved=unresolved
+    )
+    assert detections == []
+    (read,) = unresolved
+    assert read["text"] == "2" and "key" not in read and "letter_text" not in read
+    assert read["edge"] == "TR" and read["height"] == 40.0
+    # A read that resolves is a detection as before, and nothing is unresolved.
+    unresolved.clear()
+    (detection,) = digit_detections(
+        image, FakeReader("6", "6"), {"5", "6"}, corner, unresolved=unresolved
+    )
+    assert detection["key"] == "6" and unresolved == []
+    # The letters pass's differing read is kept beside the digits.
+    digit_detections(
+        image, FakeReader("2", "2A"), {"5", "6"}, corner, unresolved=unresolved
+    )
+    assert unresolved[0]["letter_text"] == "2A"
