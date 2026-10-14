@@ -27,6 +27,7 @@ from mapsnap.compare_iiif_georef import (
 )
 from mapsnap.keymap.fit_keymap import page_number
 from mapsnap.keymap.records import recorded_keymap_keys
+from mapsnap.scale_bounds import CORPUS_M_PER_PX, m_per_px_is_plausible
 from mapsnap.utils import (
     FEET_PER_METER,
     haversine_m,
@@ -400,11 +401,10 @@ def load_prob(volume: Path, stem: str) -> np.ndarray | None:
     return load_roadprob(volume / f"{stem}.jpg")
 
 
-# Median metres per pixel over the 2,540 fitted pages of the truth volumes
-# (p10 0.174, p90 0.312) -- the 50 ft-to-the-inch rung at a typical 25% scan.
-# Used only when a volume offers no fitted page at all, so that such a volume
-# still runs to completion and records its abstentions instead of crashing.
-FALLBACK_M_PER_PX = 0.203
+# The corpus-median scale (scale_bounds.CORPUS_M_PER_PX), used when a volume
+# offers no plausibly-scaled fitted page at all, so that such a volume still
+# runs to completion and records its abstentions instead of crashing.
+FALLBACK_M_PER_PX = CORPUS_M_PER_PX
 
 
 def fitted_scales(units: list[PageUnit]) -> list[float]:
@@ -433,15 +433,30 @@ def volume_median_scale(
     is split still has a scale: Gardiner NY 1913 is one sheet cut into two
     panels, so every base page is ``split``, none is ``fitted``, and the median
     was taken over an empty list.
+
+    Only plausibly-scaled fits count (``scale_bounds``, #498). A volume with one
+    or two fitted pages otherwise takes a fit wrong by orders of magnitude as its
+    scale: sanborn01711_002's one sheet fitted at 14.2 m/px and snap then asked for
+    an 18,400 px frame to check the page that set the number.
     """
     scales = fitted_scales(units)
     if not scales and panels:
         scales = fitted_scales(panels)
-    if not scales:
+    plausible = [scale for scale in scales if m_per_px_is_plausible(scale)]
+    if len(plausible) < len(scales):
         print(
-            "No fitted page in this volume; assuming the corpus-median scale "
-            f"{FALLBACK_M_PER_PX} m/px.",
+            f"Ignoring {len(scales) - len(plausible)} fitted page(s) at an implausible "
+            "scale: "
+            + ", ".join(
+                f"{scale:.4g} m/px" for scale in scales if scale not in plausible
+            ),
+            file=sys.stderr,
+        )
+    if not plausible:
+        print(
+            "No plausibly-scaled fitted page in this volume; assuming the "
+            f"corpus-median scale {FALLBACK_M_PER_PX} m/px.",
             file=sys.stderr,
         )
         return FALLBACK_M_PER_PX
-    return statistics.median(scales)
+    return statistics.median(plausible)
