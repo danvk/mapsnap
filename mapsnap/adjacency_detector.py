@@ -33,6 +33,8 @@ THRESHOLD = 0.5  # probability above which a pixel belongs to a number
 MIN_AREA = 60  # px; smaller components are specks
 # Each component is read grown by 15% of its height per side, bare, and shrunk by 10%.
 READ_SIZES = (0.15, 0.0, -0.1)
+# EasyOCR divides by a box's width and height, so a read box must keep some of each.
+MIN_READ_PX = 2
 
 Component = tuple[int, int, int, int]  # x0, y0, x1, y1 in image pixels
 
@@ -71,17 +73,29 @@ def resized_box(
     """A component grown (factor > 0) or shrunk by ``factor`` x its height per side.
 
     Returned as EasyOCR's horizontal-box form [x1, x2, y1, y2], clamped to the
-    image's (width, height).
+    image's (width, height). A shrink takes at most a quarter of each dimension
+    per side: a lone "1" is narrower than a fifth of its height, and shrinking
+    its sides by a tenth of the height turned the box inside out, which crashed
+    EasyOCR (a division by a zero width) and with it the whole item
+    (Schenectady 1914).
     """
     x0, y0, x1, y1 = component
     width, height = image_size
     pad = factor * (y1 - y0)
+    pad_x = max(pad, -(x1 - x0) / 4)
+    pad_y = max(pad, -(y1 - y0) / 4)
     return [
-        int(max(0, x0 - pad)),
-        int(min(width, x1 + pad)),
-        int(max(0, y0 - pad)),
-        int(min(height, y1 + pad)),
+        int(max(0, x0 - pad_x)),
+        int(min(width, x1 + pad_x)),
+        int(max(0, y0 - pad_y)),
+        int(min(height, y1 + pad_y)),
     ]
+
+
+def readable(box: list[int]) -> bool:
+    """Whether a horizontal box [x1, x2, y1, y2] is big enough for EasyOCR to crop and read."""
+    x1, x2, y1, y2 = box
+    return x2 - x1 >= MIN_READ_PX and y2 - y1 >= MIN_READ_PX
 
 
 def detection_centre(detection: dict) -> tuple[float, float]:
@@ -142,7 +156,14 @@ def detector_digit_detections(
                 image_path,
                 reader,
                 valid_keys,
-                ([resized_box(c, factor, (width, height)) for c in components], []),
+                (
+                    [
+                        box
+                        for c in components
+                        if readable(box := resized_box(c, factor, (width, height)))
+                    ],
+                    [],
+                ),
                 units=units,
             )
             for factor in READ_SIZES

@@ -14,6 +14,7 @@ from mapsnap.adjacency_detector import (
     detector_digit_detections,
     load_detector,
     number_components,
+    readable,
     resized_box,
 )
 
@@ -37,6 +38,21 @@ def test_number_components_drops_specks():
         (20, 10, 60, 30),
         (150, 80, 152, 82),
     ]
+
+
+def test_resized_box_never_turns_a_thin_component_inside_out():
+    # A lone "1" (6 x 40) and one flush with the image's right edge: shrinking each
+    # side by a tenth of the height used to invert both boxes and crash EasyOCR.
+    for component in [(100, 50, 106, 90), (100, 50, 103, 90), (1405, 10, 1410, 60)]:
+        x1, x2, y1, y2 = resized_box(component, -0.1, (1410, 2000))
+        assert x2 > x1 and y2 > y1
+
+
+def test_readable_needs_some_width_and_height():
+    assert readable([10, 12, 10, 40])
+    assert not readable([10, 11, 10, 40])
+    assert not readable([10, 10, 10, 40])
+    assert not readable([12, 10, 10, 40])
 
 
 def test_resized_box_grows_shrinks_and_clamps():
