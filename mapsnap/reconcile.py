@@ -1626,6 +1626,34 @@ def from_snap(hypothesis: Hypothesis) -> bool:
     return any(s.startswith("snap:") or s == "georef-snap" for s in sources)
 
 
+def read_sidecar(sidecar_dir: Path, stem: str, channel: str) -> dict:
+    """A page's ``pN.<channel>.json``, or {} when it is missing or unreadable."""
+    try:
+        return json.loads((sidecar_dir / f"{stem}.{channel}.json").read_text())
+    except (OSError, ValueError):
+        return {}
+
+
+def from_georef(chosen: Hypothesis, snap_refined: bool) -> bool:
+    """Whether a published pose is the RANSAC georef fit's: as is, merged, or refined by snap."""
+    sources = [chosen.source, *chosen.merged_sources]
+    return "georef" in sources or (snap_refined and "georef-snap" in sources)
+
+
+def used_old_name(sidecar_dir: Path, stem: str, chosen: Hypothesis) -> bool:
+    """Whether the published pose rests on a georef fit that matched an OSM old_name (#534).
+
+    True when ``pN.georef.json`` records an old_name among the inliers of its fit
+    and the published pose descends from that fit (see from_georef).
+    """
+    if chosen.affine is None:
+        return False
+    if not read_sidecar(sidecar_dir, stem, "georef").get("used_old_name"):
+        return False
+    snap = read_sidecar(sidecar_dir, stem, "georef-snap").get("osm_snap") or {}
+    return from_georef(chosen, bool(snap.get("refine")))
+
+
 def provenance_record(
     stem: str,
     nodes: dict[str, PageNode],
@@ -1926,6 +1954,11 @@ def publish(
         )
         for stem in sorted(nodes)
     }
+    for stem, record in records.items():
+        chosen = nodes[stem].hypotheses[assignment[stem]]
+        record["used_old_name"] = record["decision"] == "placed" and used_old_name(
+            sidecar_dir, stem, chosen
+        )
     confidence.annotate(list(records.values()), volume)
     for stem in sorted(nodes):
         node = nodes[stem]

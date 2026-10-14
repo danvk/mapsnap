@@ -55,6 +55,7 @@ from mapsnap.streets import (
     canonical_street_match,
     canonical_street_matches,
     deduplicate_detections,
+    former_name_streets,
     hint_type_word,
     is_bare_letter,
     is_number_only,
@@ -2120,8 +2121,16 @@ def _finalize_georef(
     keymap: dict | None = None,
     truth_polygons: list[list[list[float]]] | None = None,
     gcp_pair_records: list[dict] | None = None,
+    former_names: dict[str, list[str]] | None = None,
 ) -> tuple[float, tuple[float, float]]:
-    """Print fit stats, write georef JSON, and return (scale_deg_per_px, page_center)."""
+    """Print fit stats, write georef JSON, and return (scale_deg_per_px, page_center).
+
+    ``former_names`` (streets.former_name_streets of the index the labels were
+    matched against) marks each street constraint and intersection matched
+    through an OSM old_name with ``old_name_of``, the streets' current names, and
+    sets ``used_old_name`` when any of those is an inlier of the fit (#534).
+    """
+    former_names = former_names or {}
 
     if residuals:
         mean_m = float(np.mean(residuals)) * 111_000
@@ -2170,6 +2179,8 @@ def _finalize_georef(
         }
         if feat.fallback:
             street_out["fallback"] = True
+        if feat.text in former_names:
+            street_out["old_name_of"] = former_names[feat.text]
         streets_out.append(street_out)
 
     initial_set = set(initial_pair) if initial_pair is not None else set()
@@ -2191,6 +2202,14 @@ def _finalize_georef(
         }
         for i, gcp in enumerate(gcps)
     ]
+    for gcp, out in zip(gcps, intersections_out):
+        old = {
+            label: former_names[label]
+            for label in (gcp.label_a, gcp.label_b)
+            if label in former_names
+        }
+        if old:
+            out["old_name_of"] = old
 
     result = {
         "width": width,
@@ -2204,6 +2223,10 @@ def _finalize_georef(
         },
         "streets": streets_out,
         "intersections": intersections_out,
+        "used_old_name": any(
+            entry["inlier"] and "old_name_of" in entry
+            for entry in [*streets_out, *intersections_out]
+        ),
     }
     if keymap:
         result["keymap"] = keymap
@@ -3670,6 +3693,7 @@ def process_image(
                 keymap=keymap,
                 truth_polygons=truth_polygons,
                 gcp_pair_records=pair_records,
+                former_names=former_name_streets(block_index),
             )
             return ProcessResult(
                 success=False,
@@ -3749,6 +3773,7 @@ def process_image(
         keymap=keymap,
         truth_polygons=truth_polygons,
         extra_fields={"runner_up_poses": runner_ups} if runner_ups else None,
+        former_names=former_name_streets(block_index),
     )
     rotation = math.atan2(float(A[1, 0]), float(-A[1, 1]))
     return ProcessResult(
@@ -4009,6 +4034,7 @@ def process_deferred_image(
         parameters=parameters,
         keymap=keymap,
         truth_polygons=truth_polygons,
+        former_names=former_name_streets(block_index),
     )
     # The confirmation verdict is recorded in the sidecar's one_gcp block but no
     # longer demotes (#270 phase 4). Its signal -- one effective GCP -- is what
