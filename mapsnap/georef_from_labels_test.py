@@ -1713,6 +1713,21 @@ def test_passes_admission_gate_rejects_low_confidence_small_label():
     assert not passes_admission_gate(junk, set(), **_ADMISSION_GATE)
 
 
+def test_passes_admission_gate_admits_spelled_out_directions_not_abbreviations():
+    from mapsnap.georef_from_labels import passes_admission_gate
+
+    # Provencal 1922 p1 prints SOUTH B'L'V'D; OCR reads only SOUTH (#536).
+    south = _sized_label("SOUTH", short=24.0, long=120.0, conf=1.0)
+    assert passes_admission_gate(south, set(), **_ADMISSION_GATE)
+    # A lone abbreviation is a compass point or a separate prefix box, not a street...
+    for text in ("NE", "N.", "SW"):
+        abbreviation = _sized_label(text, short=24.0, long=48.0, conf=1.0)
+        assert not passes_admission_gate(abbreviation, set(), **_ADMISSION_GATE)
+    # ...unless the page's streets include one by that name.
+    ne = _sized_label("NE", short=24.0, long=48.0, conf=1.0)
+    assert passes_admission_gate(ne, {"NE"}, **_ADMISSION_GATE)
+
+
 def test_passes_admission_gate_aspect_floor_gates_short_names():
     from mapsnap.georef_from_labels import passes_admission_gate
 
