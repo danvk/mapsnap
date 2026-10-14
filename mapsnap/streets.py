@@ -599,6 +599,11 @@ def build_block_index(geojson: dict) -> dict[str, list[Block]]:
     (e.g. "LIBERTY" for "SOUTH LIBERTY STREET"), and leading-type-stripped aliases
     (e.g. "X" for "AVENUE X"). Each alias is only added when unambiguous (exactly
     one full name maps to that stripped form).
+
+    A feature's ``old_names`` (OSM ``old_name``, #534) index its blocks under each
+    former name too, merged into any street that already has that name. The
+    aliases above then apply to them as to any name: Austin's West 10th Street,
+    formerly "Mulberry Street", is also found as "MULBERRY".
     """
     index: dict[str, list[Block]] = {}
     for feature in geojson["features"]:
@@ -612,11 +617,18 @@ def build_block_index(geojson: dict) -> dict[str, list[Block]]:
             if geom["type"] == "MultiLineString"
             else [geom["coordinates"]]
         )
+        former = [
+            normalize_street(n) for n in feature["properties"].get("old_names") or []
+        ]
         for line in lines:
             if len(line) < 2:
                 continue
             coords = np.array([[c[0], c[1]] for c in line], dtype=float)
-            index.setdefault(name, []).append(Block(street_name=name, coords=coords))
+            block = Block(street_name=name, coords=coords)
+            index.setdefault(name, []).append(block)
+            for old in former:
+                if old and old != name:
+                    index.setdefault(old, []).append(block)
 
     # Build aliases from bare name → full name for unambiguous cases.
     # e.g. "MAGAZINE STREET" → also index under "MAGAZINE".

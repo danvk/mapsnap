@@ -14,7 +14,7 @@ import numpy as np
 import pytest
 
 from mapsnap.georef_from_labels import LabelFeature, find_intersection_gcps
-from mapsnap.streets import build_block_index
+from mapsnap.streets import build_block_index, normalize_street
 
 # ---------------------------------------------------------------------------
 # Helpers / fixtures
@@ -354,3 +354,38 @@ def test_find_gcps_two_instances_selects_closer_pair():
     assert len(gcps) == 1
     assert gcps[0].pixel == pytest.approx((1354.0, 2215.0), abs=1e-6)
     assert gcps[0].pixel_dist < 600.0
+
+
+def _street(name: str, coords: list, old_names: list[str] | None = None) -> dict:
+    """A centerline feature, with OSM former names when given."""
+    properties: dict = {"street_name": name}
+    if old_names:
+        properties["old_names"] = old_names
+    return {
+        "type": "Feature",
+        "properties": properties,
+        "geometry": {"type": "LineString", "coordinates": coords},
+    }
+
+
+def test_build_index_indexes_former_names_on_the_same_blocks():
+    # Austin: West and East 10th Street were Mulberry Street in 1885 (#534).
+    west = _street("West 10th Street", [[0, 0], [1, 0]], ["Mulberry Street"])
+    east = _street("East 10th Street", [[1, 0], [2, 0]], ["Mulberry Street"])
+    index = build_block_index({"type": "FeatureCollection", "features": [west, east]})
+    assert [b.coords.tolist() for b in index["MULBERRY STREET"]] == [
+        [[0, 0], [1, 0]],
+        [[1, 0], [2, 0]],
+    ]
+    # The same blocks, not copies, and the bare-name alias applies too.
+    assert index["MULBERRY STREET"][0] is index[normalize_street("West 10th Street")][0]
+    assert index["MULBERRY"] is index["MULBERRY STREET"]
+
+
+def test_build_index_merges_a_former_name_into_a_current_street():
+    current = _street("Walnut Street", [[5, 5], [6, 5]])
+    renamed = _street("West 14th Street", [[0, 0], [1, 0]], ["Walnut Street"])
+    index = build_block_index(
+        {"type": "FeatureCollection", "features": [current, renamed]}
+    )
+    assert len(index["WALNUT STREET"]) == 2
