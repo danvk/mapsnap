@@ -61,21 +61,40 @@ NON_STREET_TEXT: frozenset[str] = frozenset(
     | {"SM PIPE", "S W PIPE", "S W. PIPE"}
 )
 
+# The scales Sanborn printed (printed_scale.VALID_PRINTED_FT), and the OCR forms
+# of each: the recognizer reads a printed 0 as O and a 1 as I often enough that
+# "SCALE IOO FT." was in the corpus sweep behind #196.
+SCALE_NOTE_FEET = ("25", "50", "100", "200", "300")
+
+
+def ocr_digit_forms(number: str) -> set[str]:
+    """A printed number as the recognizer may read it: 0 as O, 1 as I, or both."""
+    return {
+        number,
+        number.replace("0", "O"),
+        number.replace("1", "I"),
+        number.replace("1", "I").replace("0", "O"),
+    }
+
+
 SCALE_NOTE_TEXT: frozenset[str] = frozenset(
     # The printed scale note on oddly-scaled sheets ("Scale 100 Ft. to One
-    # Inch.") and the scale-bar tick numbers (a 50ft bar reads 50-25-0-50-100,
-    # a 100ft bar 100-50-0-100-200). Only unioned into the trie for the
-    # rotation-0 pass: the note and bar are always horizontal, and keeping the
-    # rotated passes' vocabulary unchanged avoids collateral on vertical
-    # street labels. Reads matching these are tagged ignore, like the pipe
-    # annotations, so they never enter street matching.
-    {"SCALE", "INCH", "ONE INCH", "FT", "FT.", "25", "50", "100", "200", "300"}
+    # Inch.", or Fargo's "Scale 300 Ft. to an Inch", #592) and the scale-bar
+    # tick numbers (a 50ft bar reads 50-25-0-50-100, a 100ft bar
+    # 100-50-0-100-200). Only unioned into the trie for the rotation-0 pass: the
+    # note and bar are always horizontal, and keeping the rotated passes'
+    # vocabulary unchanged avoids collateral on vertical street labels. Reads
+    # matching these are tagged ignore, like the pipe annotations, so they never
+    # enter street matching.
+    {"SCALE", "INCH", "ONE INCH", "AN INCH", "FT", "FT.", *SCALE_NOTE_FEET}
     | {
-        f"SCALE {n} FT. TO ONE INCH"
-        for n in ("50", "100", "IOO", "I00", "200", "2OO", "300", "3OO")
+        f"{prefix}{form} {feet_word} TO {inch}"
+        for number in SCALE_NOTE_FEET
+        for form in ocr_digit_forms(number)
+        for prefix in ("SCALE ", "")
+        for feet_word in ("FT.", "FT")
+        for inch in ("ONE INCH", "AN INCH")
     }
-    | {f"SCALE {n} FT TO ONE INCH" for n in ("50", "100", "200", "300")}
-    | {f"{n} FT. TO ONE INCH" for n in ("50", "100", "200", "300")}
 )
 
 

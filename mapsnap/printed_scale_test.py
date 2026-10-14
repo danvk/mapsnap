@@ -98,3 +98,20 @@ def test_note_m_per_px_conversion():
     # A 200 ft note at the corpus default: ~0.98 m/px, ~5x a 50 ft page.
     assert abs(note_m_per_px(200, 62.5) - 0.9754) < 0.001
     assert abs(note_m_per_px(50, 62.5) / note_m_per_px(200, 62.5) - 0.25) < 1e-9
+
+
+def test_printed_scale_parses_to_an_inch(tmp_path):
+    # Fargo 1958 prints "Scale 300 Ft. to an Inch" (#592).
+    path = sidecar(tmp_path, [{"text": "SCALE 3OO FT. TO AN INCH", "confidence": 0.7}])
+    assert printed_scale_ft(path) == (300, 0.7)
+
+
+def test_printed_scale_rejects_scales_no_map_page_prints(tmp_path):
+    # A key map's "1000 ft" note, or a misread 400 or 600, is not a page rung.
+    for text in (
+        "SCALE 6OO FT TO ONE INCH",
+        "SCALE 400 FT. TO AN INCH",
+        "SCALE 1000 FT. TO AN INCH",
+    ):
+        path = sidecar(tmp_path, [{"text": text, "confidence": 0.5}])
+        assert printed_scale_ft(path) is None
