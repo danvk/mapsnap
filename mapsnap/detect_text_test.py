@@ -703,9 +703,10 @@ def test_detect_text_sidecar_flag_controls_the_streets_file(tmp_path, monkeypatc
 def test_scale_note_vocabulary_reads_every_printed_form():
     from mapsnap.detect_text import SCALE_NOTE_TEXT, ocr_digit_forms
 
-    # Fargo's wording (#592), the coarse rungs, and every form the old list held.
+    # Fargo's wording (#592) and every form the old list held; no page prints 400 or 600.
     assert "SCALE 300 FT. TO AN INCH" in SCALE_NOTE_TEXT
-    assert "SCALE 6OO FT. TO ONE INCH" in SCALE_NOTE_TEXT
+    assert "SCALE 3OO FT. TO AN INCH" in SCALE_NOTE_TEXT
+    assert not any("400" in text or "6OO" in text for text in SCALE_NOTE_TEXT)
     old = (
         {
             f"SCALE {n} FT. TO ONE INCH"

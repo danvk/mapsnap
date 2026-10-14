@@ -86,8 +86,13 @@ def note_m_per_px(printed_ft: int, px_per_paper_inch: float) -> float:
     return printed_ft * 0.3048 / px_per_paper_inch
 
 
-VALID_PRINTED_FT = (25, 50, 100, 200, 300, 400, 600)
-"""Scales Sanborn actually printed; a parse outside this list is a misread."""
+VALID_PRINTED_FT = (25, 50, 100, 200, 300)
+"""Scales Sanborn printed on map pages; a parse outside this list is a misread.
+
+300 is the coarsest seen (Fargo, #592). Across 1,902 OIM truth pages in 38 volumes
+the coarsest map pages sit ~4x their volume's median (Columbus p297, 200 ft), and
+nothing implies 400 or 600. Key maps print coarser notes ("Scale 1000 Ft. to an
+Inch (Approx)", Eunice 1950), but they are scaled by the key-map chain, not here."""
 
 
 def printed_scale_ft(streets_path: Path) -> tuple[int, float] | None:

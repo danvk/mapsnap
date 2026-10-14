@@ -64,7 +64,7 @@ NON_STREET_TEXT: frozenset[str] = frozenset(
 # The scales Sanborn printed (printed_scale.VALID_PRINTED_FT), and the OCR forms
 # of each: the recognizer reads a printed 0 as O and a 1 as I often enough that
 # "SCALE IOO FT." was in the corpus sweep behind #196.
-SCALE_NOTE_FEET = ("25", "50", "100", "200", "300", "400", "600")
+SCALE_NOTE_FEET = ("25", "50", "100", "200", "300")
 
 
 def ocr_digit_forms(number: str) -> set[str]:

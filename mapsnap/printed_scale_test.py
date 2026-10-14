@@ -106,6 +106,12 @@ def test_printed_scale_parses_to_an_inch(tmp_path):
     assert printed_scale_ft(path) == (300, 0.7)
 
 
-def test_printed_scale_parses_the_coarse_rungs(tmp_path):
-    path = sidecar(tmp_path, [{"text": "SCALE 6OO FT TO ONE INCH", "confidence": 0.5}])
-    assert printed_scale_ft(path) == (600, 0.5)
+def test_printed_scale_rejects_scales_no_map_page_prints(tmp_path):
+    # A key map's "1000 ft" note, or a misread 400 or 600, is not a page rung.
+    for text in (
+        "SCALE 6OO FT TO ONE INCH",
+        "SCALE 400 FT. TO AN INCH",
+        "SCALE 1000 FT. TO AN INCH",
+    ):
+        path = sidecar(tmp_path, [{"text": text, "confidence": 0.5}])
+        assert printed_scale_ft(path) is None
