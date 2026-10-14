@@ -2238,6 +2238,49 @@ def test_load_paper_reads_the_page_colour_or_none(tmp_path):
     assert load_paper(str(old)) is None
 
 
+def test_gating_prior_swaps_a_fragment_prior_for_the_volume_median():
+    from mapsnap.georef_from_labels import (
+        HALF_SCALE_MIN_RATIO,
+        broadened_scale_plausible,
+        gating_prior,
+    )
+
+    median = 1.955
+    # Miami p34 (#478): a 16.09 px/ft prior from a 1,133 m^2 sliver, 8.2x the median.
+    assert gating_prior(16.09, median) == median
+    assert broadened_scale_plausible(1.478, gating_prior(16.09, median))
+    # A normal prior, even one at the half-scale band's edge, is kept.
+    assert gating_prior(1.2 * median, median) == 1.2 * median
+    edge = median / HALF_SCALE_MIN_RATIO
+    assert gating_prior(edge, median) == edge
+    # Without a volume median (fewer than five regions), the page's own prior stands.
+    assert gating_prior(16.09, None) == 16.09
+
+
+def test_gating_prior_still_rejects_the_spurious_rectangle_fits():
+    # #478's spurious rejections had normal priors (0.76-1.21x the median); the gate
+    # sees exactly the same prior for them, so they stay rejected.
+    from mapsnap.georef_from_labels import broadened_scale_plausible, gating_prior
+
+    for fitted, prior, prior_over_median in [
+        (0.071, 2.56, 0.76),  # chicago p61w
+        (0.154, 1.63, 0.90),  # washington_dc p175
+        (0.040, 2.18, 1.21),  # washington_dc p208
+    ]:
+        median = prior / prior_over_median
+        assert gating_prior(prior, median) == prior
+        assert not broadened_scale_plausible(fitted, gating_prior(prior, median))
+
+
+def test_logged_gating_prior_notes_a_swap(capsys):
+    from mapsnap.georef_from_labels import logged_gating_prior
+
+    assert logged_gating_prior(1.0, 1.0) == 1.0
+    assert capsys.readouterr().out == ""
+    assert logged_gating_prior(16.0, 2.0) == 2.0
+    assert "is a fragment (8.0x the volume median)" in capsys.readouterr().out
+
+
 def test_fit_extent_is_plausible_lets_a_key_map_span_a_city():
     from mapsnap.georef_from_labels import MAX_KEYMAP_EXTENT_M, fit_extent_is_plausible
 
