@@ -82,6 +82,9 @@ UNIT_SNAP_M = 0.01
 # Mask vertices this close to the one before are dropped.
 REPEATED_POINT_M = 0.05
 MAX_CUT_DEPTH = 12
+# Pages whose footprints come within this of each other are masked together,
+# on one grid; farther apart, they share no ground and each group gets its own.
+GROUP_GAP_M = 250.0
 
 
 def region_map_path(image_path: Path) -> Path:
@@ -708,11 +711,90 @@ def compute_region_clip_masks(
     image only shows as black (New York 1923 p19-p21, #571).
     ``free_margins`` also gives each page the paper no other page's scan reaches
     (``extend_into_free_margins``).
+
+    Pages are masked in groups (``page_groups``), each on a grid of its own:
+    pages that do not come near each other share no ground to divide, and one
+    grid over all of them grows with the square of the distance between them.
+    Birmingham 1950 (sanborn00015_020) placed three pages 14-27 km from the
+    rest, and its single 33 x 25 km grid of 367 M cells was killed for memory
+    on a 7.5 GB Batch job (#563 pilot).
     """
     if not georefs or raw_paths is None:
         return [None] * len(georefs)
     image_paths = [Path(path) for path in raw_paths]
     ensure_region_maps(image_paths)
+    masks: list[Polygon | None] = [None] * len(georefs)
+    groups = page_groups(georefs)
+    blocks = units = 0
+    for group in groups:
+        result = group_clip_masks(
+            [georefs[i] for i in group],
+            centerlines_geojson,
+            [image_paths[i] for i in group],
+            free_margins=free_margins,
+        )
+        for index, mask in zip(group, result.masks):
+            masks[index] = mask
+        blocks += result.blocks
+        units += result.units
+    print(
+        f"Region masks: {sum(m is not None for m in masks)}/{len(georefs)} pages "
+        f"in {len(groups)} group(s); {blocks} blocks, {units} units",
+        file=sys.stderr,
+    )
+    return masks
+
+
+def page_groups(georefs: list[dict], gap_m: float = GROUP_GAP_M) -> list[list[int]]:
+    """Indices of pages whose footprints come within ``gap_m`` of each other, transitively.
+
+    Groups are listed by their first page, and each group's indices ascend, so
+    a volume whose pages all touch is one group in the original order.
+    """
+    corners = [c for georef in georefs for c in georef["corners"]]
+    lon0 = float(np.mean([c[0] for c in corners]))
+    lat0 = float(np.mean([c[1] for c in corners]))
+    frame = GroundGrid(lon0, lat0, 0.0, 0.0, 0, 0)
+    footprints = [
+        Polygon([frame.to_m(*c) for c in georef["corners"]]).buffer(gap_m / 2)
+        for georef in georefs
+    ]
+    parent = list(range(len(georefs)))
+
+    def root(i: int) -> int:
+        while parent[i] != i:
+            parent[i] = parent[parent[i]]
+            i = parent[i]
+        return i
+
+    tree = shapely.STRtree(footprints)
+    for i, j in zip(*tree.query(footprints, predicate="intersects")):
+        a, b = root(int(i)), root(int(j))
+        if a != b:
+            parent[max(a, b)] = min(a, b)
+    groups: dict[int, list[int]] = {}
+    for i in range(len(georefs)):
+        groups.setdefault(root(i), []).append(i)
+    return sorted(groups.values())
+
+
+@dataclass
+class GroupMasks:
+    """One group's masks, in its pages' order, and how much ground it was cut into."""
+
+    masks: list[Polygon | None]
+    blocks: int
+    units: int
+
+
+def group_clip_masks(
+    georefs: list[dict],
+    centerlines_geojson: dict,
+    image_paths: list[Path],
+    *,
+    free_margins: bool = False,
+) -> GroupMasks:
+    """Clip masks for pages that share ground, on one grid around them (their maps already predicted)."""
     ownership = region_ownership(georefs, image_paths)
     grid = ownership.grid
     footprints = [
@@ -777,9 +859,4 @@ def compute_region_clip_masks(
                 masks[page] = Polygon(
                     [grid.to_lonlat(x, y) for x, y in hull_m.exterior.coords]
                 )
-    print(
-        f"Region masks: {sum(m is not None for m in masks)}/{len(georefs)} pages; "
-        f"{len(blocks)} blocks, {len(units)} units",
-        file=sys.stderr,
-    )
-    return masks
+    return GroupMasks(masks, len(blocks), len(units))
