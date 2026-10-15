@@ -665,12 +665,27 @@
     }
   }
 
-  /** Links to each volume, labelled by year and volume number, oldest first. */
+  /**
+   * Links to each volume, oldest first, labelled by year and volume number.
+   *
+   * Volumes a label can't tell apart get their month, then their item number.
+   */
   function yearLinks(volumes) {
     const sorted = [...volumes].sort((a, b) =>
-      (a.date || a.year).localeCompare(b.date || b.year) || String(a.volume).localeCompare(String(b.volume)));
-    return el('span', { class: 'years' }, sorted.map((row) =>
-      link(itemUrl(row.id), row.volume ? `${row.year} v.${row.volume}` : row.year)));
+      (a.date || a.year).localeCompare(b.date || b.year) ||
+      String(a.volume).localeCompare(String(b.volume), undefined, { numeric: true }));
+    let labels = sorted.map((row) => (row.volume ? `${row.year} v.${row.volume}` : String(row.year)));
+    const clashes = (list) => list.map((label) => list.filter((other) => other === label).length > 1);
+    let clash = clashes(labels);
+    labels = labels.map((label, i) => {
+      const month = /^\d{4}-(\d{2})/.exec(sorted[i].date || '');
+      return clash[i] && month ? `${MONTHS[Number(month[1]) - 1].slice(0, 3)} ${label}` : label;
+    });
+    clash = clashes(labels);
+    labels = labels.map((label, i) => (clash[i] ? `${label} (${sorted[i].id.slice(-3)})` : label));
+    const links = sorted.map((row, i) => link(itemUrl(row.id), labels[i]));
+    // Spaces between the links, so a long list wraps.
+    return el('span', { class: 'years' }, links.flatMap((a, i) => (i ? [' ', a] : [a])));
   }
 
   /** Open a Chronoscope image in a new tab; the CDN marks its images as downloads. */
