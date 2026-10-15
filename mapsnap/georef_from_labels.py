@@ -48,6 +48,7 @@ from mapsnap.scale_bounds import (
     px_per_ft_is_plausible,
 )
 from mapsnap.streets import (
+    DIRECTION_ABBREVS,
     DIRECTION_WORDS,
     HINT_STRINGS,
     Block,
@@ -3306,8 +3307,12 @@ def passes_admission_gate(
         # Bare single letters are accepted only via promotion; an unpromoted "M"/"W" is almost
         # always a rotated misread of a quadrant/type box, so reject it here.
         and not is_bare_letter(det["text"])
+        # A lone direction abbreviation (the N of a north arrow, an NE) is no street name
+        # unless the page's streets include one by that name. A spelled-out word goes
+        # through street matching like any label: Provencal 1922 prints SOUTH B'L'V'D,
+        # and OCR reads only the SOUTH (#536).
         and (
-            normalize_street(det["text"]) not in DIRECTION_WORDS
+            det["text"].upper().strip(" .") not in DIRECTION_ABBREVS
             or det["text"].upper().strip() in normalized_streets
         )
     )
