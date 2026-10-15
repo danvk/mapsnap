@@ -56,6 +56,8 @@ IMAGE_CREDIT = (
 )
 # Parallel S3 reads when filling the caches.
 FETCH_WORKERS = 32
+# The fit statuses that put an image on the map.
+PLACED = ("placed", "key map")
 INDEX_COLUMNS = ["id", "city", "state", "year", "date", "volume", "sheets", "status"]
 # "p9__1 (tier 1, 33.99,-86.02 +/-179m)" or "p0a (the key map, ...)" in an
 # annotation page's "unplaced pages" and "withheld" metadata.
@@ -254,9 +256,11 @@ def read_fits(pages: dict[str, dict]) -> list[Fit]:
             fits += [
                 Fit(key, "withheld", note) for key, note in page_notes(page, "withheld")
             ]
-    # A key map is withheld from the main file because the key-map file has it.
-    placed = {fit.image for fit in fits if fit.status != "withheld"}
-    return [fit for fit in fits if fit.status != "withheld" or fit.image not in placed]
+    # An image one file places drops out of the other's misses: a key map is
+    # withheld from the main file because the key-map file has it, and the main
+    # fit may also list it as unplaced, having tried it as a street sheet.
+    placed = {fit.image for fit in fits if fit.status in PLACED}
+    return [fit for fit in fits if fit.status in PLACED or fit.image not in placed]
 
 
 def fits_by_sheet(fits: list[Fit]) -> dict[str, list[Fit]]:

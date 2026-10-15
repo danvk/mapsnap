@@ -546,21 +546,35 @@
     return { placed: 'placed-color', 'key map': 'keymap-color', withheld: 'withheld-color' }[status] || 'unplaced-color';
   }
 
+  /** How many panels the run cut a sheet into; 0 for a sheet it kept whole. */
+  function panelCount(sheet) {
+    if (sheet.panels) return sheet.panels.length;
+    const numbers = (sheet.fit || []).map((fit) => Number((/__(\d+)$/.exec(fit.image) || [])[1] || 0));
+    return Math.max(0, ...numbers);
+  }
+
+  /** What became of the whole sheet; placing it (as a key map, say) outranks failing to. */
+  function wholeFit(sheet) {
+    const fits = (sheet.fit || []).filter((fit) => !fit.image.includes('__'));
+    const rank = { 'key map': 0, placed: 1, withheld: 2, unplaced: 3 };
+    return fits.sort((a, b) => (rank[a.status] ?? 9) - (rank[b.status] ?? 9))[0];
+  }
+
   /** How the run left a sheet: a badge's text and class. */
   function sheetBadge(sheet) {
-    const fits = sheet.fit || [];
-    if (!fits.length) return { text: 'not fit', cls: '' };
-    if (fits.some((fit) => fit.status === 'key map')) return { text: 'key map', cls: 'keymap' };
-    const placed = fits.filter((fit) => fit.status === 'placed').length;
-    if (fits.length > 1 || sheet.panels) {
-      const panels = sheet.panels ? sheet.panels.length : fits.length;
+    const whole = wholeFit(sheet);
+    const panels = panelCount(sheet);
+    if (whole && whole.status === 'key map') return { text: 'key map', cls: 'keymap' };
+    if (panels) {
+      const placed = [...Array(panels).keys()].filter((i) => (panelFit(sheet, i) || {}).status === 'placed').length;
       return {
         text: `${placed}/${panels} panels`,
         cls: placed === panels ? 'placed' : placed ? 'partial' : '',
       };
     }
-    if (placed) return { text: 'placed', cls: 'placed' };
-    return { text: fits[0].status, cls: fits[0].status === 'withheld' ? 'withheld' : '' };
+    if (!whole) return { text: 'not fit', cls: '' };
+    if (whole.status === 'placed') return { text: 'placed', cls: 'placed' };
+    return { text: whole.status, cls: whole.status === 'withheld' ? 'withheld' : '' };
   }
 
   /** The fit of panel i (0-based) of a split sheet, if the run reported one. */
@@ -608,20 +622,23 @@
       return [link(url, first, { title: 'Open this page in Allmaps' }), rest.length ? ` ${rest.join(' ')}` : ''];
     };
     const note = (fit) => fit.note ? ` (${fit.note})` : '';
-    if (!sheet.panels && fits.length === 1) {
-      const fit = fits[0];
-      const verbPhrase = fit.status === 'unplaced' ? 'could not be placed' : ['was ', verb(fit)];
-      return [who, 'The sheet ', verbPhrase, note(fit), '.'];
+    const whole = wholeFit(sheet);
+    const count = panelCount(sheet);
+    const parts = [who];
+    if (whole) {
+      const verbPhrase = whole.status === 'unplaced' ? 'could not be placed' : ['was ', verb(whole)];
+      parts.push('The sheet ', verbPhrase, note(whole), '.');
     }
-    const parts = [who, `Split into ${sheet.panels ? sheet.panels.length : fits.length} panels.`];
-    const count = sheet.panels ? sheet.panels.length : fits.length;
-    for (let i = 0; i < count; i++) {
-      const fit = panelFit(sheet, i);
-      const status = fit ? fit.status : '';
-      parts.push(' ', el('span', { class: statusClass(status) }, el('span', { class: 'swatch' })),
-        `Panel ${i + 1} `,
-        fit ? (fit.status === 'unplaced' ? 'could not be placed' : ['was ', verb(fit)]) : 'was not fit',
-        fit ? note(fit) : '', '.');
+    if (count) {
+      parts.push(whole ? ` It was also split into ${count} panels.` : `Split into ${count} panels.`);
+      for (let i = 0; i < count; i++) {
+        const fit = panelFit(sheet, i);
+        const status = fit ? fit.status : '';
+        parts.push(' ', el('span', { class: statusClass(status) }, el('span', { class: 'swatch' })),
+          `Panel ${i + 1} `,
+          fit ? (fit.status === 'unplaced' ? 'could not be placed' : ['was ', verb(fit)]) : 'was not fit',
+          fit ? note(fit) : '', '.');
+      }
     }
     if (sheet.panels) {
       const toggle = el('input', { type: 'checkbox', id: 'show-panels', checked: !hidePanels });

@@ -217,6 +217,17 @@ def test_read_fits_keeps_a_withheld_page():
     assert fits == [Fit("p5", "withheld", "8.0 km from the catalogue location")]
 
 
+def test_read_fits_drops_misses_of_a_placed_key_map():
+    # The main fit tried p0R as a street sheet and failed; the key-map file placed it.
+    main = annotation_page(
+        [],
+        [{"label": "unplaced pages", "value": "p0R (tier 1, 40.74,-73.97 +/-307m)"}],
+    )
+    keymap = annotation_page(["Brooklyn, New York | 1899 | sanborn06116_004 p0R"])
+    fits = read_fits({"main": main, "keymap": keymap})
+    assert [(fit.image, fit.status) for fit in fits] == [("p0R", "key map")]
+
+
 def test_fit_as_json_leaves_out_empty_fields():
     assert Fit("p1", "unplaced").as_json() == {"image": "p1", "status": "unplaced"}
     assert Fit("p1", "placed", map="m", file="main").as_json() == {
