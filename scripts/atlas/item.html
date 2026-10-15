@@ -130,6 +130,9 @@
     font-size: 0.82em;
     color: var(--muted);
   }
+  .legend b {
+    font-weight: 600;
+  }
   .legend span::before {
     content: "";
     display: inline-block;
@@ -630,7 +633,8 @@
     }
     return parts;
   }
-  let hidePanels = false;
+  // Panel outlines are mapsnap's, not the scan's: off until asked for.
+  let hidePanels = true;
 
   /** The search box: an id or loc.gov link goes straight to the item; anything else searches towns. */
   async function search(text) {
@@ -877,7 +881,7 @@
       el('h2', {}, 'Elsewhere'),
       el('ul', {},
         el('li', {}, link(`${OIM_MAP}${record.id}`, 'OldInsuranceMaps.net'),
-          el('span', { class: 'note' }, ' (only if OIM has imported this volume; otherwise it will say "not found")'))));
+          el('span', { class: 'note' }, ' (only if OIM has imported this volume)'))));
   }
 
   /** The viewer: toolbar, links by source, the image and what mapsnap did with it. */
@@ -920,7 +924,7 @@
         href: itemUrl(record.id, sheet.seq),
         onclick: (event) => { event.preventDefault(); showSheet(i, { scroll: false }); },
       },
-      el('div', { class: 'thumb' }, image, sheet.panels ? panelsSvg(sheet) : null),
+      el('div', { class: 'thumb' }, image),
       el('span', { class: 'caption' }, el('span', {}, sheet.key), el('span', { class: `badge ${badge.cls}` }, badge.text)));
     }));
   }
@@ -950,11 +954,12 @@
       el('div', { class: 'browse-head' },
         el('h2', {}, 'Sheets'),
         record.run ? el('span', { class: 'legend' },
+          el('b', {}, `mapsnap ${record.run.version} fit:`),
           el('span', { class: 'placed-color' }, 'placed'),
           el('span', { class: 'keymap-color' }, 'key map'),
           el('span', { class: 'withheld-color' }, 'withheld'),
           el('span', { class: 'unplaced-color' }, 'not placed'),
-          hasPanels ? ' · outlines show how a sheet was split' : null) : null,
+          hasPanels ? el('i', {}, 'n/m panels: a sheet mapsnap split, and how many of its panels it placed') : null) : null,
         el('span', { class: 'layout-switch' }, 'Layout: ', layoutLinks.flatMap((a, i) => i ? [' · ', a] : [a]))),
       record.sheets.length ? browse : el('p', { class: 'message' }, 'No sheets of this volume are mirrored.'),
       el('section', { id: 'others' }),
