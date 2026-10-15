@@ -66,7 +66,6 @@ import os
 import re
 import resource
 import shutil
-import subprocess
 import sys
 import time
 from collections.abc import Callable, Iterator
@@ -87,7 +86,7 @@ from mapsnap.loc_craft import (
     resolve_manifest,
     sync,
 )
-from mapsnap.utils import haversine_m, list_pages, source_images
+from mapsnap.utils import haversine_m, list_pages, run_measured, source_images
 
 # The county extracts, one per FIPS, cut by `mapsnap osm-counties`.
 COUNTY_PREFIX = "osm-by-county"
@@ -510,8 +509,13 @@ def borrow_reads(local: Path, bucket: str, item: Item, source: str) -> None:
 PROGRESS_LINE = re.compile(r"^\s*\d+%\|| it/s\]|s/it\]|\|\s*\d+/\d+\s*\[")
 
 
-def failure_tail(output: str, lines: int = 12) -> str:
-    """The part of a failed stage's output worth reporting: its last real lines.
+# How much of a failed stage's output goes to the log, line by line, ahead of
+# the one-line summary in the error.
+FAILURE_LOG_LINES = 200
+
+
+def failure_lines(output: str, lines: int) -> list[str]:
+    """A failed stage's last ``lines`` real lines of output.
 
     Carriage returns are split like newlines so only each progress bar's final
     state survives, then anything that still looks like a bar is dropped.
@@ -521,7 +525,12 @@ def failure_tail(output: str, lines: int = 12) -> str:
         for line in output.replace("\r", "\n").splitlines()
         if line.strip() and not PROGRESS_LINE.search(line)
     ]
-    return " | ".join(kept[-lines:]) if kept else "(no output)"
+    return kept[-lines:]
+
+
+def failure_tail(output: str, lines: int = 12) -> str:
+    """The part of a failed stage's output worth reporting: its last real lines, joined."""
+    return " | ".join(failure_lines(output, lines)) or "(no output)"
 
 
 def stage(
@@ -544,15 +553,27 @@ def stage(
     so the working directory only ever needs to be the repo.
     """
     started = time.perf_counter()
-    result = subprocess.run(command, capture_output=True, text=True, check=False)
+    # stdout and stderr as one stream: `fit` reports which of its own stages
+    # died on one and their timings on the other, and keeping only stderr lost
+    # the half that named Birmingham 1950's killed `iiif` (#563 pilot).
+    result = run_measured(command, capture=True)
     elapsed = time.perf_counter() - started
     # One line per stage, per item. `fit` prints its own sub-stage times but
     # into a pipe this captures, so without this the only timing that reaches
     # CloudWatch is the whole item, and a 6,000-job-hour corpus run cannot say
-    # where it went.
-    print(f"[{command[1]}: {elapsed:.0f}s]", file=sys.stderr, flush=True)
+    # where it went. The peak is the largest process in the stage's tree.
+    print(
+        f"[{command[1]}: {elapsed:.0f}s, peak {result.peak_mb:.0f} MB]",
+        file=sys.stderr,
+        flush=True,
+    )
     if result.returncode != 0 and not (ok_if and ok_if()):
-        detail = failure_tail(result.stderr or result.stdout or "")
+        # The whole tail to the log, a line at a time; the error below keeps a
+        # one-line summary for the item's report.
+        for line in failure_lines(result.output, FAILURE_LOG_LINES):
+            print(f"  {command[1]} | {line}", file=sys.stderr)
+        sys.stderr.flush()
+        detail = failure_tail(result.output)
         # The exit code, always: a stage that was KILLED (-9, out of memory on a
         # box running one chain per core) raises nothing and prints nothing, so
         # the text alone cannot tell that from a crash. Miami's key-map failure

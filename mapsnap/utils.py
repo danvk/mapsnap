@@ -2,10 +2,14 @@
 
 import json
 import math
+import os
 import re
+import resource
+import signal
 import struct
 import subprocess
 import sys
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 from types import FrameType
@@ -30,27 +34,82 @@ def haversine_m(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
     return 2 * EARTH_RADIUS_M * math.asin(math.sqrt(a))
 
 
-def run_cmd(cmd: list[str]) -> None:
+@dataclass(frozen=True)
+class Finished:
+    """How a subprocess ended: its exit code, and the peak memory of its process tree."""
+
+    returncode: int  # negative for a signal, as subprocess reports it
+    peak_mb: float  # the largest resident set of the process or any child it reaped
+    output: str = ""  # stdout and stderr interleaved, when captured
+
+
+def peak_rss_mb(usage: resource.struct_rusage) -> float:
+    """ru_maxrss in MB: the kernel reports kilobytes on Linux and bytes on macOS."""
+    return usage.ru_maxrss * (1 if sys.platform == "darwin" else 1024) / 1e6
+
+
+def run_measured(cmd: list[str], *, capture: bool = False) -> Finished:
+    """Run a command to completion and report its exit code and peak memory.
+
+    The peak comes from wait4's rusage, which on Linux covers the process and
+    every descendant it reaped -- so a stage's figure includes the subprocesses
+    it ran, the ones that actually do the work. ``capture`` collects stdout and
+    stderr into one stream, in the order they were written.
+    """
+    process = subprocess.Popen(
+        cmd,
+        stdout=subprocess.PIPE if capture else None,
+        stderr=subprocess.STDOUT if capture else None,
+        text=capture,
+    )
+    output = process.stdout.read() if capture and process.stdout else ""
+    _, status, usage = os.wait4(process.pid, 0)
+    process.returncode = os.waitstatus_to_exitcode(status)
+    return Finished(process.returncode, peak_rss_mb(usage), output)
+
+
+def describe_exit(name: str, finished: Finished) -> str:
+    """A stage's exit in words; a SIGKILL is out of memory or the job's time limit."""
+    if finished.returncode >= 0:
+        return f"{name} exited {finished.returncode} (peak {finished.peak_mb:.0f} MB)"
+    number = -finished.returncode
+    reason = (
+        "killed: out of memory, or the job's time limit"
+        if number == signal.SIGKILL
+        else signal.Signals(number).name
+    )
+    return f"{name} died with signal {number} ({reason}) at a peak of {finished.peak_mb:.0f} MB"
+
+
+def run_cmd(cmd: list[str]) -> float:
     """Print and run a subprocess command, exiting with its return code on failure.
 
-    A stage killed by a SIGNAL (negative returncode) is retried once: #296 is
-    a sporadic, non-input-deterministic SIGSEGV inside snap's chamfer_refine
-    (two captures, different pages and lines, same volume rerun passes), and
-    the stage caches -- snap's incremental candidates.jsonl above all -- make
-    a retry resume in seconds. One retry converts a dead overnight lane into
-    a logged hiccup; a second failure still kills the run, so a genuinely
-    broken stage cannot loop.
+    Returns the command's peak memory in MB, and says it on the way out if the
+    command fails, so a killed stage names itself in whatever log is kept.
+
+    A stage killed by a signal other than SIGKILL is retried once: #296 is a
+    sporadic, non-input-deterministic SIGSEGV inside snap's chamfer_refine (two
+    captures, different pages and lines, same volume rerun passes), and the
+    stage caches -- snap's incremental candidates.jsonl above all -- make a
+    retry resume in seconds. A SIGKILL is not retried: it is the kernel's
+    out-of-memory killer or Batch's time limit, and both strike again. Birmingham
+    1950's `iiif` was killed twice in a row on the #563 pilot, the second time
+    half an hour of fit later.
     """
     print("+ " + " ".join(cmd), flush=True)
-    result = subprocess.run(cmd, check=False)
-    if result.returncode < 0:
+    name = " ".join(cmd[:2])
+    finished = run_measured(cmd)
+    if finished.returncode < 0 and -finished.returncode != signal.SIGKILL:
         print(
-            f"stage died with signal {-result.returncode} (#296); retrying once",
+            f"{describe_exit(name, finished)} (#296); retrying once",
+            file=sys.stderr,
             flush=True,
         )
-        result = subprocess.run(cmd, check=False)
-    if result.returncode != 0:
-        sys.exit(result.returncode)
+        finished = run_measured(cmd)
+    if finished.returncode != 0:
+        print(describe_exit(name, finished), file=sys.stderr, flush=True)
+        sys.exit(finished.returncode)
+    return finished.peak_mb
 
 
 def step_stamp(dir_path: Path, name: str) -> Path:

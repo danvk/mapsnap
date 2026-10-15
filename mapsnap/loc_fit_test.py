@@ -639,16 +639,13 @@ def test_no_key_map_is_an_answer_not_a_failure(monkeypatch, tmp_path):
     Failing the item on that broke the test-200b run: volumes with no key map
     failed outright, returned to the queue, and failed again.
     """
-    import subprocess
-
     from mapsnap import loc_fit
+    from mapsnap.utils import Finished
 
     monkeypatch.setattr(
-        loc_fit.subprocess,
-        "run",
-        lambda command, **kw: subprocess.CompletedProcess(
-            command, 1, "", "No key map identified."
-        ),
+        loc_fit,
+        "run_measured",
+        lambda command, **kw: Finished(1, 100.0, "No key map identified."),
     )
     (tmp_path / "keymaps.json").write_text('{"keys": []}')
     loc_fit.stage(
@@ -660,18 +657,15 @@ def test_no_key_map_is_an_answer_not_a_failure(monkeypatch, tmp_path):
 
 def test_a_crash_with_no_record_is_still_a_failure(monkeypatch, tmp_path):
     """The record's presence is the signal, not the exit code."""
-    import subprocess
-
     import pytest
 
     from mapsnap import loc_fit
+    from mapsnap.utils import Finished
 
     monkeypatch.setattr(
-        loc_fit.subprocess,
-        "run",
-        lambda command, **kw: subprocess.CompletedProcess(
-            command, 1, "", "Traceback: model not found"
-        ),
+        loc_fit,
+        "run_measured",
+        lambda command, **kw: Finished(1, 100.0, "Traceback: model not found"),
     )
     with pytest.raises(OSError, match="keymap-detect failed"):
         loc_fit.stage(
@@ -679,6 +673,32 @@ def test_a_crash_with_no_record_is_still_a_failure(monkeypatch, tmp_path):
             tmp_path,
             ok_if=lambda: (tmp_path / "keymaps.json").exists(),
         )
+
+
+def test_a_failed_stage_logs_its_output_and_peak(monkeypatch, tmp_path, capsys):
+    """Birmingham 1950's `fit` died with only its stderr kept, and stderr never
+    said which of fit's stages was killed: that went to stdout. Both streams now
+    reach the log, a line each, with the stage's peak memory."""
+    import pytest
+
+    from mapsnap import loc_fit
+    from mapsnap.utils import Finished
+
+    output = (
+        "[reconcile: 40s, peak 900 MB]\n"
+        "+ mapsnap iiif ...\n"
+        "Computing region clipping masks...\n"
+        "mapsnap iiif died with signal 9 (killed: out of memory, or the job's time limit)\n"
+    )
+    monkeypatch.setattr(
+        loc_fit, "run_measured", lambda command, **kw: Finished(247, 7718.0, output)
+    )
+    with pytest.raises(OSError, match="exit 247"):
+        loc_fit.stage(["mapsnap", "fit", str(tmp_path)], tmp_path)
+    log = capsys.readouterr().err
+    assert "[fit: " in log and "peak 7718 MB]" in log
+    assert "  fit | [reconcile: 40s, peak 900 MB]" in log
+    assert "  fit | mapsnap iiif died with signal 9" in log
 
 
 def test_prepare_next_counts_unprocessable_and_waiting_apart(
@@ -733,6 +753,15 @@ def test_failure_tail_keeps_the_error_not_the_progress_bar() -> None:
     # The surviving non-progress lines stay, in order.
     assert tail.index("centerlines") < tail.index("Could not derive")
     assert failure_tail("") == "(no output)"
+
+
+def test_failure_lines_keeps_the_last_lines_in_order() -> None:
+    from mapsnap.loc_fit import failure_lines
+
+    output = "".join(f"line {i}\n" for i in range(300))
+    lines = failure_lines(output, 200)
+    assert len(lines) == 200
+    assert lines[0] == "line 100" and lines[-1] == "line 299"
 
 
 def test_listed_items_exit_codes_follow_the_outcome() -> None:

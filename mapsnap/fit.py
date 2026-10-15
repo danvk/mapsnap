@@ -263,12 +263,19 @@ def main() -> None:
     # asks when a fit is slow ("which stage?") that mtime archaeology used to
     # answer badly.
     stage_seconds: dict[str, float] = {}
+    # Peak memory per stage, for the same reason: a corpus item killed for
+    # memory used to say only that `fit` died, not which of its stages did.
+    stage_peak_mb: dict[str, float] = {}
 
     def timed(stage: str, cmd: list[str]) -> None:
         started = time.perf_counter()
-        run_cmd(cmd)
+        stage_peak_mb[stage] = round(run_cmd(cmd))
         stage_seconds[stage] = round(time.perf_counter() - started, 1)
-        print(f"[{stage}: {stage_seconds[stage]:.0f}s]", flush=True)
+        print(
+            f"[{stage}: {stage_seconds[stage]:.0f}s, peak {stage_peak_mb[stage]:.0f} MB]",
+            file=sys.stderr,
+            flush=True,
+        )
 
     timed(
         "georef",
@@ -436,6 +443,7 @@ def main() -> None:
         compare_txt,
         args.label,
         stage_seconds=stage_seconds,
+        stage_peak_mb=stage_peak_mb,
     )
     total = sum(stage_seconds.values())
     print(
