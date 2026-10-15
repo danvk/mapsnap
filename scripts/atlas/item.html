@@ -1,0 +1,546 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Sanborn volume · mapsnap</title>
+<meta name="description" content="A Library of Congress Sanborn map volume: its catalogue record, every sheet, and where mapsnap placed them.">
+<link rel="stylesheet" href="/style.css">
+<style>
+  :root {
+    --placed: #166534;
+    --placed-soft: #e8f5ec;
+    --keymap: #1e40af;
+    --keymap-soft: #e8eefc;
+    --muted-soft: #f1efe9;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --placed: #86d39b;
+      --placed-soft: #1b2a20;
+      --keymap: #9db8ff;
+      --keymap-soft: #1c2335;
+      --muted-soft: #25282d;
+    }
+  }
+  .search {
+    position: relative;
+    margin: 8px 0 4px;
+  }
+  .search input[type="search"] {
+    width: min(420px, 100%);
+  }
+  .results {
+    list-style: none;
+    margin: 6px 0 0;
+    padding: 0;
+    max-width: 640px;
+  }
+  .results li {
+    padding: 6px 0;
+    border-bottom: 1px solid var(--rule);
+  }
+  .results .years a {
+    margin-right: 8px;
+    white-space: nowrap;
+  }
+  .meta-line {
+    color: var(--muted);
+    margin: 0 0 16px;
+  }
+  .viewer {
+    background: var(--surface);
+    border: 1px solid var(--rule);
+    border-radius: 8px;
+    overflow: hidden;
+  }
+  .viewer-bar {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 8px 16px;
+    padding: 8px 12px;
+    border-bottom: 1px solid var(--rule);
+  }
+  .viewer-bar .title {
+    font-weight: 600;
+    font-variant-numeric: tabular-nums;
+  }
+  .viewer-bar .links {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px 12px;
+    font-size: 0.9em;
+    margin-left: auto;
+  }
+  .viewer-bar button {
+    font: inherit;
+    padding: 2px 10px;
+    border: 1px solid var(--rule);
+    border-radius: 6px;
+    background: var(--bg);
+    color: var(--text);
+    cursor: pointer;
+  }
+  .viewer-bar button:disabled {
+    opacity: 0.4;
+    cursor: default;
+  }
+  #osd {
+    height: min(72vh, 820px);
+    background: var(--muted-soft);
+  }
+  .osd-wrap {
+    position: relative;
+  }
+  .osd-message {
+    position: absolute;
+    inset: 40% 16px auto;
+    margin: 0 auto;
+    text-align: center;
+    color: var(--muted);
+  }
+  /* OpenSeadragon's own error text; .osd-message says it in words. */
+  #osd .openseadragon-message {
+    display: none !important;
+  }
+  .osd-message[hidden] {
+    display: none;
+  }
+  .fit-line {
+    padding: 6px 12px;
+    border-top: 1px solid var(--rule);
+    font-size: 0.9em;
+    color: var(--muted);
+  }
+  .sheets {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
+    gap: 12px;
+    margin: 12px 0;
+  }
+  .sheets a {
+    display: block;
+    color: inherit;
+    text-decoration: none;
+    border: 1px solid var(--rule);
+    border-radius: 6px;
+    background: var(--surface);
+    padding: 6px;
+  }
+  .sheets a[aria-current="true"] {
+    outline: 2px solid var(--accent);
+    outline-offset: 1px;
+  }
+  .sheets img {
+    display: block;
+    width: 100%;
+    height: auto;
+    background: var(--muted-soft);
+  }
+  .sheets .caption {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 4px;
+    margin-top: 4px;
+    font-size: 0.82em;
+  }
+  .badge {
+    display: inline-block;
+    padding: 0 6px;
+    border-radius: 999px;
+    font-size: 0.78em;
+    white-space: nowrap;
+    background: var(--muted-soft);
+    color: var(--muted);
+  }
+  .badge.placed {
+    background: var(--placed-soft);
+    color: var(--placed);
+  }
+  .badge.keymap {
+    background: var(--keymap-soft);
+    color: var(--keymap);
+  }
+  .badge.partial {
+    background: var(--accent-soft);
+    color: var(--accent);
+  }
+  table.about th {
+    position: static;
+    width: 11em;
+    color: var(--muted);
+    font-weight: 500;
+  }
+  table.about {
+    max-width: 860px;
+  }
+  .message {
+    color: var(--muted);
+  }
+  @media (max-width: 600px) {
+    h1 {
+      font-size: 1.5rem;
+    }
+    .viewer-bar .links {
+      margin-left: 0;
+    }
+    #osd {
+      height: 60vh;
+    }
+    table.about th {
+      width: 7em;
+    }
+  }
+</style>
+</head>
+<body>
+<header class="site"><a href="/">mapsnap</a></header>
+<main>
+<form class="search" id="search" role="search">
+  <input type="search" id="query" placeholder="Sanborn id, loc.gov link, or town" aria-label="Find a volume">
+  <ul class="results" id="results"></ul>
+</form>
+<div id="content">
+  <p class="message" id="message">Loading…</p>
+</div>
+</main>
+<footer class="site">Sheet images: <a href="https://www.loc.gov/collections/sanborn-maps/">Library of Congress, Sanborn Maps Collection</a>, served by <a href="https://chronoscope.io/">Chronoscope</a>. Georeferencing annotations © <a href="https://www.openstreetmap.org/copyright">OpenStreetMap contributors</a> and mapsnap, under the <a href="https://opendatacommons.org/licenses/odbl/1-0/">ODbL</a>.</footer>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/openseadragon/5.0.1/openseadragon.min.js"></script>
+<script>
+  'use strict';
+
+  const params = new URLSearchParams(location.search);
+  // ?data= points the page at another copy of the data, for testing a build.
+  const DATA = (params.get('data') || 'https://data.mapsnap.org').replace(/\/$/, '');
+  const OSD_IMAGES = 'https://cdnjs.cloudflare.com/ajax/libs/openseadragon/5.0.1/images/';
+  const ID_PATTERN = /\b(sanborn\d{5}_\d{3}|\d{10})\b/;
+  const MONTHS = ['January', 'February', 'March', 'April', 'May', 'June', 'July',
+    'August', 'September', 'October', 'November', 'December'];
+
+  let record = null;
+  let current = 0;
+  let viewer = null;
+  let indexPromise = null;
+
+  /** An element with attributes and children; strings become text nodes. */
+  function el(tag, attributes, ...children) {
+    const node = document.createElement(tag);
+    for (const [name, value] of Object.entries(attributes || {})) {
+      if (value === undefined || value === null || value === false) continue;
+      if (name.startsWith('on')) node.addEventListener(name.slice(2), value);
+      else node.setAttribute(name, value === true ? '' : value);
+    }
+    for (const child of children.flat()) {
+      if (child === null || child === undefined || child === false) continue;
+      node.append(child instanceof Node ? child : String(child));
+    }
+    return node;
+  }
+
+  /** A link that opens in the same tab. */
+  function link(href, text) {
+    return el('a', { href }, text);
+  }
+
+  /** "1907-06" as "June 1907". */
+  function formatDate(date) {
+    const match = /^(\d{4})-(\d{2})/.exec(date || '');
+    return match ? `${MONTHS[Number(match[2]) - 1]} ${match[1]}` : (date || '');
+  }
+
+  /** The search index, fetched once on first use. */
+  function loadIndex() {
+    if (!indexPromise) {
+      indexPromise = fetch(`${DATA}/items/index.json`)
+        .then((response) => response.ok ? response.json() : { columns: [], rows: [] })
+        .then(({ columns, rows }) => rows.map((row) =>
+          Object.fromEntries(columns.map((column, i) => [column, row[i]]))));
+    }
+    return indexPromise;
+  }
+
+  /** The URL of this page for an item and, optionally, a sheet. */
+  function itemUrl(id, seq) {
+    const query = new URLSearchParams({ id });
+    if (seq) query.set('sp', seq);
+    if (params.get('data')) query.set('data', params.get('data'));
+    return `${location.pathname}?${query}`;
+  }
+
+  /** How the run left a sheet: a badge's text and class. */
+  function sheetStatus(sheet) {
+    const fits = sheet.fit || [];
+    if (!fits.length) return { text: 'not fit', cls: '' };
+    if (fits.some((fit) => fit.status === 'key map')) return { text: 'key map', cls: 'keymap' };
+    const placed = fits.filter((fit) => fit.status === 'placed').length;
+    if (fits.length > 1) {
+      return {
+        text: `${placed}/${fits.length} panels`,
+        cls: placed === fits.length ? 'placed' : placed ? 'partial' : '',
+      };
+    }
+    if (placed) return { text: 'placed', cls: 'placed' };
+    return { text: fits[0].status, cls: '' };
+  }
+
+  /** A sentence on what the run did with each image of a sheet. */
+  function fitSentence(sheet) {
+    const fits = sheet.fit || [];
+    if (!record.run) return 'This volume was not part of the latest mapsnap run.';
+    if (!fits.length) return 'mapsnap did not fit this sheet (title, index or other non-map page).';
+    return fits.map((fit) => {
+      const name = fit.image.includes('__') ? `Panel ${fit.image.split('__')[1]}` : 'The sheet';
+      const what = {
+        placed: 'was placed on the map',
+        'key map': 'was placed as the volume’s key map',
+        unplaced: 'could not be placed',
+        withheld: 'was placed but withheld',
+      }[fit.status] || fit.status;
+      return `${name} ${what}${fit.note ? ` (${fit.note})` : ''}.`;
+    }).join(' ');
+  }
+
+  /** The search box: an id or loc.gov link goes straight to the item; anything else searches towns. */
+  async function search(text) {
+    const results = document.getElementById('results');
+    results.replaceChildren();
+    const query = text.trim();
+    if (!query) return;
+    const match = ID_PATTERN.exec(query);
+    if (match) {
+      location.href = itemUrl(match[1]);
+      return;
+    }
+    const rows = await loadIndex();
+    const needle = query.toLowerCase();
+    const places = new Map();
+    for (const row of rows) {
+      const place = `${row.city}, ${row.state}`;
+      if (!place.toLowerCase().includes(needle)) continue;
+      if (!places.has(place)) places.set(place, []);
+      places.get(place).push(row);
+    }
+    if (!places.size) {
+      results.append(el('li', { class: 'message' }, 'No town matches.'));
+      return;
+    }
+    for (const [place, volumes] of [...places].slice(0, 25)) {
+      results.append(el('li', {}, el('b', {}, place), ' ', yearLinks(volumes)));
+    }
+  }
+
+  /** Links to each volume, labelled by year and volume number, oldest first. */
+  function yearLinks(volumes) {
+    const sorted = [...volumes].sort((a, b) =>
+      (a.date || a.year).localeCompare(b.date || b.year) || String(a.volume).localeCompare(String(b.volume)));
+    return el('span', { class: 'years' }, sorted.map((row) =>
+      el('a', { href: itemUrl(row.id), 'aria-current': record && row.id === record.id ? 'page' : null },
+        row.volume ? `${row.year} v.${row.volume}` : row.year)));
+  }
+
+  /** Show sheet i in the viewer, and remember it in the URL. */
+  function showSheet(i, replace) {
+    const sheets = record.sheets;
+    current = Math.max(0, Math.min(sheets.length - 1, i));
+    const sheet = sheets[current];
+    const query = new URLSearchParams(location.search);
+    query.set('sp', sheet.seq);
+    history[replace ? 'replaceState' : 'pushState'](null, '', `?${query}`);
+
+    document.getElementById('sheet-title').textContent =
+      `Sheet ${sheet.key.replace(/^p/, '')} · image ${sheet.seq}${record.scans ? ` of ${record.scans}` : ''}`;
+    document.getElementById('prev').disabled = current === 0;
+    document.getElementById('next').disabled = current === sheets.length - 1;
+    document.getElementById('sheet-links').replaceChildren(
+      link(sheet.loc_page, 'loc.gov'),
+      link(`${sheet.image}/full/max/0/default.jpg`, `JPEG (${sheet.width}×${sheet.height})`),
+      link(`${sheet.loc_image}/full/pct:100/0/default.jpg`, 'Full-size JPEG'),
+      link(sheet.loc_source, sheet.loc_source.endsWith('.tif') ? 'TIFF' : 'JP2'),
+      link(`${sheet.image}/info.json`, 'IIIF'),
+    );
+    document.getElementById('fit-line').textContent = fitSentence(sheet);
+    for (const [j, tile] of document.querySelectorAll('.sheets a').entries()) {
+      tile.setAttribute('aria-current', j === current ? 'true' : 'false');
+    }
+    openImage(sheet);
+  }
+
+  /** Open a sheet in OpenSeadragon: Chronoscope's copy, else loc.gov's. */
+  function openImage(sheet) {
+    if (!viewer) {
+      viewer = OpenSeadragon({
+        id: 'osd',
+        prefixUrl: OSD_IMAGES,
+        showNavigator: false,
+        showRotationControl: true,
+        gestureSettingsMouse: { clickToZoom: false },
+        crossOriginPolicy: 'Anonymous',
+      });
+      viewer.addHandler('open-failed', () => {
+        const failed = record.sheets[current];
+        if (!viewer.triedLoc) {
+          viewer.triedLoc = true;
+          viewer.open(`${failed.loc_image}/info.json`);
+        } else {
+          document.getElementById('osd-message').hidden = false;
+        }
+      });
+    }
+    viewer.triedLoc = false;
+    document.getElementById('osd-message').hidden = true;
+    viewer.open(`${sheet.image}/info.json`);
+  }
+
+  /** One row of the About table, skipped when it has no value. */
+  function aboutRow(label, ...value) {
+    const content = value.flat().filter((part) => part !== '' && part !== null && part !== undefined);
+    return content.length ? el('tr', {}, el('th', { scope: 'row' }, label), el('td', {}, content)) : null;
+  }
+
+  /** The mapsnap section: the run's status and its files. */
+  function runSection() {
+    const run = record.run;
+    if (!run) {
+      return [el('h2', {}, 'mapsnap'), el('p', { class: 'message' }, 'This volume was not part of the latest mapsnap run.')];
+    }
+    const files = [];
+    for (const [column, label] of [['main', 'Sheets'], ['keymap', 'Key map']]) {
+      const urls = run[column];
+      if (!urls) continue;
+      files.push(el('li', {},
+        el('a', { href: urls.allmaps_chronoscope }, `${label} in Allmaps`),
+        el('span', {},
+          'IIIF georeference: ', link(urls.chronoscope, 'Chronoscope images'), ' · ',
+          link(urls.loc, 'loc.gov images'), ' · ', link(urls.allmaps_loc, 'Allmaps with loc.gov images'))));
+    }
+    return [
+      el('h2', {}, `mapsnap ${run.version}`),
+      el('div', { class: 'stats' },
+        el('div', { class: 'stat' }, el('b', {}, `${run.sheets_placed} / ${run.sheets}`), el('span', {}, 'sheets placed')),
+        el('div', { class: 'stat' }, el('b', {}, run.status), el('span', {}, 'status'))),
+      files.length ? el('ul', { class: 'links' }, files) : null,
+    ];
+  }
+
+  /** Render the whole item page. */
+  function render() {
+    const content = document.getElementById('content');
+    document.title = `${record.name}, ${record.year} · mapsnap`;
+    const place = [record.city, record.county, record.state].filter(Boolean).join(', ');
+    const coordinates = record.coordinates
+      ? link(`https://www.openstreetmap.org/?mlat=${record.coordinates.lat}&mlon=${record.coordinates.lon}#map=14/${record.coordinates.lat}/${record.coordinates.lon}`, 'map')
+      : null;
+    const sheets = record.sheets.map((sheet, i) => {
+      const status = sheetStatus(sheet);
+      const image = el('img', {
+        src: sheet.thumbnail.url,
+        width: sheet.thumbnail.width,
+        height: sheet.thumbnail.height,
+        loading: 'lazy',
+        alt: `Sheet ${sheet.key}`,
+      });
+      image.addEventListener('error', () => {
+        // A sheet Chronoscope lacks: loc.gov renders the same size.
+        const fallback = `${sheet.loc_image}/full/!${sheet.thumbnail.width},${sheet.thumbnail.height}/0/default.jpg`;
+        if (image.src !== fallback) image.src = fallback;
+      }, { once: true });
+      return el('a', {
+        href: itemUrl(record.id, sheet.seq),
+        onclick: (event) => { event.preventDefault(); showSheet(i); window.scrollTo({ top: 0, behavior: 'smooth' }); },
+      }, image, el('span', { class: 'caption' }, el('span', {}, sheet.key), el('span', { class: `badge ${status.cls}` }, status.text)));
+    });
+
+    content.replaceChildren(
+      el('p', { class: 'crumbs' }, 'Library of Congress · Sanborn Maps · ', el('code', {}, record.id)),
+      el('h1', {}, record.name),
+      el('p', { class: 'meta-line' },
+        [formatDate(record.date), `${record.sheets.length} sheets`, place].filter(Boolean).join(' · ')),
+      record.sheets.length
+        ? el('section', { class: 'viewer', 'aria-label': 'Sheet viewer' },
+          el('div', { class: 'viewer-bar' },
+            el('button', { id: 'prev', type: 'button', onclick: () => showSheet(current - 1), 'aria-label': 'Previous sheet' }, '‹'),
+            el('span', { class: 'title', id: 'sheet-title' }),
+            el('button', { id: 'next', type: 'button', onclick: () => showSheet(current + 1), 'aria-label': 'Next sheet' }, '›'),
+            el('span', { class: 'links', id: 'sheet-links' })),
+          el('div', { class: 'osd-wrap' },
+            el('div', { id: 'osd' }),
+            el('p', { id: 'osd-message', class: 'osd-message', hidden: true },
+              'Neither Chronoscope nor loc.gov could show this sheet. Its original is linked above.')),
+          el('div', { class: 'fit-line', id: 'fit-line' }))
+        : el('p', { class: 'message' }, 'No sheets of this volume are mirrored.'),
+      el('h2', {}, 'Sheets'),
+      el('div', { class: 'sheets' }, sheets),
+      el('h2', {}, 'About this volume'),
+      el('div', { class: 'table-scroll' }, el('table', { class: 'about' }, el('tbody', {},
+        aboutRow('Title', record.title),
+        aboutRow('Date', formatDate(record.date)),
+        aboutRow('Location', place, coordinates ? [' (', coordinates, ')'] : null),
+        aboutRow('Notes', record.notes.join(' ')),
+        aboutRow('Images', record.scans ? `${record.scans} at loc.gov; ${record.sheets.length} map sheets here` : `${record.sheets.length} map sheets`),
+        aboutRow('Repository', record.repository),
+        aboutRow('Library of Congress', link(record.loc_item, record.loc_item)),
+        aboutRow('IIIF manifest', link(record.manifest, 'Chronoscope images'), ' · ',
+          record.loc_manifest ? link(record.loc_manifest.replace(/^http:/, 'https:'), 'loc.gov') : null),
+        aboutRow('Data', link(`${DATA}/items/${record.id}.json`, 'JSON record'))))),
+      ...runSection(),
+      el('section', { id: 'others' }),
+    );
+    if (record.sheets.length) {
+      const wanted = Number(params.get('sp'));
+      const start = Math.max(0, record.sheets.findIndex((sheet) => sheet.seq === wanted));
+      showSheet(start, true);
+    }
+    otherVolumes();
+  }
+
+  /** The other volumes of the same town, from the search index. */
+  async function otherVolumes() {
+    const rows = await loadIndex();
+    const state = record.state_code || record.state;
+    const volumes = rows.filter((row) => row.city === record.city && row.state === state);
+    if (volumes.length < 2) return;
+    document.getElementById('others').replaceChildren(
+      el('h2', {}, `Volumes of ${record.city}`),
+      el('p', {}, yearLinks(volumes)));
+  }
+
+  async function main() {
+    document.getElementById('search').addEventListener('submit', (event) => {
+      event.preventDefault();
+      search(document.getElementById('query').value);
+    });
+    document.addEventListener('keydown', (event) => {
+      if (!record || event.target.closest('input, textarea')) return;
+      if (event.key === 'ArrowLeft') showSheet(current - 1);
+      if (event.key === 'ArrowRight') showSheet(current + 1);
+    });
+    window.addEventListener('popstate', () => {
+      if (!record) return;
+      const seq = Number(new URLSearchParams(location.search).get('sp'));
+      const i = record.sheets.findIndex((sheet) => sheet.seq === seq);
+      if (i >= 0 && i !== current) showSheet(i, true);
+    });
+
+    const message = document.getElementById('message');
+    const match = ID_PATTERN.exec(params.get('id') || '');
+    if (!match) {
+      message.textContent = 'Enter a Library of Congress Sanborn id (sanborn03297_002), paste a loc.gov item link, or search for a town.';
+      document.getElementById('query').focus();
+      return;
+    }
+    const response = await fetch(`${DATA}/items/${match[1]}.json`).catch(() => null);
+    if (!response || !response.ok) {
+      message.textContent = `No volume ${match[1]} in the Sanborn collection.`;
+      return;
+    }
+    record = await response.json();
+    render();
+  }
+
+  main();
+</script>
+</body>
+</html>
