@@ -22,6 +22,7 @@ from mapsnap.detect_text import (
     page_lab,
     page_vocabs,
     region_color,
+    superseded_parents,
     threads_per_worker,
 )
 from mapsnap.keymap.locate import KeymapLocator
@@ -83,6 +84,22 @@ def test_has_split_panels(tmp_path):
     # The "p4__" prefix must not match "p428__N" (delimiter-aware).
     (tmp_path / "p4.jpg").touch()
     assert has_split_panels(str(tmp_path / "p4.jpg")) is False
+
+
+def test_superseded_parents_spares_a_split_key_map(tmp_path):
+    # Scotia 1914 (#563 pilot): raw/p1 is the key map and was split into panels too.
+    for name in (
+        "p1.jpg",
+        "p1__1.jpg",
+        "p1__2.jpg",
+        "p1.keymap.json",
+        "p7.jpg",
+        "p7__1.jpg",
+        "p8.jpg",
+    ):
+        (tmp_path / name).touch()
+    images = [str(tmp_path / n) for n in ("p1.jpg", "p7.jpg", "p8.jpg")]
+    assert superseded_parents(images) == [str(tmp_path / "p7.jpg")]
 
 
 # ---------------------------------------------------------------------------
