@@ -15,6 +15,7 @@ from build_item_pages import (
     manifest,
     page_notes,
     panel_shapes,
+    prefetch,
     read_catalogue,
     read_fits,
     read_item_list,
@@ -23,6 +24,7 @@ from build_item_pages import (
     read_run_panels,
     run_tag,
     service_id,
+    split_sheets,
     thumbnail_size,
 )
 from shapely.geometry import Point, Polygon
@@ -133,6 +135,9 @@ class FakeReader:
         self.objects = objects
         self.reads: list[str] = []
 
+    def connect(self) -> None:
+        pass
+
     def read(self, s3_url: str) -> bytes | None:
         self.reads.append(s3_url)
         return self.objects.get(s3_url)
@@ -240,6 +245,26 @@ def test_cached_read(tmp_path: Path):
     assert cached_read(reader, "s3://b/none.json", tmp_path / "none.json") is None
     assert cached_read(reader, "s3://b/none.json", tmp_path / "none.json") is None
     assert reader.reads == ["s3://b/a.json", "s3://b/none.json"]
+
+
+def test_prefetch_fills_only_missing_copies(tmp_path: Path):
+    reader = FakeReader({"s3://b/a.json": b"a", "s3://b/b.json": b"b"})
+    (tmp_path / "a.json").write_bytes(b"cached")
+    sources = [
+        ("s3://b/a.json", tmp_path / "a.json"),
+        ("s3://b/b.json", tmp_path / "b.json"),
+        ("s3://b/none.json", tmp_path / "none.json"),
+    ]
+    prefetch(reader, sources)
+    assert sorted(reader.reads) == ["s3://b/b.json", "s3://b/none.json"]
+    assert (tmp_path / "b.json").read_bytes() == b"b"
+    assert (tmp_path / "none.json").read_bytes() == b""
+    assert not list(tmp_path.glob("*.partial"))
+
+
+def test_split_sheets():
+    fits = [Fit("p2__2", "placed"), Fit("p2__1", "unplaced"), Fit("p1", "key map")]
+    assert split_sheets(fits) == ["p2"]
 
 
 def test_read_run_panels(tmp_path: Path):

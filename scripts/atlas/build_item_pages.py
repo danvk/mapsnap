@@ -31,6 +31,7 @@ import math
 import re
 import shutil
 import sys
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Protocol
@@ -53,6 +54,8 @@ IMAGE_CREDIT = (
     "Library of Congress, Geography and Map Division, Sanborn Maps Collection; "
     "quarter-size copies served by Chronoscope."
 )
+# Parallel S3 reads when filling the caches.
+FETCH_WORKERS = 32
 INDEX_COLUMNS = ["id", "city", "state", "year", "date", "volume", "sheets", "status"]
 # "p9__1 (tier 1, 33.99,-86.02 +/-179m)" or "p0a (the key map, ...)" in an
 # annotation page's "unplaced pages" and "withheld" metadata.
@@ -83,6 +86,8 @@ class Fit:
 class ObjectReader(Protocol):
     """Something that reads an S3 object's bytes (None if missing): S3Reader, or a test's fake."""
 
+    def connect(self) -> None: ...
+
     def read(self, s3_url: str) -> bytes | None: ...
 
 
@@ -92,12 +97,20 @@ class S3Reader:
     def __init__(self) -> None:
         self.client = None
 
-    def read(self, s3_url: str) -> bytes | None:
-        """An object's bytes, or None if it doesn't exist."""
+    def connect(self) -> None:
+        """Make the S3 client now: making one isn't thread-safe, using one is."""
         if self.client is None:
             import boto3  # only needed for a fetch
+            from botocore.config import Config
 
-            self.client = boto3.client("s3")
+            self.client = boto3.client(
+                "s3", config=Config(max_pool_connections=FETCH_WORKERS)
+            )
+
+    def read(self, s3_url: str) -> bytes | None:
+        """An object's bytes, or None if it doesn't exist."""
+        self.connect()
+        assert self.client is not None
         parsed = urlparse(s3_url)
         try:
             response = self.client.get_object(
@@ -112,7 +125,10 @@ def cached_read(reader: ObjectReader, s3_url: str, cache_path: Path) -> bytes | 
     """An S3 object via a local copy; a missing object is cached as an empty file."""
     if not cache_path.exists():
         cache_path.parent.mkdir(parents=True, exist_ok=True)
-        cache_path.write_bytes(reader.read(s3_url) or b"")
+        # Written aside and renamed, so an interrupted run leaves no partial copy.
+        partial = cache_path.with_name(f"{cache_path.name}.partial")
+        partial.write_bytes(reader.read(s3_url) or b"")
+        partial.replace(cache_path)
     return cache_path.read_bytes() or None
 
 
@@ -480,29 +496,55 @@ def read_s3_paths(path: Path) -> dict[str, str]:
         }
 
 
+def mirror_metadata_source(s3_path: str, cache: Path) -> tuple[str, Path]:
+    """Where an item's mirror metadata.json is in S3, and where its local copy goes."""
+    return f"{s3_path}/metadata.json", cache / f"{Path(s3_path).name}.json"
+
+
 def read_mirror_metadata(
     reader: ObjectReader, s3_path: str, cache: Path
 ) -> dict | None:
     """An item's mirror metadata.json (its sheet table), via ``cache``; None if it has none."""
-    body = cached_read(
-        reader, f"{s3_path}/metadata.json", cache / f"{Path(s3_path).name}.json"
-    )
+    body = cached_read(reader, *mirror_metadata_source(s3_path, cache))
     return json.loads(body) if body else None
+
+
+def split_sheets(fits: list[Fit]) -> list[str]:
+    """The sheets a run cut into panels: those with a p9__2-style image."""
+    return sorted({fit.image.split("__")[0] for fit in fits if "__" in fit.image})
+
+
+def panels_source(s3_path: str, tag: str, key: str, cache: Path) -> tuple[str, Path]:
+    """Where a run's pN.panels.json for a sheet is in S3, and where its local copy goes."""
+    name = f"{key}.panels.json"
+    return f"{s3_path}/runs/{tag}/{name}", cache / tag / Path(s3_path).name / name
 
 
 def read_run_panels(
     reader: ObjectReader, s3_path: str, tag: str, fits: list[Fit], cache: Path
 ) -> dict[str, list[dict]]:
     """Sheet key -> panel outlines, for each sheet the run split, from its pN.panels.json."""
-    split = sorted({fit.image.split("__")[0] for fit in fits if "__" in fit.image})
     panels: dict[str, list[dict]] = {}
-    for key in split:
-        name = f"{key}.panels.json"
-        local = cache / tag / Path(s3_path).name / name
-        body = cached_read(reader, f"{s3_path}/runs/{tag}/{name}", local)
+    for key in split_sheets(fits):
+        body = cached_read(reader, *panels_source(s3_path, tag, key, cache))
         if body:
             panels[key] = panel_shapes(json.loads(body))
     return panels
+
+
+def prefetch(reader: ObjectReader, sources: list[tuple[str, Path]]) -> None:
+    """Fill the local copies of these (S3 url, path) pairs that are missing, in parallel."""
+    missing = [(url, path) for url, path in sources if not path.exists()]
+    if not missing:
+        return
+    reader.connect()
+    print(f"fetching {len(missing):,} files from S3", file=sys.stderr)
+    with ThreadPoolExecutor(FETCH_WORKERS) as pool:
+        jobs = [pool.submit(cached_read, reader, url, path) for url, path in missing]
+        for done, job in enumerate(as_completed(jobs), start=1):
+            job.result()
+            if done % 5000 == 0:
+                print(f"  {done:,} of {len(missing):,}", file=sys.stderr)
 
 
 def read_item_list(path: Path) -> list[str]:
@@ -550,6 +592,22 @@ def main() -> None:
     catalogue = read_catalogue(args.catalogue, set(items))
     reader = S3Reader()
 
+    # What each item's run did, and so which split sheets' panels are wanted;
+    # then every file from S3 at once, before the records are built.
+    runs: dict[str, tuple[list[Fit], str]] = {}
+    sources = []
+    for item in items:
+        sources.append(mirror_metadata_source(s3_paths[item], args.sheets_cache))
+        if item in rows:
+            pages = read_pages(args.run_dir, rows[item])
+            fits, tag = read_fits(pages), run_tag(pages)
+            runs[item] = (fits, tag)
+            sources += [
+                panels_source(s3_paths[item], tag, key, args.panels_cache)
+                for key in split_sheets(fits)
+            ]
+    prefetch(reader, sources)
+
     (args.out / "items").mkdir(parents=True, exist_ok=True)
     (args.out / "manifests").mkdir(parents=True, exist_ok=True)
     index = []
@@ -559,11 +617,11 @@ def main() -> None:
             print(f"{item}: no metadata.json in the mirror", file=sys.stderr)
             continue
         run = None
-        if item in rows:
-            pages = read_pages(args.run_dir, rows[item])
-            run = RunInfo(args.version, rows[item], read_fits(pages))
+        if item in runs:
+            fits, tag = runs[item]
+            run = RunInfo(args.version, rows[item], fits)
             run.panels = read_run_panels(
-                reader, s3_paths[item], run_tag(pages), run.fits, args.panels_cache
+                reader, s3_paths[item], tag, fits, args.panels_cache
             )
         record = item_record(item, catalogue.get(item) or {}, mirror, run)
         write_min(args.out / "items" / f"{item}.json", record)
