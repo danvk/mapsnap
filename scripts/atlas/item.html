@@ -12,6 +12,9 @@
     --placed-soft: #e8f5ec;
     --keymap: #1e40af;
     --keymap-soft: #e8eefc;
+    --withheld: #b45309;
+    --withheld-soft: #fdf1e3;
+    --unplaced: #6b7280;
     --muted-soft: #f1efe9;
   }
   @media (prefers-color-scheme: dark) {
@@ -20,11 +23,16 @@
       --placed-soft: #1b2a20;
       --keymap: #9db8ff;
       --keymap-soft: #1c2335;
+      --withheld: #f3b56b;
+      --withheld-soft: #2c2318;
+      --unplaced: #9ba1a8;
       --muted-soft: #25282d;
     }
   }
+  main.wide {
+    max-width: 1400px;
+  }
   .search {
-    position: relative;
     margin: 8px 0 4px;
   }
   .search input[type="search"] {
@@ -40,84 +48,127 @@
     padding: 6px 0;
     border-bottom: 1px solid var(--rule);
   }
-  .results .years a {
-    margin-right: 8px;
+  .years a {
+    margin-right: 10px;
     white-space: nowrap;
   }
   .meta-line {
     color: var(--muted);
     margin: 0 0 16px;
   }
-  .viewer {
+  .note {
+    color: var(--muted);
+    font-size: 0.88em;
+  }
+
+  /* The two cards on top: the LoC catalogue, and what mapsnap made of it. */
+  .top {
+    display: grid;
+    grid-template-columns: minmax(0, 3fr) minmax(0, 2fr);
+    gap: 16px;
+    align-items: start;
+  }
+  .card {
     background: var(--surface);
     border: 1px solid var(--rule);
     border-radius: 8px;
-    overflow: hidden;
+    padding: 4px 14px 12px;
   }
-  .viewer-bar {
-    display: flex;
-    flex-wrap: wrap;
-    align-items: center;
-    gap: 8px 16px;
-    padding: 8px 12px;
-    border-bottom: 1px solid var(--rule);
+  .card h2 {
+    margin: 10px 0 8px;
+    font-size: 1.05rem;
   }
-  .viewer-bar .title {
-    font-weight: 600;
+  .card .source {
+    font-weight: 400;
+    color: var(--muted);
+    font-size: 0.85em;
+  }
+  table.about {
+    background: none;
+  }
+  table.about th {
+    position: static;
+    width: 9em;
+    color: var(--muted);
+    font-weight: 500;
+    background: none;
+    padding-left: 0;
+  }
+  table.about tr:last-child th,
+  table.about tr:last-child td {
+    border-bottom: 0;
+  }
+  .card ul {
+    margin: 0;
+    padding-left: 1.1em;
+  }
+  .card li {
+    margin: 3px 0;
+  }
+  .stat-line {
+    margin: 0 0 8px;
+  }
+  .stat-line b {
     font-variant-numeric: tabular-nums;
   }
-  .viewer-bar .links {
+
+  /* Browsing: a thumbnail grid and a viewer. */
+  .browse-head {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    gap: 6px 16px;
+    margin: 28px 0 8px;
+  }
+  .browse-head h2 {
+    margin: 0;
+  }
+  .legend {
     display: flex;
     flex-wrap: wrap;
     gap: 4px 12px;
-    font-size: 0.9em;
+    font-size: 0.82em;
+    color: var(--muted);
+  }
+  .legend span::before {
+    content: "";
+    display: inline-block;
+    width: 10px;
+    height: 10px;
+    border-radius: 2px;
+    margin-right: 4px;
+    vertical-align: -1px;
+    background: currentColor;
+  }
+  .layout-switch {
     margin-left: auto;
+    font-size: 0.82em;
+    color: var(--muted);
   }
-  .viewer-bar button {
-    font: inherit;
-    padding: 2px 10px;
-    border: 1px solid var(--rule);
-    border-radius: 6px;
-    background: var(--bg);
+  .layout-switch a[aria-current="page"] {
     color: var(--text);
-    cursor: pointer;
+    font-weight: 600;
+    text-decoration: none;
   }
-  .viewer-bar button:disabled {
-    opacity: 0.4;
-    cursor: default;
+  .browse.split {
+    display: grid;
+    grid-template-columns: minmax(0, 2fr) minmax(0, 3fr);
+    gap: 16px;
+    align-items: start;
   }
-  #osd {
-    height: min(72vh, 820px);
-    background: var(--muted-soft);
-  }
-  .osd-wrap {
-    position: relative;
-  }
-  .osd-message {
-    position: absolute;
-    inset: 40% 16px auto;
-    margin: 0 auto;
-    text-align: center;
-    color: var(--muted);
-  }
-  /* OpenSeadragon's own error text; .osd-message says it in words. */
-  #osd .openseadragon-message {
-    display: none !important;
-  }
-  .osd-message[hidden] {
-    display: none;
-  }
-  .fit-line {
-    padding: 6px 12px;
-    border-top: 1px solid var(--rule);
-    font-size: 0.9em;
-    color: var(--muted);
+  .browse.split .viewer-col {
+    position: sticky;
+    top: 8px;
+    height: calc(100vh - 16px);
   }
   .sheets {
     display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
-    gap: 12px;
-    margin: 12px 0;
+    grid-template-columns: repeat(auto-fill, minmax(112px, 1fr));
+    gap: 10px;
+    align-content: start;
+  }
+  .browse.lightbox .sheets {
+    grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
   }
   .sheets a {
     display: block;
@@ -126,19 +177,57 @@
     border: 1px solid var(--rule);
     border-radius: 6px;
     background: var(--surface);
-    padding: 6px;
+    padding: 5px;
   }
   .sheets a[aria-current="true"] {
     outline: 2px solid var(--accent);
     outline-offset: 1px;
   }
-  .sheets img {
+  .thumb {
+    position: relative;
+    background: var(--muted-soft);
+  }
+  .thumb img {
     display: block;
     width: 100%;
     height: auto;
-    background: var(--muted-soft);
   }
-  .sheets .caption {
+  svg.panels {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    pointer-events: none;
+  }
+  svg.panels polygon {
+    fill: currentColor;
+    fill-opacity: 0.14;
+    stroke: currentColor;
+    stroke-width: 2.5;
+    vector-effect: non-scaling-stroke;
+  }
+  svg.panels text {
+    fill: currentColor;
+    font: 700 1px -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    text-anchor: middle;
+    dominant-baseline: central;
+    paint-order: stroke;
+    stroke: var(--surface);
+    stroke-width: 0.12px;
+  }
+  .placed-color {
+    color: var(--placed);
+  }
+  .keymap-color {
+    color: var(--keymap);
+  }
+  .unplaced-color {
+    color: var(--unplaced);
+  }
+  .withheld-color {
+    color: var(--withheld);
+  }
+  .caption {
     display: flex;
     justify-content: space-between;
     align-items: center;
@@ -163,41 +252,189 @@
     background: var(--keymap-soft);
     color: var(--keymap);
   }
-  .badge.partial {
-    background: var(--accent-soft);
-    color: var(--accent);
+  .badge.partial,
+  .badge.withheld {
+    background: var(--withheld-soft);
+    color: var(--withheld);
   }
-  table.about th {
-    position: static;
-    width: 11em;
+
+  .viewer {
+    display: flex;
+    flex-direction: column;
+    height: 100%;
+    background: var(--surface);
+    border: 1px solid var(--rule);
+    border-radius: 8px;
+    overflow: hidden;
+  }
+  .viewer-bar {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 6px 12px;
+    padding: 8px 12px;
+    border-bottom: 1px solid var(--rule);
+  }
+  .viewer-bar .title {
+    font-weight: 600;
+    font-variant-numeric: tabular-nums;
+  }
+  .viewer-bar button {
+    font: inherit;
+    padding: 1px 10px;
+    border: 1px solid var(--rule);
+    border-radius: 6px;
+    background: var(--bg);
+    color: var(--text);
+    cursor: pointer;
+  }
+  .viewer-bar button:disabled {
+    opacity: 0.4;
+    cursor: default;
+  }
+  .viewer-bar .close {
+    margin-left: auto;
+  }
+  .viewer-links {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 2px 16px;
+    padding: 6px 12px;
+    border-bottom: 1px solid var(--rule);
+    font-size: 0.85em;
+  }
+  .viewer-links b {
+    font-weight: 600;
     color: var(--muted);
-    font-weight: 500;
+    margin-right: 4px;
   }
-  table.about {
-    max-width: 860px;
+  .viewer-links a {
+    margin-right: 8px;
+  }
+  .osd-wrap {
+    position: relative;
+    flex: 1;
+    min-height: 280px;
+  }
+  #osd {
+    position: absolute;
+    inset: 0;
+    background: var(--muted-soft);
+  }
+  /* OpenSeadragon's own error text; .osd-message says it in words. */
+  #osd .openseadragon-message {
+    display: none !important;
+  }
+  .osd-message {
+    position: absolute;
+    inset: 40% 16px auto;
+    margin: 0 auto;
+    text-align: center;
+    color: var(--muted);
+  }
+  .osd-message[hidden],
+  .zoom-hint[hidden] {
+    display: none;
+  }
+  .zoom-hint {
+    position: absolute;
+    left: 50%;
+    top: 50%;
+    transform: translate(-50%, -50%);
+    padding: 6px 12px;
+    border-radius: 6px;
+    background: rgb(0 0 0 / 70%);
+    color: #fff;
+    font-size: 0.9em;
+    pointer-events: none;
+  }
+  .image-source {
+    position: absolute;
+    right: 8px;
+    bottom: 8px;
+    padding: 1px 8px;
+    border-radius: 999px;
+    background: rgb(0 0 0 / 55%);
+    color: #fff;
+    font-size: 0.78em;
+    pointer-events: none;
+  }
+  .fit-line {
+    padding: 7px 12px;
+    border-top: 1px solid var(--rule);
+    font-size: 0.9em;
+  }
+  .fit-line .who {
+    font-weight: 600;
+    margin-right: 4px;
+  }
+  .fit-line .swatch {
+    display: inline-block;
+    width: 10px;
+    height: 10px;
+    border-radius: 2px;
+    background: currentColor;
+    margin-right: 3px;
+  }
+  .fit-line label {
+    margin-left: 10px;
+    color: var(--muted);
+    white-space: nowrap;
+  }
+
+  dialog.lightbox {
+    width: calc(100vw - 32px);
+    height: calc(100vh - 32px);
+    max-width: none;
+    max-height: none;
+    padding: 0;
+    border: 0;
+    border-radius: 8px;
+    background: transparent;
+  }
+  dialog.lightbox::backdrop {
+    background: rgb(0 0 0 / 60%);
   }
   .message {
     color: var(--muted);
+  }
+
+  @media (max-width: 900px) {
+    .top {
+      grid-template-columns: minmax(0, 1fr);
+    }
+    .browse.split {
+      grid-template-columns: minmax(0, 1fr);
+    }
+    /* On a phone the viewer rides at the top while the grid scrolls under it. */
+    .browse.split .viewer-col {
+      order: -1;
+      top: 0;
+      z-index: 2;
+      height: 52vh;
+    }
+    .browse.split .viewer-links {
+      display: none;
+    }
+    dialog.lightbox {
+      width: 100vw;
+      height: 100vh;
+      border-radius: 0;
+    }
   }
   @media (max-width: 600px) {
     h1 {
       font-size: 1.5rem;
     }
-    .viewer-bar .links {
-      margin-left: 0;
-    }
-    #osd {
-      height: 60vh;
-    }
     table.about th {
-      width: 7em;
+      width: 6.5em;
     }
   }
 </style>
 </head>
 <body>
 <header class="site"><a href="/">mapsnap</a></header>
-<main>
+<main class="wide">
 <form class="search" id="search" role="search">
   <input type="search" id="query" placeholder="Sanborn id, loc.gov link, or town" aria-label="Find a volume">
   <ul class="results" id="results"></ul>
@@ -206,7 +443,7 @@
   <p class="message" id="message">Loading…</p>
 </div>
 </main>
-<footer class="site">Sheet images: <a href="https://www.loc.gov/collections/sanborn-maps/">Library of Congress, Sanborn Maps Collection</a>, served by <a href="https://chronoscope.io/">Chronoscope</a>. Georeferencing annotations © <a href="https://www.openstreetmap.org/copyright">OpenStreetMap contributors</a> and mapsnap, under the <a href="https://opendatacommons.org/licenses/odbl/1-0/">ODbL</a>.</footer>
+<footer class="site">Sheet images: <a href="https://www.loc.gov/collections/sanborn-maps/">Library of Congress, Sanborn Maps Collection</a>, served by <a href="https://chronoscope.io/">Chronoscope</a> and loc.gov. Georeferencing annotations © <a href="https://www.openstreetmap.org/copyright">OpenStreetMap contributors</a> and mapsnap, under the <a href="https://opendatacommons.org/licenses/odbl/1-0/">ODbL</a>.</footer>
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/openseadragon/5.0.1/openseadragon.min.js"></script>
 <script>
@@ -215,15 +452,29 @@
   const params = new URLSearchParams(location.search);
   // ?data= points the page at another copy of the data, for testing a build.
   const DATA = (params.get('data') || 'https://data.mapsnap.org').replace(/\/$/, '');
+  const LAYOUTS = ['split', 'lightbox'];
+  const LAYOUT = LAYOUTS.includes(params.get('layout')) ? params.get('layout') : 'split';
   const OSD_IMAGES = 'https://cdnjs.cloudflare.com/ajax/libs/openseadragon/5.0.1/images/';
+  const OIM_MAP = 'https://oldinsurancemaps.net/map/';
   const ID_PATTERN = /\b(sanborn\d{5}_\d{3}|\d{10})\b/;
   const MONTHS = ['January', 'February', 'March', 'April', 'May', 'June', 'July',
     'August', 'September', 'October', 'November', 'December'];
+  const SVG = 'http://www.w3.org/2000/svg';
+  const STATUS_TEXT = {
+    placed: 'placed',
+    'key map': 'placed as the key map',
+    unplaced: 'could not be placed',
+    withheld: 'placed but withheld',
+  };
+  // Past the Chronoscope copy's own pixels (it is a 25% scan), loc.gov's
+  // full-resolution tiles take over.
+  const LOC_TAKEOVER_ZOOM = 1;
 
   let record = null;
   let current = 0;
   let viewer = null;
   let indexPromise = null;
+  let hintTimer = null;
 
   /** An element with attributes and children; strings become text nodes. */
   function el(tag, attributes, ...children) {
@@ -240,9 +491,17 @@
     return node;
   }
 
-  /** A link that opens in the same tab. */
-  function link(href, text) {
-    return el('a', { href }, text);
+  /** An SVG element with attributes and children. */
+  function svgEl(tag, attributes, ...children) {
+    const node = document.createElementNS(SVG, tag);
+    for (const [name, value] of Object.entries(attributes || {})) node.setAttribute(name, value);
+    node.append(...children);
+    return node;
+  }
+
+  /** A link. */
+  function link(href, text, attributes) {
+    return el('a', { href, ...attributes }, text);
   }
 
   /** "1907-06" as "June 1907". */
@@ -266,42 +525,112 @@
   function itemUrl(id, seq) {
     const query = new URLSearchParams({ id });
     if (seq) query.set('sp', seq);
-    if (params.get('data')) query.set('data', params.get('data'));
+    for (const name of ['data', 'layout']) {
+      if (params.get(name)) query.set(name, params.get(name));
+    }
     return `${location.pathname}?${query}`;
   }
 
+  /** The Allmaps viewer on the run's file, with this fit's page selected. */
+  function allmapsUrl(fit) {
+    const file = record.run && record.run[fit.file];
+    if (!file || !fit.map) return null;
+    return `${file.allmaps_chronoscope}&map=${encodeURIComponent(fit.map)}`;
+  }
+
+  /** The CSS class giving a fit status its color. */
+  function statusClass(status) {
+    return { placed: 'placed-color', 'key map': 'keymap-color', withheld: 'withheld-color' }[status] || 'unplaced-color';
+  }
+
   /** How the run left a sheet: a badge's text and class. */
-  function sheetStatus(sheet) {
+  function sheetBadge(sheet) {
     const fits = sheet.fit || [];
     if (!fits.length) return { text: 'not fit', cls: '' };
     if (fits.some((fit) => fit.status === 'key map')) return { text: 'key map', cls: 'keymap' };
     const placed = fits.filter((fit) => fit.status === 'placed').length;
-    if (fits.length > 1) {
+    if (fits.length > 1 || sheet.panels) {
+      const panels = sheet.panels ? sheet.panels.length : fits.length;
       return {
-        text: `${placed}/${fits.length} panels`,
-        cls: placed === fits.length ? 'placed' : placed ? 'partial' : '',
+        text: `${placed}/${panels} panels`,
+        cls: placed === panels ? 'placed' : placed ? 'partial' : '',
       };
     }
     if (placed) return { text: 'placed', cls: 'placed' };
-    return { text: fits[0].status, cls: '' };
+    return { text: fits[0].status, cls: fits[0].status === 'withheld' ? 'withheld' : '' };
   }
 
-  /** A sentence on what the run did with each image of a sheet. */
-  function fitSentence(sheet) {
-    const fits = sheet.fit || [];
-    if (!record.run) return 'This volume was not part of the latest mapsnap run.';
-    if (!fits.length) return 'mapsnap did not fit this sheet (title, index or other non-map page).';
-    return fits.map((fit) => {
-      const name = fit.image.includes('__') ? `Panel ${fit.image.split('__')[1]}` : 'The sheet';
-      const what = {
-        placed: 'was placed on the map',
-        'key map': 'was placed as the volume’s key map',
-        unplaced: 'could not be placed',
-        withheld: 'was placed but withheld',
-      }[fit.status] || fit.status;
-      return `${name} ${what}${fit.note ? ` (${fit.note})` : ''}.`;
-    }).join(' ');
+  /** The fit of panel i (0-based) of a split sheet, if the run reported one. */
+  function panelFit(sheet, i) {
+    return (sheet.fit || []).find((fit) => fit.image === `${sheet.key}__${i + 1}`);
   }
+
+  /** An SVG of a split sheet's panels, outlined and numbered, colored by what became of each. */
+  function panelsSvg(sheet) {
+    const svg = svgEl('svg', {
+      class: 'panels',
+      viewBox: `0 0 ${sheet.width} ${sheet.height}`,
+      preserveAspectRatio: 'none',
+      'aria-hidden': 'true',
+    });
+    const size = Math.max(sheet.width, sheet.height) / 12;
+    sheet.panels.forEach((panel, i) => {
+      const fit = panelFit(sheet, i);
+      const group = svgEl('g', { class: statusClass(fit && fit.status) });
+      group.append(
+        svgEl('polygon', { points: panel.points.map((point) => point.join(',')).join(' ') }),
+        svgEl('text', {
+          x: panel.label[0],
+          y: panel.label[1],
+          transform: `translate(${panel.label[0]} ${panel.label[1]}) scale(${size}) translate(${-panel.label[0]} ${-panel.label[1]})`,
+        }, String(i + 1)),
+      );
+      svg.append(group);
+    });
+    return svg;
+  }
+
+  /** "mapsnap: ..." — what the run did with each image of a sheet, linking placed ones to Allmaps. */
+  function fitLine(sheet) {
+    const who = el('span', { class: 'who' }, 'mapsnap:');
+    if (!record.run) return [who, 'This volume was not part of the latest run.'];
+    const fits = sheet.fit || [];
+    if (!fits.length) return [who, 'Not fit (a title, index or other non-map page).'];
+    /** "was placed", with "placed" linked to the page in Allmaps. */
+    const verb = (fit) => {
+      const text = STATUS_TEXT[fit.status] || fit.status;
+      const url = allmapsUrl(fit);
+      if (!url) return text;
+      const [first, ...rest] = text.split(' ');
+      return [link(url, first, { title: 'Open this page in Allmaps' }), rest.length ? ` ${rest.join(' ')}` : ''];
+    };
+    const note = (fit) => fit.note ? ` (${fit.note})` : '';
+    if (!sheet.panels && fits.length === 1) {
+      const fit = fits[0];
+      const verbPhrase = fit.status === 'unplaced' ? 'could not be placed' : ['was ', verb(fit)];
+      return [who, 'The sheet ', verbPhrase, note(fit), '.'];
+    }
+    const parts = [who, `Split into ${sheet.panels ? sheet.panels.length : fits.length} panels.`];
+    const count = sheet.panels ? sheet.panels.length : fits.length;
+    for (let i = 0; i < count; i++) {
+      const fit = panelFit(sheet, i);
+      const status = fit ? fit.status : '';
+      parts.push(' ', el('span', { class: statusClass(status) }, el('span', { class: 'swatch' })),
+        `Panel ${i + 1} `,
+        fit ? (fit.status === 'unplaced' ? 'could not be placed' : ['was ', verb(fit)]) : 'was not fit',
+        fit ? note(fit) : '', '.');
+    }
+    if (sheet.panels) {
+      const toggle = el('input', { type: 'checkbox', id: 'show-panels', checked: !hidePanels });
+      toggle.addEventListener('change', () => {
+        hidePanels = !toggle.checked;
+        drawViewerPanels();
+      });
+      parts.push(el('label', {}, toggle, ' outline panels'));
+    }
+    return parts;
+  }
+  let hidePanels = false;
 
   /** The search box: an id or loc.gov link goes straight to the item; anything else searches towns. */
   async function search(text) {
@@ -337,12 +666,24 @@
     const sorted = [...volumes].sort((a, b) =>
       (a.date || a.year).localeCompare(b.date || b.year) || String(a.volume).localeCompare(String(b.volume)));
     return el('span', { class: 'years' }, sorted.map((row) =>
-      el('a', { href: itemUrl(row.id), 'aria-current': record && row.id === record.id ? 'page' : null },
-        row.volume ? `${row.year} v.${row.volume}` : row.year)));
+      link(itemUrl(row.id), row.volume ? `${row.year} v.${row.volume}` : row.year)));
   }
 
-  /** Show sheet i in the viewer, and remember it in the URL. */
-  function showSheet(i, replace) {
+  /** Open a Chronoscope image in a new tab; the CDN marks its images as downloads. */
+  async function openInTab(event) {
+    event.preventDefault();
+    const url = event.currentTarget.href;
+    const tab = window.open('about:blank', '_blank');
+    try {
+      const blob = await (await fetch(url)).blob();
+      tab.location.href = URL.createObjectURL(blob);
+    } catch {
+      tab.location.href = url;
+    }
+  }
+
+  /** Show sheet i, and remember it in the URL. */
+  function showSheet(i, { replace = false, scroll = true } = {}) {
     const sheets = record.sheets;
     current = Math.max(0, Math.min(sheets.length - 1, i));
     const sheet = sheets[current];
@@ -350,91 +691,219 @@
     query.set('sp', sheet.seq);
     history[replace ? 'replaceState' : 'pushState'](null, '', `?${query}`);
 
+    if (LAYOUT === 'lightbox') {
+      const dialog = document.getElementById('lightbox');
+      if (!dialog.open) dialog.showModal();
+    }
     document.getElementById('sheet-title').textContent =
       `Sheet ${sheet.key.replace(/^p/, '')} · image ${sheet.seq}${record.scans ? ` of ${record.scans}` : ''}`;
     document.getElementById('prev').disabled = current === 0;
     document.getElementById('next').disabled = current === sheets.length - 1;
-    document.getElementById('sheet-links').replaceChildren(
-      link(sheet.loc_page, 'loc.gov'),
-      link(`${sheet.image}/full/max/0/default.jpg`, `JPEG (${sheet.width}×${sheet.height})`),
-      link(`${sheet.loc_image}/full/pct:100/0/default.jpg`, 'Full-size JPEG'),
-      link(sheet.loc_source, sheet.loc_source.endsWith('.tif') ? 'TIFF' : 'JP2'),
-      link(`${sheet.image}/info.json`, 'IIIF'),
+    document.getElementById('viewer-links').replaceChildren(
+      el('span', {}, el('b', {}, 'loc.gov'),
+        link(sheet.loc_page, 'sheet page'),
+        link(`${sheet.loc_image}/full/pct:100/0/default.jpg`, 'full-size JPEG', { target: '_blank' }),
+        link(sheet.loc_source, sheet.loc_source.endsWith('.tif') ? 'TIFF' : 'JP2')),
+      el('span', {}, el('b', {}, 'Chronoscope'),
+        link(`${sheet.image}/full/max/0/default.jpg`, `JPEG (${sheet.width}×${sheet.height})`,
+          { target: '_blank', onclick: openInTab }),
+        link(`${sheet.image}/info.json`, 'IIIF')),
     );
-    document.getElementById('fit-line').textContent = fitSentence(sheet);
-    for (const [j, tile] of document.querySelectorAll('.sheets a').entries()) {
-      tile.setAttribute('aria-current', j === current ? 'true' : 'false');
-    }
+    document.getElementById('fit-line').replaceChildren(...fitLine(sheet).flat(2));
+    const tiles = document.querySelectorAll('.sheets a');
+    tiles.forEach((tile, j) => tile.setAttribute('aria-current', j === current ? 'true' : 'false'));
+    if (scroll && LAYOUT === 'split') tiles[current].scrollIntoView({ block: 'nearest' });
     openImage(sheet);
   }
 
-  /** Open a sheet in OpenSeadragon: Chronoscope's copy, else loc.gov's. */
-  function openImage(sheet) {
-    if (!viewer) {
-      viewer = OpenSeadragon({
-        id: 'osd',
-        prefixUrl: OSD_IMAGES,
-        showNavigator: false,
-        showRotationControl: true,
-        gestureSettingsMouse: { clickToZoom: false },
-        crossOriginPolicy: 'Anonymous',
-      });
-      viewer.addHandler('open-failed', () => {
-        const failed = record.sheets[current];
-        if (!viewer.triedLoc) {
-          viewer.triedLoc = true;
-          viewer.open(`${failed.loc_image}/info.json`);
-        } else {
-          document.getElementById('osd-message').hidden = false;
-        }
-      });
-    }
-    viewer.triedLoc = false;
-    document.getElementById('osd-message').hidden = true;
-    viewer.open(`${sheet.image}/info.json`);
+  /** Show the zoom hint briefly. */
+  function showHint() {
+    const hint = document.getElementById('zoom-hint');
+    hint.hidden = false;
+    clearTimeout(hintTimer);
+    hintTimer = setTimeout(() => { hint.hidden = true; }, 1200);
   }
 
-  /** One row of the About table, skipped when it has no value. */
-  function aboutRow(label, ...value) {
+  /** The OpenSeadragon viewer, made on first use. */
+  function getViewer() {
+    if (viewer) return viewer;
+    viewer = OpenSeadragon({
+      id: 'osd',
+      prefixUrl: OSD_IMAGES,
+      showNavigator: false,
+      showRotationControl: true,
+      gestureSettingsMouse: { clickToZoom: false },
+      crossOriginPolicy: 'Anonymous',
+    });
+    // In the page (not the lightbox), the wheel scrolls the page; zooming takes
+    // Ctrl or ⌘ (a trackpad pinch sends Ctrl).
+    viewer.addHandler('canvas-scroll', (event) => {
+      const wheel = event.originalEvent;
+      if (LAYOUT === 'split' && !(wheel.ctrlKey || wheel.metaKey)) {
+        event.preventDefaultAction = true;
+        event.preventDefault = false;
+        showHint();
+      }
+    });
+    viewer.addHandler('open', () => {
+      const sheet = record.sheets[current];
+      drawViewerPanels();
+      if (!viewer.usingLoc) addLocLayer(sheet);
+      updateSource();
+    });
+    viewer.addHandler('open-failed', () => {
+      const sheet = record.sheets[current];
+      if (!viewer.usingLoc) {
+        // Chronoscope lacks this sheet: show loc.gov's whole.
+        viewer.usingLoc = true;
+        viewer.open(`${sheet.loc_image}/info.json`);
+      } else {
+        document.getElementById('osd-message').hidden = false;
+      }
+    });
+    viewer.addHandler('zoom', updateSource);
+    return viewer;
+  }
+
+  /** Lay loc.gov's full-resolution tiles over the Chronoscope copy, shown only once zoomed past it. */
+  function addLocLayer(sheet) {
+    viewer.locLayer = null;
+    viewer.addTiledImage({
+      tileSource: `${sheet.loc_image}/info.json`,
+      x: 0,
+      y: 0,
+      width: 1,
+      opacity: 0,
+      success: (event) => {
+        // A layer for a sheet the viewer has since moved on from.
+        if (record.sheets[current] !== sheet || viewer.usingLoc) {
+          viewer.world.removeItem(event.item);
+          return;
+        }
+        viewer.locLayer = event.item;
+        updateSource();
+      },
+    });
+  }
+
+  /** Switch to loc.gov's tiles past the Chronoscope copy's resolution, and say which is showing. */
+  function updateSource() {
+    const base = viewer.world.getItemAt(0);
+    if (!base) return;
+    let source = viewer.usingLoc ? 'loc.gov · full resolution' : 'Chronoscope · 25%';
+    if (viewer.locLayer) {
+      const zoom = base.viewportToImageZoom(viewer.viewport.getZoom(true));
+      const deep = zoom > LOC_TAKEOVER_ZOOM;
+      viewer.locLayer.setOpacity(deep ? 1 : 0);
+      if (deep) source = 'loc.gov · full resolution';
+    }
+    document.getElementById('image-source').textContent = source;
+  }
+
+  /** Outline a split sheet's panels over the viewer's image. */
+  function drawViewerPanels() {
+    if (!viewer) return;
+    viewer.clearOverlays();
+    const sheet = record.sheets[current];
+    if (!sheet.panels || hidePanels || viewer.usingLoc) return;
+    viewer.addOverlay({
+      element: panelsSvg(sheet),
+      location: new OpenSeadragon.Rect(0, 0, 1, sheet.height / sheet.width),
+    });
+  }
+
+  /** Open a sheet in the viewer: Chronoscope's copy, with loc.gov's tiles for deep zoom. */
+  function openImage(sheet) {
+    const osd = getViewer();
+    osd.usingLoc = false;
+    osd.locLayer = null;
+    document.getElementById('osd-message').hidden = true;
+    osd.open(`${sheet.image}/info.json`);
+  }
+
+  /** One row of a table, skipped when it has no value. */
+  function row(label, ...value) {
     const content = value.flat().filter((part) => part !== '' && part !== null && part !== undefined);
     return content.length ? el('tr', {}, el('th', { scope: 'row' }, label), el('td', {}, content)) : null;
   }
 
-  /** The mapsnap section: the run's status and its files. */
-  function runSection() {
-    const run = record.run;
-    if (!run) {
-      return [el('h2', {}, 'mapsnap'), el('p', { class: 'message' }, 'This volume was not part of the latest mapsnap run.')];
-    }
-    const files = [];
-    for (const [column, label] of [['main', 'Sheets'], ['keymap', 'Key map']]) {
-      const urls = run[column];
-      if (!urls) continue;
-      files.push(el('li', {},
-        el('a', { href: urls.allmaps_chronoscope }, `${label} in Allmaps`),
-        el('span', {},
-          'IIIF georeference: ', link(urls.chronoscope, 'Chronoscope images'), ' · ',
-          link(urls.loc, 'loc.gov images'), ' · ', link(urls.allmaps_loc, 'Allmaps with loc.gov images'))));
-    }
-    return [
-      el('h2', {}, `mapsnap ${run.version}`),
-      el('div', { class: 'stats' },
-        el('div', { class: 'stat' }, el('b', {}, `${run.sheets_placed} / ${run.sheets}`), el('span', {}, 'sheets placed')),
-        el('div', { class: 'stat' }, el('b', {}, run.status), el('span', {}, 'status'))),
-      files.length ? el('ul', { class: 'links' }, files) : null,
-    ];
+  /** The Library of Congress catalogue card. */
+  function catalogueCard() {
+    const place = [record.city, record.county, record.state].filter(Boolean).join(', ');
+    const c = record.coordinates;
+    return el('section', { class: 'card' },
+      el('h2', {}, 'About this volume ', el('span', { class: 'source' }, 'from the Library of Congress')),
+      el('div', { class: 'table-scroll' }, el('table', { class: 'about' }, el('tbody', {},
+        row('Title', record.title),
+        row('Date', formatDate(record.date)),
+        row('Location', place),
+        c ? row('Coordinates',
+          link(`https://www.openstreetmap.org/?mlat=${c.lat}&mlon=${c.lon}#map=15/${c.lat}/${c.lon}`,
+            `${c.lat.toFixed(5)}, ${c.lon.toFixed(5)}`),
+          ' ', el('span', { class: 'note' }, '(geocoded by LoC from the place name)')) : null,
+        row('Notes', record.notes.join(' ')),
+        row('Images', record.scans
+          ? `${record.scans} at loc.gov, ${record.sheets.length} of them map sheets`
+          : `${record.sheets.length} map sheets`),
+        row('Repository', record.repository),
+        row('loc.gov', link(record.loc_item, record.loc_item.replace(/^https:\/\/www\./, '')),
+          record.loc_manifest ? [' · ', link(record.loc_manifest.replace(/^http:/, 'https:'), 'IIIF manifest')] : null)))));
   }
 
-  /** Render the whole item page. */
-  function render() {
-    const content = document.getElementById('content');
-    document.title = `${record.name}, ${record.year} · mapsnap`;
-    const place = [record.city, record.county, record.state].filter(Boolean).join(', ');
-    const coordinates = record.coordinates
-      ? link(`https://www.openstreetmap.org/?mlat=${record.coordinates.lat}&mlon=${record.coordinates.lon}#map=14/${record.coordinates.lat}/${record.coordinates.lon}`, 'map')
-      : null;
-    const sheets = record.sheets.map((sheet, i) => {
-      const status = sheetStatus(sheet);
+  /** The mapsnap card: the run's results and files, and other places to see the volume. */
+  function mapsnapCard() {
+    const run = record.run;
+    const files = [];
+    if (run) {
+      for (const [column, label] of [['main', 'Sheets'], ['keymap', 'Key map']]) {
+        const urls = run[column];
+        if (!urls) continue;
+        files.push(el('li', {},
+          link(urls.allmaps_chronoscope, `${label} on the map (Allmaps)`),
+          el('span', { class: 'note' }, ' · IIIF georeference: ',
+            link(urls.chronoscope, 'Chronoscope'), ', ', link(urls.loc, 'loc.gov'))));
+      }
+    }
+    return el('section', { class: 'card' },
+      el('h2', {}, run ? `mapsnap ${run.version}` : 'mapsnap'),
+      run
+        ? el('p', { class: 'stat-line' }, el('b', {}, `${run.sheets_placed} of ${run.sheets}`),
+          ' sheets placed', run.status !== 'published' ? [' · ', el('i', {}, run.status)] : null)
+        : el('p', { class: 'message' }, 'This volume was not part of the latest run.'),
+      files.length ? el('ul', {}, files) : null,
+      el('ul', {},
+        el('li', {}, link(record.manifest, 'IIIF manifest'), el('span', { class: 'note' }, ' (Chronoscope images)')),
+        el('li', {}, link(`${DATA}/items/${record.id}.json`, 'All of this as JSON'))),
+      el('h2', {}, 'Elsewhere'),
+      el('ul', {},
+        el('li', {}, link(`${OIM_MAP}${record.id}`, 'OldInsuranceMaps.net'),
+          el('span', { class: 'note' }, ' (only if OIM has imported this volume; otherwise it will say "not found")'))));
+  }
+
+  /** The viewer: toolbar, links by source, the image and what mapsnap did with it. */
+  function viewerSection() {
+    return el('section', { class: 'viewer', 'aria-label': 'Sheet viewer' },
+      el('div', { class: 'viewer-bar' },
+        el('button', { id: 'prev', type: 'button', onclick: () => showSheet(current - 1), 'aria-label': 'Previous sheet' }, '‹'),
+        el('span', { class: 'title', id: 'sheet-title' }),
+        el('button', { id: 'next', type: 'button', onclick: () => showSheet(current + 1), 'aria-label': 'Next sheet' }, '›'),
+        LAYOUT === 'lightbox'
+          ? el('button', { class: 'close', type: 'button', onclick: () => document.getElementById('lightbox').close(), 'aria-label': 'Close' }, '✕')
+          : null),
+      el('div', { class: 'viewer-links', id: 'viewer-links' }),
+      el('div', { class: 'osd-wrap' },
+        el('div', { id: 'osd' }),
+        el('span', { class: 'image-source', id: 'image-source' }),
+        el('p', { id: 'zoom-hint', class: 'zoom-hint', hidden: true }, 'Hold Ctrl or ⌘ to zoom with the wheel'),
+        el('p', { id: 'osd-message', class: 'osd-message', hidden: true },
+          'Neither Chronoscope nor loc.gov could show this sheet. Its original is linked above.')),
+      el('div', { class: 'fit-line', id: 'fit-line' }));
+  }
+
+  /** The thumbnail grid. */
+  function sheetGrid() {
+    return el('div', { class: 'sheets' }, record.sheets.map((sheet, i) => {
+      const badge = sheetBadge(sheet);
       const image = el('img', {
         src: sheet.thumbnail.url,
         width: sheet.thumbnail.width,
@@ -449,49 +918,59 @@
       }, { once: true });
       return el('a', {
         href: itemUrl(record.id, sheet.seq),
-        onclick: (event) => { event.preventDefault(); showSheet(i); window.scrollTo({ top: 0, behavior: 'smooth' }); },
-      }, image, el('span', { class: 'caption' }, el('span', {}, sheet.key), el('span', { class: `badge ${status.cls}` }, status.text)));
+        onclick: (event) => { event.preventDefault(); showSheet(i, { scroll: false }); },
+      },
+      el('div', { class: 'thumb' }, image, sheet.panels ? panelsSvg(sheet) : null),
+      el('span', { class: 'caption' }, el('span', {}, sheet.key), el('span', { class: `badge ${badge.cls}` }, badge.text)));
+    }));
+  }
+
+  /** Render the whole item page. */
+  function render() {
+    const content = document.getElementById('content');
+    document.title = `${record.name}, ${record.year} · mapsnap`;
+    const place = [record.city, record.state].filter(Boolean).join(', ');
+    const layoutLinks = LAYOUTS.map((layout) => {
+      const query = new URLSearchParams(location.search);
+      query.set('layout', layout);
+      return link(`?${query}`, layout, { 'aria-current': layout === LAYOUT ? 'page' : null });
     });
+    const hasPanels = record.sheets.some((sheet) => sheet.panels);
+    const browse = LAYOUT === 'split'
+      ? el('div', { class: 'browse split' }, sheetGrid(), el('div', { class: 'viewer-col' }, viewerSection()))
+      : el('div', { class: 'browse lightbox' }, sheetGrid(),
+        el('dialog', { class: 'lightbox', id: 'lightbox' }, viewerSection()));
 
     content.replaceChildren(
       el('p', { class: 'crumbs' }, 'Library of Congress · Sanborn Maps · ', el('code', {}, record.id)),
       el('h1', {}, record.name),
       el('p', { class: 'meta-line' },
         [formatDate(record.date), `${record.sheets.length} sheets`, place].filter(Boolean).join(' · ')),
-      record.sheets.length
-        ? el('section', { class: 'viewer', 'aria-label': 'Sheet viewer' },
-          el('div', { class: 'viewer-bar' },
-            el('button', { id: 'prev', type: 'button', onclick: () => showSheet(current - 1), 'aria-label': 'Previous sheet' }, '‹'),
-            el('span', { class: 'title', id: 'sheet-title' }),
-            el('button', { id: 'next', type: 'button', onclick: () => showSheet(current + 1), 'aria-label': 'Next sheet' }, '›'),
-            el('span', { class: 'links', id: 'sheet-links' })),
-          el('div', { class: 'osd-wrap' },
-            el('div', { id: 'osd' }),
-            el('p', { id: 'osd-message', class: 'osd-message', hidden: true },
-              'Neither Chronoscope nor loc.gov could show this sheet. Its original is linked above.')),
-          el('div', { class: 'fit-line', id: 'fit-line' }))
-        : el('p', { class: 'message' }, 'No sheets of this volume are mirrored.'),
-      el('h2', {}, 'Sheets'),
-      el('div', { class: 'sheets' }, sheets),
-      el('h2', {}, 'About this volume'),
-      el('div', { class: 'table-scroll' }, el('table', { class: 'about' }, el('tbody', {},
-        aboutRow('Title', record.title),
-        aboutRow('Date', formatDate(record.date)),
-        aboutRow('Location', place, coordinates ? [' (', coordinates, ')'] : null),
-        aboutRow('Notes', record.notes.join(' ')),
-        aboutRow('Images', record.scans ? `${record.scans} at loc.gov; ${record.sheets.length} map sheets here` : `${record.sheets.length} map sheets`),
-        aboutRow('Repository', record.repository),
-        aboutRow('Library of Congress', link(record.loc_item, record.loc_item)),
-        aboutRow('IIIF manifest', link(record.manifest, 'Chronoscope images'), ' · ',
-          record.loc_manifest ? link(record.loc_manifest.replace(/^http:/, 'https:'), 'loc.gov') : null),
-        aboutRow('Data', link(`${DATA}/items/${record.id}.json`, 'JSON record'))))),
-      ...runSection(),
+      el('div', { class: 'top' }, catalogueCard(), mapsnapCard()),
+      el('div', { class: 'browse-head' },
+        el('h2', {}, 'Sheets'),
+        record.run ? el('span', { class: 'legend' },
+          el('span', { class: 'placed-color' }, 'placed'),
+          el('span', { class: 'keymap-color' }, 'key map'),
+          el('span', { class: 'withheld-color' }, 'withheld'),
+          el('span', { class: 'unplaced-color' }, 'not placed'),
+          hasPanels ? ' · outlines show how a sheet was split' : null) : null,
+        el('span', { class: 'layout-switch' }, 'Layout: ', layoutLinks.flatMap((a, i) => i ? [' · ', a] : [a]))),
+      record.sheets.length ? browse : el('p', { class: 'message' }, 'No sheets of this volume are mirrored.'),
       el('section', { id: 'others' }),
     );
+    if (LAYOUT === 'lightbox') {
+      document.getElementById('lightbox').addEventListener('close', () => {
+        const query = new URLSearchParams(location.search);
+        query.delete('sp');
+        history.replaceState(null, '', `?${query}`);
+      });
+    }
     if (record.sheets.length) {
       const wanted = Number(params.get('sp'));
-      const start = Math.max(0, record.sheets.findIndex((sheet) => sheet.seq === wanted));
-      showSheet(start, true);
+      const found = record.sheets.findIndex((sheet) => sheet.seq === wanted);
+      if (LAYOUT === 'split') showSheet(Math.max(0, found), { replace: true, scroll: found >= 0 });
+      else if (found >= 0) showSheet(found, { replace: true });
     }
     otherVolumes();
   }
@@ -500,10 +979,10 @@
   async function otherVolumes() {
     const rows = await loadIndex();
     const state = record.state_code || record.state;
-    const volumes = rows.filter((row) => row.city === record.city && row.state === state);
-    if (volumes.length < 2) return;
+    const volumes = rows.filter((row) => row.city === record.city && row.state === state && row.id !== record.id);
+    if (!volumes.length) return;
     document.getElementById('others').replaceChildren(
-      el('h2', {}, `Volumes of ${record.city}`),
+      el('h2', {}, `Other volumes of ${record.city}`),
       el('p', {}, yearLinks(volumes)));
   }
 
@@ -514,6 +993,7 @@
     });
     document.addEventListener('keydown', (event) => {
       if (!record || event.target.closest('input, textarea')) return;
+      if (LAYOUT === 'lightbox' && !document.getElementById('lightbox').open) return;
       if (event.key === 'ArrowLeft') showSheet(current - 1);
       if (event.key === 'ArrowRight') showSheet(current + 1);
     });
@@ -521,7 +1001,7 @@
       if (!record) return;
       const seq = Number(new URLSearchParams(location.search).get('sp'));
       const i = record.sheets.findIndex((sheet) => sheet.seq === seq);
-      if (i >= 0 && i !== current) showSheet(i, true);
+      if (i >= 0 && i !== current) showSheet(i, { replace: true });
     });
 
     const message = document.getElementById('message');

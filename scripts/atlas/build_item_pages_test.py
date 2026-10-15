@@ -5,6 +5,7 @@ from build_item_pages import (
     INDEX_COLUMNS,
     Fit,
     RunInfo,
+    cached_read,
     catalogue_fields,
     fits_by_sheet,
     index_row,
@@ -13,12 +14,18 @@ from build_item_pages import (
     loc_source_url,
     manifest,
     page_notes,
+    panel_shapes,
     read_catalogue,
     read_fits,
     read_item_list,
+    read_mirror_metadata,
+    read_pages,
+    read_run_panels,
+    run_tag,
     service_id,
     thumbnail_size,
 )
+from shapely.geometry import Point, Polygon
 
 STORAGE = "gmd/gmd397m/g3974m/g3974am/g3974am_g000021926"
 SERVICE = "service:gmd:gmd397m:g3974m:g3974am:g3974am_g000021926"
@@ -80,17 +87,23 @@ def annotation_page(labels: list[str], metadata: list[dict] | None = None) -> di
     return {
         "type": "AnnotationPage",
         "metadata": metadata or [],
-        "items": [{"type": "Annotation", "label": label} for label in labels],
+        "items": [
+            {
+                "id": f"{CDN}:{label.split()[-1]}/georef",
+                "type": "Annotation",
+                "label": label,
+            }
+            for label in labels
+        ],
     }
 
 
-def write_run(run_dir: Path) -> None:
-    """A run dump with a key map (p1) and a split p2 whose second panel was placed."""
-    iiif = run_dir / "iiif/chronoscope"
-    iiif.mkdir(parents=True)
+def run_pages() -> dict[str, dict]:
+    """A run's pages for an item with a key map (p1) and a split p2 whose second panel was placed."""
     main = annotation_page(
         ["Alabama City, Alabama | 1926 | sanborn00002_001 p2 [2]"],
         [
+            {"label": "run", "value": "corpus-v1"},
             {
                 "label": "unplaced pages",
                 "value": "p2__1 (tier 1, 33.99,-86.02 +/-179m)",
@@ -102,8 +115,27 @@ def write_run(run_dir: Path) -> None:
         ],
     )
     keymap = annotation_page(["Alabama City, Alabama | 1926 | sanborn00002_001 p1"])
-    (iiif / ROW["main"]).write_text(json.dumps(main))
-    (iiif / ROW["keymap"]).write_text(json.dumps(keymap))
+    return {"main": main, "keymap": keymap}
+
+
+def write_run(run_dir: Path) -> None:
+    """A run dump holding run_pages()."""
+    iiif = run_dir / "iiif/chronoscope"
+    iiif.mkdir(parents=True)
+    for column, page in run_pages().items():
+        (iiif / ROW[column]).write_text(json.dumps(page))
+
+
+class FakeReader:
+    """An S3Reader over a dict of objects, counting reads."""
+
+    def __init__(self, objects: dict[str, bytes]) -> None:
+        self.objects = objects
+        self.reads: list[str] = []
+
+    def read(self, s3_url: str) -> bytes | None:
+        self.reads.append(s3_url)
+        return self.objects.get(s3_url)
 
 
 def test_service_id():
@@ -148,26 +180,93 @@ def test_page_notes():
     assert page_notes(page, "unplaced pages") == []
 
 
-def test_read_fits(tmp_path: Path):
+def test_read_pages(tmp_path: Path):
     write_run(tmp_path)
-    fits = read_fits(tmp_path, ROW)
+    assert read_pages(tmp_path, ROW) == run_pages()
+    assert list(read_pages(tmp_path, {**ROW, "keymap": ""})) == ["main"]
+
+
+def test_run_tag():
+    assert run_tag(run_pages()) == "corpus-v1"
+    assert run_tag({}) == ""
+
+
+def test_read_fits():
+    fits = read_fits(run_pages())
     # The key map's "withheld" entry is dropped: the key-map file places it.
-    assert sorted((fit.image, fit.status) for fit in fits) == [
-        ("p1", "key map"),
-        ("p2__1", "unplaced"),
-        ("p2__2", "placed"),
+    assert sorted((fit.image, fit.status, fit.file) for fit in fits) == [
+        ("p1", "key map", "keymap"),
+        ("p2__1", "unplaced", ""),
+        ("p2__2", "placed", "main"),
     ]
+    placed = next(fit for fit in fits if fit.status == "placed")
+    # The annotation's id, which Allmaps takes as the map id.
+    assert placed.map == run_pages()["main"]["items"][0]["id"]
 
 
-def test_read_fits_keeps_a_withheld_page(tmp_path: Path):
-    iiif = tmp_path / "iiif/chronoscope"
-    iiif.mkdir(parents=True)
+def test_read_fits_keeps_a_withheld_page():
     page = annotation_page(
         [], [{"label": "withheld", "value": "p5 (8.0 km from the catalogue location)"}]
     )
-    (iiif / ROW["main"]).write_text(json.dumps(page))
-    fits = read_fits(tmp_path, {**ROW, "keymap": ""})
+    fits = read_fits({"main": page})
     assert fits == [Fit("p5", "withheld", "8.0 km from the catalogue location")]
+
+
+def test_fit_as_json_leaves_out_empty_fields():
+    assert Fit("p1", "unplaced").as_json() == {"image": "p1", "status": "unplaced"}
+    assert Fit("p1", "placed", map="m", file="main").as_json() == {
+        "image": "p1",
+        "status": "placed",
+        "map": "m",
+        "file": "main",
+    }
+
+
+def test_panel_shapes_label_inside_each_panel():
+    # An L-shaped panel, whose centroid falls outside it, and the square it wraps.
+    ell = [[0, 0], [100, 0], [100, 20], [20, 20], [20, 100], [0, 100], [0, 0]]
+    square = [[20, 20], [100, 20], [100, 100], [20, 100], [20, 20]]
+    shapes = panel_shapes({"panels": [ell, square]})
+    assert [shape["points"] for shape in shapes] == [ell, square]
+    for ring, shape in zip([ell, square], shapes, strict=True):
+        assert Polygon(ring).contains(Point(shape["label"]))
+
+
+def test_cached_read(tmp_path: Path):
+    reader = FakeReader({"s3://b/a.json": b"{}"})
+    assert cached_read(reader, "s3://b/a.json", tmp_path / "a.json") == b"{}"
+    assert cached_read(reader, "s3://b/a.json", tmp_path / "a.json") == b"{}"
+    # A missing object is remembered, so it isn't asked for again either.
+    assert cached_read(reader, "s3://b/none.json", tmp_path / "none.json") is None
+    assert cached_read(reader, "s3://b/none.json", tmp_path / "none.json") is None
+    assert reader.reads == ["s3://b/a.json", "s3://b/none.json"]
+
+
+def test_read_run_panels(tmp_path: Path):
+    prefix = "s3://mapsnap-sanborn/by-state/alabama/1926/sanborn00002_001"
+    square = [[0, 0], [10, 0], [10, 10], [0, 10], [0, 0]]
+    reader = FakeReader(
+        {
+            f"{prefix}/runs/corpus-v1/p2.panels.json": json.dumps(
+                {"panels": [square, square]}
+            ).encode()
+        }
+    )
+    panels = read_run_panels(
+        reader, prefix, "corpus-v1", read_fits(run_pages()), tmp_path
+    )
+    # Only p2 is split; p1, the key map, isn't fetched.
+    assert list(panels) == ["p2"]
+    assert len(panels["p2"]) == 2
+    assert reader.reads == [f"{prefix}/runs/corpus-v1/p2.panels.json"]
+
+
+def test_read_mirror_metadata(tmp_path: Path):
+    prefix = "s3://mapsnap-sanborn/by-state/alabama/1926/sanborn00002_001"
+    reader = FakeReader({f"{prefix}/metadata.json": json.dumps(MIRROR).encode()})
+    assert read_mirror_metadata(reader, prefix, tmp_path) == MIRROR
+    assert (tmp_path / "sanborn00002_001.json").exists()
+    assert read_mirror_metadata(reader, f"{prefix}x", tmp_path) is None
 
 
 def test_fits_by_sheet():
@@ -193,8 +292,9 @@ def test_read_catalogue(tmp_path: Path):
 
 
 def test_item_record(tmp_path: Path):
-    write_run(tmp_path)
-    run = RunInfo("v1.3", ROW, read_fits(tmp_path, ROW))
+    square = [[0, 0], [10, 0], [10, 10], [0, 10], [0, 0]]
+    run = RunInfo("v1.3", ROW, read_fits(run_pages()))
+    run.panels = {"p2": panel_shapes({"panels": [square, square]})}
     record = item_record(
         "sanborn00002_001", catalogue_fields(CATALOGUE_RECORD), MIRROR, run
     )
@@ -206,7 +306,16 @@ def test_item_record(tmp_path: Path):
         first["thumbnail"]["url"] == f"{CDN}:00002_1926-0001/full/404,479/0/default.jpg"
     )
     assert first["loc_page"] == "https://www.loc.gov/resource/g3974am.g000021926/?sp=1"
-    assert first["fit"] == [{"image": "p1", "status": "key map"}]
+    assert first["fit"] == [
+        {
+            "image": "p1",
+            "status": "key map",
+            "map": f"{CDN}:p1/georef",
+            "file": "keymap",
+        }
+    ]
+    assert "panels" not in first
+    assert len(record["sheets"][1]["panels"]) == 2
     assert [fit["status"] for fit in record["sheets"][1]["fit"]] == [
         "unplaced",
         "placed",
@@ -254,9 +363,8 @@ def test_manifest():
     }
 
 
-def test_index_row(tmp_path: Path):
-    write_run(tmp_path)
-    run = RunInfo("v1.3", ROW, read_fits(tmp_path, ROW))
+def test_index_row():
+    run = RunInfo("v1.3", ROW, read_fits(run_pages()))
     record = item_record(
         "sanborn00002_001", catalogue_fields(CATALOGUE_RECORD), MIRROR, run
     )

@@ -18,8 +18,9 @@ everything about a volume without visiting loc.gov (#606). It writes, under
 - ``items/index.json``: one row per item, for the page's search box and its
   list of other volumes of the same town.
 
-The sheet table comes from the mirror's ``metadata.json`` for each item, fetched
-from S3 once into ``--sheets-cache``. The run's fit is baked in, so the records are
+The sheet table comes from the mirror's ``metadata.json`` for each item, and a
+split sheet's panel outlines from the run's ``pN.panels.json``, both fetched from
+S3 once into local caches. The run's fit is baked in, so the records are
 rebuilt with each published run. With ``--site-dir``, item.html is copied there.
 """
 
@@ -30,12 +31,14 @@ import math
 import re
 import shutil
 import sys
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Protocol
 from urllib.parse import urlparse
 
 from build_run_site import allmaps_url, display_title, read_items
 from publish_run import CDN_BASE, page_key, write_min
+from shapely.geometry import Polygon
 
 DOCUMENTS = Path.home() / "Documents/mapsnap"
 DATA_URL = "https://data.mapsnap.org"
@@ -63,13 +66,72 @@ class Fit:
     image: str  # page key, with a panel suffix for a split sheet: p9__2
     status: str  # placed | key map | unplaced | withheld
     note: str = ""
+    # For a published image: its annotation's id, which Allmaps uses as the
+    # map's id, and the run's file holding it ("main" or "keymap").
+    map: str = ""
+    file: str = ""
 
     def as_json(self) -> dict[str, str]:
-        """The record's form, leaving out an empty note."""
+        """The record's form, leaving out empty fields."""
         doc = {"image": self.image, "status": self.status}
-        if self.note:
-            doc["note"] = self.note
+        for name in ("note", "map", "file"):
+            if getattr(self, name):
+                doc[name] = getattr(self, name)
         return doc
+
+
+class ObjectReader(Protocol):
+    """Something that reads an S3 object's bytes (None if missing): S3Reader, or a test's fake."""
+
+    def read(self, s3_url: str) -> bytes | None: ...
+
+
+class S3Reader:
+    """Reads objects from the mirror bucket, connecting only when first asked."""
+
+    def __init__(self) -> None:
+        self.client = None
+
+    def read(self, s3_url: str) -> bytes | None:
+        """An object's bytes, or None if it doesn't exist."""
+        if self.client is None:
+            import boto3  # only needed for a fetch
+
+            self.client = boto3.client("s3")
+        parsed = urlparse(s3_url)
+        try:
+            response = self.client.get_object(
+                Bucket=parsed.netloc, Key=parsed.path.lstrip("/")
+            )
+        except self.client.exceptions.NoSuchKey:
+            return None
+        return response["Body"].read()
+
+
+def cached_read(reader: ObjectReader, s3_url: str, cache_path: Path) -> bytes | None:
+    """An S3 object via a local copy; a missing object is cached as an empty file."""
+    if not cache_path.exists():
+        cache_path.parent.mkdir(parents=True, exist_ok=True)
+        cache_path.write_bytes(reader.read(s3_url) or b"")
+    return cache_path.read_bytes() or None
+
+
+def panel_shapes(panels_doc: dict) -> list[dict]:
+    """A split sheet's panels, in order (panel 1 first), as outlines with a label point inside.
+
+    The outlines are in the mirror's 25% pixels, the Chronoscope image's frame.
+    """
+    shapes = []
+    for ring in panels_doc.get("panels") or []:
+        polygon = Polygon(ring).buffer(0)
+        point = polygon.representative_point()
+        shapes.append(
+            {
+                "points": [[round(x, 1), round(y, 1)] for x, y in ring],
+                "label": [round(point.x, 1), round(point.y, 1)],
+            }
+        )
+    return shapes
 
 
 def service_id(storage_dir: str, stem: str) -> str:
@@ -103,12 +165,14 @@ def loc_source_url(sheet: dict) -> str:
     return f"{LOC_STORAGE}/{branch}/{sheet['storage_dir']}/{sheet['stem']}{suffix}"
 
 
-def sheet_record(sheet: dict, fits: list[Fit]) -> dict:
+def sheet_record(
+    sheet: dict, fits: list[Fit], panels: list[dict] | None = None
+) -> dict:
     """One sheet's entry: its place in LoC's order, its images and what the run did with it."""
     service = service_id(sheet["storage_dir"], sheet["stem"])
     cdn = f"{CDN_BASE}/{service}"
     thumb_width, thumb_height = thumbnail_size(sheet["width"], sheet["height"])
-    return {
+    record = {
         "seq": sheet["seq"],
         "key": sheet["key"],
         "stem": sheet["stem"],
@@ -125,6 +189,9 @@ def sheet_record(sheet: dict, fits: list[Fit]) -> dict:
         "loc_source": loc_source_url(sheet),
         "fit": [fit.as_json() for fit in fits],
     }
+    if panels:
+        record["panels"] = panels
+    return record
 
 
 def page_notes(page: dict, label: str) -> list[tuple[str, str]]:
@@ -135,14 +202,35 @@ def page_notes(page: dict, label: str) -> list[tuple[str, str]]:
     return []
 
 
-def read_fits(run_dir: Path, row: dict[str, str]) -> list[Fit]:
-    """What the run did with each of an item's images, from its published IIIF files."""
+def read_pages(run_dir: Path, row: dict[str, str]) -> dict[str, dict]:
+    """The item's published annotation pages ("main", "keymap"), Chronoscope flavor."""
+    return {
+        column: json.loads((run_dir / "iiif/chronoscope" / row[column]).read_text())
+        for column in ("main", "keymap")
+        if row.get(column)
+    }
+
+
+def run_tag(pages: dict[str, dict]) -> str:
+    """The run that made these pages (corpus-v1), from their "run" metadata; "" if none says."""
+    for page in pages.values():
+        for entry in page.get("metadata") or []:
+            if entry.get("label") == "run":
+                return str(entry.get("value", ""))
+    return ""
+
+
+def read_fits(pages: dict[str, dict]) -> list[Fit]:
+    """What the run did with each of an item's images, from its published annotation pages."""
     fits: list[Fit] = []
     for column, status in (("main", "placed"), ("keymap", "key map")):
-        if not row.get(column):
+        if column not in pages:
             continue
-        page = json.loads((run_dir / "iiif/chronoscope" / row[column]).read_text())
-        fits += [Fit(page_key(annotation), status) for annotation in page["items"]]
+        page = pages[column]
+        fits += [
+            Fit(page_key(annotation), status, map=annotation["id"], file=column)
+            for annotation in page["items"]
+        ]
         if column == "main":
             fits += [
                 Fit(key, "unplaced") for key, _ in page_notes(page, "unplaced pages")
@@ -208,7 +296,14 @@ def item_record(
         "scans": int(row["scans"]) if row.get("scans") else None,
         "loc_item": f"{LOC_ITEM}{item}/",
         "manifest": f"{DATA_URL}/manifests/{item}.json",
-        "sheets": [sheet_record(sheet, fits.get(sheet["key"], [])) for sheet in sheets],
+        "sheets": [
+            sheet_record(
+                sheet,
+                fits.get(sheet["key"], []),
+                run.panels.get(sheet["key"]) if run else None,
+            )
+            for sheet in sheets
+        ],
         "broken": mirror.get("broken") or [],
     }
     if run:
@@ -223,6 +318,7 @@ class RunInfo:
     version: str
     row: dict[str, str]
     fits: list[Fit]
+    panels: dict[str, list[dict]] = field(default_factory=dict)  # split sheet -> panels
 
     def file_urls(self, name: str) -> dict[str, str]:
         """A published file's URL for each image source, and the Allmaps viewer on each."""
@@ -384,29 +480,29 @@ def read_s3_paths(path: Path) -> dict[str, str]:
         }
 
 
-def fetch_mirror_metadata(s3_paths: dict[str, str], cache: Path) -> None:
-    """Copy each item's metadata.json from the mirror bucket into ``cache``, unless it is there."""
-    missing = {
-        item: s3_path
-        for item, s3_path in s3_paths.items()
-        if not (cache / f"{item}.json").exists()
-    }
-    if not missing:
-        return
-    import boto3  # only needed for a fetch
+def read_mirror_metadata(
+    reader: ObjectReader, s3_path: str, cache: Path
+) -> dict | None:
+    """An item's mirror metadata.json (its sheet table), via ``cache``; None if it has none."""
+    body = cached_read(
+        reader, f"{s3_path}/metadata.json", cache / f"{Path(s3_path).name}.json"
+    )
+    return json.loads(body) if body else None
 
-    client = boto3.client("s3")
-    cache.mkdir(parents=True, exist_ok=True)
-    for item, s3_path in missing.items():
-        dest = cache / f"{item}.json"
-        parsed = urlparse(s3_path)
-        key = f"{parsed.path.lstrip('/')}/metadata.json"
-        try:
-            body = client.get_object(Bucket=parsed.netloc, Key=key)["Body"].read()
-        except client.exceptions.NoSuchKey:
-            print(f"{item}: no metadata.json at {s3_path}", file=sys.stderr)
-            continue
-        dest.write_bytes(body)
+
+def read_run_panels(
+    reader: ObjectReader, s3_path: str, tag: str, fits: list[Fit], cache: Path
+) -> dict[str, list[dict]]:
+    """Sheet key -> panel outlines, for each sheet the run split, from its pN.panels.json."""
+    split = sorted({fit.image.split("__")[0] for fit in fits if "__" in fit.image})
+    panels: dict[str, list[dict]] = {}
+    for key in split:
+        name = f"{key}.panels.json"
+        local = cache / tag / Path(s3_path).name / name
+        body = cached_read(reader, f"{s3_path}/runs/{tag}/{name}", local)
+        if body:
+            panels[key] = panel_shapes(json.loads(body))
+    return panels
 
 
 def read_item_list(path: Path) -> list[str]:
@@ -440,24 +536,35 @@ def main() -> None:
     parser.add_argument(
         "--sheets-cache", type=Path, default=DOCUMENTS / "mirror-metadata"
     )
+    parser.add_argument(
+        "--panels-cache",
+        type=Path,
+        default=DOCUMENTS / "run-panels",
+        help="Local copies of the runs' pN.panels.json, by run and item.",
+    )
     args = parser.parse_args()
 
     s3_paths = read_s3_paths(args.volumes)
     items = read_item_list(args.items) if args.items else sorted(s3_paths)
-    fetch_mirror_metadata({item: s3_paths[item] for item in items}, args.sheets_cache)
     rows = {row["item"]: row for row in read_items(args.run_dir / "items.tsv")}
     catalogue = read_catalogue(args.catalogue, set(items))
+    reader = S3Reader()
 
     (args.out / "items").mkdir(parents=True, exist_ok=True)
     (args.out / "manifests").mkdir(parents=True, exist_ok=True)
     index = []
     for item in items:
-        mirror_path = args.sheets_cache / f"{item}.json"
-        if not mirror_path.exists():
+        mirror = read_mirror_metadata(reader, s3_paths[item], args.sheets_cache)
+        if mirror is None:
+            print(f"{item}: no metadata.json in the mirror", file=sys.stderr)
             continue
-        mirror = json.loads(mirror_path.read_text())
-        row = rows.get(item)
-        run = RunInfo(args.version, row, read_fits(args.run_dir, row)) if row else None
+        run = None
+        if item in rows:
+            pages = read_pages(args.run_dir, rows[item])
+            run = RunInfo(args.version, rows[item], read_fits(pages))
+            run.panels = read_run_panels(
+                reader, s3_paths[item], run_tag(pages), run.fits, args.panels_cache
+            )
         record = item_record(item, catalogue.get(item) or {}, mirror, run)
         write_min(args.out / "items" / f"{item}.json", record)
         write_min(args.out / "manifests" / f"{item}.json", manifest(record))
