@@ -278,6 +278,20 @@ def has_split_panels(image_path: str) -> bool:
     return any(Path(image_path).parent.glob(f"{stem}__*.jpg"))
 
 
+def superseded_parents(images: list[str]) -> list[str]:
+    """The images not to OCR because their split panels are read instead.
+
+    A key map the key-map chain is reading (a sibling ``<stem>.keymap.json``) is
+    always read whole. Splitting runs on key-map sheets too since #587, but
+    keymap-detect can still name the whole sheet; skipping it left the chain's
+    georef with no reads, which failed the item (Scotia 1914 and five others in
+    the #563 pilot).
+    """
+    from mapsnap.georef_from_labels import is_keymap_image
+
+    return [p for p in images if has_split_panels(p) and not is_keymap_image(p)]
+
+
 def _axis_starts(length: int, tile: int, stride: int) -> list[int]:
     """Tile-start offsets covering [0, length]; the final tile sits flush with the end."""
     if length <= tile:
@@ -1133,7 +1147,7 @@ def main() -> None:
     # mirrors mapsnap.utils.list_pages so the rule holds however ocr is invoked (pipeline
     # or a raw shell glob that happens to include the parent).
     images = drop_sidecar_images(args.images)
-    superseded = [p for p in images if has_split_panels(p)]
+    superseded = superseded_parents(images)
     if superseded:
         images = [p for p in images if p not in superseded]
         print(
