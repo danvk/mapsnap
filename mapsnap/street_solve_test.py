@@ -1,6 +1,7 @@
 import math
 
 import numpy as np
+import pytest
 
 from mapsnap.keymap.align_page_region import (
     init_pose_from_model,
@@ -386,3 +387,44 @@ def test_consensus_batch_scoring_matches_scalar_gates():
         assert [c[2] for c in inliers] == [c[2] for c in scalar]
         assert len(inliers) >= DEFAULT_GATES.min_inliers
         assert bearing_spread(pose, inliers) >= DEFAULT_GATES.bearing_diversity_deg
+
+
+@pytest.mark.parametrize("max_pairs", [2_000_000, 7])
+def test_nearest_within_matches_the_full_broadcast_inside_the_gate(
+    monkeypatch, max_pairs
+):
+    """Exact where it matters: within the gate, the same distance and bearing
+    (the same segment, ties included); beyond it, infinitely far."""
+    from mapsnap import street_solve
+    from mapsnap.street_solve import batch_point_to_segments, nearest_within
+
+    monkeypatch.setattr(street_solve, "MAX_BROADCAST_PAIRS", max_pairs)
+    rng = np.random.default_rng(1)
+    starts = rng.uniform(-2_000.0, 2_000.0, (300, 2))
+    ends = starts + rng.uniform(-150.0, 150.0, (300, 2))
+    # Two identical segments: the full broadcast takes the first, and so must this.
+    starts = np.vstack([starts, starts[:1]])
+    ends = np.vstack([ends, ends[:1]])
+    points = np.vstack(
+        [
+            rng.uniform(-2_200.0, 2_200.0, (4_000, 2)),
+            starts[:50] + rng.uniform(-30.0, 30.0, (50, 2)),  # many within the gate
+        ]
+    )
+    gate = 50.0
+    expected_d, expected_b = batch_point_to_segments(points, starts, ends)
+    distances, bearings = nearest_within(points, starts, ends, gate)
+    within = expected_d <= gate
+    assert within.sum() > 100 and (~within).sum() > 100
+    np.testing.assert_array_equal(distances[within], expected_d[within])
+    np.testing.assert_array_equal(bearings[within], expected_b[within])
+    assert np.isinf(distances[~within]).all()
+
+
+def test_nearest_within_handles_nothing_to_measure():
+    from mapsnap.street_solve import nearest_within
+
+    empty = np.zeros((0, 2))
+    distances, _ = nearest_within(np.zeros((3, 2)), empty, empty, 50.0)
+    assert np.isinf(distances).all()
+    assert len(nearest_within(empty, np.ones((2, 2)), np.ones((2, 2)), 50.0)[0]) == 0
