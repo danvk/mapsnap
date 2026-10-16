@@ -111,6 +111,8 @@ interface InfoPanelProps {
    * annotation on screen.
    */
   runArtifacts?: RunArtifacts;
+  /** The run's sidecar list could not be fetched, rather than the run having none. */
+  runArtifactsFailed?: boolean;
   onClose: () => void;
 }
 
@@ -246,6 +248,7 @@ export function InfoPanel(props: InfoPanelProps) {
     run,
     pageImages = null,
     runArtifacts,
+    runArtifactsFailed = false,
     onOpenDebugView,
     onOpenSnapView,
     onClose,
@@ -371,7 +374,15 @@ export function InfoPanel(props: InfoPanelProps) {
             run.
           </p>
         )}
-        {!runArtifacts?.dir && (
+        {!runArtifacts?.dir && runArtifactsFailed && (
+          <p className="page-info-fallback">
+            Couldn&rsquo;t load this run&rsquo;s list of sidecars (the server
+            didn&rsquo;t answer); the links below point at the volume&rsquo;s
+            top-level files, which may come from a different run. Reselect the
+            run to try again.
+          </p>
+        )}
+        {!runArtifacts?.dir && !runArtifactsFailed && (
           <p className="page-info-fallback">
             This run has no artifact directory; the links below point at the
             volume&rsquo;s top-level files, which may come from a different run.

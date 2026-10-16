@@ -1,5 +1,6 @@
 import { typedApi } from 'crosswalk';
 import { jsonFetch } from '../apiFetch';
+import { retryOnNetworkError } from '../retry';
 import type { API, KeymapInfo, RunArtifactsResponse } from '../../server/api';
 import type { CompareResponse } from '../../server/compareTxt';
 import type { OsmRelationResponse } from '../../server/api';
@@ -72,7 +73,11 @@ export async function fetchVolumePageFiles(
  * empty and footer is "" when there is no sidecar.
  */
 export async function fetchCompare(path: string): Promise<CompareResponse> {
-  return api.get('/iiif-api/compare')(null, { path });
+  // Retried: it loads alongside every page image, and losing it silently drops
+  // the RMSE column and the colour-by-RMSE overlay.
+  return retryOnNetworkError(() =>
+    api.get('/iiif-api/compare')(null, { path }),
+  );
 }
 
 /**
@@ -116,7 +121,9 @@ export async function fetchAdjacency(
 export async function fetchRunArtifacts(
   path: string,
 ): Promise<RunArtifactsResponse> {
-  return api.get('/iiif-api/run-artifacts')(null, { path });
+  return retryOnNetworkError(() =>
+    api.get('/iiif-api/run-artifacts')(null, { path }),
+  );
 }
 
 /**

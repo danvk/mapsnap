@@ -154,6 +154,9 @@ export function VolumeViewer() {
   // The annotation's own artifact directory, so page links point at the files
   // that produced it rather than at whatever the last run left at the top level.
   const [runArtifacts, setRunArtifacts] = useState<RunArtifacts | undefined>();
+  // Set when the run's sidecar list could not be fetched at all, as opposed to
+  // a run that saved none: the page panel says which.
+  const [runArtifactsFailed, setRunArtifactsFailed] = useState(false);
   // A page view opened in place of the map. Null shows the map. The volume,
   // page list and selection are deliberately untouched by this, so closing the
   // view returns to exactly what was on screen before.
@@ -227,6 +230,7 @@ export function VolumeViewer() {
     setCompareRows(null);
     setCompareFooter('');
     setRunArtifacts(undefined);
+    setRunArtifactsFailed(false);
     fetchCompare(selectedPath)
       .then(({ pages, missing, footer }) => {
         if (cancelled) return;
@@ -245,10 +249,13 @@ export function VolumeViewer() {
         if (cancelled) return;
         setRunArtifacts(dir ? { dir, stems } : undefined);
       })
-      .catch(() => {
+      .catch((error: unknown) => {
         // An older server without this endpoint degrades to the top-level
-        // links, which is what the viewer did before this existed.
-        if (!cancelled) setRunArtifacts(undefined);
+        // links, which is what the viewer did before this existed. A request
+        // that never reached the server (after retries) is reported as such.
+        if (cancelled) return;
+        setRunArtifacts(undefined);
+        setRunArtifactsFailed(error instanceof TypeError);
       });
 
     // Truth annotation, rewritten into the same local pixel frame, for the missing-page
@@ -847,6 +854,7 @@ export function VolumeViewer() {
             onOpenDebugView={(files, label) => setDebugView({ files, label })}
             onOpenSnapView={snapRecord ? () => setSnapOpen(true) : undefined}
             runArtifacts={runArtifacts}
+            runArtifactsFailed={runArtifactsFailed}
             run={volumeRun}
             pageImages={pageImages}
             pages={pages}
