@@ -6,6 +6,7 @@ here with the failure modes that motivated them (see the osm-snap PR).
 """
 
 import dataclasses
+import json
 
 import numpy as np
 import pytest
@@ -15,15 +16,16 @@ from mapsnap.feature_index import FeatureIndex
 from mapsnap.osm_snap import ScalePrior
 from mapsnap.page_units import PageUnit
 from mapsnap.snap_volume import (
+    FIRST_PASS_KEY,
     SNAP_LOG_BEGIN,
     SNAP_LOG_END,
     VolumeContext,
     affine_m_per_px,
     append_snap_logs,
     arbitrate_challenge,
-    candidates_record_fresh,
     decision_block,
     init_worker,
+    read_snap_log,
     refine_adoption,
     rung_flip,
     snap_one_page,
@@ -150,43 +152,25 @@ def make_unit(fit_state: str) -> PageUnit:
     )
 
 
-def test_candidates_record_fresh_tracks_fit_changes():
-    record = {"fit_state": "fitted", "georef_mtime": 111, "status": "ok"}
-    assert candidates_record_fresh(record, make_unit("fitted"), 111)
-    # A re-run georef rewrote the sidecar: the cached incumbent is stale.
-    assert not candidates_record_fresh(record, make_unit("fitted"), 222)
-    # The page's fit STATE changed (fitted -> nofit or vice versa).
-    assert not candidates_record_fresh(record, make_unit("nofit"), 111)
-    # Legacy records (no georef_mtime) always recompute once.
-    assert not candidates_record_fresh(
-        {"fit_state": "fitted", "status": "ok"}, make_unit("fitted"), 111
+def test_read_snap_log_is_the_runs_finished_pages(tmp_path):
+    log = tmp_path / "candidates.jsonl"
+    assert read_snap_log(log) == {}
+    first = {"target": "p1", "status": "ok"}
+    reseeded = {"target": "p2", "status": "ok", "seeded": True}
+    reseeded[FIRST_PASS_KEY] = {"target": "p2", "status": "no_hit"}
+    # A failure is finished work too, and a line cut short by an interrupted
+    # write is not: that page simply is not done.
+    failed = {"target": "p3", "status": "no_prob"}
+    log.write_text(
+        "".join(json.dumps(r) + "\n" for r in (first, reseeded, failed))
+        + '{"target": "p4", "sta'
     )
-    # Failures are always retried: they turn on the P(road) cache and the key
-    # map's sidecars, which this check does not track, so caching one would pin
-    # the page behind a stale failure even after that input is fixed.
-    base = {"fit_state": "fitted", "georef_mtime": 111}
-    for status in ("no_prob", "no_keymap", "implausible"):
-        assert not candidates_record_fresh(
-            {**base, "status": status}, make_unit("fitted"), 111
-        )
-    assert candidates_record_fresh({**base, "status": "ok"}, make_unit("fitted"), 111)
-    # A contradiction hint appeared (or was rewritten by a re-demotion): the
-    # cached candidates predate the stamp-consistency gate and must recompute.
-    assert not candidates_record_fresh(
-        {**base, "status": "ok"}, make_unit("fitted"), 111, hint_mtime=555
-    )
-    hinted = {**base, "status": "ok", "contradiction_mtime": 555}
-    assert candidates_record_fresh(hinted, make_unit("fitted"), 111, hint_mtime=555)
-    assert not candidates_record_fresh(hinted, make_unit("fitted"), 111, hint_mtime=777)
-    # The key map's sidecars moved (the #213 assignment repair rewrites them
-    # without touching any page's georef): the cached search centers are stale.
-    keyed = {**hinted, "keymap_mtime": 999}
-    assert candidates_record_fresh(
-        keyed, make_unit("fitted"), 111, hint_mtime=555, keymap_mtime=999
-    )
-    assert not candidates_record_fresh(
-        keyed, make_unit("fitted"), 111, hint_mtime=555, keymap_mtime=1000
-    )
+    assert read_snap_log(log) == {"p1": first, "p2": reseeded, "p3": failed}
+    # What the first pass had, for a first pass resumed after the reseed pass.
+    assert read_snap_log(log, first_pass=True)["p2"] == {
+        "target": "p2",
+        "status": "no_hit",
+    }
 
 
 def test_init_worker_indexes_pages_and_panels(monkeypatch, tmp_path):

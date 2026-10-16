@@ -1,5 +1,6 @@
 """Tests for the CPU chain driver (mapsnap.loc_fit)."""
 
+import itertools
 from pathlib import Path
 
 from mapsnap.loc_craft import Item
@@ -1223,3 +1224,45 @@ def test_sync_reads_uploads_only_reads(tmp_path, monkeypatch) -> None:
     assert command[command.index("--exclude") + 1] == "*"
     assert command[command.index("--include") + 1] == "*.streets.json"
     assert command[4].endswith(f"/runs/{TAG}")
+
+
+def test_fit_runs_resumable_with_its_progress_saved(
+    tmp_path: Path, monkeypatch
+) -> None:
+    from mapsnap import loc_fit
+    from mapsnap.keymap.records import write_keymaps_record
+
+    (tmp_path / "p1.jpg").write_bytes(b"")
+    seen: dict[str, tuple[list[str], object]] = {}
+
+    def record(command, local, **kw):
+        seen[command[1]] = (command, kw.get("while_running"))
+        if command[1] == "keymap-detect":
+            write_keymaps_record(tmp_path, [])
+
+    monkeypatch.setattr(loc_fit, "stage", record)
+    work = plan_fit(ALPHA, ["p1.jpg", "p1.boxes.json"], County("US01001"), TAG)
+    save_fit = lambda: None
+    loc_fit.run_chain(tmp_path, work, work.run_tag, save_fit=save_fit)
+    command, progress = seen["fit"]
+    assert "--resume" in command
+    assert progress is save_fit
+
+
+def test_sync_fit_progress_uploads_markers_after_their_files(
+    tmp_path, monkeypatch
+) -> None:
+    """A marker that lands first, then a reclaim, would make a retry skip a
+    step whose files are not in the bucket."""
+    from mapsnap import loc_fit
+
+    (tmp_path / ".pipeline").mkdir()
+    (tmp_path / ".pipeline" / "fit-georef.done").write_text("")
+    (tmp_path / ".pipeline" / "rerun-ocr.done").write_text("")  # not fit's
+    calls: list[list[str]] = []
+    monkeypatch.setattr(loc_fit, "run_aws", lambda command, **kw: calls.append(command))
+    loc_fit.sync_fit_progress(tmp_path, "s3://bucket", ALPHA, TAG)
+    sync, *copies = calls
+    assert sync[:3] == ["aws", "s3", "sync"]
+    assert ("--exclude", ".pipeline/fit-*") in itertools.pairwise(sync)
+    assert [c[3].endswith("/.pipeline/fit-georef.done") for c in copies] == [True]

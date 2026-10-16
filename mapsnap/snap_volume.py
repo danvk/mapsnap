@@ -69,7 +69,12 @@ from mapsnap.page_units import (
     volume_median_scale,
 )
 from mapsnap.streets import Block, build_block_index
-from mapsnap.utils import default_centerlines, haversine_m, pose_is_upside_down
+from mapsnap.utils import (
+    default_centerlines,
+    haversine_m,
+    pose_is_upside_down,
+    write_text_atomic,
+)
 
 # Pages the rescue channel may place: everything the iiif glob does not see.
 LOCAL_CHALLENGE_RADIUS_M = 150.0
@@ -621,85 +626,6 @@ def load_panel_units(volume: Path) -> list[PageUnit]:
     return units
 
 
-def georef_variant_mtime(volume: Path, stem: str) -> int | None:
-    """mtime of the stem's current georef-variant sidecar, or None for none.
-
-    The staleness key for cached candidates: `mapsnap fit` re-runs georef
-    before snap, and a page whose fit changed (or whose fit STATE changed)
-    must be re-matched — its cached record carries the old incumbent pose.
-    """
-    from mapsnap.page_units import GEOREF_VARIANTS
-
-    for variant in GEOREF_VARIANTS:
-        path = volume / f"{stem}.{variant}.json"
-        if path.exists():
-            return int(path.stat().st_mtime)
-    return None
-
-
-def candidates_record_fresh(
-    record: dict,
-    unit: PageUnit,
-    mtime: int | None,
-    hint_mtime: int | None = None,
-    keymap_mtime: int | None = None,
-) -> bool:
-    """Whether a cached candidates record still matches the page's fit state.
-
-    Only a successful record is ever fresh. A failure ('no_prob', 'no_keymap')
-    turns on inputs this check does not track — the P(road) cache and the key
-    map's own sidecars — so caching one would pin the page behind a stale
-    failure even after the input is fixed. Recomputing a failure is cheap: it
-    fails at the same gate before any matching work.
-
-    ``hint_mtime`` is the contradiction-hint sidecar's mtime: a page the
-    adjacency gate demoted twice has georef_mtime None both times, and without
-    this key the second snap pass reuses the first pass's candidates —
-    generated before the hint (or the stamp-consistency gate) existed — and
-    re-adopts the very alias the gate demoted (KC p551).
-
-    ``keymap_mtime`` covers the key map's own sidecars, which supply every
-    page's search centers, radius and region rings. The adjacency assignment
-    repair (#213) rewrites them without touching any page's georef, so a
-    page that just gained a key-map location — or had a wrong one corrected —
-    would otherwise keep candidates searched around the old place, or none at
-    all.
-    """
-    if record.get("status") != "ok":
-        return False
-    return (
-        record.get("fit_state") == unit.fit_state
-        and record.get("georef_mtime") == mtime
-        and record.get("contradiction_mtime") == hint_mtime
-        and record.get("keymap_mtime") == keymap_mtime
-    )
-
-
-def keymap_sidecar_mtime(volume: Path) -> int | None:
-    """Newest mtime across the volume's key-map sidecars, or None when absent.
-
-    One number for the whole volume, since every page's coarse location comes
-    from the same key maps: any change to the numbers or the regions can move
-    any page's search centers.
-    """
-    raw = volume / "raw"
-    if not raw.is_dir():
-        return None
-    mtimes = [
-        int(path.stat().st_mtime)
-        for pattern in ("*.keymap.json", "*.regions.panels.json")
-        for path in raw.glob(pattern)
-        if ".truth." not in path.name
-    ]
-    return max(mtimes) if mtimes else None
-
-
-def contradiction_hint_mtime(volume: Path, stem: str) -> int | None:
-    """mtime of the page's contradiction-hint sidecar, or None for none."""
-    path = volume / f"{stem}.contradiction.json"
-    return int(path.stat().st_mtime) if path.exists() else None
-
-
 def load_volume_context(
     volume: Path,
     units: list[PageUnit] | None = None,
@@ -1180,9 +1106,6 @@ def page_record(vctx: VolumeContext, unit: PageUnit) -> dict:
         "target": unit.stem,
         "status": status,
         "fit_state": unit.fit_state,
-        "georef_mtime": georef_variant_mtime(vctx.volume, unit.stem),
-        "keymap_mtime": keymap_sidecar_mtime(vctx.volume),
-        "contradiction_mtime": contradiction_hint_mtime(vctx.volume, unit.stem),
         "width": unit.width,
         "height": unit.height,
         "has_truth": unit.truth is not None,
@@ -1486,6 +1409,33 @@ def snap_targets(
     ]
 
 
+# A half-sheet reseed record carries the first-pass record it replaced, here.
+FIRST_PASS_KEY = "first_pass"
+
+
+def read_snap_log(path: Path, *, first_pass: bool = False) -> dict[str, dict]:
+    """The pages snap has finished in this run: page stem -> its candidates record.
+
+    ``first_pass`` returns each reseeded page's first-pass record instead, which
+    is what the first pass had when it ran. A last line cut short by an
+    interrupted write is dropped: that page simply is not done.
+    """
+    records: dict[str, dict] = {}
+    if not path.exists():
+        return records
+    for line in path.read_text().splitlines():
+        if not line.strip():
+            continue
+        try:
+            record = json.loads(line)
+        except ValueError:
+            continue
+        if first_pass and FIRST_PASS_KEY in record:
+            record = record[FIRST_PASS_KEY]
+        records[record["target"]] = record
+    return records
+
+
 def cmd_candidates(
     volume: Path,
     pages: list[str] | None,
@@ -1519,12 +1469,7 @@ def cmd_candidates(
         return
     seeding = reseed is not None
     vctx = load_volume_context(volume, units, half_sheet_seeds=seeding)
-    existing: dict[str, dict] = {}
-    if out_path.exists():
-        for line in out_path.read_text().splitlines():
-            if line.strip():
-                record = json.loads(line)
-                existing[record["target"]] = record
+    existing = read_snap_log(out_path, first_pass=not seeding)
 
     targets = snap_targets(vctx.units, vctx.panel_units, all_pages=all_pages)
     if pages:
@@ -1555,26 +1500,24 @@ def cmd_candidates(
     vis_dir = out_dir / "vis"
     if vis:
         vis_dir.mkdir(exist_ok=True)
-    keymap_mtime = keymap_sidecar_mtime(volume)
+    # The log is this run's record of finished pages: a page in it is done.
+    # `fit` starts every run with an empty log (clear_derived_sidecars) unless
+    # it is resuming the same run, so nothing in it predates this run's inputs.
     stale = [
         unit
         for unit in targets
-        if recompute
-        or pages
-        or reseed is not None
-        or (cached := existing.get(unit.stem)) is None
-        or not candidates_record_fresh(
-            cached,
-            unit,
-            georef_variant_mtime(volume, unit.stem),
-            contradiction_hint_mtime(volume, unit.stem),
-            keymap_mtime,
-        )
+        if recompute or pages or reseed is not None or unit.stem not in existing
     ]
     by_stem = {unit.stem: unit for unit in targets}
 
     def record_done(stem: str, record: dict) -> None:
         """Log one finished page, draw its contact sheet, and checkpoint the file."""
+        if seeding and stem in existing:
+            # Keep the first pass's record inside the one that replaces it: a
+            # resumed first pass selects from first-pass records only, so the
+            # half-sheet pass that follows sees what it saw the first time.
+            prior = existing[stem]
+            record = {**record, FIRST_PASS_KEY: prior.get(FIRST_PASS_KEY, prior)}
         existing[stem] = record
         best = (record.get("candidates") or [{}])[0]
         rmse = best.get("rmse_ft")
@@ -1596,9 +1539,11 @@ def cmd_candidates(
         if vis and record.get("candidates"):
             write_contact_sheet(vctx, by_stem[stem], record, vis_dir)
         # Rewrite after every page so an interrupted run keeps its progress.
-        with out_path.open("w") as handle:
-            for target in sorted(existing):
-                handle.write(json.dumps(existing[target]) + "\n")
+        # Atomically: loc-fit uploads the log while snap runs (#613).
+        write_text_atomic(
+            out_path,
+            "".join(json.dumps(existing[target]) + "\n" for target in sorted(existing)),
+        )
 
     if num_workers > 1 and len(stale) > 1:
         # Matching is independent per page and CPU-bound. Workers rebuild the

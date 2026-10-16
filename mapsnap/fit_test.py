@@ -127,3 +127,20 @@ def test_clear_derived_sidecars_clears_snap_caches(tmp_path: Path):
     assert not (snap / "candidates.jsonl").exists()
     assert not (snap / "selection_volume.jsonl").exists()
     assert not (street / "candidates.jsonl").exists()
+
+
+def test_clear_derived_sidecars_starts_a_new_run_log_and_markers(tmp_path: Path):
+    """A new run must not inherit an old run's finished-step markers or snap log:
+    a later --resume would take them as this run's."""
+    snap = tmp_path / "artifacts" / "osm_snap"
+    snap.mkdir(parents=True)
+    (snap / "candidates.jsonl").write_text('{"target": "p1"}\n')
+    pipeline = tmp_path / ".pipeline"
+    pipeline.mkdir()
+    for name in ("fit-georef.done", "fit-snap.done", "rerun-ocr.done"):
+        (pipeline / name).write_text("")
+
+    clear_derived_sidecars(tmp_path)
+
+    assert not (snap / "candidates.jsonl").exists()
+    assert sorted(p.name for p in pipeline.iterdir()) == ["rerun-ocr.done"]

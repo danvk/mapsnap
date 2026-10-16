@@ -551,29 +551,6 @@ def test_dry_run_writes_nothing(tmp_path):
     assert not (volume / "raw" / "p0.keymap-raw.json").exists()
 
 
-def test_keymap_sidecar_mtime_tracks_the_newest_sidecar(tmp_path):
-    import os
-
-    from mapsnap.snap_volume import keymap_sidecar_mtime
-
-    assert keymap_sidecar_mtime(tmp_path) is None  # no raw/ at all
-    raw = tmp_path / "raw"
-    raw.mkdir()
-    assert keymap_sidecar_mtime(tmp_path) is None  # no sidecars
-    keymap = raw / "p0.keymap.json"
-    keymap.write_text("{}")
-    os.utime(keymap, (1_000_000, 1_000_000))
-    regions = raw / "p0.regions.panels.json"
-    regions.write_text("{}")
-    os.utime(regions, (2_000_000, 2_000_000))
-    assert keymap_sidecar_mtime(tmp_path) == 2_000_000
-    # Hand-labelled truth files are not inputs and must not move the key.
-    truth = raw / "p0.truth.regions.panels.json"
-    truth.write_text("{}")
-    os.utime(truth, (9_000_000, 9_000_000))
-    assert keymap_sidecar_mtime(tmp_path) == 2_000_000
-
-
 def test_planner_inputs_neutralize_masked_reads_in_place():
     from mapsnap.keymap.adjacency_assign import planner_inputs
 

@@ -78,6 +78,7 @@ from pathlib import Path
 
 from mapsnap import run_archive
 from mapsnap.aws_cli import run_aws
+from mapsnap.fit import FIT_STEP_PREFIX
 from mapsnap.keymap.records import recorded_keymap_keys
 from mapsnap.loc_craft import (
     Item,
@@ -660,6 +661,7 @@ def run_chain(
     run_tag: str | None = None,
     checkpoint: Callable[[str], None] | None = None,
     save_reads: Callable[[], None] | None = None,
+    save_fit: Callable[[], None] | None = None,
 ) -> None:
     """split, adjacency, keymap, ocr, fit -- the order `run-loc` uses.
 
@@ -674,6 +676,8 @@ def run_chain(
     ``save_reads`` runs every PROGRESS_SYNC_SECONDS during OCR, so the pages read
     so far go up as they are made: OCR is over half of a large volume's time, and
     `ocr --resume` skips every page whose read came back with the run.
+    ``save_fit`` does the same during `fit`, which runs with --resume: a retry
+    skips the fit steps that finished and the pages snap had logged.
     """
     finished = finished_stages(local)
 
@@ -764,15 +768,28 @@ def run_chain(
             str(local),
             "--tag",
             ARCHIVE_TAG,
+            # The work dir holds this run and nothing else: what an earlier
+            # attempt left in it came down from this run's own prefix.
+            "--resume",
             *(["--run-tag", run_tag] if run_tag else []),
         ],
         local,
+        while_running=save_fit,
     )
 
 
-def sync_outputs(local: Path, bucket: str, item: Item, run_tag: str) -> None:
+def sync_outputs(
+    local: Path,
+    bucket: str,
+    item: Item,
+    run_tag: str,
+    *,
+    also_exclude: tuple[str, ...] = (),
+) -> None:
     """Sync this run's sidecars up: everything but the stable half and the markers."""
     excludes: list[str] = []
+    for pattern in also_exclude:
+        excludes += ["--exclude", pattern]
     for pattern in UPLOAD_EXCLUDES:
         excludes += ["--exclude", pattern]
     for pattern in UPLOAD_INCLUDES:
@@ -821,6 +838,32 @@ def sync_reads(local: Path, bucket: str, item: Item, run_tag: str) -> None:
             "--only-show-errors",
         ]
     )
+
+
+def sync_fit_progress(local: Path, bucket: str, item: Item, run_tag: str) -> None:
+    """Upload what `fit` has written so far, then its step markers, in that order.
+
+    `fit --resume` skips a step whose marker came back with the run, so a marker
+    must never land before the files it vouches for. The markers are listed
+    first: fit writes one only after its step's files are complete, so every
+    marker on the list has its files on disk when the sync below runs.
+    """
+    markers = sorted((local / ".pipeline").glob(f"{FIT_STEP_PREFIX}*.done"))
+    sync_outputs(
+        local, bucket, item, run_tag, also_exclude=(f".pipeline/{FIT_STEP_PREFIX}*",)
+    )
+    destination = run_prefix(bucket, item, run_tag)
+    for marker in markers:
+        run_aws(
+            [
+                "aws",
+                "s3",
+                "cp",
+                str(marker),
+                f"{destination}/.pipeline/{marker.name}",
+                "--only-show-errors",
+            ]
+        )
 
 
 def upload(local: Path, bucket: str, item: Item, run_tag: str) -> None:
@@ -909,6 +952,7 @@ def process_item(work: FitWork, local: Path, bucket: str) -> int:
                 local, bucket, work.item, work.run_tag, name
             ),
             save_reads=lambda: sync_reads(local, bucket, work.item, work.run_tag),
+            save_fit=lambda: sync_fit_progress(local, bucket, work.item, work.run_tag),
         )
         upload(local, bucket, work.item, work.run_tag)
         return len(work.pages)
