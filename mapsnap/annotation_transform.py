@@ -1,7 +1,7 @@
 """The pixel -> (lon, lat) transform an IIIF georeference annotation describes."""
 
 import math
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 
 import numpy as np
 
@@ -21,14 +21,25 @@ def page_transform(annotation: dict) -> Transform | None:
         if feature.get("properties", {}).get("resourceCoords")
         and feature.get("geometry")
     ]
+    kind = annotation["body"].get("transformation", {}).get("type")
+    return gcp_transform(pairs, helmert=kind == "helmert")
+
+
+def gcp_transform(
+    pairs: list[tuple[Sequence[float], Sequence[float]]], *, helmert: bool = False
+) -> Transform | None:
+    """A pixel -> (lon, lat) function fitted to (pixel, (lon, lat)) control points.
+
+    A similarity when ``helmert`` or with only two points, an affine otherwise,
+    fitted as ``page_transform`` describes. None with fewer than two points.
+    """
     if len(pairs) < 2:
         return None
     pixels = np.array([pixel for pixel, _ in pairs], float)
     geo = np.array([lonlat for _, lonlat in pairs], float)
     k = math.cos(math.radians(geo[:, 1].mean()))
     metric = np.c_[geo[:, 0] * k, geo[:, 1]]
-    kind = annotation["body"].get("transformation", {}).get("type")
-    if kind == "helmert" or len(pairs) == 2:
+    if helmert or len(pairs) == 2:
         # A least-squares similarity is a complex linear map, w = a z + b. Pixel y
         # runs down and latitude up, so y is flipped first: no similarity can
         # mirror, and without the flip the fit shrinks and skews the page.
