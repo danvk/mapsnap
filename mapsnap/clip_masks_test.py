@@ -25,6 +25,7 @@ from mapsnap.clip_masks import (
     compute_all_clip_masks,
     geo_polygon_to_svg,
     inset_from_border,
+    rounded_ring,
     safe_overlay,
 )
 
@@ -954,3 +955,25 @@ def test_unrepairable_mask_leaves_the_page_unclipped(monkeypatch, capsys):
     masks = clip_masks.compute_all_clip_masks([georef], {"features": []})
     assert masks == [None]
     assert "leaving it unclipped" in capsys.readouterr().err
+
+
+def test_rounded_ring_drops_a_vertex_rounding_repeats():
+    # Two vertices 0.02 px apart round to one point (Schenectady p4, #622).
+    ring = [
+        (4.0, 3622.01),
+        (4.02, 3622.0),
+        (100.0, 3622.0),
+        (100.0, 3700.0),
+        (4.0, 3622.01),
+    ]
+    assert rounded_ring(ring) == [
+        (4.0, 3622.0),
+        (100.0, 3622.0),
+        (100.0, 3700.0),
+        (4.0, 3622.0),
+    ]
+
+
+def test_rounded_ring_keeps_the_ring_closed_when_its_last_vertex_repeats_the_first():
+    ring = [(0.0, 0.0), (10.0, 0.0), (10.0, 10.0), (0.01, 0.01), (0.0, 0.0)]
+    assert rounded_ring(ring) == [(0.0, 0.0), (10.0, 0.0), (10.0, 10.0), (0.0, 0.0)]

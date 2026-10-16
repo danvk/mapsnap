@@ -21,7 +21,7 @@ number of color pixels and improves convexity.
 
 import math
 import sys
-from collections.abc import Sequence
+from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import cast
@@ -927,6 +927,24 @@ def compute_all_clip_masks(
 BORDER_INSET_PX = 4.0
 
 
+def rounded_ring(coords: Iterable[Sequence[float]]) -> list[tuple[float, float]]:
+    """A closed ring's vertices rounded to 0.1 canvas px, without repeating one in a row.
+
+    Rounding can land two neighbouring vertices on the same point, and Allmaps
+    fails to triangulate some renderings of a mask that repeats a vertex: 20 of
+    1,974 selectors in #582's 20-volume evaluation did, among them Schenectady
+    p4, which failed one rendering in three until its repeat was dropped.
+    """
+    points: list[tuple[float, float]] = []
+    for vertex in coords:
+        point = (round(vertex[0], 1), round(vertex[1], 1))
+        if not points or point != points[-1]:
+            points.append(point)
+    if len(points) > 1 and points[0] == points[-1]:
+        points.pop()
+    return [*points, points[0]] if points else points
+
+
 def inset_from_border(polygon: Polygon, width: float, height: float) -> Polygon:
     """A canvas-pixel mask kept BORDER_INSET_PX inside a width x height image.
 
@@ -988,9 +1006,7 @@ def geo_polygon_to_svg(
     )
 
     def ring_svg(polygon: Polygon) -> str:
-        points = " ".join(
-            f"{round(x, 1)},{round(y, 1)}" for x, y in polygon.exterior.coords
-        )
+        points = " ".join(f"{x},{y}" for x, y in rounded_ring(polygon.exterior.coords))
         return f'<svg><polygon points="{points}" /></svg>'
 
     def fallback_rect() -> str:

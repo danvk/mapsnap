@@ -5,6 +5,7 @@ import cv2
 import numpy as np
 import pytest
 from shapely.geometry import LineString, Polygon, box
+from shapely.geometry.base import BaseGeometry
 
 from mapsnap.region_clip_masks import (
     CELL_M,
@@ -18,6 +19,7 @@ from mapsnap.region_clip_masks import (
     ensure_region_maps,
     fill_enclosed_holes,
     fit_line,
+    hand_off_ground_off_the_paper,
     interior_score,
     owned_cells_hull,
     page_footprint,
@@ -380,3 +382,71 @@ def test_a_distant_page_neither_changes_the_others_masks_nor_their_grid(
     assert with_far[:2] == alone
     # Two small grids, not one 33 km wide.
     assert len(grids) == 2 and max(grids) < 100_000
+
+
+def test_compute_region_clip_masks_give_a_dark_border_to_the_neighbour_showing_it(
+    tmp_path: Path,
+):
+    """Ground on one sheet's scanner bed goes to the neighbour whose paper shows it.
+
+    The west sheet's block runs to a street at x = 190 px, across its own bed
+    (x 182-200). Cut at the west scan's edge and clipped to its paper only at
+    the end, the strip from the paper's edge to the street went to no page,
+    though the east sheet shows it: Oakland 1903 p332/p338.
+    """
+    georefs, paths = two_page_volume(tmp_path)
+    west = np.full((200, 200), 220, np.uint8)
+    west[:, 182:] = 20  # the scanner bed down the west sheet's right side
+    cv2.imwrite(str(paths[0]), west)
+    cv2.imwrite(str(paths[1]), np.full((200, 200), 220, np.uint8))
+    west_prob = np.zeros((200, 200), np.float32)
+    west_prob[:, :182] = 1.0  # the region model reads the bed as nobody's
+    east_prob = np.zeros((200, 200), np.float32)
+    east_prob[:, 36:] = 1.0  # from x = 186 px, too little to cut the west block
+    write_region_map(paths[0], west_prob)
+    write_region_map(paths[1], east_prob)
+    streets = [
+        street([(190, -50), (190, 250)]),
+        street([(-50, -10), (400, -10)]),
+        street([(-50, 210), (400, 210)]),
+        street([(-10, -50), (-10, 250)]),
+        street([(360, -50), (360, 250)]),
+    ]
+    masks = compute_region_clip_masks(
+        georefs, {"type": "FeatureCollection", "features": streets}, raw_paths=paths
+    )
+    west_mask, east_mask = masks
+    assert west_mask is not None and east_mask is not None
+    assert west_mask.bounds[2] <= 182 * DEG_PER_PX
+    band = box(180 * DEG_PER_PX, -190 * DEG_PER_PX, 190 * DEG_PER_PX, -10 * DEG_PER_PX)
+    shown = west_mask.union(east_mask).intersection(band).area
+    assert shown == pytest.approx(band.area, rel=0.02)
+
+
+def test_hand_off_ground_off_the_paper_moves_it_to_a_neighbour_that_shows_it():
+    # Page 0 holds x 0-100 but its paper stops at 90; page 1 holds 100-200 and its
+    # paper starts at 80. A 10 m strip beyond page 0's paper goes to page 1.
+    shapes: dict[int, BaseGeometry] = {0: box(0, 0, 100, 100), 1: box(100, 0, 200, 100)}
+    visible: list[BaseGeometry] = [box(0, 0, 90, 100), box(80, 0, 200, 100)]
+    hand_off_ground_off_the_paper(shapes, visible)
+    assert shapes[0].area == pytest.approx(90 * 100)
+    assert shapes[1].area == pytest.approx(110 * 100)
+    assert shapes[0].intersection(shapes[1]).area == pytest.approx(0)
+
+
+def test_hand_off_ground_off_the_paper_leaves_ground_no_neighbour_shows():
+    # Page 1's paper doesn't reach page 0's strip, and page 2's does but doesn't touch it.
+    shapes: dict[int, BaseGeometry] = {
+        0: box(0, 0, 100, 100),
+        1: box(100, 0, 200, 100),
+        2: box(0, 300, 100, 400),
+    }
+    visible: list[BaseGeometry] = [
+        box(0, 0, 90, 100),
+        box(100, 0, 200, 100),
+        box(0, 0, 100, 400),
+    ]
+    hand_off_ground_off_the_paper(shapes, visible)
+    assert shapes[0].area == pytest.approx(100 * 100)
+    assert shapes[1].area == pytest.approx(100 * 100)
+    assert shapes[2].area == pytest.approx(100 * 100)

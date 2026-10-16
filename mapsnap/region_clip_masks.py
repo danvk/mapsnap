@@ -561,6 +561,41 @@ def fill_enclosed_holes(
             shapes[best_page] = unary_union([shapes.get(best_page, Polygon()), piece])
 
 
+def hand_off_ground_off_the_paper(
+    shapes: dict[int, BaseGeometry], visible: list[BaseGeometry]
+) -> None:
+    """Give ground a page holds beyond its paper to the neighbour whose paper shows it.
+
+    The ground is divided among whole scans, and each mask is clipped to its
+    paper only at the end. A unit running into its owner's scanner bed (3-4 m
+    deep along Oakland 1903's tops and bottoms) would lose that strip to no
+    page, though the neighbour beside it shows it: p332/p338 opened a 0.6 m gap.
+    A part moves only to a page whose paper shows most of it and whose shape it
+    touches; anything else stays where it is, for the final clip to remove.
+    Done after the holes are filled, which still see the scans: dividing the
+    papers from the start opened a hole on New York 1923 p20 to the outside
+    through p21's bed, and it went unshown.
+    """
+    for page in sorted(shapes):
+        beyond = shapes[page].difference(visible[page])
+        for part in polygons_of(beyond):
+            best_page, best_length = None, 0.0
+            for other, geometry in shapes.items():
+                if other == page or visible[other].intersection(part).area < (
+                    0.5 * part.area
+                ):
+                    continue
+                shared = part.boundary.intersection(geometry.buffer(0.5)).length
+                if shared > best_length:
+                    best_page, best_length = other, shared
+            if best_page is None:
+                continue
+            shapes[page] = shapes[page].difference(part)
+            shapes[best_page] = unary_union(
+                [shapes[best_page], part.intersection(visible[best_page])]
+            )
+
+
 def without_near_duplicates(polygon: Polygon) -> Polygon:
     """The polygon without vertices within REPEATED_POINT_M of the one before.
 
@@ -814,6 +849,7 @@ def group_clip_masks(
         footprint if paper is None else footprint.intersection(paper)
         for footprint, paper in zip(footprints, papers)
     ]
+    hand_off_ground_off_the_paper(shapes, visible)
     if free_margins:
         added = extend_into_free_margins(shapes, footprints, papers)
         print(
