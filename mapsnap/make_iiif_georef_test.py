@@ -1,10 +1,13 @@
 """Unit tests for make_iiif_georef helpers."""
 
 import json
+import math
+import re
 from pathlib import Path
 
-from shapely.geometry import box
+from shapely.geometry import Polygon, box
 
+from mapsnap.annotation_transform import gcp_transform, page_transform
 from mapsnap.make_iiif_georef import (
     GcpPoint,
     _load_oim_index,
@@ -19,6 +22,7 @@ from mapsnap.make_iiif_georef import (
     glob_matched_anything,
     make_annotation,
     own_label,
+    published_pose,
 )
 from mapsnap.split import write_panels_json
 
@@ -990,3 +994,93 @@ def test_metadata_carries_reconciles_confidence():
     assert by_label["confidence_provisional"] == "true"
     plain = {e["label"] for e in _georef_metadata({"streets": [], "intersections": []})}
     assert "confidence" not in plain
+
+
+# ---------------------------------------------------------------------------
+# Masks on the published pose
+# ---------------------------------------------------------------------------
+
+# Metres per degree of latitude, and per degree of longitude at Oakland.
+_M_LAT = 111_195.0
+_M_LON = _M_LAT * math.cos(math.radians(37.86))
+
+
+def _snap_like_pose(x: float, y: float) -> tuple[float, float]:
+    """A 0.2 m/px pose that is 0.7% wider than tall: a similarity in unequal degree lengths."""
+    return (-122.27 + x * 0.2 * 1.007 / _M_LON, 37.86 - y * 0.2 / _M_LAT)
+
+
+def _snap_like_georef() -> dict:
+    """A 1000×1500 page on that pose, published through two seed GCPs (#595)."""
+    corners = [
+        _snap_like_pose(x, y) for x, y in [(0, 0), (1000, 0), (1000, 1500), (0, 1500)]
+    ]
+    seeds = [
+        make_intersection("A", "B", x, y, lon=lon, lat=lat, inlier=False, initial=True)
+        for x, y in [(150.0, 1300.0), (850.0, 200.0)]
+        for lon, lat in [_snap_like_pose(x, y)]
+    ]
+    return make_georef(1000, 1500, seeds, corners=[list(c) for c in corners])
+
+
+def _ground_m(a: tuple[float, float], b: tuple[float, float]) -> float:
+    """Metres between two (lon, lat) points a few hundred metres apart."""
+    return math.hypot((a[0] - b[0]) * _M_LON, (a[1] - b[1]) * _M_LAT)
+
+
+def test_published_pose_puts_the_corners_under_the_annotations_helmert():
+    georef = _snap_like_georef()
+    published = published_pose(georef)
+    helmert = gcp_transform([(p, g) for p, g, _ in georef_gcp_points(georef)])
+    assert helmert is not None
+    for (x, y), corner in zip(
+        [(0, 0), (1000, 0), (1000, 1500), (0, 1500)], published["corners"]
+    ):
+        assert _ground_m(corner, helmert(x, y)) < 0.01
+    # The pose itself is not a similarity: its corners sit well off the Helmert's.
+    moved = max(
+        _ground_m(a, b) for a, b in zip(georef["corners"], published["corners"])
+    )
+    assert moved > 0.3
+    assert published["intersections"] == georef["intersections"]
+
+
+def test_published_pose_keeps_the_corners_of_a_corner_fallback():
+    georef = _snap_like_georef()
+    georef["intersections"] = []
+    published = published_pose(georef)
+    for a, b in zip(georef["corners"], published["corners"]):
+        assert _ground_m(a, b) < 0.01
+
+
+def test_a_mask_is_drawn_where_it_was_computed(tmp_path):
+    """The selector, under the annotation's own transform, lands on the ground mask."""
+    georef = _snap_like_georef()
+    ground = [
+        _snap_like_pose(x, y) for x, y in [(30, 30), (970, 30), (970, 1470), (30, 1470)]
+    ]
+    item = {
+        "label": "Oakland | 1903 p330",
+        "target": {
+            "source": {
+                "id": "http://example/p330/info.json",
+                "type": "ImageService2",
+                "width": 4000,
+                "height": 6000,
+            }
+        },
+    }
+    annotation = make_annotation(
+        item, georef, "p330", tmp_path / "p330.jpg", "now", Polygon(ground)
+    )
+    transform = page_transform(annotation)
+    assert transform is not None
+    selector = annotation["target"]["selector"]["value"]
+    drawn = [
+        transform(float(x), float(y))
+        for x, y in re.findall(r"(-?[\d.]+),(-?[\d.]+)", selector)
+    ]
+    # Each drawn vertex is within a few centimetres of a vertex of the mask (the
+    # selector rounds canvas pixels to 0.1, 5 mm here).
+    for point in drawn:
+        assert min(_ground_m(point, vertex) for vertex in ground) < 0.05

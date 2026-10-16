@@ -38,6 +38,7 @@ import numpy as np
 from shapely.geometry import Polygon as ShapelyPolygon
 from shapely.geometry import mapping as geom_mapping
 
+from mapsnap.annotation_transform import gcp_transform
 from mapsnap.clip_masks import compute_all_clip_masks, geo_polygon_to_svg
 from mapsnap.compare_iiif_georef import redundant_skeleton_keys
 from mapsnap.keymap.records import recorded_keymap_keys
@@ -518,6 +519,30 @@ def georef_gcp_points(georef: dict) -> list[GcpPoint]:
     ]
 
 
+def published_pose(georef: dict) -> dict:
+    """The georef with its corners moved onto the pose its annotation publishes.
+
+    An annotation carries GCPs, not corners, and a viewer draws the page under
+    the transform fitted to them: a Helmert through a snap refinement's two seed
+    GCPs (#595), the closest Web Mercator similarity to its pose, about 0.7 m
+    off it at the sheet's edge; or an affine through a corner fallback's corners
+    and inlier intersections, metres off on some pages. A mask computed under
+    the corners is drawn under that transform, so two neighbours whose masks
+    share an edge on the ground pull apart into a hairline gap, or overlap
+    (Oakland 1903 p330/p336). Masks are computed, and converted to pixels, on
+    this pose instead.
+    """
+    points = georef_gcp_points(georef)
+    transform = gcp_transform(
+        [(pixel, lonlat) for pixel, lonlat, _ in points], helmert=len(points) == 2
+    )
+    if transform is None:
+        return georef
+    width, height = float(georef["width"]), float(georef["height"])
+    corners = [(0.0, 0.0), (width, 0.0), (width, height), (0.0, height)]
+    return {**georef, "corners": [list(transform(x, y)) for x, y in corners]}
+
+
 def make_annotation(
     item: dict,
     georef: dict,
@@ -663,7 +688,7 @@ def make_annotation(
                 "type": "SvgSelector",
                 "value": geo_polygon_to_svg(
                     geo_mask,
-                    georef,
+                    published_pose(georef),
                     source_width,
                     source_height,
                     split_canvas,
@@ -1233,7 +1258,7 @@ def main() -> None:
     geo_masks: list[ShapelyPolygon | None] = [None] * len(all_valid_items)
     if args.centerlines:
         centerlines_geojson: dict = load_centerlines(args.centerlines)
-        all_georefs = [georef for _, _, georef, _, _ in all_valid_items]
+        all_georefs = [published_pose(georef) for _, _, georef, _, _ in all_valid_items]
         print(f"Computing {args.masks} clipping masks...", file=sys.stderr)
         debug_blocks: list[dict] | None = [] if args.debug_blocks else None
         geo_masks = MASKERS[args.masks](
