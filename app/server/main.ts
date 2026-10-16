@@ -49,10 +49,21 @@ app.use(express.json({ limit: '10mb' }));
 
 // Open CORS for all origins — required for browser-based IIIF viewers (e.g.
 // Allmaps) fetching /iiif tiles. Harmless for the same-origin JSON APIs.
+//
+// Nothing here goes in the browser's HTTP cache. Responses carried only an
+// ETag, so Chrome stored each one and revalidated it on every load, and two
+// requests for one URL in flight at once share a cache entry: Chrome failed
+// the second with ERR_CACHE_READ_FAILURE (19 of 20 concurrent run-artifacts
+// requests; 29 of the 228 duplicated info.json requests split panels make).
+// React StrictMode's double fetch lost the run's sidecars this way, and
+// Allmaps lost maps (#620). Caching saved no work: Express computes the ETag
+// by hashing a response it has already rendered. express.static (the
+// production build) sets its own Cache-Control over this one.
 app.use((req, res, next) => {
   res.header('Access-Control-Allow-Origin', '*');
   res.header('Access-Control-Allow-Methods', 'GET, HEAD, PUT, OPTIONS');
   res.header('Access-Control-Allow-Headers', 'Accept, Content-Type');
+  res.header('Cache-Control', 'no-store');
   if (req.method === 'OPTIONS') return res.sendStatus(204);
   next();
 });
