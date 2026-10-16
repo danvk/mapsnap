@@ -67,9 +67,11 @@ import re
 import resource
 import shutil
 import sys
+import threading
 import time
 from collections.abc import Callable, Iterator
 from concurrent.futures import ThreadPoolExecutor
+from contextlib import contextmanager
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
@@ -135,6 +137,10 @@ DONE_MARKER = f"{ARCHIVE_TAG}.iiif.json"
 # its output is the item, and the done marker already records it.
 CHECKPOINT_DIRNAME = "checkpoints"
 CHECKPOINTED_STAGES = ("keymap-detect", "adjacency", "keymap", "ocr")
+# How often the OCR stage's reads so far are uploaded while it runs. A page takes
+# 25-60 s, so a reclaim loses a few pages at most; each sync is an `aws s3 sync`
+# process and a listing, well under 1% of a 2-vCPU job at this rate.
+PROGRESS_SYNC_SECONDS = 120.0
 # The reads `--ocr-from` brings forward from an earlier run. `ocr --resume`
 # decides what to keep: it re-reads any page whose recognizer weights differ,
 # and any page the previous run never had (a new panel, say).
@@ -533,8 +539,40 @@ def failure_tail(output: str, lines: int = 12) -> str:
     return " | ".join(failure_lines(output, lines)) or "(no output)"
 
 
+@contextmanager
+def every(seconds: float, action: Callable[[], None] | None) -> Iterator[None]:
+    """Call ``action`` every ``seconds`` on a background thread while the block runs.
+
+    Nothing runs when ``action`` is None. An action that raises is reported and
+    tried again next time: it saves a retry work, and must never fail the stage.
+    """
+    if action is None:
+        yield
+        return
+    stop = threading.Event()
+
+    def loop() -> None:
+        while not stop.wait(seconds):
+            try:
+                action()
+            except Exception as error:  # noqa: BLE001 -- progress is best-effort
+                print(f"progress save failed: {error}", file=sys.stderr, flush=True)
+
+    thread = threading.Thread(target=loop, daemon=True)
+    thread.start()
+    try:
+        yield
+    finally:
+        stop.set()
+        thread.join()
+
+
 def stage(
-    command: list[str], local: Path, ok_if: Callable[[], bool] | None = None
+    command: list[str],
+    local: Path,
+    ok_if: Callable[[], bool] | None = None,
+    *,
+    while_running: Callable[[], None] | None = None,
 ) -> None:
     """Run one pipeline command, failing loudly.
 
@@ -556,7 +594,8 @@ def stage(
     # stdout and stderr as one stream: `fit` reports which of its own stages
     # died on one and their timings on the other, and keeping only stderr lost
     # the half that named Birmingham 1950's killed `iiif` (#563 pilot).
-    result = run_measured(command, capture=True)
+    with every(PROGRESS_SYNC_SECONDS, while_running):
+        result = run_measured(command, capture=True)
     elapsed = time.perf_counter() - started
     # One line per stage, per item. `fit` prints its own sub-stage times but
     # into a pipe this captures, so without this the only timing that reaches
@@ -620,6 +659,7 @@ def run_chain(
     work: FitWork,
     run_tag: str | None = None,
     checkpoint: Callable[[str], None] | None = None,
+    save_reads: Callable[[], None] | None = None,
 ) -> None:
     """split, adjacency, keymap, ocr, fit -- the order `run-loc` uses.
 
@@ -630,6 +670,10 @@ def run_chain(
     A stage in CHECKPOINTED_STAGES that an earlier attempt finished (its marker
     is in ``local``) is skipped, its outputs having come down with the run; one
     that runs here is followed by ``checkpoint(name)``, which uploads it.
+
+    ``save_reads`` runs every PROGRESS_SYNC_SECONDS during OCR, so the pages read
+    so far go up as they are made: OCR is over half of a large volume's time, and
+    `ocr --resume` skips every page whose read came back with the run.
     """
     finished = finished_stages(local)
 
@@ -701,6 +745,7 @@ def run_chain(
                 *effective,
             ],
             local,
+            while_running=save_reads,
         ),
     )
     # The previous run's archive comes down with the sync, and `fit` refuses to
@@ -749,6 +794,30 @@ def sync_outputs(local: Path, bucket: str, item: Item, run_tag: str) -> None:
             "--exclude",
             f"{CHECKPOINT_DIRNAME}/*",
             *excludes,
+            "--only-show-errors",
+        ]
+    )
+
+
+def sync_reads(local: Path, bucket: str, item: Item, run_tag: str) -> None:
+    """Upload the OCR reads made so far (``*.streets.json``), and nothing else.
+
+    No checkpoint marker goes with them: the OCR stage is not finished, and a
+    retry re-runs it with --resume, which keeps each read whose recognizer is
+    current and reads the rest. A file caught mid-write is not trusted either:
+    an unreadable read counts as stale and is read again.
+    """
+    run_aws(
+        [
+            "aws",
+            "s3",
+            "sync",
+            str(local),
+            run_prefix(bucket, item, run_tag),
+            "--exclude",
+            "*",
+            "--include",
+            "*.streets.json",
             "--only-show-errors",
         ]
     )
@@ -839,6 +908,7 @@ def process_item(work: FitWork, local: Path, bucket: str) -> int:
             checkpoint=lambda name: checkpoint(
                 local, bucket, work.item, work.run_tag, name
             ),
+            save_reads=lambda: sync_reads(local, bucket, work.item, work.run_tag),
         )
         upload(local, bucket, work.item, work.run_tag)
         return len(work.pages)

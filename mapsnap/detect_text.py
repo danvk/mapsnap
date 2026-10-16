@@ -23,7 +23,12 @@ from mapsnap.keymap.records import is_recorded_keymap_page
 from mapsnap.osm_to_centerlines import load_centerlines
 from mapsnap.paper_color import is_off_paper
 from mapsnap.streets import build_block_index, polygon_side_lengths
-from mapsnap.utils import default_centerlines, drop_sidecar_images, image_stem
+from mapsnap.utils import (
+    default_centerlines,
+    drop_sidecar_images,
+    image_stem,
+    write_json_atomic,
+)
 
 # Non-street text that appears on Sanborn maps and should be recognized but
 # excluded from georeferencing.
@@ -187,8 +192,7 @@ def backfill_backgrounds(image_path: str) -> int:
         streets_doc["paper"] = annotate_backgrounds(
             detections, np.array(img.convert("RGB"))
         )
-    with open(path, "w") as f:
-        json.dump(streets_doc, f, indent=2)
+    write_json_atomic(path, streets_doc)
     paper = streets_doc["paper"]
     return sum(1 for det in detections if is_off_paper(det["background"], paper))
 
@@ -815,8 +819,7 @@ def detect_text(
         "streets": all_detections,
     }
     if sidecar:
-        with open(_streets_path(image_path), "w") as f:
-            json.dump(streets_doc, f, indent=2)
+        write_json_atomic(_streets_path(image_path), streets_doc)
 
     return all_detections
 
