@@ -34,6 +34,20 @@ def haversine_m(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
     return 2 * EARTH_RADIUS_M * math.asin(math.sqrt(a))
 
 
+def write_json_atomic(path: Path | str, doc: object, indent: int | None = 2) -> None:
+    """Write ``doc`` as JSON to ``path`` so that a reader sees the old file or the new one, never half.
+
+    The JSON goes to ``<path>.partial`` first and is renamed over ``path``: a
+    sidecar that is being uploaded while it is written (loc-fit syncs OCR reads
+    mid-stage) arrives whole or not at all.
+    """
+    path = Path(path)
+    partial = path.with_name(f"{path.name}.partial")
+    with open(partial, "w") as f:
+        json.dump(doc, f, indent=indent)
+    os.replace(partial, path)
+
+
 @dataclass(frozen=True)
 class Finished:
     """How a subprocess ended: its exit code, and the peak memory of its process tree."""

@@ -376,3 +376,15 @@ def test_run_cmd_retries_another_signal_once(tmp_path):
 
 def test_run_cmd_returns_the_peak():
     assert run_cmd(python("pass")) > 1
+
+
+def test_write_json_atomic_replaces_whole_and_leaves_no_partial(tmp_path):
+    import json
+
+    from mapsnap.utils import write_json_atomic
+
+    path = tmp_path / "p1.streets.json"
+    path.write_text('{"streets": [')  # a half-written file from before
+    write_json_atomic(path, {"streets": [1, 2]})
+    assert json.loads(path.read_text()) == {"streets": [1, 2]}
+    assert [p.name for p in tmp_path.iterdir()] == ["p1.streets.json"]

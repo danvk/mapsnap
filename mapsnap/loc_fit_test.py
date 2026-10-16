@@ -485,7 +485,9 @@ def test_one_item_touches_s3_in_the_right_order(monkeypatch, tmp_path):
 
     monkeypatch.setattr(loc_fit, "sync", fake_sync)
     monkeypatch.setattr(loc_fit, "run_aws", fake_run_aws)
-    monkeypatch.setattr(loc_fit, "run_chain", lambda *a, checkpoint: checkpoint("ocr"))
+    monkeypatch.setattr(
+        loc_fit, "run_chain", lambda *a, checkpoint, **kw: checkpoint("ocr")
+    )
 
     work = plan_fit(ALPHA, present(2), County("US01001"), TAG)
     loc_fit.fetch_item(work, "s3://bucket", tmp_path, ocr_from="v1.2")
@@ -1148,3 +1150,76 @@ def test_a_checkpoint_never_uploads_the_done_marker(tmp_path, monkeypatch):
 
     assert DONE_MARKER in calls[0]  # excluded from the sync
     assert not any(c[2] == "cp" and c[-2].endswith(DONE_MARKER) for c in calls)
+
+
+def test_every_calls_the_action_while_the_block_runs(capsys) -> None:
+    import time as time_module
+
+    from mapsnap.loc_fit import every
+
+    calls: list[int] = []
+
+    def flaky() -> None:
+        calls.append(1)
+        if len(calls) == 1:
+            raise OSError("S3 unreachable")
+
+    with every(0.02, flaky):
+        time_module.sleep(0.2)
+    seen = len(calls)
+    time_module.sleep(0.1)
+    assert seen >= 3, "kept trying after the first failure"
+    assert len(calls) == seen, "stopped when the block ended"
+    assert "progress save failed: S3 unreachable" in capsys.readouterr().err
+    with every(0.01, None):
+        pass  # no action, no thread
+
+
+def test_stage_runs_while_running_during_the_command(tmp_path, monkeypatch) -> None:
+    import time as time_module
+
+    from mapsnap import loc_fit
+    from mapsnap.utils import Finished
+
+    def slow(command, **kw):
+        time_module.sleep(0.2)
+        return Finished(0, 100.0, "")
+
+    monkeypatch.setattr(loc_fit, "run_measured", slow)
+    monkeypatch.setattr(loc_fit, "PROGRESS_SYNC_SECONDS", 0.02)
+    saves: list[int] = []
+    loc_fit.stage(["mapsnap", "ocr"], tmp_path, while_running=lambda: saves.append(1))
+    assert len(saves) >= 3
+
+
+def test_run_chain_saves_reads_during_ocr_only(tmp_path: Path, monkeypatch) -> None:
+    from mapsnap import loc_fit
+    from mapsnap.keymap.records import write_keymaps_record
+
+    (tmp_path / "p1.jpg").write_bytes(b"")
+    progress: dict[str, object] = {}
+
+    def record(command, local, **kw):
+        progress[command[1]] = kw.get("while_running")
+        if command[1] == "keymap-detect":
+            write_keymaps_record(tmp_path, [])
+
+    monkeypatch.setattr(loc_fit, "stage", record)
+    work = plan_fit(ALPHA, ["p1.jpg", "p1.boxes.json"], County("US01001"), TAG)
+    save = lambda: None
+    loc_fit.run_chain(tmp_path, work, work.run_tag, save_reads=save)
+    assert progress["ocr"] is save
+    assert all(action is None for name, action in progress.items() if name != "ocr")
+
+
+def test_sync_reads_uploads_only_reads(tmp_path, monkeypatch) -> None:
+    from mapsnap import loc_fit
+
+    calls: list[list[str]] = []
+    monkeypatch.setattr(loc_fit, "run_aws", lambda command, **kw: calls.append(command))
+    loc_fit.sync_reads(tmp_path, "s3://bucket", ALPHA, TAG)
+    (command,) = calls
+    assert command[:3] == ["aws", "s3", "sync"]
+    assert command[command.index("--exclude") + 1] == "*"
+    assert command[command.index("--include") + 1] == "*.streets.json"
+    assert command[4].endswith(f"/runs/{TAG}")
