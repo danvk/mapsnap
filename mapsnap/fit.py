@@ -6,10 +6,17 @@ import json
 import subprocess
 import sys
 import time
+from collections.abc import Callable
 from pathlib import Path
 
 from mapsnap import run_archive
-from mapsnap.utils import list_pages, require_centerlines, run_cmd
+from mapsnap.utils import (
+    list_pages,
+    mark_step_done,
+    require_centerlines,
+    run_cmd,
+    step_done,
+)
 
 
 def worker_flag(georef_extra: list[str]) -> list[str]:
@@ -89,6 +96,8 @@ def resolve_run_id(
 # adjacency gate the contradicted ones, snap the -osm ones, street-solve the
 # -streets ones. Nothing else writes them.
 DERIVED_SIDECAR_GLOB = "p*.georef*.json"
+# fit's own step markers, under .pipeline/: fit-georef.done and so on (--resume).
+FIT_STEP_PREFIX = "fit-"
 
 
 def clear_derived_sidecars(dir_path: Path) -> int:
@@ -112,22 +121,21 @@ def clear_derived_sidecars(dir_path: Path) -> int:
     for path in sorted(dir_path.glob(DERIVED_SIDECAR_GLOB)):
         path.unlink()
         removed += 1
-    # The snap candidate/selection caches are derived state too (#342). Inside
-    # a fit they can only ever hit for pages whose records carry no
-    # georef_mtime (demoted/failure classes) -- every fitted page's record is
-    # invalidated by the georef rewrite above -- and those hits are exactly
-    # the cache-temperature flips #342 measured (KC p566__1 at 7.4 vs 282 ft
-    # on cache state alone, ~2 net points). Measured across all 18 truth
-    # volumes, a fully cold snap stage costs 3 minutes per corpus run (4,958s
-    # warm vs 5,113s cold), so the cache buys nothing a fit can keep. The
-    # files remain useful within a run and for standalone `mapsnap snap`
-    # iteration; a fit just never inherits a previous run's records.
+    # Snap's and street-solve's logs of finished pages are this run's too. A new
+    # run starts them empty: inheriting a previous run's records flipped results
+    # on cache state alone (#342, KC p566__1 at 7.4 vs 282 ft), and a fully cold
+    # snap costs only 3 minutes per corpus run of the 18 truth volumes. A fit
+    # resuming the same run (--resume) keeps them and skips what they record.
     for cache in (
         *sorted((dir_path / "artifacts" / "osm_snap").glob("candidates.jsonl")),
         *sorted((dir_path / "artifacts" / "osm_snap").glob("selection_*.jsonl")),
         *sorted((dir_path / "artifacts" / "street_solve").glob("candidates.jsonl")),
     ):
         cache.unlink()
+        removed += 1
+    # A previous run's step markers would tell a later --resume its steps were done.
+    for marker in sorted((dir_path / ".pipeline").glob(f"{FIT_STEP_PREFIX}*.done")):
+        marker.unlink()
         removed += 1
     if removed:
         print(f"Cleared {removed} derived georef sidecar(s) from {dir_path}")
@@ -184,6 +192,17 @@ def main() -> None:
         help=(
             "Leave out reconcile's content-region overlap factor (#352), and "
             "the P(region) maps it needs before reconcile runs."
+        ),
+    )
+    parser.add_argument(
+        "--resume",
+        action="store_true",
+        help=(
+            "Continue an interrupted run of this fit in the same directory: keep "
+            "what it wrote, skip the steps it finished (georef with the "
+            "adjacency gate, snap, street-solve) and snap's finished pages. Only "
+            "for a directory that holds one run, as loc-fit's do; a plain fit "
+            "starts over."
         ),
     )
     parser.add_argument(
@@ -256,7 +275,8 @@ def main() -> None:
         print(f"Run {run_id} already archived at {archive_dir}; skipping computation.")
         return
 
-    clear_derived_sidecars(dir_path)
+    if not args.resume:
+        clear_derived_sidecars(dir_path)
 
     # Wall-clock per stage, printed at the end and recorded in the manifest —
     # the input the #320 incremental-fit work needs, and the first thing anyone
@@ -277,35 +297,59 @@ def main() -> None:
             flush=True,
         )
 
-    timed(
-        "georef",
-        [
-            "mapsnap",
-            "georef",
-            *images,
-            "--centerlines",
-            str(centerlines),
-            *georef_extra,
-        ],
-    )
+    def checkpointed(step: str, run: Callable[[], None]) -> None:
+        """Run a step and mark it finished, or with --resume skip one already marked."""
+        marker = f"{FIT_STEP_PREFIX}{step}"
+        if args.resume and step_done(dir_path, marker):
+            print(
+                f"[{step}: finished in an earlier attempt]", file=sys.stderr, flush=True
+            )
+            return
+        run()
+        mark_step_done(dir_path, marker)
 
-    # Demote fits that contradict their own printed mutual-adjacency claims
-    # (adjacency edges are ~100% precise, so a contradicted, weakly-supported
-    # fit is wrong). The demotion leaves partner-stamp re-search hints that
-    # snap's rescue picks up, so it runs before snap. No adjacency.json: no-op.
-    timed("adjacency-gate", ["mapsnap", "adjacency-gate", str(dir_path)])
+    def georef_and_gate() -> None:
+        """georef, then the gate that rewrites its sidecars: one unit to resume."""
+        timed(
+            "georef",
+            [
+                "mapsnap",
+                "georef",
+                *images,
+                "--centerlines",
+                str(centerlines),
+                *georef_extra,
+            ],
+        )
+        # Demote fits that contradict their own printed mutual-adjacency claims
+        # (adjacency edges are ~100% precise, so a contradicted, weakly-supported
+        # fit is wrong). The demotion leaves partner-stamp re-search hints that
+        # snap's rescue picks up, so it runs before snap. No adjacency.json: no-op.
+        timed("adjacency-gate", ["mapsnap", "adjacency-gate", str(dir_path)])
+
+    checkpointed("georef", georef_and_gate)
 
     # The geometry-first snap channel: rescue unplaced pages, arbitrate fits
     # OSM contradicts, refine mid-tier fits. Writes pN.georef-snap.json.
     if not args.no_snap:
         # Both passes are per-page and CPU-bound, so one --num-workers governs
         # both; the rest of the georef passthrough is georef-only.
-        timed("snap", ["mapsnap", "snap", str(dir_path), *worker_flag(georef_extra)])
+        # Snap logs each page as it finishes (artifacts/osm_snap/candidates.jsonl)
+        # and skips the pages in its log, so a resumed snap starts where it was.
+        checkpointed(
+            "snap",
+            lambda: timed(
+                "snap", ["mapsnap", "snap", str(dir_path), *worker_flag(georef_extra)]
+            ),
+        )
         # The street-constraint channel: fit key-map-prior pages from their
         # street labels. Writes pN.georef-street.json. Runs after snap because
         # its referee shares machinery with the snap channel; skipped with
         # --no-snap for the same reason.
-        timed("street-solve", ["mapsnap", "street-solve", str(dir_path)])
+        checkpointed(
+            "street-solve",
+            lambda: timed("street-solve", ["mapsnap", "street-solve", str(dir_path)]),
+        )
 
     # Every page's P(region) map, for reconcile's region-overlap factor (#352).
     # Publication's region masks need the same maps for the pages it places,

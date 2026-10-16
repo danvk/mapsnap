@@ -34,18 +34,22 @@ def haversine_m(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
     return 2 * EARTH_RADIUS_M * math.asin(math.sqrt(a))
 
 
-def write_json_atomic(path: Path | str, doc: object, indent: int | None = 2) -> None:
-    """Write ``doc`` as JSON to ``path`` so that a reader sees the old file or the new one, never half.
+def write_text_atomic(path: Path | str, text: str) -> None:
+    """Write ``text`` to ``path`` so that a reader sees the old file or the new one, never half.
 
-    The JSON goes to ``<path>.partial`` first and is renamed over ``path``: a
-    sidecar that is being uploaded while it is written (loc-fit syncs OCR reads
-    mid-stage) arrives whole or not at all.
+    The text goes to ``<path>.partial`` first and is renamed over ``path``: a
+    file that is being uploaded while it is written (loc-fit syncs OCR reads and
+    snap's log mid-stage) arrives whole or not at all.
     """
     path = Path(path)
     partial = path.with_name(f"{path.name}.partial")
-    with open(partial, "w") as f:
-        json.dump(doc, f, indent=indent)
+    partial.write_text(text)
     os.replace(partial, path)
+
+
+def write_json_atomic(path: Path | str, doc: object, indent: int | None = 2) -> None:
+    """Write ``doc`` as JSON to ``path`` atomically (see write_text_atomic)."""
+    write_text_atomic(path, json.dumps(doc, indent=indent))
 
 
 @dataclass(frozen=True)
