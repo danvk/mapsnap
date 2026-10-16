@@ -21,6 +21,7 @@ from mapsnap.region_clip_masks import (
     interior_score,
     owned_cells_hull,
     page_footprint,
+    page_groups,
     panel_outline_mask,
     polygons_of,
     region_map_path,
@@ -330,3 +331,52 @@ def test_without_near_duplicates_drops_centimetre_edges():
 def test_without_near_duplicates_keeps_a_polygon_it_would_break():
     tiny = Polygon([(0, 0), (0.03, 0), (0.03, 0.03), (0, 0.03)])
     assert without_near_duplicates(tiny).equals(tiny)
+
+
+def test_page_groups_joins_pages_that_come_near_each_other():
+    # 1 px is 1.11 m: georef(x0) spans x0..x0+200 px.
+    assert page_groups([georef(0), georef(150), georef(30_000)]) == [[0, 1], [2]]
+    # Transitively: the first and third pages are 100 px apart but chained by the second.
+    assert page_groups([georef(0), georef(300), georef(150)]) == [[0, 1, 2]]
+    # Within GROUP_GAP_M (250 m): a 200 px (222 m) gap joins, a 300 px (334 m) gap does not.
+    assert page_groups([georef(0), georef(400)]) == [[0, 1]]
+    assert page_groups([georef(0), georef(500)]) == [[0], [1]]
+
+
+def test_a_distant_page_neither_changes_the_others_masks_nor_their_grid(
+    tmp_path: Path, monkeypatch
+):
+    """Birmingham 1950 placed three pages 14-27 km from the rest, and one grid
+    over all of them was killed for memory. A stray page is masked on its own."""
+    from mapsnap import region_clip_masks
+
+    georefs, paths = two_page_volume(tmp_path)
+    far = tmp_path / "p3.jpg"
+    write_region_map(far, np.ones((200, 200), np.float32))
+    streets = {
+        "type": "FeatureCollection",
+        "features": [
+            street([(175, -50), (175, 250)]),
+            street([(-50, -10), (400, -10)]),
+            street([(-50, 210), (400, 210)]),
+            street([(-10, -50), (-10, 250)]),
+            street([(360, -50), (360, 250)]),
+        ],
+    }
+    alone = compute_region_clip_masks(georefs, streets, raw_paths=paths)
+
+    grids = []
+    real = region_clip_masks.region_ownership
+
+    def recording(group_georefs, image_paths):
+        ownership = real(group_georefs, image_paths)
+        grids.append(ownership.grid.rows * ownership.grid.cols)
+        return ownership
+
+    monkeypatch.setattr(region_clip_masks, "region_ownership", recording)
+    with_far = compute_region_clip_masks(
+        [*georefs, georef(30_000)], streets, raw_paths=[*paths, far]
+    )
+    assert with_far[:2] == alone
+    # Two small grids, not one 33 km wide.
+    assert len(grids) == 2 and max(grids) < 100_000

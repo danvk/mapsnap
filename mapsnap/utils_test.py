@@ -1,16 +1,21 @@
 """Tests for mapsnap.utils."""
 
+import sys
 from pathlib import Path
 
 import pytest
 
 from mapsnap.utils import (
+    Finished,
     Step,
     default_centerlines,
+    describe_exit,
     image_stem,
     label_to_page_key,
     list_pages,
     mark_step_done,
+    run_cmd,
+    run_measured,
     source_id_to_page_key,
     step_done,
 )
@@ -300,3 +305,74 @@ def test_drop_sidecar_images_keeps_pages_and_reports(capsys) -> None:
     assert kept == ["a/p1.jpg", "a/p2__1.jpg"]
     assert "Ignoring 1 sidecar" in capsys.readouterr().err
     assert drop_sidecar_images(["a/p1.jpg"]) == ["a/p1.jpg"]
+
+
+def python(code: str) -> list[str]:
+    """A command running ``code`` in this interpreter."""
+    return [sys.executable, "-c", code]
+
+
+def test_run_measured_captures_both_streams_in_order():
+    finished = run_measured(
+        python("import sys; print('out', flush=True); print('err', file=sys.stderr)"),
+        capture=True,
+    )
+    assert finished.returncode == 0
+    assert finished.output.split() == ["out", "err"]
+    assert finished.peak_mb > 1  # the interpreter alone is several MB
+
+
+def test_run_measured_reports_the_peak_of_a_big_allocation():
+    finished = run_measured(
+        python("x = bytearray(300_000_000); x[::4096] = bytes(len(x[::4096]))")
+    )
+    assert finished.returncode == 0
+    assert finished.peak_mb >= 300
+
+
+def test_run_measured_reports_a_signal_as_a_negative_code():
+    finished = run_measured(
+        python("import os, signal; os.kill(os.getpid(), signal.SIGKILL)")
+    )
+    assert finished.returncode == -9
+
+
+def test_describe_exit():
+    assert "out of memory" in describe_exit("mapsnap iiif", Finished(-9, 7718.0))
+    assert "7718 MB" in describe_exit("mapsnap iiif", Finished(-9, 7718.0))
+    assert "SIGSEGV" in describe_exit("mapsnap snap", Finished(-11, 900.0))
+    assert describe_exit("mapsnap georef", Finished(2, 10.0)).startswith(
+        "mapsnap georef exited 2"
+    )
+
+
+def counting(tmp_path: Path, then: str) -> list[str]:
+    """A command that appends a line to tmp_path/runs, then runs ``then``."""
+    runs = tmp_path / "runs"
+    return python(f"open({str(runs)!r}, 'a').write('x'); {then}")
+
+
+def test_run_cmd_does_not_retry_a_sigkill(tmp_path, capsys):
+    with pytest.raises(SystemExit) as raised:
+        run_cmd(
+            counting(
+                tmp_path, "import os, signal; os.kill(os.getpid(), signal.SIGKILL)"
+            )
+        )
+    assert raised.value.code == -9
+    assert (tmp_path / "runs").read_text() == "x"
+    assert "out of memory" in capsys.readouterr().err
+
+
+def test_run_cmd_retries_another_signal_once(tmp_path):
+    with pytest.raises(SystemExit):
+        run_cmd(
+            counting(
+                tmp_path, "import os, signal; os.kill(os.getpid(), signal.SIGSEGV)"
+            )
+        )
+    assert (tmp_path / "runs").read_text() == "xx"
+
+
+def test_run_cmd_returns_the_peak():
+    assert run_cmd(python("pass")) > 1
