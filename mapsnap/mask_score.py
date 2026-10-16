@@ -22,8 +22,9 @@ Defects (no truth needed), on the ground under each annotation's own transform:
 - ``slivers``: mask area narrower than 4 m, as a share of mask area;
 - ``vertices_median`` / ``vertices_max``: selector complexity;
 - ``invalid``: self-intersecting or degenerate selectors;
-- ``seam_on_street`` (with ``--centerlines``): the share of seam length (mask
-  edges inside the mosaic, not its outline) within 10 m of a street centerline.
+- ``seam_on_street`` (with ``--centerlines``): the share of seam length (where
+  two masks meet within 4 m, each seam once, not the mosaic's outline) within
+  10 m of a street centerline.
   Overlap, gaps and complexity cannot tell a seam that follows a street from one
   that cuts through a block. It means little where masks overlap much, since
   an overlapped mask's edge is then not a seam;
@@ -302,17 +303,34 @@ def mosaic_outline(union: BaseGeometry) -> BaseGeometry:
     return filled_mosaic(union).boundary.buffer(OUTLINE_MARGIN_M)
 
 
+def seam_lines(masks: list[Polygon], outline: BaseGeometry) -> BaseGeometry:
+    """Each seam between two masks once: the first mask's edge where the second lies within GAP_CLOSE_M.
+
+    Edges inside ``outline`` (the mosaic's outer edge) are left out.
+    """
+    tree = STRtree(masks)
+    pieces = []
+    for i, mask in enumerate(masks):
+        for j in tree.query(mask.buffer(GAP_CLOSE_M)):
+            if j <= i:
+                continue
+            piece = mask.boundary.intersection(masks[j].buffer(GAP_CLOSE_M))
+            if not piece.is_empty:
+                pieces.append(piece.difference(outline))
+    return unary_union(pieces) if pieces else LineString()
+
+
 def seam_street_share(
     masks: list[Polygon], union: BaseGeometry, streets: list[LineString]
 ) -> tuple[float, float | None]:
     """Total seam length (m) and the share of it within STREET_TOLERANCE_M of a street.
 
-    Seams are mask edges away from the mosaic's filled outline, so both sides of a
-    gap between pages count, and the volume's outer edge does not.
+    A seam is where two masks meet, away from the mosaic's filled outline, and
+    counts once (``seam_lines``). Counting every mask's edge instead counted a
+    seam twice wherever a gap or overlap kept its two edges apart, so pulling
+    them together lowered the share without moving a seam off a street (#621).
     """
-    seams = unary_union([mask.boundary for mask in masks]).difference(
-        mosaic_outline(union)
-    )
+    seams = seam_lines(masks, mosaic_outline(union))
     if seams.length == 0:
         return 0.0, None
     near = unary_union(streets).buffer(STREET_TOLERANCE_M) if streets else Polygon()
