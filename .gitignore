@@ -227,3 +227,5 @@ instances*.tsv
 # mirror's mapping TSV, neither of which lives here. Build it with
 # scripts/atlas/build_places.py; the app says so when it is missing.
 app/public/atlas/
+
+.claude
