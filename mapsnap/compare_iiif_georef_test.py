@@ -727,3 +727,31 @@ def test_own_leaked_label_marker_still_grades_whole_canvas(tmp_path):
     by_key = {r["page_key"]: r for r in rows}
     assert by_key["p7__1"]["rmse_ft"] < 25.0
     assert by_key["p7__2"]["rmse_ft"] > 1000.0
+
+
+def test_sheet_equal_score_footer_for_a_run_under_runs(tmp_path, capsys):
+    """A run kept in <vol>/runs/<tag>/ is scored with the volume's truth, oim/
+    and centerlines, and its own panels beside its IIIF."""
+    from mapsnap.compare_iiif_georef import print_sheet_equal_score
+
+    truth_path, gen_path = _split_volume(
+        tmp_path,
+        [
+            ("x p7 [1]", -74.0, "https://x/p7__1/georef"),
+            ("x p7 [2]", -73.99, "https://x/p7__2/georef"),
+        ],
+        gen_panels=[
+            [[0, 0], [200, 0], [200, 200], [0, 200]],
+            [[200, 0], [400, 0], [400, 200], [200, 200]],
+        ],
+    )
+    _write_centerlines_near_split_volume(tmp_path)
+    run = tmp_path / "runs" / "corpus-v1"
+    run.mkdir(parents=True)
+    run_iiif = run / gen_path.name
+    gen_path.rename(run_iiif)
+    (tmp_path / "p7.panels.json").rename(run / "p7.panels.json")
+    print_sheet_equal_score(truth_path, run_iiif)
+    out = capsys.readouterr().out
+    assert "Score: 100.0%" in out
+    assert "2/2 pages placed" in out
