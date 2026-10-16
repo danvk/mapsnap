@@ -20,16 +20,16 @@ given whole to one page:
 - a superblock that another page owns at least MINORITY_M2 of is cut by a
   straight line fitted to the boundary between its two main owners (Sanborn
   sheet edges are straight), recursively for three or more;
-- a unit reaching past what its owner can show (the paper on its scan, or a
-  split panel's outline) is cut there, and the part beyond goes to the covering
-  page that owns most of it.
+- a unit reaching past its owner's scan is cut along the scan's edge, and the
+  part beyond goes to the covering page that owns most of it.
 
 Pages are dissolved from their units. A stray part joins the neighbour sharing
-the longest boundary, if that neighbour shows most of it. Holes the mosaic
-encloses go to the covering page with the best P(region) there. Then
+the longest boundary, if that neighbour's scan shows most of it. Holes the
+mosaic encloses go to the covering page with the best P(region) there. Then
 ``shapely.coverage_simplify`` simplifies all pages together, so shared edges stay
-shared, and each mask is clipped to what its page can show again: a mask
-reaching past its image makes Allmaps fail to triangulate the map.
+shared, and each mask is clipped to what its page can show (its scan, or a split
+panel's outline): a mask reaching past its image makes Allmaps fail to
+triangulate the map.
 
 Scored with ``mapsnap mask-eval`` / ``mask-score`` (#548): against OIM's masks on
 OIM's own poses, IoU 0.785 → 0.880 on volumes the region model never saw, and
@@ -40,7 +40,6 @@ import json
 import math
 import sys
 from collections import Counter
-from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -462,11 +461,9 @@ def assign_units(
 
 
 def clip_units_to_scans(
-    units: list[tuple[Polygon, int]],
-    footprints: Sequence[BaseGeometry],
-    ownership: Ownership,
+    units: list[tuple[Polygon, int]], footprints: list[Polygon], ownership: Ownership
 ) -> list[tuple[Polygon, int]]:
-    """Cut each unit at what its owner shows (``footprints``); the part beyond goes to the covering page owning most of it."""
+    """Cut each unit at its owner's footprint; the part beyond goes to the covering page owning most of it."""
     owner, claimed, grid = ownership.owner, ownership.claimed, ownership.grid
     result: list[tuple[Polygon, int]] = []
     for polygon, page in units:
@@ -488,7 +485,7 @@ def clip_units_to_scans(
 
 
 def dissolve_pages(
-    units: list[tuple[Polygon, int]], footprints: Sequence[BaseGeometry]
+    units: list[tuple[Polygon, int]], footprints: list[Polygon]
 ) -> dict[int, BaseGeometry]:
     """Each page's units, merged; a stray part joins the neighbour sharing the longest edge.
 
@@ -534,9 +531,7 @@ def dissolve_pages(
 
 
 def fill_enclosed_holes(
-    shapes: dict[int, BaseGeometry],
-    footprints: Sequence[BaseGeometry],
-    ownership: Ownership,
+    shapes: dict[int, BaseGeometry], footprints: list[Polygon], ownership: Ownership
 ) -> None:
     """Give each hole the mosaic encloses to the covering page with the best P(region) there.
 
@@ -564,6 +559,41 @@ def fill_enclosed_holes(
         if best_page is not None:
             piece = hole.intersection(footprints[best_page])
             shapes[best_page] = unary_union([shapes.get(best_page, Polygon()), piece])
+
+
+def hand_off_ground_off_the_paper(
+    shapes: dict[int, BaseGeometry], visible: list[BaseGeometry]
+) -> None:
+    """Give ground a page holds beyond its paper to the neighbour whose paper shows it.
+
+    The ground is divided among whole scans, and each mask is clipped to its
+    paper only at the end. A unit running into its owner's scanner bed (3-4 m
+    deep along Oakland 1903's tops and bottoms) would lose that strip to no
+    page, though the neighbour beside it shows it: p332/p338 opened a 0.6 m gap.
+    A part moves only to a page whose paper shows most of it and whose shape it
+    touches; anything else stays where it is, for the final clip to remove.
+    Done after the holes are filled, which still see the scans: dividing the
+    papers from the start opened a hole on New York 1923 p20 to the outside
+    through p21's bed, and it went unshown.
+    """
+    for page in sorted(shapes):
+        beyond = shapes[page].difference(visible[page])
+        for part in polygons_of(beyond):
+            best_page, best_length = None, 0.0
+            for other, geometry in shapes.items():
+                if other == page or visible[other].intersection(part).area < (
+                    0.5 * part.area
+                ):
+                    continue
+                shared = part.boundary.intersection(geometry.buffer(0.5)).length
+                if shared > best_length:
+                    best_page, best_length = other, shared
+            if best_page is None:
+                continue
+            shapes[page] = shapes[page].difference(part)
+            shapes[best_page] = unary_union(
+                [shapes[best_page], part.intersection(visible[best_page])]
+            )
 
 
 def without_near_duplicates(polygon: Polygon) -> Polygon:
@@ -805,25 +835,21 @@ def group_clip_masks(
     footprints = [
         page_footprint(g, path, grid) for g, path in zip(georefs, image_paths)
     ]
-    # What each page may show: the paper on its scan (or panel outline). The
-    # ground is divided among these, not among whole scans: a unit cut at its
-    # owner's scan edge and clipped to the paper only at the end left the band
-    # between the two (a dark scanner bed, 3-4 m deep along Oakland 1903's
-    # tops and bottoms) to no page, though the neighbour's paper showed it
-    # (p332/p338).
-    papers = [paper_outline(path, g, grid) for g, path in zip(georefs, image_paths)]
-    visible: list[BaseGeometry] = [
-        footprint if paper is None else footprint.intersection(paper)
-        for footprint, paper in zip(footprints, papers)
-    ]
     outline = claimed_outline(ownership)
     hull = unary_union(footprints).convex_hull
     blocks = street_blocks(centerlines_geojson, grid, hull, outline)
     extent = max(footprint.length for footprint in footprints) * 2
     units = assign_units(blocks, ownership, extent)
-    units = clip_units_to_scans(units, visible, ownership)
-    shapes = dissolve_pages(units, visible)
-    fill_enclosed_holes(shapes, visible, ownership)
+    units = clip_units_to_scans(units, footprints, ownership)
+    shapes = dissolve_pages(units, footprints)
+    fill_enclosed_holes(shapes, footprints, ownership)
+    # What each page may show: the paper on its scan (or panel outline).
+    papers = [paper_outline(path, g, grid) for g, path in zip(georefs, image_paths)]
+    visible: list[BaseGeometry] = [
+        footprint if paper is None else footprint.intersection(paper)
+        for footprint, paper in zip(footprints, papers)
+    ]
+    hand_off_ground_off_the_paper(shapes, visible)
     if free_margins:
         added = extend_into_free_margins(shapes, footprints, papers)
         print(
