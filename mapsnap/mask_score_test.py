@@ -2,7 +2,7 @@ import json
 from pathlib import Path
 
 import pytest
-from shapely.geometry import LineString, box
+from shapely.geometry import LineString, Polygon, box
 
 from mapsnap.mask_score import (
     GroundMask,
@@ -186,6 +186,32 @@ def test_seam_street_share_finds_a_seam_along_a_street():
     assert share == pytest.approx(1.0)
     assert seam_street_share([left, right], union, [elsewhere])[1] == pytest.approx(0.0)
     assert seam_street_share([left], left, [street]) == (0.0, None)
+
+
+def test_seam_street_share_counts_a_seam_once_across_a_gap():
+    """A gap between two masks doesn't count the seam twice (#621)."""
+    street = LineString([(100, -50), (100, 300)])
+    # West of x = 100 the pages leave a 1 m gap along the street; above y = 100 they
+    # meet exactly on a seam through a block, off the street.
+    west = Polygon([(0, 0), (99.5, 0), (99.5, 100), (50, 100), (50, 200), (0, 200)])
+    east = Polygon(
+        [(100.5, 0), (200, 0), (200, 200), (50, 200), (50, 100), (100.5, 100)]
+    )
+    union = west.union(east)
+    length, share = seam_street_share([west, east], union, [street])
+    assert length == pytest.approx(100 + 50 + 100 - 10, rel=0.05)
+    touching_west = Polygon(
+        [(0, 0), (100, 0), (100, 100), (50, 100), (50, 200), (0, 200)]
+    )
+    touching_east = Polygon(
+        [(100, 0), (200, 0), (200, 200), (50, 200), (50, 100), (100, 100)]
+    )
+    touching = seam_street_share(
+        [touching_west, touching_east],
+        touching_west.union(touching_east),
+        [street],
+    )
+    assert share == pytest.approx(touching[1], abs=0.02)
 
 
 def test_local_frame_is_metres_from_its_origin():
