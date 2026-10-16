@@ -274,3 +274,17 @@ def test_missing_generated_panels_names_split_pages_without_a_cut(tmp_path):
     assert missing_generated_panels(iiif) == ["p20"]
     (tmp_path / "p20.panels.json").write_text("{}")
     assert missing_generated_panels(iiif) == []
+
+
+def test_volume_root_is_the_volume_for_a_run_under_runs():
+    from mapsnap.score import run_label, volume_root
+
+    volume = Path("data/oakland_ca_1903_sanborn00727_004")
+    run = volume / "runs" / "corpus-v1" / "mapsnap.iiif.json"
+    assert volume_root(run) == volume
+    assert run_label(run) == "oakland_ca_1903_sanborn00727_004/corpus-v1"
+    # A file at the volume root is its own volume, and so is an archive copy.
+    assert volume_root(volume / "mapsnap.iiif.json") == volume
+    assert run_label(volume / "mapsnap.iiif.json") == "oakland_ca_1903_sanborn00727_004"
+    archive = volume / "artifacts" / "2026-08-14" / "x.iiif.json"
+    assert volume_root(archive) == archive.parent

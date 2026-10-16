@@ -302,13 +302,16 @@ def volume_page_scores(
     that the truth defines the denominator as well as the per-page RMSE, so two
     truth sets are only comparable when they cover the same sheets.
     """
-    volume = generated_iiif.parent
+    volume = volume_root(generated_iiif)
     truth_path = truth if truth is not None else volume / "main.iiif.json"
     if not truth_path.exists():
         sys.exit(f"No truth data at {truth_path}.")
     centerlines = default_centerlines(volume)
     if centerlines is None:
-        sys.exit(f"{volume} has no centerlines.geojson (needed for land weights).")
+        sys.exit(
+            f"{volume} has no centerlines.geojson or centerlines.osm.pbf "
+            "(needed for land weights)."
+        )
     missing_panels = missing_generated_panels(generated_iiif)
     if missing_panels:
         sys.exit(
@@ -410,6 +413,26 @@ def summarize(
     )
 
 
+def volume_root(generated_iiif: Path) -> Path:
+    """The volume a generated IIIF belongs to: its own directory, or ``<vol>`` for ``<vol>/runs/<tag>/``.
+
+    The truth, the OIM panels (``oim/``) and the centerlines are the volume's,
+    shared by every run, so a run kept under ``runs/<tag>/`` is scored against
+    the volume's copies. The run's own split cuts (``pN.panels.json``) are
+    still read from beside its IIIF.
+    """
+    directory = generated_iiif.parent
+    return directory.parent.parent if directory.parent.name == "runs" else directory
+
+
+def run_label(generated_iiif: Path) -> str:
+    """How a scored file is named in the table: its volume, plus its run when it has one."""
+    volume = volume_root(generated_iiif)
+    if volume == generated_iiif.parent:
+        return volume.name
+    return f"{volume.name}/{generated_iiif.parent.name}"
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(
         description=(
@@ -425,7 +448,8 @@ def main() -> None:
         metavar="GEN_IIIF",
         help=(
             "Generated IIIF AnnotationPage file(s); each is scored against the "
-            "main.iiif.json and centerlines.geojson in its own directory."
+            "main.iiif.json, oim/ and centerlines in its own directory, or in "
+            "<vol> for a run kept under <vol>/runs/<tag>/."
         ),
     )
     parser.add_argument(
@@ -463,7 +487,7 @@ def main() -> None:
     args = parser.parse_args()
 
     if args.truth is not None:
-        volumes = {Path(p).parent for p in args.generated}
+        volumes = {volume_root(Path(p)) for p in args.generated}
         if len(volumes) > 1:
             sys.exit(
                 "--truth applies to one volume, but the generated files span "
@@ -486,7 +510,7 @@ def main() -> None:
         # silently cratering split-heavy volumes (champaign scored 70.0 instead
         # of 97.1 when the 2026-08-14 archives were scored from a directory
         # with no oim/ -- the #330 scare). Fail loudly instead.
-        volume_dir = generated.parent
+        volume_dir = volume_root(generated)
         truth_path = Path(args.truth) if args.truth else volume_dir / "main.iiif.json"
         if truth_path.exists() and not (volume_dir / "oim").is_dir():
             truth_doc = json.loads(truth_path.read_text())
@@ -499,17 +523,18 @@ def main() -> None:
                 sys.exit(
                     f"{volume_dir} has no oim/ panels directory, but its truth "
                     f"contains split panels -- scoring here would silently count "
-                    f"every split as unplaced. Score the volume-root IIIF (which "
-                    f"sits beside oim/), not an archive copy."
+                    f"every split as unplaced. Score the volume-root IIIF or a run "
+                    f"under its runs/<tag>/ (both find the volume's oim/), not an "
+                    f"archive copy, or run `mapsnap oim-panels` on the volume."
                 )
         pages = volume_page_scores(
             generated, street_near_m=args.street_near_m, truth=args.truth
         )
-        all_pages.extend((generated.parent.name, p) for p in pages)
+        all_pages.extend((run_label(generated), p) for p in pages)
         s = summarize(pages, good_ft=args.good_ft, disaster_ft=args.disaster_ft)
         summaries.append(s)
         print(
-            f"{generated.parent.name:<30} {s.n_pages:>5} {s.n_placed:>6} "
+            f"{run_label(generated):<30} {s.n_pages:>5} {s.n_placed:>6} "
             f"{s.good_share:>7.1%} {s.disaster_share:>7.1%} {s.net_score:>6.1%}"
         )
     if len(summaries) > 1:
