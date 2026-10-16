@@ -593,17 +593,23 @@ def print_sheet_equal_score(truth_path: Path, generated_path: Path) -> None:
     """Print the #300 sheet-equal score footer, or one line saying why not.
 
     The number matches ``mapsnap score`` and the Score line of ``mapsnap fit``
-    exactly: the volume is the GENERATED file's directory, whose oim/ panels
-    and centerlines.geojson supply the split weights and land fractions.
+    exactly: the volume is the GENERATED file's (score.volume_root: its own
+    directory, or <vol> for a run kept under <vol>/runs/<tag>/), whose oim/
+    panels and centerlines supply the split weights and land fractions.
     """
     # Imported here because score.py imports compare_pages from this module.
-    from mapsnap.score import missing_generated_panels, summarize, volume_page_scores
+    from mapsnap.score import (
+        missing_generated_panels,
+        summarize,
+        volume_page_scores,
+        volume_root,
+    )
 
-    volume = generated_path.parent
+    volume = volume_root(generated_path)
     if default_centerlines(volume) is None:
         print(
-            f"\nScore: unavailable -- {volume} has no centerlines.geojson "
-            "(needed for land weights)"
+            f"\nScore: unavailable -- {volume} has no centerlines.geojson or "
+            "centerlines.osm.pbf (needed for land weights)"
         )
         return
     if not (volume / "oim").is_dir():
@@ -626,7 +632,8 @@ def print_sheet_equal_score(truth_path: Path, generated_path: Path) -> None:
         # on their sheets through our own pN.panels.json cuts beside the IIIF.
         print(
             f"\nScore: unavailable -- {len(missing_panels)} generated split page(s) "
-            f"({', '.join(missing_panels[:5])}) have no pN.panels.json in {volume}"
+            f"({', '.join(missing_panels[:5])}) have no pN.panels.json in "
+            f"{generated_path.parent}"
         )
         return
     summary = summarize(volume_page_scores(generated_path, truth=truth_path))
