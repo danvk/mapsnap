@@ -409,6 +409,65 @@ def batch_point_to_segments(
     return distances[rows, nearest], segment_bearings[nearest]
 
 
+# Point-segment pairs one broadcast may hold. batch_point_to_segments keeps a
+# few (N, S, 2) float64 temporaries alive at once, 16 bytes a pair each, so this
+# is about 100 MB however many proposals and segments a page brings.
+MAX_BROADCAST_PAIRS = 2_000_000
+
+
+def nearest_within(
+    points: np.ndarray, starts: np.ndarray, ends: np.ndarray, gate_m: float
+) -> tuple[np.ndarray, np.ndarray]:
+    """batch_point_to_segments for the points with a segment within ``gate_m``; inf for the rest.
+
+    Consensus scoring only asks which proposals put a label within the
+    position gate of its street, and how far within: a segment beyond the gate
+    can never make an inlier, and when one is within it the nearest segment
+    overall is too. So each point is measured against only the segments that
+    come within the gate of its cell, and the result is the same distance and
+    bearing (same segment order, so the same tie-break) wherever it is within
+    the gate. Points beyond it get an infinite distance and a zero bearing.
+
+    Scoring every proposal against every segment made Miami 1946
+    (sanborn01309_015) broadcast 65,218 proposals x 372 segments in one call and
+    7.7 billion pairs over one page, 367 of its 385 seconds; the volume ran
+    6.5 hours in Batch before it was killed for memory (#614).
+    """
+    count = len(points)
+    distances = np.full(count, np.inf)
+    bearings = np.zeros(count)
+    if count == 0 or len(starts) == 0:
+        return distances, bearings
+    # Each segment's bounding box, widened by the gate: a point within the gate
+    # of a segment lies inside it.
+    low = np.minimum(starts, ends) - gate_m
+    high = np.maximum(starts, ends) + gate_m
+    cell = 2.0 * gate_m
+    keys = np.floor(points / cell).astype(np.int64)
+    order = np.lexsort((keys[:, 1], keys[:, 0]))
+    breaks = np.flatnonzero(np.any(np.diff(keys[order], axis=0) != 0, axis=1)) + 1
+    for group in np.split(order, breaks):
+        x0, y0 = keys[group[0]] * cell
+        near = np.flatnonzero(
+            (high[:, 0] >= x0)
+            & (low[:, 0] <= x0 + cell)
+            & (high[:, 1] >= y0)
+            & (low[:, 1] <= y0 + cell)
+        )
+        if len(near) == 0:
+            continue
+        step = max(1, MAX_BROADCAST_PAIRS // len(near))
+        for first in range(0, len(group), step):
+            chunk = group[first : first + step]
+            found, nearest = batch_point_to_segments(
+                points[chunk], starts[near], ends[near]
+            )
+            within = found <= gate_m
+            distances[chunk[within]] = found[within]
+            bearings[chunk[within]] = nearest[within]
+    return distances, bearings
+
+
 LineEquation = tuple[
     float, float, float, float
 ]  # (normal_x, normal_y, n·point, bearing)
@@ -501,14 +560,16 @@ def consensus_poses(
         # each label's world point (pose_world_of is base + t), so the per-pose
         # residual loop collapses to array arithmetic. This was 97% of the
         # channel's runtime as 14M scalar residuals_at calls (43 s on a
-        # constraint-heavy Kansas City page; ~2 s batched).
+        # constraint-heavy Kansas City page; ~2 s batched). Only the segments
+        # within the position gate are measured (nearest_within): nothing
+        # beyond it can be an inlier, and the inliers' distances are exact.
         poses = list(proposals.values())
         translations = np.array([(p[0], p[1]) for p in poses])
         position = np.empty((len(poses), len(constraints)))
         angle = np.empty_like(position)
         for k, c in enumerate(constraints):
-            distances, bearings = batch_point_to_segments(
-                translations + bases[k], c[3], c[4]
+            distances, bearings = nearest_within(
+                translations + bases[k], c[3], c[4], gates.position_gate_m
             )
             position[:, k] = distances
             angle[:, k] = (claimed[k] - bearings + 90.0) % 180.0 - 90.0
