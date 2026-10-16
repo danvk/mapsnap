@@ -596,3 +596,14 @@ def test_load_sheets_skips_a_split_parent(tmp_path):
     assert [stem for stem, _ in load_sheets(volume)] == ["p0", "p0__1"]
     (raw / "p0.panels.json").write_text("{}")
     assert [stem for stem, _ in load_sheets(volume)] == ["p0__1"]
+
+
+def test_load_sheets_keeps_a_split_sheet_the_record_names(tmp_path):
+    from mapsnap.keymap.adjacency_assign import load_sheets
+    from mapsnap.keymap.records import write_keymaps_record
+
+    volume = write_volume(tmp_path, [("2", 1.0, 1.0)], [])
+    (volume / "raw" / "p0.panels.json").write_text("{}")
+    assert [stem for stem, _ in load_sheets(volume)] == []
+    write_keymaps_record(volume, ["p0"])
+    assert [stem for stem, _ in load_sheets(volume)] == ["p0"]

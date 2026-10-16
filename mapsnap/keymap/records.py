@@ -150,6 +150,17 @@ def split_parent(keymap_json: Path) -> bool:
     pushed Schenectady's inset panels p60__1 and p72__2 (24 and 8 ft) into the
     half-scale band and onto the 0.5x rung (459 and 218 ft). Every consumer that
     globs ``raw/*.keymap.json`` skips a split parent through this check.
+
+    Unless the volume's ``keymaps.json`` names the whole sheet: keymap-detect
+    can decide a split's cuts don't hold up, and the chain then runs on the
+    parent (#610), so its sidecars are the live ones. Hiding them anyway left
+    46 of corpus-v2's first 900 items without their key map -- Oakland 1903
+    (sanborn00727_004) lost every page of its p0b, and 45 placed pages with
+    them. With no record at all, a split parent is still taken as superseded.
     """
     stem = keymap_json.name[: -len(".keymap.json")]
-    return keymap_json.with_name(f"{stem}.panels.json").exists()
+    if not keymap_json.with_name(f"{stem}.panels.json").exists():
+        return False
+    raw = keymap_json.parent
+    volume = raw.parent if raw.name == "raw" else raw
+    return stem not in recorded_keymap_keys(volume)

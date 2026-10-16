@@ -599,3 +599,23 @@ def test_plausibly_sized_threshold_sits_between_the_populations(tmp_path: Path):
     assert keymap_extent_m(tmp_path / "town.georef.json") == pytest.approx(3010, abs=50)
     assert not plausibly_sized(tail)
     assert plausibly_sized(town)
+
+
+def test_usable_keymaps_keeps_a_split_sheet_the_record_names(tmp_path: Path):
+    from mapsnap.keymap.records import write_keymaps_record
+
+    # Oakland 1903 (sanborn00727_004): split cut p0b into panels, keymap-detect
+    # judged the cuts wrong and recorded the whole sheet, and the chain ran on it
+    # (#610). Hiding p0b as a split parent took the key map from 38 pages.
+    raw = tmp_path / "raw"
+    raw.mkdir()
+    make_keymap(raw, "p0a")
+    make_keymap(raw, "p0b")
+    (raw / "p0b.panels.json").write_text("{}")
+    assert usable_keymaps(raw) == [raw / "p0a.keymap.json"]  # no record: superseded
+    write_keymaps_record(tmp_path, ["p0a", "p0b"])
+    assert usable_keymaps(raw) == [raw / "p0a.keymap.json", raw / "p0b.keymap.json"]
+    # Schenectady's case is unchanged: the record names the panel, not the parent.
+    make_keymap(raw, "p0b__1")
+    write_keymaps_record(tmp_path, ["p0a", "p0b__1"])
+    assert usable_keymaps(raw) == [raw / "p0a.keymap.json", raw / "p0b__1.keymap.json"]
