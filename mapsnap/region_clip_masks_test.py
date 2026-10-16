@@ -380,3 +380,42 @@ def test_a_distant_page_neither_changes_the_others_masks_nor_their_grid(
     assert with_far[:2] == alone
     # Two small grids, not one 33 km wide.
     assert len(grids) == 2 and max(grids) < 100_000
+
+
+def test_compute_region_clip_masks_give_a_dark_border_to_the_neighbour_showing_it(
+    tmp_path: Path,
+):
+    """Ground on one sheet's scanner bed goes to the neighbour whose paper shows it.
+
+    The west sheet's block runs to a street at x = 190 px, across its own bed
+    (x 182-200). Cut at the west scan's edge and clipped to its paper only at
+    the end, the strip from the paper's edge to the street went to no page,
+    though the east sheet shows it: Oakland 1903 p332/p338.
+    """
+    georefs, paths = two_page_volume(tmp_path)
+    west = np.full((200, 200), 220, np.uint8)
+    west[:, 182:] = 20  # the scanner bed down the west sheet's right side
+    cv2.imwrite(str(paths[0]), west)
+    cv2.imwrite(str(paths[1]), np.full((200, 200), 220, np.uint8))
+    west_prob = np.zeros((200, 200), np.float32)
+    west_prob[:, :182] = 1.0  # the region model reads the bed as nobody's
+    east_prob = np.zeros((200, 200), np.float32)
+    east_prob[:, 36:] = 1.0  # from x = 186 px, too little to cut the west block
+    write_region_map(paths[0], west_prob)
+    write_region_map(paths[1], east_prob)
+    streets = [
+        street([(190, -50), (190, 250)]),
+        street([(-50, -10), (400, -10)]),
+        street([(-50, 210), (400, 210)]),
+        street([(-10, -50), (-10, 250)]),
+        street([(360, -50), (360, 250)]),
+    ]
+    masks = compute_region_clip_masks(
+        georefs, {"type": "FeatureCollection", "features": streets}, raw_paths=paths
+    )
+    west_mask, east_mask = masks
+    assert west_mask is not None and east_mask is not None
+    assert west_mask.bounds[2] <= 182 * DEG_PER_PX
+    band = box(180 * DEG_PER_PX, -190 * DEG_PER_PX, 190 * DEG_PER_PX, -10 * DEG_PER_PX)
+    shown = west_mask.union(east_mask).intersection(band).area
+    assert shown == pytest.approx(band.area, rel=0.02)
