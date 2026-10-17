@@ -820,52 +820,66 @@ def project_to_polyline(
     (undirected — a street running NE and SW both have the same tangent angle).
     Returns None if blocks is empty.
     """
-    q = np.array([lon, lat])
-    best_dist = float("inf")
-    best_pt: np.ndarray | None = None
-    best_tangent: float = 0.0
-
-    terminal = _terminal_endpoints(blocks) if extrapolate else set()
-
-    for block in blocks:
-        pts = block.coords  # shape (N, 2), columns [lon, lat]
-        n_segs = len(pts) - 1
-        start_terminal = (float(pts[0, 0]), float(pts[0, 1])) in terminal
-        end_terminal = (float(pts[-1, 0]), float(pts[-1, 1])) in terminal
-        for k in range(n_segs):
-            p1, p2 = pts[k], pts[k + 1]
-            seg = p2 - p1
-            seg_len_sq = float(np.dot(seg, seg))
-            if seg_len_sq < 1e-20:
-                continue
-            t_raw = float(np.dot(q - p1, seg) / seg_len_sq)
-            is_start_terminal = k == 0 and start_terminal and extrapolate
-            is_end_terminal = k == n_segs - 1 and end_terminal and extrapolate
-            t_min = 0.0
-            t_max = 1.0
-            if is_start_terminal or is_end_terminal:
-                mid_lat = float((p1[1] + p2[1]) / 2)
-                ft_per_deg_lon = _FT_PER_DEG_LAT * math.cos(math.radians(mid_lat))
-                seg_ft = math.sqrt(
-                    (float(seg[0]) * ft_per_deg_lon) ** 2
-                    + (float(seg[1]) * _FT_PER_DEG_LAT) ** 2
-                )
-                max_t = (max_extrapolation_ft / seg_ft) if seg_ft > 0 else 0.0
-                if is_start_terminal:
-                    t_min = -max_t
-                if is_end_terminal:
-                    t_max = 1.0 + max_t
-            t = float(np.clip(t_raw, t_min, t_max))
-            nearest = p1 + t * seg
-            dist = float(np.linalg.norm(q - nearest))
-            if dist < best_dist:
-                best_dist = dist
-                best_pt = nearest
-                best_tangent = float(np.arctan2(seg[1], seg[0])) % np.pi
-
-    if best_pt is None:
+    coords = [block.coords for block in blocks if len(block.coords) >= 2]
+    if not coords:
         return None
-    return (float(best_pt[0]), float(best_pt[1]), best_tangent)
+    # Every segment of every block at once: a per-segment Python loop made this
+    # function most of georef's time (542,102 calls, 45.6 M np.clip calls on
+    # Miami 1946's key map, #629). The blocks are joined end to end; the
+    # "segment" from one block's last point to the next block's first is masked.
+    pts = np.concatenate(coords)  # shape (N, 2), columns [lon, lat]
+    ends = np.cumsum([len(c) for c in coords])  # one past each block's last point
+    starts = pts[:-1]
+    segs = pts[1:] - starts
+    seg_len_sq = segs[:, 0] * segs[:, 0] + segs[:, 1] * segs[:, 1]
+    usable = seg_len_sq >= 1e-20  # zero-length segments are skipped
+    usable[ends[:-1] - 1] = False
+    q = np.array([lon, lat])
+    to_q = q - starts
+    t = (to_q[:, 0] * segs[:, 0] + to_q[:, 1] * segs[:, 1]) / np.where(
+        usable, seg_len_sq, 1.0
+    )
+    t_min = np.zeros(len(segs))
+    t_max = np.ones(len(segs))
+    if extrapolate:
+        # A terminal endpoint lets its own segment run on past it.
+        terminal = _terminal_endpoints(blocks)
+        for block_pts, end in zip(coords, ends, strict=True):
+            first, last = end - len(block_pts), end - 2
+            if (float(block_pts[0, 0]), float(block_pts[0, 1])) in terminal:
+                t_min[first] = -_extrapolation_t(
+                    block_pts[0], block_pts[1], max_extrapolation_ft
+                )
+            if (float(block_pts[-1, 0]), float(block_pts[-1, 1])) in terminal:
+                t_max[last] = 1.0 + _extrapolation_t(
+                    block_pts[-2], block_pts[-1], max_extrapolation_ft
+                )
+    t = np.minimum(np.maximum(t, t_min), t_max)
+    nearest = starts + t[:, None] * segs
+    offset = q - nearest
+    dist = np.sqrt(offset[:, 0] * offset[:, 0] + offset[:, 1] * offset[:, 1])
+    # argmin takes the first nearest segment in block order, which is the one the
+    # loop this replaced kept (it only moved on for a strictly nearer one). NaN
+    # never wins, as it never compared nearer.
+    dist = np.where(usable & ~np.isnan(dist), dist, np.inf)
+    k = int(np.argmin(dist))
+    if not np.isfinite(dist[k]):
+        return None
+    tangent = float(np.arctan2(segs[k, 1], segs[k, 0])) % np.pi
+    return (float(nearest[k, 0]), float(nearest[k, 1]), tangent)
+
+
+def _extrapolation_t(
+    p1: np.ndarray, p2: np.ndarray, max_extrapolation_ft: float
+) -> float:
+    """How far past an end of segment p1-p2, as a fraction of its length, max_extrapolation_ft reaches."""
+    seg = p2 - p1
+    mid_lat = float((p1[1] + p2[1]) / 2)
+    ft_per_deg_lon = _FT_PER_DEG_LAT * math.cos(math.radians(mid_lat))
+    seg_ft = math.sqrt(
+        (float(seg[0]) * ft_per_deg_lon) ** 2 + (float(seg[1]) * _FT_PER_DEG_LAT) ** 2
+    )
+    return (max_extrapolation_ft / seg_ft) if seg_ft > 0 else 0.0
 
 
 def label_inliers(

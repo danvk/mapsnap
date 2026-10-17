@@ -542,6 +542,55 @@ def test_project_returns_none_for_empty_blocks():
     assert project_to_polyline(-90.0, 30.0, []) is None
 
 
+def test_project_never_uses_the_gap_between_two_blocks():
+    # Two separate N-S blocks with a gap between them. The blocks are projected
+    # together, end to end; the line from one's end to the other's start is not
+    # a street, so a point in the middle of the gap clamps to an endpoint.
+    south = _make_block([(-90.0, 30.0), (-90.0, 30.001)])
+    north = _make_block([(-90.0, 30.003), (-90.0, 30.004)])
+    result = project_to_polyline(-90.0, 30.002, [south, north], extrapolate=False)
+    assert result is not None
+    lon, lat, _ = result
+    assert lon == pytest.approx(-90.0)
+    assert lat == pytest.approx(30.001)  # the first block's end, the tie's first
+
+
+def test_project_ties_go_to_the_first_block():
+    # A point equidistant from an E-W block and a N-S block: the first block listed wins.
+    east_west = _make_block([(-90.001, 30.0), (-90.0, 30.0)])
+    north_south = _make_block([(-90.0, 30.0), (-90.0, 30.001)])
+    corner = (-90.0, 30.0)
+    first = project_to_polyline(*corner, [east_west, north_south], extrapolate=False)
+    second = project_to_polyline(*corner, [north_south, east_west], extrapolate=False)
+    assert first is not None and second is not None
+    assert first[2] == pytest.approx(0.0)  # E-W tangent
+    assert second[2] == pytest.approx(math.pi / 2)  # N-S tangent
+
+
+def test_project_skips_zero_length_segments_and_single_point_blocks():
+    point_only = _make_block([(-90.0, 30.0)])
+    repeated = _make_block([(-90.0, 30.0), (-90.0, 30.0), (-90.0, 30.001)])
+    result = project_to_polyline(-90.0001, 30.0005, [point_only, repeated])
+    assert result is not None
+    lon, lat, tangent = result
+    assert (lon, lat) == pytest.approx((-90.0, 30.0005))
+    assert tangent == pytest.approx(math.pi / 2)
+    assert project_to_polyline(-90.0, 30.0, [point_only]) is None
+
+
+def test_project_extrapolates_only_past_terminal_ends_of_a_joined_street():
+    # Two blocks meeting at lat 30.001: the shared end is not terminal, so a point
+    # beyond the street's far end extrapolates but the joint never does.
+    deg_300ft = 300.0 / _FT_PER_DEG_LAT
+    first = _make_block([(-90.0, 30.0), (-90.0, 30.001)])
+    second = _make_block([(-90.0, 30.001), (-90.0, 30.002)])
+    result = project_to_polyline(
+        -90.0, 30.002 + deg_300ft, [first, second], extrapolate=True
+    )
+    assert result is not None
+    assert result[1] == pytest.approx(30.002 + deg_300ft)
+
+
 # ---------------------------------------------------------------------------
 # _angle_diff_abs
 # ---------------------------------------------------------------------------
