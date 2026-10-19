@@ -1,10 +1,13 @@
 import json
+from collections import Counter
+from collections.abc import Callable
 from pathlib import Path
 
 import cv2
 import numpy as np
 import pytest
-from shapely.geometry import LineString, Polygon, box
+from shapely.errors import GEOSException
+from shapely.geometry import LineString, Point, Polygon, box
 from shapely.geometry.base import BaseGeometry
 
 from mapsnap.region_clip_masks import (
@@ -29,6 +32,7 @@ from mapsnap.region_clip_masks import (
     region_map_path,
     region_ownership,
     scanner_bed,
+    street_blocks,
     without_holes,
     without_near_duplicates,
 )
@@ -450,3 +454,64 @@ def test_hand_off_ground_off_the_paper_leaves_ground_no_neighbour_shows():
     assert shapes[0].area == pytest.approx(100 * 100)
     assert shapes[1].area == pytest.approx(100 * 100)
     assert shapes[2].area == pytest.approx(100 * 100)
+
+
+def street_grid_blocks(
+    monkeypatch: pytest.MonkeyPatch, rejects: Callable[[Polygon, int], bool]
+) -> list[Polygon]:
+    """street_blocks over a 3x3 street grid, GEOS failing the clips ``rejects`` picks.
+
+    ``rejects`` sees the block and how many times that block's clip was tried.
+    """
+    grid = GroundGrid(0.0, 0.0, -100.0, -100.0, 200, 200)
+    lines = [[(x, -50.0), (x, 250.0)] for x in (0.0, 100.0, 200.0)]
+    lines += [[(-50.0, y), (250.0, y)] for y in (0.0, 100.0, 200.0)]
+    features = [
+        {
+            "type": "Feature",
+            "properties": {"name": "STREET"},
+            "geometry": {
+                "type": "LineString",
+                "coordinates": [list(grid.to_lonlat(x, y)) for x, y in line],
+            },
+        }
+        for line in lines
+    ]
+    outline = box(-20, -20, 220, 220)
+    real_intersection = Polygon.intersection
+    tries: Counter[str] = Counter()
+
+    def flaky_intersection(self: Polygon, other: BaseGeometry, *args, **kwargs):
+        if isinstance(other, Polygon) and other.equals(outline):
+            key = self.representative_point().wkt
+            tries[key] += 1
+            if rejects(self, tries[key]):
+                raise GEOSException("TopologyException: Ring edge missing")
+        return real_intersection(self, other, *args, **kwargs)
+
+    monkeypatch.setattr(Polygon, "intersection", flaky_intersection)
+    return street_blocks(
+        {"type": "FeatureCollection", "features": features},
+        grid,
+        box(-30, -30, 230, 230),
+        outline,
+    )
+
+
+def test_street_blocks_retries_a_clip_geos_rejects(monkeypatch: pytest.MonkeyPatch):
+    with monkeypatch.context() as patch:
+        clean = street_grid_blocks(patch, lambda block, tries: False)
+    retried = street_grid_blocks(monkeypatch, lambda block, tries: tries == 1)
+    assert sorted(b.wkt for b in retried) == sorted(b.wkt for b in clean)
+
+
+def test_street_blocks_drops_only_a_block_geos_cannot_clip(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    with monkeypatch.context() as patch:
+        clean = street_grid_blocks(patch, lambda block, tries: False)
+    blocks = street_grid_blocks(
+        monkeypatch, lambda block, tries: block.contains(Point(50, 50))
+    )
+    assert len(blocks) == len(clean) - 1
+    assert not any(b.contains(Point(50, 50)) for b in blocks)

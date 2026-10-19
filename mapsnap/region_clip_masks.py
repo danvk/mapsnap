@@ -52,7 +52,12 @@ from shapely.geometry import LineString, MultiPoint, MultiPolygon, Polygon
 from shapely.geometry.base import BaseGeometry
 from shapely.ops import nearest_points, split, transform, unary_union
 
-from mapsnap.clip_masks import _fit_affine, _polygonize_streets, _remove_spike_vertices
+from mapsnap.clip_masks import (
+    _fit_affine,
+    _polygonize_streets,
+    _remove_spike_vertices,
+    safe_overlay,
+)
 
 M_PER_DEGREE = math.pi * 6_371_008.8 / 180
 # Side of a ground-grid cell, in metres.
@@ -407,11 +412,12 @@ def street_blocks(
             [grid.to_m(*c) for c in block.exterior.coords],
             [[grid.to_m(*c) for c in ring.coords] for ring in block.interiors],
         ).buffer(0)
-        blocks.extend(
-            p
-            for p in polygons_of(polygon.intersection(outline))
-            if p.area >= MIN_UNIT_M2
-        )
+        # GEOS can reject a valid pair (ferris 1921: "Ring edge missing"); the
+        # make_valid retry recovers it, and a block it can't is just dropped.
+        clipped = safe_overlay(polygon, outline, "intersection")
+        if clipped is None:
+            continue
+        blocks.extend(p for p in polygons_of(clipped) if p.area >= MIN_UNIT_M2)
     return blocks
 
 
