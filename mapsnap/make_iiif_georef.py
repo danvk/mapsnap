@@ -422,6 +422,25 @@ def _load_loc_index(data: dict) -> dict[str, dict]:
     return index
 
 
+CONFIDENCE_LABELS = ("confidence", "confidence_provisional", "confidence_model")
+
+
+def confidence_metadata(confidence: dict | None) -> list[dict]:
+    """IIIF metadata entries for a pose's confidence record (see mapsnap.confidence.annotate).
+
+    ``confidence`` is ``{"p_good": 0.93, "provisional": false, "model": "<version>"}``
+    or None, which gives no entries.
+    """
+    if not confidence:
+        return []
+    entries = [{"label": "confidence", "value": f"{confidence['p_good']:.2f}"}]
+    if confidence.get("provisional"):
+        entries.append({"label": "confidence_provisional", "value": "true"})
+    if confidence.get("model"):
+        entries.append({"label": "confidence_model", "value": confidence["model"]})
+    return entries
+
+
 def _georef_metadata(
     georef: dict,
     split_canvas: tuple[float, float, float, float] | None = None,
@@ -438,11 +457,7 @@ def _georef_metadata(
         {"label": "intersections", "value": str(n_intersections)},
     ]
     # Reconcile's estimate that the pose is within 25 ft (mapsnap.confidence).
-    confidence = (georef.get("reconcile") or {}).get("confidence")
-    if confidence:
-        entries.append({"label": "confidence", "value": f"{confidence['p_good']:.2f}"})
-        if confidence.get("provisional"):
-            entries.append({"label": "confidence_provisional", "value": "true"})
+    entries += confidence_metadata((georef.get("reconcile") or {}).get("confidence"))
     if split_canvas is not None:
         x, y, w, h = split_canvas
         entries += [

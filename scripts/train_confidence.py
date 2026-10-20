@@ -9,11 +9,11 @@ labelled by its RMSE against the truth pages ``mapsnap compare`` pairs it with
 (the worst one, when it is paired with several).
 
 Prints grouped cross-validation (whole volumes held out) and writes the model as
-JSON. ``models/confidence.json`` was trained on corpus-v1 in the 400 OIM-truth
-volumes:
+JSON. ``models/confidence.json`` was trained on corpus-v2 in the 690 OIM-truth
+volumes (each a run's annotation, provenance and panels beside the truth):
 
-    uv run python scripts/train_confidence.py ~/Documents/mapsnap/quality/train/* \\
-        --iiif corpus-v1.iiif.json --version corpus-v1 --out models/confidence.json
+    uv run python scripts/train_confidence.py ~/Documents/mapsnap/score-690/corpus-v2/* \\
+        --version corpus-v2 --out models/confidence.json
 """
 
 import argparse
