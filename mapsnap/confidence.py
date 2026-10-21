@@ -18,19 +18,18 @@ truth. Its inputs are only what reconcile records about the page in
 Reconcile's own energies are left out on purpose: any change to reconcile
 changes what they mean, and they add only 0.004 AUC.
 
-Trained by ``scripts/train_confidence.py`` on corpus-v1 against OIM truth (400
-volumes, 23,371 placed poses). Out-of-fold, with whole volumes held out, it
-reaches AUC 0.88, against 0.87 for GCPs and verification together and 0.74
-for GCPs alone. Poses scored 0.9-1.0 were 96% within 25 ft; those under 0.1
-were 5%.
+Trained by ``scripts/train_confidence.py`` on corpus-v2 against OIM truth (665
+volumes with graded poses, 36,690 placed poses). Out-of-fold, with whole volumes
+held out, it reaches AUC 0.879 (pages 0.881, panels 0.833) and is calibrated
+(mean P(good) 86.8% against 86.8% observed). The corpus-v1 model it replaces
+ranked the same corpus-v2 poses at AUC 0.856 (pages 0.862, panels 0.803) and was
+13 points under-confident, since corpus-v2 places pages better given the same
+signals; recalibrating that model's scores fixed the calibration but not the
+ranking. ``scripts/rescore_confidence.py`` re-scores a run already published
+with an older model, from its provenance.
 
-Panel scores are marked ``provisional``. Panels rank worse than whole pages
-even within corpus-v1 (AUC 0.77 against 0.89), and #570 has since changed what
-their signals mean: panels are now snapped and scored. Retrain on a
-current-code corpus run before relying on them. Whole pages transfer: on the
-20 standard volumes under current code (#570, #578), this model ranks pages at
-AUC 0.91 (0.93 on the nine volumes it never saw), and is slightly cautious
-(mean P(good) 85% against 88% observed).
+Panel scores are still marked ``provisional``: panels rank worse than whole
+pages (AUC 0.83 against 0.88), though their scores are now calibrated.
 """
 
 import json

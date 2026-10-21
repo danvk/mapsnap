@@ -996,6 +996,17 @@ def test_metadata_carries_reconciles_confidence():
     assert "confidence" not in plain
 
 
+def test_confidence_metadata_names_the_model():
+    from mapsnap.make_iiif_georef import confidence_metadata
+
+    entries = confidence_metadata({"p_good": 0.5, "provisional": False, "model": "v9"})
+    assert entries == [
+        {"label": "confidence", "value": "0.50"},
+        {"label": "confidence_model", "value": "v9"},
+    ]
+    assert confidence_metadata(None) == []
+
+
 # ---------------------------------------------------------------------------
 # Masks on the published pose
 # ---------------------------------------------------------------------------
