@@ -3,6 +3,7 @@
 import json
 from typing import Any
 
+import cv2
 import numpy as np
 from PIL import Image
 
@@ -21,9 +22,11 @@ from mapsnap.detect_text import (
     lab_to_hex,
     page_lab,
     page_vocabs,
+    paper_statistics,
     region_color,
     superseded_parents,
     threads_per_worker,
+    weighted_median,
 )
 from mapsnap.keymap.locate import KeymapLocator
 from mapsnap.paper_color import is_off_paper
@@ -735,3 +738,45 @@ def test_scale_note_vocabulary_reads_every_printed_form():
     )
     assert old <= SCALE_NOTE_TEXT
     assert ocr_digit_forms("100") == {"100", "1OO", "I00", "IOO"}
+
+
+def _noisy_page(shape: tuple[int, int], seed: int) -> np.ndarray:
+    """Yellowed paper with coloured blocks and noise: a page with many distinct Lab values."""
+    rng = np.random.default_rng(seed)
+    page = _rgb_page(shape).astype(np.int16)
+    page[5:25, 5:30] = (200, 40, 40)
+    page[30:45, 10:40] = (90, 140, 210)
+    page += rng.integers(-12, 13, size=page.shape)
+    return np.clip(page, 0, 255).astype(np.uint8)
+
+
+def test_weighted_median_matches_np_median():
+    rng = np.random.default_rng(3)
+    for size in (7, 8):  # odd and even totals
+        values = rng.normal(size=size)
+        counts = rng.integers(1, 5, size=size)
+        assert weighted_median(values, counts) == float(
+            np.median(np.repeat(values, counts))
+        )
+
+
+def test_paper_statistics_match_medians_over_the_float_image():
+    # Odd and even pixel counts; small chunks so the histogram is built across several.
+    for shape in ((47, 53), (48, 50)):
+        page = _noisy_page(shape, seed=shape[0])
+        lab = page_lab(page)
+        expected = (
+            float(np.median(lab[:, :, 0])),
+            float(np.median(lab[:, :, 1])),
+            float(np.median(lab[:, :, 2])),
+            float(np.median(np.hypot(lab[:, :, 1], lab[:, :, 2]))),
+        )
+        lab8 = cv2.cvtColor(page, cv2.COLOR_RGB2Lab)
+        assert paper_statistics(lab8, rows_per_chunk=7) == expected
+
+
+def test_region_color_is_the_same_from_8_bit_lab():
+    page = _noisy_page((50, 50), seed=1)
+    box = _box(8, 6, 33, 28)
+    lab8 = cv2.cvtColor(page, cv2.COLOR_RGB2Lab)
+    assert region_color(lab8, box) == region_color(page_lab(page), box)

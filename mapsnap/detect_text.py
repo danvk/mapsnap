@@ -110,10 +110,50 @@ def page_lab(rgb: np.ndarray) -> np.ndarray:
     ordinary polar coordinates of (a, b). skimage's rgb2lab is not an option here: it segfaults
     once scipy's MINPACK has run in-process, which it has by the time georeferencing calls back.
     """
-    lab = cv2.cvtColor(rgb, cv2.COLOR_RGB2Lab).astype(np.float64)
+    return centered_lab(cv2.cvtColor(rgb, cv2.COLOR_RGB2Lab))
+
+
+def centered_lab(lab8: np.ndarray) -> np.ndarray:
+    """cv2's 8-bit Lab as float64, with a/b re-centered on 0."""
+    lab = lab8.astype(np.float64)
     lab[:, :, 1] -= 128.0
     lab[:, :, 2] -= 128.0
     return lab
+
+
+def weighted_median(values: np.ndarray, counts: np.ndarray) -> float:
+    """The median of ``values`` each repeated ``counts`` times, as np.median would compute it.
+
+    With an even total, np.median averages the two middle values; so does this.
+    """
+    order = np.argsort(values, kind="stable")
+    sorted_values, cumulative = values[order], np.cumsum(counts[order])
+    total = int(cumulative[-1])
+    lower = sorted_values[np.searchsorted(cumulative, (total - 1) // 2, side="right")]
+    upper = sorted_values[np.searchsorted(cumulative, total // 2, side="right")]
+    return float((lower + upper) / 2.0)
+
+
+def paper_statistics(
+    lab8: np.ndarray, rows_per_chunk: int = 512
+) -> tuple[float, float, float, float]:
+    """The page's median lightness, a, b and per-pixel chroma, from cv2's 8-bit Lab.
+
+    The same numbers as taking medians over :func:`page_lab`'s float64 image, without making
+    one: each pixel's (a, b) pair is one of 65,536, so chroma's median comes from a histogram
+    of the pairs, and the channel medians from the 8-bit channels shifted afterwards.
+    """
+    lightness = float(np.median(lab8[:, :, 0]))
+    a = float(np.median(lab8[:, :, 1])) - 128.0
+    b = float(np.median(lab8[:, :, 2])) - 128.0
+    pairs = np.zeros(256 * 256, np.int64)
+    for start in range(0, lab8.shape[0], rows_per_chunk):
+        chunk = lab8[start : start + rows_per_chunk]
+        codes = chunk[:, :, 1].astype(np.int32) * 256 + chunk[:, :, 2]
+        pairs += np.bincount(codes.ravel(), minlength=256 * 256)
+    present = np.nonzero(pairs)[0]
+    chroma = np.hypot(present // 256 - 128.0, present % 256 - 128.0)
+    return lightness, a, b, weighted_median(chroma, pairs[present])
 
 
 def lab_to_hex(lightness: float, a: float, b: float) -> str:
@@ -131,6 +171,9 @@ def region_color(lab: np.ndarray, polygon: list) -> dict:
     median reports the *background*: paper for a street label, the fill colour for a label
     printed on a building. ``a`` and ``b`` are medianed separately and combined afterwards,
     because hue is circular and a median over it is not meaningful.
+
+    ``lab`` is either :func:`page_lab`'s centered float image or cv2's 8-bit Lab, whose box
+    is centered here; a whole key map as float64 Lab is several gigabytes.
     """
     pts = np.asarray(polygon, dtype=float)
     x0, x1 = max(0, int(pts[:, 0].min())), int(pts[:, 0].max())
@@ -138,6 +181,8 @@ def region_color(lab: np.ndarray, polygon: list) -> dict:
     region = lab[y0 : y1 + 1, x0 : x1 + 1]
     if not region.size:
         return {"color": "#000000", "hue": 0.0, "chroma": 0.0}
+    if region.dtype == np.uint8:
+        region = centered_lab(region)
     lightness = float(np.median(region[:, :, 0]))
     a = float(np.median(region[:, :, 1]))
     b = float(np.median(region[:, :, 2]))
@@ -160,16 +205,15 @@ def annotate_backgrounds(detections: list[dict], rgb: np.ndarray) -> dict:
     The paper is the page's own because it varies enormously between volumes: near-white in
     Nashville (chroma 1-5), heavily yellowed in Chicago and New Orleans (13-20).
     """
-    lab = page_lab(rgb)
-    lab_a, lab_b = lab[:, :, 1], lab[:, :, 2]
+    # 8-bit Lab: an eighth of the float64 image, which on a 160 MP key map is ~4 GB.
+    lab8 = cv2.cvtColor(rgb, cv2.COLOR_RGB2Lab)
     # Chroma is medianed per pixel (the typical saturation), while the paper's displayed colour
     # comes from the median a/b — the right reduction for each, so they differ slightly.
-    paper_chroma = float(np.median(np.hypot(lab_a, lab_b)))
-    paper_a, paper_b = float(np.median(lab_a)), float(np.median(lab_b))
+    lightness, paper_a, paper_b, paper_chroma = paper_statistics(lab8)
     for det in detections:
-        det["background"] = region_color(lab, det["polygon"])
+        det["background"] = region_color(lab8, det["polygon"])
     return {
-        "color": lab_to_hex(float(np.median(lab[:, :, 0])), paper_a, paper_b),
+        "color": lab_to_hex(lightness, paper_a, paper_b),
         "hue": round(math.degrees(math.atan2(paper_b, paper_a)) % 360.0, 1),
         "chroma": round(paper_chroma, 1),
     }
