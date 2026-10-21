@@ -2,7 +2,7 @@
 
 from pathlib import Path
 
-from pull_item import directory_name, state_abbreviation, sync_command
+from pull_item import directory_name, state_abbreviation, sync_command, sync_paths
 
 
 def volume(item: str, state: str, city: str, year: str) -> dict[str, str]:
@@ -50,3 +50,18 @@ def test_sync_command_mirrors_the_prefix():
         "s3://mapsnap-sanborn/by-state/pennsylvania/1914/sanborn08035_001/",
         "data/wernersville_pa_1914",
     ]
+
+
+def test_sync_paths_is_the_whole_prefix_without_a_run():
+    prefix = "s3://mapsnap-sanborn/by-state/new-york/1939/sanborn05791_054"
+    destination = Path("data/brooklyn_ny_1939_vol_2")
+    assert sync_paths(prefix, destination, None) == (prefix, destination)
+
+
+def test_sync_paths_narrows_to_one_run():
+    prefix = "s3://mapsnap-sanborn/by-state/new-york/1939/sanborn05791_054/"
+    destination = Path("data/brooklyn_ny_1939_vol_2")
+    assert sync_paths(prefix, destination, "corpus-v2") == (
+        "s3://mapsnap-sanborn/by-state/new-york/1939/sanborn05791_054/runs/corpus-v2",
+        Path("data/brooklyn_ny_1939_vol_2/runs/corpus-v2"),
+    )
