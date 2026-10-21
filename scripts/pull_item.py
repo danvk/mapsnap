@@ -3,6 +3,7 @@
 
     uv run python scripts/pull_item.py sanborn08035_001
     uv run python scripts/pull_item.py sanborn08035_001 sanborn06116_049 --dry-run
+    uv run python scripts/pull_item.py sanborn05791_054 --run corpus-v2 --name brooklyn_ny_1939_vol_2
 
 Looks the item up in the volumes TSV (item, state, city, year, pages, title,
 s3_path) and runs ``aws s3 sync`` from its prefix into
@@ -14,6 +15,11 @@ number to tell them apart.
 The layout is the mirror's own, kept as it is: page scans and their CRAFT
 boxes and P(road) maps at the top, each run's outputs under ``runs/<tag>/``.
 The volume viewer reads a run's annotation, sidecars and adjacency from there.
+
+``--run TAG`` syncs only ``runs/<TAG>/`` and leaves everything else in the
+directory alone. That is the way to add a corpus run to a volume already in
+data/: a full sync would overwrite its page images with the mirror's, which
+are encoded differently.
 
 ``aws s3 sync`` downloads ten files at a time by default and skips any file
 already present with the same size and an up-to-date copy, so re-running it
@@ -89,6 +95,13 @@ def sync_command(s3_path: str, destination: Path) -> list[str]:
     ]
 
 
+def sync_paths(s3_path: str, destination: Path, run: str | None) -> tuple[str, Path]:
+    """What to sync where: the item's whole prefix, or with ``run`` only its ``runs/<run>/``."""
+    if run is None:
+        return s3_path, destination
+    return f"{s3_path.rstrip('/')}/runs/{run}", destination / "runs" / run
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(
         description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
@@ -98,6 +111,11 @@ def main() -> None:
     parser.add_argument("--data-dir", type=Path, default=DEFAULT_DATA_DIR)
     parser.add_argument(
         "--name", help="Directory name under data/, instead of the derived one"
+    )
+    parser.add_argument(
+        "--run",
+        metavar="TAG",
+        help="Sync only this run's outputs (runs/<TAG>/), e.g. corpus-v2",
     )
     parser.add_argument(
         "--dry-run", action="store_true", help="Print what would be synced, and stop"
@@ -118,12 +136,13 @@ def main() -> None:
     for item in args.items:
         row = by_item[item]
         destination = args.data_dir / (args.name or directory_name(row, rows))
-        command = sync_command(row["s3_path"], destination)
-        print(f"{item}: {row['title']} ({row['year']}) -> {destination}")
+        source, target = sync_paths(row["s3_path"], destination, args.run)
+        command = sync_command(source, target)
+        print(f"{item}: {row['title']} ({row['year']}) -> {target}")
         if args.dry_run:
             print("  " + " ".join(command))
             continue
-        destination.mkdir(parents=True, exist_ok=True)
+        target.mkdir(parents=True, exist_ok=True)
         subprocess.run(command, check=True, env=environment)
         files = [path for path in destination.rglob("*") if path.is_file()]
         size_mb = sum(path.stat().st_size for path in files) / 1e6
