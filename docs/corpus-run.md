@@ -174,29 +174,35 @@ through retries, but every one of them restarted.
 
 ### Don't trust the early estimates
 
-Time and cost projected from the first few hundred finished children run high,
-and in corpus-v2 they were still far too high after 500 items. The cause is
-the planner, which is unchanged as of #641 (#624 and #625 are open):
+Time and cost projected from the first few hundred finished children run high.
+In corpus-v2 they were still far too high after 500 items. That's a side effect
+of the planner's order, which is deliberate:
 
 - **The heaviest children run first.** `balance_items` places items
   largest-first into the lightest child, and ties go to the lowest index. So
-  the first children fill with the biggest volumes before load-balancing has
-  anything to even out. In corpus-v2, planned work fell from about 149
-  sheet-equivalents a child at the start of the array to 104 at the end.
-  Batch starts children roughly in index order, so the first to finish are the
-  heaviest.
+  the first children hold the biggest volumes. In corpus-v2, planned work fell
+  from about 149 sheet-equivalents a child at the start of the array to 104 at
+  the end. Batch starts children roughly in index order, so the first to finish
+  are the heaviest.
 - **Each child runs its biggest item first,** because items keep the planner's
-  order. A child's first item to finish is also slower than average.
-- **The cost report projects per child,** which overstates a chunked run's
-  corpus cost about 4× (#624).
+  order.
 
-Until the planner shuffles the order of its children, estimate from work done,
-not children done. Sum the planned sheet-equivalents (`sheets + 3` per item, as
-`balance_items` weighs them) of the finished children, divide by elapsed time,
-and apply that rate to what's left. For cost, price the fleet snapshots: dollars
-an hour multiplied by the hours left. Either way the rate rises as the run goes
-on. corpus-v2's pace estimate fell from Tuesday to Monday between the 500-item
-and 2,300-item marks.
+This is worth keeping. A long child that starts late sets the end of the whole
+run, and a big item reclaimed near the end has to start over while the rest of
+the fleet sits idle. Starting the large volumes early shortens that tail (#625
+has the straggler numbers). The cost is only in the estimates.
+
+**Estimate from work done, not children done.**
+- **Time:** sum the planned sheet-equivalents of the finished children
+  (`sheets + 3` per item, as `balance_items` weighs them), divide by elapsed
+  time, and apply that rate to what's left.
+- **Cost:** price the fleet snapshots, dollars an hour multiplied by the hours
+  left.
+
+Expect the rate to rise as the run goes on. corpus-v2's estimated finish moved
+from Tuesday to Monday between the 500-item and 2,300-item marks. Separately,
+`collect-run.py`'s corpus projection is per child, which overstates a chunked
+run's cost about 4× (#624, a real bug).
 
 ### Reading failures
 
