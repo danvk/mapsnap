@@ -43,11 +43,11 @@ ITEMS=$BUCKET/_runs/$TAG/items-$LIST_ID.txt
 aws s3 cp "$LIST" "$ITEMS" --only-show-errors --region "$REGION"
 
 JOB_ID=$(aws batch submit-job --region "$REGION" \
-  --job-name "fit-$TAG" --job-queue "$QUEUE" --job-definition "$JOBDEF" \
+  --job-name "fit-${TAG//[^A-Za-z0-9_-]/-}" --job-queue "$QUEUE" --job-definition "$JOBDEF" \
   --array-properties "size=$SIZE" \
   --parameters "items=$ITEMS,runTag=$TAG,bucket=$BUCKET,itemsPerJob=$PER_JOB" \
   --query jobId --output text)
-echo "submitted fit-$TAG: $SIZE children, array job $JOB_ID"
+echo "submitted fit-${TAG//[^A-Za-z0-9_-]/-}: $SIZE children, array job $JOB_ID"
 echo "console: https://$REGION.console.aws.amazon.com/batch/home?region=$REGION#jobs/array/$JOB_ID"
 echo "$JOB_ID" > "/tmp/mapsnap-batch-$TAG.jobid"
 exec "$HERE/status.sh" "$JOB_ID"
