@@ -60,8 +60,10 @@ IMAGE=213478311378.dkr.ecr.us-west-2.amazonaws.com/mapsnap:<sha> \
   scripts/batch/setup.sh --job-definitions-only
 ```
 
-`ATTEMPTS` (default 5) and `ATTEMPT_SECONDS` (default 10800, three hours) set
-the retry count and per-attempt timeout the same way. Register a changed
+`ATTEMPTS` (default 10, Batch's maximum) and `ATTEMPT_SECONDS` (default 43200,
+twelve hours) set the retry count and per-attempt timeout the same way. Leave
+them at the defaults when re-registering for a new image: a definition
+registered without them silently gets whatever the script defaults to. Register a changed
 definition with the script rather than by editing a copy of what
 `describe-job-definitions` returns: that call lists revisions in no particular
 order, so `jobDefinitions[-1]` is not the newest, and copying an old revision
@@ -115,10 +117,10 @@ item's outcome, which the job definition's retry policy reads:
 | exit | meaning | Batch |
 |---|---|---|
 | 0 | fitted, or already done under this tag | SUCCEEDED |
-| 1 | the chain raised | retried once, then FAILED |
+| 1 | the chain raised | retried, up to `ATTEMPTS` in all, then FAILED |
 | 3 | unprocessable: no pages in the mirror, no county extract | FAILED, never retried |
 | 4 | inputs missing (CRAFT boxes) | FAILED, never retried |
-| 137 | killed for memory | retried once — then raise the job definition's memory |
+| 137 | killed for memory | retried, which rarely helps — resubmit on `mapsnap-loc-fit-large` (see below) |
 
 The run's `artifacts/mapsnap/manifest.json` records the Batch job id, attempt
 and array index beside the git sha, and `loc-fit`'s summary line prints the
@@ -352,6 +354,9 @@ An array job holds at most 10,000 children, which is why the corpus runs
 several items to a child (see above) rather than as four arrays. Spot
 reclamation shows as a `Host EC2…` status reason and is always retried; the
 pilot lost two instances that way and all eight of their children recovered.
+On weekday afternoons (Pacific) reclaims come in waves: on Monday 2026-10-19
+two corpus-v2 children were reclaimed on all five of their attempts, which is
+why `ATTEMPTS` is now 10.
 
 ## Running the image locally on an Apple Silicon Mac
 
