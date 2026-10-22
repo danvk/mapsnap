@@ -178,23 +178,33 @@ def keymap_extent_m(georef_path: Path) -> float | None:
     )
 
 
-def plausibly_sized(
-    keymap_json: Path, min_extent_m: float = MIN_KEYMAP_EXTENT_M
+def plausible_keymap_georef(
+    georef_path: Path, min_extent_m: float = MIN_KEYMAP_EXTENT_M
 ) -> bool:
-    """Whether a key map's georeference spans enough ground to index a town.
+    """Whether a key map's georef sidecar spans enough ground to index a town.
 
-    A sheet whose extent cannot be read passes: that is not evidence of a bad fit.
+    The one test of a key map's size: placement (``plausibly_sized``) and
+    publishing (``fit``'s key-map annotation) both ask it, so a key map too
+    small to locate pages is never published either. A sheet whose extent
+    cannot be read passes: that is not evidence of a bad fit.
     """
-    extent_m = keymap_extent_m(keymap_georef_path(keymap_json))
+    extent_m = keymap_extent_m(georef_path)
     if extent_m is None or extent_m >= min_extent_m:
         return True
     print(
-        f"Ignoring key map {keymap_json.name}: it is georeferenced to a sheet "
-        f"{extent_m:.0f} m across, under the {min_extent_m:g} m a key map "
+        f"Ignoring key map {georef_path.name.split('.')[0]}: it is georeferenced to a "
+        f"sheet {extent_m:.0f} m across, under the {min_extent_m:g} m a key map "
         "indexing a town must span.",
         file=sys.stderr,
     )
     return False
+
+
+def plausibly_sized(
+    keymap_json: Path, min_extent_m: float = MIN_KEYMAP_EXTENT_M
+) -> bool:
+    """Whether a key map's georeference spans enough ground to index a town."""
+    return plausible_keymap_georef(keymap_georef_path(keymap_json), min_extent_m)
 
 
 def usable_keymaps(directory: Path) -> list[Path]:

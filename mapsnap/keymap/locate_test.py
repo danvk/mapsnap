@@ -18,6 +18,7 @@ from mapsnap.keymap.locate import (
     meters_between,
     page_key,
     page_number,
+    plausible_keymap_georef,
     plausibly_sized,
     redundant_keymaps,
     resolve_keymaps,
@@ -619,3 +620,12 @@ def test_usable_keymaps_keeps_a_split_sheet_the_record_names(tmp_path: Path):
     make_keymap(raw, "p0b__1")
     write_keymaps_record(tmp_path, ["p0a", "p0b__1"])
     assert usable_keymaps(raw) == [raw / "p0a.keymap.json", raw / "p0b__1.keymap.json"]
+
+
+def test_plausible_keymap_georef_reads_the_sidecar_directly(tmp_path: Path):
+    write_georef(tmp_path, "bronx", BRONX_CORNERS)
+    write_georef(tmp_path, "town", square_corners(0.0209))
+    assert not plausible_keymap_georef(tmp_path / "bronx.georef.json")
+    assert plausible_keymap_georef(tmp_path / "town.georef.json")
+    # Unreadable is not evidence of a bad fit.
+    assert plausible_keymap_georef(tmp_path / "missing.georef.json")

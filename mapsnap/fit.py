@@ -10,6 +10,7 @@ from collections.abc import Callable
 from pathlib import Path
 
 from mapsnap import run_archive
+from mapsnap.keymap.locate import plausible_keymap_georef
 from mapsnap.utils import (
     list_pages,
     mark_step_done,
@@ -140,6 +141,20 @@ def clear_derived_sidecars(dir_path: Path) -> int:
     if removed:
         print(f"Cleared {removed} derived georef sidecar(s) from {dir_path}")
     return removed
+
+
+def publishable_keymap_georefs(raw_dir: Path) -> list[Path]:
+    """The key-map georef sidecars worth an annotation: those that could locate pages.
+
+    One georeferenced to a few hundred metres (Boston 1867's spans 57 m) is a
+    wrong pose, and #525 already keeps it out of placement; publishing it
+    anyway put 736 such key maps in v2.0.
+    """
+    return [
+        path
+        for path in sorted(raw_dir.glob("*.georef.json"))
+        if plausible_keymap_georef(path)
+    ]
 
 
 def main() -> None:
@@ -415,7 +430,7 @@ def main() -> None:
     # built for street sheets, and a key map's own footprint lives in its
     # regions.panels.json instead, which is uploaded too -- so a mask can be
     # added later by regenerating this file, without re-running the chain.
-    keymap_georefs = sorted((dir_path / "raw").glob("*.georef.json"))
+    keymap_georefs = publishable_keymap_georefs(dir_path / "raw")
     if keymap_georefs:
         keymap_iiif = dir_path / f"{run_id}.keymap.iiif.json"
         timed(
@@ -428,7 +443,8 @@ def main() -> None:
                     if ref_iiif is not None and not args.image_base_url
                     else []
                 ),
-                str(dir_path / "raw" / "*.georef.json"),
+                # make_iiif_georef reads a comma-separated list of globs; a path is one.
+                ",".join(str(path) for path in keymap_georefs),
                 *(
                     [
                         "--image-base-url",
