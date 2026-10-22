@@ -252,6 +252,19 @@ run's cost about 4× (#624, a real bug).
 - **Overriding a parameter at submit:** use
   `--parameters cityCounties=…,locations=…` in `aws batch submit-job`.
 
+### Check the masks before publishing
+
+corpus-v2 published 127 volumes whose annotations were all whole sheets, and
+about 180 more with whole groups of pages unmasked (#647). Nothing failed, and
+nothing in the job logs showed it.
+
+- **Each item's manifest counts them:** `metrics.masks` has `annotations` and
+  `whole_sheet`. Flag any volume where `whole_sheet` is close to
+  `annotations`. A handful of whole-sheet pages is normal; a whole volume is
+  not.
+- **`runs/<tag>/fit.log`** holds `fit`'s full output for each item, including
+  the masker's `region masks: …` lines.
+
 ### Cost
 
 - **Collect promptly:** run `collect-run.py` within 24 hours. Batch drops the
