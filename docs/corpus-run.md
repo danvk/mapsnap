@@ -142,22 +142,61 @@ through retries, but every one of them restarted.
 
 ## Running a pass
 
-1. **Canary** (a handful of items, including one with a key map), then a random 1,000
-   (`sample-items.py`). Check cost, failures and peak memory before the rest.
-2. **Plan and submit the rest under the same run tag:**
+1. **Canary** (a handful of items, including one with a key map), then a first
+   batch. Make the batch a random 1,000 (`sample-items.py`) **plus every OIM
+   truth volume**, and check cost, failures and peak memory before the rest.
+2. **Retrain p(good) on that batch before running the rest.** The confidence
+   model is trained against OIM truth on a run's own provenance, and scores
+   drift as the pipeline changes: corpus-v2 ran with the corpus-v1 model and
+   was 13 points under-confident. Retraining afterwards meant downloading and
+   rewriting every published IIIF (see *Confidence* below). Instead:
+   - score the batch's truth volumes;
+   - run `scripts/train_confidence.py` over them;
+   - merge the new `models/confidence.json`, then build and push the image the
+     rest of the corpus runs on.
+
+   Only the first batch then needs `rescore_confidence.py`, a few minutes for
+   1,000 volumes.
+3. **Plan and submit the rest under the same run tag:**
    ```sh
    scripts/batch/plan-items.py rest.txt --per-job 8 --out planned.txt
    PER_JOB=8 scripts/batch/submit.sh corpus-v2 planned.txt
    ```
    An item already published under the tag is skipped, so passes can overlap
    and resubmissions are safe.
-3. **Sample the fleet alongside it:**
+4. **Sample the fleet alongside it:**
    `scripts/batch/snapshot-instances.sh <job> instances.tsv &`. Terminated
    instances leave `describe-instances` within the hour, so the cost can't be
    reconstructed afterwards.
-4. **Watch it** with `scripts/batch/status.sh <job> --watch`, or a loop that
+5. **Watch it** with `scripts/batch/status.sh <job> --watch`, or a loop that
    reports only new failures and progress milestones. That saves reading the
    console for 60 hours.
+
+### Don't trust the early estimates
+
+Time and cost projected from the first few hundred finished children run high,
+and in corpus-v2 they were still far too high after 500 items. The cause is
+the planner, which is unchanged as of #641 (#624 and #625 are open):
+
+- **The heaviest children run first.** `balance_items` places items
+  largest-first into the lightest child, and ties go to the lowest index. So
+  the first children fill with the biggest volumes before load-balancing has
+  anything to even out. In corpus-v2, planned work fell from about 149
+  sheet-equivalents a child at the start of the array to 104 at the end.
+  Batch starts children roughly in index order, so the first to finish are the
+  heaviest.
+- **Each child runs its biggest item first,** because items keep the planner's
+  order. A child's first item to finish is also slower than average.
+- **The cost report projects per child,** which overstates a chunked run's
+  corpus cost about 4× (#624).
+
+Until the planner shuffles the order of its children, estimate from work done,
+not children done. Sum the planned sheet-equivalents (`sheets + 3` per item, as
+`balance_items` weighs them) of the finished children, divide by elapsed time,
+and apply that rate to what's left. For cost, price the fleet snapshots: dollars
+an hour multiplied by the hours left. Either way the rate rises as the run goes
+on. corpus-v2's pace estimate fell from Tuesday to Monday between the 500-item
+and 2,300-item marks.
 
 ### Reading failures
 
@@ -243,6 +282,9 @@ Some truth volumes are suspect. Rochester 1950 Vol. 1 holds Vol. 1s's fits
 finds more.
 
 ## Confidence (p(good))
+
+Retrain the model on the first batch, before the rest of the corpus runs (see
+*Running a pass*); the steps below are for when that didn't happen.
 
 The model is trained on a run's own provenance against OIM truth
 (`scripts/train_confidence.py`). Retrain it after any change to placement,
