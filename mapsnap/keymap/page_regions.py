@@ -513,12 +513,30 @@ def working_geometry(
     return scale, line_smooth_size
 
 
+# Key maps above this many pixels are segmented from their 8-bit image (#639). A normal key map
+# is about 50 MP, and its float64 copy (1.2 GB) is kept, because the segmentation is sensitive
+# to the +/-1 a uint8 resize rounds differently: on 39 of 41 key maps it moved some region,
+# though the mean IoU against truth was unchanged within noise (0.346 vs 0.341). Only the
+# outsized ones (Brooklyn 1908's 163 MP, Boston 1867's 146 MP) take the 8-bit path, whose
+# float64 copy alone was 3.5-3.9 GB.
+FLOAT_INPUT_MAX_PIXELS = 100_000_000
+
+
+def segmentation_input(rgb: np.ndarray) -> np.ndarray:
+    """The image to segment: floats in [0, 1], or for an outsized key map its 8-bit RGB as is."""
+    if rgb.shape[0] * rgb.shape[1] > FLOAT_INPUT_MAX_PIXELS:
+        return rgb
+    return rgb.astype(np.float64) / 255.0
+
+
 def segment_page_regions(
     rgb: np.ndarray, seeds: list[Box], params: RegionParams
 ) -> dict[int, list[Point]]:
     """Polygon (full-res pixels) of the colored block around each seeded page number.
 
-    rgb is a float image in [0, 1] (H x W x 3). ``seeds`` are page-number bounding boxes in
+    rgb is the key map as floats in [0, 1], or as 8-bit RGB (H x W x 3; see
+    :func:`segmentation_input`). Only a copy shrunk to the working scale is ever segmented, so
+    8-bit input never needs a full-size float image. ``seeds`` are page-number bounding boxes in
     full-resolution coordinates. The image is colour-clustered — seed-palette quantization by
     default, plain k-means with ``params.use_global_kmeans`` (or as the fallback when no
     palette colour survives the paper filter); each cluster mask is cleaned
@@ -530,12 +548,14 @@ def segment_page_regions(
     """
     scale, line_smooth_size = working_geometry(rgb.shape, seeds, params)
     height, width = rgb.shape[:2]
-    scaled_u8 = np.clip(
-        cv2.resize(rgb, (max(1, round(width * scale)), max(1, round(height * scale))))
-        * 255.0,
-        0,
-        255,
-    ).astype(np.uint8)
+    scaled = cv2.resize(
+        rgb, (max(1, round(width * scale)), max(1, round(height * scale)))
+    )
+    scaled_u8 = (
+        scaled
+        if scaled.dtype == np.uint8
+        else np.clip(scaled * 255.0, 0, 255).astype(np.uint8)
+    )
 
     scaled_boxes = scale_boxes(seeds, scale, scaled_u8.shape)
     seeded = (
@@ -865,19 +885,21 @@ def main() -> None:
     params = RegionParams(use_global_kmeans=args.global_kmeans)
     seeds, texts = load_seeds(args.keymap)
     image = Image.open(image_path).convert("RGB")
+    size = image.size
     rgb = np.asarray(image)
+    del image  # the 8-bit array is all that's needed from here
     if args.scale:
         params = dataclasses.replace(params, target_long_side=args.scale)
-        polygons = segment_page_regions(rgb.astype(np.float64) / 255.0, seeds, params)
+        polygons = segment_page_regions(segmentation_input(rgb), seeds, params)
         picked = args.scale
     else:
         polygons, picked = segment_page_regions_multiscale(
-            rgb.astype(np.float64) / 255.0, seeds, params
+            segmentation_input(rgb), seeds, params
         )
         # The debug outputs below re-derive geometry from params; keep them at the
         # scale the segmentation actually used.
         params = dataclasses.replace(params, target_long_side=picked)
-    doc = regions_panels_doc(image_path.name, image.size, polygons, texts)
+    doc = regions_panels_doc(image_path.name, size, polygons, texts)
     output.write_text(json.dumps(doc))
     print(
         f"Wrote {output}: {len(polygons)}/{len(seeds)} regions found (scale {picked})."

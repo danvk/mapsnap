@@ -21,6 +21,7 @@ from mapsnap.keymap.page_regions import (
     seed_palette,
     segment_page_regions,
     segment_page_regions_multiscale,
+    segmentation_input,
     segmentation_irregularity,
     split_component,
     working_scale,
@@ -171,6 +172,32 @@ def test_segment_page_regions_splits_shared_block():
     assert max(x for x, _ in polygons[0]) < min(
         x for x, _ in polygons[1]
     )  # split, disjoint
+
+
+def test_segment_page_regions_takes_8_bit_input():
+    # The CLI passes the key map as 8-bit RGB so no full-size float copy is made (#639);
+    # the same blocks come out as from the [0, 1] float image.
+    rgb = np.full((80, 80, 3), 0.85, dtype=np.float64)
+    rgb[30:50, 15:30] = [0.8, 0.1, 0.1]
+    rgb[30:50, 50:65] = [0.1, 0.1, 0.8]
+    params = RegionParams(n_clusters=3, max_region_sheet_frac=1.0)
+    seeds = [(18.0, 35.0, 27.0, 45.0), (53.0, 35.0, 62.0, 45.0), (5.0, 5.0, 12.0, 12.0)]
+    from_float = segment_page_regions(rgb, seeds, params)
+    from_u8 = segment_page_regions((rgb * 255).round().astype(np.uint8), seeds, params)
+    assert set(from_u8) == set(from_float) == {0, 1}
+    for seed in from_float:
+        xs_float = [x for x, _ in from_float[seed]]
+        xs_u8 = [x for x, _ in from_u8[seed]]
+        assert abs(min(xs_float) - min(xs_u8)) <= 1
+        assert abs(max(xs_float) - max(xs_u8)) <= 1
+
+
+def test_segmentation_input_is_float_unless_the_key_map_is_outsized(monkeypatch):
+    rgb = np.full((10, 20, 3), 255, dtype=np.uint8)
+    pixels = segmentation_input(rgb)
+    assert pixels.dtype == np.float64 and pixels.max() == 1.0
+    monkeypatch.setattr("mapsnap.keymap.page_regions.FLOAT_INPUT_MAX_PIXELS", 199)
+    assert segmentation_input(rgb) is rgb
 
 
 def test_scale_boxes_scales_and_clamps():
