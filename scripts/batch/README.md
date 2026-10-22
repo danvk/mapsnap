@@ -1,5 +1,9 @@
 # Running the corpus fit on AWS Batch
 
+For the end-to-end runbook (pre-flight checks, scheduling, mop-up, scoring and
+publishing to data.mapsnap.org), see `docs/corpus-run.md`. This file covers the
+Batch scripts themselves.
+
 How the corpus runs (#448), since the hand-rolled EC2 fleet and its SQS
 worker loop were deleted: the image built from the repo's `Dockerfile`
 runs one item per Batch job, an array job maps over an item list, and Batch
