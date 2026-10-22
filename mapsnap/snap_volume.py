@@ -626,6 +626,24 @@ def load_panel_units(volume: Path) -> list[PageUnit]:
     return units
 
 
+def calibration_units(
+    units: list[PageUnit], panel_units: list[PageUnit]
+) -> list[PageUnit]:
+    """The fitted pages snap calibrates radius and rotation against: whole sheets, else panels.
+
+    The same policy as ``volume_median_scale``: whole sheets when any is fitted,
+    so every volume that has one is unchanged, and otherwise the fitted panels.
+    Calibrating on whole sheets alone skipped every volume whose only fits are
+    split panels -- 6,526 of corpus-v2's 35,101 (#646).
+    """
+
+    def fitted(unit: PageUnit) -> bool:
+        return unit.fit_state == "fitted" and unit.gen_affine is not None
+
+    sheets = [unit for unit in units if fitted(unit)]
+    return sheets or [unit for unit in panel_units if fitted(unit)]
+
+
 def load_volume_context(
     volume: Path,
     units: list[PageUnit] | None = None,
@@ -644,7 +662,8 @@ def load_volume_context(
     keymaps = usable_keymaps(volume / "raw")
     locator = KeymapLocator.from_keymaps(keymaps) if keymaps else None
     _, region_centroids = keymap_region_adjacency(volume)
-    residuals = keymap_fit_residuals(units)
+    calibrating = calibration_units(units, panel_units)
+    residuals = keymap_fit_residuals(calibrating)
     locator_radius = locator.radius_m if locator else 600.0
     radius, radius_source = calibrated_radius_m(residuals, locator_radius)
     return VolumeContext(
@@ -660,7 +679,7 @@ def load_volume_context(
         filter_params=volume_filter_params(volume),
         radius_m=radius,
         radius_source=radius_source,
-        median_theta_deg=volume_median_theta(units),
+        median_theta_deg=volume_median_theta(calibrating),
     )
 
 
@@ -1456,7 +1475,7 @@ def cmd_candidates(
     out_dir.mkdir(parents=True, exist_ok=True)
     out_path = out_dir / "candidates.jsonl"
     units = load_page_units(volume)
-    if not any(u.fit_state == "fitted" and u.gen_affine is not None for u in units):
+    if not calibration_units(units, load_panel_units(volume)):
         # Nothing to calibrate scale/radius/rotation against — and nothing for
         # the channel to do that could be trusted. Leave an empty candidates
         # file so select/materialize no-op cleanly instead of erroring.
