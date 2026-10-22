@@ -47,8 +47,11 @@ IMAGE=${IMAGE:-$ACCOUNT.dkr.ecr.$REGION.amazonaws.com/mapsnap:latest}
 # them on BOTH attempts, roughly a 1-in-3 chance per attempt. A retry resumes
 # (published items are skipped), so an extra attempt costs a re-sync and the
 # item in flight. Exit 3 and 4 still stop at once, so nothing unrunnable pays.
-ATTEMPTS=${ATTEMPTS:-5}
-ATTEMPT_SECONDS=${ATTEMPT_SECONDS:-10800}
+# 10 (Batch's maximum) since corpus-v2: two children used all 5 attempts on spot
+# reclaims during a weekday afternoon. 12 hours an attempt, because one child
+# runs 8 items and the slowest corpus-v2 child took 5.7 hours.
+ATTEMPTS=${ATTEMPTS:-10}
+ATTEMPT_SECONDS=${ATTEMPT_SECONDS:-43200}
 # Named here rather than beside the role that creates it: the job definitions
 # reference it in every mode, including --job-definitions-only, which skips
 # the IAM section entirely.
@@ -255,6 +258,11 @@ fi
 # $ATTEMPTS attempts in all (see ATTEMPTS above). The pilot lost two instances
 # to spot and all eight children recovered on their second attempt; the full
 # corpus, at 128 jobs, did not get off so lightly.
+# cityCounties is city-items.tsv (independent cities) plus the hand-labelled counties
+# of items the county mapping missed (NJ coast atlases, Alaska boroughs, ...).
+# locations is each item's catalogue coordinate: without it loc-fit reads a small
+# volume (<= 10 pages) against its whole county, and corpus-v1 and corpus-v2 both
+# ran that way -- 1,459 corpus-v2 volumes had pages placed over 5 km from town (#531).
 register_fit_definition() {
   local name=$1 memory=$2
   run aws batch register-job-definition --region "$REGION" --cli-input-json "$(cat <<JSON
@@ -267,14 +275,16 @@ register_fit_definition() {
     "runTag": "UNSET",
     "bucket": "s3://mapsnap-sanborn",
     "counties": "s3://mapsnap-sanborn/_craft/items.tsv",
-    "cityCounties": "s3://mapsnap-sanborn/_craft/city-items.tsv",
+    "cityCounties": "s3://mapsnap-sanborn/_craft/city-and-hand-items.tsv",
+    "locations": "s3://mapsnap-sanborn/_craft/item-locations.tsv",
     "itemsPerJob": "1"
   },
   "containerProperties": {
     "image": "$IMAGE",
     "command": ["loc-fit", "--items", "Ref::items", "--items-per-job", "Ref::itemsPerJob",
                 "--run-tag", "Ref::runTag", "--bucket", "Ref::bucket",
-                "--counties", "Ref::counties", "Ref::cityCounties"],
+                "--counties", "Ref::counties", "Ref::cityCounties",
+                "--locations", "Ref::locations"],
     "jobRoleArn": "arn:aws:iam::$ACCOUNT:role/$JOB_ROLE",
     "resourceRequirements": [{"type": "VCPU", "value": "2"}, {"type": "MEMORY", "value": "$memory"}],
     "environment": [{"name": "OMP_NUM_THREADS", "value": "2"}, {"name": "AWS_REGION", "value": "$REGION"},
