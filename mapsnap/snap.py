@@ -31,7 +31,7 @@ NCC matching (roughly 10-30 minutes per volume); candidates are cached in
 artifacts/osm_snap/candidates.jsonl and reruns are seconds.
 
 Usage:
-    mapsnap snap DIR [--rescue-only] [--recompute]
+    mapsnap snap DIR [--rescue-only] [--recompute] [--accept-model]
 """
 
 import argparse
@@ -73,6 +73,15 @@ def main() -> None:
             "so expect about a gigabyte of memory apiece on a large volume."
         ),
     )
+    parser.add_argument(
+        "--accept-model",
+        action="store_true",
+        help=(
+            "Decide rescues and challenges with the learned accept "
+            "probabilities in models/snap_accept.json instead of the "
+            "select-score bars (#650). Ranking is unchanged."
+        ),
+    )
     args = parser.parse_args()
 
     # The production gates are frozen alongside the selection code (see the
@@ -89,6 +98,12 @@ def main() -> None:
         half_sheet_seed_targets,
     )
 
+    accept_model = None
+    if args.accept_model:
+        from mapsnap.snap_accept import load_accept_model
+
+        accept_model = load_accept_model()
+        print(f"accept model: {accept_model.version}")
     mode = "union" if args.rescue_only else "arbitrate"
     cmd_candidates(
         args.dir,
@@ -105,6 +120,7 @@ def main() -> None:
         PRODUCTION_GATE_SCORE,
         PRODUCTION_GATE_MARGIN,
         PRODUCTION_ARBITRATE_GATE,
+        accept_model=accept_model,
     )
     cmd_materialize(args.dir, mode)
     if HALF_SHEET_SEEDS:
@@ -129,6 +145,7 @@ def main() -> None:
                 PRODUCTION_GATE_SCORE,
                 PRODUCTION_GATE_MARGIN,
                 PRODUCTION_ARBITRATE_GATE,
+                accept_model=accept_model,
             )
             cmd_materialize(args.dir, mode)
 
