@@ -19,6 +19,7 @@ import argparse
 import hashlib
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -288,6 +289,48 @@ def truth_metrics(truth_path: Path, iiif_path: Path) -> dict:
     return metrics
 
 
+SELECTOR_POINTS = re.compile(r'points="([^"]*)"')
+
+
+def is_whole_sheet_selector(annotation: dict) -> bool:
+    """Whether an annotation's clip polygon is just its image (or split canvas) rectangle.
+
+    That is the selector a page gets when the masker gives it nothing. A split
+    panel's fallback is its panel outline instead, which this does not catch.
+    """
+    selector = annotation.get("target", {}).get("selector") or {}
+    match = SELECTOR_POINTS.search(selector.get("value", ""))
+    if match is None:
+        return False
+    points = {
+        tuple(round(float(value)) for value in point.split(","))
+        for point in match.group(1).split()
+    }
+    meta = {
+        entry["label"]: entry["value"] for entry in annotation.get("metadata") or []
+    }
+    if "split_canvas_w" in meta:
+        x, y, width, height = (
+            round(float(meta[f"split_canvas_{key}"])) for key in ("x", "y", "w", "h")
+        )
+    else:
+        source = annotation["target"]["source"]
+        x, y, width, height = 0, 0, round(source["width"]), round(source["height"])
+    corners = {(x, y), (x + width, y), (x + width, y + height), (x, y + height)}
+    return points == corners
+
+
+def mask_counts(iiif_path: Path) -> dict[str, int]:
+    """How many of a published IIIF's annotations carry a clip mask, and how many don't.
+
+    A volume whose annotations are all whole sheets is how #647 looked: the
+    masker quietly made nothing, and only the published file showed it.
+    """
+    items = json.loads(iiif_path.read_text()).get("items") or []
+    whole = sum(is_whole_sheet_selector(annotation) for annotation in items)
+    return {"annotations": len(items), "whole_sheet": whole}
+
+
 def build_manifest(
     dir_path: Path,
     run_id: str,
@@ -307,6 +350,8 @@ def build_manifest(
     metrics: dict = coverage_counts(dir_path)
     if truth_path is not None and truth_path.exists() and iiif_path is not None:
         metrics["truth"] = truth_metrics(truth_path, iiif_path)
+    if iiif_path is not None and iiif_path.exists():
+        metrics["masks"] = mask_counts(iiif_path)
     manifest: dict = {
         "run_id": run_id,
         "git": git,

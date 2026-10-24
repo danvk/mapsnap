@@ -678,6 +678,28 @@ def test_a_crash_with_no_record_is_still_a_failure(monkeypatch, tmp_path):
         )
 
 
+def test_stage_keeps_a_successful_commands_output_when_asked(
+    monkeypatch, tmp_path
+) -> None:
+    """A fit that succeeds says nothing in the job log; #647's masker said its
+    piece only into the captured output, which was dropped."""
+    import fnmatch
+
+    from mapsnap import loc_fit
+    from mapsnap.utils import Finished
+
+    output = "region masks: no masks for any of 29 pages (p85L, ...)\n"
+    monkeypatch.setattr(
+        loc_fit, "run_measured", lambda command, **kw: Finished(0, 700.0, output)
+    )
+    loc_fit.stage(["mapsnap", "fit", str(tmp_path)], tmp_path, log_name=loc_fit.FIT_LOG)
+    assert (tmp_path / loc_fit.FIT_LOG).read_text() == output
+    assert loc_fit.FIT_LOG in UPLOAD_GLOBS
+    assert not any(
+        fnmatch.fnmatch(loc_fit.FIT_LOG, pattern) for pattern in UPLOAD_EXCLUDES
+    )
+
+
 def test_a_failed_stage_logs_its_output_and_peak(monkeypatch, tmp_path, capsys):
     """Birmingham 1950's `fit` died with only its stderr kept, and stderr never
     said which of fit's stages was killed: that went to stdout. Both streams now

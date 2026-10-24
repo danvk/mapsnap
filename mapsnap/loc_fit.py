@@ -136,6 +136,11 @@ DONE_MARKER = f"{ARCHIVE_TAG}.iiif.json"
 # uploaded, are checkpointed. split and craft are not: they re-cut panel
 # files that are never uploaded, in under a second a page. fit is not either:
 # its output is the item, and the done marker already records it.
+# `fit`'s own output, kept beside the run. stage() captures every command's
+# output and prints it only when the command fails, so a fit that succeeded
+# but published 127 volumes without clip masks (#647) left no trace of the
+# masker's complaints anywhere.
+FIT_LOG = "fit.log"
 CHECKPOINT_DIRNAME = "checkpoints"
 CHECKPOINTED_STAGES = ("keymap-detect", "adjacency", "keymap", "ocr")
 # How often the OCR stage's reads so far are uploaded while it runs. A page takes
@@ -160,6 +165,7 @@ UPLOAD_GLOBS = (
     f"artifacts/{ARCHIVE_TAG}/manifest.json",
     "adjacency.json",
     "keymaps.json",
+    FIT_LOG,
     f"{ARCHIVE_TAG}.iiif.json",
     # The key map's own annotation page: it is georeferenced like any other
     # sheet and is the one sheet that shows how the volume is laid out.
@@ -574,8 +580,12 @@ def stage(
     ok_if: Callable[[], bool] | None = None,
     *,
     while_running: Callable[[], None] | None = None,
+    log_name: str | None = None,
 ) -> None:
     """Run one pipeline command, failing loudly.
+
+    ``log_name`` also writes the command's whole output to that file in
+    ``local``, whether or not it succeeded, so it goes up with the run.
 
     ``ok_if`` names the thing the stage was for, when a non-zero exit does not
     mean it failed. keymap-detect exits 1 when it finds no key map, which most
@@ -598,6 +608,8 @@ def stage(
     with every(PROGRESS_SYNC_SECONDS, while_running):
         result = run_measured(command, capture=True)
     elapsed = time.perf_counter() - started
+    if log_name is not None:
+        (local / log_name).write_text(result.output)
     # One line per stage, per item. `fit` prints its own sub-stage times but
     # into a pipe this captures, so without this the only timing that reaches
     # CloudWatch is the whole item, and a 6,000-job-hour corpus run cannot say
@@ -775,6 +787,7 @@ def run_chain(
         ],
         local,
         while_running=save_fit,
+        log_name=FIT_LOG,
     )
 
 

@@ -16,6 +16,8 @@ from mapsnap.run_archive import (
     find_dedup_streets_dir,
     format_volume_diff,
     gather_inputs,
+    is_whole_sheet_selector,
+    mask_counts,
     normalize_flags_for_hash,
     page_status,
 )
@@ -166,6 +168,59 @@ def test_build_manifest_coverage_only_without_truth(tmp_path):
     assert manifest["label"] == "my-run"
     assert manifest["metrics"]["georeferenced"] == 1
     assert "truth" not in manifest["metrics"]
+
+
+def _annotation(points: str, split: tuple[int, int, int, int] | None = None) -> dict:
+    """A published annotation on a 1000 x 800 image with the given selector points."""
+    metadata = []
+    if split is not None:
+        metadata = [
+            {"label": f"split_canvas_{key}", "value": str(value)}
+            for key, value in zip(("x", "y", "w", "h"), split)
+        ]
+    return {
+        "metadata": metadata,
+        "target": {
+            "source": {"width": 1000, "height": 800},
+            "selector": {"value": f'<svg><polygon points="{points}" /></svg>'},
+        },
+    }
+
+
+def test_is_whole_sheet_selector_spots_the_image_rectangle():
+    assert is_whole_sheet_selector(_annotation("0,800 0,0 1000,0 1000,800 0,800"))
+    assert not is_whole_sheet_selector(_annotation("10,790 10,20 950,15 940,780"))
+
+
+def test_is_whole_sheet_selector_uses_the_split_canvas():
+    split = (500, 0, 500, 800)
+    assert is_whole_sheet_selector(
+        _annotation("500,800 500,0 1000.0,0 1000.0,800 500,800", split)
+    )
+    assert not is_whole_sheet_selector(
+        _annotation("0,800 0,0 1000,0 1000,800 0,800", split)
+    )
+
+
+def test_build_manifest_counts_whole_sheet_selectors(tmp_path):
+    iiif = tmp_path / "mapsnap.iiif.json"
+    items = [
+        _annotation("0,800 0,0 1000,0 1000,800 0,800"),
+        _annotation("10,790 10,20 950,15 940,780"),
+    ]
+    iiif.write_text(json.dumps({"items": items}))
+    assert mask_counts(iiif) == {"annotations": 2, "whole_sheet": 1}
+    manifest = build_manifest(
+        tmp_path,
+        run_id="abc-123",
+        flag_tokens=[],
+        inputs={},
+        git={},
+        command=["mapsnap", "fit", "data/vol"],
+        truth_path=None,
+        iiif_path=iiif,
+    )
+    assert manifest["metrics"]["masks"] == {"annotations": 2, "whole_sheet": 1}
 
 
 # --- dedup + archiving ---
