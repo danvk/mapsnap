@@ -219,6 +219,7 @@ __marimo__/
 
 data
 backup-data
+# Claude Code: skills and shared settings are tracked; personal settings are not.
 .claude/settings.local.json
 models/*.pth
 instances*.tsv
@@ -228,4 +229,3 @@ instances*.tsv
 # scripts/atlas/build_places.py; the app says so when it is missing.
 app/public/atlas/
 
-.claude
