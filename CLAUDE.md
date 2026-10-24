@@ -6,6 +6,14 @@
 - Don't merge PRs unless explicitly told to.
 - Don't include issue numbers in PR titles. Put them in the body instead.
 - Use GitHub keyword phrases like "Fixes #123" or "Resolves #234" to make PRs automatically close issues.
+- Don't hard-wrap PR bodies, issue bodies or comments: GitHub renders each newline. Hard-wrap commit messages and code comments only.
+- Put figures in issues and PRs via the `issue-images` branch (see the `issue-images` skill), never as local paths.
+
+## Running things locally
+
+- Run one heavy job at a time on the laptop, with the default (serial) `--num-workers`. Never run two OCR or fit jobs at once; it runs out of memory.
+- Never put a recursive S3 listing (`aws s3 ls --recursive`) in a polling loop: listings are billed as egress.
+- Skills in `.claude/skills/` cover recurring procedures: `background-jobs` (launching and waiting on long jobs on macOS), `truth-ab` (A/B runs on OIM-truth volumes), `local-volume` (pulling a corpus item into data/), `issue-images`.
 
 ## Coding guidelines
 
@@ -66,6 +74,8 @@ uv run ruff format <file>
 uv run ruff check --fix <file>
 uv run pyright
 ```
+
+Read these gates' full output: never pipe them through `tail` or `head`, which once hid two real findings and failed CI. Before pushing, run them repo-wide as CI does: `uv run ruff format --check`, `uv run ruff check`, `uv run pyright`, `uv run pytest`.
 
 ### TypeScript / frontend files
 
