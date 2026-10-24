@@ -5,6 +5,8 @@ import math
 import re
 from pathlib import Path
 
+import cv2
+import numpy as np
 from shapely.geometry import Polygon, box
 
 from mapsnap.annotation_transform import gcp_transform, page_transform
@@ -18,6 +20,7 @@ from mapsnap.make_iiif_georef import (
     expand_georef_globs,
     fill_missing_source_ids,
     georef_gcp_points,
+    georef_page_stem,
     georef_path_to_page_key,
     glob_matched_anything,
     make_annotation,
@@ -268,6 +271,32 @@ def test_georef_path_with_direction_suffix():
 def test_georef_path_with_left_right_suffix():
     assert georef_path_to_page_key("data/vol/p10L.georef.json") == "p10l"
     assert georef_path_to_page_key("data/vol/p10R.georef.json") == "p10r"
+
+
+def test_georef_page_stem_keeps_the_files_letter_case():
+    assert georef_page_stem("data/vol/p10L.georef-final.json") == "p10L"
+    assert georef_page_stem("data/vol/p12A__2.georef.json") == "p12A__2"
+    assert georef_page_stem("data/vol/p16.georef-snap.json") == "p16"
+    assert georef_page_stem("data/vol/notes.json") is None
+
+
+def test_s3_items_read_images_by_the_files_own_case(tmp_path):
+    # On Linux p10l.jpg is not p10L.jpg (#647); the key stays lowercase for
+    # canvases, but every file path keeps the scan's case.
+    from mapsnap.make_iiif_georef import _load_s3_items
+
+    cv2.imwrite(str(tmp_path / "p10L.jpg"), np.full((30, 40, 3), 255, np.uint8))
+    posed = json.dumps(
+        {"corners": [[-74.0, 40.0], [-73.9, 40.0], [-73.9, 39.9], [-74.0, 39.9]]}
+    )
+    (tmp_path / "p10L.georef-final.json").write_text(posed)
+    (tmp_path / "p10L__2.georef-final.json").write_text(posed)
+    items, _, _ = _load_s3_items(str(tmp_path / "*.georef-final.json"), "https://x")
+    by_key = {key: (image, item) for key, item, _, image, _ in items}
+    assert set(by_key) == {"p10l", "p10l__2"}
+    assert by_key["p10l"][0].name == "p10L.jpg"
+    assert by_key["p10l__2"][0].name == "p10L__2.jpg"
+    assert by_key["p10l"][1]["target"]["source"]["id"] == "https://x/p10L.jpg"
 
 
 def test_georef_path_left_right_suffix_zero():

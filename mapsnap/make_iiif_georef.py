@@ -87,15 +87,31 @@ def georef_path_to_page_key(path: str) -> str | None:
     ending in 's' ('p6ns') parse too; drop_redundant_skeletons decides whether
     one is a skeleton.
     """
+    stem = georef_page_stem(path)
+    if stem is None:
+        return None
+    match = re.fullmatch(r"(p\d+)([a-z]*)((?:__\d+)?)", stem, re.IGNORECASE)
+    assert match is not None
+    page_num, suffix, split = match.groups()
+    return f"{page_num}{suffix.lower()}{split}"
+
+
+def georef_page_stem(path: str) -> str | None:
+    """The page's own file stem in a georef filename, letter case kept ('p10L__2').
+
+    The page key (georef_path_to_page_key) lowercases the letter suffix to
+    match canvases; files on disk keep the scan's case. Build image and
+    sidecar paths from this, never from the key: on a case-sensitive
+    filesystem p10l.jpg is not p10L.jpg, and the iiif step lost the region
+    masks and split panels of every such page on Batch (#647) while working
+    on the Mac.
+    """
     m = re.search(
-        r"(?:\b|_)(p\d+)([a-z]*)((?:__\d+)?)(?:\.[^.]+)?\.georef(?:2|-[a-z0-9-]+)?\.json$",
+        r"(?:\b|_)(p\d+[a-z]*(?:__\d+)?)(?:\.[^.]+)?\.georef(?:2|-[a-z0-9-]+)?\.json$",
         path,
         re.IGNORECASE,
     )
-    if not m:
-        return None
-    page_num, suffix, split = m.groups()
-    return f"{page_num}{suffix.lower()}{split}"
+    return m.group(1) if m else None
 
 
 def has_pose(path: str) -> bool:
@@ -620,8 +636,9 @@ def make_annotation(
         ]
     else:
         # Split page: place the panel within the parent canvas using panels.json.
-        parent_key = page_key.split("__")[0]
-        panels_path = panels_json_path(image_path.parent / f"{parent_key}.jpg")
+        # The image's own stem, not the page key: the key is lowercased (#647).
+        parent_stem = image_path.stem.split("__")[0]
+        panels_path = panels_json_path(image_path.parent / f"{parent_stem}.jpg")
         if not panels_path.exists():
             raise ValueError(f"panels.json not found: {panels_path}")
         panels_data = read_panels_json(panels_path)
@@ -755,9 +772,9 @@ def _load_s3_items(
             print(f"Warning: could not parse page key from '{path}'", file=sys.stderr)
             continue
         # Splits share their parent page's full canvas.
-        parent_key = page_key.split("__")[0]
-        image_path = Path(path).parent / f"{page_key}.jpg"
-        parent_image = Path(path).parent / f"{parent_key}.jpg"
+        stem = georef_page_stem(path) or page_key
+        image_path = Path(path).parent / f"{stem}.jpg"
+        parent_image = Path(path).parent / f"{stem.split('__')[0]}.jpg"
         if not parent_image.exists():
             print(f"Warning: page image not found: {parent_image}", file=sys.stderr)
             continue
@@ -769,7 +786,7 @@ def _load_s3_items(
             "label": page_key,
             "target": {
                 "source": {
-                    "id": f"{base_url}/{parent_key}.jpg",
+                    "id": f"{base_url}/{parent_image.name}",
                     "type": source_type,
                     "width": source_width,
                     "height": source_height,
@@ -1032,7 +1049,7 @@ def _load_volume_items(
             )
             continue
         georef = json.loads(Path(path).read_text())
-        image_path = Path(path).parent / f"{page_key}.jpg"
+        image_path = Path(path).parent / f"{georef_page_stem(path) or page_key}.jpg"
         valid_items.append((page_key, canvas_item, georef, image_path, Path(path)))
 
     # Drop skeleton pages (key ends in 's') when a full-color counterpart exists
