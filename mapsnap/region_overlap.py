@@ -90,11 +90,17 @@ def posed_region_metres(
     return make_valid(posed).buffer(0)
 
 
-def overlap_over_min(a: Polygon | MultiPolygon, b: Polygon | MultiPolygon) -> float:
-    """Intersection area over the smaller area; 0 when either is empty or they are apart."""
+def overlap_over_min(
+    a: Polygon | MultiPolygon, b: Polygon | MultiPolygon, floor_area: float = 0.0
+) -> float:
+    """Intersection area over the smaller area; 0 when either is empty or they are apart.
+
+    ``floor_area`` is the least the denominator may be, so a small region's
+    ordinary seam is not read as a large share of it (#643).
+    """
     if a.is_empty or b.is_empty or not a.intersects(b):
         return 0.0
-    smaller = min(a.area, b.area)
+    smaller = max(min(a.area, b.area), floor_area)
     if smaller <= 0:
         return 0.0
     return float(a.intersection(b).area / smaller)

@@ -187,6 +187,14 @@ def main() -> None:
         ),
     )
     parser.add_argument(
+        "--region-floor",
+        action="store_true",
+        help=(
+            "Have reconcile judge a region overlap against no less than half "
+            "the volume's median whole-sheet region (#643)."
+        ),
+    )
+    parser.add_argument(
         "--no-region-overlap",
         action="store_true",
         help=(
@@ -247,6 +255,7 @@ def main() -> None:
         *georef_extra,
         *(["--no-snap"] if args.no_snap else []),
         *(["--no-region-overlap"] if args.no_region_overlap else []),
+        *(["--region-floor"] if args.region_floor else []),
     ]
     run_id = resolve_run_id(dir_path, args.tag, id_tokens, inputs, git)
 
@@ -370,6 +379,11 @@ def main() -> None:
             str(dir_path),
             "--publish",
             *([] if args.no_region_overlap else ["--region-overlap"]),
+            *(
+                ["--region-floor"]
+                if args.region_floor and not args.no_region_overlap
+                else []
+            ),
         ],
     )
 

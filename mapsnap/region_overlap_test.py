@@ -5,6 +5,7 @@ from pathlib import Path
 
 import cv2
 import numpy as np
+import pytest
 
 from mapsnap.region_overlap import (
     overlap_over_min,
@@ -59,3 +60,15 @@ def test_posed_regions_overlap_by_displacement(tmp_path: Path) -> None:
     assert abs(overlap_over_min(at_home, shifted) - 0.5) < 0.02
     apart = posed_region_metres(region, north_up(500.0), origin)
     assert overlap_over_min(at_home, apart) == 0.0
+
+
+def test_overlap_over_min_floors_a_small_regions_denominator() -> None:
+    from shapely.geometry import box
+
+    sheet = box(0, 0, 100, 100)  # 10,000 m^2
+    inset = box(90, 0, 110, 50)  # 1,000 m^2, half of it on the sheet
+    assert overlap_over_min(sheet, inset) == pytest.approx(0.5)
+    # Judged against 5,000 m^2 instead, the same 500 m^2 seam is 10%.
+    assert overlap_over_min(sheet, inset, floor_area=5_000) == pytest.approx(0.1)
+    # The floor never raises a denominator that is already larger.
+    assert overlap_over_min(sheet, box(50, 0, 150, 100), 5_000) == pytest.approx(0.5)

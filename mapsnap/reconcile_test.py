@@ -1319,3 +1319,42 @@ def test_seed_pair_skips_coincident_seeds():
     assert seed_pair([same, dict(same)]) == []
     other = {"x": 50.0, "y": 5.0, "initial": True}
     assert seed_pair([same, {"x": 9, "y": 9}, other]) == [same, other]
+
+
+def test_region_floor_is_half_the_median_published_sheet_region():
+    from mapsnap.reconcile import region_floor_m2
+
+    def sheet(stem: str, width_m: float):
+        return make_node(stem, [boxed(scored("georef", affine(0), 1.8), 0.0, width_m)])
+
+    nodes = {
+        "p1": sheet("p1", 500.0),  # 200,000 m^2
+        "p2": sheet("p2", 400.0),  # 160,000 m^2
+        "p3": sheet("p3", 600.0),  # 240,000 m^2
+        # A panel and an unplaced page are not sheets to take a median of.
+        "p4__2": make_node(
+            "p4__2", [boxed(scored("georef", affine(0), 1.8), 0.0, 20.0)], base="p4"
+        ),
+        "p5": make_node(
+            "p5", [boxed(scored("georef", affine(0), 1.8), 0.0, 900.0)], published=None
+        ),
+    }
+    assert region_floor_m2(nodes) == pytest.approx(0.5 * 200_000)
+    del nodes["p3"]
+    assert region_floor_m2(nodes) == 0.0  # too few sheets for a median
+
+
+def test_region_floor_spares_an_insets_seam_but_not_an_inset_on_its_neighbour():
+    from mapsnap.reconcile import region_energy
+
+    sheet = boxed(scored("georef", affine(0), 1.8), 0.0)  # 500 x 400 m
+    # A 50 x 400 m inset whose seam shares a 25 m strip with the sheet: half of it.
+    seam = boxed(scored("georef", affine(0), 1.0), 475.0, 50.0)
+    assert region_energy(sheet, seam, soft=0.12, weight=1.5) > 0
+    floor = 0.5 * 500 * 400
+    assert region_energy(sheet, seam, soft=0.12, weight=1.5, floor_m2=floor) == 0.0
+    # Dropped onto the sheet's own ground, a sheet-sized inset still pays in full.
+    misplaced = boxed(scored("georef", affine(0), 1.0), 0.0, 300.0)
+    assert region_energy(
+        sheet, misplaced, soft=0.12, weight=1.5, floor_m2=floor
+    ) == pytest.approx(1.5)
