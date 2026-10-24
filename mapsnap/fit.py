@@ -202,6 +202,15 @@ def main() -> None:
         ),
     )
     parser.add_argument(
+        "--snap-accept-model",
+        action="store_true",
+        help=(
+            "Have snap decide rescues and challenges with its learned accept "
+            "model (models/snap_accept.json) instead of the select-score bars "
+            "(#650)."
+        ),
+    )
+    parser.add_argument(
         "--no-region-overlap",
         action="store_true",
         help=(
@@ -262,6 +271,7 @@ def main() -> None:
         *georef_extra,
         *(["--no-snap"] if args.no_snap else []),
         *(["--no-region-overlap"] if args.no_region_overlap else []),
+        *(["--snap-accept-model"] if args.snap_accept_model else []),
     ]
     run_id = resolve_run_id(dir_path, args.tag, id_tokens, inputs, git)
 
@@ -354,7 +364,14 @@ def main() -> None:
         checkpointed(
             "snap",
             lambda: timed(
-                "snap", ["mapsnap", "snap", str(dir_path), *worker_flag(georef_extra)]
+                "snap",
+                [
+                    "mapsnap",
+                    "snap",
+                    str(dir_path),
+                    *worker_flag(georef_extra),
+                    *(["--accept-model"] if args.snap_accept_model else []),
+                ],
             ),
         )
         # The street-constraint channel: fit key-map-prior pages from their

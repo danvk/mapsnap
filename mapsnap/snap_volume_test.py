@@ -820,3 +820,89 @@ def test_half_sheet_seeds_are_on_unless_opted_out(monkeypatch):
     assert not importlib.reload(snap_volume).HALF_SHEET_SEEDS
     monkeypatch.delenv("MAPSNAP_NO_HALF_SHEET_SEEDS")
     importlib.reload(snap_volume)
+
+
+def accept_model(rescue_threshold: float = 0.5, replace_threshold: float = 0.5):
+    """An accept model whose probabilities follow the top candidate's ncc_fine alone."""
+    from mapsnap.snap_accept import AcceptModel, LogisticModel
+
+    def model(threshold: float) -> LogisticModel:
+        # sigmoid(10 * (ncc_fine - 0.5)): 0.5 at ncc_fine 0.5, ~1 at 0.9, ~0 at 0.1.
+        return LogisticModel(
+            0.0, {"ncc_fine": {"mean": 0.5, "scale": 0.1, "coef": 1.0}}, threshold
+        )
+
+    return AcceptModel("test", model(rescue_threshold), model(replace_threshold))
+
+
+def with_evidence(record: dict, ncc_fine: float) -> dict:
+    """The record with the matcher evidence the accept model reads on every candidate."""
+    for candidate in record["candidates"]:
+        candidate.update(
+            inlier_frac=0.6,
+            ncc_fine=ncc_fine,
+            chamfer_mean_m=8.0,
+            n_points=2000,
+            scale_m_per_px=0.6,
+            scale_adjust=1.0,
+        )
+    return record
+
+
+def test_select_argmax_with_accept_model_decides_by_probability():
+    from mapsnap.snap_volume import select_argmax
+
+    # A panel at select 1.0: far under the solo bar, but the model is confident.
+    confident = with_evidence(rescue_record(1.0), ncc_fine=0.9)
+    confident["target"] = "p3__1"
+    [without] = select_argmax([confident], 1.35, 0.25)
+    assert without["chosen"] is None
+    assert without["reason"].startswith("panel-solo")
+    [chosen] = select_argmax([confident], 1.35, 0.25, accept_model=accept_model())
+    assert chosen["chosen"] == 0
+    assert chosen["reason"] == "accept-model"
+    assert chosen["p_accept"] > 0.9
+
+    # A whole sheet at select 2.5 clears every bar, but the model doubts it.
+    doubtful = with_evidence(rescue_record(2.5), ncc_fine=0.1)
+    [without] = select_argmax([doubtful], 1.35, 0.25)
+    assert without["chosen"] == 0
+    [rejected] = select_argmax([doubtful], 1.35, 0.25, accept_model=accept_model())
+    assert rejected["chosen"] is None
+    assert rejected["reason"].startswith("p(good)")
+
+
+def test_select_union_with_accept_model_skips_the_energy_committee(
+    monkeypatch, tmp_path
+):
+    from mapsnap.snap_volume import select_union
+
+    def no_energy(*args, **kwargs):
+        raise AssertionError("the energy committee ran")
+
+    monkeypatch.setattr(snap_volume, "select_volume", no_energy)
+    records = [with_evidence(rescue_record(1.0), ncc_fine=0.9)]
+    [chosen] = select_union(
+        tmp_path, records, 1.35, 0.25, {}, accept_model=accept_model()
+    )
+    assert chosen["reason"] == "accept-model"
+
+
+def test_model_challenge_needs_disagreement_and_probability():
+    from mapsnap.snap_volume import model_challenge
+
+    model = accept_model()
+    # 300 m away, confident: replaced, though the incumbent is defensible and
+    # the select score is under the challenge bar.
+    far = with_evidence(fitted_record(0.8, 1.0, 300.0, select=1.0), ncc_fine=0.9)
+    assert arbitrate_challenge(far, 1.6) is None
+    challenge = model_challenge(far, model)
+    assert challenge is not None
+    assert challenge["reason"] == "challenge"
+    assert challenge["disagreement_ft"] > 100
+    # Doubtful: kept.
+    doubtful = with_evidence(fitted_record(0.8, 1.0, 300.0), ncc_fine=0.1)
+    assert model_challenge(doubtful, model) is None
+    # Confident but agreeing: refinement's business, not a challenge.
+    near = with_evidence(fitted_record(0.8, 1.0, 10.0), ncc_fine=0.9)
+    assert model_challenge(near, model) is None
