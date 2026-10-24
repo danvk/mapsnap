@@ -60,7 +60,9 @@ aws s3 cp s3://mapsnap-sanborn/osm-by-county/$fips.osm.pbf data/<vol>/centerline
   for panels in Path("data/<vol>").glob("p*.panels.json"):
       base = panels.name.removesuffix(".panels.json")
       doc = json.loads(panels.read_text())
-      write_panels(panels.parent / f"{base}.jpg", [Polygon(r) for r in doc["panels"]], base)
+      write_panels(
+          panels.parent / f"{base}.jpg", [Polygon(r) for r in doc["panels"]], base
+      )
   ```
 
 - **Region maps** (`artifacts/region/`) aren't uploaded either: `mapsnap region data/<vol>`.
