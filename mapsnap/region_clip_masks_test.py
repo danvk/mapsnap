@@ -15,6 +15,7 @@ from mapsnap.region_clip_masks import (
     GroundGrid,
     Ownership,
     PageWindow,
+    RegionMapError,
     assign_units,
     clip_units_to_scans,
     compute_region_clip_masks,
@@ -29,6 +30,7 @@ from mapsnap.region_clip_masks import (
     page_groups,
     panel_outline_mask,
     polygons_of,
+    readable_region_map,
     region_map_path,
     region_ownership,
     scanner_bed,
@@ -321,6 +323,37 @@ def test_scanner_bed_is_thick_dark_ground_touching_the_edge():
     assert bed[:, :15].all()
     assert not bed[50, 20:].any()
     assert not bed[40:60, 40:60].any()
+
+
+def test_readable_region_map_rejects_a_truncated_png(tmp_path: Path):
+    _, paths = two_page_volume(tmp_path)
+    data = region_map_path(paths[1]).read_bytes()
+    region_map_path(paths[1]).write_bytes(data[: len(data) // 3])
+    assert readable_region_map(paths[0])
+    assert not readable_region_map(paths[1])
+    assert not readable_region_map(tmp_path / "p3.jpg")
+
+
+def test_ensure_region_maps_predicts_an_unreadable_map_again(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    _, paths = two_page_volume(tmp_path)
+    region_map_path(paths[1]).write_bytes(b"")
+    predicted: list[Path] = []
+    monkeypatch.setattr("mapsnap.region_model.load_region_model", lambda: (None, None))
+    monkeypatch.setattr(
+        "mapsnap.region_predict.write_region_maps",
+        lambda directory, images, **_: predicted.extend(images),
+    )
+    ensure_region_maps(paths)
+    assert predicted == [paths[1]]
+
+
+def test_region_ownership_refuses_a_page_without_a_readable_map(tmp_path: Path):
+    georefs, paths = two_page_volume(tmp_path)
+    region_map_path(paths[1]).write_bytes(b"not a png")
+    with pytest.raises(RegionMapError, match="p2.jpg"):
+        region_ownership(georefs, paths)
 
 
 def test_compute_region_clip_masks_needs_images():

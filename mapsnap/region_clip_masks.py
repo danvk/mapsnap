@@ -100,9 +100,23 @@ def region_map_path(image_path: Path) -> Path:
     return region_prob_path(image_path.parent, image_path.stem)
 
 
+class RegionMapError(RuntimeError):
+    """A page to be masked has no readable P(region) map, even after predicting it."""
+
+
+def readable_region_map(image_path: Path) -> bool:
+    """Whether the image's P(region) map exists and decodes."""
+    path = region_map_path(image_path)
+    return path.exists() and cv2.imread(str(path), cv2.IMREAD_GRAYSCALE) is not None
+
+
 def ensure_region_maps(image_paths: list[Path]) -> None:
-    """Predict the P(region) maps that are missing, beside each image's volume."""
-    missing = [path for path in image_paths if not region_map_path(path).exists()]
+    """Predict the P(region) maps that are missing or unreadable, beside each image's volume.
+
+    An unreadable map is predicted again rather than trusted: a file that exists
+    but does not decode would otherwise leave its page unmasked without a word (#647).
+    """
+    missing = [path for path in image_paths if not readable_region_map(path)]
     if not missing:
         return
     from mapsnap.region_model import load_region_model
@@ -237,8 +251,9 @@ def region_ownership(georefs: list[dict], image_paths: list[Path]) -> Ownership:
     for index, (georef, image_path) in enumerate(zip(georefs, image_paths)):
         prob = cv2.imread(str(region_map_path(image_path)), cv2.IMREAD_GRAYSCALE)
         if prob is None:
-            print(f"region masks: no P(region) for {image_path}", file=sys.stderr)
-            continue
+            # Skipping the page published its whole group unmasked on corpus-v2,
+            # silently (#647). Failing lets the item be retried instead.
+            raise RegionMapError(f"no readable P(region) map for {image_path}")
         prob = prob.astype(np.float32) / 255.0
         prob *= panel_outline_mask(image_path, prob.shape)
         a_fwd, _ = _fit_affine(georef)  # georef px -> (lon, lat)
@@ -776,6 +791,14 @@ def compute_region_clip_masks(
         )
         for index, mask in zip(group, result.masks):
             masks[index] = mask
+        if len(group) > 1 and all(mask is None for mask in result.masks):
+            # Every page of a group falling back to its whole sheet is what #647
+            # looked like from outside; say so, since nothing else will.
+            names = ", ".join(image_paths[i].stem for i in group)
+            print(
+                f"region masks: no masks for any of {len(group)} pages ({names})",
+                file=sys.stderr,
+            )
         blocks += result.blocks
         units += result.units
     print(
