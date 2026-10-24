@@ -2,7 +2,11 @@
 
 from pathlib import Path
 
-from mapsnap.fit import clear_derived_sidecars, worker_flag
+from mapsnap.fit import (
+    clear_derived_sidecars,
+    publishable_keymap_georefs,
+    worker_flag,
+)
 
 
 def test_worker_flag_extracts_both_spellings():
@@ -144,3 +148,22 @@ def test_clear_derived_sidecars_starts_a_new_run_log_and_markers(tmp_path: Path)
 
     assert not (snap / "candidates.jsonl").exists()
     assert sorted(p.name for p in pipeline.iterdir()) == ["rerun-ocr.done"]
+
+
+def test_publishable_keymap_georefs_leaves_out_an_impossible_key_map(tmp_path: Path):
+    # Boston 1867's key map was georeferenced to 57 m: no key-map annotation for it.
+    import json
+
+    def georef(stem: str, side_deg: float) -> None:
+        corners = [
+            [-71.06, 42.36],
+            [-71.06 + side_deg, 42.36],
+            [-71.06 + side_deg, 42.36 - side_deg],
+            [-71.06, 42.36 - side_deg],
+        ]
+        (tmp_path / f"{stem}.georef.json").write_text(json.dumps({"corners": corners}))
+
+    georef("p1a", 0.0004)  # ~50 m across
+    georef("p1c", 0.05)  # ~6 km across
+    assert publishable_keymap_georefs(tmp_path) == [tmp_path / "p1c.georef.json"]
+    assert publishable_keymap_georefs(tmp_path / "missing") == []
