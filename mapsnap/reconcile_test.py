@@ -1053,8 +1053,45 @@ def test_region_edges_skip_siblings_and_skeleton_twins():
     assert ("p1", "p1s") not in pairs
     assert ("p2__1", "p2__2") not in pairs
     assert ("p1", "p3") in pairs  # via p3's alias hypothesis
-    assert ("p1s", "p3") in pairs
+    # p1s maps p1's ground: p3 is charged for that overlap once, against p1.
+    assert ("p1s", "p3") not in pairs
     assert not any("p4" in pair for pair in pairs)
+
+
+def test_region_edges_charge_a_neighbour_and_its_skeleton_once():
+    # New York 1923: p13 sits beside p14, and both sheets have skeletons. Each
+    # overlap is charged within a layer (p13-p14, p13s-p14s), never across it.
+    from mapsnap.reconcile import build_region_edges
+
+    def page(stem: str, west_m: float):
+        return make_node(stem, [boxed(scored("georef", affine(0), 1.8), west_m)])
+
+    nodes = {
+        "p13": page("p13", 0.0),
+        "p13s": page("p13s", 0.0),
+        "p14": page("p14", 400.0),
+        "p14s": page("p14s", 400.0),
+        # A skeleton with no full-colour twin is checked against full pages.
+        "p15s": page("p15s", 800.0),
+    }
+    for node in nodes.values():
+        node.region_px = object()
+    pairs = {(a, b) for _, a, b in build_region_edges(nodes)}
+    assert ("p13", "p14") in pairs
+    assert ("p13s", "p14s") in pairs
+    assert ("p13", "p14s") not in pairs
+    assert ("p13s", "p14") not in pairs
+    assert ("p14", "p15s") in pairs
+
+
+def test_duplicates_a_layer_only_when_a_twin_is_a_page():
+    from mapsnap.reconcile import duplicates_a_layer
+
+    assert duplicates_a_layer("p13", "p14s", {"p13", "p14", "p14s"})
+    assert duplicates_a_layer("p13s", "p14", {"p13", "p13s", "p14"})
+    assert not duplicates_a_layer("p13", "p14", {"p13", "p13s", "p14", "p14s"})
+    assert not duplicates_a_layer("p13", "p15s", {"p13", "p15s"})
+    assert duplicates_a_layer("p29s__2", "p27", {"p27", "p29", "p29s"})
 
 
 def test_region_factor_evicts_the_less_supported_overlapping_pose():

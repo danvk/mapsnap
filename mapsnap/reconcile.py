@@ -1202,13 +1202,40 @@ def skeleton_twins(a: str, b: str) -> bool:
     return base_a == base_b + "s" or base_b == base_a + "s"
 
 
+def is_skeleton(stem: str, bases: set[str]) -> bool:
+    """A skeleton sheet (pNs, or its panels) whose full-colour pN is a page of the volume too."""
+    base = stem.split("__")[0]
+    return base.endswith("s") and base[:-1] in bases
+
+
+def duplicates_a_layer(a: str, b: str, bases: set[str]) -> bool:
+    """True for a full-colour/skeleton pair whose overlap is already charged within one layer.
+
+    A skeleton maps the same ground as its full-colour twin, so a page next to
+    both p14 and p14s would pay for the same overlap twice. When either page of
+    a mixed pair has a twin, the twins carry that overlap (p13-p14 and
+    p13s-p14s), and the mixed pair is dropped. A skeleton whose full sheet is not
+    a page still meets the full-colour pages around it.
+    """
+    if is_skeleton(a, bases) == is_skeleton(b, bases):
+        return False
+
+    def has_twin(stem: str) -> bool:
+        base = stem.split("__")[0]
+        return is_skeleton(stem, bases) or base + "s" in bases
+
+    return has_twin(a) or has_twin(b)
+
+
 def build_region_edges(nodes: dict[str, PageNode]) -> list[tuple[str, str, str]]:
     """("region", a, b) for every pair whose posed regions could meet.
 
     Any hypothesis pair counts: a page's alias 300 ft away lands on a
     neighbour it does not touch at its published pose. Sibling panels are
     excluded (an inset legitimately details ground its large panel also
-    covers), as are skeleton twins.
+    covers), as are skeleton twins, and a neighbour and its skeleton are
+    charged once rather than twice (``duplicates_a_layer``): counting both
+    unplaced New York 1923's p13, p26 and p27 in corpus-v2.
     """
     bounds: dict[str, tuple[float, float, float, float]] = {}
     for stem, node in nodes.items():
@@ -1221,12 +1248,13 @@ def build_region_edges(nodes: dict[str, PageNode]) -> list[tuple[str, str, str]]
                 max(b[3] for b in boxes),
             )
     stems = sorted(bounds)
+    bases = {stem.split("__")[0] for stem in nodes}
     edges: list[tuple[str, str, str]] = []
     for i, a in enumerate(stems):
         for b in stems[i + 1 :]:
             if panel_base(a) is not None and panel_base(a) == panel_base(b):
                 continue
-            if skeleton_twins(a, b):
+            if skeleton_twins(a, b) or duplicates_a_layer(a, b, bases):
                 continue
             ba, bb = bounds[a], bounds[b]
             if ba[2] < bb[0] or bb[2] < ba[0] or ba[3] < bb[1] or bb[3] < ba[1]:
