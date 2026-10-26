@@ -157,7 +157,7 @@ def filter_pages(
                 distance = haversine_m(page_center(annotation, transform), location)
                 if distance > SMALL_VOLUME_RADIUS_M:
                     result.too_far += 1
-                    reason = f"{distance / 1000:.1f} km from the catalogue location"
+                    reason = f"{distance / 1000:.1f} km from the catalog location"
                     result.withheld.append((page_key(annotation), reason))
                     continue
         result.kept.append(annotation)
@@ -517,7 +517,7 @@ def main() -> None:
         published = status.startswith("published")
         tally[status] += 1
         tally["pages dropped: sheet too large"] += pages.too_large
-        tally["pages dropped: far from the catalogue location"] += pages.too_far
+        tally["pages dropped: far from the catalog location"] += pages.too_far
         tally["pages dropped: the key map, published as a page"] += len(keymap_pages)
         tally["pages dropped: skeleton of a published sheet"] += len(skeleton_pages)
 

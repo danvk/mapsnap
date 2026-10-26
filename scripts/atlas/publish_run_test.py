@@ -160,7 +160,7 @@ def test_filter_pages_drops_a_far_page_only_in_a_small_volume():
     small = filter_pages([far, near], 5, TOWN)
     assert small.kept == [near]
     assert small.too_far == 1
-    assert small.withheld[0][1].endswith("km from the catalogue location")
+    assert small.withheld[0][1].endswith("km from the catalog location")
     # Eleven sheets is not a small volume; neither is one of unknown size.
     assert len(filter_pages([far, near], 11, TOWN).kept) == 2
     assert len(filter_pages([far, near], 0, TOWN).kept) == 2

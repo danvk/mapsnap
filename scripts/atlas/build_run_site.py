@@ -39,6 +39,18 @@ DEFAULT_SOURCE = "chronoscope"
 ITEM_PAGE = "/item?id="
 # How many of the run page's search matches are shown at a time.
 RESULTS_PAGE = 200
+# The copy-ID button's icons (Lucide's clipboard and check), drawn in currentColor.
+COPY_ICON = (
+    '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" '
+    'stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">'
+    '<rect x="8" y="2" width="8" height="4" rx="1"/>'
+    '<path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"/></svg>'
+)
+CHECK_ICON = (
+    '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" '
+    'stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">'
+    '<path d="M20 6 9 17l-5-5"/></svg>'
+)
 ALLMAPS_VIEWER = "https://viewer.allmaps.org/?url="
 LOC_ITEM = "https://www.loc.gov/item/"
 REPO = "https://github.com/danvk/mapsnap"
@@ -102,10 +114,10 @@ COLUMNS = [
     ),
     (
         "city, state, year, date",
-        "The town, its postal code, and the volume's year and catalogue date.",
+        "The town, its postal code, and the volume's year and catalog date.",
     ),
-    ("volume", "The volume number, where the catalogue gives one."),
-    ("title", "The catalogue title."),
+    ("volume", "The volume number, where the catalog gives one."),
+    ("title", "The catalog title."),
     (
         "sheets",
         (
@@ -114,7 +126,7 @@ COLUMNS = [
             "and index pages are left out."
         ),
     ),
-    ("scans", "Every image the Library of Congress catalogues for the volume."),
+    ("scans", "Every image the Library of Congress catalogs for the volume."),
     ("images", "Images the run split the sheets into (split sheets become several)."),
     ("placed", "Images the run georeferenced."),
     ("published", "Images published: those placed, less the ones dropped below."),
@@ -127,7 +139,7 @@ COLUMNS = [
         "dropped_over_5km_from_location",
         (
             "Images dropped because, in a volume of 10 sheets or fewer, they sit over "
-            "5 km from the catalogue's location for the town."
+            "5 km from the catalog's location for the town."
         ),
     ),
     (
@@ -160,7 +172,7 @@ def as_int(value: str) -> int:
 
 
 def display_title(row: dict[str, str]) -> str:
-    """A volume's title without the catalogue's boilerplate, with its volume number."""
+    """A volume's title without the catalog's boilerplate, with its volume number."""
     title = row["title"].removeprefix(TITLE_PREFIX).rstrip(".") or row["city"]
     return f"{title}, vol. {row['volume']}" if row["volume"] else title
 
@@ -374,7 +386,7 @@ function row(v) {{
   const titleLink = document.createElement("a");
   titleLink.href = "{ITEM_PAGE}" + encodeURIComponent(item);
   titleLink.textContent = title;
-  titleCell.append(titleLink);
+  titleCell.append(titleLink, copyButton(item));
   const stateCell = document.createElement("td");
   const stateLink = document.createElement("a");
   stateLink.href = "{site.page_path()}states/" + state.toLowerCase();
@@ -427,6 +439,55 @@ input.addEventListener("input", () => {{
   timer = setTimeout(update, 150);
 }});
 more.addEventListener("click", showMore);"""
+
+
+def copy_button(item: str) -> str:
+    """A button beside a volume's title that copies its id; shown when its row is hovered."""
+    return (
+        f'<button type="button" class="copy" data-copy="{escape(item)}" '
+        f'title="Copy the volume ID ({escape(item)})" '
+        f'aria-label="Copy the volume ID {escape(item)}">{COPY_ICON}</button>'
+    )
+
+
+def copy_script() -> str:
+    """Script for every copy button on the page, including rows added later.
+
+    Copies the id, then shows a checkmark for a moment.
+    """
+    return f"""const COPY_ICON = {json.dumps(COPY_ICON)};
+const CHECK_ICON = {json.dumps(CHECK_ICON)};
+// A copy button for rows the page builds itself.
+function copyButton(item) {{
+  const button = document.createElement("button");
+  button.type = "button";
+  button.className = "copy";
+  button.dataset.copy = item;
+  button.title = `Copy the volume ID (${{item}})`;
+  button.setAttribute("aria-label", `Copy the volume ID ${{item}}`);
+  button.innerHTML = COPY_ICON;
+  return button;
+}}
+document.addEventListener("click", async (event) => {{
+  const button = event.target.closest("button.copy");
+  if (!button) return;
+  const item = button.dataset.copy;
+  try {{
+    await navigator.clipboard.writeText(item);
+  }} catch (error) {{
+    button.title = "Your browser didn't allow copying";
+    return;
+  }}
+  button.innerHTML = CHECK_ICON;
+  button.classList.add("copied");
+  button.title = `Copied ${{item}}`;
+  clearTimeout(button.copiedTimer);
+  button.copiedTimer = setTimeout(() => {{
+    button.innerHTML = COPY_ICON;
+    button.classList.remove("copied");
+    button.title = `Copy the volume ID (${{item}})`;
+  }}, 1500);
+}});"""
 
 
 def volumes_json(rows: list[dict[str, str]]) -> list[list]:
@@ -572,15 +633,21 @@ opens in the Allmaps viewer: {example["sheets_placed"]} georeferenced sheets ove
 <p><button type="button" id="more" hidden>Show more</button></p>
 <script>
 {source_script(site)}
+{copy_script()}
 {find_script(site)}
 </script>
-
-<h2>Browse a volume</h2>
-<p>The <a href="/item">item viewer</a> shows any volume in the collection, whether or not mapsnap placed it: its catalog record and all of its scans, from {CHRONOSCOPE}'s faster copies. It's a quicker way to page through a volume than loc.gov. Search it by town, or open <code>mapsnap.org/item?id=&lt;item&gt;</code> for a Library of Congress id. The titles on each state's page lead there too.</p>
 
 <h2>Download</h2>
 <table class="downloads">
 {downloads}
+</table>
+
+<h2>States</h2>
+<table class="states">
+<thead><tr><th>State</th><th class="num">Volumes published</th><th class="num">of</th><th class="num">Sheets placed</th><th class="num">of</th><th class="num">%</th></tr></thead>
+<tbody>
+{chr(10).join(state_rows)}
+</tbody>
 </table>
 
 <h2>The files</h2>
@@ -597,14 +664,6 @@ opens in the Allmaps viewer: {example["sheets_placed"]} georeferenced sheets ove
 
 <h2>OldInsuranceMaps.net</h2>
 <p>mapsnap was built with data from {OLD_INSURANCE_MAPS}, where volunteers have georeferenced Sanborn maps by hand; their work is what mapsnap was developed and measured against. If a volume you want isn't listed here, or is missing pages, look for it on OldInsuranceMaps.net, or georeference it by hand there.</p>
-
-<h2>States</h2>
-<table class="states">
-<thead><tr><th>State</th><th class="num">Volumes published</th><th class="num">of</th><th class="num">Sheets placed</th><th class="num">of</th><th class="num">%</th></tr></thead>
-<tbody>
-{chr(10).join(state_rows)}
-</tbody>
-</table>
 
 <h2>items.tsv</h2>
 <table class="columns">
@@ -636,7 +695,8 @@ def state_page(code: str, rows: list[dict[str, str]], site: Site) -> str:
         # links to the volume's page in mapsnap.org's item viewer.
         body_rows.append(
             f'<tr data-item="{escape(row["item"])}"{"" if published else ' class="withheld"'}>'
-            f'<td><a href="{ITEM_PAGE}{escape(row["item"])}">{escape(display_title(row))}</a></td>'
+            f'<td><a href="{ITEM_PAGE}{escape(row["item"])}">{escape(display_title(row))}</a>'
+            f"{copy_button(row['item'])}</td>"
             f"<td>{escape(row['year'])}</td><td>{escape(row['city'])}</td>"
             f'<td class="num">{escape(row["sheets"])}</td><td class="num">{escape(row["sheets_placed"])}</td>'
             f"{files}</tr>"
@@ -656,6 +716,7 @@ def state_page(code: str, rows: list[dict[str, str]], site: Site) -> str:
 </div>
 <script>
 {source_script(site)}
+{copy_script()}
 const input = document.getElementById("filter");
 const count = document.getElementById("count");
 const rows = [...document.querySelectorAll("table.volumes tbody tr")];

@@ -146,7 +146,22 @@ def test_run_index_links_states_downloads_and_the_example(tmp_path):
     assert 'href="https://iiif.io/api/extension/georef/"' in html
     assert 'href="https://github.com/danvk/mapsnap/issues/541"' in html
     assert 'href="https://oldinsurancemaps.net/"' in html
-    assert 'href="/item"' in html
+    # The item viewer has nothing to do with the run, so the run page doesn't describe it.
+    assert "Browse a volume" not in html
+    # Background sections come after the states, before the items.tsv reference.
+    order = [
+        html.index(f"<h2>{h}</h2>")
+        for h in (
+            "Find a volume",
+            "Download",
+            "States",
+            "The files",
+            "Limitations",
+            "OldInsuranceMaps.net",
+            "items.tsv",
+        )
+    ]
+    assert order == sorted(order)
 
 
 def test_state_page_lists_every_volume_with_its_files():
@@ -241,4 +256,14 @@ def test_run_index_searches_every_volume(tmp_path):
     assert 'fetch("/runs/v1.3/volumes.json")' in html
     assert '"NY": "New York"' in html
     assert "fileHref(name, view)" in html
-    assert 'href="/item"' in html
+    # Result rows get the copy button too.
+    assert "copyButton(item)" in html and "navigator.clipboard.writeText" in html
+
+
+def test_state_page_titles_have_a_copy_id_button():
+    html = state_page("NY", [row("sanborn06116_046")], SITE)
+    assert 'data-copy="sanborn06116_046"' in html
+    assert 'title="Copy the volume ID (sanborn06116_046)"' in html
+    assert "navigator.clipboard.writeText" in html
+    # The checkmark shown after a copy is in the script, not the page's rows.
+    assert html.count("M20 6 9 17l-5-5") == 1
