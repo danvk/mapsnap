@@ -179,9 +179,9 @@ W_REGION = 1.5
 REGION_SOFT = 0.12
 # --region-floor (#643): an overlap is a share of the smaller region, but no
 # less than this fraction of the volume's median whole-sheet region. A cut-out
-# inset is a tenth of a sheet, so an ordinary seam with its neighbour read as
+# inset is a tenth of a sheet, so an ordinary seam with its neighbor read as
 # 46% of it and evicted a correct New York 1923 p26; floored, that seam is
-# judged against something sheet-sized, while an inset dropped on a neighbour
+# judged against something sheet-sized, while an inset dropped on a neighbor
 # outright still overlaps it by more than the floor.
 REGION_FLOOR_FRACTION = 0.5
 # Fewer whole sheets with regions than this, and there is no median to trust.

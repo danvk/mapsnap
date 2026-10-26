@@ -1344,7 +1344,7 @@ def test_region_floor_is_half_the_median_published_sheet_region():
     assert region_floor_m2(nodes) == 0.0  # too few sheets for a median
 
 
-def test_region_floor_spares_an_insets_seam_but_not_an_inset_on_its_neighbour():
+def test_region_floor_spares_an_insets_seam_but_not_an_inset_on_its_neighbor():
     from mapsnap.reconcile import region_energy
 
     sheet = boxed(scored("georef", affine(0), 1.8), 0.0)  # 500 x 400 m
