@@ -12,6 +12,7 @@ from build_run_site import (
     state_page,
     totals_by_state,
     volume_sort_key,
+    volumes_json,
     write_zip,
 )
 
@@ -217,3 +218,27 @@ def test_state_page_has_one_sticky_source_toggle():
     assert '<span class="src">' not in html
     assert 'const IIIF = "https://data.mapsnap.org/runs/v1.3/iiif/"' in html
     assert "localStorage" in html
+
+
+def test_volumes_json_is_one_compact_row_per_volume():
+    rows = [
+        row("b", state="NJ", status="no page placed", main="", sheets_placed="0"),
+        row("a", keymap="a.keymap.iiif.json"),
+    ]
+    volumes = volumes_json(rows)
+    # Sorted by state, then as the state pages sort.
+    assert [v[0] for v in volumes] == ["b", "a"]
+    a = volumes[1]
+    assert (a[0], a[4], a[7], a[8], a[9]) == ("a", "NY", "published", 1, 1)
+    assert isinstance(a[5], int) and isinstance(a[6], int)
+    assert volumes[0][7:] == ["no page placed", 0, 0]
+
+
+def test_run_index_searches_every_volume(tmp_path):
+    html = run_index([row("sanborn06116_046", volume="2")], SITE, tmp_path)
+    assert "<h2>Find a volume</h2>" in html
+    assert '<div class="controls">' in html
+    assert 'fetch("/runs/v1.3/volumes.json")' in html
+    assert '"NY": "New York"' in html
+    assert "fileHref(name, view)" in html
+    assert 'href="/item"' in html
