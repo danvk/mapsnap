@@ -10,12 +10,19 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          # The spelling check diffs a PR against its merge base.
+          fetch-depth: 0
 
       - name: Install uv
         uses: astral-sh/setup-uv@v5
 
       - name: Install dependencies
         run: uv sync --group dev
+
+      - name: American spelling in added lines
+        if: github.event_name == 'pull_request'
+        run: scripts/check_spelling.sh origin/${{ github.base_ref }}
 
       - name: Ruff format check
         run: uv run ruff format --check

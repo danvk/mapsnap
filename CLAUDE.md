@@ -1,5 +1,11 @@
 # Claude Code Instructions
 
+## Spelling: American English everywhere
+
+- Use American English in everything you write: code, identifiers, comments, docstrings, docs, commit messages, PR and issue text. "Color", "neighbor", "meter", "center", "gray", "labeled", "canceled", "catalog", "penalize".
+- The codebase has hundreds of older British spellings ("colour", "neighbour", "metres", "centre"). Don't copy them from the code around you. Keep one only where renaming would break an interface (a CLI flag, a JSON key, a file name).
+- CI checks the lines a PR adds (`scripts/check_spelling.sh`, codespell's British-to-American list); run it before pushing.
+
 ## Pull Requests
 
 - Don't commit directly to `main`. Always go through a pull request.
@@ -13,6 +19,7 @@
 
 - Run one heavy job at a time on the laptop, with the default (serial) `--num-workers`. Never run two OCR or fit jobs at once; it runs out of memory.
 - Never put a recursive S3 listing (`aws s3 ls --recursive`) in a polling loop: listings are billed as egress.
+- The Mac's filesystem is case-insensitive; Batch's Linux is not. Build file paths from a file's real stem, never from a normalized (lowercased, zero-stripped) page key: `p100l.jpg` finds `p100L.jpg` locally and nothing on Batch (#647).
 - Skills in `.claude/skills/` cover recurring procedures: `background-jobs` (launching and waiting on long jobs on macOS), `truth-ab` (A/B runs on OIM-truth volumes), `local-volume` (pulling a corpus item into data/), `issue-images`.
 
 ## Coding guidelines
@@ -24,10 +31,6 @@
 - Write unit tests for all public functions.
 - Functions should never take more than four positional arguments. To avoid this factor out dataclasses/interfaces, use keyword-only arguments or an options object, or group x/y parameters into  `(x, y)` tuples (or lat/lng, width/height, etc.).
 - All boolean variables (function parameters, command-line flags) should default to `false`.
-- Use American English:
-  - "Color" not "colour"
-  - "Penalize" not "penalise"
-  - "Neighbor" not "neighbour"
 
 ### Python
 

@@ -146,7 +146,7 @@ def clear_derived_sidecars(dir_path: Path) -> int:
 def publishable_keymap_georefs(raw_dir: Path) -> list[Path]:
     """The key-map georef sidecars worth an annotation: those that could locate pages.
 
-    One georeferenced to a few hundred metres (Boston 1867's spans 57 m) is a
+    One georeferenced to a few hundred meters (Boston 1867's spans 57 m) is a
     wrong pose, and #525 already keeps it out of placement; publishing it
     anyway put 736 such key maps in v2.0.
     """

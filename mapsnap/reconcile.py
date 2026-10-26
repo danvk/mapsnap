@@ -1203,19 +1203,19 @@ def skeleton_twins(a: str, b: str) -> bool:
 
 
 def is_skeleton(stem: str, bases: set[str]) -> bool:
-    """A skeleton sheet (pNs, or its panels) whose full-colour pN is a page of the volume too."""
+    """A skeleton sheet (pNs, or its panels) whose full-color pN is a page of the volume too."""
     base = stem.split("__")[0]
     return base.endswith("s") and base[:-1] in bases
 
 
 def duplicates_a_layer(a: str, b: str, bases: set[str]) -> bool:
-    """True for a full-colour/skeleton pair whose overlap is already charged within one layer.
+    """True for a full-color/skeleton pair whose overlap is already charged within one layer.
 
-    A skeleton maps the same ground as its full-colour twin, so a page next to
+    A skeleton maps the same ground as its full-color twin, so a page next to
     both p14 and p14s would pay for the same overlap twice. When either page of
     a mixed pair has a twin, the twins carry that overlap (p13-p14 and
     p13s-p14s), and the mixed pair is dropped. A skeleton whose full sheet is not
-    a page still meets the full-colour pages around it.
+    a page still meets the full-color pages around it.
     """
     if is_skeleton(a, bases) == is_skeleton(b, bases):
         return False
@@ -1233,7 +1233,7 @@ def build_region_edges(nodes: dict[str, PageNode]) -> list[tuple[str, str, str]]
     Any hypothesis pair counts: a page's alias 300 ft away lands on a
     neighbour it does not touch at its published pose. Sibling panels are
     excluded (an inset legitimately details ground its large panel also
-    covers), as are skeleton twins, and a neighbour and its skeleton are
+    covers), as are skeleton twins, and a neighbor and its skeleton are
     charged once rather than twice (``duplicates_a_layer``): counting both
     unplaced New York 1923's p13, p26 and p27 in corpus-v2.
     """

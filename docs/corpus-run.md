@@ -233,6 +233,7 @@ run's cost about 4× (#624, a real bug).
 | Boston 1867 (146 MP key map) | key-map OCR | 7.9 GB | fixed by #637 |
 | both of the above | key-map `page_regions` | 8–9 GB | #640 |
 | Atlantic City 1921 | region masker in `iiif` | 11.4 GB | #638, open; needs 16 GB |
+| sanborn05408_004 (167 pages) | region masker in `iiif` | 11.6 GB | needed 16 GB in the v2.0 rerun |
 
 - **Key maps:** a giant key map (> 100 MP; a typical one is about 50 MP) is the
   common thread in the first three. Full-resolution float64 copies of the
@@ -264,6 +265,42 @@ nothing in the job logs showed it.
   not.
 - **`runs/<tag>/fit.log`** holds `fit`'s full output for each item, including
   the masker's `region masks: …` lines.
+- **The cause in corpus-v2 was letter case** (#647, fixed by #657). The iiif
+  step looked for `p100l.jpg` where the scan is `p100L.jpg`. That works on the
+  Mac, whose filesystem ignores case, and finds nothing on Batch's Linux. Since
+  #648 an unreadable region map fails the item instead of publishing whole
+  sheets.
+
+### Re-running only the last stages
+
+When a fix only changes reconcile or the iiif step, an item doesn't need its
+chain re-run. This is how v2.0 was republished in 2026-10 (#644, #647): 961
+items, about 4 minutes each.
+
+1. **Seed a new run tag:** `scripts/batch/seed-run.sh <new-tag> <items.txt>
+   [<source-tag>]`. Each line of the list may name its own source tag, which
+   matters when the published set mixes runs (v2.0 is corpus-v2 plus
+   corpus-v2.1). It's a server-side copy of each item's run without its done
+   marker, key-map IIIF, manifest and `fit.log`. loc-fit's checkpoints and
+   `fit --resume` then skip everything up to the region stage.
+   - **Seed everything before submitting anything** under the new tag, and
+     never seed an item that has already run under it. `aws s3 sync` re-copies
+     any file whose size differs, so it puts the old run's sidecars back over
+     the new run's. That happened to NY 1923's pilot: its published IIIF is
+     right, but its corpus-v2.2 sidecars are corpus-v2's. The script now
+     refuses items with a done marker.
+   - **`--copy-props none`** is needed: `mapsnap-mirror` can't read object
+     tags, which a plain S3-to-S3 copy does.
+2. **Build, push and re-register** as above, then **pilot two items**
+   (`PER_JOB=1`; an array needs two). Check each item's `fit.log`: only
+   split, craft, region, reconcile and iiif should run.
+3. **Submit** under the new tag (`PER_JOB=8`).
+4. **The job definitions pass `--locations` by default.** In a rerun, items of
+   ten pages or fewer have their streets clipped to 5 km of the catalog
+   location, even if they originally ran without it.
+5. **Collect and check:** each item's `runs/<tag>/mapsnap.iiif.json` and the
+   manifests' `metrics.masks`, then publish as below, copying the new tag's
+   files over the published set.
 
 ### Cost
 
@@ -371,6 +408,14 @@ The local mirror is `~/Documents/mapsnap/data.mapsnap.org/` (`runs/`,
 7. **Upload:** `aws s3 sync … s3://mapsnap/… --profile r2` for
    `runs/<version>/`, `items/` and `manifests/`. The edge serves
    `max-age=14400` whatever the upload says.
+8. **Purge the edge cache** once every sync has finished, or the old files are
+   served for up to 4 hours. In the Cloudflare dashboard: the mapsnap.org zone,
+   then Caching → Configuration → Purge Everything. (Purging by prefix needs an
+   Enterprise plan.) Browsers keep their own copies for the same 4 hours.
+
+Back up the local `runs/<version>/`, `items/` and `manifests/` before
+rebuilding them in place. The v2.0 republish kept its backup in
+`~/Documents/mapsnap/backups/`.
 
 ## Working on the Mac
 
@@ -391,6 +436,20 @@ The local mirror is `~/Documents/mapsnap/data.mapsnap.org/` (`runs/`,
 - **One heavy local job at a time.** Even two OCR workers bog down the laptop.
 
 ## Open threads after v2.0
+
+v2.0 was republished on 2026-10-24 with #644, #645 and #657: 343,403 sheets
+placed, up 966. Still open:
+
+- **#643 / #653:** content regions that are too large (NY 1923 p26 and its
+  inset).
+- **#646:** snap skips panel-only volumes (Rosendale).
+- **#650 / #651:** a learned accept score for snap. The replace model holds up
+  on held-out volumes; the rescue model doesn't yet. Reconcile needs
+  recalibrating with it.
+- **#652:** panel bars and priors ignore panel size.
+- **#658:** the scorer finds `panels.json` by page key (case, zero padding).
+- **#659:** skeletons published instead of an agreeing full-color twin (88
+  sheets).
 
 - **#638:** Atlantic City's masker memory.
 - **#614:** guarding rasters sized by geography.
