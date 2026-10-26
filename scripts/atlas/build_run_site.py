@@ -30,6 +30,12 @@ from urllib.parse import quote
 from gazetteer import STATE_CODES
 
 SOURCES = {"loc": "loc.gov", "chronoscope": "Chronoscope"}
+# The image source a state page's links start on; its toggle switches them all,
+# and the viewer's choice is remembered in the browser.
+DEFAULT_SOURCE = "chronoscope"
+# mapsnap.org's item viewer: a volume's catalog record and every scan, whether or
+# not mapsnap placed any of it.
+ITEM_PAGE = "/item?id="
 ALLMAPS_VIEWER = "https://viewer.allmaps.org/?url="
 LOC_ITEM = "https://www.loc.gov/item/"
 REPO = "https://github.com/danvk/mapsnap"
@@ -57,6 +63,11 @@ CONTACT_HTML = (
 MOBILE_NOTE = (
     "If a Chronoscope Allmaps link doesn't load on mobile, try the loc.gov link "
     "or a desktop browser."
+)
+# The state pages' version: their links follow the Images toggle.
+STATE_MOBILE_NOTE = (
+    "If a volume doesn't load on your phone, switch Images to loc.gov, or try a "
+    "desktop browser."
 )
 
 LICENSE_TEXT = (
@@ -225,17 +236,19 @@ class Site:
         return f"{self.data_url.rstrip('/')}/iiif/{source}/{name}"
 
     def file_links(self, name: str) -> str:
-        """Download and Allmaps links for one IIIF file, from each image source."""
+        """View (Allmaps) and JSON links for one IIIF file, on DEFAULT_SOURCE.
+
+        Both carry the file's name, which is the same under every source, so the
+        state page's Images toggle can point them at another source's copy.
+        """
         if not name:
             return '<span class="none">—</span>'
-        parts = []
-        for source, label in SOURCES.items():
-            url = self.file_url(source, name)
-            parts.append(
-                f'<span class="src">{label}: <a href="{escape(url)}">JSON</a> · '
-                f'<a href="{escape(allmaps_url(url))}">Allmaps</a></span>'
-            )
-        return "".join(parts)
+        url = self.file_url(DEFAULT_SOURCE, name)
+        return (
+            f'<a class="file view" data-name="{escape(name)}" '
+            f'href="{escape(allmaps_url(url))}">View</a> · '
+            f'<a class="file json" data-name="{escape(name)}" href="{escape(url)}">JSON</a>'
+        )
 
 
 def page(title: str, body: str) -> str:
@@ -346,6 +359,9 @@ opens in the Allmaps viewer: {example["sheets_placed"]} georeferenced sheets ove
 
 {example_html}
 
+<h2>Browse a volume</h2>
+<p>The <a href="/item">item viewer</a> shows any volume in the collection, whether or not mapsnap placed it: its catalog record and all of its scans, from {CHRONOSCOPE}'s faster copies. It's a quicker way to page through a volume than loc.gov. Search it by town, or open <code>mapsnap.org/item?id=&lt;item&gt;</code> for a Library of Congress id. The titles on each state's page lead there too.</p>
+
 <h2>Download</h2>
 <table class="downloads">
 {downloads}
@@ -401,19 +417,32 @@ def state_page(code: str, rows: list[dict[str, str]], site: Site) -> str:
         else:
             files = f'<td class="files status" colspan="2">{escape(row["status"])}</td>'
         # The item id isn't shown, but the filter still finds it, and the title
-        # links to the volume's page at the Library of Congress.
+        # links to the volume's page in mapsnap.org's item viewer.
         body_rows.append(
             f'<tr data-item="{escape(row["item"])}"{"" if published else ' class="withheld"'}>'
-            f'<td><a href="{LOC_ITEM}{escape(row["item"])}/">{escape(display_title(row))}</a></td>'
+            f'<td><a href="{ITEM_PAGE}{escape(row["item"])}">{escape(display_title(row))}</a></td>'
             f"<td>{escape(row['year'])}</td><td>{escape(row['city'])}</td>"
             f'<td class="num">{escape(row["sheets"])}</td><td class="num">{escape(row["sheets_placed"])}</td>'
             f"{files}</tr>"
         )
+    source_radios = "\n".join(
+        f'<label><input type="radio" name="source" value="{source}"'
+        f"{' checked' if source == DEFAULT_SOURCE else ''}> {label}</label>"
+        for source, label in sorted(
+            SOURCES.items(), key=lambda kv: kv[0] != DEFAULT_SOURCE
+        )
+    )
     body = f"""<p class="crumbs"><a href="{site.page_path()}">Run {escape(site.version)}</a> › {escape(name)}</p>
 <h1>{escape(name)}</h1>
-<p class="lede">{number(totals.published)} of {number(totals.volumes)} volumes published, with {number(totals.sheets_placed)} of {number(totals.sheets)} sheets placed. <b>JSON</b> is the IIIF file; <b>Allmaps</b> opens it over today's map. loc.gov files draw the Library of Congress's scans, Chronoscope files its faster copies of them.</p>
-<p>Not every page is placed, or placed accurately: please <a href="{PROBLEMS_URL}">report problems</a>. Missing a volume, or pages of one? Look for it on {OLD_INSURANCE_MAPS}, or georeference it by hand there. {MOBILE_NOTE}</p>
-<p><input type="search" id="filter" placeholder="Filter by town, year or id" aria-label="Filter volumes"> <span id="count"></span></p>
+<p class="lede">{number(totals.published)} of {number(totals.volumes)} volumes published, with {number(totals.sheets_placed)} of {number(totals.sheets)} sheets placed. A title opens the volume's page, with its catalog record and every scan. <b>View</b> opens its placed sheets over today's map in Allmaps; <b>JSON</b> is the IIIF file behind them. <b>Images</b> chooses whose scans they draw: {CHRONOSCOPE}'s faster copies, or the Library of Congress's originals.</p>
+<p>Not every page is placed, or placed accurately: please <a href="{PROBLEMS_URL}">report problems</a>. Missing a volume, or pages of one? Look for it on {OLD_INSURANCE_MAPS}, or georeference it by hand there. {STATE_MOBILE_NOTE}</p>
+<div class="controls">
+<input type="search" id="filter" placeholder="Filter by town, year or id" aria-label="Filter volumes">
+<span class="source" role="radiogroup" aria-label="Images">Images:
+{source_radios}
+</span>
+<span id="count"></span>
+</div>
 <div class="table-scroll">
 <table class="volumes">
 <thead><tr><th>Title</th><th>Year</th><th>Location</th><th class="num">Sheets</th><th class="num">Placed</th><th>Main content</th><th>Key map</th></tr></thead>
@@ -423,6 +452,31 @@ def state_page(code: str, rows: list[dict[str, str]], site: Site) -> str:
 </table>
 </div>
 <script>
+const IIIF = "{site.data_url.rstrip("/")}/iiif/";
+const DEFAULT_SOURCE = "{DEFAULT_SOURCE}";
+const links = [...document.querySelectorAll("a.file")];
+// Point every View and JSON link at one image source's copy of its file.
+function setSource(source) {{
+  for (const link of links) {{
+    const url = IIIF + source + "/" + link.dataset.name;
+    link.href = link.classList.contains("view") ? "{ALLMAPS_VIEWER}" + encodeURIComponent(url) : url;
+  }}
+}}
+for (const radio of document.querySelectorAll('input[name="source"]')) {{
+  radio.addEventListener("change", () => {{
+    setSource(radio.value);
+    try {{ localStorage.setItem("mapsnap-source", radio.value); }} catch (error) {{}}
+  }});
+}}
+let saved = null;
+try {{ saved = localStorage.getItem("mapsnap-source"); }} catch (error) {{}}
+if (saved && saved !== DEFAULT_SOURCE) {{
+  const radio = document.querySelector(`input[name="source"][value="${{saved}}"]`);
+  if (radio) {{
+    radio.checked = true;
+    setSource(saved);
+  }}
+}}
 const input = document.getElementById("filter");
 const count = document.getElementById("count");
 const rows = [...document.querySelectorAll("table.volumes tbody tr")];

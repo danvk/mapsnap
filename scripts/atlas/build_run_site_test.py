@@ -110,16 +110,17 @@ def test_volume_sort_key_orders_volumes_numerically():
     assert [r["item"] for r in sorted(rows, key=volume_sort_key)] == ["b", "a", "c"]
 
 
-def test_site_links_every_source_and_allmaps():
+def test_site_links_view_and_json_on_the_default_source():
     links = SITE.file_links("x.main.iiif.json")
-    assert (
-        'href="https://data.mapsnap.org/runs/v1.3/iiif/loc/x.main.iiif.json"' in links
-    )
     assert (
         'href="https://data.mapsnap.org/runs/v1.3/iiif/chronoscope/x.main.iiif.json"'
         in links
     )
-    assert links.count("viewer.allmaps.org") == 2
+    assert "iiif/loc/" not in links
+    assert links.count("viewer.allmaps.org") == 1
+    assert ">View</a>" in links and ">JSON</a>" in links
+    # The toggle rebuilds both links from the file's name.
+    assert links.count('data-name="x.main.iiif.json"') == 2
     assert SITE.file_links("") == '<span class="none">—</span>'
 
 
@@ -144,6 +145,7 @@ def test_run_index_links_states_downloads_and_the_example(tmp_path):
     assert 'href="https://iiif.io/api/extension/georef/"' in html
     assert 'href="https://github.com/danvk/mapsnap/issues/541"' in html
     assert 'href="https://oldinsurancemaps.net/"' in html
+    assert 'href="/item"' in html
 
 
 def test_state_page_lists_every_volume_with_its_files():
@@ -153,14 +155,16 @@ def test_state_page_lists_every_volume_with_its_files():
     ]
     html = state_page("NY", rows, SITE)
     assert "<h1>New York</h1>" in html
-    assert 'href="https://www.loc.gov/item/a/"' in html
+    # Titles open the item viewer, not loc.gov.
+    assert 'href="/item?id=a"' in html
+    assert "loc.gov/item/a/" not in html
     assert "iiif/chronoscope/a.keymap.iiif.json" in html
     assert '<tr data-item="b" class="withheld">' in html
     assert "no page placed" in html
     # No id column: the id is only in the row's data, for the filter.
     assert "<th>ID</th>" not in html and "<code>a</code>" not in html
     assert "row.dataset.item" in html
-    assert "try the loc.gov link" in html
+    assert "switch Images to loc.gov" in html
     assert "1 of 2 volumes published" in html
     assert 'href="https://github.com/danvk/mapsnap/issues/541"' in html
     assert 'href="https://oldinsurancemaps.net/"' in html
@@ -201,4 +205,15 @@ def test_a_key_map_only_volume_counts_as_published_and_links_its_key_map():
     assert totals.published == 1
     html = state_page("NY", [only], SITE)
     assert '<tr class="withheld">' not in html
-    assert "iiif/loc/k.keymap.iiif.json" in html
+    assert "iiif/chronoscope/k.keymap.iiif.json" in html
+
+
+def test_state_page_has_one_sticky_source_toggle():
+    html = state_page("NY", [row("a", keymap="a.keymap.iiif.json")], SITE)
+    assert '<div class="controls">' in html
+    assert 'value="chronoscope" checked' in html
+    assert 'value="loc">' in html
+    # No per-row source labels: one toggle switches every link.
+    assert '<span class="src">' not in html
+    assert 'const IIIF = "https://data.mapsnap.org/runs/v1.3/iiif/"' in html
+    assert "localStorage" in html
