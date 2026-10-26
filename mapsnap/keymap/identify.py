@@ -353,6 +353,27 @@ def log_plan(volume: Path, assumed: list[str], to_test: list[str]) -> None:
         append_keymap_log(volume / f"{parent}.jpg", "keymap-plan", lines)
 
 
+def log_below_floor(volume: Path, *, min_distinct: int = MIN_DISTINCT) -> bool:
+    """Record on each candidate sheet that the volume is too small to have a key map.
+
+    detection_plan nominates nothing below the ``min_distinct`` floor, which
+    otherwise leaves no trace in the logs: a sheet holding a key-map panel looks
+    as though it was tested and rejected. Returns whether the volume is below
+    the floor.
+    """
+    sheet_count = len(volume_valid_pages(volume))
+    if sheet_count >= min_distinct:
+        return False
+    line = (
+        f"volume has {sheet_count} sheet(s), fewer than the {min_distinct} distinct page "
+        "numbers a key map must read (#405): no key map possible, nothing tested"
+    )
+    for key in candidate_keys(volume):
+        append_keymap_log(volume / f"{key}.jpg", "keymap-detect", [line])
+    print(f"  {line}", file=sys.stderr)
+    return True
+
+
 def identify_keymaps(
     volume: Path,
     *,
@@ -379,6 +400,8 @@ def identify_keymaps(
             if "__" not in image_stem(str(image))
         ]
     else:
+        if log_below_floor(volume, min_distinct=min_distinct):
+            return []
         assumed, keys = detection_plan(volume, min_distinct=min_distinct)
         log_plan(volume, assumed, keys)
         if assumed:
