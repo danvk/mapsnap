@@ -20,6 +20,7 @@ holding that source's IIIF files, items.tsv and README.txt.
 
 import argparse
 import csv
+import json
 import zipfile
 from collections import defaultdict
 from dataclasses import dataclass, field
@@ -30,11 +31,31 @@ from urllib.parse import quote
 from gazetteer import STATE_CODES
 
 SOURCES = {"loc": "loc.gov", "chronoscope": "Chronoscope"}
+# The image source a state page's links start on; its toggle switches them all,
+# and the viewer's choice is remembered in the browser.
+DEFAULT_SOURCE = "chronoscope"
+# mapsnap.org's item viewer: a volume's catalog record and every scan, whether or
+# not mapsnap placed any of it.
+ITEM_PAGE = "/item?id="
+# How many of the run page's search matches are shown at a time.
+RESULTS_PAGE = 200
+# The copy-ID button's icons (Lucide's clipboard and check), drawn in currentColor.
+COPY_ICON = (
+    '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" '
+    'stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">'
+    '<rect x="8" y="2" width="8" height="4" rx="1"/>'
+    '<path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"/></svg>'
+)
+CHECK_ICON = (
+    '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" '
+    'stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">'
+    '<path d="M20 6 9 17l-5-5"/></svg>'
+)
 ALLMAPS_VIEWER = "https://viewer.allmaps.org/?url="
 LOC_ITEM = "https://www.loc.gov/item/"
 REPO = "https://github.com/danvk/mapsnap"
 # Where readers report a volume that is misplaced or missing pages.
-PROBLEMS_URL = "https://github.com/danvk/mapsnap/issues/541"
+PROBLEMS_URL = "https://github.com/danvk/mapsnap/issues/661"
 GEOREF_SPEC = "https://iiif.io/api/extension/georef/"
 CHRONOSCOPE = '<a href="https://chronoscope.io/">Chronoscope</a>'
 OLD_INSURANCE_MAPS = '<a href="https://oldinsurancemaps.net/">OldInsuranceMaps.net</a>'
@@ -57,6 +78,11 @@ CONTACT_HTML = (
 MOBILE_NOTE = (
     "If a Chronoscope Allmaps link doesn't load on mobile, try the loc.gov link "
     "or a desktop browser."
+)
+# The state pages' version: their links follow the Images toggle.
+STATE_MOBILE_NOTE = (
+    "If a volume doesn't load on your phone, switch Images to loc.gov, or try a "
+    "desktop browser."
 )
 
 LICENSE_TEXT = (
@@ -88,10 +114,10 @@ COLUMNS = [
     ),
     (
         "city, state, year, date",
-        "The town, its postal code, and the volume's year and catalogue date.",
+        "The town, its postal code, and the volume's year and catalog date.",
     ),
-    ("volume", "The volume number, where the catalogue gives one."),
-    ("title", "The catalogue title."),
+    ("volume", "The volume number, where the catalog gives one."),
+    ("title", "The catalog title."),
     (
         "sheets",
         (
@@ -100,7 +126,7 @@ COLUMNS = [
             "and index pages are left out."
         ),
     ),
-    ("scans", "Every image the Library of Congress catalogues for the volume."),
+    ("scans", "Every image the Library of Congress catalogs for the volume."),
     ("images", "Images the run split the sheets into (split sheets become several)."),
     ("placed", "Images the run georeferenced."),
     ("published", "Images published: those placed, less the ones dropped below."),
@@ -113,7 +139,7 @@ COLUMNS = [
         "dropped_over_5km_from_location",
         (
             "Images dropped because, in a volume of 10 sheets or fewer, they sit over "
-            "5 km from the catalogue's location for the town."
+            "5 km from the catalog's location for the town."
         ),
     ),
     (
@@ -146,7 +172,7 @@ def as_int(value: str) -> int:
 
 
 def display_title(row: dict[str, str]) -> str:
-    """A volume's title without the catalogue's boilerplate, with its volume number."""
+    """A volume's title without the catalog's boilerplate, with its volume number."""
     title = row["title"].removeprefix(TITLE_PREFIX).rstrip(".") or row["city"]
     return f"{title}, vol. {row['volume']}" if row["volume"] else title
 
@@ -225,17 +251,266 @@ class Site:
         return f"{self.data_url.rstrip('/')}/iiif/{source}/{name}"
 
     def file_links(self, name: str) -> str:
-        """Download and Allmaps links for one IIIF file, from each image source."""
+        """View (Allmaps) and JSON links for one IIIF file, on DEFAULT_SOURCE.
+
+        Both carry the file's name, which is the same under every source, so the
+        state page's Images toggle can point them at another source's copy.
+        """
         if not name:
             return '<span class="none">—</span>'
-        parts = []
-        for source, label in SOURCES.items():
-            url = self.file_url(source, name)
-            parts.append(
-                f'<span class="src">{label}: <a href="{escape(url)}">JSON</a> · '
-                f'<a href="{escape(allmaps_url(url))}">Allmaps</a></span>'
-            )
-        return "".join(parts)
+        url = self.file_url(DEFAULT_SOURCE, name)
+        return (
+            f'<a class="file view" data-name="{escape(name)}" '
+            f'href="{escape(allmaps_url(url))}">View</a> · '
+            f'<a class="file json" data-name="{escape(name)}" href="{escape(url)}">JSON</a>'
+        )
+
+
+def controls_html(placeholder: str) -> str:
+    """The sticky bar of a filter box and the Images toggle, shared by run and state pages."""
+    radios = "\n".join(
+        f'<label><input type="radio" name="source" value="{source}"'
+        f"{' checked' if source == DEFAULT_SOURCE else ''}> {label}</label>"
+        for source, label in sorted(
+            SOURCES.items(), key=lambda kv: kv[0] != DEFAULT_SOURCE
+        )
+    )
+    return f"""<div class="controls">
+<input type="search" id="filter" placeholder="{escape(placeholder)}" aria-label="Filter volumes">
+<span class="source" role="radiogroup" aria-label="Images">Images:
+{radios}
+</span>
+<span id="count"></span>
+</div>"""
+
+
+def source_script(site: "Site") -> str:
+    """Script for the Images toggle: points every a.file link at the chosen source.
+
+    Links are looked up when the source changes, so rows a page adds later
+    (the run page's search results) follow the toggle too; they build their
+    own hrefs with fileHref().
+    """
+    return f"""const IIIF = "{site.data_url.rstrip("/")}/iiif/";
+const ALLMAPS = "{ALLMAPS_VIEWER}";
+const DEFAULT_SOURCE = "{DEFAULT_SOURCE}";
+let source = DEFAULT_SOURCE;
+// The URL of one IIIF file on the current source, or its Allmaps view.
+function fileHref(name, view) {{
+  const url = IIIF + source + "/" + name;
+  return view ? ALLMAPS + encodeURIComponent(url) : url;
+}}
+function setSource(value) {{
+  source = value;
+  for (const link of document.querySelectorAll("a.file")) {{
+    link.href = fileHref(link.dataset.name, link.classList.contains("view"));
+  }}
+}}
+for (const radio of document.querySelectorAll('input[name="source"]')) {{
+  radio.addEventListener("change", () => {{
+    setSource(radio.value);
+    try {{ localStorage.setItem("mapsnap-source", radio.value); }} catch (error) {{}}
+  }});
+}}
+let saved = null;
+try {{ saved = localStorage.getItem("mapsnap-source"); }} catch (error) {{}}
+if (saved && saved !== DEFAULT_SOURCE) {{
+  const radio = document.querySelector(`input[name="source"][value="${{saved}}"]`);
+  if (radio) {{
+    radio.checked = true;
+    setSource(saved);
+  }}
+}}"""
+
+
+def find_script(site: "Site") -> str:
+    """Script for the run page's search: fetch volumes.json once, filter it, show matches.
+
+    Every term must appear in the volume's id, title, year, town, state (code or
+    name) or status. Matches are shown RESULTS_PAGE at a time.
+    """
+    state_names = json.dumps(STATE_NAMES, sort_keys=True)
+    return f"""const STATE_NAMES = {state_names};
+const RESULTS_PAGE = {RESULTS_PAGE};
+const input = document.getElementById("filter");
+const count = document.getElementById("count");
+const table = document.getElementById("results");
+const body = table.querySelector("tbody");
+const more = document.getElementById("more");
+let volumes = null;
+let matches = [];
+let shown = 0;
+// The run's volumes, fetched on first use, each with the text its terms match.
+async function load() {{
+  if (!volumes) {{
+    const response = await fetch("{site.page_path()}volumes.json");
+    volumes = (await response.json()).map((v) => ({{
+      v,
+      text: [v[0], v[1], v[2], v[3], v[4], STATE_NAMES[v[4]] || "", v[7]].join(" ").toLowerCase(),
+    }}));
+  }}
+  return volumes;
+}}
+function cell(text, className) {{
+  const td = document.createElement("td");
+  if (className) td.className = className;
+  td.textContent = text;
+  return td;
+}}
+// A View · JSON pair for one of the volume's files, or a dash.
+function fileCell(item, kind, has) {{
+  const td = document.createElement("td");
+  td.className = "files";
+  if (!has) {{
+    td.innerHTML = '<span class="none">—</span>';
+    return td;
+  }}
+  const name = `${{item}}.${{kind}}.iiif.json`;
+  for (const [label, view] of [["View", true], ["JSON", false]]) {{
+    const link = document.createElement("a");
+    link.className = view ? "file view" : "file json";
+    link.dataset.name = name;
+    link.href = fileHref(name, view);
+    link.textContent = label;
+    td.append(link);
+    if (view) td.append(" · ");
+  }}
+  return td;
+}}
+function row(v) {{
+  const [item, title, year, city, state, sheets, placed, status, main, keymap] = v;
+  const published = status.startsWith("published");
+  const tr = document.createElement("tr");
+  if (!published) tr.className = "withheld";
+  const titleCell = document.createElement("td");
+  const titleLink = document.createElement("a");
+  titleLink.href = "{ITEM_PAGE}" + encodeURIComponent(item);
+  titleLink.textContent = title;
+  titleCell.append(titleLink, copyButton(item));
+  const stateCell = document.createElement("td");
+  const stateLink = document.createElement("a");
+  stateLink.href = "{site.page_path()}states/" + state.toLowerCase();
+  stateLink.textContent = state;
+  stateCell.append(stateLink);
+  tr.append(titleCell, cell(year), cell(city), stateCell, cell(sheets, "num"), cell(placed, "num"));
+  if (published) {{
+    tr.append(fileCell(item, "main", main), fileCell(item, "keymap", keymap));
+  }} else {{
+    const td = cell(status, "files status");
+    td.colSpan = 2;
+    tr.append(td);
+  }}
+  return tr;
+}}
+function showMore() {{
+  const next = matches.slice(shown, shown + RESULTS_PAGE);
+  body.append(...next.map((m) => row(m.v)));
+  shown += next.length;
+  more.hidden = shown >= matches.length;
+  more.textContent = `Show ${{Math.min(RESULTS_PAGE, matches.length - shown)}} more`;
+}}
+async function update() {{
+  const terms = input.value.toLowerCase().split(/\\s+/).filter(Boolean);
+  body.replaceChildren();
+  shown = 0;
+  if (!terms.length) {{
+    table.hidden = true;
+    more.hidden = true;
+    count.textContent = "";
+    return;
+  }}
+  let all;
+  try {{
+    all = await load();
+  }} catch (error) {{
+    count.textContent = "Couldn't load the list of volumes.";
+    return;
+  }}
+  // A newer keystroke may have finished first.
+  if (input.value.toLowerCase().split(/\\s+/).filter(Boolean).join(" ") !== terms.join(" ")) return;
+  matches = all.filter((m) => terms.every((term) => m.text.includes(term)));
+  table.hidden = !matches.length;
+  count.textContent = `${{matches.length.toLocaleString()}} of ${{all.length.toLocaleString()}} volumes`;
+  showMore();
+}}
+let timer = null;
+input.addEventListener("input", () => {{
+  clearTimeout(timer);
+  timer = setTimeout(update, 150);
+}});
+more.addEventListener("click", showMore);"""
+
+
+def copy_button(item: str) -> str:
+    """A button beside a volume's title that copies its id; shown when its row is hovered."""
+    return (
+        f'<button type="button" class="copy" data-copy="{escape(item)}" '
+        f'title="Copy the volume ID ({escape(item)})" '
+        f'aria-label="Copy the volume ID {escape(item)}">{COPY_ICON}</button>'
+    )
+
+
+def copy_script() -> str:
+    """Script for every copy button on the page, including rows added later.
+
+    Copies the id, then shows a checkmark for a moment.
+    """
+    return f"""const COPY_ICON = {json.dumps(COPY_ICON)};
+const CHECK_ICON = {json.dumps(CHECK_ICON)};
+// A copy button for rows the page builds itself.
+function copyButton(item) {{
+  const button = document.createElement("button");
+  button.type = "button";
+  button.className = "copy";
+  button.dataset.copy = item;
+  button.title = `Copy the volume ID (${{item}})`;
+  button.setAttribute("aria-label", `Copy the volume ID ${{item}}`);
+  button.innerHTML = COPY_ICON;
+  return button;
+}}
+document.addEventListener("click", async (event) => {{
+  const button = event.target.closest("button.copy");
+  if (!button) return;
+  const item = button.dataset.copy;
+  try {{
+    await navigator.clipboard.writeText(item);
+  }} catch (error) {{
+    button.title = "Your browser didn't allow copying";
+    return;
+  }}
+  button.innerHTML = CHECK_ICON;
+  button.classList.add("copied");
+  button.title = `Copied ${{item}}`;
+  clearTimeout(button.copiedTimer);
+  button.copiedTimer = setTimeout(() => {{
+    button.innerHTML = COPY_ICON;
+    button.classList.remove("copied");
+    button.title = `Copy the volume ID (${{item}})`;
+  }}, 1500);
+}});"""
+
+
+def volumes_json(rows: list[dict[str, str]]) -> list[list]:
+    """Every volume as [item, title, year, town, state, sheets, placed, status, main, key map].
+
+    The run page's search reads this: the last two are 1 when the volume has that
+    IIIF file, whose name follows from the item (<item>.main.iiif.json).
+    """
+    return [
+        [
+            row["item"],
+            display_title(row),
+            row["year"],
+            row["city"],
+            row["state"],
+            as_int(row["sheets"]),
+            as_int(row["sheets_placed"]),
+            row["status"],
+            int(bool(row["main"])),
+            int(bool(row["keymap"])),
+        ]
+        for row in sorted(rows, key=lambda r: (r["state"],) + volume_sort_key(r))
+    ]
 
 
 def page(title: str, body: str) -> str:
@@ -346,9 +621,33 @@ opens in the Allmaps viewer: {example["sheets_placed"]} georeferenced sheets ove
 
 {example_html}
 
+<h2>Find a volume</h2>
+<p>Search every volume in the run by town, state, year or Library of Congress id. A title opens the volume's page; <b>View</b> opens its placed sheets over today's map in Allmaps, and <b>JSON</b> is the IIIF file behind them.</p>
+{controls_html("Find a volume by town, state, year or id")}
+<div class="table-scroll">
+<table class="volumes" id="results" hidden>
+<thead><tr><th>Title</th><th>Year</th><th>Location</th><th>State</th><th class="num">Sheets</th><th class="num">Placed</th><th>Main content</th><th>Key map</th></tr></thead>
+<tbody></tbody>
+</table>
+</div>
+<p><button type="button" id="more" hidden>Show more</button></p>
+<script>
+{source_script(site)}
+{copy_script()}
+{find_script(site)}
+</script>
+
 <h2>Download</h2>
 <table class="downloads">
 {downloads}
+</table>
+
+<h2>States</h2>
+<table class="states">
+<thead><tr><th>State</th><th class="num">Volumes published</th><th class="num">of</th><th class="num">Sheets placed</th><th class="num">of</th><th class="num">%</th></tr></thead>
+<tbody>
+{chr(10).join(state_rows)}
+</tbody>
 </table>
 
 <h2>The files</h2>
@@ -365,14 +664,6 @@ opens in the Allmaps viewer: {example["sheets_placed"]} georeferenced sheets ove
 
 <h2>OldInsuranceMaps.net</h2>
 <p>mapsnap was built with data from {OLD_INSURANCE_MAPS}, where volunteers have georeferenced Sanborn maps by hand; their work is what mapsnap was developed and measured against. If a volume you want isn't listed here, or is missing pages, look for it on OldInsuranceMaps.net, or georeference it by hand there.</p>
-
-<h2>States</h2>
-<table class="states">
-<thead><tr><th>State</th><th class="num">Volumes published</th><th class="num">of</th><th class="num">Sheets placed</th><th class="num">of</th><th class="num">%</th></tr></thead>
-<tbody>
-{chr(10).join(state_rows)}
-</tbody>
-</table>
 
 <h2>items.tsv</h2>
 <table class="columns">
@@ -401,19 +692,20 @@ def state_page(code: str, rows: list[dict[str, str]], site: Site) -> str:
         else:
             files = f'<td class="files status" colspan="2">{escape(row["status"])}</td>'
         # The item id isn't shown, but the filter still finds it, and the title
-        # links to the volume's page at the Library of Congress.
+        # links to the volume's page in mapsnap.org's item viewer.
         body_rows.append(
             f'<tr data-item="{escape(row["item"])}"{"" if published else ' class="withheld"'}>'
-            f'<td><a href="{LOC_ITEM}{escape(row["item"])}/">{escape(display_title(row))}</a></td>'
+            f'<td><a href="{ITEM_PAGE}{escape(row["item"])}">{escape(display_title(row))}</a>'
+            f"{copy_button(row['item'])}</td>"
             f"<td>{escape(row['year'])}</td><td>{escape(row['city'])}</td>"
             f'<td class="num">{escape(row["sheets"])}</td><td class="num">{escape(row["sheets_placed"])}</td>'
             f"{files}</tr>"
         )
     body = f"""<p class="crumbs"><a href="{site.page_path()}">Run {escape(site.version)}</a> › {escape(name)}</p>
 <h1>{escape(name)}</h1>
-<p class="lede">{number(totals.published)} of {number(totals.volumes)} volumes published, with {number(totals.sheets_placed)} of {number(totals.sheets)} sheets placed. <b>JSON</b> is the IIIF file; <b>Allmaps</b> opens it over today's map. loc.gov files draw the Library of Congress's scans, Chronoscope files its faster copies of them.</p>
-<p>Not every page is placed, or placed accurately: please <a href="{PROBLEMS_URL}">report problems</a>. Missing a volume, or pages of one? Look for it on {OLD_INSURANCE_MAPS}, or georeference it by hand there. {MOBILE_NOTE}</p>
-<p><input type="search" id="filter" placeholder="Filter by town, year or id" aria-label="Filter volumes"> <span id="count"></span></p>
+<p class="lede">{number(totals.published)} of {number(totals.volumes)} volumes published, with {number(totals.sheets_placed)} of {number(totals.sheets)} sheets placed. A title opens the volume's page, with its catalog record and every scan. <b>View</b> opens its placed sheets over today's map in Allmaps; <b>JSON</b> is the IIIF file behind them. <b>Images</b> chooses whose scans they draw: {CHRONOSCOPE}'s faster copies, or the Library of Congress's originals.</p>
+<p>Not every page is placed, or placed accurately: please <a href="{PROBLEMS_URL}">report problems</a>. Missing a volume, or pages of one? Look for it on {OLD_INSURANCE_MAPS}, or georeference it by hand there. {STATE_MOBILE_NOTE}</p>
+{controls_html("Filter by town, year or id")}
 <div class="table-scroll">
 <table class="volumes">
 <thead><tr><th>Title</th><th>Year</th><th>Location</th><th class="num">Sheets</th><th class="num">Placed</th><th>Main content</th><th>Key map</th></tr></thead>
@@ -423,6 +715,8 @@ def state_page(code: str, rows: list[dict[str, str]], site: Site) -> str:
 </table>
 </div>
 <script>
+{source_script(site)}
+{copy_script()}
 const input = document.getElementById("filter");
 const count = document.getElementById("count");
 const rows = [...document.querySelectorAll("table.volumes tbody tr")];
@@ -504,6 +798,9 @@ def main() -> None:
     out = args.site_dir / "runs" / args.version
     (out / "states").mkdir(parents=True, exist_ok=True)
     (out / "index.html").write_text(run_index(rows, site, args.run_dir))
+    (out / "volumes.json").write_text(
+        json.dumps(volumes_json(rows), separators=(",", ":"))
+    )
     by_state: dict[str, list[dict[str, str]]] = defaultdict(list)
     for row in rows:
         if row["state"]:

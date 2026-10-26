@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Sanborn volume · mapsnap</title>
-<meta name="description" content="A Library of Congress Sanborn map volume: its catalogue record, every sheet, and where mapsnap placed them.">
+<meta name="description" content="A Library of Congress Sanborn map volume: its catalog record, every sheet, and where mapsnap placed them.">
 <link rel="stylesheet" href="/style.css">
 <style>
   :root {
@@ -61,7 +61,7 @@
     font-size: 0.88em;
   }
 
-  /* The two cards on top: the LoC catalogue, and what mapsnap made of it. */
+  /* The two cards on top: the LoC catalog, and what mapsnap made of it. */
   .top {
     display: grid;
     grid-template-columns: minmax(0, 3fr) minmax(0, 2fr);
@@ -863,8 +863,8 @@
     return content.length ? el('tr', {}, el('th', { scope: 'row' }, label), el('td', {}, content)) : null;
   }
 
-  /** The Library of Congress catalogue card. */
-  function catalogueCard() {
+  /** The Library of Congress catalog card. */
+  function catalogCard() {
     const place = [record.city, record.county, record.state].filter(Boolean).join(', ');
     const c = record.coordinates;
     return el('section', { class: 'card' },
@@ -982,7 +982,7 @@
       el('h1', {}, record.name),
       el('p', { class: 'meta-line' },
         [formatDate(record.date), `${record.sheets.length} sheets`, place].filter(Boolean).join(' · ')),
-      el('div', { class: 'top' }, catalogueCard(), mapsnapCard()),
+      el('div', { class: 'top' }, catalogCard(), mapsnapCard()),
       el('div', { class: 'browse-head' },
         el('h2', {}, 'Sheets'),
         record.run ? el('span', { class: 'legend' },
