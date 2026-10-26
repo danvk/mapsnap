@@ -8,6 +8,7 @@ from mapsnap.keymap.identify import (
     detection_plan,
     is_keymap,
     legitimate_keymap_split,
+    log_below_floor,
     log_plan,
     page_zero_stems,
     panel_flush_edges,
@@ -202,6 +203,27 @@ def test_log_plan_records_the_split_verdict_per_sheet(tmp_path: Path):
     assert read_section(plain / "p0.jpg", "keymap-detect") == [
         "page-0 sheet with no split panels: key map by convention"
     ]
+
+
+def test_log_below_floor_records_the_skip_on_candidate_sheets(tmp_path: Path):
+    from mapsnap.keymap.log import read_section
+
+    # Arkadelphia 1896: four sheets, the key map a panel of p1, never tested.
+    volume = make_volume(
+        tmp_path, ["p1.jpg", "p1__1.jpg", "p1__2.jpg", "p2.jpg", "p3.jpg", "p4.jpg"]
+    )
+    assert log_below_floor(volume)
+    expected = (
+        f"volume has 4 sheet(s), fewer than the {MIN_DISTINCT} distinct page numbers "
+        "a key map must read (#405): no key map possible, nothing tested"
+    )
+    assert read_section(volume / "p1.jpg", "keymap-detect") == [expected]
+    assert read_section(volume / "p2.jpg", "keymap-detect") is None
+    # A volume above the floor logs nothing here; detection_plan takes over.
+    (tmp_path / "big").mkdir()
+    big = make_indexed_volume(tmp_path / "big", ["p1.jpg"])
+    assert not log_below_floor(big)
+    assert read_section(big / "p1.jpg", "keymap-detect") is None
 
 
 def test_detection_plan_no_page_zero_uses_candidates(tmp_path: Path):
