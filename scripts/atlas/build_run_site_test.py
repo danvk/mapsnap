@@ -144,7 +144,7 @@ def test_run_index_links_states_downloads_and_the_example(tmp_path):
     assert "try the loc.gov link" in html
     assert 'href="https://chronoscope.io/"' in html
     assert 'href="https://iiif.io/api/extension/georef/"' in html
-    assert 'href="https://github.com/danvk/mapsnap/issues/541"' in html
+    assert 'href="https://github.com/danvk/mapsnap/issues/661"' in html
     assert 'href="https://oldinsurancemaps.net/"' in html
     # The item viewer has nothing to do with the run, so the run page doesn't describe it.
     assert "Browse a volume" not in html
@@ -182,7 +182,7 @@ def test_state_page_lists_every_volume_with_its_files():
     assert "row.dataset.item" in html
     assert "switch Images to loc.gov" in html
     assert "1 of 2 volumes published" in html
-    assert 'href="https://github.com/danvk/mapsnap/issues/541"' in html
+    assert 'href="https://github.com/danvk/mapsnap/issues/661"' in html
     assert 'href="https://oldinsurancemaps.net/"' in html
 
 

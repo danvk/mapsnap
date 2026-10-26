@@ -55,7 +55,7 @@ ALLMAPS_VIEWER = "https://viewer.allmaps.org/?url="
 LOC_ITEM = "https://www.loc.gov/item/"
 REPO = "https://github.com/danvk/mapsnap"
 # Where readers report a volume that is misplaced or missing pages.
-PROBLEMS_URL = "https://github.com/danvk/mapsnap/issues/541"
+PROBLEMS_URL = "https://github.com/danvk/mapsnap/issues/661"
 GEOREF_SPEC = "https://iiif.io/api/extension/georef/"
 CHRONOSCOPE = '<a href="https://chronoscope.io/">Chronoscope</a>'
 OLD_INSURANCE_MAPS = '<a href="https://oldinsurancemaps.net/">OldInsuranceMaps.net</a>'
