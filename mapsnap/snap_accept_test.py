@@ -14,7 +14,7 @@ SCALE_DEG = 0.6 / KX  # ~0.6 m/px
 
 
 def affine(lon_shift_m: float = 0.0) -> list[list[float]]:
-    """A north-up page->lonlat affine near 40N, optionally slid east by metres."""
+    """A north-up page->lonlat affine near 40N, optionally slid east by meters."""
     return [
         [SCALE_DEG, 0.0, -74.0 + lon_shift_m / KX],
         [0.0, -SCALE_DEG * KX / 110_540.0, 40.0],
