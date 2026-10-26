@@ -68,6 +68,7 @@ from mapsnap.page_units import (
     runner_up_affines_of,
     volume_median_scale,
 )
+from mapsnap.snap_accept import AcceptModel
 from mapsnap.streets import Block, build_block_index
 from mapsnap.utils import (
     default_centerlines,
@@ -1841,6 +1842,37 @@ def arbitrate_challenge(record: dict, arbitrate_gate: float) -> dict | None:
     }
 
 
+def model_challenge(record: dict, accept_model: AcceptModel) -> dict | None:
+    """The challenge decision for one fitted page under the learned accept model (#650).
+
+    Replaces arbitrate_challenge's score, margin, indefensible-incumbent,
+    verification and name rules with one probability that publishing the top
+    candidate improves the page. The disagreement floor stays: an agreeing
+    challenger is refinement's business.
+    """
+    incumbent = record.get("incumbent") or {}
+    candidates = record.get("candidates") or []
+    if not incumbent.get("world_affine") or not candidates:
+        return None
+    probability = accept_model.replace_probability(record)
+    if probability is None or probability < accept_model.replace.threshold:
+        return None
+    disagreement = incumbent_disagreement_ft(record)
+    if disagreement is None or disagreement < ARBITRATE_MIN_DISAGREE_FT:
+        return None
+    return {
+        "target": record["target"],
+        "chosen": 0,
+        "reason": "challenge",
+        "challenge": True,
+        "select_score": candidates[0]["select_score"],
+        "p_accept": round(probability, 4),
+        "disagreement_ft": round(disagreement, 1),
+        "incumbent_verification": incumbent.get("verification"),
+        "challenger_verification": candidates[0].get("verification"),
+    }
+
+
 # Rung-flip arbitration: a fit published at HALF its true scale. Ten of the
 # 2026-07-30 corpus's 39 disasters were exact half/double-scale fits with
 # near-perfect rotation, and for several the correct pose already sat in the
@@ -2189,10 +2221,21 @@ def select_union(
     gate_score: float,
     gate_margin: float,
     allowed: dict[str, set[int] | None],
+    *,
+    accept_model: AcceptModel | None = None,
 ) -> list[dict]:
     """The two dev-calibrated committees, combined: the energy mode (at its
     conservative gate) resolves joint/ambiguous pages, and the per-page argmax
-    gate is the floor for pages the energy abstains on."""
+    gate is the floor for pages the energy abstains on.
+
+    With ``accept_model`` the per-page argmax decides alone, on the model's
+    probability: the energy committee's gate is a select-score bar too, and
+    its acceptances were among those the model was trained to replace (#650).
+    """
+    if accept_model is not None:
+        return select_argmax(
+            records, gate_score, gate_margin, allowed, accept_model=accept_model
+        )
     by_target = {
         s["target"]: s
         for s in select_volume(volume, records, VOLUME_MODE_GATE, allowed)
@@ -2214,8 +2257,14 @@ def cmd_select(
     gate_margin: float,
     arbitrate_gate: float = 2.0,
     refine_margin: float | None = None,
+    *,
+    accept_model: AcceptModel | None = None,
 ) -> None:
-    """Pick one candidate (or abstain) per page; write selection_<mode>.jsonl."""
+    """Pick one candidate (or abstain) per page; write selection_<mode>.jsonl.
+
+    ``accept_model`` (#650) decides rescues and challenges by its learned
+    probabilities instead of the select-score bars; ranking is unchanged.
+    """
     records = load_candidates(volume)
     # Fitted pages' records (from `candidates --all-pages`) exist solely for
     # arbitration; the rescue committees must never treat them as targets.
@@ -2225,16 +2274,24 @@ def cmd_select(
     if mode == "volume":
         selections = select_volume(volume, rescue, gate_score, allowed)
     elif mode == "union":
-        selections = select_union(volume, rescue, gate_score, gate_margin, allowed)
+        selections = select_union(
+            volume, rescue, gate_score, gate_margin, allowed, accept_model=accept_model
+        )
     elif mode == "arbitrate":
         # The union rescue selection, plus challenges to placed RANSAC fits.
-        selections = select_union(volume, rescue, gate_score, gate_margin, allowed)
+        selections = select_union(
+            volume, rescue, gate_score, gate_margin, allowed, accept_model=accept_model
+        )
         note_ratios = printed_note_ratios(volume, records)
         challenged = refined = flipped = 0
         for record in records:
             if record.get("fit_state") != "fitted":
                 continue
-            challenge = arbitrate_challenge(record, arbitrate_gate)
+            challenge = (
+                arbitrate_challenge(record, arbitrate_gate)
+                if accept_model is None
+                else model_challenge(record, accept_model)
+            )
             if challenge is not None:
                 selections.append(challenge)
                 challenged += 1
@@ -2611,12 +2668,19 @@ def select_argmax(
     gate_score: float,
     gate_margin: float,
     panel_allowed: dict[str, set[int] | None] | None = None,
+    *,
+    accept_model: AcceptModel | None = None,
 ) -> list[dict]:
     """v0: per-page rank-1 with abstention gates.
 
     Panels face the sheet-integrity gate on top of the usual ones: rank-1 must
     agree with any reliable fitted sibling's implied sheet; a panel with no
     reliable anchor is held to the much higher PANEL_SOLO_GATE instead.
+
+    With ``accept_model``, rank-1's rescue probability replaces the score,
+    margin and panel-solo bars (the model has the margin and the panel among
+    its inputs). Stamp-corroborated and half-sheet-seeded rescues keep their
+    own relaxed paths, and the sheet-agreement gate still applies.
     """
     panel_allowed = panel_allowed or {}
     selections = []
@@ -2631,7 +2695,7 @@ def select_argmax(
                     choice["reason"] = "sheet-agreement"
                     selections.append(choice)
                     continue
-                if allowed is None and not seeded:
+                if allowed is None and not seeded and accept_model is None:
                     top_score = record["candidates"][0].get("select_score")
                     if top_score is None or top_score < PANEL_SOLO_GATE:
                         choice["reason"] = (
@@ -2664,12 +2728,26 @@ def select_argmax(
                 # 40 m search disc and ~1 degree: every candidate is the same
                 # hypothesis, so there is no rival to be ambiguous with.
                 margin = math.inf
-            effective_gate = (
-                STAMP_RESCUE_SCORE
-                if corroborated or (seeded and record.get("fit_state") in RESCUE_STATES)
-                else gate_score
+            relaxed = corroborated or (
+                seeded and record.get("fit_state") in RESCUE_STATES
             )
-            if score is None:
+            effective_gate = STAMP_RESCUE_SCORE if relaxed else gate_score
+            if accept_model is not None and not relaxed:
+                probability = accept_model.rescue_probability(record)
+                threshold = accept_model.rescue.threshold
+                if probability is None:
+                    choice["reason"] = "implausible"
+                elif probability < threshold:
+                    choice["reason"] = f"p(good) {probability:.3f} < {threshold:.3f}"
+                else:
+                    choice = {
+                        "target": stem,
+                        "chosen": 0,
+                        "reason": "accept-model",
+                        "select_score": score,
+                        "p_accept": round(probability, 4),
+                    }
+            elif score is None:
                 choice["reason"] = "implausible"
             elif score < effective_gate:
                 choice["reason"] = f"score {score:.2f} < {effective_gate}"
