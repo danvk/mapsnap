@@ -1058,7 +1058,7 @@ def test_region_edges_skip_siblings_and_skeleton_twins():
     assert not any("p4" in pair for pair in pairs)
 
 
-def test_region_edges_charge_a_neighbour_and_its_skeleton_once():
+def test_region_edges_charge_a_neighbor_and_its_skeleton_once():
     # New York 1923: p13 sits beside p14, and both sheets have skeletons. Each
     # overlap is charged within a layer (p13-p14, p13s-p14s), never across it.
     from mapsnap.reconcile import build_region_edges
@@ -1071,7 +1071,7 @@ def test_region_edges_charge_a_neighbour_and_its_skeleton_once():
         "p13s": page("p13s", 0.0),
         "p14": page("p14", 400.0),
         "p14s": page("p14s", 400.0),
-        # A skeleton with no full-colour twin is checked against full pages.
+        # A skeleton with no full-color twin is checked against full pages.
         "p15s": page("p15s", 800.0),
     }
     for node in nodes.values():
