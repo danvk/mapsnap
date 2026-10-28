@@ -402,9 +402,12 @@ The local mirror is `~/Documents/mapsnap/data.mapsnap.org/` (`runs/`,
    `build_run_site.py --run-dir … --site-dir ~/Documents/mapsnap/mapsnap.org --version v2.0 --data-url https://data.mapsnap.org/runs/v2.0 --zip`.
    The site is a local git repo with no remote; Dan deploys it.
 6. **Rebuild the item pages:**
-   `AWS_PROFILE=mapsnap build_item_pages.py --run-dir … --version v2.0 --out ~/Documents/mapsnap/data.mapsnap.org`.
+   `AWS_PROFILE=mapsnap build_item_pages.py --run-dir … --version v2.0 --out ~/Documents/mapsnap/data.mapsnap.org --run-iiif-dir …/iiif`.
    They're baked per run, and the script reads panels from the run tag recorded
-   in each annotation.
+   in each annotation. `--run-iiif-dir` is step 2's `--iiif-dir`. A volume the
+   run placed nothing of has no published file, so its unplaced images and
+   their panels come from the run's own annotation instead. Without it, the
+   records of 4,638 v2.0 volumes list no images at all.
 7. **Upload:** `aws s3 sync … s3://mapsnap/… --profile r2` for
    `runs/<version>/`, `items/` and `manifests/`. The edge serves
    `max-age=14400` whatever the upload says.
@@ -412,6 +415,19 @@ The local mirror is `~/Documents/mapsnap/data.mapsnap.org/` (`runs/`,
    served for up to 4 hours. In the Cloudflare dashboard: the mapsnap.org zone,
    then Caching → Configuration → Purge Everything. (Purging by prefix needs an
    Enterprise plan.) Browsers keep their own copies for the same 4 hours.
+9. **Rebuild and deploy the atlas** (mapsnap.org/atlas):
+   ```sh
+   uv run python scripts/atlas/build_places.py
+   uv run python scripts/atlas/build_footprints.py \
+     --run-dir ~/Documents/mapsnap/data.mapsnap.org/runs/<version>
+   aws s3 sync app/public/atlas s3://mapsnap/atlas/<version>/ --profile r2
+   cd app && VITE_ATLAS_DATA_URL=https://data.mapsnap.org/atlas/<version> \
+     npm run build:atlas
+   cp -R dist-atlas/atlas.html dist-atlas/atlas-assets ~/Documents/mapsnap/mapsnap.org/
+   ```
+   `app/public/atlas` is generated and gitignored. The page reads it from
+   data.mapsnap.org and reads the run's annotations and item records from
+   there too, so deploy it after steps 6–8. Then deploy the site.
 
 Back up the local `runs/<version>/`, `items/` and `manifests/` before
 rebuilding them in place. The v2.0 republish kept its backup in

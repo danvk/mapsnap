@@ -44,6 +44,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 import numpy as np
+from build_places import volume_number
 from gazetteer import STATE_CODES_BY_LOWERCASE
 
 from mapsnap.annotation_transform import Transform, page_transform
@@ -381,15 +382,6 @@ def add_names(items: dict[str, dict], atlas_dir: Path) -> None:
         entry.setdefault("date", "")
         entry.setdefault("title", "")
         entry["postal"] = STATE_CODES_BY_LOWERCASE.get(entry["state"].lower(), "")
-
-
-def volume_number(notes: list[str]) -> str:
-    """The volume number a catalogue record's notes give ("Vol. 2, 1915; Republished 1939."), or ""."""
-    for note in notes:
-        match = re.search(r"\bvol(?:ume)?\.?\s*(\d+[a-z]?)\b", note, re.IGNORECASE)
-        if match:
-            return match.group(1)
-    return ""
 
 
 def read_volume_numbers(path: Path) -> dict[str, str]:
