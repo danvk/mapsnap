@@ -255,6 +255,10 @@
     background: var(--keymap-soft);
     color: var(--keymap);
   }
+  .badge.matter {
+    background: transparent;
+    font-style: italic;
+  }
   .badge.partial,
   .badge.withheld {
     background: var(--withheld-soft);
@@ -463,6 +467,19 @@
   const MONTHS = ['January', 'February', 'March', 'April', 'May', 'June', 'July',
     'August', 'September', 'October', 'November', 'December'];
   const SVG = 'http://www.w3.org/2000/svg';
+  // What a scan the mirror skipped is (unmirrored_scans.scan_role). A volume's
+  // front and back matter is not a map; the pipeline cannot name the other
+  // two yet, so never ran them.
+  const MATTER_ROLES = ['cover', 'title', 'index', 'notes', 'corrections'];
+  const ROLE_TEXT = {
+    cover: 'cover',
+    title: 'title page',
+    index: 'index',
+    notes: 'notes',
+    corrections: 'corrections',
+    map: 'not processed',
+    other: 'not processed',
+  };
   const STATUS_TEXT = {
     placed: 'placed',
     'key map': 'placed as the key map',
@@ -562,6 +579,9 @@
 
   /** How the run left a sheet: a badge's text and class. */
   function sheetBadge(sheet) {
+    if (sheet.role) {
+      return { text: ROLE_TEXT[sheet.role] || sheet.role, cls: MATTER_ROLES.includes(sheet.role) ? 'matter' : '' };
+    }
     const whole = wholeFit(sheet);
     const panels = panelCount(sheet);
     if (whole && whole.status === 'key map') return { text: 'key map', cls: 'keymap' };
@@ -610,6 +630,9 @@
   /** "mapsnap: ..." — what the run did with each image of a sheet, linking placed ones to Allmaps. */
   function fitLine(sheet) {
     const who = el('span', { class: 'who' }, 'mapsnap:');
+    if (sheet.role === 'map') return [who, 'Not fit: mapsnap can’t process this kind of map sheet yet.'];
+    if (sheet.role === 'other') return [who, 'Not fit: mapsnap skips sheets numbered like this one.'];
+    if (sheet.role) return [who, `Not fit: the volume’s ${ROLE_TEXT[sheet.role]}, not a map.`];
     if (!record.run) return [who, 'This volume was not part of the latest run.'];
     const fits = sheet.fit || [];
     if (!fits.length) return [who, 'Not fit (a title, index or other non-map page).'];
@@ -879,8 +902,8 @@
           ' ', el('span', { class: 'note' }, '(geocoded by LoC from the place name)')) : null,
         row('Notes', record.notes.join(' ')),
         row('Images', record.scans
-          ? `${record.scans} at loc.gov, ${record.sheets.length} of them map sheets`
-          : `${record.sheets.length} map sheets`),
+          ? `${record.scans} at loc.gov, ${mapSheetCount()} of them map sheets`
+          : `${mapSheetCount()} map sheets`),
         row('Repository', record.repository),
         row('loc.gov', link(record.loc_item, record.loc_item.replace(/^https:\/\/www\./, '')),
           record.loc_manifest ? [' · ', link(record.loc_manifest.replace(/^http:/, 'https:'), 'IIIF manifest')] : null)))));
@@ -936,6 +959,11 @@
       el('div', { class: 'fit-line', id: 'fit-line' }));
   }
 
+  /** How many of the record's scans are map sheets, not its front and back matter. */
+  function mapSheetCount() {
+    return record.sheets.filter((sheet) => !MATTER_ROLES.includes(sheet.role)).length;
+  }
+
   /** The thumbnail grid. */
   function sheetGrid() {
     return el('div', { class: 'sheets' }, record.sheets.map((sheet, i) => {
@@ -981,7 +1009,7 @@
       el('p', { class: 'crumbs' }, 'Library of Congress · Sanborn Maps · ', el('code', {}, record.id)),
       el('h1', {}, record.name),
       el('p', { class: 'meta-line' },
-        [formatDate(record.date), `${record.sheets.length} sheets`, place].filter(Boolean).join(' · ')),
+        [formatDate(record.date), `${mapSheetCount()} sheets`, place].filter(Boolean).join(' · ')),
       el('div', { class: 'top' }, catalogCard(), mapsnapCard()),
       el('div', { class: 'browse-head' },
         el('h2', {}, 'Sheets'),

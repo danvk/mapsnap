@@ -401,8 +401,15 @@ The local mirror is `~/Documents/mapsnap/data.mapsnap.org/` (`runs/`,
 5. **Build the README, the zips and the site pages:**
    `build_run_site.py --run-dir … --site-dir ~/Documents/mapsnap/mapsnap.org --version v2.0 --data-url https://data.mapsnap.org/runs/v2.0 --zip`.
    The site is a local git repo with no remote; Dan deploys it.
-6. **Rebuild the item pages:**
+6. **Rebuild the item pages:** first
+   `PYTHONPATH=.:scripts/atlas uv run python scripts/atlas/unmirrored_scans.py`,
+   then
    `AWS_PROFILE=mapsnap build_item_pages.py --run-dir … --version v2.0 --out ~/Documents/mapsnap/data.mapsnap.org --run-iiif-dir …/iiif`.
+   The first fetches, at 2 a second, the size of each scan the mirror skips
+   (covers, title pages, indexes, #467's map sheets) from the CDN, into
+   `~/Documents/mapsnap/cdn-info/`. The cache makes later runs instant; the
+   first took about 74 minutes for 8,864 scans. Item pages show those scans
+   too, and the 44 items the mirror skipped entirely get pages of their own.
    They're baked per run, and the script reads panels from the run tag recorded
    in each annotation. `--run-iiif-dir` is step 2's `--iiif-dir`. A volume the
    run placed nothing of has no published file, so its unplaced images and
