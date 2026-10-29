@@ -21,6 +21,7 @@ cached as such; any other failure is not, so the next run tries it again.
 
 import argparse
 import csv
+import http.client
 import json
 import re
 import sys
@@ -119,14 +120,15 @@ def cached_size(cache: Path, scan: Scan) -> tuple[int, int] | None:
 
 
 def fetch_info(url: str) -> tuple[int, bytes]:
-    """GET a URL; (status, body), with status 0 for a network failure."""
+    """GET a URL; (status, body), with status 0 for a network failure of any kind."""
     request = urllib.request.Request(url, headers={"User-Agent": USER_AGENT})
     try:
         with urllib.request.urlopen(request, timeout=30) as response:
             return response.status, response.read()
     except urllib.error.HTTPError as error:
         return error.code, b""
-    except (urllib.error.URLError, TimeoutError):
+    except (OSError, http.client.HTTPException):
+        # Timeouts, refused or reset connections, truncated responses.
         return 0, b""
 
 

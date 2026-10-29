@@ -8,6 +8,7 @@ from unmirrored_scans import (
     Scan,
     cache_path,
     cached_size,
+    fetch_info,
     fill_cache,
     info_url,
     read_unmirrored,
@@ -96,3 +97,11 @@ def test_fill_cache_keeps_sizes_and_misses_but_retries_failures(
     assert not cache_path(tmp_path, scans[2]).exists()
     # A rerun fetches only the failure.
     assert fill_cache(scans, tmp_path, rate_per_s=1000)["cached"] == 2
+
+
+def test_fetch_info_reports_a_reset_connection_as_a_failure(monkeypatch):
+    def reset(*args, **kwargs):
+        raise ConnectionResetError(54, "Connection reset by peer")
+
+    monkeypatch.setattr(unmirrored_scans.urllib.request, "urlopen", reset)
+    assert fetch_info("https://cdn.example/info.json") == (0, b"")
