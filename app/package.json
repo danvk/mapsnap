@@ -5,6 +5,7 @@
     "dev": "concurrently --kill-others --names client,server --prefix-colors cyan,magenta \"npm:client:dev\" \"npm:server\"",
     "client:dev": "vite",
     "build": "vite build",
+    "build:atlas": "vite build --config vite.atlas.config.ts",
     "preview": "vite preview",
     "type-check": "tsc --noEmit",
     "test": "vitest run",

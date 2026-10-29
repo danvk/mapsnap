@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 """Build the atlas app's place index from the LoC catalogue and the mirror mapping.
 
-    scripts/atlas/build_places.py --run-tag corpus-v1
+    scripts/atlas/build_places.py
 
 The atlas opens on a map of every town the Sanborn collection covers, so the
 first thing it loads must be small. That file is `places.json`: one row per
@@ -25,6 +25,9 @@ Gazetteer places all but 48 of them (see gazetteer.py).
 The year comes from the TSV, never from the catalogue's ``Date``: they disagree
 for 310 items (sanborn00518_001 is catalogued 1890 and mirrored under 1899),
 and a derived year sends the app to a key that does not exist.
+
+Which run the app shows is not decided here: build_footprints.py reads a
+published run and records it beside the footprints.
 """
 
 import argparse
@@ -42,6 +45,10 @@ from gazetteer import Gazetteer, read_gazetteer
 DEFAULT_METADATA = Path.home() / "Documents/mapsnap/metadata.jsonl"
 DEFAULT_MAPPING = Path.home() / "Downloads/loc-sanborn-maps.mapping.tsv"
 DEFAULT_GAZETTEER = Path.home() / "Documents/mapsnap/gazetteer"
+# "Vol. 2, 1915", "Volume 3A", "Vol. A, 1894": a number, or a capital letter
+# (Chicago's suburban volumes run A to J). The letter must be a capital, or
+# "volumes" would read as volume "s".
+VOLUME_NUMBER = re.compile(r"\b(?i:vol(?:ume)?)\.?\s*(\d+[a-zA-Z]?|[A-Z])\b")
 
 
 @dataclass
@@ -69,6 +76,8 @@ class Volume:
     year: int | None
     sheets: int
     title: str
+    # The catalog's volume number ("5", "3A", "B"), or "" when it gives none.
+    number: str = ""
     mirror_state: str | None = None
     mirror_year: str | None = None
     loc: LocSheets | None = None
@@ -112,6 +121,15 @@ def sheet_count(record: dict) -> int:
     notes = " ".join(record.get("Notes") or [])
     match = re.search(r"(\d+)\s+sheet", notes)
     return int(match.group(1)) if match else 0
+
+
+def volume_number(notes: list[str]) -> str:
+    """The volume number a catalog record's notes give ("Vol. 2, 1915; Republished 1939."), or ""."""
+    for note in notes:
+        match = VOLUME_NUMBER.search(note)
+        if match:
+            return match.group(1)
+    return ""
 
 
 def read_mirror(path: Path) -> tuple[dict[str, tuple[str, str]], dict[str, int]]:
@@ -280,6 +298,7 @@ def read_record(
             # the annotation will actually hold.
             sheets=lookups.mirror_sheets.get(item) or sheet_count(record),
             title=record.get("Title") or "",
+            number=volume_number(record.get("Notes") or []),
             mirror_state=prefix[0] if prefix else None,
             mirror_year=prefix[1] if prefix else None,
         )
@@ -317,7 +336,7 @@ def volume_states(by_state: dict[str, dict[str, list[dict]]]) -> dict[str, list[
 
 
 def write_outputs(
-    places: dict[tuple[str, str], Place], out_dir: Path, run_tag: str, bucket: str
+    places: dict[tuple[str, str], Place], out_dir: Path
 ) -> tuple[int, int]:
     """Write places.json, one volumes file per state and volume-states.json; return counts."""
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -352,6 +371,7 @@ def write_outputs(
                 "year": volume.year,
                 "sheets": volume.sheets,
                 "title": volume.title,
+                **({"volume": volume.number} if volume.number else {}),
                 **(
                     {"state": volume.mirror_state, "mirrorYear": volume.mirror_year}
                     if volume.mirror_state
@@ -375,11 +395,7 @@ def write_outputs(
             )
         ]
 
-    index = {
-        "runTag": run_tag,
-        "bucket": bucket,
-        "places": rows,
-    }
+    index = {"places": rows}
     (out_dir / "places.json").write_text(json.dumps(index, separators=(",", ":")))
     for state_slug, place_volumes in by_state.items():
         (out_dir / "volumes" / f"{state_slug}.json").write_text(
@@ -412,12 +428,6 @@ def main() -> None:
         type=Path,
         default=Path(__file__).resolve().parents[2] / "app/public/atlas",
     )
-    parser.add_argument(
-        "--run-tag",
-        default="corpus-v1",
-        help="Run whose annotations the app reads (default: %(default)s)",
-    )
-    parser.add_argument("--bucket", default="mapsnap-sanborn")
     args = parser.parse_args()
 
     prefixes, mirror_sheets = read_mirror(args.mapping)
@@ -436,7 +446,7 @@ def main() -> None:
     for place in places.values():
         for volume in place.volumes:
             volume.loc = loc_sheets.get(volume.item)
-    n_places, n_states = write_outputs(places, args.out_dir, args.run_tag, args.bucket)
+    n_places, n_states = write_outputs(places, args.out_dir)
 
     volumes = sum(len(p.volumes) for p in places.values())
     mirrored = sum(1 for p in places.values() for v in p.volumes if v.mirror_state)

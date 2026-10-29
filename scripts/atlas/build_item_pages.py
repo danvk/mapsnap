@@ -229,6 +229,12 @@ def read_pages(run_dir: Path, row: dict[str, str]) -> dict[str, dict]:
     }
 
 
+def read_unpublished(run_iiif_dir: Path | None, item: str) -> dict | None:
+    """The run's own main annotation page for an item, from publish_run.py's input, if there."""
+    path = run_iiif_dir / f"{item}.iiif.json" if run_iiif_dir else None
+    return json.loads(path.read_text()) if path and path.exists() else None
+
+
 def run_tag(pages: dict[str, dict]) -> str:
     """The run that made these pages (corpus-v1), from their "run" metadata; "" if none says."""
     for page in pages.values():
@@ -238,9 +244,24 @@ def run_tag(pages: dict[str, dict]) -> str:
     return ""
 
 
-def read_fits(pages: dict[str, dict]) -> list[Fit]:
-    """What the run did with each of an item's images, from its published annotation pages."""
+def read_fits(pages: dict[str, dict], unpublished: dict | None = None) -> list[Fit]:
+    """What the run did with each of an item's images, from its published annotation pages.
+
+    An item the run placed nothing of has no published main file, and so no
+    list of the images it could not place. ``unpublished`` is the run's own
+    main annotation page for such an item (publish_run.py's input), which
+    has that list. Any page it places was dropped when the run was published,
+    so it counts as withheld.
+    """
     fits: list[Fit] = []
+    if unpublished is not None and "main" not in pages:
+        fits += [
+            Fit(key, "unplaced") for key, _ in page_notes(unpublished, "unplaced pages")
+        ]
+        fits += [
+            Fit(page_key(annotation), "withheld", "dropped when the run was published")
+            for annotation in unpublished.get("items") or []
+        ]
     for column, status in (("main", "placed"), ("keymap", "key map")):
         if column not in pages:
             continue
@@ -583,6 +604,14 @@ def main() -> None:
         "--sheets-cache", type=Path, default=DOCUMENTS / "mirror-metadata"
     )
     parser.add_argument(
+        "--run-iiif-dir",
+        type=Path,
+        help=(
+            "publish_run.py's --iiif-dir: the run's own annotations, which list the "
+            "images of an item the run placed nothing of"
+        ),
+    )
+    parser.add_argument(
         "--panels-cache",
         type=Path,
         default=DOCUMENTS / "run-panels",
@@ -604,7 +633,11 @@ def main() -> None:
         sources.append(mirror_metadata_source(s3_paths[item], args.sheets_cache))
         if item in rows:
             pages = read_pages(args.run_dir, rows[item])
-            fits, tag = read_fits(pages), run_tag(pages)
+            unpublished = (
+                None if "main" in pages else read_unpublished(args.run_iiif_dir, item)
+            )
+            fits = read_fits(pages, unpublished)
+            tag = run_tag(pages) or run_tag({"main": unpublished or {}})
             runs[item] = (fits, tag)
             sources += [
                 panels_source(s3_paths[item], tag, key, args.panels_cache)

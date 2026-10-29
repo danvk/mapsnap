@@ -421,3 +421,25 @@ def test_read_item_list(tmp_path: Path):
     path = tmp_path / "items.txt"
     path.write_text("# pilot\nsanborn00002_001\n\nsanborn00009_001 extra words\n")
     assert read_item_list(path) == ["sanborn00002_001", "sanborn00009_001"]
+
+
+def test_read_fits_reads_an_unpublished_item_from_the_runs_own_page():
+    # Nothing placed, so nothing published: the run's own page lists the
+    # images, and the one page it placed was dropped by publish_run.
+    unpublished = annotation_page(
+        ["Bethel, Vermont | 1922 | sanborn08907_006 p3 [1]"],
+        [
+            {
+                "label": "unplaced pages",
+                "value": "p1__1 (no location); p1__2 (no location)",
+            }
+        ],
+    )
+    fits = read_fits({}, unpublished)
+    assert [(fit.image, fit.status) for fit in fits] == [
+        ("p1__1", "unplaced"),
+        ("p1__2", "unplaced"),
+        ("p3__1", "withheld"),
+    ]
+    # A published main file wins.
+    assert read_fits(run_pages(), unpublished) == read_fits(run_pages())

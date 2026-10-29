@@ -1,31 +1,22 @@
 /**
- * Reading a corpus run's annotations as the atlas needs them.
+ * Reading a published run's annotations as the atlas needs them.
  *
- * Two sources, because the obvious one does not hold up. A published
- * annotation points its image services at loc.gov, and using it unmodified is
- * the cheapest thing the atlas could do -- nothing but the annotation JSON
- * would ever touch our own storage. But a town-year is hundreds of sheets and
- * thousands of tiles, and tile.loc.gov rate-limits well below that: opening
- * Chicago 1951 (7 volumes, 719 sheets) drew 4,096 failed requests and left the
- * host answering 429 to everything for minutes afterwards. The browser reports
- * those as CORS failures, since a 429 error page carries no CORS headers.
- *
- * So the default is the Chronoscope CDN, a static (level 0) IIIF service built
- * from the mirrored 25% scans of every sheet: each page's service is repointed
- * there, in the browser, and the tiles never touch our own server. `loc`
- * remains selectable -- loc.gov is where the scans come from, and the right
- * source for reading a single volume.
+ * A published run (scripts/atlas/publish_run.py) holds every volume's
+ * annotation twice: under iiif/loc/, pointing at loc.gov's image services, and
+ * under iiif/chronoscope/, pointing at the Chronoscope CDN's quarter-size
+ * copies, with control points and clip polygons already rescaled. The CDN is
+ * the default. A town-year is hundreds of sheets and thousands of tiles, and
+ * tile.loc.gov rate-limits well below that: opening Chicago 1951 (7 volumes,
+ * 719 sheets) drew 4,096 failed requests and left the host answering 429 to
+ * everything for minutes afterwards. The browser reports those as CORS
+ * failures, since a 429 error page carries no CORS headers. loc.gov remains
+ * selectable: it is where the scans come from, and fine for one volume.
  */
 
 import { pagesFromAnnotation, type PageGeo } from '../iiif/pages';
-import {
-  rescaleSvgSelector,
-  type GeorefAnnotationPage,
-} from '../../server/iiifAnnotations';
+import type { GeorefAnnotationPage } from '../../server/iiifAnnotations';
+import type { RunInfo } from './footprints';
 import type { Volume } from './places';
-
-/** The static IIIF service for the mirrored scans, one directory per sheet. */
-export const CDN_BASE = 'https://cdn.chronoscope.io/mapsnap';
 
 /** A volume's annotation, and the page geometry derived from it. */
 export interface LoadedVolume {
@@ -64,10 +55,15 @@ export function reportedCount(
   return Number.isFinite(value) ? value : null;
 }
 
-/** A volume that has no annotation to draw, and why. */
+/**
+ * A volume that has no annotation to draw, and why.
+ *
+ * `nothing placed`: the run published nothing for it, having placed none of
+ * its images (or dropped all it placed).
+ */
 export interface MissingVolume {
   volume: Volume;
-  reason: 'not digitized' | 'not in this run' | 'unreadable';
+  reason: 'not digitized' | 'nothing placed' | 'unreadable';
 }
 
 /**
@@ -111,123 +107,35 @@ export function withPageMetadata(
   return { ...annotation, items } as GeorefAnnotationPage;
 }
 
-/** Where a volume's sheet images come from. */
-export type ImageSource = 'cdn' | 'loc';
+/** Where a volume's sheet images come from: the run's two copies of each annotation. */
+export type ImageSource = 'chronoscope' | 'loc';
 
-/**
- * Where to fetch a volume's published annotation, whatever the image source.
- *
- * `loc` draws it verbatim, so its pages resolve to loc.gov; `cdn` rewrites it
- * in the browser (rewriteForCdn).
- */
-export function annotationUrl(uri: string): string {
-  return `/s3-api/object?uri=${encodeURIComponent(uri)}`;
-}
-
-/**
- * The CDN's service for a sheet, from its loc.gov service URL.
- *
- * The CDN keeps LoC's own service id as the directory name, e.g.
- * `.../iiif/service:gmd:gmd410m:...:01778_1915-0010` becomes
- * `${CDN_BASE}/service:gmd:gmd410m:...:01778_1915-0010`. Null for a source
- * that is not a loc.gov image service.
- */
-export function cdnServiceUrl(
-  locServiceUrl: string | undefined,
-): string | null {
-  const match = /\/iiif\/(service:[^/]+)/.exec(locServiceUrl ?? '');
-  return match ? `${CDN_BASE}/${match[1]}` : null;
-}
-
-/**
- * The size of the CDN's image for a sheet LoC serves at width x height.
- *
- * The CDN's images are the mirror's 25% scans, which LoC renders at
- * ceil(dimension / 4) -- 6450 x 7650 is 1613 x 1913, where rounding would give
- * 1612 x 1912 and misplace every control point by a fraction of a pixel. Held
- * for all 86 sheets checked against the CDN's info.json, across 40 volumes.
- */
-export function cdnImageSize(size: { width: number; height: number }): {
-  width: number;
-  height: number;
-} {
-  return {
-    width: Math.ceil(size.width / 4),
-    height: Math.ceil(size.height / 4),
-  };
-}
-
-// Round to 1 decimal, as the server's rewrite does.
-function round1(value: number): number {
-  return Math.round(value * 10) / 10;
-}
-
-/**
- * Repoint every loc.gov page of an annotation at the CDN.
- *
- * The published annotation's control points and clipping polygon are in the
- * pixels of LoC's full-resolution image, so both are rescaled into the CDN
- * image's frame, per axis. An item whose source is not a loc.gov service is
- * left as it is. The argument is not mutated.
- */
-export function rewriteForCdn(
-  annotation: GeorefAnnotationPage,
-): GeorefAnnotationPage {
-  const result = structuredClone(annotation);
-  for (const item of result.items ?? []) {
-    const source = item.target?.source;
-    const service = cdnServiceUrl(source?.id);
-    if (
-      !item.target ||
-      !source ||
-      !service ||
-      !source.width ||
-      !source.height
-    ) {
-      continue;
-    }
-    const size = cdnImageSize(source);
-    const scale = {
-      scaleX: size.width / source.width,
-      scaleY: size.height / source.height,
-    };
-    item.target.source = { id: service, type: 'ImageService3', ...size };
-    for (const feature of item.body?.features ?? []) {
-      const coords = feature.properties?.resourceCoords;
-      if (coords && coords.length >= 2) {
-        feature.properties.resourceCoords = [
-          round1((coords[0] ?? 0) * scale.scaleX),
-          round1((coords[1] ?? 0) * scale.scaleY),
-        ];
-      }
-    }
-    const selector = item.target.selector;
-    if (selector?.type === 'SvgSelector') {
-      selector.value = rescaleSvgSelector(selector.value, scale, size);
-    }
-  }
-  return result;
+/** A volume's main annotation in a published run. */
+export function annotationUrl(
+  run: RunInfo,
+  item: string,
+  source: ImageSource,
+): string {
+  return `${run.url}/iiif/${source}/${item}.main.iiif.json`;
 }
 
 /**
  * Fetch one volume's annotation, or say why there is none.
  *
- * A 404 is the ordinary case while a run is still going, not an error worth
- * throwing: the town simply has fewer volumes to draw today than it will
- * tomorrow.
+ * A 404 is ordinary, not an error worth throwing: a run publishes no file for
+ * a volume it placed nothing of.
  */
 export async function loadVolume(
   volume: Volume,
-  uri: string | null,
+  run: RunInfo,
   source: ImageSource,
 ): Promise<LoadedVolume | MissingVolume> {
-  if (!uri) return { volume, reason: 'not digitized' };
+  if (!volume.state) return { volume, reason: 'not digitized' };
   try {
-    const response = await fetch(annotationUrl(uri));
-    if (!response.ok) return { volume, reason: 'not in this run' };
-    const raw = (await response.json()) as GeorefAnnotationPage;
+    const response = await fetch(annotationUrl(run, volume.item, source));
+    if (!response.ok) return { volume, reason: 'nothing placed' };
     const annotation = withPageMetadata(
-      source === 'cdn' ? rewriteForCdn(raw) : raw,
+      (await response.json()) as GeorefAnnotationPage,
     );
     return {
       volume,
@@ -238,6 +146,51 @@ export async function loadVolume(
   } catch {
     return { volume, reason: 'unreadable' };
   }
+}
+
+/** What a run says about one placed image, from its annotation's metadata. */
+export interface PageReport {
+  /** P(good): the confidence model's estimate that the pose is within 25 ft. */
+  confidence: number | null;
+  /** Set for panels, which the model ranks less well than whole pages. */
+  provisional: boolean;
+  /** The confidence model's version, e.g. "corpus-v2". */
+  model: string | null;
+  /** Streets and intersections the fit matched. */
+  streets: number | null;
+  intersections: number | null;
+  /** The corpus run that placed it ("corpus-v2", "corpus-v2.1"). */
+  run: string | null;
+}
+
+/** An annotation item's report, read from its metadata entries. */
+export function pageReport(
+  annotation: GeorefAnnotationPage,
+  itemIndex: number,
+): PageReport {
+  const entries = new Map(
+    (annotation.items?.[itemIndex]?.metadata ?? []).map((entry) => [
+      entry.label,
+      String(entry.value),
+    ]),
+  );
+  const number = (label: string): number | null => {
+    const value = entries.get(label);
+    return value !== undefined && Number.isFinite(Number(value))
+      ? Number(value)
+      : null;
+  };
+  const pageRun = (
+    annotation as { metadata?: { label?: string; value?: string }[] }
+  ).metadata?.find((entry) => entry.label === 'run')?.value;
+  return {
+    confidence: number('confidence'),
+    provisional: entries.get('confidence_provisional') === 'true',
+    model: entries.get('confidence_model') ?? null,
+    streets: number('streets'),
+    intersections: number('intersections'),
+    run: entries.get('run') ?? pageRun ?? null,
+  };
 }
 
 /** Whether a load result carries something to draw. */

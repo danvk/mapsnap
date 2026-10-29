@@ -10,6 +10,7 @@ from build_places import (
     loc_resource,
     read_loc_sheets,
     read_record,
+    volume_number,
 )
 from gazetteer import Gazetteer
 
@@ -135,3 +136,11 @@ def test_volume_states_lists_each_states_place_numbers():
         "alabama": ["00001"],
         "louisiana": ["03286", "03412"],
     }
+
+
+def test_volume_number_reads_numbers_and_capital_letters():
+    assert volume_number(["Vol. A, 1894.", "117 sheet(s)."]) == "A"
+    assert volume_number(["1912 - 1957; VOl. 2, Republished, 1957."]) == "2"
+    assert volume_number(["Volume 3A"]) == "3A"
+    # "volumes" is not volume "s".
+    assert volume_number(["Bound in 2 volumes."]) == ""

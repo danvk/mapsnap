@@ -24,9 +24,6 @@ export interface Place {
 }
 
 export interface PlaceIndex {
-  /** The corpus run whose annotations the app reads. */
-  runTag: string;
-  bucket: string;
   places: Place[];
 }
 
@@ -38,6 +35,8 @@ export interface Volume {
   year: number | null;
   sheets: number;
   title: string;
+  /** The catalogue's volume number ("5", "3A", "B"), when it gives one. */
+  volume?: string;
   /**
    * The mirror's state slug and year, present only for a mirrored volume.
    *
@@ -94,7 +93,6 @@ export function locSheetUrl(
   return locItemUrl(volume.item);
 }
 
-/** The state slug of a place id, which is also its volumes file's name. */
 /**
  * The key a volume is filed under in volume-states.json: its catalogue place
  * number, `03286` for `sanborn03286_001`, or the whole id when it has none.
@@ -131,25 +129,9 @@ export function placeOfVolume(
   return null;
 }
 
+/** The state slug of a place id, which is also its volumes file's name. */
 export function stateSlug(placeId: string): string {
   return placeId.split('/')[0] ?? '';
-}
-
-/**
- * Where a mirrored volume's annotation lives in the bucket.
- *
- * Returns null for a volume the mirror never took, which has no run output to
- * read however the corpus run went.
- */
-export function annotationUri(
-  volume: Volume,
-  index: Pick<PlaceIndex, 'bucket' | 'runTag'>,
-): string | null {
-  if (!volume.state || !volume.mirrorYear) return null;
-  return (
-    `s3://${index.bucket}/by-state/${volume.state}/${volume.mirrorYear}/` +
-    `${volume.item}/runs/${index.runTag}/mapsnap.iiif.json`
-  );
 }
 
 /** Descending distinct years a town has volumes for; undated ones last. */
@@ -161,28 +143,6 @@ export function yearsOf(volumes: Volume[]): (number | null)[] {
     return b - a;
   });
   return years;
-}
-
-/** The volumes of one year, in catalogue order. */
-export function volumesOfYear(
-  volumes: Volume[],
-  year: number | null,
-): Volume[] {
-  return volumes.filter((volume) => volume.year === year);
-}
-
-/**
- * The year to open a town on: its most recent with something to draw.
- *
- * A town's newest volume is often one the mirror never took, and opening on a
- * year that renders nothing looks like a broken app rather than a gap in the
- * data. Falls back to the newest year of any kind when nothing is mirrored, so
- * the panel still has something selected to describe.
- */
-export function defaultYear(volumes: Volume[]): number | null {
-  const mirrored = volumes.filter((volume) => volume.state);
-  const years = yearsOf(mirrored.length > 0 ? mirrored : volumes);
-  return years[0] ?? null;
 }
 
 /**

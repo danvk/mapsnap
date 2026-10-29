@@ -1,12 +1,10 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import {
-  CDN_BASE,
-  cdnImageSize,
-  cdnServiceUrl,
+  annotationUrl,
   inParallel,
   loadVolume,
-  rewriteForCdn,
+  pageReport,
   stemFromLabel,
   withPageMetadata,
 } from './annotations.ts';
@@ -97,155 +95,154 @@ describe('inParallel', () => {
   });
 });
 
-// Champaign 1915 p10, as a corpus run publishes it: LoC's full-resolution
-// frame, 6450 x 7650, which the CDN serves at 1613 x 1913.
-const CHAMPAIGN_SERVICE =
-  'service:gmd:gmd410m:g4104m:g4104cm:g017781915:01778_1915-0010';
-const champaign = (): GeorefAnnotationPage =>
+const RUN = { version: 'v2.0', url: 'https://data.mapsnap.org/runs/v2.0' };
+
+// Abbeville 1907 p1, as the v2.0 run publishes it under iiif/chronoscope/.
+const abbeville = (): GeorefAnnotationPage =>
   ({
     type: 'AnnotationPage',
+    metadata: [
+      { label: 'run', value: 'corpus-v2' },
+      { label: 'pages', value: '6' },
+    ],
     items: [
       {
         type: 'Annotation',
-        label: 'Champaign, Illinois | 1915 | sanborn01778_006 p10',
+        label: 'Abbeville, Alabama | 1907 | sanborn00001_001 p1',
+        metadata: [
+          { label: 'streets', value: '3' },
+          { label: 'intersections', value: '1' },
+          { label: 'confidence', value: '0.94' },
+          { label: 'confidence_model', value: 'corpus-v2' },
+        ],
         target: {
           source: {
-            id: `https://tile.loc.gov/image-services/iiif/${CHAMPAIGN_SERVICE}/info.json`,
-            type: 'ImageService2',
-            width: 6450,
-            height: 7650,
+            id: 'https://cdn.chronoscope.io/mapsnap/service:gmd:gmd397m:g3974m:g3974am:g3974am_g000011907:00001_1907-0001',
+            type: 'ImageService3',
+            width: 1613,
+            height: 1913,
           },
           selector: {
             type: 'SvgSelector',
             value:
-              '<svg><polygon points="0,0 6450,0 6450,7650 130,550.8" /></svg>',
+              '<svg><polygon points="0,0 1613,0 1613,1913 0,1913" /></svg>',
           },
         },
         body: {
+          type: 'FeatureCollection',
+          transformation: { type: 'polynomial', options: { order: 1 } },
           features: [
             {
               type: 'Feature',
-              properties: { resourceCoords: [6450, 7650] },
-              geometry: null,
+              properties: { resourceCoords: [0, 0] },
+              geometry: { type: 'Point', coordinates: [-85.26, 31.58] },
             },
             {
               type: 'Feature',
-              properties: { resourceCoords: [1000, 2000] },
-              geometry: null,
+              properties: { resourceCoords: [1613, 0] },
+              geometry: { type: 'Point', coordinates: [-85.25, 31.58] },
+            },
+            {
+              type: 'Feature',
+              properties: { resourceCoords: [0, 1913] },
+              geometry: { type: 'Point', coordinates: [-85.26, 31.57] },
             },
           ],
         },
       },
+      {
+        type: 'Annotation',
+        label: 'Abbeville, Alabama | 1907 | sanborn00001_001 p2 [1]',
+        metadata: [
+          { label: 'confidence', value: '0.71' },
+          { label: 'confidence_provisional', value: 'true' },
+        ],
+      },
     ],
   }) as unknown as GeorefAnnotationPage;
 
-describe('cdnServiceUrl', () => {
-  it("keeps LoC's service id as the CDN's directory", () => {
-    expect(
-      cdnServiceUrl(
-        `https://tile.loc.gov/image-services/iiif/${CHAMPAIGN_SERVICE}/info.json`,
-      ),
-    ).toBe(`${CDN_BASE}/${CHAMPAIGN_SERVICE}`);
-    expect(
-      cdnServiceUrl(
-        `https://tile.loc.gov/image-services/iiif/${CHAMPAIGN_SERVICE}`,
-      ),
-    ).toBe(`${CDN_BASE}/${CHAMPAIGN_SERVICE}`);
-  });
-
-  it('is null for anything but a loc.gov image service', () => {
-    expect(cdnServiceUrl('http://localhost:8182/iiif/vol/p10.jpg')).toBeNull();
-    expect(cdnServiceUrl(undefined)).toBeNull();
-  });
-});
-
-describe('cdnImageSize', () => {
-  it('rounds a quarter up, as the CDN does', () => {
-    // Rounding to nearest would give 1612 x 1912 (half to even) or 1613 x 1913
-    // (half up) depending on the language; the CDN's info.json says 1613.
-    expect(cdnImageSize({ width: 6450, height: 7650 })).toEqual({
-      width: 1613,
-      height: 1913,
-    });
-    expect(cdnImageSize({ width: 6452, height: 7652 })).toEqual({
-      width: 1613,
-      height: 1913,
-    });
-  });
-});
-
-describe('rewriteForCdn', () => {
-  it("moves the page onto the CDN's image and frame", () => {
-    const input = champaign();
-    const item = rewriteForCdn(input).items[0]!;
-    expect(item.target?.source).toEqual({
-      id: `${CDN_BASE}/${CHAMPAIGN_SERVICE}`,
-      type: 'ImageService3',
-      width: 1613,
-      height: 1913,
-    });
-    const coords = item.body?.features?.map((f) => f.properties.resourceCoords);
-    // The far corner lands on the far corner, not a fraction of a pixel short.
-    expect(coords?.[0]).toEqual([1613, 1913]);
-    expect(coords?.[1]).toEqual([250.1, 500.1]);
-    expect(item.target?.selector?.value).toBe(
-      '<svg><polygon points="0,0 1613,0 1613,1913 32.5,137.7" /></svg>',
+describe('annotationUrl', () => {
+  it("is the volume's main file under the source's directory", () => {
+    expect(annotationUrl(RUN, 'sanborn00001_001', 'chronoscope')).toBe(
+      'https://data.mapsnap.org/runs/v2.0/iiif/chronoscope/sanborn00001_001.main.iiif.json',
     );
-    // The published annotation is untouched.
-    expect(input.items[0]?.target?.source.width).toBe(6450);
+    expect(annotationUrl(RUN, 'sanborn00001_001', 'loc')).toBe(
+      'https://data.mapsnap.org/runs/v2.0/iiif/loc/sanborn00001_001.main.iiif.json',
+    );
+  });
+});
+
+describe('pageReport', () => {
+  it("reads a page's P(good) and match counts", () => {
+    expect(pageReport(abbeville(), 0)).toEqual({
+      confidence: 0.94,
+      provisional: false,
+      model: 'corpus-v2',
+      streets: 3,
+      intersections: 1,
+      run: 'corpus-v2',
+    });
   });
 
-  it('leaves a page that is not on loc.gov alone', () => {
-    const input = champaign();
-    input.items[0]!.target!.source.id =
-      'http://localhost:8182/iiif/vol/p10.jpg';
-    expect(rewriteForCdn(input)).toEqual(input);
+  it('marks a panel provisional and leaves missing fields null', () => {
+    const report = pageReport(abbeville(), 1);
+    expect(report.confidence).toBe(0.71);
+    expect(report.provisional).toBe(true);
+    expect(report.streets).toBeNull();
   });
 });
 
 describe('loadVolume', () => {
-  const volume = { item: 'sanborn01778_006' } as Volume;
-  const uri =
-    's3://mapsnap-sanborn/by-state/illinois/1915/sanborn01778_006/runs/corpus-v1/mapsnap.iiif.json';
+  const volume = {
+    item: 'sanborn00001_001',
+    state: 'alabama',
+    mirrorYear: '1907',
+    sheets: 2,
+  } as Volume;
 
   afterEach(() => {
     vi.unstubAllGlobals();
   });
 
   // A fetch that serves the published annotation, recording what was asked.
-  function stubFetch() {
+  function stubFetch(status = 200) {
     const requested: string[] = [];
     vi.stubGlobal('fetch', async (url: string) => {
       requested.push(url);
-      return Response.json(champaign());
+      return status === 200
+        ? Response.json(abbeville())
+        : new Response('', { status });
     });
     return requested;
   }
 
-  it('draws the published annotation from the CDN', async () => {
+  it('reads the published file for the source, and names its pages', async () => {
     const requested = stubFetch();
-    const result = await loadVolume(volume, uri, 'cdn');
-    expect(
-      'annotation' in result && result.annotation.items[0]?.target?.source,
-    ).toEqual({
-      id: `${CDN_BASE}/${CHAMPAIGN_SERVICE}`,
-      type: 'ImageService3',
-      width: 1613,
-      height: 1913,
-    });
-    // The annotation is the only request; the tiles are Allmaps' to fetch.
+    const result = await loadVolume(volume, RUN, 'chronoscope');
     expect(requested).toEqual([
-      `/s3-api/object?uri=${encodeURIComponent(uri)}`,
+      annotationUrl(RUN, 'sanborn00001_001', 'chronoscope'),
     ]);
+    expect('pages' in result && result.pages.map((p) => p.stem)).toEqual([
+      'p1',
+    ]);
+    expect('totalImages' in result && result.totalImages).toBe(6);
   });
 
-  it('draws it verbatim from loc.gov', async () => {
-    stubFetch();
-    const result = await loadVolume(volume, uri, 'loc');
-    expect(
-      'annotation' in result && result.annotation.items[0]?.target?.source.id,
-    ).toBe(
-      `https://tile.loc.gov/image-services/iiif/${CHAMPAIGN_SERVICE}/info.json`,
-    );
+  it('says nothing was placed when the run published no file', async () => {
+    stubFetch(404);
+    expect(await loadVolume(volume, RUN, 'loc')).toEqual({
+      volume,
+      reason: 'nothing placed',
+    });
+  });
+
+  it('fetches nothing for a volume never digitized', async () => {
+    const requested = stubFetch();
+    const paper = { item: 'sanborn00001_009' } as Volume;
+    expect(await loadVolume(paper, RUN, 'chronoscope')).toEqual({
+      volume: paper,
+      reason: 'not digitized',
+    });
+    expect(requested).toEqual([]);
   });
 });
