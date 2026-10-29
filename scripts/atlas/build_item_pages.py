@@ -735,8 +735,8 @@ def main() -> None:
     print(f"wrote {len(index)} items to {args.out}")
     if unsized:
         print(
-            f"{unsized:,} skipped scans left out for want of a size: "
-            "run unmirrored_scans.py to fetch them",
+            f"{unsized:,} skipped scans left out for want of a size: not on the "
+            "CDN, or not fetched yet (run unmirrored_scans.py)",
             file=sys.stderr,
         )
 
