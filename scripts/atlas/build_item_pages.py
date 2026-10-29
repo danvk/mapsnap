@@ -10,8 +10,8 @@ these files and Chronoscope's copies of the scans, so a LoC Sanborn id leads to
 everything about a volume without visiting loc.gov (#606). It writes, under
 ``--out``:
 
-- ``items/<item>.json``: the catalogue record (metadata.jsonl), every mirrored
-  sheet with its Chronoscope image service, thumbnail and loc.gov sources, and
+- ``items/<item>.json``: the catalog record (metadata.jsonl), every scan LoC
+  has with its Chronoscope image service, thumbnail and loc.gov sources, and
   what ``--run-dir``'s run did with each sheet;
 - ``manifests/<item>.json``: a IIIF Presentation 3 manifest of the Chronoscope
   images, for Mirador, Universal Viewer or the Allmaps editor;
@@ -20,7 +20,10 @@ everything about a volume without visiting loc.gov (#606). It writes, under
 
 The sheet table comes from the mirror's ``metadata.json`` for each item, and a
 split sheet's panel outlines from the run's ``pN.panels.json``, both fetched from
-S3 once into local caches. The run's fit is baked in, so the records are
+S3 once into local caches. The mirror leaves out covers, title pages, indexes
+and a few map sheets the pipeline cannot use yet (#467); those come from the
+mirror's mapping TSV, sized by unmirrored_scans.py's cache of the CDN's
+info.json (run it first), and carry a ``role`` saying what they are. The run's fit is baked in, so the records are
 rebuilt with each published run. With ``--site-dir``, item.html is copied there.
 """
 
@@ -40,6 +43,15 @@ from urllib.parse import urlparse
 from build_run_site import allmaps_url, display_title, read_items
 from publish_run import CDN_BASE, page_key, write_min
 from shapely.geometry import Polygon
+from unmirrored_scans import DEFAULT_CACHE as CDN_INFO_CACHE
+from unmirrored_scans import (
+    DEFAULT_MAPPING,
+    Scan,
+    cached_size,
+    read_unmirrored,
+    scan_role,
+    service_id,
+)
 
 DOCUMENTS = Path.home() / "Documents/mapsnap"
 DATA_URL = "https://data.mapsnap.org"
@@ -62,6 +74,9 @@ INDEX_COLUMNS = ["id", "city", "state", "year", "date", "volume", "sheets", "sta
 # "p9__1 (tier 1, 33.99,-86.02 +/-179m)" or "p0a (the key map, ...)" in an
 # annotation page's "unplaced pages" and "withheld" metadata.
 PAGE_NOTE = re.compile(r"(p[^\s(;,]+) \(([^)]*)\)")
+# The roles of a volume's front and back matter (unmirrored_scans.scan_role):
+# scans, but not map sheets.
+MATTER_ROLES = ("cover", "title", "index", "notes", "corrections")
 
 
 @dataclass
@@ -152,11 +167,6 @@ def panel_shapes(panels_doc: dict) -> list[dict]:
     return shapes
 
 
-def service_id(storage_dir: str, stem: str) -> str:
-    """LoC's image-service id for a sheet: its storage path with colons, then its stem."""
-    return "service:" + storage_dir.replace("/", ":") + ":" + stem
-
-
 def thumbnail_size(width: int, height: int) -> tuple[int, int]:
     """The CDN's pre-rendered size at 1/THUMBNAIL_SCALE of its image, rounding up as it does."""
     return math.ceil(width / THUMBNAIL_SCALE), math.ceil(height / THUMBNAIL_SCALE)
@@ -207,9 +217,42 @@ def sheet_record(
         "loc_source": loc_source_url(sheet),
         "fit": [fit.as_json() for fit in fits],
     }
+    if sheet.get("role"):
+        record["role"] = sheet["role"]
     if panels:
         record["panels"] = panels
     return record
+
+
+def unmirrored_sheets(scans: list[Scan], cache: Path) -> list[dict]:
+    """The scans the mirror skipped, as sheet entries like its own, each with its role.
+
+    A scan whose size is not in the CDN cache (unmirrored_scans.py has not
+    fetched it, or the CDN does not have it) is left out.
+    """
+    sheets = []
+    for scan in scans:
+        size = cached_size(cache, scan)
+        if size is None:
+            continue
+        sheets.append(
+            {
+                "seq": scan.seq,
+                "key": scan.key,
+                "stem": scan.stem,
+                "storage_dir": scan.storage_dir,
+                "source": scan.source,
+                "width": size[0],
+                "height": size[1],
+                "role": scan_role(scan.key),
+            }
+        )
+    return sheets
+
+
+def is_map_sheet(sheet: dict) -> bool:
+    """Whether a sheet record is a map rather than a volume's front or back matter."""
+    return sheet.get("role") not in MATTER_ROLES
 
 
 def page_notes(page: dict, label: str) -> list[tuple[str, str]]:
@@ -495,7 +538,7 @@ def index_row(record: dict) -> list:
         record["year"],
         record["date"],
         record["volume"],
-        len(record["sheets"]),
+        sum(1 for sheet in record["sheets"] if is_map_sheet(sheet)),
         run.get("status", ""),
     ]
 
@@ -612,6 +655,18 @@ def main() -> None:
         ),
     )
     parser.add_argument(
+        "--mapping",
+        type=Path,
+        default=DEFAULT_MAPPING,
+        help="The mirror's mapping TSV, which lists the scans the mirror skipped.",
+    )
+    parser.add_argument(
+        "--cdn-info",
+        type=Path,
+        default=CDN_INFO_CACHE,
+        help="unmirrored_scans.py's cache of the CDN's info.json for those scans.",
+    )
+    parser.add_argument(
         "--panels-cache",
         type=Path,
         default=DOCUMENTS / "run-panels",
@@ -624,6 +679,8 @@ def main() -> None:
     rows = {row["item"]: row for row in read_items(args.run_dir / "items.tsv")}
     catalogue = read_catalogue(args.catalogue, set(items))
     reader = S3Reader()
+    unmirrored = read_unmirrored(args.mapping)
+    unsized = 0
 
     # What each item's run did, and so which split sheets' panels are wanted;
     # then every file from S3 at once, before the records are built.
@@ -650,9 +707,15 @@ def main() -> None:
     index = []
     for item in items:
         mirror = read_mirror_metadata(reader, s3_paths[item], args.sheets_cache)
+        extra = unmirrored_sheets(unmirrored.get(item, []), args.cdn_info)
+        unsized += len(unmirrored.get(item, [])) - len(extra)
         if mirror is None:
-            print(f"{item}: no metadata.json in the mirror", file=sys.stderr)
-            continue
+            if not extra:
+                print(f"{item}: no metadata.json in the mirror", file=sys.stderr)
+                continue
+            # Every scan was skipped (#467): the record is those scans alone,
+            # with the year the mirror files it under.
+            mirror = {"year": Path(s3_paths[item]).parent.name}
         run = None
         if item in runs:
             fits, tag = runs[item]
@@ -660,6 +723,8 @@ def main() -> None:
             run.panels = read_run_panels(
                 reader, s3_paths[item], tag, fits, args.panels_cache
             )
+        # The scans the mirror skipped join its own sheets.
+        mirror = {**mirror, "sheets": [*(mirror.get("sheets") or []), *extra]}
         record = item_record(item, catalogue.get(item) or {}, mirror, run)
         write_min(args.out / "items" / f"{item}.json", record)
         write_min(args.out / "manifests" / f"{item}.json", manifest(record))
@@ -668,6 +733,12 @@ def main() -> None:
     if args.site_dir:
         shutil.copy(Path(__file__).with_name("item.html"), args.site_dir / "item.html")
     print(f"wrote {len(index)} items to {args.out}")
+    if unsized:
+        print(
+            f"{unsized:,} skipped scans left out for want of a size: "
+            "run unmirrored_scans.py to fetch them",
+            file=sys.stderr,
+        )
 
 
 if __name__ == "__main__":

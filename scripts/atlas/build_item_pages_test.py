@@ -9,6 +9,7 @@ from build_item_pages import (
     catalogue_fields,
     fits_by_sheet,
     index_row,
+    is_map_sheet,
     item_record,
     loc_resource,
     loc_source_url,
@@ -26,8 +27,10 @@ from build_item_pages import (
     service_id,
     split_sheets,
     thumbnail_size,
+    unmirrored_sheets,
 )
 from shapely.geometry import Point, Polygon
+from unmirrored_scans import Scan, cache_path
 
 STORAGE = "gmd/gmd397m/g3974m/g3974am/g3974am_g000021926"
 SERVICE = "service:gmd:gmd397m:g3974m:g3974am:g3974am_g000021926"
@@ -443,3 +446,44 @@ def test_read_fits_reads_an_unpublished_item_from_the_runs_own_page():
     ]
     # A published main file wins.
     assert read_fits(run_pages(), unpublished) == read_fits(run_pages())
+
+
+def test_item_record_adds_the_scans_the_mirror_skipped(tmp_path: Path):
+    # The title page (seq 0) and an index (seq 3) the mirror left out; the
+    # index is sized in the CDN cache, a cover is not.
+    scans = [
+        Scan("sanborn00002_001", 0, "ptitl", "00002_1926-titl", STORAGE),
+        Scan("sanborn00002_001", 3, "pind1", "00002_1926-ind1", STORAGE),
+        Scan("sanborn00002_001", 4, "pcovr", "00002_1926-covr", STORAGE),
+    ]
+    for scan in scans[:2]:
+        path = cache_path(tmp_path, scan)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps({"width": 1380, "height": 2067}))
+    extra = unmirrored_sheets(scans, tmp_path)
+    assert [(s["key"], s["role"], s["width"]) for s in extra] == [
+        ("ptitl", "title", 1380),
+        ("pind1", "index", 1380),
+    ]
+    mirror = {**MIRROR, "sheets": [*MIRROR["sheets"], *extra]}
+    record = item_record(
+        "sanborn00002_001", catalogue_fields(CATALOGUE_RECORD), mirror, None
+    )
+    assert [(s["key"], s.get("role")) for s in record["sheets"]] == [
+        ("ptitl", "title"),
+        ("p1", None),
+        ("p2", None),
+        ("pind1", "index"),
+    ]
+    assert record["sheets"][0]["thumbnail"]["url"] == (
+        f"{CDN}:00002_1926-titl/full/345,517/0/default.jpg"
+    )
+    # Only map sheets count as sheets in the search index.
+    assert dict(zip(INDEX_COLUMNS, index_row(record), strict=True))["sheets"] == 2
+    assert len(manifest(record)["items"]) == 4
+
+
+def test_is_map_sheet():
+    assert is_map_sheet({"key": "p1"})
+    assert is_map_sheet({"key": "pcbd1", "role": "map"})
+    assert not is_map_sheet({"key": "ptitl", "role": "title"})
