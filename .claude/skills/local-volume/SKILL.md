@@ -38,11 +38,11 @@ aws s3 cp s3://mapsnap-sanborn/osm-by-county/$fips.osm.pbf data/<vol>/centerline
 ## 4. What the viewer and scoring need beside a run's IIIF
 
 - **Panel cuts:** `runs/<tag>/pN.panels.json`, the run's own split cuts. Without them, its split panels can't be matched to truth.
-- **The compare text:** the viewer's "color by RMSE" reads a `.txt` sibling of the IIIF:
+- **The compare text:** the viewer's score and "color by RMSE" read a `.txt` sibling of the IIIF, named by swapping `.iiif.json` for `.txt` (`mapsnap.iiif.json` → `mapsnap.txt`). Under any other name the viewer silently turns those features off:
 
   ```bash
   uv run mapsnap compare data/<vol>/main.iiif.json data/<vol>/runs/<tag>/mapsnap.iiif.json \
-      > data/<vol>/runs/<tag>/mapsnap.iiif.txt
+      > data/<vol>/runs/<tag>/mapsnap.txt
   ```
 
 - **Scoring:** `uv run mapsnap score data/<vol>/runs/<tag>/mapsnap.iiif.json`. Scores are against the volume root's truth, `oim/` and centerlines (`score.volume_root`); `--csv FILE` also writes per-page rows.
