@@ -21,7 +21,7 @@ Training labels come from OldInsuranceMaps footprints projected through the key 
 own georeference (mapsnap.keymap.train_region_unet). Inference:
 
     uv run python -m mapsnap.keymap.region_unet data/<vol>/raw/p0.keymap.json \\
-        [--output p0.regions.panels.json] [--overlay p0.regions.png]
+        [--output p0.regions.panels.json] [--overlay p0.regions.png] [--image raw/p0.jpg]
 """
 
 import argparse
@@ -631,9 +631,19 @@ def segment_keymap(
     model: UNet,
     device: torch.device,
     params: DecodeParams | None = None,
+    *,
+    image_path: Path | None = None,
 ) -> tuple[SegmentedKeymap, Path]:
-    """Segment the key map a ``<stem>.keymap.json`` describes; returns regions and the image path."""
-    image_path = keymap_json.with_name(keymap_json.name.replace(".keymap.json", ".jpg"))
+    """Segment the key map a ``<stem>.keymap.json`` describes; returns regions and the image path.
+
+    The image defaults to the sibling ``<stem>.jpg``; a mirror run keeps its sidecars
+    under ``runs/<tag>/raw/`` with the sheet in the volume's ``raw/``, so callers can
+    name it.
+    """
+    if image_path is None:
+        image_path = keymap_json.with_name(
+            keymap_json.name.replace(".keymap.json", ".jpg")
+        )
     rgb = read_rgb(image_path)
     seeds, texts = seed_points(keymap_json)
     return segment_keymap_image(
@@ -693,13 +703,22 @@ def main() -> None:
     parser.add_argument(
         "--maps", type=Path, help="Write the class maps as a PNG here (one input only)."
     )
+    parser.add_argument(
+        "--image",
+        type=Path,
+        help="The key-map JPEG (default: <stem>.jpg beside the input; one input only).",
+    )
     args = parser.parse_args()
-    if len(args.keymap_json) > 1 and (args.output or args.overlay or args.maps):
-        sys.exit("--output/--overlay/--maps take a single input.")
+    if len(args.keymap_json) > 1 and (
+        args.output or args.overlay or args.maps or args.image
+    ):
+        sys.exit("--output/--overlay/--maps/--image take a single input.")
     device = select_device()
     model = load_region_unet(args.weights, device)
     for keymap_json in args.keymap_json:
-        segmented, image_path = segment_keymap(keymap_json, model, device)
+        segmented, image_path = segment_keymap(
+            keymap_json, model, device, image_path=args.image
+        )
         with Image.open(image_path) as image:
             size = image.size
         doc = regions_panels_doc(

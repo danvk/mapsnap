@@ -4,6 +4,7 @@ from pathlib import Path
 
 import numpy as np
 import torch
+from PIL import Image
 
 from mapsnap.keymap.region_unet import (
     BACKGROUND,
@@ -30,6 +31,7 @@ from mapsnap.keymap.region_unet import (
     region_polygons,
     resize_image,
     scale_points,
+    segment_keymap,
     segment_keymap_image,
     sidecar_dir,
     tile_origins,
@@ -225,6 +227,31 @@ def test_segment_keymap_image_returns_full_resolution_polygons():
     assert segmented.probabilities.shape == (NUM_CLASSES, 300, 400)
     assert len(segmented.polygons) == len(segmented.texts)
     assert all(text in {"1", "2", "3", "4", UNSEEDED_LABEL} for text in segmented.texts)
+
+
+def test_segment_keymap_takes_the_image_from_another_directory(tmp_path: Path):
+    # A mirror run's sidecars sit under runs/<tag>/raw/ while the sheet is in raw/ (#554).
+    model = build_model(base=4).eval()
+    sidecars = tmp_path / "runs" / "corpus-v2" / "raw"
+    sidecars.mkdir(parents=True)
+    (tmp_path / "raw").mkdir()
+    image = tmp_path / "raw" / "p0.jpg"
+    Image.fromarray(np.full((300, 400, 3), 240, np.uint8)).save(image)
+    keymap_json = sidecars / "p0.keymap.json"
+    streets = [
+        {
+            "text": str(i + 1),
+            "polygon": [[x - 5, y - 5], [x + 5, y - 5], [x + 5, y + 5], [x - 5, y + 5]],
+        }
+        for i, (x, y) in enumerate(grid_seeds(100.0, 2))
+    ]
+    keymap_json.write_text(json.dumps({"streets": streets}))
+    segmented, used_image = segment_keymap(
+        keymap_json, model, torch.device("cpu"), image_path=image
+    )
+    assert used_image == image
+    assert segmented.probabilities.shape == (NUM_CLASSES, 300, 400)
+    assert len(segmented.polygons) == len(segmented.texts)
 
 
 def test_class_map_image_colors():
