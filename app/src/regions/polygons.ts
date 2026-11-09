@@ -156,3 +156,80 @@ export function sheetFraction(
   if (ring.length < MIN_RING_VERTICES || width <= 0 || height <= 0) return 0;
   return polygonArea(ring) / (width * height);
 }
+
+/** Color cycle for traced regions; index-based so a region keeps its color. */
+export const REGION_COLORS = [
+  '#e6194b',
+  '#3cb44b',
+  '#4363d8',
+  '#f58231',
+  '#911eb4',
+  '#008080',
+  '#9a6324',
+  '#800000',
+];
+
+/** Outline color of the region at `index`, shared by the canvas and the preview. */
+export function regionColor(index: number): string {
+  return REGION_COLORS[index % REGION_COLORS.length]!;
+}
+
+/** Fraction of a ring's larger side added as margin on each side of its preview. */
+export const PREVIEW_MARGIN_FRACTION = 0.15;
+
+/** Least preview margin in image pixels, so a tiny block still shows its surroundings. */
+export const PREVIEW_MIN_MARGIN = 24;
+
+/** A window of the sheet to preview a ring in, and the scale to display it at. */
+export interface PreviewCrop {
+  /** Top-left corner of the window, in image pixels. */
+  x: number;
+  y: number;
+  /** Window size, in image pixels. */
+  width: number;
+  height: number;
+  /** Display pixels per image pixel: 1 unless the window is too big for the box. */
+  scale: number;
+}
+
+/**
+ * Window of the sheet to preview a ring in: its bounding box plus a margin, shown at
+ * 1:1 unless that would overflow `boxSize`, in which case it is scaled down to fit.
+ *
+ * A small block is never enlarged, so the printed page number stays at native
+ * sharpness. The window is shifted to stay inside the sheet, and clipped to the sheet
+ * when the sheet itself is smaller than the window.
+ */
+export function previewCrop(
+  ring: [number, number][],
+  imageSize: [number, number],
+  boxSize: [number, number],
+): PreviewCrop | null {
+  if (ring.length === 0) return null;
+  const xs = ring.map((point) => point[0]);
+  const ys = ring.map((point) => point[1]);
+  const minX = Math.min(...xs);
+  const maxX = Math.max(...xs);
+  const minY = Math.min(...ys);
+  const maxY = Math.max(...ys);
+  const margin = Math.max(
+    PREVIEW_MIN_MARGIN,
+    Math.max(maxX - minX, maxY - minY) * PREVIEW_MARGIN_FRACTION,
+  );
+  const [imageWidth, imageHeight] = imageSize;
+  const width = Math.min(imageWidth, maxX - minX + 2 * margin);
+  const height = Math.min(imageHeight, maxY - minY + 2 * margin);
+  const [boxWidth, boxHeight] = boxSize;
+  return {
+    x: clampOrigin(minX - margin, width, imageWidth),
+    y: clampOrigin(minY - margin, height, imageHeight),
+    width,
+    height,
+    scale: Math.min(1, boxWidth / width, boxHeight / height),
+  };
+}
+
+// Shift a window so it lies inside [0, total]; its size never exceeds the total.
+function clampOrigin(origin: number, size: number, total: number): number {
+  return Math.min(Math.max(origin, 0), Math.max(0, total - size));
+}

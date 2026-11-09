@@ -130,6 +130,33 @@
   pointer-events: none;
 }
 
+/* Full-resolution look at the selected region, between the sheet and the table.
+   Its width is the preview box plus padding (see PREVIEW_BOX). */
+.regions-preview {
+  width: 336px;
+  flex-shrink: 0;
+  box-sizing: border-box;
+  padding: 8px;
+  border-left: 1px solid #ddd;
+  overflow: hidden;
+}
+
+.regions-preview canvas {
+  display: block;
+  background: #f4f4f4;
+  border: 1px solid #ddd;
+}
+
+.regions-preview-caption {
+  margin: 4px 0 0;
+  color: #555;
+}
+
+.regions-preview-empty {
+  margin: 0;
+  color: #888;
+}
+
 .regions-panel {
   width: 260px;
   flex-shrink: 0;

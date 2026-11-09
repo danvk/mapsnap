@@ -5,6 +5,7 @@ import {
   VERTEX_HIT_RADIUS,
   rectRing,
   regionAt,
+  regionColor,
   sheetFraction,
   vertexAt,
 } from './polygons';
@@ -36,18 +37,6 @@ interface PolygonCanvasProps {
   onSelect: (index: number | null) => void;
   onMoveVertex: (region: number, vertex: number, to: [number, number]) => void;
 }
-
-/** Colour cycle for finished regions; index-based so a region keeps its colour. */
-const COLORS = [
-  '#e6194b',
-  '#3cb44b',
-  '#4363d8',
-  '#f58231',
-  '#911eb4',
-  '#008080',
-  '#9a6324',
-  '#800000',
-];
 
 /**
  * Shading laid over every traced region, so covered ground reads at a glance.
@@ -226,7 +215,7 @@ export function PolygonCanvas(props: PolygonCanvasProps) {
           height={height * zoom}
         >
           {regions.map((region, index) => {
-            const color = COLORS[index % COLORS.length]!;
+            const color = regionColor(index);
             const selected = index === selectedIndex;
             return (
               <g key={index}>
