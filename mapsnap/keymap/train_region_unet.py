@@ -146,6 +146,13 @@ COLORED_BLOCK_FRACTION = 0.5
 PAPER_MIN_LIGHTNESS = 60.0
 PAPER_CHROMA_PERCENTILE = 90  # of the paper's own chroma spread, the paper-like cutoff
 PAPER_CHROMA_FLOOR = 4.0
+# Paper that is cut off from the open sheet (by ink lines, stains or bleed) still marks
+# background when the pocket is at least this share of spacing²; smaller enclosed pockets
+# are taken for speckles in a pale fill. None keeps only connected paper.
+OPEN_PAPER_POCKET_FRAC: float | None = 0.005
+# Drop paper-like pixels from a filled block's core: a footprint that overshoots its
+# drawn block onto the street must not mark the street as block.
+CLIP_CORES_TO_FILL = True
 SHARP_BAND_PX = 3
 WEAK_EDGE = (
     0.15  # edge strength below which a snapped boundary is unsupported (ignored)
@@ -359,11 +366,16 @@ def paper_mask(
     return light & (distance <= threshold)
 
 
-def open_paper(paper_like: np.ndarray, outside: np.ndarray) -> np.ndarray:
+def open_paper(
+    paper_like: np.ndarray, outside: np.ndarray, min_pocket_px: float | None = None
+) -> np.ndarray:
     """Paper-like pixels connected, through paper-like pixels, to the paper in ``outside``.
 
     Streets reach the sheet's margins; a pale speckle inside a block does not. The mask
     is eroded by a pixel first so a one-pixel gap in a block's outline is not a leak.
+    With ``min_pocket_px``, enclosed paper of at least that many pixels counts too: on
+    a stained or ink-dense sheet the streets break into cells that never reach the
+    margin, while fill speckles stay small.
     """
     eroded = cv2.erode(paper_like.astype(np.uint8), np.ones((3, 3), np.uint8))
     count, components = cv2.connectedComponents(eroded, connectivity=4)
@@ -371,6 +383,10 @@ def open_paper(paper_like: np.ndarray, outside: np.ndarray) -> np.ndarray:
     touching = np.unique(labeled[outside & (eroded > 0)])
     keep = np.zeros(int(count) + 1, bool)
     keep[touching[touching > 0]] = True
+    if min_pocket_px is not None:
+        sizes = np.bincount(labeled.ravel(), minlength=int(count) + 1)
+        keep |= sizes >= min_pocket_px
+    keep[0] = False
     return keep[labeled]
 
 
@@ -661,13 +677,22 @@ def build_label_image(inputs: LabelInputs) -> tuple[np.ndarray, LabelStats]:
         core_paper = paper_like[marker.rows, marker.cols][marker.core]
         if core_paper.size and 1.0 - core_paper.mean() >= COLORED_BLOCK_FRACTION:
             colored_blocks += 1
+            if CLIP_CORES_TO_FILL:
+                marker.core = marker.core & ~paper_like[marker.rows, marker.cols]
         else:
             uncolored_zone[marker.rows, marker.cols] |= marker.allowed
     markers = np.zeros(shape, np.int32)
+    cores[:] = False
     for index, marker in enumerate(footprint_markers):
         view = markers[marker.rows, marker.cols]
         view[marker.core] = index + 2
-    street = open_paper(paper_like & ~cores, background)
+        cores[marker.rows, marker.cols] |= marker.core
+    min_pocket = (
+        OPEN_PAPER_POCKET_FRAC * inputs.spacing**2
+        if OPEN_PAPER_POCKET_FRAC is not None
+        else None
+    )
+    street = open_paper(paper_like & ~cores, background, min_pocket)
     background |= street & ~uncolored_zone
     markers[background & (markers == 0)] = 1
     won = watershed(strength, markers)

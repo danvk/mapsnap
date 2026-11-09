@@ -193,6 +193,9 @@ def test_paper_mask_and_open_paper():
     pocket[100:120, 300:320] = True  # paper-like pixels enclosed by block B
     opened = open_paper(pocket, background)
     assert opened[5, 5] and not opened[110, 310]
+    # A pocket counts once it is big enough (18x18 after the 1 px erosion = 324 px).
+    assert open_paper(pocket, background, min_pocket_px=300)[110, 310]
+    assert not open_paper(pocket, background, min_pocket_px=400)[110, 310]
 
 
 def test_build_label_image_keeps_the_street_between_two_blocks_as_paper():
