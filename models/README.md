@@ -139,6 +139,70 @@ Verify with the corpus overlap measurement in #352 (good-page median overlap
 per volume) and the held-out IoU the trainer prints; #355's ablations
 (longer training, base 32) still hold and are not worth repeating.
 
+## keymap_region_unet.pt
+
+The **key-map page-region** model (`mapsnap.keymap.region_unet`): a UNet (base
+16, BatchNorm, 2.0M parameters) that labels every pixel of a key-map sheet
+background (paper, cartouche, inset), block **interior**, or block **boundary**
+(the heavy line or color change between two pages). The blocks come out of a
+watershed on P(boundary) seeded from the detected page numbers, as a planar
+partition; a block no detected number sits in becomes a region labeled `?`. It
+is the alternative to `page_regions`' color rules, which lose blocks whenever
+color stops meaning "same block" (two neighbors in one color, one block in two
+colors, pale fills) and move regions on 39 of 41 key maps for a one-pixel change
+in the input (#640). The sheet is worked at the scale that puts the median
+spacing between page numbers at 128 px, tiled at 512 px, and predicted with
+flip averaging. `MAPSNAP_KEYMAP_REGIONS=unet` makes `mapsnap keymap` use it;
+`MAPSNAP_KEYMAP_REGION_WEIGHTS` loads other weights. About 10 s per key map on
+an M2 (4 s of it the watershed).
+
+Labels need no hand tracing: every OIM-georeferenced page's footprint, projected
+through the key map's own georeference, is a block. Three corrections make
+footprints usable (`mapsnap.keymap.train_region_unet`): each footprint is shrunk
+to a core and a marker watershed on an edge-strength map (ink darkness and
+color change) snaps its boundary to the drawn line within a band of 15% of the
+spacing (the key-map georef's error is 15–50 px); where `page_regions` agrees
+with a footprint at IoU ≥ 0.8 its polygon is taken as the exact block; and
+blocks nobody labeled (unclipped OIM footprints, the inset, detected numbers
+with no footprint, paper bubbles) are *ignored*, not taught as paper. Training
+data lives outside the repo in `~/Documents/mapsnap/keymap-region-training`:
+`prep` builds it from the volumes under `data/`, and a streaming pull of the
+corpus-v2 key maps for the other OIM-truth items adds the rest (the sheets are
+deleted after their example is built; disk, not bandwidth, is the limit).
+
+**Current weights (2026-11-09)** are the average of epochs 18–30 of a 30-epoch
+run on 59 key maps (Hudson, Chicago 1950 vol 1, Miami 1950 and San Antonio
+1952 held out), about 2.5 h on an M2. On the four held-out maps, mean IoU
+against the projected OIM footprints is **0.422** for the model against
+**0.415** for `page_regions`, matched by page number; matched by shape alone
+(any region to any footprint, so the page-number reads drop out) **0.537**
+against **0.498**. Over all 63 key maps with truth under `data/` (59 of them
+in the training set, so this flatters the model) it is 0.454 against 0.432,
+ahead on 43 of them, with 2,677 blocks at IoU ≥ 0.5 against 2,418 of 4,545;
+the wins are large (Richmond 1952 +0.30, Asheville +0.24, Columbia +0.19) and
+the losses small (≤ 0.06). Both are capped near 0.75 by the truth itself: OIM
+clips pages to the street centerline, the drawn block stops at the curb, and
+both methods' regions are about three quarters of their footprint's area. A
+one-pixel change in the input (the #640 perturbation) leaves the model's regions
+at a self-consistency of 0.99 (Chicago), 0.94 (San Antonio), 0.91 (Hudson) and
+0.88 (Miami) by mean per-page IoU; `page_regions` on the same Hudson sheet
+scores 0.81, with 14 of 89 pages moving by more than half their area.
+
+Retrain:
+
+```
+uv run python -m mapsnap.keymap.train_region_unet prep        # labels from data/
+uv run python -m mapsnap.keymap.train_region_unet train       # 30 epochs, ~5 min each
+uv run python -m mapsnap.keymap.train_region_unet eval --stability
+```
+
+`eval` prints, per held-out map, the model and `page_regions` side by side
+(mean IoU and blocks at IoU ≥ 0.5, the shape-only IoU, self-overlap, unseeded
+regions, seeds the paper test dropped) and the stability check. The decoder's
+thresholds (`DecodeParams`) were swept on the held-out maps and the result did
+not move; the model's probabilities are confident enough that they do not
+matter.
+
 ## cutline_unet.pt
 
 The splitter's **cutline** model (#83): a whole-page UNet (base 16, GroupNorm,

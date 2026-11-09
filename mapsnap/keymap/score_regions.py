@@ -110,7 +110,9 @@ def score_regions(truth_doc: dict, predicted_doc: dict) -> RegionScore:
         predicted_by_label.setdefault(label, []).append(polygon)
 
     score = RegionScore()
-    for label, truths in sorted(truth_by_label.items(), key=lambda kv: int(kv[0])):
+    for label, truths in sorted(
+        truth_by_label.items(), key=lambda kv: page_key_sort(kv[0])
+    ):
         predictions = predicted_by_label.get(label, [])
         matched = greedy_match(truths, predictions)
         matched_truths = set()

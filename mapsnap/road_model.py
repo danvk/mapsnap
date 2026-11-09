@@ -161,10 +161,18 @@ class UNet(nn.Module):
 
     ``in_channels=3`` is for key maps, where colour is load-bearing: their pale
     pastel region fills are nearly paper-bright in grayscale, and the roads
-    crossing those fills would vanish with them.
+    crossing those fills would vanish with them. ``out_channels`` is 1 for the
+    binary P(road)-style heads and 3 for the key-map region model's
+    background / interior / boundary softmax (mapsnap.keymap.region_unet).
     """
 
-    def __init__(self, base: int = 24, in_channels: int = 1, norm: str = "batch"):
+    def __init__(
+        self,
+        base: int = 24,
+        in_channels: int = 1,
+        norm: str = "batch",
+        out_channels: int = 1,
+    ):
         super().__init__()
         self.enc1 = DoubleConv(in_channels, base, norm)
         self.enc2 = DoubleConv(base, base * 2, norm)
@@ -177,7 +185,7 @@ class UNet(nn.Module):
         self.dec3 = DoubleConv(base * 8 + base * 4, base * 4, norm)
         self.dec2 = DoubleConv(base * 4 + base * 2, base * 2, norm)
         self.dec1 = DoubleConv(base * 2 + base, base, norm)
-        self.head = nn.Conv2d(base, 1, 1)
+        self.head = nn.Conv2d(base, out_channels, 1)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         e1 = self.enc1(x)

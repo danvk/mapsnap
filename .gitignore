@@ -229,3 +229,5 @@ instances*.tsv
 # scripts/atlas/build_places.py; the app says so when it is missing.
 app/public/atlas/
 
+models/keymap_region_unet.last.pt
+models/keymap_region_unet.history.json
