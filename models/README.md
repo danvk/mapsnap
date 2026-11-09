@@ -170,33 +170,44 @@ data lives outside the repo in `~/Documents/mapsnap/keymap-region-training`:
 corpus-v2 key maps for the other OIM-truth items adds the rest (the sheets are
 deleted after their example is built; disk, not bandwidth, is the limit).
 
-**Current weights (2026-11-09)** are the average of epochs 18–30 of a 30-epoch
-run on 59 key maps (Hudson, Chicago 1950 vol 1, Miami 1950 and San Antonio
-1952 held out), about 2.5 h on an M2. On the four held-out maps, mean IoU
-against the projected OIM footprints is **0.422** for the model against
-**0.415** for `page_regions`, matched by page number; matched by shape alone
-(any region to any footprint, so the page-number reads drop out) **0.537**
-against **0.498**. Over all 63 key maps with truth under `data/` (59 of them
-in the training set, so this flatters the model) it is 0.454 against 0.432,
-ahead on 43 of them, with 2,677 blocks at IoU ≥ 0.5 against 2,418 of 4,545;
-the wins are large (Richmond 1952 +0.30, Asheville +0.24, Columbia +0.19) and
-the losses small (≤ 0.06). Both are capped near 0.75 by the truth itself: OIM
+**Current weights (2026-11-09)** are the average of epochs 18–24 of a 24-epoch
+run on 549 key maps (the 59 with truth under `data/` plus 490 corpus-v2 key
+maps of other OIM-truth volumes; Hudson, Chicago 1950 vol 1, Miami 1950 and
+San Antonio 1952 held out), about 5.5 h on an M2. On the four held-out maps,
+mean IoU against the projected OIM footprints is **0.430** for the model
+against **0.415** for `page_regions`, matched by page number; matched by shape
+alone (any region to any footprint, so the page-number reads drop out)
+**0.544** against **0.498**. A first model trained on the 59 `data/` maps
+alone scored 0.422 / 0.537 on the same four, and 0.427 / 0.524 against 0.406 /
+0.475 on 60 corpus maps it had never seen (ahead on 35 of the 60 by page
+number and 44 by shape, 2,241 blocks at IoU ≥ 0.5 against 2,082 of 4,016); the
+extra 490 maps bought about 0.01, so data is not what limits this model.
+Over the 63 key maps with truth under `data/` (59 of them in the training
+set, so this flatters the model) it is 0.465 against 0.433 (shape 0.559
+against 0.498), ahead on 39, with 2,537 blocks at IoU ≥ 0.5 against 2,222 of
+4,171; the wins are large (Richmond 1952 +0.31, Asheville +0.28, Columbia
++0.21) and the losses small (≤ 0.06). Both methods are capped near 0.75 by the truth itself: OIM
 clips pages to the street centerline, the drawn block stops at the curb, and
 both methods' regions are about three quarters of their footprint's area. A
-one-pixel change in the input (the #640 perturbation) leaves the model's regions
-at a self-consistency of 0.99 (Chicago), 0.94 (San Antonio), 0.91 (Hudson) and
-0.88 (Miami) by mean per-page IoU; `page_regions` on the same Hudson sheet
-scores 0.81, with 14 of 89 pages moving by more than half their area.
+one-pixel change in the input (the #640 perturbation) leaves the model's
+regions at a self-consistency of 0.95 (Chicago), 0.96 (Hudson), 0.93 (San
+Antonio) and 0.89 (Miami) by mean per-page IoU; `page_regions` on the same
+Hudson sheet scores 0.81, with 14 of 89 pages moving by more than half their
+area.
 
 Retrain:
 
 ```
 uv run python -m mapsnap.keymap.train_region_unet prep        # labels from data/
-uv run python -m mapsnap.keymap.train_region_unet train       # 30 epochs, ~5 min each
+uv run python -m mapsnap.keymap.train_region_unet train --checkpoint-dir CKPT --epochs 24
+uv run python -m mapsnap.keymap.train_region_unet average models/keymap_region_unet.pt CKPT/epoch_{18..24}.pt
 uv run python -m mapsnap.keymap.train_region_unet eval --stability
 ```
 
-`eval` prints, per held-out map, the model and `page_regions` side by side
+Averaging the late epochs' weights gives a model as good as the best single
+epoch on the held-out maps without choosing it by those same maps; the
+trainer also keeps the best epoch by held-out IoU as its output. `eval`
+prints, per held-out map, the model and `page_regions` side by side
 (mean IoU and blocks at IoU ≥ 0.5, the shape-only IoU, self-overlap, unseeded
 regions, seeds the paper test dropped) and the stability check. The decoder's
 thresholds (`DecodeParams`) were swept on the held-out maps and the result did
