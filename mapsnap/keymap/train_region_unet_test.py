@@ -24,11 +24,15 @@ from mapsnap.keymap.train_region_unet import (
     dilate,
     edge_strength,
     erode,
+    footprint_shifts,
+    hand_truth_path,
     labels_matched_to_truth,
     matching_label,
     neighbor_differs,
+    open_paper,
     panels_doc_rings,
     paper_color,
+    paper_mask,
     photometric_jitter,
     random_tile,
     rasterize,
@@ -150,6 +154,72 @@ def test_matching_label_drops_division_letters_unless_truth_has_them():
 def test_sharp_cores_matches_lettered_reads_to_numeric_truth():
     truth = [TruthFootprint("63", rectangle(0, 0, 100, 100))]
     assert set(sharp_cores(truth, [("63W", rectangle(1, 1, 99, 99))])) == {0}
+
+
+def test_sharp_cores_accepts_a_block_inside_a_wider_footprint():
+    # The footprint reaches the street centerline, the block stops at the curb: IoU is
+    # only 0.64, but the polygon lies inside the footprint and covers most of it.
+    truth = [TruthFootprint("1", rectangle(0, 0, 100, 100))]
+    assert set(sharp_cores(truth, [("1", rectangle(10, 10, 90, 90))])) == {0}
+
+
+def test_footprint_shifts_follow_the_local_color_offset():
+    truth = [
+        TruthFootprint(str(i), rectangle(100 * i, 0, 100 * i + 80, 80))
+        for i in range(6)
+    ]
+    color = [
+        (str(i), rectangle(100 * i + 10, -5, 100 * i + 90, 75))
+        for i in range(6)
+        if i != 3  # the color segmenter missed block 3
+    ]
+    shifts = footprint_shifts(truth, color, 100.0)
+    assert len(shifts) == 6
+    for dx, dy in shifts:  # block 3 moves with its neighbors
+        assert abs(dx - 10) < 1e-6 and abs(dy + 5) < 1e-6
+    # Too few samples to trust: nothing moves.
+    assert footprint_shifts(truth[:2], color[:2], 100.0) == [(0.0, 0.0)] * 2
+
+
+def test_paper_mask_and_open_paper():
+    rgb, _ = synthetic_keymap()
+    lab = to_lab(rgb)
+    background = np.zeros(rgb.shape[:2], bool)
+    background[:40] = True
+    paper = paper_color(lab, background)
+    like = paper_mask(lab, paper, background)
+    assert like[5, 5] and not like[150, 100]  # the margin yes, the green fill no
+    pocket = like.copy()
+    pocket[100:120, 300:320] = True  # paper-like pixels enclosed by block B
+    opened = open_paper(pocket, background)
+    assert opened[5, 5] and not opened[110, 310]
+
+
+def test_build_label_image_keeps_the_street_between_two_blocks_as_paper():
+    # Two colored blocks with a 40 px paper street between them; the footprints meet at
+    # the street's centerline, as OIM's do. The labels must stop at the color edges.
+    rgb = np.full((300, 400, 3), (235, 225, 200), np.uint8)
+    rgb[50:250, 40:180] = (120, 200, 120)
+    rgb[50:250, 220:360] = (240, 220, 120)
+    truth = [
+        TruthFootprint("1", rectangle(40, 50, 200, 250)),
+        TruthFootprint("2", rectangle(200, 50, 360, 250)),
+    ]
+    labels, stats = build_label_image(LabelInputs(rgb, truth, [], [], [], 160.0))
+    assert stats.colored == 2
+    assert labels[150, 190] == BACKGROUND and labels[150, 200] == BACKGROUND
+    assert labels[150, 210] == BACKGROUND
+    assert labels[150, 100] == INTERIOR and labels[150, 300] == INTERIOR
+    assert BOUNDARY in labels[150, 176:184]  # block A's color edge, not x=200
+
+
+def test_hand_truth_path(tmp_path: Path):
+    meta = make_meta(volume="town", key="p0")
+    assert hand_truth_path(tmp_path, meta) is None
+    traced = tmp_path / "town" / "raw" / "truth" / "p0.regions.panels.json"
+    traced.parent.mkdir(parents=True)
+    traced.write_text("{}")
+    assert hand_truth_path(tmp_path, meta) == traced
 
 
 def test_sharp_cores_accepts_only_agreeing_polygons():

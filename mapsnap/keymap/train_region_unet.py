@@ -1,23 +1,37 @@
 """Train the key-map region UNet (mapsnap.keymap.region_unet) on OIM-derived labels.
 
 Every OldInsuranceMaps-georeferenced page of a volume has a footprint polygon; the
-key map's own georeference (``<key>.georef.json``) maps it into key-map pixels. Those
-projected footprints are the labels, with three corrections for what they are not:
+key map's own georeference (``<key>.georef.json``) maps it into key-map pixels. The
+labels are the *drawn* blocks, the colored fills a tracer would outline, and the
+projected footprints only say which block is which page, with corrections for what
+they are not:
 
-* They are 15-50 px off the drawn block, by the key-map georef's error. Each footprint
-  is shrunk to a *core* and a marker watershed on an edge-strength map (ink darkness
-  and color change) moves its boundary onto the nearest heavy line or color change
-  within a band around the truth edge. Where the band holds no edge, the band is
-  excluded from the loss rather than taught at a made-up position.
-* Where page_regions' color segmentation agrees with a footprint (IoU >= SHARP_IOU),
-  the color polygon follows the ink exactly and replaces the footprint as a sharp core.
+* A key map is a stylized drawing, so footprints land 0.05-0.3 spacings off the blocks
+  and not uniformly across the sheet (a better georef does not help: Chicago's right
+  edge is 50 px off under two independent fits). Each footprint is first moved by the
+  local median offset between footprints and page_regions' same-numbered polygons.
+* A footprint reaches the street centerline; the drawn block stops at the curb. Each
+  footprint is shrunk to a *core* and a marker watershed on an edge-strength map (ink
+  darkness and color change) grows it back to the drawn line. Paper connected to the
+  open sheet is a background marker even between two blocks, so a colored block's flood
+  stops at its color edge and the street between two blocks stays paper. (Hand traces
+  showed an earlier version without that marker labeling streets as block interior,
+  and the model learned it: regions ran to the street centerline.)
+* Where page_regions' polygon sits inside its footprint and covers most of it
+  (SHARP_PRECISION, SHARP_COVERAGE), it follows the ink exactly and replaces the
+  footprint as a sharp core.
 * Blocks nobody labeled (pages OIM never georeferenced or did not clip, the volumes
   inset, and detected numbers with no footprint) are *ignored*, not background: an
   unlabeled block taught as paper would teach the model to miss blocks.
 
+Hand-traced blocks (the regions labeler, ``data/<vol>/raw/truth/<key>.regions.panels.json``)
+are the evaluation that matters: ``eval`` and the per-epoch validation score against
+them wherever they exist, beside the footprint-based score.
+
     uv run python -m mapsnap.keymap.train_region_unet prep            # labels -> training dir
+    uv run python -m mapsnap.keymap.train_region_unet relabel         # new label recipe, same examples
     uv run python -m mapsnap.keymap.train_region_unet train           # -> models/keymap_region_unet.pt
-    uv run python -m mapsnap.keymap.train_region_unet eval            # held-out IoU vs k-means, stability
+    uv run python -m mapsnap.keymap.train_region_unet eval            # held-out IoU vs k-means and hand traces
 """
 
 import argparse
@@ -33,6 +47,7 @@ import numpy as np
 import torch
 from PIL import Image
 from scipy import ndimage as ndi
+from scipy.spatial import KDTree
 from shapely.geometry import Polygon
 from shapely.geometry.base import BaseGeometry
 from shapely.validation import make_valid
@@ -87,22 +102,50 @@ from mapsnap.keymap.truth_regions import MIN_INSIDE_FRACTION, world_to_pixel_aff
 from mapsnap.road_model import UNet
 
 TRAINING_DIR = Path.home() / "Documents" / "mapsnap" / "keymap-region-training"
+# Held out of training. The hand-traced volumes are the real benchmark, so none of
+# them may be trained on.
 DEFAULT_VAL_VOLUMES = (
     "hudson_co_nj_1950_vol_9",  # pale fills, where k-means loses blocks to paper
     "chicago_il_1950_vol_1",  # dense, colorful
-    "miami_fl_1950_vol_1",  # faint, foxed
+    "miami_fl_1950_vol_1",  # faint, foxed; hand-traced
     "san-antonio_texas_1952_sanborn08740_020",  # corpus-style low-resolution scan
+    "kansas_city_mo_1951_vol_4",  # hand-traced
+    "grand_rapids_mi_1953_vol7",  # hand-traced
+    "brooklyn_ny_1939_vol_1",  # hand-traced
 )
+# Validation picks the best epoch by the hand-traced score when at least this many
+# validation maps have traces, else by the footprint score.
+MIN_HAND_VAL_MAPS = 3
 
 # Label construction, in working pixels unless noted.
 BAND_FRAC = 0.15  # truth-edge uncertainty band as a fraction of the seed spacing
 MIN_BAND_PX = 4
-SHARP_IOU = (
-    0.8  # a color polygon this close to its footprint is taken as the exact block
-)
+# A color polygon is the exact block when it lies inside its footprint and covers most
+# of it: a footprint reaches the street centerline, so IoU alone would reject correct
+# blocks on wide-street maps.
+SHARP_PRECISION = 0.9
+SHARP_COVERAGE = 0.55
 SHARP_OTHER_OVERLAP = (
     0.1  # ... unless it covers more than this of another page's footprint
 )
+# Footprint shift: a local median over the nearest same-numbered color polygons.
+SHIFT_NEIGHBORS = 6
+SHIFT_MIN_NEAR = 3
+SHIFT_MIN_SAMPLES = 4
+SHIFT_RADIUS_FRAC = 3.0  # of the spacing: how far a sample may be to count as local
+SHIFT_CANDIDATE_AREA = (
+    0.3,
+    1.6,
+)  # color polygon area / footprint area, else not a sample
+SHIFT_MAX_FRAC = 0.6  # of the spacing: a larger shift is noise, clipped
+# A block counts as a filled block when this share of its core is not paper-like; only
+# then may paper inside its band be a background marker (an outline-only block is
+# paper inside). Miami's fills are so pale that half of them fail the colored test
+# against the margin paper, but almost none of their pixels pass as paper.
+COLORED_BLOCK_FRACTION = 0.5
+PAPER_MIN_LIGHTNESS = 60.0
+PAPER_CHROMA_PERCENTILE = 90  # of the paper's own chroma spread, the paper-like cutoff
+PAPER_CHROMA_FLOOR = 4.0
 SHARP_BAND_PX = 3
 WEAK_EDGE = (
     0.15  # edge strength below which a snapped boundary is unsupported (ignored)
@@ -295,6 +338,42 @@ def colored_mask(lab: np.ndarray, paper: np.ndarray) -> np.ndarray:
     return smooth > 0.5
 
 
+def paper_mask(
+    lab: np.ndarray, paper: np.ndarray, background: np.ndarray
+) -> np.ndarray:
+    """Pixels that look like the sheet's paper: light, with chroma within the paper's own spread.
+
+    The spread is measured on ``background`` (the estimated paper), so a foxed sheet
+    gets a looser test than a clean one, while pale fills farther from the paper than
+    its own variation stay out.
+    """
+    distance = np.hypot(lab[..., 1] - paper[1], lab[..., 2] - paper[2])
+    light = lab[..., 0] >= PAPER_MIN_LIGHTNESS
+    sample = distance[background & light]
+    spread = (
+        float(np.percentile(sample, PAPER_CHROMA_PERCENTILE))
+        if sample.size
+        else PAPER_CHROMA_FLOOR
+    )
+    threshold = float(np.clip(spread, PAPER_CHROMA_FLOOR, UNLABELED_CHROMA_DISTANCE))
+    return light & (distance <= threshold)
+
+
+def open_paper(paper_like: np.ndarray, outside: np.ndarray) -> np.ndarray:
+    """Paper-like pixels connected, through paper-like pixels, to the paper in ``outside``.
+
+    Streets reach the sheet's margins; a pale speckle inside a block does not. The mask
+    is eroded by a pixel first so a one-pixel gap in a block's outline is not a leak.
+    """
+    eroded = cv2.erode(paper_like.astype(np.uint8), np.ones((3, 3), np.uint8))
+    count, components = cv2.connectedComponents(eroded, connectivity=4)
+    labeled = np.asarray(components, dtype=np.int32)
+    touching = np.unique(labeled[outside & (eroded > 0)])
+    keep = np.zeros(int(count) + 1, bool)
+    keep[touching[touching > 0]] = True
+    return keep[labeled]
+
+
 @dataclass
 class LabelStats:
     """What the label builder did on one key map, for the prep log."""
@@ -302,6 +381,8 @@ class LabelStats:
     footprints: int
     sharp: int  # footprints replaced by an agreeing color polygon
     band_px: int
+    shift_px: float = 0.0  # median footprint shift onto the drawn blocks
+    colored: int = 0  # footprints whose block is a colored fill
 
 
 def truth_has_letters(labels: list[str]) -> bool:
@@ -330,26 +411,106 @@ def labels_matched_to_truth(predicted_doc: dict, truth_doc: dict) -> dict:
     return doc
 
 
+def color_polygons_by_label(
+    truth: list[TruthFootprint], color_regions: list[tuple[str, list[Point]]]
+) -> dict[str, list[BaseGeometry]]:
+    """page_regions' polygons keyed the way the truth labels its pages (``63W`` -> ``63``)."""
+    keep = truth_has_letters([footprint.label for footprint in truth])
+    by_label: dict[str, list[BaseGeometry]] = {}
+    for label, ring in color_regions:
+        key = matching_label(label, keep)
+        by_label.setdefault(key, []).append(make_valid(Polygon(ring)))
+    return by_label
+
+
+def footprint_shifts(
+    truth: list[TruthFootprint],
+    color_regions: list[tuple[str, list[Point]]],
+    spacing: float,
+) -> list[Point]:
+    """Per-footprint (dx, dy) moving it onto the drawn blocks: a local median of color-polygon offsets.
+
+    Where page_regions found a polygon with the footprint's page number, overlapping
+    it at a plausible size, the centroid offset samples the drawing's local error.
+    Every footprint, with or without a sample of its own, takes the median of the
+    nearest samples, so one wrong polygon moves nothing much and a block the color
+    segmenter missed is still moved with its neighbors.
+    """
+    truth_polygons = [make_valid(Polygon(footprint.ring)) for footprint in truth]
+    keep = truth_has_letters([footprint.label for footprint in truth])
+    by_label = color_polygons_by_label(truth, color_regions)
+    samples: list[tuple[float, float, float, float]] = []
+    for footprint, polygon in zip(truth, truth_polygons):
+        if polygon.area <= 0:
+            continue
+        best: tuple[float, BaseGeometry] | None = None
+        for candidate in by_label.get(matching_label(footprint.label, keep), []):
+            ratio = candidate.area / polygon.area
+            if not SHIFT_CANDIDATE_AREA[0] <= ratio <= SHIFT_CANDIDATE_AREA[1]:
+                continue
+            overlap = candidate.intersection(polygon).area
+            if overlap > 0 and (best is None or overlap > best[0]):
+                best = (overlap, candidate)
+        if best is not None:
+            center, truth_center = best[1].centroid, polygon.centroid
+            samples.append(
+                (
+                    truth_center.x,
+                    truth_center.y,
+                    center.x - truth_center.x,
+                    center.y - truth_center.y,
+                )
+            )
+    if len(samples) < SHIFT_MIN_SAMPLES:
+        return [(0.0, 0.0)] * len(truth)
+    table = np.asarray(samples, dtype=np.float64)
+    tree = KDTree(table[:, :2])
+    limit = SHIFT_MAX_FRAC * spacing
+    shifts: list[Point] = []
+    for polygon in truth_polygons:
+        if polygon.area <= 0:
+            shifts.append((0.0, 0.0))
+            continue
+        center = polygon.centroid
+        distances, indexes = tree.query(
+            [center.x, center.y], k=min(SHIFT_NEIGHBORS, len(table))
+        )
+        distances, indexes = np.atleast_1d(distances), np.atleast_1d(indexes)
+        near = indexes[distances <= SHIFT_RADIUS_FRAC * spacing]
+        if len(near) < SHIFT_MIN_NEAR:
+            near = np.arange(len(table))  # too sparse here: the sheet-wide median
+        dx = float(np.clip(np.median(table[near, 2]), -limit, limit))
+        dy = float(np.clip(np.median(table[near, 3]), -limit, limit))
+        shifts.append((dx, dy))
+    return shifts
+
+
+def shifted_footprints(
+    truth: list[TruthFootprint], shifts: list[Point]
+) -> list[TruthFootprint]:
+    """The footprints translated by their shifts."""
+    return [
+        TruthFootprint(footprint.label, [(x + dx, y + dy) for x, y in footprint.ring])
+        for footprint, (dx, dy) in zip(truth, shifts)
+    ]
+
+
 def sharp_cores(
     truth: list[TruthFootprint], color_regions: list[tuple[str, list[Point]]]
 ) -> dict[int, list[Point]]:
     """Truth index -> color polygon that agrees with it well enough to be the exact block."""
     truth_polygons = [make_valid(Polygon(footprint.ring)) for footprint in truth]
     keep = truth_has_letters([footprint.label for footprint in truth])
-    by_label: dict[str, list[BaseGeometry]] = {}
-    for label, ring in color_regions:
-        key = matching_label(label, keep)
-        by_label.setdefault(key, []).append(make_valid(Polygon(ring)))
+    by_label = color_polygons_by_label(truth, color_regions)
     cores: dict[int, list[Point]] = {}
     for index, footprint in enumerate(truth):
         for candidate in by_label.get(matching_label(footprint.label, keep), []):
-            if candidate.area <= 0:
+            if candidate.area <= 0 or truth_polygons[index].area <= 0:
                 continue
-            union = truth_polygons[index].union(candidate).area
+            overlap = truth_polygons[index].intersection(candidate).area
             if (
-                union <= 0
-                or truth_polygons[index].intersection(candidate).area / union
-                < SHARP_IOU
+                overlap / candidate.area < SHARP_PRECISION
+                or overlap / truth_polygons[index].area < SHARP_COVERAGE
             ):
                 continue
             others = sum(
@@ -468,26 +629,47 @@ def build_label_image(inputs: LabelInputs) -> tuple[np.ndarray, LabelStats]:
     """The uint8 class image (BACKGROUND / INTERIOR / BOUNDARY / IGNORE) for one key map.
 
     See the module docstring for the construction. The watershed runs over the whole
-    sheet with one background marker (everything outside every footprint's band) and
-    one core marker per footprint; a footprint keeps only the pixels it won inside its
-    own band, and its won pixels outside the band are ignored.
+    sheet with one core marker per (shifted) footprint and a background marker on the
+    paper outside every footprint's band plus the open paper inside the bands of
+    colored blocks; a footprint keeps only the pixels it won inside its own band, and
+    its won pixels outside the band are ignored.
     """
     shape = inputs.rgb.shape[:2]
     band = max(MIN_BAND_PX, round(BAND_FRAC * inputs.spacing))
     lab = to_lab(inputs.rgb)
     strength = edge_strength(lab)
-    sharp = sharp_cores(inputs.truth, inputs.color_regions)
-    markers = np.zeros(shape, np.int32)
-    footprint_markers: list[FootprintMarker] = []
+    shifts = footprint_shifts(inputs.truth, inputs.color_regions, inputs.spacing)
+    truth = shifted_footprints(inputs.truth, shifts)
+    sharp = sharp_cores(truth, inputs.color_regions)
+    footprint_markers = [
+        footprint_marker(footprint.ring, sharp.get(index), band, shape)
+        for index, footprint in enumerate(truth)
+    ]
     union_allowed = np.zeros(shape, bool)
-    for index, footprint in enumerate(inputs.truth):
-        marker = footprint_marker(footprint.ring, sharp.get(index), band, shape)
-        footprint_markers.append(marker)
+    cores = np.zeros(shape, bool)
+    for marker in footprint_markers:
         union_allowed[marker.rows, marker.cols] |= marker.allowed
+        cores[marker.rows, marker.cols] |= marker.core
+    background = ~union_allowed
+    paper = paper_color(lab, background)
+    colored = colored_mask(lab, paper)
+    paper_like = paper_mask(lab, paper, background)
+    # Outline-only blocks are paper inside, so paper in their bands marks nothing.
+    uncolored_zone = np.zeros(shape, bool)
+    colored_blocks = 0
+    for marker in footprint_markers:
+        core_paper = paper_like[marker.rows, marker.cols][marker.core]
+        if core_paper.size and 1.0 - core_paper.mean() >= COLORED_BLOCK_FRACTION:
+            colored_blocks += 1
+        else:
+            uncolored_zone[marker.rows, marker.cols] |= marker.allowed
+    markers = np.zeros(shape, np.int32)
     for index, marker in enumerate(footprint_markers):
         view = markers[marker.rows, marker.cols]
         view[marker.core] = index + 2
-    markers[~union_allowed & (markers == 0)] = 1
+    street = open_paper(paper_like & ~cores, background)
+    background |= street & ~uncolored_zone
+    markers[background & (markers == 0)] = 1
     won = watershed(strength, markers)
 
     regions = np.zeros(shape, np.int32)
@@ -504,7 +686,10 @@ def build_label_image(inputs: LabelInputs) -> tuple[np.ndarray, LabelStats]:
     distance = np.asarray(ndi.distance_transform_edt(~edge), dtype=np.float64)
     boundary = (regions > 0) & (distance <= BOUNDARY_WIDTH_PX / 2)
     interior = (regions > 0) & ~boundary
-    weak = edge & (strength < WEAK_EDGE) & ~sharp_zone & (regions > 0)
+    # A weak edge between two footprints is unsupported by the ink; against the paper
+    # the open-paper marker anchors it at the color edge, except for outline-only blocks.
+    against_paper = neighbor_differs(regions > 0) & ~uncolored_zone
+    weak = edge & ~against_paper & (strength < WEAK_EDGE) & ~sharp_zone & (regions > 0)
     if weak.any():
         weak_distance = np.asarray(ndi.distance_transform_edt(~weak), dtype=np.float64)
         ignore |= (regions > 0) & (weak_distance <= band)
@@ -516,8 +701,7 @@ def build_label_image(inputs: LabelInputs) -> tuple[np.ndarray, LabelStats]:
     labels[ignore] = IGNORE
     # Unlabeled blocks: colored ground no footprint claimed (outside every footprint, or
     # inside a band but flooded from the paper), or a detected number with no footprint.
-    unlabeled = colored_mask(lab, paper_color(lab, won == 1)) & (regions == 0)
-    labels[unlabeled] = IGNORE
+    labels[colored & (regions == 0)] = IGNORE
     radius = max(2, round(UNLABELED_SEED_RADIUS_FRAC * inputs.spacing))
     for x, y in inputs.seeds:
         cx, cy = round(x), round(y)
@@ -525,7 +709,12 @@ def build_label_image(inputs: LabelInputs) -> tuple[np.ndarray, LabelStats]:
             cv2.circle(labels, (cx, cy), radius, int(IGNORE), -1)
     if inputs.inset_rings:
         labels[rasterize(inputs.inset_rings, shape)] = IGNORE
-    return labels, LabelStats(len(inputs.truth), len(sharp), band)
+    shift_px = (
+        float(np.median([math.hypot(dx, dy) for dx, dy in shifts])) if shifts else 0.0
+    )
+    return labels, LabelStats(
+        len(truth), len(sharp), band, shift_px=shift_px, colored=colored_blocks
+    )
 
 
 # Prepared example on disk: <name>.jpg (working-scale RGB), <name>.label.png, <name>.json.
@@ -643,6 +832,47 @@ def prepare_keymap(sources: KeymapSources, out_dir: Path) -> str | LabelStats:
     Image.fromarray(labels).save(out_dir / f"{name}.label.png")
     (out_dir / f"{name}.json").write_text(json.dumps(meta.to_json()))
     return stats
+
+
+def label_inputs_from_prepared(
+    data_dir: Path, name: str
+) -> tuple[LabelInputs, PreparedMeta]:
+    """A prepared example's label inputs, rebuilt from its working-scale image and sidecars.
+
+    The corpus sheets were deleted after the first prep (the laptop had 6 GB free), so
+    a new label recipe is applied to the working-scale JPEG the example keeps, with the
+    footprints from its metadata and page_regions' sidecars from where they were.
+    """
+    rgb, _, meta = load_example(data_dir, name)
+    full_width = meta.full_size[0]
+    truth = [
+        TruthFootprint(str(label), [(x * meta.scale, y * meta.scale) for x, y in ring])
+        for ring, label in zip(meta.truth_doc["panels"], meta.truth_doc["labels"])
+        if len(ring) >= 3
+    ]
+    color_regions: list[tuple[str, list[Point]]] = []
+    inset_rings: list[list[Point]] = []
+    if meta.color_regions_path:
+        regions_path = Path(meta.color_regions_path)
+        if regions_path.exists():
+            doc = json.loads(regions_path.read_text())
+            color_regions = panels_doc_rings(
+                doc, full_width / doc["width"] * meta.scale
+            )
+        inset_path = regions_path.with_name(
+            regions_path.name.replace(".regions.panels.json", ".inset.panels.json")
+        )
+        if inset_path.exists():
+            doc = json.loads(inset_path.read_text())
+            inset_rings = [
+                ring
+                for _, ring in panels_doc_rings(
+                    doc, full_width / doc["width"] * meta.scale
+                )
+            ]
+    return LabelInputs(
+        rgb, truth, color_regions, inset_rings, meta.seeds, meta.spacing
+    ), meta
 
 
 LABEL_TINTS = {
@@ -890,6 +1120,17 @@ class MapEvaluation:
     color_shape: float | None
     counts: DecodeCounts
     seconds: float
+    # Against the hand-traced blocks, when the volume has them.
+    hand: RegionScore | None = None
+    hand_shape: float | None = None
+    color_hand: RegionScore | None = None
+    color_hand_shape: float | None = None
+
+
+def hand_truth_path(data_dir: Path, meta: PreparedMeta) -> Path | None:
+    """The regions labeler's traces for a prepared key map, if the volume has them."""
+    path = data_dir / meta.volume / "raw" / "truth" / f"{meta.key}.regions.panels.json"
+    return path if path.exists() else None
 
 
 def score_summary(score: RegionScore) -> tuple[float, int, int]:
@@ -979,30 +1220,45 @@ def shape_score(truth_doc: dict, predicted_doc: dict) -> float:
 
 
 def evaluate_map(
-    model: UNet, data_dir: Path, name: str, device: torch.device, params: DecodeParams
+    model: UNet,
+    data_dir: Path,
+    name: str,
+    device: torch.device,
+    params: DecodeParams,
+    hand_dir: Path | None = None,
 ) -> MapEvaluation:
-    """Decode one prepared key map and score it, with the color segmentation beside it."""
+    """Decode one prepared key map and score it, with the color segmentation beside it.
+
+    With ``hand_dir`` (the ``data/`` root), also scores both against the hand traces.
+    """
     started = time.time()
     rgb, _, meta = load_example(data_dir, name)
     probabilities = predict_prepared(model, rgb, meta, device)
     doc, counts = regions_doc_from_probabilities(probabilities, meta, params)
-    model_score = score_doc(meta.truth_doc, doc)
-    model_shape = shape_score(meta.truth_doc, doc)
-    color_score = None
-    color_shape = None
+    evaluation = MapEvaluation(
+        name,
+        score_doc(meta.truth_doc, doc),
+        None,
+        shape_score(meta.truth_doc, doc),
+        None,
+        counts,
+        0.0,
+    )
+    color_doc = None
     if meta.color_regions_path and Path(meta.color_regions_path).exists():
         color_doc = json.loads(Path(meta.color_regions_path).read_text())
-        color_score = score_doc(meta.truth_doc, color_doc)
-        color_shape = shape_score(meta.truth_doc, color_doc)
-    return MapEvaluation(
-        name,
-        model_score,
-        color_score,
-        model_shape,
-        color_shape,
-        counts,
-        time.time() - started,
-    )
+        evaluation.color = score_doc(meta.truth_doc, color_doc)
+        evaluation.color_shape = shape_score(meta.truth_doc, color_doc)
+    hand_path = hand_truth_path(hand_dir, meta) if hand_dir else None
+    if hand_path is not None:
+        hand_doc = json.loads(hand_path.read_text())
+        evaluation.hand = score_doc(hand_doc, doc)
+        evaluation.hand_shape = shape_score(hand_doc, doc)
+        if color_doc is not None:
+            evaluation.color_hand = score_doc(hand_doc, color_doc)
+            evaluation.color_hand_shape = shape_score(hand_doc, color_doc)
+    evaluation.seconds = time.time() - started
+    return evaluation
 
 
 def format_evaluation(evaluation: MapEvaluation) -> str:
@@ -1019,7 +1275,28 @@ def format_evaluation(evaluation: MapEvaluation) -> str:
             f" | k-means {color_mean:.3f} ({color_good:3d}) shape {evaluation.color_shape:.3f} "
             f"overlap {evaluation.color.predicted_overlap:.1%}"
         )
+    if evaluation.hand is not None and evaluation.hand_shape is not None:
+        hand_mean, hand_good, hand_count = score_summary(evaluation.hand)
+        line += (
+            f" | HAND unet {hand_mean:.3f} ({hand_good:3d}/{hand_count:3d}) "
+            f"shape {evaluation.hand_shape:.3f}"
+        )
+        if (
+            evaluation.color_hand is not None
+            and evaluation.color_hand_shape is not None
+        ):
+            color_mean, color_good, _ = score_summary(evaluation.color_hand)
+            line += (
+                f", k-means {color_mean:.3f} ({color_good:3d}) "
+                f"shape {evaluation.color_hand_shape:.3f}"
+            )
     return line
+
+
+def hand_mean(evaluations: list[MapEvaluation]) -> tuple[float | None, int]:
+    """(mean hand-traced IoU over the maps that have traces, their count)."""
+    values = [score_summary(e.hand)[0] for e in evaluations if e.hand is not None]
+    return (float(np.mean(values)) if values else None), len(values)
 
 
 def cmd_prep(args: argparse.Namespace) -> None:
@@ -1048,23 +1325,57 @@ def cmd_prep(args: argparse.Namespace) -> None:
         Image.fromarray(label_overlay(rgb, labels)).save(
             overlay_dir / f"{source.name}.jpg", quality=85
         )
-        counts = {
-            name: float((labels == value).mean())
-            for name, value in (
-                ("bg", BACKGROUND),
-                ("in", INTERIOR),
-                ("bd", BOUNDARY),
-                ("ign", IGNORE),
-            )
-        }
         print(
             f"[{index}/{len(sources)}] {source.name}: {labels.shape[1]}x{labels.shape[0]} "
-            + " ".join(f"{k} {v:.2f}" for k, v in counts.items())
-            + f" footprints {result.footprints} sharp {result.sharp} band {result.band_px}px"
+            + label_counts_text(labels)
+            + f" footprints {result.footprints} sharp {result.sharp}"
+            + f" colored {result.colored} shift {result.shift_px:.0f}px band {result.band_px}px"
             + f" [{time.time() - started:.0f}s]",
             flush=True,
         )
     print(f"{kept} prepared key maps in {out_dir}")
+
+
+def label_counts_text(labels: np.ndarray) -> str:
+    """Class shares of a label image, for the prep and relabel logs."""
+    return " ".join(
+        f"{name} {float((labels == value).mean()):.2f}"
+        for name, value in (
+            ("bg", BACKGROUND),
+            ("in", INTERIOR),
+            ("bd", BOUNDARY),
+            ("ign", IGNORE),
+        )
+    )
+
+
+def cmd_relabel(args: argparse.Namespace) -> None:
+    data_dir = args.training_dir / "data"
+    overlay_dir = args.training_dir / "overlays"
+    overlay_dir.mkdir(exist_ok=True)
+    names = args.only or prepared_names(data_dir)
+    print(f"relabeling {len(names)} prepared key maps", flush=True)
+    for index, name in enumerate(names, 1):
+        started = time.time()
+        try:
+            inputs, _ = label_inputs_from_prepared(data_dir, name)
+            labels, stats = build_label_image(inputs)
+        except Exception as error:  # noqa: BLE001 - one bad map must not stop the pass
+            print(
+                f"[{index}/{len(names)}] {name}: ERROR {type(error).__name__}: {error}"
+            )
+            continue
+        Image.fromarray(labels).save(data_dir / f"{name}.label.png")
+        Image.fromarray(label_overlay(inputs.rgb, labels)).save(
+            overlay_dir / f"{name}.jpg", quality=85
+        )
+        print(
+            f"[{index}/{len(names)}] {name}: {label_counts_text(labels)}"
+            f" footprints {stats.footprints} sharp {stats.sharp} colored {stats.colored}"
+            f" shift {stats.shift_px:.0f}px [{time.time() - started:.0f}s]",
+            flush=True,
+        )
+    print("RELABEL-DONE", flush=True)
 
 
 def cmd_train(args: argparse.Namespace) -> None:
@@ -1075,7 +1386,11 @@ def cmd_train(args: argparse.Namespace) -> None:
         f"train {len(train)} key maps, val {len(val)} ({', '.join(val)}) on {device}",
         flush=True,
     )
-    model = build_model(args.base).to(device)
+    if args.init:
+        model = load_region_unet(args.init, device)  # warm start
+        print(f"initialized from {args.init}", flush=True)
+    else:
+        model = build_model(args.base).to(device)
     optimizer = torch.optim.Adam(model.parameters(), lr=args.learning_rate)
     schedule = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=args.epochs)
     rng = np.random.default_rng(args.seed)
@@ -1104,10 +1419,18 @@ def cmd_train(args: argparse.Namespace) -> None:
         schedule.step()
         model.eval()
         evaluations = [
-            evaluate_map(model, data_dir, name, device, params) for name in val
+            evaluate_map(model, data_dir, name, device, params, hand_dir=args.data_dir)
+            for name in val
         ]
         means = [score_summary(e.model)[0] for e in evaluations]
         val_iou = float(np.mean(means)) if means else 0.0
+        val_hand, hand_count = hand_mean(evaluations)
+        # The hand traces are the benchmark; the footprints stand in where there are none.
+        selector = (
+            val_hand
+            if val_hand is not None and hand_count >= MIN_HAND_VAL_MAPS
+            else val_iou
+        )
         saved = ""
         args.output.parent.mkdir(parents=True, exist_ok=True)
         torch.save(model.state_dict(), args.output.with_suffix(".last.pt"))
@@ -1116,8 +1439,8 @@ def cmd_train(args: argparse.Namespace) -> None:
             torch.save(
                 model.state_dict(), args.checkpoint_dir / f"epoch_{epoch:02d}.pt"
             )
-        if val_iou > best:
-            best = val_iou
+        if selector > best:
+            best = selector
             torch.save(model.state_dict(), args.output)
             saved = "  (saved)"
         history.append(
@@ -1125,18 +1448,30 @@ def cmd_train(args: argparse.Namespace) -> None:
                 "epoch": epoch,
                 "loss": float(np.mean(losses)),
                 "val_iou": val_iou,
+                "val_hand": val_hand,
                 "per_map": dict(zip(val, means)),
+                "per_map_hand": {
+                    e.name: score_summary(e.hand)[0]
+                    for e in evaluations
+                    if e.hand is not None
+                },
             }
         )
         args.output.with_suffix(".history.json").write_text(
             json.dumps(history, indent=1)
         )
+        hand_text = (
+            f"  hand IoU {val_hand:.3f} ({hand_count} maps)"
+            if val_hand is not None
+            else ""
+        )
         print(
             f"epoch {epoch:2d}: loss {np.mean(losses):.4f}  val IoU {val_iou:.3f} "
-            f"({' '.join(f'{m:.3f}' for m in means)})  [{time.time() - started:.0f}s]{saved}",
+            f"({' '.join(f'{m:.3f}' for m in means)}){hand_text}"
+            f"  [{time.time() - started:.0f}s]{saved}",
             flush=True,
         )
-    print(f"best val IoU {best:.3f} -> {args.output}")
+    print(f"best validation score {best:.3f} -> {args.output}")
 
 
 def stability_iou(
@@ -1206,8 +1541,12 @@ def cmd_eval(args: argparse.Namespace) -> None:
     color_means: list[float] = []
     model_shapes: list[float] = []
     color_shapes: list[float] = []
+    evaluations: list[MapEvaluation] = []
     for name in names:
-        evaluation = evaluate_map(model, data_dir, name, device, params)
+        evaluation = evaluate_map(
+            model, data_dir, name, device, params, hand_dir=args.data_dir
+        )
+        evaluations.append(evaluation)
         line = format_evaluation(evaluation)
         model_means.append(score_summary(evaluation.model)[0])
         model_shapes.append(evaluation.model_shape)
@@ -1238,6 +1577,23 @@ def cmd_eval(args: argparse.Namespace) -> None:
             else ""
         )
     )
+    traced = [e for e in evaluations if e.hand is not None and e.hand_shape is not None]
+    if traced:
+        unet_hand = [score_summary(e.hand)[0] for e in traced if e.hand is not None]
+        unet_shape = [e.hand_shape for e in traced if e.hand_shape is not None]
+        line = (
+            f"vs hand traces on {len(traced)} key maps: unet {np.mean(unet_hand):.3f} "
+            f"(shape {np.mean(unet_shape):.3f})"
+        )
+        color_hand = [
+            score_summary(e.color_hand)[0] for e in traced if e.color_hand is not None
+        ]
+        color_shape = [
+            e.color_hand_shape for e in traced if e.color_hand_shape is not None
+        ]
+        if color_hand:
+            line += f", k-means {np.mean(color_hand):.3f} (shape {np.mean(color_shape):.3f})"
+        print(line)
 
 
 def main() -> None:
@@ -1259,6 +1615,13 @@ def main() -> None:
     )
     prep.set_defaults(func=cmd_prep)
 
+    relabel = subparsers.add_parser(
+        "relabel",
+        help="Rebuild the label images of prepared examples (no full-res sheets needed).",
+    )
+    relabel.add_argument("--only", nargs="*", help="Prepared names to relabel.")
+    relabel.set_defaults(func=cmd_relabel)
+
     train = subparsers.add_parser(
         "train", help="Train the UNet on the prepared examples."
     )
@@ -1275,6 +1638,15 @@ def main() -> None:
         "--checkpoint-dir",
         type=Path,
         help="Also keep every epoch's weights here (epoch_NN.pt), for averaging.",
+    )
+    train.add_argument(
+        "--init", type=Path, help="Start from these weights instead of at random."
+    )
+    train.add_argument(
+        "--data-dir",
+        type=Path,
+        default=Path("data"),
+        help="Volume root holding raw/truth/<key>.regions.panels.json hand traces.",
     )
     train.set_defaults(func=cmd_train)
 
@@ -1305,6 +1677,12 @@ def main() -> None:
     )
     evaluate.add_argument(
         "--out-dir", type=Path, help="Write decoded regions and class maps here."
+    )
+    evaluate.add_argument(
+        "--data-dir",
+        type=Path,
+        default=Path("data"),
+        help="Volume root holding raw/truth/<key>.regions.panels.json hand traces.",
     )
     evaluate.set_defaults(func=cmd_eval)
 
