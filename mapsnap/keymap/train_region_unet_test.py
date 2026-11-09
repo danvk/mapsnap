@@ -3,6 +3,7 @@ from pathlib import Path
 
 import numpy as np
 import torch
+from PIL import Image
 
 from mapsnap.keymap.region_unet import (
     BACKGROUND,
@@ -25,8 +26,10 @@ from mapsnap.keymap.train_region_unet import (
     edge_strength,
     erode,
     footprint_shifts,
+    hand_label_image,
     hand_truth_path,
     labels_matched_to_truth,
+    load_example,
     matching_label,
     neighbor_differs,
     open_paper,
@@ -424,3 +427,59 @@ def test_average_checkpoints_means_floats_and_keeps_counters(tmp_path: Path):
     averaged = average_checkpoints([tmp_path / "a.pt", tmp_path / "b.pt"])
     assert torch.equal(averaged["w"], torch.tensor([2.0, 4.0]))
     assert int(averaged["n"]) == 2
+
+
+def prepared_meta(scale: float, spacing: float, seeds: list[tuple[float, float]]):
+    return PreparedMeta(
+        volume="v",
+        key="p0",
+        scale=scale,
+        spacing=spacing,
+        seeds=seeds,
+        texts=[str(i) for i in range(len(seeds))],
+        full_size=(200, 200),
+        truth_doc={},
+        color_regions_path=None,
+    )
+
+
+def test_hand_label_image_marks_untraced_ground_as_background():
+    # One traced block at full-res 20..100 (working 10..50), a detected number at
+    # (90, 90) with no trace, and an inset in the lower right.
+    meta = prepared_meta(0.5, 40.0, [(20.0, 20.0), (90.0, 90.0)])
+    hand_doc = {
+        "width": 200,
+        "height": 200,
+        "panels": [[[20, 20], [100, 20], [100, 100], [20, 100], [20, 20]]],
+        "labels": ["7"],
+    }
+    inset = [rectangle(80, 80, 99, 99)]
+    labels = hand_label_image(hand_doc, meta, inset, (100, 100))
+    assert labels[30, 30] == INTERIOR
+    assert labels[11, 30] == BOUNDARY
+    # Colored or not, untraced ground is background: the point of hand labels.
+    assert labels[70, 20] == BACKGROUND
+    assert labels[20, 70] == BACKGROUND
+    assert labels[90, 90] == IGNORE  # the untraced detection's disk
+    assert labels[82, 82] == IGNORE  # the inset
+    assert labels.shape == (100, 100)
+
+
+def test_load_example_prefers_a_label_dir_image(tmp_path: Path):
+    data_dir = tmp_path / "data"
+    data_dir.mkdir()
+    label_dir = tmp_path / "hand"
+    label_dir.mkdir()
+    Image.fromarray(np.zeros((4, 4, 3), np.uint8)).save(data_dir / "v__p0.jpg")
+    Image.fromarray(np.full((4, 4), INTERIOR, np.uint8)).save(
+        data_dir / "v__p0.label.png"
+    )
+    Image.fromarray(np.full((4, 4), BOUNDARY, np.uint8)).save(
+        label_dir / "v__p0.label.png"
+    )
+    (data_dir / "v__p0.json").write_text(
+        json.dumps(prepared_meta(1.0, 10.0, []).to_json())
+    )
+    assert load_example(data_dir, "v__p0")[1].max() == INTERIOR
+    assert load_example(data_dir, "v__p0", label_dir)[1].max() == BOUNDARY
+    assert load_example(data_dir, "v__p0", tmp_path / "none")[1].max() == INTERIOR

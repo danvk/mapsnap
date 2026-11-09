@@ -876,7 +876,6 @@ def label_inputs_from_prepared(
         if len(ring) >= 3
     ]
     color_regions: list[tuple[str, list[Point]]] = []
-    inset_rings: list[list[Point]] = []
     if meta.color_regions_path:
         regions_path = Path(meta.color_regions_path)
         if regions_path.exists():
@@ -884,20 +883,57 @@ def label_inputs_from_prepared(
             color_regions = panels_doc_rings(
                 doc, full_width / doc["width"] * meta.scale
             )
-        inset_path = regions_path.with_name(
-            regions_path.name.replace(".regions.panels.json", ".inset.panels.json")
-        )
-        if inset_path.exists():
-            doc = json.loads(inset_path.read_text())
-            inset_rings = [
-                ring
-                for _, ring in panels_doc_rings(
-                    doc, full_width / doc["width"] * meta.scale
-                )
-            ]
     return LabelInputs(
-        rgb, truth, color_regions, inset_rings, meta.seeds, meta.spacing
+        rgb, truth, color_regions, inset_rings_for(meta), meta.seeds, meta.spacing
     ), meta
+
+
+def inset_rings_for(meta: PreparedMeta) -> list[list[Point]]:
+    """Inset rings of a prepared key map in working pixels, from page_regions' sidecar."""
+    if not meta.color_regions_path:
+        return []
+    regions_path = Path(meta.color_regions_path)
+    inset_path = regions_path.with_name(
+        regions_path.name.replace(".regions.panels.json", ".inset.panels.json")
+    )
+    if not inset_path.exists():
+        return []
+    doc = json.loads(inset_path.read_text())
+    factor = meta.full_size[0] / doc["width"] * meta.scale
+    return [ring for _, ring in panels_doc_rings(doc, factor)]
+
+
+def hand_label_image(
+    hand_doc: dict,
+    meta: PreparedMeta,
+    inset_rings: list[list[Point]],
+    shape: tuple[int, int],
+) -> np.ndarray:
+    """The class image of a hand-traced key map, at the prepared working scale.
+
+    Unlike the footprint recipe, everything outside the traces is background: a
+    tracer draws every page block, so colored ground with no trace (a volume border,
+    a legend, a water tint) is exactly what the model must learn to leave alone. A
+    detected number outside every trace still gets an ignored disk, since it may be
+    a block the tracer skipped; insets are ignored as in the footprint labels.
+    """
+    regions = np.zeros(shape, np.int32)
+    factor = meta.full_size[0] / hand_doc["width"] * meta.scale
+    for index, (_, ring) in enumerate(panels_doc_rings(hand_doc, factor)):
+        regions[rasterize([ring], shape)] = index + 1
+    edge = neighbor_differs(regions)
+    distance = np.asarray(ndi.distance_transform_edt(~edge), dtype=np.float64)
+    labels = np.full(shape, BACKGROUND, np.uint8)
+    labels[regions > 0] = INTERIOR
+    labels[(regions > 0) & (distance <= BOUNDARY_WIDTH_PX / 2)] = BOUNDARY
+    radius = max(2, round(UNLABELED_SEED_RADIUS_FRAC * meta.spacing))
+    for x, y in meta.seeds:
+        cx, cy = round(x), round(y)
+        if 0 <= cy < shape[0] and 0 <= cx < shape[1] and regions[cy, cx] == 0:
+            cv2.circle(labels, (cx, cy), radius, int(IGNORE), -1)
+    if inset_rings:
+        labels[rasterize(inset_rings, shape)] = IGNORE
+    return labels
 
 
 LABEL_TINTS = {
@@ -920,11 +956,18 @@ def label_overlay(
 
 
 def load_example(
-    data_dir: Path, name: str
+    data_dir: Path, name: str, label_dir: Path | None = None
 ) -> tuple[np.ndarray, np.ndarray, PreparedMeta]:
-    """A prepared key map: working-scale RGB, label image and metadata."""
+    """A prepared key map: working-scale RGB, label image and metadata.
+
+    With ``label_dir``, a label image of the same name there (the ``hand-labels``
+    output) replaces the prepared one.
+    """
     rgb = read_rgb(data_dir / f"{name}.jpg")
-    labels = np.asarray(Image.open(data_dir / f"{name}.label.png"))
+    label_path = data_dir / f"{name}.label.png"
+    if label_dir is not None and (label_dir / label_path.name).exists():
+        label_path = label_dir / label_path.name
+    labels = np.asarray(Image.open(label_path))
     meta = PreparedMeta.from_json(json.loads((data_dir / f"{name}.json").read_text()))
     return rgb, labels, meta
 
@@ -1100,10 +1143,12 @@ def tiles_for_epoch(
     names: list[str],
     tiles_per_megapixel: float,
     rng: np.random.Generator,
+    *,
+    label_dir: Path | None = None,
 ):
     """Yield augmented tiles over the prepared maps in random order, loading one map at a time."""
     for index in rng.permutation(len(names)):
-        rgb, labels, meta = load_example(data_dir, names[index])
+        rgb, labels, meta = load_example(data_dir, names[index], label_dir)
         megapixels = labels.shape[0] * labels.shape[1] / 1e6
         count = max(8, round(tiles_per_megapixel * megapixels))
         for _ in range(count):
@@ -1411,6 +1456,33 @@ def cmd_relabel(args: argparse.Namespace) -> None:
     print("RELABEL-DONE", flush=True)
 
 
+def cmd_hand_labels(args: argparse.Namespace) -> None:
+    data_dir = args.training_dir / "data"
+    out_dir = args.training_dir / "hand-labels"
+    out_dir.mkdir(parents=True, exist_ok=True)
+    written = 0
+    for name in args.only or prepared_names(data_dir):
+        meta = PreparedMeta.from_json(
+            json.loads((data_dir / f"{name}.json").read_text())
+        )
+        hand_path = hand_truth_path(args.data_dir, meta)
+        if hand_path is None:
+            continue
+        rgb = read_rgb(data_dir / f"{name}.jpg")
+        hand_doc = json.loads(hand_path.read_text())
+        labels = hand_label_image(hand_doc, meta, inset_rings_for(meta), rgb.shape[:2])
+        Image.fromarray(labels).save(out_dir / f"{name}.label.png")
+        Image.fromarray(label_overlay(rgb, labels)).save(
+            out_dir / f"{name}.jpg", quality=85
+        )
+        written += 1
+        print(
+            f"{name}: {len(hand_doc['panels'])} traces, {label_counts_text(labels)}",
+            flush=True,
+        )
+    print(f"HAND-LABELS-DONE {written} written to {out_dir}", flush=True)
+
+
 def cmd_train(args: argparse.Namespace) -> None:
     data_dir = args.training_dir / "data"
     device = select_device()
@@ -1419,6 +1491,16 @@ def cmd_train(args: argparse.Namespace) -> None:
         f"train {len(train)} key maps, val {len(val)} ({', '.join(val)}) on {device}",
         flush=True,
     )
+    if args.label_dir:
+        # Hand-labeled maps replace their footprint labels and are visited more often,
+        # since a handful of them would otherwise vanish among 500 maps.
+        overridden = [n for n in train if (args.label_dir / f"{n}.label.png").exists()]
+        train = train + overridden * (args.label_dir_repeat - 1)
+        print(
+            f"labels from {args.label_dir} for {len(overridden)} training maps "
+            f"({', '.join(overridden)}), each visited {args.label_dir_repeat}x per epoch",
+            flush=True,
+        )
     if args.init:
         model = load_region_unet(args.init, device)  # warm start
         print(f"initialized from {args.init}", flush=True)
@@ -1434,7 +1516,9 @@ def cmd_train(args: argparse.Namespace) -> None:
         model.train()
         started = time.time()
         losses: list[float] = []
-        tiles = tiles_for_epoch(data_dir, train, args.tiles_per_megapixel, rng)
+        tiles = tiles_for_epoch(
+            data_dir, train, args.tiles_per_megapixel, rng, label_dir=args.label_dir
+        )
         for batch in shuffled_batches(tiles, args.batch_size, args.pool_size, rng):
             inputs, targets = tiles_to_tensors(batch, device)
             loss = region_loss(model(inputs), targets)
@@ -1681,7 +1765,28 @@ def main() -> None:
         default=Path("data"),
         help="Volume root holding raw/truth/<key>.regions.panels.json hand traces.",
     )
+    train.add_argument(
+        "--label-dir",
+        type=Path,
+        help="Label images (the hand-labels output) that replace the prepared ones "
+        "for the training maps found there.",
+    )
+    train.add_argument(
+        "--label-dir-repeat",
+        type=int,
+        default=1,
+        help="Times per epoch each map with a --label-dir label is visited.",
+    )
     train.set_defaults(func=cmd_train)
+
+    hand = subparsers.add_parser(
+        "hand-labels",
+        help="Build label images from the regions labeler's hand traces, into "
+        "<training-dir>/hand-labels/.",
+    )
+    hand.add_argument("--data-dir", type=Path, default=Path("data"))
+    hand.add_argument("--only", nargs="*", help="Prepared names to build.")
+    hand.set_defaults(func=cmd_hand_labels)
 
     average = subparsers.add_parser(
         "average", help="Average several checkpoints' weights into one."
