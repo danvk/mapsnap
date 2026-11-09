@@ -81,6 +81,10 @@ export function RegionsTable(props: RegionsTableProps) {
                   <button
                     type="button"
                     title="Delete this region"
+                    // Out of the tab order, so Tab steps from one page key straight to
+                    // the next; a delete is a mouse action, and Delete on the selected
+                    // region does the same from the keyboard.
+                    tabIndex={-1}
                     onClick={(e) => {
                       e.stopPropagation();
                       onDelete(index);
