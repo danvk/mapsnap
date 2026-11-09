@@ -362,9 +362,13 @@ def test_tiles_to_tensors_and_shuffled_batches():
 
 
 def test_split_names_by_volume(tmp_path: Path):
-    for name in ("a__p0", "a__p1", "b__p0"):
+    for name in ("a__p0", "a__p1", "b__p0", "c_vol_4__p0__2"):
         (tmp_path / f"{name}.json").write_text("{}")
-    assert split_names(tmp_path, ("b",)) == (["a__p0", "a__p1"], ["b__p0"])
+    # A split-panel stem (p0__2) must not hide its volume from the val set.
+    assert split_names(tmp_path, ("b", "c_vol_4")) == (
+        ["a__p0", "a__p1"],
+        ["b__p0", "c_vol_4__p0__2"],
+    )
 
 
 def test_regions_doc_from_probabilities_and_scoring():

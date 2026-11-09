@@ -941,9 +941,17 @@ def split_names(
     train: list[str] = []
     val: list[str] = []
     for name in prepared_names(data_dir):
-        volume = name.rsplit("__", 1)[0]
-        (val if volume in val_volumes else train).append(name)
+        (val if prepared_volume(name) in val_volumes else train).append(name)
     return train, val
+
+
+def prepared_volume(name: str) -> str:
+    """The volume of a prepared name ``<volume>__<stem>``.
+
+    Split-panel stems carry their own double underscore (``p0__2``), so the
+    volume is everything before the first one, not the last.
+    """
+    return name.split("__", 1)[0]
 
 
 # ---------------------------------------------------------------------------- training
