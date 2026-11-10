@@ -157,50 +157,90 @@ flip averaging. `MAPSNAP_KEYMAP_REGIONS=unet` makes `mapsnap keymap` use it;
 an M2 (4 s of it the watershed).
 
 Labels need no hand tracing: every OIM-georeferenced page's footprint, projected
-through the key map's own georeference, is a block. Three corrections make
-footprints usable (`mapsnap.keymap.train_region_unet`): each footprint is shrunk
-to a core and a marker watershed on an edge-strength map (ink darkness and
-color change) snaps its boundary to the drawn line within a band of 15% of the
-spacing (the key-map georef's error is 15–50 px); where `page_regions` agrees
-with a footprint at IoU ≥ 0.8 its polygon is taken as the exact block; and
-blocks nobody labeled (unclipped OIM footprints, the inset, detected numbers
-with no footprint, paper bubbles) are *ignored*, not taught as paper. Training
-data lives outside the repo in `~/Documents/mapsnap/keymap-region-training`:
-`prep` builds it from the volumes under `data/`, and a streaming pull of the
-corpus-v2 key maps for the other OIM-truth items adds the rest (the sheets are
-deleted after their example is built; disk, not bandwidth, is the limit).
+through the key map's own georeference, is a block. Footprints are not blocks,
+though, so `mapsnap.keymap.train_region_unet` corrects them: each is shifted by
+the local median offset between footprints and the same-numbered `page_regions`
+polygons (the key-map georef's error is 15–50 px, and the drawing is another
+0.05–0.3 spacings off), shrunk to a core, and a marker watershed on an
+edge-strength map (ink darkness and color change) snaps its boundary to the
+drawn line within a band of 15% of the spacing; paper connected to the open
+sheet (light, low chroma, reached from the margin) is background even inside
+that band, so a label never runs across a street; a core whose `page_regions`
+polygon matches it at precision ≥ 0.9 and coverage ≥ 0.55 is taken as the exact
+block; and blocks nobody labeled (unclipped OIM footprints, the inset, detected
+numbers with no footprint, paper bubbles) are *ignored*, not taught as paper.
+Training data lives outside the repo in
+`~/Documents/mapsnap/keymap-region-training`: `prep` builds it from the volumes
+under `data/`, a streaming pull of the corpus-v2 key maps for the other
+OIM-truth items adds the rest (the sheets are deleted after their example is
+built; disk, not bandwidth, is the limit), and `relabel` rebuilds every label
+from the kept working-scale JPEGs when the recipe changes.
 
-**Current weights (2026-11-09)** are the average of epochs 18–24 of a 24-epoch
-run on 549 key maps (the 59 with truth under `data/` plus 490 corpus-v2 key
-maps of other OIM-truth volumes; Hudson, Chicago 1950 vol 1, Miami 1950 and
-San Antonio 1952 held out), about 5.5 h on an M2. On the four held-out maps,
-mean IoU against the projected OIM footprints is **0.430** for the model
-against **0.415** for `page_regions`, matched by page number; matched by shape
-alone (any region to any footprint, so the page-number reads drop out)
-**0.544** against **0.498**. A first model trained on the 59 `data/` maps
-alone scored 0.422 / 0.537 on the same four, and 0.427 / 0.524 against 0.406 /
-0.475 on 60 corpus maps it had never seen (ahead on 35 of the 60 by page
-number and 44 by shape, 2,241 blocks at IoU ≥ 0.5 against 2,082 of 4,016); the
-extra 490 maps bought about 0.01, so data is not what limits this model.
-Over the 63 key maps with truth under `data/` (59 of them in the training
-set, so this flatters the model) it is 0.465 against 0.433 (shape 0.559
-against 0.498), ahead on 39, with 2,537 blocks at IoU ≥ 0.5 against 2,222 of
-4,171; the wins are large (Richmond 1952 +0.31, Asheville +0.28, Columbia
-+0.21) and the losses small (≤ 0.06). Both methods are capped near 0.75 by the truth itself: OIM
-clips pages to the street centerline, the drawn block stops at the curb, and
-both methods' regions are about three quarters of their footprint's area. A
-one-pixel change in the input (the #640 perturbation) leaves the model's
-regions at a self-consistency of 0.95 (Chicago), 0.96 (Hudson), 0.93 (San
-Antonio) and 0.89 (Miami) by mean per-page IoU; `page_regions` on the same
-Hudson sheet scores 0.81, with 14 of 89 pages moving by more than half their
-area.
+**Current weights (2026-11-09, third model)** average epochs 7–12 of a 12-epoch
+run warm-started from the second model's weights, on 553 key maps (the 63 with
+truth under `data/` plus 490 corpus-v2 key maps of other OIM-truth volumes),
+about 10 h on an M2. Seven volumes are held out, chosen because they have
+hand-traced regions: Hudson, Chicago 1950 vol 1, Miami 1950, San Antonio 1952,
+Kansas City 1951 vol 4, Grand Rapids 1953 vol 7 and Brooklyn 1939 vol 1 (nine
+key maps, two of them split panels). On those nine, mean IoU against the
+projected OIM footprints is **0.454** for the model against **0.421** for
+`page_regions`, matched by page number; matched by shape alone (any region to
+any footprint, so the page-number reads drop out) **0.532** against **0.471**.
+The second model scored 0.442 / 0.510 on the same maps, and a first model
+trained on the 59 `data/` maps alone was within 0.01 of it, so data is not what
+limits this model.
+
+The footprints are not the benchmark, though. A region should track the
+colored fill drawn for the page, and OIM's footprints reach the street
+centerline, 0.05–0.3 spacings past it (Miami's are off by a median 58 px, and
+it is the drawing, not the georeference: re-fitting the key map moves them by
+1 px). The regions labeler (`app/regions.html`) saves hand traces as
+`raw/truth/<stem>.regions.panels.json`, and `eval` scores against them beside
+the footprints. On the eight traced maps the model's mean IoU against the
+traces is **0.603** (shape **0.757**) against `page_regions`' **0.529**
+(**0.606**); the second model, trained on the earlier labels, was 0.525
+(0.634), below `page_regions`, because those labels painted the paper between
+two blocks as block interior wherever a footprint band covered it (Kansas
+City's labels ran across every street) and the model learned to spill to
+mid-street. The share of predicted area outside every trace fell from 17–21%
+to 4–6% on Brooklyn and Kansas City, 21% to 12–13% on Grand Rapids, 26% to 15%
+on San Antonio and 36% to 26% on Miami. Per map (model / `page_regions`, mean
+IoU against the traces): Kansas City 0.91 / 0.71 (127 of 129 blocks at IoU
+≥ 0.5 against 92), Brooklyn 0.73 and 0.87 / 0.83 and 0.91, Grand Rapids 0.45
+and 0.49 / 0.28 and 0.35, San Antonio 0.49 / 0.40, Miami 0.37 / 0.32, Hudson
+0.52 / 0.44 (four traces). Brooklyn is the one map `page_regions` still wins:
+its blocks are sharp solid fills, the easy case for color rules, and the
+model's loss there is seeds, not boundaries (its paper test drops four of the
+37 page numbers and two more land in the wrong block; the regions it does draw
+have a median precision of 0.98). Miami's loss is half the detector (about 65
+of the 88 numbers are found) and half the tan strip drawn around the volume's
+area, which the model and `page_regions` both paint into the adjacent blocks
+(73, 65 and 59 come out at 1.6× their traced area); the automatic labels give
+no supervision there. A one-pixel change in the input (the #640 perturbation)
+leaves the model's regions at a self-consistency of 0.93–0.985 across the nine
+maps by mean per-page IoU; `page_regions` on the same Hudson sheet scores
+0.81, with 14 of 89 pages moving by more than half their area.
+
+Hand traces can also train the model: `hand-labels` rasterizes a volume's
+traces into labels (everything untraced is background, the inset ignored) and
+`train --label-dir DIR --label-dir-repeat N` substitutes them for the
+automatic labels of those maps, visiting each N times per epoch. A two-fold
+experiment (Brooklyn + Kansas City traces in and Grand Rapids + Miami + San
+Antonio held out, then the reverse; six epochs from the current weights) moved
+the held-out maps' mean IoU against the traces by +0.009 and +0.003, within
+the epoch-to-epoch noise of ±0.03, so traces from a few volumes do not carry to
+other styles. They do fix what they supervise: with Miami's traces in
+training its three border-strip blocks come out at 1.0–1.3× their traced area
+instead of 1.6×, and San Antonio gains 0.03. Tracing repairs a volume; it
+does not train the model. The shipped weights saw no traces.
 
 Retrain:
 
 ```
 uv run python -m mapsnap.keymap.train_region_unet prep        # labels from data/
-uv run python -m mapsnap.keymap.train_region_unet train --checkpoint-dir CKPT --epochs 24
-uv run python -m mapsnap.keymap.train_region_unet average models/keymap_region_unet.pt CKPT/epoch_{18..24}.pt
+uv run python -m mapsnap.keymap.train_region_unet relabel     # after a recipe change
+uv run python -m mapsnap.keymap.train_region_unet train --init models/keymap_region_unet.pt --checkpoint-dir CKPT --epochs 12
+uv run python -m mapsnap.keymap.train_region_unet average models/keymap_region_unet.pt CKPT/epoch_{07..12}.pt
 uv run python -m mapsnap.keymap.train_region_unet eval --stability
 ```
 
