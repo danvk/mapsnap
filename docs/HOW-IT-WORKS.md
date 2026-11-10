@@ -280,7 +280,10 @@ volume's page set, the number the pipeline actually consumes, averages 87%
 across the 20 volumes, from 52% (Philadelphia) to 99% (Detroit). Regions are
 rougher: mean IoU per sheet runs 0.45–0.71 and roughly two thirds of regions
 reach 0.5 (DC 115 of 133, Detroit 83 of 104), which is why the region is only
-a prior and never a placement.
+a prior and never a placement. A learned segmenter trained on OIM footprints
+projected through the key-map georef (`mapsnap.keymap.region_unet`,
+`MAPSNAP_KEYMAP_REGIONS=unet`) is the opt-in alternative to the color rules;
+`models/README.md` has its numbers.
 
 From here on each page carries, in its sidecar, a **search center and radius**
 (the region's centroid; the vocabulary of step 7 is restricted to it), and a

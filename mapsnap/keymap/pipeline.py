@@ -18,6 +18,8 @@ its key-map neighborhood; that needs three sidecars next to the (raw) key-map im
     resolution by default, which is what makes the key map's small labels detectable.
   * ``<stem>.regions.panels.json`` — the colored block polygon around each page number
     (``mapsnap.keymap.page_regions``), so a page's key-map neighborhood is its own block.
+    ``MAPSNAP_KEYMAP_REGIONS=unet`` segments with the learned boundary + interior model
+    (``mapsnap.keymap.region_unet``) instead of the color rules.
 
 Between the first and the rest, the page-number assignments can be repaired against the volume's
 printed adjacency graph (``mapsnap.keymap.adjacency_assign``, issue #213): a number misread as a
@@ -45,6 +47,7 @@ affine. Detecting the page numbers after georeferencing would leave a first run 
 
 import argparse
 import json
+import os
 import sys
 from collections.abc import Iterable
 from pathlib import Path
@@ -54,6 +57,22 @@ from mapsnap.keymap.fit_keymap import collapse_skeleton_keys, volume_page_keys
 from mapsnap.keymap.log import append_keymap_log
 from mapsnap.keymap.records import keymap_path, page_key_sort
 from mapsnap.utils import default_centerlines, image_stem, run_cmd
+
+REGIONS_ENV_VAR = "MAPSNAP_KEYMAP_REGIONS"  # "unet" for the learned segmenter
+REGION_MODULES = {
+    "kmeans": "mapsnap.keymap.page_regions",
+    "unet": "mapsnap.keymap.region_unet",
+}
+
+
+def region_module() -> str:
+    """The module that writes ``<stem>.regions.panels.json``, per MAPSNAP_KEYMAP_REGIONS."""
+    choice = os.environ.get(REGIONS_ENV_VAR, "kmeans")
+    if choice not in REGION_MODULES:
+        sys.exit(
+            f"{REGIONS_ENV_VAR}={choice!r}: expected one of {sorted(REGION_MODULES)}"
+        )
+    return REGION_MODULES[choice]
 
 
 def format_page_spec(keys: Iterable[int | str]) -> str:
@@ -369,14 +388,7 @@ def main() -> None:
 
     # 4. Segment the colored block around each page number (one key map at a time).
     for image in images:
-        run_cmd(
-            [
-                sys.executable,
-                "-m",
-                "mapsnap.keymap.page_regions",
-                keymap_path(str(image)),
-            ]
-        )
+        run_cmd([sys.executable, "-m", region_module(), keymap_path(str(image))])
 
 
 if __name__ == "__main__":

@@ -1,3 +1,5 @@
+import pytest
+
 """Tests for the key-map pipeline's flag handling."""
 
 import subprocess
@@ -105,3 +107,15 @@ def test_georef_log_reports_missing_reads(tmp_path):
     text = "\n".join(georef_log_lines(tmp_path / "p0c.jpg"))
     assert "no reads file" in text
     assert "NO POSE WRITTEN" in text
+
+
+def test_region_module_switch(monkeypatch):
+    from mapsnap.keymap.pipeline import REGIONS_ENV_VAR, region_module
+
+    monkeypatch.delenv(REGIONS_ENV_VAR, raising=False)
+    assert region_module() == "mapsnap.keymap.page_regions"
+    monkeypatch.setenv(REGIONS_ENV_VAR, "unet")
+    assert region_module() == "mapsnap.keymap.region_unet"
+    monkeypatch.setenv(REGIONS_ENV_VAR, "sam")
+    with pytest.raises(SystemExit):
+        region_module()

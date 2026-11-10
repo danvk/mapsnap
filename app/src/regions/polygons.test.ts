@@ -1,11 +1,15 @@
 import { describe, expect, it } from 'vitest';
 import {
+  PREVIEW_MIN_MARGIN,
+  REGION_COLORS,
   autoLabel,
   closedRing,
   createRegionsJson,
   openRing,
+  previewCrop,
   rectRing,
   regionAt,
+  regionColor,
   sheetFraction,
   vertexAt,
 } from './polygons';
@@ -218,5 +222,51 @@ describe('rectRing', () => {
     expect(ring).toHaveLength(4);
     expect(sheetFraction(ring, 10, 20)).toBeCloseTo(1.0);
     expect(closedRing(ring)).toHaveLength(5);
+  });
+});
+
+describe('previewCrop', () => {
+  const sheet: [number, number] = [5000, 8000];
+  const box: [number, number] = [320, 420];
+
+  it('pads the bounding box by 15% of its larger side and shows it at 1:1', () => {
+    const crop = previewCrop(rectRing([1000, 2000], [1200, 2100]), sheet, box)!;
+    expect(crop.scale).toBe(1);
+    expect(crop.x).toBeCloseTo(1000 - 30);
+    expect(crop.y).toBeCloseTo(2000 - 30);
+    expect(crop.width).toBeCloseTo(200 + 60);
+    expect(crop.height).toBeCloseTo(100 + 60);
+  });
+
+  it('scales a block larger than the box down to fit', () => {
+    const crop = previewCrop(rectRing([500, 500], [1500, 900]), sheet, box)!;
+    expect(crop.width).toBeCloseTo(1000 + 300);
+    expect(crop.width * crop.scale).toBeCloseTo(320);
+    expect(crop.height * crop.scale).toBeLessThanOrEqual(420);
+  });
+
+  it('uses the minimum margin for a tiny block and stays inside the sheet', () => {
+    const crop = previewCrop(rectRing([0, 0], [50, 50]), sheet, box)!;
+    expect(crop.x).toBe(0);
+    expect(crop.y).toBe(0);
+    expect(crop.width).toBe(50 + 2 * PREVIEW_MIN_MARGIN);
+    expect(crop.scale).toBe(1);
+  });
+
+  it('clips the window to a sheet smaller than the padded box', () => {
+    const crop = previewCrop(rectRing([10, 10], [90, 90]), [100, 100], box)!;
+    expect(crop).toMatchObject({ x: 0, y: 0, width: 100, height: 100 });
+  });
+
+  it('is null for an empty ring', () => {
+    expect(previewCrop([], sheet, box)).toBeNull();
+  });
+});
+
+describe('regionColor', () => {
+  it('cycles through the palette by index', () => {
+    expect(regionColor(0)).toBe(REGION_COLORS[0]);
+    expect(regionColor(REGION_COLORS.length)).toBe(REGION_COLORS[0]);
+    expect(regionColor(1)).not.toBe(regionColor(0));
   });
 });

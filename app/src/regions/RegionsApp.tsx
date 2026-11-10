@@ -11,8 +11,9 @@ import {
   imageUrl,
   saveRegions,
 } from './api';
-import { MIN_RING_VERTICES, autoLabel } from './polygons';
+import { MIN_RING_VERTICES, autoLabel, regionColor } from './polygons';
 import { PolygonCanvas } from './PolygonCanvas';
+import { RegionPreview } from './RegionPreview';
 import { RegionsTable } from './RegionsTable';
 import type { DrawMode, KeymapDetection, RegionPolygon } from './types';
 
@@ -38,6 +39,10 @@ export function RegionsApp() {
   const [selectedName, setSelectedName] = useState<string | null>(null);
   const [imageWidth, setImageWidth] = useState(0);
   const [imageHeight, setImageHeight] = useState(0);
+  // The decoded sheet, kept for the full-resolution preview of the selection.
+  const [imageElement, setImageElement] = useState<HTMLImageElement | null>(
+    null,
+  );
   const [regions, setRegions] = useState<RegionPolygon[]>([]);
   const [draft, setDraft] = useState<[number, number][]>([]);
   const [selectedIndex, setSelectedIndex] = useState<number | null>(null);
@@ -69,6 +74,7 @@ export function RegionsApp() {
     setSelectedIndex(null);
     setDraft([]);
     setSaveStatus('idle');
+    setImageElement(null);
     Promise.all([
       loadImage(imageUrl(selectedName)),
       fetchRegions(selectedName),
@@ -78,6 +84,7 @@ export function RegionsApp() {
         if (cancelled) return;
         setImageWidth(sidecar?.width ?? element.naturalWidth);
         setImageHeight(sidecar?.height ?? element.naturalHeight);
+        setImageElement(element);
         setRegions(sidecar?.regions ?? []);
         setDetections(points);
         dirtyRef.current = false;
@@ -275,6 +282,14 @@ export function RegionsApp() {
           />
         )}
       </div>
+
+      <RegionPreview
+        image={imageElement}
+        region={
+          selectedIndex === null ? null : (regions[selectedIndex] ?? null)
+        }
+        color={selectedIndex === null ? '#000' : regionColor(selectedIndex)}
+      />
 
       <RegionsTable
         regions={regions}
